@@ -218,10 +218,12 @@ struct ControlDescriptor {
 /// getter/setter). The value lives in the class variable (1–4 bytes); the descriptor
 /// is just the metadata UI rendering and persistence need.
 ///
-/// **Memory footprint:** target under 16 bytes per descriptor (variable pointer +
-/// flash name pointer + type enum + type-dependent min/max). Descriptors live in a
-/// fixed-capacity per-module array — no per-control heap allocation. A module that
-/// overflows the default capacity is probably too complex.
+/// **Memory footprint:** the descriptor stays lean — a variable pointer, a flash
+/// name pointer, an `aux` word (Progress total / Select options), the type enum, the
+/// int32 min/max, two UI flag bytes, and an optional validate hook (~48 bytes on a
+/// 64-bit host, less on ESP32's 32-bit pointers). Descriptors live in a fixed-capacity
+/// per-module array — no per-control heap allocation. A module that overflows the
+/// default capacity is probably too complex.
 ///
 /// **Persistence and dynamic rebuild:** control values persist via FilesystemModule,
 /// which overlays loaded values through each control's pointer during

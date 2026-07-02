@@ -28,11 +28,19 @@ SOURCE_DIRS = {
 }
 
 
+# Subdirs under docs/moonmodules/ that are NOT hand-written active specs:
+#   moxygen/ — generated technical pages (no `## Source`; the page IS the source view)
+#   archive/ — the old per-module pages, kept for migration cross-check until Stage 5
+#              deletes them; transitional, not maintained (their relative links are
+#              stale after the archive move — no reason to fix links on doomed files).
+_NON_SPEC_DIRS = {"moxygen", "archive"}
+
+
 def spec_md_files():
-    """Every hand-written spec `.md` under docs/moonmodules/, EXCLUDING the generated
-    `moxygen/` technical pages (produced by gen_api.py from the `.h` — they carry no
-    `## Source` section by design, since the page *is* the source view)."""
-    return (md for md in SPECS.rglob("*.md") if "moxygen" not in md.parts)
+    """Every hand-written, still-active spec `.md` under docs/moonmodules/, excluding
+    the generated and archived subtrees (see _NON_SPEC_DIRS)."""
+    return (md for md in SPECS.rglob("*.md")
+            if _NON_SPEC_DIRS.isdisjoint(md.parts))
 
 
 def find_moonmodules():
@@ -250,7 +258,9 @@ def check_source_links():
             # `source [..]` links if present, else the detail-page `.md` links; every
             # relative link must resolve. (No `## Source` section — it would duplicate
             # every row; the rows are rendered as a table on the site.)
-            src_links = re.findall(r'source \[[^\]]+\]\(([^)]+)\)', text)
+            # \b before `source` so it matches the `source [Foo.h](…)` link marker,
+            # not the tail of a word like "resource [".
+            src_links = re.findall(r'\bsource \[[^\]]+\]\(([^)]+)\)', text)
             if not src_links:
                 # index page: the per-entry links to detail pages (…Driver.md),
                 # same-dir (no ../) — e.g. `](RmtLedDriver.md)`.
@@ -278,14 +288,15 @@ def check_source_links():
         # A summary page whose technical reference is the source-generated page
         # (moonmodules/{core,light}/moxygen/<Module>.md, built by gen_api.py from the
         # `.h`'s /// comments) links to that page instead of a `## Source` GitHub blob
-        # — the generated page *is* the source view. The page is virtual (built at
-        # MkDocs time, never on disk), so validate the linked stem is actually a
-        # discovered header rather than resolving a file; no `## Source` section
-        # required (it would duplicate the generated reference).
-        api = re.search(r'\]\([\w./-]*moxygen/([\w-]+)\.md(?:#[\w-]+)?\)', text)
-        if api:
-            if api.group(1) not in _API_STEMS:
-                issues.append((spec_rel, f"moxygen link to '{api.group(1)}' is not a generated module"))
+        # — the generated page *is* the source view. Validate EVERY moxygen link on the
+        # page (a summary page tables many modules, so it has many such links) against
+        # the discovered-header set; no `## Source` section required (it would
+        # duplicate the generated reference).
+        moxygen_links = re.findall(r'\]\([\w./-]*moxygen/([\w-]+)\.md(?:#[\w-]+)?\)', text)
+        if moxygen_links:
+            for stem in moxygen_links:
+                if stem not in _API_STEMS:
+                    issues.append((spec_rel, f"moxygen link to '{stem}' is not a generated module"))
             continue
 
         # Capture only the Source section body — stop at the next top-level
@@ -318,7 +329,13 @@ def main():
         rel = mod.relative_to(SRC)
         spec = find_spec(mod)
         if not spec:
-            missing.append(rel)
+            # docs-v2: a module with no active hand-written .md is still documented if
+            # it has a source-generated technical page (its .h is in the moxygen
+            # discovery set). The generated page IS its spec; not a miss.
+            if mod.stem in _API_STEMS:
+                ok.append(rel)
+            else:
+                missing.append(rel)
         else:
             issues = check_spec_freshness(mod, spec)
             if issues:

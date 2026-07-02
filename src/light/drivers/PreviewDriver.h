@@ -32,9 +32,11 @@ namespace mm {
 ///        triple i at coord-table entry i*stride.
 // --8<-- [end:wire-format]
 ///
-/// `count` here is the number of points actually sent = ceil(lightCount/stride).
-/// stride>1 only when lightCount*3 would exceed the send-buffer cap (a large
-/// dense grid); sparse layouts (sphere) send every light exactly (stride 1).
+/// `count` is the number of points actually kept after lattice downsampling (the
+/// lights whose position satisfies `pos ≡ 0 mod stride`) — a client sizes its buffer
+/// from this `count`, not from the light total. `stride` rises above 1 only when the
+/// point set would exceed the runtime send-buffer cap (`min(display, memory)`); below
+/// the cap every light is sent (stride 1), so a sparse layout streams in full.
 class PreviewDriver : public DriverBase {
 public:
     /// The 3D preview the web UI renders streams from this driver. Deleting or

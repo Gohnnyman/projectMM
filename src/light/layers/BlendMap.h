@@ -7,26 +7,50 @@
 
 namespace mm {
 
-// How a layer's pixels combine into the destination during composition.
-//   Overwrite — dst = src (replace; the first/bottom layer, fastest)
-//   Alpha     — dst = src*opacity + dst*(255-opacity)  (opacity-weighted over)
-//   Additive  — dst = clamp(dst + src*opacity/255)      (adds light, never dims)
-enum class BlendOp : uint8_t { Overwrite, Alpha, Additive };
+/// How a layer's pixels combine into the destination during composition.
+///
+/// The per-Layer `blendMode` / `opacity` controls that select the op live on the
+/// Layer; the Drivers container reads them together with the layer stack order and
+/// drives one `blendMap` pass per enabled layer each frame.
+enum class BlendOp : uint8_t {
+    Overwrite,  ///< `dst = src` (replace; the first/bottom layer, fastest — no read-back)
+    Alpha,      ///< `dst = src*opacity + dst*(255-opacity)` (opacity-weighted over)
+    Additive,   ///< `dst = clamp(dst + src*opacity/255)` (adds light, never dims)
+};
 
-// Fast 8-bit "divide by 255": exact for 0..65535. Avoids a real divide on the
-// hot path (the textbook (x + (x>>8) + 1) >> 8 trick).
+/// Fast 8-bit "divide by 255": exact for 0..65535. Avoids a real divide on the
+/// hot path (the textbook `(x + (x>>8) + 1) >> 8` trick).
 inline uint8_t div255(uint16_t x) { return static_cast<uint8_t>((x + (x >> 8) + 1) >> 8); }
 
-// Reads from logical buffer (src), writes/blends to physical buffer (dst) via LUT.
-//
-// `op` + `opacity` decide how each light combines into dst; `clearFirst` clears
-// dst before writing (the first/bottom layer in a composite — so physical cells
-// with no source stay black; subsequent layers blend ONTO the accumulated frame).
-// For a single layer the caller passes op=Overwrite, opacity=255, clearFirst=true,
-// which takes the exact fast path this had before composition (memcpy / plain copy).
-//
-// The op/opacity branch is resolved ONCE here, before the per-light loop, so each
-// path is a tight specialized loop with no per-pixel mode check (hot-path rule).
+/// Reads a layer's logical buffer (`src`) and writes the mapped result into a
+/// physical destination buffer (`dst`) via the layer's LUT — called by the Drivers
+/// container once per enabled layer each frame.
+///
+/// `op` + `opacity` decide how each light combines into `dst`; `clearFirst` clears
+/// `dst` before writing (the first/bottom layer in a composite — so physical cells
+/// with no source, such as a sparse layout's lattice gaps, stay black; subsequent
+/// layers pass `false` to blend ONTO the accumulated frame below). For a single
+/// layer the caller passes `op=Overwrite`, `opacity=255`, `clearFirst=true`, which
+/// takes the exact fast path this had before composition (memcpy / plain copy).
+///
+/// **Integer-only combine math** (the hot-path per-light rule), one tight
+/// specialised loop chosen ONCE before the per-light loop — no per-pixel mode check:
+///
+/// - **Overwrite** (default / bottom layer): plain copy, no read-back. A dense grid
+///   (no LUT) is a `memcpy`; a single-write LUT (mirror, shuffle, sparse box→driver)
+///   copies source→destination per mapped light. A non-overwriting LUT (one that
+///   folds several logical lights onto one physical cell) routes through the additive
+///   accumulate path so overlaps sum-with-clamp rather than last-writer-win.
+/// - **Additive**: `dst = clamp(dst + src·opacity)` — sum with saturation at 255,
+///   opacity scaling the source.
+/// - **Alpha** (over): `dst = (src·α + dst·(255−α)) / 255` — the textbook 8-bit
+///   alpha-over, division by 255 via the fast `div255` reciprocal. Full opacity (255)
+///   collapses to a plain overwrite (no blend cost).
+///
+/// A dense-grid layer has no LUT, so its buffer blends 1:1 (source index == physical
+/// index, no lookup); a layer with a LUT maps each logical light to its physical
+/// destination(s) first. Physical indices come from the LUT, built in-range from the
+/// shared Layouts, so they address `dst` in bounds by construction.
 inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
                      uint8_t channelsPerLight,
                      BlendOp op = BlendOp::Overwrite, uint8_t opacity = 255,

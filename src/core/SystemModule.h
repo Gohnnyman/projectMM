@@ -10,20 +10,70 @@
 
 namespace mm {
 
+/// System-level diagnostics and device identity — always loaded, always visible in the
+/// UI. Surfaces the live tick metrics (uptime, fps, tick time, free heap, PSRAM, largest
+/// allocatable block), the static hardware facts (chip, SDK/IDF version, flash size,
+/// boot/reset reason, WiFi co-processor state), and owns the device's identity: its
+/// network name and its physical-hardware model.
+///
+/// **Controls (ordered by change frequency):**
+/// - *Dynamic (every second):* `uptime` (progress), `fps` (derived from the Scheduler's
+///   tick time), `tickTimeUs` (average tick, microseconds), `heap` (progress: used /
+///   total internal), `psram` (progress: used / total, only when present), `maxBlock`
+///   (largest contiguous allocatable block).
+/// - *Configurable:* `deviceName` (default `MM-XXXX`, XXXX = last 4 hex of the MAC) and
+///   `deviceModel` (display-only in the UI, pushed by tooling).
+/// - *Static (set at boot):* `chip`, `sdk`, `flash`, `bootReason`, and `wifiCoproc`
+///   (only on boards whose radio is a separate chip). On desktop the hardware-specific
+///   fields read "desktop" / "N/A".
+///
+/// **Device name:** `deviceName` is the single network identity across the system —
+/// NetworkModule uses it as the mDNS hostname (`<name>.local`), the SoftAP SSID, and the
+/// DHCP hostname, and MoonDeck shows it in the device list. It is coerced to a valid,
+/// non-empty hostname every tick (sanitize + MAC fallback) so whatever the user typed or
+/// persistence restored, a live rename propagates everywhere within one tick — see
+/// `loop1s()`. The default `MM-XXXX` derives from the last 4 hex of the MAC.
+///
+/// **Device model:** `deviceModel` is the physical-hardware identity (which product this
+/// is, for example `Olimex ESP32-Gateway Rev G`) — the entry name from the device-model
+/// catalog. The device cannot self-identify its hardware, so this is pushed by tooling:
+/// the web installer sends it as an `APPLY_OP` `set` op during provisioning, or MoonDeck
+/// over HTTP `/api/control`. The printable-ASCII rule (1..31 chars, 0x20–0x7E, no NUL)
+/// is a per-control validator on the descriptor, so every write path (HTTP, serial
+/// APPLY_OP, persistence load) runs it in the backend. See `validateDeviceModel`.
+///
+/// **`bootReason`:** the human-readable reset reason from `platform::resetReason()`
+/// (`POWERON`, `SW`, `PANIC`, `INT_WDT`, `TASK_WDT`, `BROWNOUT`, `DEEPSLEEP`; desktop
+/// always reports `OK`). The UI flags the reboot button with a red border when the value
+/// is one of PANIC / INT_WDT / TASK_WDT / BROWNOUT, indicating the prior boot ended
+/// unexpectedly.
+///
+/// **PSRAM detection is derived, not flagged:** ESP-IDF auto-detects the PSRAM chip at
+/// boot and merges its pool into the heap allocator, after which `totalHeap()` reports
+/// internal + PSRAM combined while `totalInternalHeap()` reports internal only — so
+/// `totalHeap > totalInternal` is the "PSRAM present" signal. Boards without PSRAM skip
+/// the `psram` control naturally, with no per-platform code path.
+///
+/// **Children:** accepts user-added Peripheral children (sensors, actuators) through the
+/// generic MoonModule add/replace/delete + persistence path — the same firmware runs
+/// with or without them.
+///
+/// **Prior art:** MoonLight — system diagnostics via REST API; device name used for
+/// mDNS.
 class SystemModule : public MoonModule {
 public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
 
-    // Diagnostics keep ticking regardless — disabling System hides uptime/heap/fps
-    // from the UI for no good reason, and the user can't easily re-enable.
+    /// Diagnostics keep ticking regardless — disabling System hides uptime/heap/fps
+    /// from the UI for no good reason, and the user can't easily re-enable.
     bool respectsEnabled() const override { return false; }
 
-    // Accepts user-added Peripheral children (sensors, actuators — bridges to
-    // hardware/network the user solders on or off). The same firmware runs with
-    // or without them, so the user adds/deletes them at runtime; the add/replace/
-    // delete + persistence machinery is the generic MoonModule path. (The deviceModel
-    // identity is a SystemModule control above, not a child module — SystemModule owns
-    // the device's identity, name + model, directly.)
+    /// Accepts user-added Peripheral children (sensors, actuators — bridges to
+    /// hardware/network the user solders on or off). The same firmware runs with
+    /// or without them, so the user adds/deletes them at runtime; the add/replace/
+    /// delete + persistence machinery is the generic MoonModule path. (The deviceModel
+    /// identity is a SystemModule control above, not a child module — SystemModule owns
+    /// the device's identity, name + model, directly.)
     const char* acceptsChildRoles() const override { return "peripheral"; }
 
     void setup() override {
@@ -193,21 +243,24 @@ public:
         MoonModule::loop1s();
     }
 
+    /// The device's network identity (mDNS hostname, SoftAP SSID, DHCP hostname all
+    /// derive from it). Guaranteed a valid, non-empty hostname — coerced every tick.
     const char* deviceName() const { return deviceName_; }
 
+    /// The physical-hardware identity (device-model catalog entry name), pushed by tooling.
     const char* deviceModel() const { return deviceModel_; }
 
-    // Per-control validator for `deviceModel`, applied on EVERY write path (HTTP
-    // /api/control, APPLY_OP over serial, persistence load) via ControlDescriptor::validate.
-    // Accepts 1..31 chars, ASCII-printable (0x20–0x7E), no embedded NUL. The printable floor
-    // rejects control bytes / NULs that would corrupt downstream consumers — JSON
-    // serialization (control bytes need \u escaping at best, break naive emitters at worst),
-    // the device UI (rendered verbatim; a BEL/ESC would mangle the page), and C-string
-    // handling (no embedded NUL → strlen/strcpy round-trip cleanly). Printable ASCII still
-    // contains `"` and `\`, which serializers must escape normally — the floor isn't a
-    // license to skip escaping. (Length: the 31-char cap matches deviceModel_'s 32-byte
-    // buffer; over-long is rejected, not truncated.) Declaring the rule on the control
-    // keeps it with the data, so it holds for every transport that writes deviceModel.
+    /// Per-control validator for `deviceModel`, applied on EVERY write path (HTTP
+    /// /api/control, APPLY_OP over serial, persistence load) via ControlDescriptor::validate.
+    /// Accepts 1..31 chars, ASCII-printable (0x20–0x7E), no embedded NUL. The printable floor
+    /// rejects control bytes / NULs that would corrupt downstream consumers — JSON
+    /// serialization (control bytes need \u escaping at best, break naive emitters at worst),
+    /// the device UI (rendered verbatim; a BEL/ESC would mangle the page), and C-string
+    /// handling (no embedded NUL → strlen/strcpy round-trip cleanly). Printable ASCII still
+    /// contains `"` and `\`, which serializers must escape normally — the floor isn't a
+    /// license to skip escaping. (Length: the 31-char cap matches deviceModel_'s 32-byte
+    /// buffer; over-long is rejected, not truncated.) Declaring the rule on the control
+    /// keeps it with the data, so it holds for every transport that writes deviceModel.
     static bool validateDeviceModel(const char* value) {
         if (!value) return false;
         size_t n = std::strlen(value);

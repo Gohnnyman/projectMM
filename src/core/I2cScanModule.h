@@ -1,21 +1,5 @@
 #pragma once
 
-// I2cScanModule — a diagnostic that scans an I2C bus and reports which device
-// addresses ACK (the standard `i2cdetect`). Domain-neutral: any I2C bring-up
-// (an audio codec, a sensor, a port expander) uses it to confirm wiring and
-// read off a device's address. Pressing `scan` probes the bus on the `sda` /
-// `scl` pins and lists the 7-bit addresses found in `result`.
-//
-// Same shape as DevicesModule (a momentary `scan` button → results), one rung
-// simpler: the bus is local (no persisted list, no live age-out), so a single
-// read-only `result` string suffices instead of a ListSource.
-//
-// The pins are controls (defaulting unset) so each board sets its bus pins in
-// web-installer/deviceModels.json — the same per-board pin-config pattern as the
-// driver/audio modules. The actual probe is platform::i2cScan (platform.h), a
-// self-contained seam that opens a temporary bus, scans, and tears it down, so
-// the diagnostic never fights a bus another driver owns.
-
 #include "core/MoonModule.h"
 #include "platform/platform.h"  // i2cScan
 
@@ -25,10 +9,43 @@
 
 namespace mm {
 
+/// A core, domain-neutral diagnostic that scans an I2C bus and reports which device
+/// addresses ACK — the standard `i2cdetect` operation, surfaced in the UI. It is the bring-up
+/// tool for any I2C peripheral (an audio codec, a sensor, a port expander): set the bus pins,
+/// press scan, read off the addresses present, confirming wiring before a driver tries to talk
+/// to the device. Pressing `scan` probes the bus on the `sda` / `scl` pins and lists the 7-bit
+/// addresses found in `result`.
+///
+/// Same shape as DevicesModule (a momentary `scan` button → results), one rung simpler: the bus
+/// is local (no persisted list, no live age-out), so a single read-only `result` string suffices
+/// instead of a ListSource. Scan state ("N devices found", "set sda + scl pins first") reports
+/// through the standard `setStatus()` channel.
+///
+/// **Not auto-wired.** Factory-registered like AudioModule, so a board with an I2C bus adds it
+/// through the installer device catalog (its `sda`/`scl` controls carrying that board's bus
+/// pins) or the user adds it from the UI. The pins default to GPIO21/22, the Arduino-ESP32
+/// core's conventional I2C pair, so the control pre-fills a sensible starting point on a classic
+/// ESP32 (the pins route through the GPIO matrix, so they're a convention, not fixed hardware);
+/// a board with a fixed bus overrides them in its catalog entry (such as the S31's `sda:51,
+/// scl:50`).
+///
+/// **How it works:** the probe is `platform::i2cScan(sda, scl, out, maxOut)` (declared in
+/// platform.h), a self-contained seam that opens a temporary I2C master bus on the given pins,
+/// probes every 7-bit address (`0x01`–`0x77`), writes the ACKing addresses into the caller's
+/// buffer, and tears the bus down. Opening its own short-lived bus (rather than borrowing one)
+/// means the scan never conflicts with a bus another driver owns — the ES8311 codec on the
+/// ESP32-S31 holds its own bus, and the scan probes the same pins independently between codec
+/// operations. On a target without an I2C bus (an I2C-less ESP32, or desktop) the seam returns
+/// `kI2cBusUnavailable`, so the scan reports "bus unavailable" rather than a misleading "0
+/// devices found" — the 0 is reserved for a real scan where nothing ACKed.
+///
+/// **Prior art:** the bus-scan-as-a-feature mirrors MoonLight's I2C scan diagnostic; the seam
+/// name and probe range follow the Linux `i2c-tools` `i2cdetect` convention
+/// (https://manpages.debian.org/i2c-tools/i2cdetect.8.en.html).
 class I2cScanModule : public MoonModule {
 public:
-    // A diagnostic, like FirmwareUpdateModule / DevicesModule — keeps its
-    // controls and the scan action available regardless of the `enabled` toggle.
+    /// A diagnostic, like FirmwareUpdateModule / DevicesModule — keeps its
+    /// controls and the scan action available regardless of the `enabled` toggle.
     bool respectsEnabled() const override { return false; }
 
     ModuleRole role() const override { return ModuleRole::Peripheral; }

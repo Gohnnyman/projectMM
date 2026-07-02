@@ -10,23 +10,6 @@
 
 namespace mm {
 
-// FirmwareUpdateModule — surfaces OTA flash progress as live read-only controls.
-//
-// Not user-configurable: ensureInfraModules() recreates it on every boot if
-// absent (same safety net as NetworkModule). The actual flash is driven by
-// POST /api/firmware/url in HttpServerModule — that handler spawns the OTA
-// task via platform::http_fetch_to_ota(), which writes to two file-scope
-// globals (g_otaStatus, g_otaBytesRead, g_otaBytesTotal). This module polls
-// them in loop1s() and
-// copies into its bound control buffers so the WebSocket state push picks up
-// the change at 1 Hz. The shared-buffer + 1 Hz poll pattern is the simplest
-// way to bridge a FreeRTOS task and a MoonModule on the scheduler thread
-// without locks. No synchronisation: torn reads of
-// the status string are acceptable for display-only fields.
-//
-// On desktop (platform::hasOta == false) the controls still exist for UI
-// uniformity but the route returns 501; status stays "idle" forever.
-
 // File-scope globals shared with the OTA route + the platform-layer task.
 // Declared `inline` (C++17) so multiple translation units that include the
 // header still share one storage instance (the header is included from
@@ -46,11 +29,49 @@ inline char     g_otaStatus[64]     = "idle";
 inline uint32_t g_otaBytesRead      = 0;
 inline uint32_t g_otaBytesTotal     = 0;
 
+/// A thin status surface for OTA flashing — surfaces flash progress as live
+/// read-only controls plus the per-module status banner
+///
+/// Not user-configurable: `ensureInfraModules()` recreates it on every boot if
+/// absent (same safety net as NetworkModule). The actual flash is driven by
+/// `POST /api/firmware/url` in HttpServerModule, which hands the URL to
+/// `platform::http_fetch_to_ota()` — a task that downloads via `esp_https_ota` and
+/// writes the next OTA partition, communicating through the file-scope globals above
+/// (`g_otaStatus`, `g_otaBytesRead`, `g_otaBytesTotal`). This module polls them in
+/// `loop1s()` and copies into its bound control buffers so the WebSocket state push
+/// picks up the change at 1 Hz. The shared-buffer + 1 Hz poll pattern is the simplest
+/// way to bridge a FreeRTOS task and a MoonModule on the scheduler thread without
+/// locks; no synchronisation, since torn reads of display-only fields are acceptable.
+///
+/// **Controls.** `version` — pure semver (`MM_VERSION`): a stable release is a clean
+/// `X.Y.Z`, a moving `latest` build is a monotonic prerelease `` `<core>-dev.<N>` `` (semver.org
+/// §9/§11), so the release channel is derivable from the version rather than mixed into
+/// it, keeping the string a clean machine-comparable semver the UI's update check compares
+/// against the newest GitHub release. `build` — build date/time. `firmware` — the
+/// build-time variant key (`esp32`, `esp32-eth`, `esp32s3-n16r8`, … / `desktop-*`) that
+/// identifies which release asset matches the device (a legacy `esp32-eth-wifi` key
+/// OTA-maps to `esp32`); the physical hardware is SystemModule's `deviceModel`.
+/// `firmwarePartition` — running app image size / app-partition size (named distinctly
+/// from `firmware` so a `find(name === "firmware")` caller resolves the string).
+/// `update_pct` — live byte counters rendered "X KB / Y KB" (`total` is 0 until
+/// `esp_https_ota_get_image_size` reports it just after the TLS handshake; the name is
+/// historical, the wire shape is bytes).
+///
+/// **Flash phase is not a control** — it surfaces through the module's shared status slot
+/// (`setStatus()`): `idle` clears the banner, an `error:` prefix maps to `Severity::Error`,
+/// everything else (`starting`/`downloading`/`flashing`/`rebooting`) is neutral. On
+/// desktop (`platform::hasOta == false`) the controls still exist for UI uniformity but the
+/// route returns 501 and status stays "idle" forever.
+///
+/// **Prior art:** `esp_https_ota` is the standard ESP-IDF OTA-from-HTTP component used by
+/// every ESP32 OTA flow since IDF v4.x; the install-picker UI is the new layer on top. See
+/// docs/moonmodules/core/FirmwareUpdateModule.md for the `POST /api/firmware/url` wire
+/// contract, the compatibility rules, and the flash lifecycle + error taxonomy.
 class FirmwareUpdateModule : public MoonModule {
 public:
-    // Diagnostics keep ticking regardless of the user toggle; matches
-    // SystemModule + NetworkModule. The user can't easily re-enable a
-    // disabled diagnostic module without it being visible.
+    /// Diagnostics keep ticking regardless of the user toggle; matches
+    /// SystemModule + NetworkModule. The user can't easily re-enable a
+    /// disabled diagnostic module without it being visible.
     bool respectsEnabled() const override { return false; }
 
     void setup() override {
@@ -119,12 +140,12 @@ public:
         }
     }
 
-    // Point the shared status slot at our owned buffer, choosing the severity
-    // from the status text: the platform OTA task prefixes every failure with
-    // "error: " (see platform_esp32_ota.cpp), so that prefix is the Error gate.
-    // "idle" is the quiescent state and reads better as no banner than as an
-    // info banner, so it clears the slot. setStatus doesn't copy — statusStr_
-    // outlives every call, so the pointer stays valid.
+    /// Point the shared status slot at our owned buffer, choosing the severity
+    /// from the status text: the platform OTA task prefixes every failure with
+    /// "error: " (see platform_esp32_ota.cpp), so that prefix is the Error gate.
+    /// "idle" is the quiescent state and reads better as no banner than as an
+    /// info banner, so it clears the slot. setStatus doesn't copy — statusStr_
+    /// outlives every call, so the pointer stays valid.
     void publishStatus() {
         if (std::strcmp(statusStr_, "idle") == 0) {
             clearStatus();
@@ -140,11 +161,11 @@ private:
     uint32_t bytesRead_     = 0;
     uint32_t totalSnap_     = 0;
     // Firmware identity (static for this build) + the running app-partition usage.
-    char     versionStr_[32] = {};   // pure semver — e.g. "2.0.0" or "2.1.0-dev.7"
+    char     versionStr_[32] = {};   ///< pure semver — such as "2.0.0" or "2.1.0-dev.7"
     char     buildStr_[24]   = {};
-    char     firmwareStr_[24] = {};  // build variant name, e.g. "esp32s3-n16r8"
-    uint32_t firmwareSizeVal_ = 0;   // bytes used in the app partition
-    uint32_t totalFlashVal_   = 0;   // app partition size
+    char     firmwareStr_[24] = {};  ///< build variant name, such as "esp32s3-n16r8"
+    uint32_t firmwareSizeVal_ = 0;   ///< bytes used in the app partition
+    uint32_t totalFlashVal_   = 0;   ///< app partition size
 };
 
 } // namespace mm

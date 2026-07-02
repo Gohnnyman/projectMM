@@ -1,28 +1,70 @@
 #pragma once
 
-// AudioModule — acquires an audio source and publishes an AudioFrame (an overall
-// sound level plus a 16-band frequency spectrum and the dominant peak). The frame
-// is always available every render tick, but its analysed values are recomputed
-// only when a full sample block has accumulated: a 512-sample block at 22 kHz
-// takes ~23 ms to arrive (longer than one tick), so a tick that doesn't complete
-// a block re-publishes the previous AudioFrame unchanged rather than re-analysing.
-// Named for what it does (audio acquisition + analysis), not
-// for one source: today the source is a digital I2S MEMS mic (e.g. INMP441, the
-// only one wired); the analysis pipeline is source-independent and is meant to
-// serve line-in / USB sources behind the platform read seam as they are added.
-// It is the PRODUCER in the audio producer/consumer pair; audio-reactive effects
-// (AudioVolumeEffect, AudioSpectrumEffect) are the consumers, wired the
-// AudioFrame* in main.cpp.
-//
-// A SystemModule Peripheral child (the role already exists). Chip-agnostic:
-// gated on platform::hasI2sMic, inert with a status note on targets without I2S
-// and on desktop. The signal math is host-tested domain code (AudioLevel.h,
-// AudioBands.h); this module owns the lifecycle, the controls, and the two
-// platform seams (the I2S read and the FFT kernel).
-//
-// Hot path: fixed member scratch buffers (sample block + window + magnitudes),
-// one float FFT per loop, no per-loop heap. The mic read is non-blocking enough
-// for the tick; a bad init leaves the module idle (zeroed frame), never crashing.
+/// Acquires an audio source and publishes an `AudioFrame` — an overall sound
+/// **level**, a 16-band frequency **spectrum**, and the **dominant peak** — as the
+/// producer half of the audio-reactive pipeline
+///
+/// The frame is available to consumers every render tick, but its analysed values
+/// are *recomputed* only when a full sample block has accumulated (a 512-sample
+/// block at 22 kHz takes ~23 ms, longer than one tick), so a tick that doesn't
+/// complete a block re-publishes the previous `AudioFrame` unchanged rather than
+/// re-analysing. `AudioVolumeEffect` and `AudioSpectrumEffect` are the consumers,
+/// reaching the live frame through the static `latestFrame()`.
+///
+/// **Named for what it does** — audio acquisition plus analysis, not for one
+/// source. Today the source is a digital I2S MEMS microphone (INMP441-class, the
+/// only one wired); the same source-independent analysis pipeline is built to serve
+/// other sources (line-in, USB audio, PDM mics, I2C codecs) behind the platform
+/// read seam as they are added. Most of the module is the analysis (DC-blocker,
+/// RMS level, windowed FFT, band mapping), which is source-independent.
+///
+/// **User-added Peripheral.** A SystemModule Peripheral child, registered in the
+/// factory and added through the UI when wanted, not boot-wired — auto-wiring it
+/// forced an I2S init on every board, which on the classic ESP32 hung `setup()` and
+/// boot-looped a mic-less device. When added, its pins default to unset (−1, the
+/// standard Pin-control sentinel, so GPIO 0 stays a usable mic pin) and it stays
+/// idle with a status note until the user enters the real GPIOs. Chip-agnostic:
+/// gated on `platform::hasI2sMic`, inert with a status note on targets without I2S
+/// and on desktop.
+///
+/// **The AudioFrame pipeline.** Each `loop()` that completes a block: read a block
+/// of samples, DC-blocker high-pass, compute the level, window + FFT, map to bands.
+/// The high-pass conditions the raw block once, up front, so both the level and the
+/// spectrum see the same cleaned signal. The DSP choices are textbook defaults on
+/// purpose — a Hann window, RMS for level, a geometric band split, argmax for the
+/// peak — with deliberately no per-frequency correction table (the INMP441 is flat
+/// ±3 dB across the range that matters). The level is overall RMS loudness computed
+/// independently of the FFT, not derived from the bands.
+///
+/// **Hardware: INMP441-class digital mic.** A self-clocked I2S MEMS microphone:
+/// standard/Philips framing, 24-bit data left-justified in a 32-bit slot, mono. The
+/// part is self-clocked from the bit clock; there is no master-clock (MCLK) pin.
+/// The bench wiring is WS=4 (word-select/LRCLK), SD=5 (serial data out), SCK=6 (bit
+/// clock). It drives the one slot its L/R select pin chooses (tie L/R to GND for the
+/// left slot); if `level` stays at the floor with sound present, the mic is filling
+/// the other slot — one wire, not firmware.
+///
+/// **Platform seams.** Only the I2S read and the FFT kernel are platform code
+/// (`platform_esp32_i2s.cpp`: IDF's `i2s_std` driver + esp-dsp's float
+/// `dsps_fft2r_fc32`, the radix-2 real FFT); everything else is plain domain math
+/// that runs in CI on the desktop's reference DFT. The signal math is host-tested
+/// domain code (`AudioLevel.h`, `AudioBands.h`); this module owns the lifecycle,
+/// the controls, and the two seams.
+///
+/// **Hot path:** fixed member scratch buffers (sample block + window + magnitudes,
+/// ~6 KB DRAM-resident), one float FFT per loop, no per-loop heap. The mic read is
+/// non-blocking (the first ~250 ms of power-on settling garbage flows through the
+/// first few reads and self-corrects); a bad init leaves the module idle (zeroed
+/// frame), never crashing.
+///
+/// **Prior art:** audio-reactive lighting is a long-standing idea in the
+/// LED-controller world (WLED-MM and MoonLight are the closest lineage). This is
+/// projectMM's own implementation, designed from the INMP441 datasheet
+/// (https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf) and standard
+/// DSP rather than traced from any one project. See
+/// docs/moonmodules/core/AudioModule.md for the full DSP rationale, the source-seam
+/// backlog (line-in / PDM / analog / I2C codecs), and the forward-looking adaptive
+/// noise-gate analysis.
 
 #include "core/MoonModule.h"
 #include "core/AudioFrame.h"
@@ -39,21 +81,21 @@ namespace mm {
 
 class AudioModule : public MoonModule {
 public:
-    // Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of
-    // audio per frame — fine resolution (~43 Hz/bin) at a modest per-tick cost.
+    /// Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of
+    /// audio per frame — fine resolution (~43 Hz/bin) at a modest per-tick cost.
     static constexpr size_t kBlock = 512;
-    static constexpr size_t kMag = kBlock / 2;   // real-FFT magnitude bins
+    static constexpr size_t kMag = kBlock / 2;   ///< real-FFT magnitude bins
 
     ModuleRole role() const override { return ModuleRole::Peripheral; }
 
-    // Unlike a zero-cost diagnostic peripheral, this module pays a
-    // real per-tick cost (the FFT) that IS the capability, not an optional extra,
-    // so it must not run when the user turns it off. We therefore respect `enabled`
-    // (the default): the Scheduler skips loop() entirely while disabled, so the FFT,
-    // the level, and the read-outs all stop and the cost goes to zero. Enabled runs
-    // the full pipeline; removing the module stops it the same way. The read-outs
-    // hold their last value while disabled (no consumer reads a disabled module).
-    // (respectsEnabled() defaults to true, so we don't override it.)
+    /// Unlike a zero-cost diagnostic peripheral, this module pays a
+    /// real per-tick cost (the FFT) that IS the capability, not an optional extra,
+    /// so it must not run when the user turns it off. We therefore respect `enabled`
+    /// (the default): the Scheduler skips loop() entirely while disabled, so the FFT,
+    /// the level, and the read-outs all stop and the cost goes to zero. Enabled runs
+    /// the full pipeline; removing the module stops it the same way. The read-outs
+    /// hold their last value while disabled (no consumer reads a disabled module).
+    /// (respectsEnabled() defaults to true, so we don't override it.)
 
     // --- controls: three I2S pins, sample rate, the two conditioning knobs, and
     // two read-only read-outs. The pins default to UNSET (-1, the standard Pin-
@@ -61,29 +103,31 @@ public:
     // when a board has a mic, and stays idle (no I2S init) until the user enters the
     // real GPIOs, so adding it can't grab arbitrary pins or wedge a board with no
     // mic. The bench INMP441 wiring is WS=4 / SD=5 / SCK=6. ---
-    int8_t wsPin = -1;           // word-select / LRCLK (-1 = unset)
-    int8_t sdPin = -1;           // serial data in (-1 = unset)
-    int8_t sckPin = -1;          // bit clock (-1 = unset)
-    // Sample rate is a discrete choice (the standard audio rates), so it's a
-    // dropdown over a fixed set, not a free number. sampleRateSel indexes
-    // kSampleRates; sampleRate() resolves it to Hz. Default index 2 = 22050.
+    int8_t wsPin = -1;           ///< word-select / LRCLK (-1 = unset). Changing it re-creates the I2S channel live (no reboot).
+    int8_t sdPin = -1;           ///< serial data in (-1 = unset). Changing it re-creates the I2S channel live.
+    int8_t sckPin = -1;          ///< bit clock (-1 = unset). Changing it re-creates the I2S channel live.
+    /// Sample rate is a discrete choice (the standard audio rates), so it's a
+    /// dropdown over a fixed set, not a free number. sampleRateSel indexes
+    /// kSampleRates; sampleRate() resolves it to Hz. Default index 2 = 22050
+    /// (~11 kHz Nyquist covers the range that matters for light). Changing it
+    /// re-creates the channel live.
     uint8_t  sampleRateSel = 2;
     // Two knobs condition the spectrum + level:
-    uint8_t  floor = 100;        // noise floor (dB display floor) — bands/level
-                                 // below this read as silence. Raise to keep an
-                                 // ambient room dark, lower for a quiet room.
-    uint8_t  gain = 222;         // sensitivity — HIGHER = more (a narrower dB window
-                                 // so a given sound fills more of the bar).
-    // Simulated audio: fill the frame with a synthesized signal so audio-reactive effects are demoable
-    // (and testable) without a mic or music. Two patterns:
-    //   `music` — a plausible song: multi-sine bands + a swelling volume + a periodic beat + a
-    //             sweeping peak. Nice for demos (bars dance, VU breathes, peaks move).
-    //   `sweep` — a single band lit, marching bass→treble on a timer, with the peak frequency and a
-    //             steady volume tracking it. Deterministic — the clean test pattern to check that each
-    //             effect responds across the whole spectrum.
-    // A real mic always wins: when `mode` is a fill-in mode it only runs while there's no real signal.
-    uint8_t  simulate = 0;       // 0 = off, 1 = music (fill silence), 2 = sweep (fill silence),
-                                 // 3 = music (always), 4 = sweep (always)
+    uint8_t  floor = 100;        ///< noise floor (dB display floor) — bands/level
+                                 ///< below this read as silence. Raise to keep an
+                                 ///< ambient room dark, lower for a quiet room.
+    uint8_t  gain = 222;         ///< sensitivity — HIGHER = more (a narrower dB window
+                                 ///< so a given sound fills more of the bar).
+    /// Simulated audio: fill the frame with a synthesized signal so audio-reactive effects are demoable
+    /// (and testable) without a mic or music, such as a preview/demo device with no microphone. Two patterns:
+    ///   `music` — a plausible song: multi-sine bands + a swelling volume + a periodic beat + a
+    ///             sweeping peak. Nice for demos (bars dance, VU breathes, peaks move).
+    ///   `sweep` — a single band lit, marching bass→treble on a timer, with the peak frequency and a
+    ///             steady volume tracking it. Deterministic — the clean test pattern to check that each
+    ///             effect responds across the whole spectrum.
+    /// A real mic always wins: when `mode` is a fill-in ("silence") mode it only runs while there's no real signal.
+    uint8_t  simulate = 0;       ///< 0 = off, 1 = music (fill silence), 2 = sweep (fill silence),
+                                 ///< 3 = music (always), 4 = sweep (always)
 
     static constexpr uint16_t kSampleRates[] = {8000, 16000, 22050, 44100};
     static constexpr uint8_t kSampleRateCount = 4;
@@ -114,7 +158,7 @@ public:
         MoonModule::onBuildControls();
     }
 
-    // A pin or rate change rebuilds the I2S channel.
+    /// A pin or rate change rebuilds the I2S channel (live, no reboot).
     bool controlChangeTriggersBuildState(const char* name) const override {
         return std::strcmp(name, "wsPin") == 0 || std::strcmp(name, "sdPin") == 0
             || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "sampleRate") == 0;
@@ -130,19 +174,22 @@ public:
         if (active_ == this) active_ = nullptr;   // vacate; a surviving module re-elects itself in loop()
     }
 
-    // The latest analysed frame — what effects read. Always valid (zeroed until
-    // the first successful read), so a consumer never dereferences null and a
-    // mic-less build just sees silence.
+    /// The latest analysed frame — what effects read. Always valid (zeroed until
+    /// the first successful read), so a consumer never dereferences null and a
+    /// mic-less build just sees silence.
     const AudioFrame* audioFrame() const { return &frame_; }
 
-    // Process-wide accessor for the consumers (audio effects). There is one mic,
-    // and an effect can be added/removed via the UI at any time, so it can't rely
-    // on a boot-time setter — it asks here. Returns the live mic's frame while one
-    // exists, else a static all-silent frame, so an effect added before/without a
-    // mic still reads valid silence instead of null. The FIRST live module claims the seat in setup(),
-    // vacates it in teardown(), and any running module re-claims an empty seat in loop() — so a device
-    // with two mics reads the first consistently, and removing the active one lets a survivor take over.
-    // Add/remove in any order leaves a coherent answer (the robustness rule).
+    /// Process-wide accessor for the consumers (audio effects). There is one mic,
+    /// and an effect can be added/removed via the UI at any time, so it can't rely
+    /// on a boot-time setter — it asks here
+    ///
+    /// Returns the live mic's frame while one exists, else a static all-silent
+    /// frame, so an effect added before/without a mic still reads valid silence
+    /// instead of null. The FIRST live module claims the seat in `setup()`, vacates
+    /// it in `teardown()`, and any running module re-claims an empty seat in
+    /// `loop()` — so a device with two mics reads the first consistently, and
+    /// removing the active one lets a survivor take over. Add/remove in any order
+    /// leaves a coherent answer (the robustness rule).
     static const AudioFrame* latestFrame() {
         static const AudioFrame kSilence{};
         return active_ ? &active_->frame_ : &kSilence;
@@ -228,10 +275,10 @@ public:
         }
     }
 
-    // Fill frame_ with a synthesized signal. sweep=false → a plausible "song" (each band its own
-    // oscillator, a swelling volume, a periodic beat, a drifting peak); sweep=true → one band lit
-    // marching bass→treble on a timer (the deterministic test pattern). All integer LUT math (sin8),
-    // once per tick, off the per-light path. Also runs the same levelSmoothed EMA the mic path does.
+    /// Fill frame_ with a synthesized signal. sweep=false → a plausible "song" (each band its own
+    /// oscillator, a swelling volume, a periodic beat, a drifting peak); sweep=true → one band lit
+    /// marching bass→treble on a timer (the deterministic test pattern). All integer LUT math (sin8),
+    /// once per tick, off the per-light path. Also runs the same levelSmoothed EMA the mic path does.
     void synthesizeFrame(bool sweep) {
         const uint32_t t = platform::millis();
         if (sweep) {
@@ -309,6 +356,10 @@ private:
 
     static constexpr const char* kInitFailMsg = "mic init failed — check pins / rate";
 
+    /// (Re)create the I2S channel for the current pins + rate. On a codec board the
+    /// I2S peripheral drives MCLK first, then the codec is configured over I2C. Any
+    /// unset pin (-1) or missing I2S support leaves the module idle with a status
+    /// note rather than attempting an init. Called from setup() and onBuildState().
     void reinit() {
         if constexpr (!platform::hasI2sMic) {
             setStatus("mic: no I2S on this platform", Severity::Warning);

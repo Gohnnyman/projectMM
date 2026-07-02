@@ -41,7 +41,7 @@ It runs on ESP32 (the primary target), and also on Teensy, macOS, Windows, Linux
 
     System design, the module model, and the per-module reference.
 
-    [Architecture](architecture.md) · [Core modules](moonmodules/core/MoonModule.md) · [Light pipeline](moonmodules/light/EffectBase.md)
+    [Architecture](architecture.md) · [Core modules](moonmodules/core/supporting/supporting.md) · [Light pipeline](moonmodules/light/supporting/supporting.md)
 
 </div>
 

@@ -26,6 +26,7 @@ in CI, where both are provisioned); a contributor without doxygen still gets the
 """
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 TEMPLATES = Path(__file__).resolve().parent / "moxygen-templates" / "cpp"
+
+# A floor on how many pages a healthy run produces. Below this, something broke
+# (doxygen parsed nothing, moxygen emitted nothing, the class→header map is empty) —
+# raise rather than write a near-empty API set. Set well under the real count (~114
+# today) so it only trips on genuine breakage, not on adding/removing a few headers.
+_MIN_EXPECTED_PAGES = 50
+
+
+class GenApiError(RuntimeError):
+    """The Doxygen/moxygen toolchain was present but failed or produced too few pages.
+    Distinct from the toolchain being *absent* (which is a graceful {} skip): this is a
+    real failure the caller should surface, so CI doesn't ship a degraded docs site."""
 
 # The two domains whose headers are offered to Doxygen. The output URI nests under
 # the matching domain dir (moonmodules/core/moxygen/, moonmodules/light/moxygen/),
@@ -69,7 +82,9 @@ def available() -> bool:
 
 
 def _doxyfile(headers: list[str], xml_out: str) -> str:
-    inputs = " ".join(str(ROOT / h) for h in headers)
+    # Quote each path so a ROOT (or any parent) containing spaces doesn't get split
+    # into separate INPUT entries — Doxygen treats a quoted path as one argument.
+    inputs = " ".join(f'"{ROOT / h}"' for h in headers)
     return (
         f'PROJECT_NAME="projectMM API"\n'
         f"INPUT = {inputs}\n"
@@ -103,17 +118,47 @@ def _migration_crosscheck_header(header_rel: str, domain: str, stem: str) -> str
     resolves to its rendered `.html`), so a reviewer can cross-check that the `.md`'s
     content was absorbed into the `.h`'s `///` comments. Removed at Stage 5."""
     parts = [f"[source `{Path(header_rel).name}`]({_BLOB_BASE}/{header_rel})"]
-    # The old per-module .md lives somewhere under docs/moonmodules — find it by name
-    # (excluding the generated moxygen/ dirs). Link RELATIVE to this generated page
-    # (docs/moonmodules/<domain>/moxygen/<stem>.md) so MkDocs resolves it in-site.
+    # The old per-module .md now lives under docs/moonmodules/<domain>/archive/. Find
+    # it by name (excluding the generated moxygen/ dirs); SORT so rglob's unspecified
+    # order can't make the chosen match (and thus the emitted relative path) vary build
+    # to build. Link RELATIVE to this generated page so MkDocs resolves it in-site.
     this_dir = DOCS_MOONMODULES / domain / "moxygen"
-    for md in DOCS_MOONMODULES.rglob(f"{stem}.md"):
+    for md in sorted(DOCS_MOONMODULES.rglob(f"{stem}.md")):
         if "moxygen" in md.parts:
             continue
         rel = os.path.relpath(md, this_dir).replace(os.sep, "/")
         parts.append(f"[original `{md.name}`]({rel})")
         break
     return f"> _Migration cross-check (temporary):_ {' · '.join(parts)}\n\n"
+
+
+# A moxygen inter-class link: `](cls_mm-<Class>.md#<anchor>)`, plus the namespace file
+# `](cls_mm.md#<anchor>)` (namespace-level free functions). moxygen names these by its
+# OWN per-file output names, which don't exist after we recombine into per-header pages
+# — so every such link must be repointed (or dropped for the namespace file, which has
+# no single per-header home).
+_CLS_LINK_RE = re.compile(r'\]\(cls_(?P<key>mm(?:-[\w-]+)?)\.md(?P<frag>#[\w-]+)?\)')
+
+
+def _rewrite_cls_links(md: str, from_domain: str, cls_to_page: dict) -> str:
+    """Repoint moxygen's `cls_mm-<Class>.md#anchor` cross-links at the per-header page
+    the class actually lands on. Same domain → a sibling `<stem>.md`; cross-domain →
+    `../../<domain>/moxygen/<stem>.md`. A class with no generated page (in a class-less
+    util header) → drop the link, leaving its label as plain text so nothing dangles.
+
+    The `#anchor` fragment is DROPPED: moxygen numbered anchors per its own per-class
+    file (`#onbuildstate-13`), so after recombining several classes into one page those
+    numbers no longer match the rendered heading ids — keeping them would emit thousands
+    of dead-anchor warnings. Linking to the page (no fragment) lands the reader on the
+    right module; the intra-page jump is a fair trade for a clean build."""
+    def _sub(m: re.Match) -> str:
+        page = cls_to_page.get(m.group("key"))
+        if page is None:
+            return "]"          # unknown class → strip target, keep the `[label]` text
+        domain, stem = page
+        rel = f"{stem}.md" if domain == from_domain else f"../../{domain}/moxygen/{stem}.md"
+        return f"]({rel})"
+    return _CLS_LINK_RE.sub(_sub, md)
 
 
 def _class_to_header(xml_dir: Path) -> dict[str, str]:
@@ -150,7 +195,14 @@ def generate() -> dict[str, str]:
     Per-header (132×) meant 132 npx cold-starts (~0.95s each ≈ 150s); the single pass
     is ~5s. moxygen `--classes` emits one file per class, so a header's several classes
     (Control.h → Control, ControlList, ControlDescriptor) are recombined here into one
-    per-header page via the class→header map from the XML `<location>`."""
+    per-header page via the class→header map from the XML `<location>`.
+
+    Failure model: `available()` false → return {} (a contributor without the tools
+    still builds the rest of the site — a *graceful* skip). But if the tools ARE present
+    and then fail (npx registry fetch error, doxygen crash, empty output), raise
+    GenApiError — silently returning {} there would ship a docs site with ZERO API pages
+    and no red X. The caller (mkdocs_hooks) degrades gracefully on absent tools but lets
+    the error propagate so CI, where the tools are provisioned, fails loudly."""
     if not available():
         return {}
 
@@ -165,7 +217,7 @@ def generate() -> dict[str, str]:
         r = subprocess.run(["doxygen", str(tdp / "Doxyfile")],
                            cwd=tdp, capture_output=True, text=True)
         if r.returncode != 0 or not xml_dir.exists():
-            return {}
+            raise GenApiError(f"doxygen failed (rc={r.returncode}): {r.stderr[-500:]}")
 
         # One moxygen call, class-per-file (output name = fully-qualified class, ::→-).
         m = subprocess.run(
@@ -175,12 +227,24 @@ def generate() -> dict[str, str]:
             cwd=tdp, capture_output=True, text=True,
         )
         if m.returncode != 0:
-            return {}
+            # npx couldn't fetch/run moxygen (registry outage, yanked version, no net).
+            raise GenApiError(f"npx moxygen failed (rc={m.returncode}): {m.stderr[-500:]}")
 
         cls_to_header = _class_to_header(xml_dir)
 
+        # moxygen's `--classes` cross-references link to its OWN per-class filenames
+        # (`cls_mm-<Class>.md#anchor`). We recombine classes into per-header pages, so
+        # those targets don't exist — rewrite each to the header page the class lands
+        # on. A class in a non-generated header (e.g. a struct in a class-less util)
+        # maps to nothing → strip the link to plain text so it can't dangle.
+        # cls-key ("mm-Layer") → (domain, header-stem) of the page it ends up in.
+        cls_to_page = {
+            key: (domain_of(h), Path(h).stem)
+            for key, h in cls_to_header.items() if domain_of(h)
+        }
+
         # Group the per-class markdown by owning header (in header order, so a page's
-        # classes appear top-down as declared). moxygen's output is used verbatim.
+        # classes appear top-down as declared).
         by_header: dict[str, list[str]] = {}
         for cls_md in sorted(tdp.glob("cls_*.md")):
             key = cls_md.name[len("cls_"):-len(".md")]   # "mm-ControlList"
@@ -193,7 +257,8 @@ def generate() -> dict[str, str]:
         for header, blocks in by_header.items():
             domain = domain_of(header)
             stem = Path(header).stem
-            md = _migration_crosscheck_header(header, domain, stem) + "".join(blocks)
+            body = _rewrite_cls_links("".join(blocks), domain, cls_to_page)
+            md = _migration_crosscheck_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"
             dst = DOCS_MOONMODULES / domain / "moxygen" / f"{stem}.md"
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -206,4 +271,11 @@ def generate() -> dict[str, str]:
             if not dst.exists() or dst.read_text(encoding="utf-8") != md:
                 dst.write_text(md, encoding="utf-8")
             pages[uri] = md
+
+        # Tools ran but produced far too few pages → something broke upstream (empty
+        # XML, an unmatched class→header map). Fail loudly rather than ship a gutted set.
+        if len(pages) < _MIN_EXPECTED_PAGES:
+            raise GenApiError(
+                f"only {len(pages)} API pages generated (expected ≥ {_MIN_EXPECTED_PAGES}) "
+                f"— doxygen/moxygen ran but produced almost nothing")
         return pages

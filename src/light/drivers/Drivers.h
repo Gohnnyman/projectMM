@@ -13,86 +13,96 @@
 
 namespace mm {
 
+/// Base class for one driver — a consumer that reads the shared source buffer and
+/// emits it to a destination (a physical LED output, a network sink, or the preview).
+///
+/// A driver optionally reads dimensions from an active Layer, optionally applies the
+/// shared output correction, and optionally restricts its output to a contiguous
+/// *window* of the source buffer (see `addWindowControls`). It plays the same
+/// zero-state role for drivers that EffectBase does for effects.
 class DriverBase : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Driver; }
     virtual void setSourceBuffer(Buffer* buf) = 0;
-    // Optional: drivers that need dimensions (e.g. PreviewDriver describing the LED grid in
-    // the WebSocket frame) call layer_ for current physical width/height/depth. ArtNet doesn't
-    // need it — it just streams bytes.
-    //
-    // This is the *active* layer for dimension queries, not a 1:1 wiring
-    // constraint: each driver outputs to a single physical fixture, and the
-    // Drivers container hands it one Layer for dimensions regardless of how many
-    // layers feed the output buffer.
+    /// Set the active Layer this driver reads dimensions from. Optional: drivers that
+    /// need dimensions (such as PreviewDriver describing the LED grid in the WebSocket
+    /// frame) call `layer_` for current physical width/height/depth; ArtNet doesn't need
+    /// it — it just streams bytes.
+    ///
+    /// This is the *active* layer for dimension queries, not a 1:1 wiring constraint:
+    /// each driver outputs to a single physical fixture, and the Drivers container hands
+    /// it one Layer for dimensions regardless of how many layers feed the output buffer.
     void setLayer(Layer* layer) { layer_ = layer; }
 
-    // The configured window (start light, count; count 0 = to end of buffer).
-    // Public for tests pinning the slice arithmetic; production reads via
-    // windowSlice(). See start_/count_ below.
+    /// First light of the configured window. Public for tests pinning the slice
+    /// arithmetic; production reads via `windowSlice()`. See `start_`/`count_` below.
     uint16_t windowStart() const { return start_; }
+    /// Number of lights in the configured window (0 = to end of buffer).
     uint16_t windowCount() const { return count_; }
-    // Set the window directly (the UI sets it via the start/count controls; this
-    // is for code-wiring a driver's slice and for tests). Takes effect on the next
-    // config parse / loop, like a control edit.
+    /// Set the window directly (the UI sets it via the start/count controls; this is
+    /// for code-wiring a driver's slice and for tests). Takes effect on the next config
+    /// parse / loop, like a control edit.
     void setWindow(uint16_t start, uint16_t count) { start_ = start; count_ = count; }
-    // The active Layer this driver reads dimensions from — null when no Layer is
-    // wired (e.g. the last Layer was deleted). Drivers must tolerate null here.
+    /// The active Layer this driver reads dimensions from — null when no Layer is wired
+    /// (such as after the last Layer was deleted). Drivers must tolerate null here.
     Layer* layer() const { return layer_; }
 
-    // Shared output correction (brightness LUT + channel order + white) owned by the
-    // Drivers container. Default no-op so Preview (which shows the raw logical buffer)
-    // and any future preview-style driver opt out for free; only physical drivers
-    // (ArtNet, future LED) override to apply it.
+    /// Hand this driver the shared output correction (brightness LUT + channel order +
+    /// white) owned by the Drivers container. Default no-op so Preview (which shows the
+    /// raw logical buffer) and any preview-style driver opt out for free; only physical
+    /// drivers (ArtNet, LED) override to apply it.
     virtual void setCorrection(const Correction* /*c*/) {}
 
-    // Notified by Drivers when the shared Correction's outChannels may have changed
-    // (a lightPreset switch RGB↔RGBW). Default no-op; physical drivers that own an
-    // intermediate correction-applied buffer override to resize it OFF the hot path.
-    // Topology changes (light count, channels per light) already flow through
-    // onBuildState — this hook is just for the preset-driven channel-count change
-    // that doesn't trigger a structural rebuild.
+    /// Notified by Drivers when the shared Correction's outChannels may have changed (a
+    /// lightPreset switch RGB↔RGBW). Default no-op; physical drivers that own an
+    /// intermediate correction-applied buffer override to resize it OFF the hot path.
+    /// Topology changes (light count, channels per light) already flow through
+    /// onBuildState — this hook is just for the preset-driven channel-count change that
+    /// doesn't trigger a structural rebuild.
     virtual void onCorrectionChanged() {}
 
-    // Clear both shared status strings on teardown (frees the owned failBuf_). A
-    // driver that overrides teardown() for its own peripheral cleanup chains to
-    // this afterwards: `deinit(); DriverBase::teardown();`.
+    /// Clear both shared status strings on teardown (frees the owned `failBuf_`). A
+    /// driver that overrides teardown() for its own peripheral cleanup chains to this
+    /// afterwards: `deinit(); DriverBase::teardown();`.
     void teardown() override { clearFailBuf(); clearConfigErr(); }
 
 protected:
     Layer* layer_ = nullptr;
 
     // --- Shared source-buffer window (start, count) ---------------------------
-    // Every driver reads the SAME shared source buffer (Drivers hands the one
-    // Buffer* to each child) and outputs a contiguous slice of it: lights
-    // [start_, start_+count_). This is how light distribution is made *explicit*
-    // and order-independent — a second driver on a different slice (e.g. an
-    // onboard status LED at index 0, the main strip from index 1) just sets its
-    // own window, rather than the buffer being split by driver order. `count_`==0
-    // means "the rest of the buffer from start_" (the common whole-buffer case).
-    // NetworkSendDriver's universe maps onto the same window; the LED drivers'
-    // pins/ledsPerPin distribute lights *within* the window.
-    uint16_t start_ = 0;
-    uint16_t count_ = 0;   // 0 = to end of buffer
+    /// Every driver reads the SAME shared source buffer (Drivers hands the one
+    /// `Buffer*` to each child) and outputs a contiguous slice of it: lights
+    /// `[start_, start_+count_)`. This is how light distribution is made *explicit*
+    /// and order-independent — a second driver on a different slice (such as an
+    /// onboard status LED at index 0, the main strip from index 1) just sets its
+    /// own window, rather than the buffer being split by driver order. `count_`==0
+    /// means "the rest of the buffer from start_" (the common whole-buffer case).
+    /// NetworkSendDriver's universe maps onto the same window; the LED drivers'
+    /// pins/ledsPerPin distribute lights *within* the window. It is the alternative
+    /// to a "split the buffer by sibling order" model some controllers use — here the
+    /// user (or catalog) says which slice goes where.
+    uint16_t start_ = 0;   ///< First source-buffer light this driver outputs (default 0).
+    uint16_t count_ = 0;   ///< Lights to output from `start_`; 0 = to end of buffer.
 
-    // Add the two window controls — call from a driver's onBuildControls(). Kept
-    // a helper (not auto-added) so a driver opts in by calling it where its other
-    // controls go, keeping control *order* in the driver's hands.
+    /// Add the two window controls — call from a driver's onBuildControls(). Kept a
+    /// helper (not auto-added) so a driver opts in by calling it where its other
+    /// controls go, keeping control *order* in the driver's hands.
     void addWindowControls() {
         controls_.addUint16("start", start_);
         controls_.addUint16("count", count_);
     }
 
-    // True if `name` is one of the window controls — a driver folds this into its
-    // controlChangeTriggersBuildState() so editing the slice re-runs its config.
+    /// True if `name` is one of the window controls — a driver folds this into its
+    /// controlChangeTriggersBuildState() so editing the slice re-runs its config.
     static bool isWindowControl(const char* name) {
         return std::strcmp(name, "start") == 0 || std::strcmp(name, "count") == 0;
     }
 
-    // Resolve the window against a buffer of `bufN` lights: writes the clamped
-    // first light to `outStart` and the slice length to `outLen` (0 if the window
-    // starts past the end). The textbook [start, start+count) clamp — every
-    // driver calls this instead of reading from light 0.
+    /// Resolve the window against a buffer of `bufN` lights: writes the clamped first
+    /// light to `outStart` and the slice length to `outLen` (0 if the window starts
+    /// past the end — the driver then idles, no out-of-bounds read). The textbook
+    /// `[start, start+count)` clamp — every driver calls this instead of reading from
+    /// light 0.
     void windowSlice(nrOfLightsType bufN, nrOfLightsType& outStart,
                      nrOfLightsType& outLen) const {
         outStart = start_ < bufN ? start_ : bufN;
@@ -145,22 +155,88 @@ protected:
     }
 };
 
+/// Top-level container for one or more drivers — the consumer side of the pipeline.
+/// Owns the shared output buffer (when memory allows) and performs blend+map from
+/// every layer's buffer into it each frame.
+///
+/// **Naming convention.** Capital `Drivers` is the container class; lowercase
+/// "driver"/"drivers" is the English singular/plural for individual `DriverBase`
+/// children. Capitalisation disambiguates "the Drivers container" from "two drivers
+/// running" (same rule for `Layouts`/layout and `Layers`/layer).
+///
+/// **Shared output buffer.** Necessary because blend+map writes to arbitrary physical
+/// positions via LUT — the output is not filled sequentially, so a driver cannot read
+/// chunk-by-chunk until the full buffer is populated. It uses the same `Buffer` type a
+/// Layer does, sized by the Layouts container. Exception: when exactly one layer is
+/// enabled AND its mapping is 1:1 unshuffled (no LUT — grid layout, no serpentine),
+/// Drivers skips its own buffer and lets drivers read directly from the layer's buffer
+/// (the zero-copy fast path, at the cost of parallelism).
+///
+/// **Multi-layer composition.** When two or more layers are enabled, Drivers composites
+/// them into the shared output buffer each frame in Layers container order (bottom→top,
+/// via `forEachEnabledLayer`). The bottom layer clears and overwrites the buffer; each
+/// layer above blends onto the accumulated frame per its own `blendMode` and `opacity`
+/// (the inert per-Layer controls). Drivers owns the orchestration because only it sees
+/// the stack order and the output buffer; the layers carry only the parameters. The
+/// per-pixel blend math lives in `blendMap` (integer-only, per the hot-path rule). A
+/// full-opacity overwrite/additive layer pays no alpha arithmetic, so per-frame cost
+/// scales with the enabled-layer count. With a single enabled layer there is no
+/// composite: the fast path applies (no-LUT → zero-copy; with a LUT → one blend+map pass
+/// into the output buffer).
+///
+/// **Output correction.** Drivers owns the shared output-correction state (a
+/// `Correction`: brightness LUT, channel-order table, output channel count, derive-white
+/// flag) and exposes `brightness`, `lightPreset`, and the global `palette` controls; each
+/// *physical* driver child applies the correction per-light as it reads the source buffer,
+/// while Preview ignores it (shows the raw logical buffer). `onUpdate` rebuilds the
+/// correction on a `brightness`/`lightPreset` change and hands each child a
+/// `const Correction*`. Every driver sees the same composited output. Palette model +
+/// names follow FastLED's, credited as prior art; implementation in `src/light/Palette.h`.
+///
+/// **Per-driver source window (`start` / `count`).** A window-aware output driver reads
+/// the shared source buffer and outputs a contiguous slice of it — its *window* — making
+/// light distribution explicit and order-independent: each driver names its own slice, so
+/// reordering drivers does not change which lights each outputs (only tick order). The
+/// motivating case: an onboard status LED with window `[0, 1)` and a main strip with
+/// window `[1, …)` as two driver instances on the same buffer, neither stealing the
+/// other's lights. `DriverBase::addWindowControls()` opts a driver in (see there); a driver
+/// that outputs the whole buffer (such as PreviewDriver) simply doesn't call it.
+///
+/// **Prior art:** MoonLight's PhysicalLayer — owns `channelsD` (display buffer),
+/// `compositeLayers()` maps virtualChannels → channelsD, parallelism via a semaphore
+/// (driver signals completion, compositor writes)
+/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h).
 class Drivers : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "driver"; }
 
-    // Default low (≈8%). A fresh device with LEDs wired but no power budget set
-    // (e.g. a strip on USB 5V) draws far less at 20 than at full white, so the
-    // first boot can't brown out the board before the user sets a safe level.
-    // The user raises it via the brightness control once their supply is known.
+    /// Global brightness (0–255). Scales every channel through a 256-entry LUT
+    /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
+    /// `onUpdate` tier — no pipeline realloc, so the slider is fluent. Gamma /
+    /// white-balance fold into this LUT later as a per-channel R/G/B split.
+    ///
+    /// Default low (≈8%). A fresh device with LEDs wired but no power budget set
+    /// (such as a strip on USB 5V) draws far less at 20 than at full white, so the
+    /// first boot can't brown out the board before the user sets a safe level.
+    /// The user raises it via the brightness control once their supply is known.
     uint8_t brightness = 20;
-    // GRB (index 2): the wire order of WS2812/SK6812 strips — the common case,
-    // so a freshly-flashed board with a strip attached shows correct colours
-    // out of the box. Only the physical output drivers apply this reorder;
-    // PreviewDriver reads the RGB source buffer directly, so the simulator is
-    // unaffected. RGB-ordered outputs (some ArtNet/network sinks) flip it back.
-    uint8_t lightPreset = 2;  // index into kLightPresetOptions; 2 = GRB
-    uint8_t palette = 0;      // index into mm::palettes::kBuiltins; the global active palette effects read
+    /// Physical wire format: channel order and whether the light is RGBW (index into
+    /// `kLightPresetOptions`; options `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`,
+    /// `GRBW`). RGBW presets make each driver emit 4 channels per light with white
+    /// derived as `min(R,G,B)` from the (brightness-scaled) RGB.
+    ///
+    /// GRB (index 2) is the wire order of WS2812/SK6812 strips — the common case, so a
+    /// freshly-flashed board with a strip attached shows correct colours out of the box.
+    /// Only the physical output drivers apply this reorder; PreviewDriver reads the RGB
+    /// source buffer directly, so the simulator is unaffected. RGB-ordered outputs (some
+    /// ArtNet/network sinks) flip it back.
+    uint8_t lightPreset = 2;  ///< index into kLightPresetOptions; 2 = GRB
+    /// The global active colour palette (index into `mm::palettes::kBuiltins`;
+    /// `Rainbow`, `Party`, `Lava`, `Ocean`, …). Palette-driven effects read it via
+    /// `Palettes::active()` and colour their pixels through `colorFromPalette(index)`, so
+    /// changing this recolours every such effect live. The select index expands the chosen
+    /// gradient into the active 16-entry palette on `onUpdate` (cheap, off the hot path).
+    uint8_t palette = 0;
 
     // Two ways to wire the source Layer:
     //  - setLayers(Layers*): bind the container; layer_ is re-resolved from

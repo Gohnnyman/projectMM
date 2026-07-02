@@ -2,7 +2,7 @@
 
 Overview, controls, prior art, source, and tests: [drivers.md § LED output](drivers.md#rmtled). This page carries *only* what no single source file can: the WS2812B wire contract, buffer slicing, the on-device loopback self-test, and the LED-flicker troubleshooting playbook.
 
-Output driver for WS2812B-class addressable LEDs over the ESP32 **[RMT (Remote Control Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)** peripheral — one GPIO and one RMT TX channel per strand. Reads the [Drivers](../Drivers.md) buffer, applies the shared [output correction](../Drivers.md#output-correction) per light, and emits the WS2812 1-wire signal.
+Output driver for WS2812B-class addressable LEDs over the ESP32 **[RMT (Remote Control Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)** peripheral — one GPIO and one RMT TX channel per strand. Reads the [Drivers](../moxygen/Drivers.md) buffer, applies the shared [output correction](../archive/Drivers.md#output-correction) per light, and emits the WS2812 1-wire signal.
 
 ## Wire contract — [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf)
 

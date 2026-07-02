@@ -126,6 +126,10 @@ nav:
       - Modifiers: moonmodules/light/modifiers/modifiers.md
       - Drivers: moonmodules/light/drivers/drivers.md
       - Live scripting: moonmodules/light/moonlive/MoonLiveEffect.md
+      - Supporting: moonmodules/light/supporting/supporting.md
+  - Core:
+      - UI: moonmodules/core/ui/ui.md
+      - Supporting: moonmodules/core/supporting/supporting.md
   - Tests (what we verify):
       - Unit tests: tests/unit-tests.md
       - Scenario tests: tests/scenario-tests.md
@@ -135,49 +139,13 @@ nav:
       - Building: building.md
       - Testing strategy: testing.md
       - Performance: performance.md
-      # Docs-v2 module summaries: one 4-column table per module group. Each row
-      # links to the module's generated technical page (moonmodules/{core,light}/
-      # moxygen/<Module>.md, built at MkDocs time by gen_api.py from each `.h`'s ///
-      # comments). Those generated pages are reached via the summary row's link —
-      # not browsed in the menu, since they grow as headers are enriched and listing
-      # each would drift; the link IS the nav.
-      - Module summaries:
-          - Core UI: moonmodules/core/ui/ui.md
-          - Core supporting: moonmodules/core/supporting/supporting.md
-          - Light supporting: moonmodules/light/supporting/supporting.md
-      # NOTE: the per-module pages below are the OLD (docs-v1) layout, kept until the
-      # Stage-5 switchover deletes them and this section collapses into the summaries.
-      - Core modules:
-          - MoonModule (base): moonmodules/core/MoonModule.md
-          - Control: moonmodules/core/Control.md
-          - Scheduler: moonmodules/core/Scheduler.md
-          - System: moonmodules/core/SystemModule.md
-          - Network: moonmodules/core/NetworkModule.md
-          - HTTP server: moonmodules/core/HttpServerModule.md
-          - Improv provisioning: moonmodules/core/ImprovProvisioningModule.md
-          - Firmware update: moonmodules/core/FirmwareUpdateModule.md
-          - Devices: moonmodules/core/DevicesModule.md
-          - Filesystem: moonmodules/core/FilesystemModule.md
-          - Audio: moonmodules/core/AudioModule.md
-          - I2C scan: moonmodules/core/I2cScanModule.md
-          - UI: moonmodules/core/ui.md
-      - Light pipeline:
-          - Effect base: moonmodules/light/EffectBase.md
-          - Modifier base: moonmodules/light/ModifierBase.md
-          - Layer: moonmodules/light/Layer.md
-          - Layers: moonmodules/light/Layers.md
-          - Layouts (container): moonmodules/light/Layouts.md
-          - Drivers (container): moonmodules/light/Drivers.md
-          - Buffer: moonmodules/light/Buffer.md
-          - Blend map: moonmodules/light/BlendMap.md
-          - Mapping LUT: moonmodules/light/MappingLUT.md
-          - Light config: moonmodules/light/LightConfig.md
-      - Drivers (detail):
-          - RMT LED: moonmodules/light/drivers/RmtLedDriver.md
-          - Parlio LED: moonmodules/light/drivers/ParlioLedDriver.md
-          - LCD LED: moonmodules/light/drivers/LcdLedDriver.md
-          - Network send: moonmodules/light/drivers/NetworkSendDriver.md
-          - Preview: moonmodules/light/drivers/PreviewDriver.md
-          - Hue: moonmodules/light/drivers/HueDriver.md
       - Hardware reference:
           - ESP32-S31 coreboard: reference/esp32-s31-coreboard.md
+      # The per-module summary pages above (Effects & building shows › Supporting,
+      # Core › UI/Supporting) are the docs-v2 surface: each 4-column table row links
+      # to the module's generated technical page (moonmodules/{core,light}/moxygen/
+      # <Module>.md, from each `.h`'s /// comments) and, temporarily during the
+      # migration, to the original hand-written page. Those per-module pages
+      # (moonmodules/core/*.md, moonmodules/light/*.md, .../drivers/*.md) still BUILD
+      # and are reachable by link, but are OFF the menu — they collapse away entirely
+      # at the Stage-5 switchover once every module's content is absorbed into its /// .

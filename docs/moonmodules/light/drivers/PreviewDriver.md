@@ -4,7 +4,7 @@ Overview, controls, prior art, source, and tests: [drivers.md § Preview](driver
 
 ## Protocol
 
-PreviewDriver owns both wire formats and **streams** the bytes to a `BinaryBroadcaster` — the core [HttpServerModule](../../core/HttpServerModule.md) — via `beginBinaryFrame`/`pushBinaryFrame`/`endBinaryFrame`, never building a copy of a frame. The HTTP server only writes the bytes to its WebSocket clients: no knowledge of the preview, the light domain, or the formats. `main.cpp` wires the driver's broadcaster to the HTTP server instance.
+PreviewDriver owns both wire formats and **streams** the bytes to a `BinaryBroadcaster` — the core [HttpServerModule](../../core/moxygen/HttpServerModule.md) — via `beginBinaryFrame`/`pushBinaryFrame`/`endBinaryFrame`, never building a copy of a frame. The HTTP server only writes the bytes to its WebSocket clients: no knowledge of the preview, the light domain, or the formats. `main.cpp` wires the driver's broadcaster to the HTTP server instance.
 
 The wire layout is the device source itself — edit the header, this follows:
 
@@ -17,7 +17,7 @@ The wire layout is the device source itself — edit the header, this follows:
 
 ## Cross-module data flow
 
-PreviewDriver reads the **sparse driver buffer** — the one the LED/ArtNet drivers also consume — which the `Layer`'s [MappingLUT](../MappingLUT.md) fills with exactly the real lights (a radius-4 sphere → 210 entries, not its 9×9×9 = 729 box). Both messages stream straight from that buffer and the layout's coordinate iterator; neither holds a preview-side copy. The coordinate table is built in the **same driver order** as the buffer, so RGB index `i` and coordinate `i` always refer to the same light. See [Layer](../Layer.md) / [MappingLUT](../MappingLUT.md) for the box→driver mapping.
+PreviewDriver reads the **sparse driver buffer** — the one the LED/ArtNet drivers also consume — which the `Layer`'s [MappingLUT](../moxygen/MappingLUT.md) fills with exactly the real lights (a radius-4 sphere → 210 entries, not its 9×9×9 = 729 box). Both messages stream straight from that buffer and the layout's coordinate iterator; neither holds a preview-side copy. The coordinate table is built in the **same driver order** as the buffer, so RGB index `i` and coordinate `i` always refer to the same light. See [Layer](../moxygen/Layer.md) / [MappingLUT](../moxygen/MappingLUT.md) for the box→driver mapping.
 
 **Buffer-lifecycle coupling (the non-obvious one).** A large frame rides HttpServerModule's resumable `sendBufferedFrame`, drained a chunk per tick from the *stable* driver buffer — so a 196² frame (~115 KB) never stalls the loop, and the frame rate self-limits to what the link sustains. But a geometry rebuild frees + reallocs that buffer, so `onBuildState()` must call `cancelBufferedSend()` first, or a half-sent frame reads freed memory — a use-after-free guard pinned by a test. This coupling spans PreviewDriver ↔ HttpServerModule ↔ the Layer buffer, and is why the driver streams without its own frame copy.
 

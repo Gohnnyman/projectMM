@@ -14,6 +14,23 @@
 
 namespace mm {
 
+/// A `Layer` MoonModule (role `ModuleRole::Layer`, child of the `Layers` container) owns a buffer, a mapping LUT, an ordered effect list, and an ordered modifier list, and references the shared `Layouts` that describes the physical topology.
+///
+/// **Ownership:** a `Buffer` (logical light data, sized to the logical box); a `MappingLUT` (logical lights to physical positions); effects (write lights into the buffer, dynamic heap-grown list, no fixed max); modifiers (transform the LUT or light values, same dynamic list).
+///
+/// **Composition:** two controls, `blendMode` and `opacity`, govern how this Layer composites onto the layers below it. They are inert on the Layer — it never reads them; a Layer can't know its position in the stack or what's beneath it. The `Drivers` container reads each enabled Layer's two values plus the container child order and does the compositing (bottom layer overwrites, each layer above blends per its mode and opacity). The value lives here so it travels with the Layer through add / delete / reorder — no separate sync-prone blend list on Drivers. The blend math itself lives in `BlendMap`.
+///
+/// **Buffer persistence:** the buffer persists frame-to-frame — the Layer does NOT clear it. This is the FastLED / WLED / MoonLight convention: the buffer holds the previous frame so an effect can fade it for trails (`fadeToBlackBy`) or read prior pixels (a scroll, Game-of-Life). Each effect owns its background. `rebuildLUT` clears once on the cold path so a freshly added effect starts black.
+///
+/// **rebuildLUT (cold path):** called when a layout or modifier control changes. Reads physical dimensions from `Layouts`, folds the box through each enabled static modifier to compute the logical box, allocates the buffer and LUT, and for the common case (no modifier, dense grid in natural order) skips the table entirely with an identity mapping. The general path folds each physical light through the static chain to its logical cell via a textbook counting-sort CSR build.
+///
+/// **render (hot path):** runs each enabled effect in order (all write the same buffer), calls `extrude` after each effect to duplicate its written slice across the axes it doesn't iterate, then ticks each enabled modifier. A live (animated) modifier triggers the per-frame `applyLivePass` backward gather; a beat-driven one asks for a single coalesced rebuild.
+///
+/// **extrude:** lets a low-dimensional effect work on a higher-dimensional layer without per-effect changes — a D2 effect on a 3D layer has its z=0 slice copied across z, a D1 effect its x=0 column copied across x, then that row across the rest. Cost is zero for D3 effects (the default, an early return) and zero when the layer's unused axes are size 1 (a D2 effect on a 2D layer). Real `memcpy` work only happens when the layer has more dimensions than the effect writes.
+///
+/// **Status:** the status slot shows the LOGICAL box the effects render into (`` `<w>×<h>×<d>` ``), which can differ from the physical box shown on `Layouts` (a Mirror-XY modifier folds a 128×128 physical layout into a 64×64 logical box). The same slot carries memory-degradation warnings when a build can't fit (`modifier mapping skipped`, `buffer reduced`, `buffer allocation failed`, all `— not enough memory`), and a warning wins over the neutral box line.
+///
+/// **Prior art:** MoonLight's `VirtualLayer` — `oneToOneMapping` fast-path flag, `virtualChannels` per-layer buffer, `effectDimension`, a `nodes` vector for effects/modifiers, and `forEachLight` per-logical-light iteration that asks the modifier for physical destinations (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
 class Layer : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Layer; }
@@ -41,9 +58,9 @@ public:
         MoonModule::onBuildControls();
     }
 
-    // How this Layer composites when stacked above another (read by Drivers).
-    // Maps the blendMode select index to the BlendMap op. Index order must match
-    // kBlendModeOptions above.
+    /// How this Layer composites when stacked above another (read by Drivers).
+    /// Maps the blendMode select index to the BlendMap op. Index order must match
+    /// kBlendModeOptions above.
     BlendOp blendOp() const {
         return blendMode == 1 ? BlendOp::Additive : BlendOp::Alpha;
     }
@@ -230,14 +247,15 @@ public:
         }
     }
 
-    // Copy the effect's written slice to fill the unused axes. Called after each
-    // effect's loop(). Buffer layout is (z * h + y) * w + x channels per light.
-    //
-    // Hot-path shape: D3 effects (the default) take the early return and pay
-    // nothing beyond one comparison and a branch. On a 2D layout (depth=1) the
-    // z-fill is naturally a no-op regardless of effectDim — the `depth_ > 1`
-    // guard short-circuits. Same for D1 on a 1D layout. Real work only happens
-    // when the effect declared fewer axes than the layout has.
+    /// Copy the effect's written slice to fill the unused axes. Called after each
+    /// effect's loop(). Buffer layout is (z * h + y) * w + x channels per light.
+    ///
+    /// Hot-path shape: D3 effects (the default) take the early return and pay
+    /// nothing beyond one comparison and a branch. On a 2D layout (depth=1) the
+    /// z-fill is naturally a no-op regardless of effectDim — the `` `depth_ > 1` ``
+    /// guard short-circuits. Same for D1 on a 1D layout. Real work only happens
+    /// when the effect declared fewer axes than the layout has. See
+    /// EffectBase § Dimensions and auto-extrusion for the effect-side contract.
     void extrude(Dim effectDim) {
         if (effectDim == Dim::D3) return;
         uint8_t* buf = buffer_.data();
@@ -299,7 +317,13 @@ public:
 
     bool lutSkipped() const { return lutSkipped_; }
 
-    // Precondition: physicalWidth_/Height_/Depth_ must be set (call from onBuildState)
+    /// Cold path, called from onBuildState after physical dimensions are known.
+    /// Applies each enabled static modifier to compute the logical box, allocates
+    /// the buffer and LUT, and for each logical light asks the modifier chain for
+    /// physical destinations. Without a modifier AND with a dense grid in natural
+    /// order (no sparse, no serpentine, x-then-y-then-z) it sets an identity mapping
+    /// and skips the table entirely (the FPS floor for the common case).
+    /// Precondition: physicalWidth_/Height_/Depth_ must be set (call from onBuildState).
     void rebuildLUT() {
         lutSkipped_ = false;
         clearStatus();  // re-evaluated below if a degrade path is taken

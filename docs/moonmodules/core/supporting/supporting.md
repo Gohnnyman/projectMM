@@ -28,4 +28,4 @@ Detail: [technical](../moxygen/MoonModule.md)
 
 ## Persistence and dynamic rebuild
 
-Control values persist via [FilesystemModule](../FilesystemModule.md), which overlays loaded values through each control's variable pointer during `onBuildControls()`. Calling `onBuildControls()` again at runtime (e.g. when a Select changes mode) clears and rebuilds the set, so only the controls relevant to the current mode show — this is how a control's conditional `hidden` flag re-evaluates. The rebuild sweep is also how a config change applies live, with no reboot.
+Control values persist via [FilesystemModule](../moxygen/FilesystemModule.md), which overlays loaded values through each control's variable pointer during `onBuildControls()`. Calling `onBuildControls()` again at runtime (e.g. when a Select changes mode) clears and rebuilds the set, so only the controls relevant to the current mode show — this is how a control's conditional `hidden` flag re-evaluates. The rebuild sweep is also how a config change applies live, with no reboot.

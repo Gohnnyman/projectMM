@@ -1,4 +1,6 @@
-# Plan — Phase 4b: source-generated technical docs (the inversion)
+# Plan — Phase 4b: source-generated technical docs (the inversion) — SUPERSEDED by Docs v2
+
+**Outcome: superseded.** The core idea (generate technical docs from `.h` `///` comments via Doxygen→moxygen) shipped, but this plan's *page model* — a curated `INFRA_HEADERS` list feeding virtual `moonmodules/api/` pages — was replaced by the Docs v2 plan: exhaustive per-header discovery, domain-nested `moonmodules/{core,light}/moxygen/` output, and the two-surface (summary + generated) structure. Kept as the design record of the intermediate step.
 
 Approved-pending. The final phase of the docs overhaul ([docs/backlog/docs-system-overhaul.md](../../backlog/docs-system-overhaul.md)), on `next-iteration`, after the Doxide→moxygen tool evaluation (see the pilot plan for why moxygen won).
 

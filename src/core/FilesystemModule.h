@@ -1,24 +1,5 @@
 #pragma once
 
-// FilesystemModule — control-list-driven JSON persistence.
-//
-// Storage: one flat JSON file per top-level MoonModule under /.config/<TypeName>.json.
-// Children are encoded with "<index>." key prefix (positional) — a deliberately flat
-// file shape, loaded with the cheap first-match key helpers (parseString/Int/Bool). A
-// control whose VALUE is structured — a List control's array of objects — is read back
-// with the recursive reader in core/JsonUtil.h via the control's own restore hook: the
-// file's top level stays flat, the structure lives inside one control's value string.
-//
-// Boot flow:
-//   Scheduler phase 1: onBuildControls (every module binds full control set incl. hidden ones)
-//   Scheduler phase 2: this module's loadAllHook reads each file and overlays bound variables
-//   Scheduler phase 3: modules' own setup() runs with persisted values in member vars
-//   Scheduler phase 4: onBuildState
-//
-// Save flow:
-//   HttpServerModule::handleSetControl calls target->markDirty() on every mutation
-//   This module's loop1s() debounces 2s, walks the tree, writes any dirty subtree atomically
-//
 // This is the .h interface. Bodies live in FilesystemModule.cpp — splitting them
 // out keeps the every-time-it-edits-recompile cost off the rest of the tree.
 
@@ -32,6 +13,67 @@ namespace mm {
 class Scheduler;
 struct ControlDescriptor;
 
+/// Control-list-driven JSON persistence — writes control values to flash so settings
+/// survive a reboot. Always loaded, runs first in the scheduler so its load hook fires
+/// before any other module's `setup()`
+///
+/// **Storage:** one flat JSON file per top-level MoonModule under
+/// `/.config/<TypeName>.json` (the filename is `MoonModule::typeName()`). Children are
+/// encoded positionally with an `<index>.` key prefix — no nested objects, no arrays,
+/// loaded with the cheap first-match key helpers (parseString/Int/Bool). A control
+/// whose *value* is structured (a List control's array of objects) is read back with
+/// the recursive reader in `core/JsonUtil.h` via the control's own restore hook: the
+/// file's top level stays flat, the structure lives inside one control's value string.
+/// `ReadOnly` and `Progress` controls are never persisted — they are derived values,
+/// not state.
+///
+/// **Structural reconciliation.** The `type` field per child drives reconciliation at
+/// load time: when the JSON describes a child type at position N that differs from the
+/// live tree's child at N, the loader factory-creates the JSON type, runs its
+/// `onBuildControls()`, and swaps it into place. Children present in the live tree but
+/// missing from the JSON are torn down; children in the JSON beyond the live tree's end
+/// are appended. Phases 3+4 cascade into the reconciled tree, so newly-created children
+/// are fully initialised like any other.
+///
+/// **Boot flow (Scheduler::setup, four phases):**
+///   - phase 1 `onBuildControls()` — every module binds its full control set (incl. hidden)
+///   - phase 2 `loadAllHook` — this module reads each file and overlays bound variables
+///   - phase 2b `rebuildControls()` — re-runs onBuildControls so conditional hidden flags see the persisted values
+///   - phase 3 `setup()` — modules' own init runs with persisted values in members
+///   - phase 4 `onBuildState()` — buffers sized to final values
+///
+/// The Scheduler exposes `setLoadAllHook()` as a function pointer so it stays
+/// independent of this module's type (no circular include); the hook is wired from
+/// `setScheduler()`.
+///
+/// **Save flow.** HttpServerModule calls `markDirty()` + `noteDirty()` on every
+/// successful mutation — control changes AND tree-shape changes (add / delete / move a
+/// module marks the parent dirty so its file is rewritten with the new child set).
+/// `noteDirty()` stamps `lastDirtyMs_`; `loop1s()` waits `DEBOUNCE_MS` (2 s) after the
+/// last dirty mark, then walks the tree and serialises any subtree with a dirty
+/// descendant to a flat JSON blob, written atomically (write to `.tmp`, then rename). A
+/// subtree's dirty flag clears only after its write succeeds; a failed write leaves it
+/// set so `loop1s()` retries. `flushPending()` forces all dirty subtrees through
+/// synchronously (the reboot handler calls it so an add-then-reboot doesn't lose the
+/// change); losing power before the debounce expires loses the in-flight change — the
+/// cost of debouncing for fewer flash writes.
+///
+/// **Conditional visibility.** Modules with conditional controls bind their full
+/// control set unconditionally and toggle a `hidden` flag per descriptor, so the
+/// persistence layer can find and overlay a value regardless of the live conditional
+/// state while the UI honours the flag. A Select change at runtime triggers
+/// `rebuildControls()` to re-evaluate the flags.
+///
+/// **Platform layer.** Filesystem access goes through `platform::fs*` (mount, mkdir,
+/// read, atomic write-then-rename, used/total). ESP32 uses LittleFS on a dedicated
+/// partition; desktop uses `std::filesystem` rooted at `build/` (overridable via
+/// `fsSetRoot` for test isolation). Save/load shares one `MAX_FILE_BYTES` buffer; a
+/// subtree that serialises larger than that fails the write.
+///
+/// **First boot:** no files exist → load is a no-op, modules run with default
+/// member-initialised values; after the first UI change the debounce creates the file.
+/// A missing key keeps the default, an unknown key is silently ignored (no schema
+/// migration).
 class FilesystemModule : public MoonModule {
 public:
     static constexpr const char* CONFIG_DIR = "/.config";
@@ -40,38 +82,39 @@ public:
     static constexpr size_t MAX_KEY = 48;
     static constexpr uint32_t DEBOUNCE_MS = 2000;
 
-    // Singleton is registered in setScheduler() (called by main.cpp on the real
-    // FilesystemModule), NOT in the constructor. The factory creates short-lived
-    // probe instances for /api/types defaults capture; the probe's destructor would
-    // otherwise clear instance_ and break noteDirty()/flushPending() for the rest
-    // of the device's life.
+    /// Singleton is registered in setScheduler() (called by main.cpp on the real
+    /// FilesystemModule), NOT in the constructor. The factory creates short-lived
+    /// probe instances for /api/types defaults capture; the probe's destructor would
+    /// otherwise clear instance_ and break noteDirty()/flushPending() for the rest
+    /// of the device's life.
     FilesystemModule() = default;
     ~FilesystemModule() override;
 
-    // Persistence must keep flushing dirty subtrees regardless of the `enabled` toggle —
-    // otherwise the user could lose changes by accidentally disabling this module via
-    // the UI before the 2s debounce expires.
+    /// Persistence must keep flushing dirty subtrees regardless of the `enabled` toggle —
+    /// otherwise the user could lose changes by accidentally disabling this module via
+    /// the UI before the 2s debounce expires.
     bool respectsEnabled() const override { return false; }
 
     void setScheduler(Scheduler* s);
     void setup() override;
 
-    // Read-only "last saved" display — surfaces in the UI so the user can see
-    // how long ago the config was last written (or "never" before any save).
+    /// Binds the read-only "lastSaved" display (how long ago the config was last written,
+    /// or "never" before any save) and the "filesystem" partition-usage progress bar (bound
+    /// only when the platform reports a real data partition; 0 → omitted).
     void onBuildControls() override;
     void loop1s() override;
 
-    // Synchronous save of every dirty subtree, bypassing the debounce. Same work
-    // loop1s does once the debounce expires. Exposed for tests so they can assert
-    // the file appears without wall-clock waits; production callers shouldn't need this.
+    /// Synchronous save of every dirty subtree, bypassing the debounce. Same work
+    /// loop1s does once the debounce expires. Exposed for tests so they can assert
+    /// the file appears without wall-clock waits; production callers shouldn't need this.
     void flush();
 
-    // Static convenience for callers (e.g. reboot handler) that need to force any
-    // debounced saves through before a teardown — mirrors noteDirty's call style.
+    /// Static convenience for callers (such as the reboot handler) that need to force any
+    /// debounced saves through before a teardown — mirrors noteDirty's call style.
     static void flushPending();
 
-    // Called by HttpServerModule on every successful control mutation so the
-    // 2s debounce starts. Cheap timestamp record; the actual walk happens in loop1s().
+    /// Called by HttpServerModule on every successful control mutation so the
+    /// 2s debounce starts. Cheap timestamp record; the actual walk happens in loop1s().
     static void noteDirty();
 
 private:
@@ -79,16 +122,16 @@ private:
     Scheduler* scheduler_ = nullptr;
     bool mounted_ = false;
     bool dirtyPending_ = false;
-    bool everSaved_ = false;       // false until the first successful save
+    bool everSaved_ = false;       ///< false until the first successful save
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
-    char lastSaveStr_[24] = "never";  // "lastSaved" read-only control value
-    uint32_t fsUsedVal_ = 0;          // "filesystem" progress: bytes used, refreshed in loop1s
-    uint32_t totalFsVal_ = 0;         // "filesystem" progress: partition total, read once in onBuildControls
-    // Shared load/save buffer — load runs once at boot (phase 2), save runs in loop1s after
-    // the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
-    // since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32
-    // default task stack ceiling (4–8KB).
+    char lastSaveStr_[24] = "never";  ///< "lastSaved" read-only control value
+    uint32_t fsUsedVal_ = 0;          ///< "filesystem" progress: bytes used, refreshed in loop1s
+    uint32_t totalFsVal_ = 0;         ///< "filesystem" progress: partition total, read once in onBuildControls
+    /// Shared load/save buffer — load runs once at boot (phase 2), save runs in loop1s after
+    /// the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
+    /// since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32
+    /// default task stack ceiling (4–8KB).
     char fileBuf_[MAX_FILE_BYTES] = {};
 
     // ---- Internals ----

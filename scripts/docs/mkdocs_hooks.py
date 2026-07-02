@@ -136,12 +136,14 @@ def _cell(s: str) -> str:
 
 
 def _slug(text: str) -> str:
-    """Mimic MkDocs' (Python-Markdown toc) heading slug: lowercase, drop anything
-    that isn't a word char / space / hyphen, then spaces -> hyphens. Matches the
-    id= it generates for a `## Heading`, so a hand-built anchor link resolves.
-    e.g. 'LED output — details' -> 'led-output-details'."""
-    s = re.sub(r'[^\w\s-]', '', text.lower())
-    return re.sub(r'\s+', '-', s.strip())
+    """The heading anchor id MkDocs generates for a `## Heading`, so a hand-built
+    `#anchor` link resolves. Delegates to Python-Markdown's OWN toc slugify (the exact
+    function MkDocs' toc uses) rather than re-implementing it — a hand-rolled mimic
+    drifts on unicode (accent-stripping), consecutive separators, and decoration.
+    e.g. 'LED output — details' -> 'led-output-details'. `markdown` is always present
+    in the build env (it's a MkDocs dependency)."""
+    from markdown.extensions.toc import slugify
+    return slugify(text, "-")
 
 
 def _emit_row(b: dict, details_names: set) -> str:
@@ -303,8 +305,11 @@ def on_files(files, config):
     # build sees them (MkDocs' file scan ran before this hook, so the fresh writes
     # aren't in `files` yet; _add de-dups a same-URI entry a later scan would find).
     # Empty dict when doxygen/npx are absent (local without the toolchain) — the site
-    # still builds; the pages appear in CI. Record {stem: domain} so on_page_markdown
-    # can retarget a `.h` link to the domain-nested page.
+    # still builds; the pages appear in CI. But if the tools ARE present and fail (npx
+    # fetch error, doxygen crash, near-empty output), generate() raises GenApiError,
+    # which propagates and fails the build — so a transient failure can't silently ship
+    # a docs site with zero API pages. Record {stem: domain} so on_page_markdown can
+    # retarget a `.h` link to the domain-nested page.
     global _API_MODULES
     api_pages = gen_api.generate()
     # uri: 'moonmodules/<domain>/moxygen/<Stem>.md' → {'<Stem>': '<domain>'}
