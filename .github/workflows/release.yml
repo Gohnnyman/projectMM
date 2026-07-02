@@ -33,6 +33,7 @@ on:
       # docs/** covers every page rendered into the Pages root by MkDocs; mkdocs.yml is
       # the site config (nav/theme) — a nav change with no doc change must still redeploy.
       - 'docs/**'
+      - 'web-installer/**'
       - 'mkdocs.yml'
   workflow_dispatch:
     inputs:

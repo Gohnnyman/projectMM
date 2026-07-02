@@ -106,15 +106,39 @@ def check_spec_freshness(source_path, spec_path):
 
     return issues
 
-def check_source_links():
-    """Verify every spec page carries a '## Source' section whose links resolve.
+# Consolidated catalog pages document one module per `### ` block, and each block
+# carries its own `source [Foo.h](...)` link (the docs site renders these blocks as
+# a table, so a trailing `## Source` list would just duplicate every row's link —
+# removed as redundant). These pages are checked by validating those per-block
+# source links resolve, NOT by requiring a `## Source` section.
+CATALOG_PAGES = {
+    SPECS / "light" / "effects" / "effects.md",
+    SPECS / "light" / "modifiers" / "modifiers.md",
+    SPECS / "light" / "layouts" / "layouts.md",
+    SPECS / "light" / "drivers" / "drivers.md",
+}
 
-    The Source section links each spec back to the .h/.cpp (or UI/asset files)
-    it documents. This pass catches two drifts the source->spec checks above
-    can't: a source file renamed/moved out from under a spec's link, and a new
-    spec page added without a Source section at all. Walks spec->source (the
-    inverse direction), so it covers every .md including the few that document
-    multiple files (ui.md, LightConfig.md) with no single matching module.
+
+def _resolve_link(md, href):
+    """Return an issue string if the relative link doesn't resolve inside the repo, else None."""
+    target = href.split("#", 1)[0]  # drop any anchor
+    candidate = (md.parent / target).resolve()
+    if target.startswith("/") or not candidate.is_relative_to(ROOT):
+        return f"source link escapes repo or is absolute: {href}"
+    if not candidate.exists():
+        return f"source link does not resolve: {href}"
+    return None
+
+
+def check_source_links():
+    """Verify every spec page's source back-links resolve.
+
+    Catches a source file renamed/moved out from under a spec's link. Two shapes:
+    - Catalog pages (effects/modifiers/layouts/drivers): validate the per-block
+      `source [Foo.h](...)` links — one per module, rendered into the table's Links
+      column. No `## Source` section required (it would duplicate every row).
+    - Every other spec: require a `## Source` section with ≥1 resolving relative
+      link (the page's back-reference to the code it documents).
 
     Returns a list of (spec_rel, issue) tuples — empty when all is well.
     """
@@ -122,6 +146,30 @@ def check_source_links():
     for md in sorted(SPECS.rglob("*.md")):
         spec_rel = md.relative_to(ROOT)
         text = md.read_text(encoding="utf-8")
+
+        if md in CATALOG_PAGES:
+            # A catalog page back-references code either directly — each `### ` block
+            # carries a `source [Foo.h](...)` link (effects/modifiers/layouts) — or
+            # indirectly, linking each entry to its per-driver detail page which holds
+            # the real source link (drivers.md, an index). Accept both: validate the
+            # `source [..]` links if present, else the detail-page `.md` links; every
+            # relative link must resolve. (No `## Source` section — it would duplicate
+            # every row; the rows are rendered as a table on the site.)
+            src_links = re.findall(r'source \[[^\]]+\]\(([^)]+)\)', text)
+            if not src_links:
+                # index page: the per-entry links to detail pages (…Driver.md),
+                # same-dir (no ../) — e.g. `](RmtLedDriver.md)`.
+                src_links = re.findall(r'\]\(([^)]*Driver\.md[^)]*)\)', text)
+            rel_links = [h for h in src_links if not h.startswith(("http://", "https://"))]
+            if not rel_links:
+                issues.append((spec_rel, "no per-block source or detail-page links"))
+                continue
+            for href in rel_links:
+                issue = _resolve_link(md, href)
+                if issue:
+                    issues.append((spec_rel, issue))
+            continue
+
         # Capture only the Source section body — stop at the next top-level
         # header or end-of-file, so links in a later section aren't mistaken
         # for source links if a page ever has one after Source.
@@ -137,16 +185,9 @@ def check_source_links():
             issues.append((spec_rel, "'## Source' section has no relative source link"))
             continue
         for href in rel_links:
-            target = href.split("#", 1)[0]  # drop any anchor
-            # A source link must resolve to a file inside the repo. Relative
-            # `../` hops are expected (specs are nested under docs/); what's
-            # rejected is an absolute path or one whose resolved target lands
-            # outside the repo root.
-            candidate = (md.parent / target).resolve()
-            if target.startswith("/") or not candidate.is_relative_to(ROOT):
-                issues.append((spec_rel, f"source link escapes repo or is absolute: {href}"))
-            elif not candidate.exists():
-                issues.append((spec_rel, f"source link does not resolve: {href}"))
+            issue = _resolve_link(md, href)
+            if issue:
+                issues.append((spec_rel, issue))
     return issues
 
 def main():

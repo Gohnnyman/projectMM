@@ -156,21 +156,19 @@ For each `.md` file, if `docs/assets/<type-folder>/<TypeName>.png` exists and th
 
 Also inserts MoonDeck tab screenshots and the installer screenshot into `scripts/MoonDeck.md` and `README.md` at fixed anchor points (defined in the `EXTRA_SHOTS` list in the script).
 
+Reports unreferenced screenshots — any PNG or GIF in `docs/assets/` not mentioned anywhere in `docs/` or `scripts/`.
+
 ### build_docs
 
-Render the documentation site (Material for MkDocs) from the `docs/` tree into `site/`, streaming the build log to the window.
+**Preview Docs Site** — serve the documentation site (Material for MkDocs) from the `docs/` tree with live-reload, so you can view and iterate on it. Long-running: MoonDeck shows **Stop** while the server is up (like Installer Preview); a stray `mkdocs serve` is killed before a new one starts. The button passes `--serve`.
 
 ```bash
-uv run scripts/docs/build_docs.py            # build to site/ (what this button runs)
-uv run scripts/docs/build_docs.py --serve     # live-preview at localhost:8422 (auto-reload on edit)
+uv run scripts/docs/build_docs.py --serve     # what the button runs → http://localhost:8422/projectMM/ (auto-reload)
+uv run scripts/docs/build_docs.py            # one-shot build to site/ (CI parity; no server)
 uv run scripts/docs/build_docs.py --strict    # promote every warning to an error (local anchor audit)
 ```
 
-The `--serve` preview binds **:8422** — the [Installer Preview](#preview_installer) owns :8421 and MoonDeck :8420, so both local previews can run at once. A stray `mkdocs serve` is killed before a new one starts.
-
-Config is `mkdocs.yml`. The nav is a top-down user → developer order over the existing docs; `history/` and `backlog/` are excluded (internal). Warnings for links to repo files outside `docs/` (`../src/*.h`, `../CLAUDE.md`) and the pre-existing stale cross-doc anchors are expected — the build still succeeds. Deps (`mkdocs-material`) are declared inline in the script, so `uv run` provisions them on first use; nothing to install. This button builds once; use `--serve` from a terminal to iterate live.
-
-Reports unreferenced screenshots — any PNG or GIF in `docs/assets/` not mentioned anywhere in `docs/` or `scripts/`.
+The preview binds **:8422** — the [Installer Preview](#preview_installer) owns :8421 and MoonDeck :8420, so all three servers run at once. Config is `mkdocs.yml`; deps (`mkdocs-material`) are declared inline in the script, so `uv run` provisions them on first use. The two test-inventory pages and each effect/modifier's inline test list are generated from the test files at build time (`scripts/docs/mkdocs_hooks.py`), so they're never committed and can't drift; `history/` and `backlog/` are built but kept off the nav. Warnings for links to repo files outside `docs/` (rewritten to GitHub URLs) and pre-existing stale anchors are expected — the build still succeeds.
 
 ## Live Tab
 

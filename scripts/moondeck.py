@@ -1213,6 +1213,11 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         script_path = SCRIPTS_DIR / script_def["script"]
         cmd = ["uv", "run", str(script_path)]
 
+        # Fixed args a card always passes to its script (e.g. build_docs runs
+        # with `--serve`). Distinct from `flags` (user checkboxes) and the
+        # `needs_*` selectors (UI-driven values) — these are constant per card.
+        cmd.extend(script_def.get("args", []))
+
         # Forward selector state (firmware / port / host) when the script
         # declares it needs them. The UI maintains a single Firmware dropdown
         # on the ESP32 tab driving every needs_firmware script; the older

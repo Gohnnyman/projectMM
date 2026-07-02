@@ -22,6 +22,24 @@
 
 namespace {
 
+// Owns the Layouts/GridLayout/Layer wiring every case shares: build a grid of the
+// given dimensions, parent it, and configure the layer's channels. Same struct-Ctx
+// idiom as unit_effects_render.cpp; each case adds its FreqMatrixEffect afterward.
+struct GridLayer {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    mm::Layer layer;
+
+    GridLayer(mm::lengthType w, mm::lengthType h, mm::lengthType d, uint8_t channels) {
+        grid.width = w;
+        grid.height = h;
+        grid.depth = d;
+        layouts.addChild(&grid);
+        layer.setLayouts(&layouts);
+        layer.setChannelsPerLight(channels);
+    }
+};
+
 // Restores real-clock behaviour and vacates the process-wide active-mic seat so
 // each case is independent (both are global state a prior case could leave set).
 struct AudioGuard {
@@ -55,25 +73,16 @@ TEST_CASE("FreqMatrixEffect paints a lit source pixel from a live tone") {
     AudioGuard guard{mic};
     driveLoudTone(mic);
 
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 1;
-    grid.height = 8;
-    grid.depth = 1;
-    layouts.addChild(&grid);
-
-    mm::Layer layer;
-    layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
+    GridLayer g(1, 8, 1, 3);
 
     mm::FreqMatrixEffect fx;
     fx.speed = 255;   // period = 256 - 255 = 1 ms → scrolls on the first tick
-    layer.addChild(&fx);
-    layer.onBuildState();
+    g.layer.addChild(&fx);
+    g.layer.onBuildState();
 
-    layer.loop();   // paints the new pixel at y=0 (elapsed = kToneMs, throttle passes)
+    g.layer.loop();   // paints the new pixel at y=0 (elapsed = kToneMs, throttle passes)
 
-    auto* data = layer.buffer().data();
+    auto* data = g.layer.buffer().data();
     // Pixel (0,0) is index 0: the source end carries the freshly-painted lit colour.
     CHECK((data[0] > 0 || data[1] > 0 || data[2] > 0));
 }
@@ -84,24 +93,15 @@ TEST_CASE("FreqMatrixEffect scrolls the painted pixel one step along Y") {
     AudioGuard guard{mic};
     driveLoudTone(mic);
 
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 1;
-    grid.height = 8;
-    grid.depth = 1;
-    layouts.addChild(&grid);
-
-    mm::Layer layer;
-    layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
+    GridLayer g(1, 8, 1, 3);
 
     mm::FreqMatrixEffect fx;
     fx.speed = 255;   // period 1 ms → any millis advance re-scrolls
-    layer.addChild(&fx);
-    layer.onBuildState();
+    g.layer.addChild(&fx);
+    g.layer.onBuildState();
 
-    layer.loop();   // tick 1 at kToneMs: paints the lit colour at y=0
-    auto* data = layer.buffer().data();
+    g.layer.loop();   // tick 1 at kToneMs: paints the lit colour at y=0
+    auto* data = g.layer.buffer().data();
     const uint8_t r0 = data[0], g0 = data[1], b0 = data[2];
     REQUIRE((r0 > 0 || g0 > 0 || b0 > 0));   // something lit landed at the source
 
@@ -109,9 +109,9 @@ TEST_CASE("FreqMatrixEffect scrolls the painted pixel one step along Y") {
     // lit band (pos = (t/250)%16 = 1 at t=380, env still high) — the column shifts.
     mm::platform::setTestNowMs(kToneMs + 5);
     mic.loop();     // refresh the frame at the new time (still a loud tone on band 1)
-    layer.loop();   // tick 2: the y=0 colour of tick 1 moves up to y=1
+    g.layer.loop();   // tick 2: the y=0 colour of tick 1 moves up to y=1
 
-    data = layer.buffer().data();   // buffer may have been rebuilt; re-read
+    data = g.layer.buffer().data();   // buffer may have been rebuilt; re-read
     // Pixel (0,1) is index 1*3 = 3: it now carries the colour painted at y=0 on tick 1.
     CHECK(data[3] == r0);
     CHECK(data[4] == g0);
@@ -125,26 +125,17 @@ TEST_CASE("FreqMatrixEffect paints black on silence") {
     { mm::AudioModule idle; idle.teardown(); }
     mm::platform::setTestNowMs(1000);
 
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 1;
-    grid.height = 8;
-    grid.depth = 1;
-    layouts.addChild(&grid);
-
-    mm::Layer layer;
-    layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
+    GridLayer g(1, 8, 1, 3);
 
     mm::FreqMatrixEffect fx;
     fx.speed = 255;
-    layer.addChild(&fx);
-    layer.onBuildState();
+    g.layer.addChild(&fx);
+    g.layer.onBuildState();
 
     REQUIRE(mm::AudioModule::latestFrame()->peakHz == 0);   // silence: no tone
-    layer.loop();
+    g.layer.loop();
 
-    auto* data = layer.buffer().data();
+    auto* data = g.layer.buffer().data();
     // The freshly-painted source pixel is black — silence scrolls dark.
     CHECK(data[0] == 0);
     CHECK(data[1] == 0);
@@ -156,21 +147,12 @@ TEST_CASE("FreqMatrixEffect paints black on silence") {
 // The "runs at every grid size" hard rule: degenerate grids never crash.
 TEST_CASE("FreqMatrixEffect survives degenerate grid sizes") {
     for (auto dims : {mm::Coord3D{0, 0, 0}, mm::Coord3D{1, 1, 1}}) {
-        mm::Layouts layouts;
-        mm::GridLayout grid;
-        grid.width = dims.x;
-        grid.height = dims.y;
-        grid.depth = dims.z;
-        layouts.addChild(&grid);
-
-        mm::Layer layer;
-        layer.setLayouts(&layouts);
-        layer.setChannelsPerLight(3);
+        GridLayer g(dims.x, dims.y, dims.z, 3);
 
         mm::FreqMatrixEffect fx;
-        layer.addChild(&fx);
-        layer.onBuildState();
-        layer.loop();   // must not crash on 0×0×0 or 1×1×1
+        g.layer.addChild(&fx);
+        g.layer.onBuildState();
+        g.layer.loop();   // must not crash on 0×0×0 or 1×1×1
     }
     CHECK(true);
 }

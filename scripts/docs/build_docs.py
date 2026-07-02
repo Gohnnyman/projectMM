@@ -35,6 +35,7 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -90,8 +91,31 @@ def main() -> int:
     if args.site_dir and not args.serve:
         cmd += ["--site-dir", args.site_dir]
 
+    # Tell the mkdocs hook to stage the installer into the site (local-preview
+    # single-origin mirror). Serve only — in CI/plain build, release.yml owns
+    # install/ staging (with the firmware binaries), so the hook must skip it.
+    env = dict(os.environ)
+    if args.serve:
+        env["MM_DOCS_SERVE"] = "1"
+
     print(f"$ {' '.join(cmd)}")
-    return subprocess.run(cmd, cwd=ROOT).returncode
+    rc = subprocess.run(cmd, cwd=ROOT, env=env).returncode
+
+    # Closing summary so the URL / next step is the last thing in the log,
+    # not scrolled off. `serve` runs until interrupted, so this only prints
+    # after a build (rc reached) or once a serve is stopped.
+    if rc == 0 and not args.serve:
+        site = args.site_dir or "site/"
+        print()
+        print(f"==> docs built to {site}")
+        print(f"    preview locally: uv run scripts/docs/build_docs.py --serve"
+              f"  → http://localhost:{SERVE_PORT}/projectMM/")
+        print(f"    deployed (after merge to main): https://moonmodules.org/projectMM/")
+    elif args.serve:
+        # A serve that just exited: remind where it was.
+        print()
+        print(f"==> docs preview was at http://localhost:{args.port}/projectMM/")
+    return rc
 
 
 if __name__ == "__main__":

@@ -14,6 +14,13 @@
 // the process-wide active mic on teardown so cases stay order-independent.
 struct ClockGuard { ~ClockGuard() { platform::setTestNowMs(0); } };
 
+// Vacates the process-wide active-mic seat on scope exit (even if an assertion aborts
+// the case), so a failed REQUIRE can't leak AudioModule::active_ into a later test.
+struct AudioGuard {
+    mm::AudioModule& mic;
+    ~AudioGuard() { mic.teardown(); }  // clears AudioModule::active_ if it is this mic
+};
+
 // Silence (no active mic) leaves the buffer all-black — every band magnitude is 0, so no bar rises.
 TEST_CASE("GEQ3DEffect renders black on silence") {
     mm::Layouts layouts;
@@ -48,6 +55,7 @@ TEST_CASE("GEQ3DEffect draws a bar where the audio band is energised") {
     platform::setTestNowMs(125);
 
     mm::AudioModule mic;
+    AudioGuard micGuard{mic};  // vacate the active mic on scope exit (even if a REQUIRE aborts)
     mic.simulate = 4;          // "sweep (always)" — deterministic single-band test pattern
     mic.setup();               // claims the process-wide active mic seat
     mic.loop();                // synthesizes the frame at the frozen time
@@ -86,8 +94,6 @@ TEST_CASE("GEQ3DEffect draws a bar where the audio band is energised") {
     bool rightLit = false;
     for (int y = 0; y < h; y++) rightLit |= lit(w - 1, y);
     CHECK_FALSE(rightLit);
-
-    mic.teardown();            // vacate the active mic for the next case
 }
 
 // The effect runs at a degenerate 0×0×0 grid without crashing (the "every grid size" hard rule).
@@ -117,6 +123,7 @@ TEST_CASE("GEQ3DEffect handles a grid narrower than numBands") {
     platform::setTestNowMs(125);   // sweep → bands[0] high
 
     mm::AudioModule mic;
+    AudioGuard micGuard{mic};  // vacate the active mic on scope exit (even if a REQUIRE aborts)
     mic.simulate = 4;
     mic.setup();
     mic.loop();
@@ -147,6 +154,4 @@ TEST_CASE("GEQ3DEffect handles a grid narrower than numBands") {
         leftLit |= data[idx] || data[idx + 1] || data[idx + 2];
     }
     CHECK(leftLit);
-
-    mic.teardown();
 }

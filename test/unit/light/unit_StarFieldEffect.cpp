@@ -5,9 +5,14 @@
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"  // setTestNowMs — drive the throttle past its interval deterministically
 
+// Restore the real clock on scope exit, even if a REQUIRE aborts the case mid-way,
+// so a frozen millis() can't leak into a later test (same pattern as unit_BouncingBallsEffect.cpp).
+namespace { struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } }; }
+
 // A frame past the speed throttle interval lights at least one star (greyscale, so every lit pixel
 // is a pure grey R==G==B) — the field advances and re-projects stars onto the panel.
 TEST_CASE("StarFieldEffect paints greyscale stars once the throttle elapses") {
+    ClockGuard guard;
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
@@ -46,11 +51,11 @@ TEST_CASE("StarFieldEffect paints greyscale stars once the throttle elapses") {
     CHECK(anyLit);
     CHECK(allGrey);
 
-    mm::platform::setTestNowMs(0);  // restore real-clock for later cases
 }
 
 // speed=0 pauses the field: the buffer stays fully black no matter how much virtual time passes.
 TEST_CASE("StarFieldEffect at speed 0 leaves the buffer black") {
+    ClockGuard guard;
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
@@ -78,11 +83,11 @@ TEST_CASE("StarFieldEffect at speed 0 leaves the buffer black") {
     }
     CHECK(allBlack);
 
-    mm::platform::setTestNowMs(0);
 }
 
 // The palette variant lights on-panel stars in colour (not forced grey) — usePalette drives hue.
 TEST_CASE("StarFieldEffect with usePalette lights stars from the palette") {
+    ClockGuard guard;
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
@@ -121,12 +126,12 @@ TEST_CASE("StarFieldEffect with usePalette lights stars from the palette") {
     CHECK(anyLit);
     CHECK(anyColoured);
 
-    mm::platform::setTestNowMs(0);
 }
 
 // Hard rule: the effect runs at a degenerate 0×0×0 grid without crashing (it allocates nothing and
 // the loop bails on the zero dimensions).
 TEST_CASE("StarFieldEffect survives a 0x0x0 grid") {
+    ClockGuard guard;
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 0;
@@ -147,5 +152,4 @@ TEST_CASE("StarFieldEffect survives a 0x0x0 grid") {
 
     CHECK(layer.buffer().count() == 0);
 
-    mm::platform::setTestNowMs(0);
 }

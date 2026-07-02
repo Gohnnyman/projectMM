@@ -2,7 +2,7 @@
 
 High-performance LED &amp; DMX lighting control for ESP32 and beyond.
 
-[:material-flash: Flash an ESP32 from your browser](/install/){ .md-button .md-button--primary }
+[:material-flash: Flash an ESP32 from your browser](/projectMM/install/){ .md-button .md-button--primary }
 &nbsp;
 [:material-github: GitHub](https://github.com/MoonModules/projectMM){ .md-button }
 
@@ -23,7 +23,7 @@ It runs on ESP32 (the primary target), and also on Teensy, macOS, Windows, Linux
 
     Flash a board from your browser and light your first pixels.
 
-    [Getting started](gettingstarted.md) · [Web installer](/install/)
+    [Getting started](gettingstarted.md) · [Web installer](/projectMM/install/)
 
 -   :material-palette: **Build a show**
 

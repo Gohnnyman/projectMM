@@ -146,16 +146,3 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 
 [Tests](../../../tests/unit-tests.md#rotatemodifier)
 
-## Source
-
-- [BlockModifier.h](../../../../src/light/modifiers/BlockModifier.h)
-- [CheckerboardModifier.h](../../../../src/light/modifiers/CheckerboardModifier.h)
-- [CircleModifier.h](../../../../src/light/modifiers/CircleModifier.h)
-- [MirrorModifier.h](../../../../src/light/modifiers/MirrorModifier.h)
-- [MultiplyModifier.h](../../../../src/light/modifiers/MultiplyModifier.h)
-- [PinwheelModifier.h](../../../../src/light/modifiers/PinwheelModifier.h)
-- [RandomMapModifier.h](../../../../src/light/modifiers/RandomMapModifier.h)
-- [RegionModifier.h](../../../../src/light/modifiers/RegionModifier.h)
-- [RippleXZModifier.h](../../../../src/light/modifiers/RippleXZModifier.h)
-- [RotateModifier.h](../../../../src/light/modifiers/RotateModifier.h)
-- [TransposeModifier.h](../../../../src/light/modifiers/TransposeModifier.h)

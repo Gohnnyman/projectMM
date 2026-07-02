@@ -195,20 +195,3 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 The [Layouts](../Layouts.md) container itself takes no controls — see its page for coordinate iteration, reordering, and rebuild propagation.
 
-## Source
-
-- [CarLightsLayout.h](../../../../src/light/layouts/CarLightsLayout.h)
-- [CubeLayout.h](../../../../src/light/layouts/CubeLayout.h)
-- [GridLayout.h](../../../../src/light/layouts/GridLayout.h)
-- [HumanSizedCubeLayout.h](../../../../src/light/layouts/HumanSizedCubeLayout.h)
-- [PanelLayout.h](../../../../src/light/layouts/PanelLayout.h)
-- [PanelsLayout.h](../../../../src/light/layouts/PanelsLayout.h)
-- [RingLayout.h](../../../../src/light/layouts/RingLayout.h)
-- [Rings241Layout.h](../../../../src/light/layouts/Rings241Layout.h)
-- [SingleColumnLayout.h](../../../../src/light/layouts/SingleColumnLayout.h)
-- [SingleRowLayout.h](../../../../src/light/layouts/SingleRowLayout.h)
-- [SphereLayout.h](../../../../src/light/layouts/SphereLayout.h)
-- [SpiralLayout.h](../../../../src/light/layouts/SpiralLayout.h)
-- [TorontoBarGourdsLayout.h](../../../../src/light/layouts/TorontoBarGourdsLayout.h)
-- [TubesLayout.h](../../../../src/light/layouts/TubesLayout.h)
-- [WheelLayout.h](../../../../src/light/layouts/WheelLayout.h)

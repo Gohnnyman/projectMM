@@ -116,3 +116,7 @@ __pycache__/
 
 # MkDocs — built docs site (rendered fresh in CI, never committed)
 /site/
+
+# Generated test inventory pages — built into the site by scripts/docs/mkdocs_hooks.py
+# (the CLI generate_test_docs.py can still write them locally, but they are not committed).
+/docs/tests/*.md

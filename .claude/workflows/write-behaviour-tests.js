@@ -54,7 +54,7 @@ const results = await parallel(MODULES.map(([cls, header, kind]) => () =>
   agent(
 `Write a behaviour-specific doctest unit test for the projectMM module **${cls}** (${kind}).
 
-Repo: /Users/ewoud/Developer/GitHub/MoonModules/projectMM
+Repo: the current workspace root (the projectMM checkout you're running in) — all paths below are relative to it.
 
 ## Study first (do NOT guess behaviour)
 1. Read the module header: ${header} — understand what it ACTUALLY does: its controls, its render/modify logic, what it writes to the buffer or how it transforms coordinates. Behaviour is the spec.

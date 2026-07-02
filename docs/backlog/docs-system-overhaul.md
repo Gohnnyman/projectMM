@@ -9,7 +9,8 @@ Follows the *Refactor for simplicity* process rule: alternatives enumerated, gai
 - **~259K words / 19.5K lines** of `.md`. Biggest buckets: `docs/history/` (97K words, incl. 47 plan files), `docs/backlog/` (57K), `docs/moonmodules/` (38K), `docs/tests/` (25K, **auto-generated**), top-level `docs/` (29K).
 - **GitHub Pages today publishes only the web installer** (`docs/install/`), *not the docs*. So the docs are read as raw `.md` on github.com — no nav, no search, no landing page. This is the root of "impossible for end users to read": **there is no doc *site* at all yet.**
 - **One generation loop already works and proves the model:** `scripts/docs/generate_test_docs.py` reads test metadata (`// @module` tags in `test/unit/*.cpp`, JSON fields in `test/scenarios/*.json`) and emits `docs/tests/{unit,scenario}-tests.md`. The same parser (`_test_metadata.py`) feeds MoonDeck's `/api/tests` UI. Source of truth = the test file. This is the pattern to extend, not replace.
-- **Duplication hotspots** (each fact lives in N places, changing one forces the others):
+- **Duplication hotspots** — each fact lives in N places, changing one forces the others:
+
   | Fact | Lives in | Sync today |
   |---|---|---|
   | Control name (`"sparking"`) | `.h` (definition) + `.md` spec + test code | `check_specs.py` checks *presence* in `.md`, not accuracy |
@@ -17,6 +18,7 @@ Follows the *Refactor for simplicity* process rule: alternatives enumerated, gai
   | Author/attribution | `.h` `// Author:` + `.md` `Origin:` (40+ effects, two formats) | none |
   | Module name (`FireEffect`) | class + `registerType(...)` string + test `@module` + `.md` anchor + `deviceModels.json` | `check_specs`/`check_devices` partial |
   | Architectural fact (buffer persists; AudioModule respects `enabled`) | `.h` comment + module `.md` + `architecture.md` | none |
+
 - **No structured doc-comments in source.** `.h`/`.cpp` carry rich *inline `//` rationale* but no Doxygen/`///` API blocks. So "move technical detail into the code" is a real move, not a relabel.
 
 ## The core insight
@@ -47,12 +49,14 @@ Rejected: **classic Doxygen HTML** (separate site, dated UI, not integrated), **
 - Add a **landing page** (`docs/index.md`) — the front door end users currently lack: "what is this → install → first light → effects → drill down."
 - **Outcome:** every existing word is now navigable + searchable, zero duplication introduced, zero risk. This alone solves the *"impossible for end users to read"* complaint.
 
-### Phase 1 — Restructure nav for the two audiences — *small*
+### Phase 1 — Restructure nav for the two audiences — *DONE (Phase 0's nav already delivered it)*
 - Split the nav (not the files, yet) into **User guide** (README intro, getting-started, effect catalog, per-board install) and **Developer/Reference** (architecture, coding-standards, module specs, generated tests, source-drill). `history/` + `backlog/` stay out of the published nav (internal).
 - Move the *most* end-user-hostile prose (deep architecture) below a "Developer" fold so a user's top-down path never hits it unless they drill.
 - **Outcome:** the "top-to-down, easy navigate" structure, still additive.
 
-### Phase 2 — Fold generated tests into the site + surface them to users — *small, high-value*
+### Phase 2 — Fold generated tests into the site + surface them to users — *DONE (scripts/docs/mkdocs_hooks.py)*
+
+*As shipped: the two inventory pages are generated at build time (never committed). Each effect/modifier keeps a compact card (heading, GIF, params, source link) with a one-line `[Tests]` link into its inventory section — an early attempt to expand that link into the full inline case list bloated the cards and was reverted; tests are a link, not a dump.*
 - Run the existing test-doc generation *at site-build time* via `mkdocs-gen-files` (stop committing `docs/tests/*.md` — the 25K generated words leave the repo, generated fresh each build). Kills the "forgot to regenerate" drift class entirely.
 - On **each effect/module user page**, auto-embed "Tests proving this works: …" from the same test metadata — so an end user reading about *Fire* sees the tests that pin it. This is the PO's *"github issues will be solved adding a new test to proof it, this should be visible to end users."* The link from issue → test → visible-on-the-module-page becomes the norm.
 - **Outcome:** tests visible to users; 25K words of committed generation deleted (subtraction).

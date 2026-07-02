@@ -129,9 +129,12 @@
       "id": "build_docs",
       "tab": "pc",
       "group": "docs",
-      "label": "Build Docs Site",
+      "label": "Preview Docs Site",
       "help": "build_docs",
-      "script": "docs/build_docs.py"
+      "script": "docs/build_docs.py",
+      "args": ["--serve"],
+      "long_running": true,
+      "process_name": "mkdocs"
     },
     {
       "id": "live_scenario",
