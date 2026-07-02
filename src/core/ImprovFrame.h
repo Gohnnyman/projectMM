@@ -31,10 +31,10 @@ inline constexpr uint8_t kImprovMagic[6] = {'I','M','P','R','O','V'};
 inline constexpr uint8_t kImprovSerialVersion = 1;
 inline constexpr size_t  kImprovMaxPayload    = 128;  // RPC bodies are well under this
 
-// Frame types from the spec; named without the protocol prefix to avoid
-// shadowing the library's `improv::ImprovSerialType` enum where both are
-// in scope (the test code only includes this header; the ESP32 task
-// includes both and dispatches at the boundary).
+/// Frame types from the spec; named without the protocol prefix to avoid
+/// shadowing the library's `improv::ImprovSerialType` enum where both are
+/// in scope (the test code only includes this header; the ESP32 task
+/// includes both and dispatches at the boundary).
 enum class ImprovFrameType : uint8_t {
     CurrentState = 0x01,
     ErrorState   = 0x02,
@@ -43,7 +43,7 @@ enum class ImprovFrameType : uint8_t {
 };
 // --8<-- [end:frame-constants]
 
-// Result of feeding a byte to the parser.
+/// Result of feeding a byte to the parser.
 enum class ImprovFeedResult : uint8_t {
     NeedMore,        // mid-frame; keep feeding
     FrameReady,      // a complete, checksum-valid frame is in lastType()/lastPayload()
@@ -51,14 +51,14 @@ enum class ImprovFeedResult : uint8_t {
     OversizePayload, // length byte > kImprovMaxPayload; resync
 };
 
-// Byte-at-a-time framing parser. Resets to the magic-search state after
-// every completed frame (or error). Caller owns the parser; one instance
-// per UART channel.
+/// Byte-at-a-time framing parser. Resets to the magic-search state after
+/// every completed frame (or error). Caller owns the parser; one instance
+/// per UART channel.
 class ImprovFrameParser {
 public:
-    // Returns NeedMore until a full frame has been read. On FrameReady the
-    // caller can read lastType() + lastPayload()/lastPayloadLen(). The
-    // buffers are valid until the next feed() call.
+    /// Feed one received byte. Returns NeedMore until a full frame has been read.
+    /// On FrameReady the caller can read lastType() + lastPayload()/lastPayloadLen();
+    /// those buffers are valid until the next feed() call.
     ImprovFeedResult feed(uint8_t byte) {
         switch (state_) {
             case State::Magic0: case State::Magic1: case State::Magic2:

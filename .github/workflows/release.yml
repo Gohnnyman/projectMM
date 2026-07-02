@@ -540,6 +540,16 @@ jobs:
           done
           ls -la pages/ pages/install/
 
+      - name: Install Doxygen (source-generated API pages)
+        run: |
+          set -euo pipefail
+          # gen_api.py runs Doxygen -> moxygen to generate moonmodules/api/*.md
+          # from the `.h` /// comments at MkDocs-build time. moxygen runs via npx
+          # (Node is preinstalled on the runner); Doxygen is the one apt binary we
+          # add — the justified non-uv dependency (like ESP-IDF's Python). Absent,
+          # the API pages skip silently; installed, they render into the site.
+          sudo apt-get update && sudo apt-get install -y doxygen
+
       - name: Build docs site into Pages root
         run: |
           set -euo pipefail

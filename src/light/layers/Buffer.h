@@ -9,6 +9,23 @@
 
 namespace mm {
 
+/// Contiguous light-data buffer, shared between the layers that write it (effects)
+/// and the driver groups that read it. When memory allows, layers and driver groups
+/// each own a buffer (so they run in parallel); when memory is tight, one buffer is
+/// shared.
+///
+/// **Storage:** a raw `uint8_t*` (not `RGB*`), so any channel layout fits — RGB,
+/// RGBW, or multi-channel DMX fixtures — addressed by channel count + offset.
+/// Allocated once via `platform::alloc` (PSRAM when available) outside the hot path
+/// and reused every frame; a `std::span<uint8_t>` view is the zero-cost safe accessor.
+///
+/// **Locking:** a semaphore costs ~150 bytes on ESP32, so prefer lock-free patterns —
+/// an atomic pointer swap for double-buffering, a single-slot SPSC handoff, or one
+/// shared semaphore across layers rather than one per layer.
+///
+/// **Prior art:** MoonLight's `VirtualLayer.virtualChannels` — a raw `uint8_t*` sized
+/// by `channelsPerLight * nrOfLights`, RGB/RGBW/DMX via LightsHeader offsets
+/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
 class Buffer {
 public:
     Buffer() = default;

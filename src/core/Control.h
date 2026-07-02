@@ -86,56 +86,58 @@ inline void sanitizeHostname(char* buf) {
     *w = '\0';
 }
 
+/// The type of a control — selects its storage, its UI widget, and its DMX mapping.
+/// Each `controls_.addX(name, var, …)` binds one of these to a class variable by
+/// reference. Uint8 (a slider, 0–255) is the preferred default; the non-obvious
+/// members are noted per value below. There is no RGB colour-picker type — effects
+/// use a palette index (a Uint8) instead; `float` and `Coord3D` exist but are used
+/// minimally, prefer Uint8.
 enum class ControlType : uint8_t {
-    Uint8,
-    Uint16,
-    Int16,      // signed 16-bit. For coordinate-style controls where negative
-                // values are legal. (The light domain's grid coordinate type is
-                // int16 for this reason.)
-    Pin,        // a GPIO number (int8_t storage, -1 = unused/default). Distinct
-                // from Int16 so the UI renders a plain number input, not a slider:
-                // a GPIO has no meaningful range to drag, and pins span 0..~52
-                // across chips. Serializes/parses as a plain integer.
-    Bool,
-    Text,
-    TextArea,   // multi-line text — identical char-buffer storage and parse/persist
-                // path to Text; differs only in the UI type string so the front-end
-                // renders a resizable <textarea> instead of a single-line input
-                // (used for script source and other multi-line fields).
-    Password,   // secret text — /api/state serializes it XOR-obfuscated +
-                // base64-encoded, not plaintext. Obfuscation only (the XOR key
-                // is shared with app.js), so it is trivially reversible.
-    ReadOnly,   // display-only text (ptr → char buffer)
-    ReadOnlyInt,// display-only signed int (ptr → int8_t, aux → const char* unit
-                // suffix e.g. "dBm"). UI renders "<value> <suffix>" verbatim.
-                // 1-byte storage where a string would be ~10 bytes — used for
-                // RSSI, TX power, future numeric telemetry.
-    Select,     // dropdown (ptr → uint8_t index, aux → options array pointer)
-    Progress,   // bar with value/total (ptr → uint32_t value, aux = total)
-    IPv4,       // dotted-quad IP address (ptr → uint8_t[4]). 4 bytes of storage
-                // vs ~16 for a "192.168.255.255\0" string. Serializes/parses as
-                // the dotted-quad string at the JSON boundary. Used for the
-                // static-IP / gateway / subnet / DNS fields in NetworkModule.
-    List,       // a variable list of rows (ptr → a ListSource the owning module
-                // implements). Each row serializes a flat summary object plus an
-                // optional detail object (the UI shows rows, expands a row to its
-                // detail). Read-only today — discovery output, not user-edited.
-                // The data lives in the module (a contiguous array it walks in
-                // place), NOT copied into the control system: a List adds zero
-                // persistent storage beyond the one descriptor pointer, the same
-                // "control holds a void* into module-owned data" shape every addX()
-                // uses, one level up. (Data-over-objects: no per-row object graph,
-                // no allocation on rebuild — see docs/architecture.md hot-path.)
-    Button,     // a momentary action, not a stored value. The UI renders a button;
-                // a click POSTs a value and the module's onUpdate() runs the action.
-                // No backing storage (ptr unused) and non-persistable — distinct
-                // from Bool, which is an on/off STATE that renders as a toggle and a
-                // toggle is the wrong affordance for "do this now" (e.g. rescan).
-    Palette     // a colour-palette dropdown (ptr → uint8_t index). Like Select, but
-                // each option carries its gradient *colours* (16 hex stops) so the UI
-                // renders a gradient swatch per option, not just a name. The light
-                // domain supplies the names + swatches via the Palette type; the wire
-                // shape (options:[{name,colors}]) is serialized in writeControlMetadata.
+    Uint8,      ///< 1 byte, min/max — a 0–255 slider. The preferred default; DMX-mappable.
+    Uint16,     ///< 2 bytes — a number input (universe, port). DMX-mappable.
+    Int16,      ///< signed 16-bit, min/max — for coordinate-style controls where negatives
+                ///< are legal (the light grid coordinate type is int16). A bounded slider
+                ///< (unbounded → a ±percentage slider). DMX-mappable.
+    Pin,        ///< a GPIO number (int8_t storage, -1 = unused/default). Distinct from Int16
+                ///< so the UI renders a plain number input, not a slider (a GPIO has no
+                ///< meaningful drag range; pins span 0..~52). min/max clamp writes server-side.
+    Bool,       ///< 1 byte — a toggle. DMX 0/1.
+    Text,       ///< char[N] — a text input.
+    TextArea,   ///< multi-line text — same storage/persist path as Text, a resizable
+                ///< `<textarea>` in the UI (script source and other multi-line fields).
+    Password,   ///< secret text — /api/state serializes it XOR-obfuscated + base64, not
+                ///< plaintext. Obfuscation only (XOR key shared with app.js), trivially
+                ///< reversible by design — a first line of defence, not encryption.
+    ReadOnly,   ///< display-only text (ptr → char buffer).
+    ReadOnlyInt,///< display-only signed int (ptr → int8_t, aux → a unit suffix such as
+                ///< "dBm"). Renders `<value> <suffix>`; 1 byte where a string would be
+                ///< ~10 (RSSI, TX power). See coding-standards § Prefer integers.
+    Select,     ///< dropdown (ptr → uint8_t index, aux → options array pointer). DMX mode.
+    Progress,   ///< bar with value/total (ptr → uint32_t value, aux = total).
+    IPv4,       ///< dotted-quad IP address (ptr → uint8_t[4]). 4 bytes of storage
+                ///< vs ~16 for a "192.168.255.255\0" string. Serializes/parses as
+                ///< the dotted-quad string at the JSON boundary. Used for the
+                ///< static-IP / gateway / subnet / DNS fields in NetworkModule.
+    List,       ///< a variable list of rows (ptr → a ListSource the owning module
+                ///< implements). Each row serializes a flat summary object plus an
+                ///< optional detail object (the UI shows rows, expands a row to its
+                ///< detail). Read-only today — discovery output, not user-edited.
+                ///< The data lives in the module (a contiguous array it walks in
+                ///< place), NOT copied into the control system: a List adds zero
+                ///< persistent storage beyond the one descriptor pointer, the same
+                ///< "control holds a void* into module-owned data" shape every addX()
+                ///< uses, one level up. (Data-over-objects: no per-row object graph,
+                ///< no allocation on rebuild — see docs/architecture.md hot-path.)
+    Button,     ///< a momentary action, not a stored value. The UI renders a button;
+                ///< a click POSTs a value and the module's onUpdate() runs the action.
+                ///< No backing storage (ptr unused) and non-persistable — distinct
+                ///< from Bool, which is an on/off STATE that renders as a toggle and a
+                ///< toggle is the wrong affordance for "do this now" (e.g. rescan).
+    Palette     ///< a colour-palette dropdown (ptr → uint8_t index). Like Select, but
+                ///< each option carries its gradient *colours* (16 hex stops) so the UI
+                ///< renders a gradient swatch per option, not just a name. The light
+                ///< domain supplies the names + swatches via the Palette type; the wire
+                ///< shape (options:[{name,colors}]) is serialized in writeControlMetadata.
 };
 
 // Forward-declared (defined below the enum) so the descriptor can hold a pointer.
@@ -209,6 +211,31 @@ struct ControlDescriptor {
     bool (*validate)(const char* value) = nullptr;
 };
 
+/// The set of controls a MoonModule exposes to the UI — a module's `controls_`.
+///
+/// Controls bind to a class variable **by reference** — the descriptor stores a
+/// pointer, hot-path code reads the variable directly (zero overhead, no
+/// getter/setter). The value lives in the class variable (1–4 bytes); the descriptor
+/// is just the metadata UI rendering and persistence need.
+///
+/// **Memory footprint:** target under 16 bytes per descriptor (variable pointer +
+/// flash name pointer + type enum + type-dependent min/max). Descriptors live in a
+/// fixed-capacity per-module array — no per-control heap allocation. A module that
+/// overflows the default capacity is probably too complex.
+///
+/// **Persistence and dynamic rebuild:** control values persist via FilesystemModule,
+/// which overlays loaded values through each control's pointer during
+/// `onBuildControls()`. Calling `onBuildControls()` again at runtime (e.g. when a
+/// Select changes) clears and rebuilds the set, so only controls relevant to the
+/// current mode are shown — this is how conditional `hidden` flags re-evaluate.
+///
+/// The per-type storage/UI/DMX reference is on `ControlType`; each `addX` method
+/// below binds one type.
+///
+/// **Prior art:** MoonLight's `addControl` binds via
+/// `reinterpret_cast<uintptr_t>(&variable)` with UI types
+/// "slider"/"select"/"toggle"/"text"/"display"
+/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Nodes.h#L80).
 class ControlList {
 public:
     ~ControlList() { delete[] controls_; }
@@ -219,15 +246,17 @@ public:
     ControlList(ControlList&&) = delete;
     ControlList& operator=(ControlList&&) = delete;
 
+    /// Bind a `uint8_t` as a 0–255 slider (the preferred default control). `min`/`max`
+    /// bound the UI drag range and clamp writes server-side.
     void addUint8(const char* name, uint8_t& var, uint8_t min = 0, uint8_t max = 255) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Uint8, min, max};
     }
 
-    // min/max default to the full type range (no UI constraint) when omitted;
-    // pass explicit bounds (e.g. addUint16("sampleRate", r, 8000, 48000)) to get
-    // a bounded slider in the UI and server-side clamping on write — the same
-    // contract as addUint8/addInt16, now that the descriptor's min/max are int32.
+    /// Bind a `uint16_t` as a number input. min/max default to the full type range
+    /// (no UI constraint); pass explicit bounds (e.g. `addUint16("sampleRate", r,
+    /// 8000, 48000)`) for a bounded slider + server-side write clamp — same contract
+    /// as addUint8/addInt16.
     void addUint16(const char* name, uint16_t& var,
                    uint16_t min = 0, uint16_t max = UINT16_MAX) {
         grow();
@@ -429,10 +458,10 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c);
 // HttpServerModule maps to 400-with-message; FilesystemModule treats
 // non-Ok as "leave existing"; scenario_runner returns false to the caller.
 enum class ApplyResult : uint8_t {
-    Ok,
-    OutOfRange,    // numeric value outside the descriptor's bounds (Strict only)
-    Malformed,     // IPv4 string didn't parse, etc.
-    ReadOnly,      // tried to write a display-only control
+    Ok,            ///< value parsed and applied.
+    OutOfRange,    ///< numeric value outside the descriptor's bounds (Strict only).
+    Malformed,     ///< the value didn't parse (e.g. a bad IPv4 string).
+    ReadOnly,      ///< tried to write a display-only control.
 };
 
 // Out-of-range policy for numeric / Select writes. The HTTP API wants
@@ -440,7 +469,10 @@ enum class ApplyResult : uint8_t {
 // than silently get clamped); persistence load wants tolerant clamping
 // (a stale on-disk value from a schema change should still come close,
 // not silently drop to the default-constructed zero).
-enum class ApplyPolicy : uint8_t { Strict, Clamp };
+enum class ApplyPolicy : uint8_t {
+    Strict,   ///< reject an out-of-range value (the HTTP API — surfaces as a 400).
+    Clamp,    ///< clamp to the nearest valid value (persistence load — tolerates stale on-disk values).
+};
 
 // Parse the JSON value at `json[key]` and apply it to the control's storage.
 // `json` is the enclosing JSON object's text; the function calls into

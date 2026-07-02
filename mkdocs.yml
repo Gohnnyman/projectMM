@@ -135,6 +135,18 @@ nav:
       - Building: building.md
       - Testing strategy: testing.md
       - Performance: performance.md
+      # Docs-v2 module summaries: one 4-column table per module group. Each row
+      # links to the module's generated technical page (moonmodules/{core,light}/
+      # moxygen/<Module>.md, built at MkDocs time by gen_api.py from each `.h`'s ///
+      # comments). Those generated pages are reached via the summary row's link —
+      # not browsed in the menu, since they grow as headers are enriched and listing
+      # each would drift; the link IS the nav.
+      - Module summaries:
+          - Core UI: moonmodules/core/ui/ui.md
+          - Core supporting: moonmodules/core/supporting/supporting.md
+          - Light supporting: moonmodules/light/supporting/supporting.md
+      # NOTE: the per-module pages below are the OLD (docs-v1) layout, kept until the
+      # Stage-5 switchover deletes them and this section collapses into the summaries.
       - Core modules:
           - MoonModule (base): moonmodules/core/MoonModule.md
           - Control: moonmodules/core/Control.md

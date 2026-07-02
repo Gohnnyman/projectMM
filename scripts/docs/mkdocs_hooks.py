@@ -31,17 +31,25 @@ from _test_metadata import (  # noqa: E402
     collect_scenario_files,
 )
 from generate_test_docs import render_unit_tests, render_scenarios  # noqa: E402
+import gen_api  # noqa: E402  (same dir, on sys.path via _HERE above)
 
 
 # ---- source-link rewrite: docs link OUT to repo files the site can't host ----
 
 # The blob base for links that escape docs/ into the repo (src/, scripts/, test/,
 # CLAUDE.md, README.md, web-installer/). The site can't serve these — src/ isn't
-# published, and pre-Doxide there are no in-site source pages — so a relative link
-# 404s on the deployed site. Rewrite to an absolute GitHub blob URL so "source
-# [Foo.h]" resolves everywhere (locally-served preview + moonmodules.org). When
-# Phase 4 (Doxide) lands, src/ links get repointed at in-site generated pages.
+# published — so a relative link 404s on the deployed site. Rewrite to an absolute
+# GitHub blob URL so "source [Foo.h]" resolves everywhere (locally-served preview +
+# moonmodules.org). A `.h` link for a module that HAS a generated technical page is
+# repointed at that in-site page instead (see _API_MODULES / on_page_markdown); only
+# files with no generated page fall through to the GitHub blob URL.
 _BLOB_BASE = "https://github.com/MoonModules/projectMM/blob/main"
+
+# {module stem: domain} for every module that got a generated technical page this
+# build, e.g. {"Control": "core", "FireEffect": "light"} — populated by on_files,
+# read by the link retargeter to build the domain-nested target path. Empty when the
+# doxygen/moxygen toolchain is absent (so links fall back to GitHub, unchanged).
+_API_MODULES: dict[str, str] = {}
 
 # Repo top-level dirs/files a doc may link into but the site doesn't host.
 _OUT_OF_DOCS = ("src/", "scripts/", "test/", "esp32/", "web-installer/",
@@ -59,10 +67,21 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
     page_dir = Path("docs") / src_uri
     page_dir = page_dir.parent
 
+    # Depth from this page up to docs/ (so a `.h` link can be repointed at the
+    # in-site generated API page with the right relative `../` count).
+    up = "../" * len(Path(src_uri).parent.parts) if str(Path(src_uri).parent) != "." else ""
+
     def _sub(m: re.Match) -> str:
         href = m.group("href")
         frag = m.group("frag") or ""
         rel = href.split("#", 1)[0]
+        # A `.h` whose module has a generated technical page → point at the in-site
+        # page, not GitHub. The generated reference IS the source view we want. The
+        # target nests by domain (core/light), so use the recorded domain.
+        stem = Path(rel).stem
+        if rel.endswith(".h") and stem in _API_MODULES:
+            domain = _API_MODULES[stem]
+            return f"]({up}moonmodules/{domain}/moxygen/{stem}.md{frag})"
         # Resolve against the page dir to a repo-relative path (the correct case).
         target = os.path.normpath(str(page_dir / rel)).replace(os.sep, "/")
         if target.startswith(_OUT_OF_DOCS) and not target.startswith("docs/"):
@@ -91,6 +110,12 @@ _CATALOG_PAGES = {
     "moonmodules/light/modifiers/modifiers.md",
     "moonmodules/light/layouts/layouts.md",
     "moonmodules/light/drivers/drivers.md",
+    # Summary pages for the non-catalog module groups use the same ### -block → table
+    # transform, one common authoring process for every summary page (supporting rows
+    # just leave the preview/controls columns blank).
+    "moonmodules/core/supporting/supporting.md",
+    "moonmodules/core/ui/ui.md",
+    "moonmodules/light/supporting/supporting.md",
 }
 
 _H3_RE = re.compile(r'^###\s+(?P<title>.+?)\s*$')
@@ -137,7 +162,9 @@ def _emit_row(b: dict, details_names: set) -> str:
         img = re.sub(r'\s+(width|height)="[^"]*"', "", b["img"])
         col2 = img.replace("<img ", '<img class="mm-preview" ', 1)
     else:
-        col2 = "_no preview yet_"
+        # No image: a neutral dash reads correctly both for a catalog module still
+        # awaiting a gif and a supporting module that has no visual by nature.
+        col2 = "—"
 
     # Col 3: parameters, one per line. Split each at the em-dash into the name part
     # (before — keeps its `code` chips, styled accent) and the description (after —
@@ -255,19 +282,37 @@ def _render_catalog_table(markdown: str) -> str:
 
 
 def on_files(files, config):
-    """Add the two generated test-inventory pages to the virtual tree."""
+    """Inject build-time-generated pages into the virtual tree: the test inventories,
+    and (Phase 4b) a per-module API reference for each infrastructure module,
+    generated from its `///` source comments by gen_api (Doxygen → moxygen)."""
     from mkdocs.structure.files import File
 
     def _add(src_uri: str, content: str):
         f = File.generated(config, src_uri, content=content)
-        # Replace a same-URI file if one somehow exists (defensive); else append.
-        existing = files.get_file_from_path(src_uri)
+        existing = files.get_file_from_path(src_uri)   # replace a same-URI file if any
         if existing:
             files.remove(existing)
         files.append(f)
 
     _add("tests/unit-tests.md", render_unit_tests(collect_unit_files()))
     _add("tests/scenario-tests.md", render_scenarios(collect_scenario_files()))
+
+    # Source-generated technical pages. gen_api.generate() writes each to disk under
+    # docs/moonmodules/<domain>/moxygen/<Module>.md (gitignored, so a human can preview
+    # the .md directly) and returns {uri: markdown}. We still inject via _add so THIS
+    # build sees them (MkDocs' file scan ran before this hook, so the fresh writes
+    # aren't in `files` yet; _add de-dups a same-URI entry a later scan would find).
+    # Empty dict when doxygen/npx are absent (local without the toolchain) — the site
+    # still builds; the pages appear in CI. Record {stem: domain} so on_page_markdown
+    # can retarget a `.h` link to the domain-nested page.
+    global _API_MODULES
+    api_pages = gen_api.generate()
+    # uri: 'moonmodules/<domain>/moxygen/<Stem>.md' → {'<Stem>': '<domain>'}
+    _API_MODULES = {
+        Path(uri).stem: Path(uri).parts[1] for uri in api_pages
+    }
+    for uri, md in api_pages.items():
+        _add(uri, md)
     return files
 
 

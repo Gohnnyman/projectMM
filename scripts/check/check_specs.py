@@ -13,11 +13,27 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SRC = ROOT / "src"
 SPECS = ROOT / "docs" / "moonmodules"
 
+# The module stems that get a source-generated technical page (every `.h` under
+# src/{core,light} — gen_api discovers them). A summary/overview may link its
+# `moxygen/<stem>.md` in place of a `## Source` section; this set validates that link
+# points at a real generated page. Import by path so this check needs no PYTHONPATH tweak.
+sys.path.insert(0, str(ROOT / "scripts" / "docs"))
+from gen_api import _discover_headers  # noqa: E402
+_API_STEMS = {Path(h).stem for h in _discover_headers()}
+
 # Map source directories to spec directories
 SOURCE_DIRS = {
     "core": "core",
     "light": "light",
 }
+
+
+def spec_md_files():
+    """Every hand-written spec `.md` under docs/moonmodules/, EXCLUDING the generated
+    `moxygen/` technical pages (produced by gen_api.py from the `.h` — they carry no
+    `## Source` section by design, since the page *is* the source view)."""
+    return (md for md in SPECS.rglob("*.md") if "moxygen" not in md.parts)
+
 
 def find_moonmodules():
     """Find all .h files that define MoonModule subclasses."""
@@ -87,7 +103,7 @@ def find_spec(module_path):
                 break  # consolidated page missing — fall through to the per-module stem search
 
     # Per-module page: match by filename stem anywhere under docs/moonmodules/.
-    for md in SPECS.rglob("*.md"):
+    for md in spec_md_files():
         if md.stem == name:
             return md
     return None
@@ -222,7 +238,7 @@ def check_source_links():
     Returns a list of (spec_rel, issue) tuples — empty when all is well.
     """
     issues = []
-    for md in sorted(SPECS.rglob("*.md")):
+    for md in sorted(spec_md_files()):
         spec_rel = md.relative_to(ROOT)
         text = md.read_text(encoding="utf-8")
 
@@ -257,6 +273,19 @@ def check_source_links():
         if back:
             issue = _resolve_link(md, back.group(1))
             issues += ([(spec_rel, issue)] if issue else [])
+            continue
+
+        # A summary page whose technical reference is the source-generated page
+        # (moonmodules/{core,light}/moxygen/<Module>.md, built by gen_api.py from the
+        # `.h`'s /// comments) links to that page instead of a `## Source` GitHub blob
+        # — the generated page *is* the source view. The page is virtual (built at
+        # MkDocs time, never on disk), so validate the linked stem is actually a
+        # discovered header rather than resolving a file; no `## Source` section
+        # required (it would duplicate the generated reference).
+        api = re.search(r'\]\([\w./-]*moxygen/([\w-]+)\.md(?:#[\w-]+)?\)', text)
+        if api:
+            if api.group(1) not in _API_STEMS:
+                issues.append((spec_rel, f"moxygen link to '{api.group(1)}' is not a generated module"))
             continue
 
         # Capture only the Source section body — stop at the next top-level
