@@ -26,6 +26,7 @@ namespace mm {
 // Framing constants — match the spec verbatim. The library also defines
 // these (improv.h: IMPROV_SERIAL_VERSION etc.) but we don't pull that in
 // here to keep this header dependency-free for host-side testing.
+// --8<-- [start:frame-constants]
 inline constexpr uint8_t kImprovMagic[6] = {'I','M','P','R','O','V'};
 inline constexpr uint8_t kImprovSerialVersion = 1;
 inline constexpr size_t  kImprovMaxPayload    = 128;  // RPC bodies are well under this
@@ -40,6 +41,7 @@ enum class ImprovFrameType : uint8_t {
     Rpc          = 0x03,
     RpcResponse  = 0x04,
 };
+// --8<-- [end:frame-constants]
 
 // Result of feeding a byte to the parser.
 enum class ImprovFeedResult : uint8_t {

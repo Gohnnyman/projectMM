@@ -180,7 +180,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Expanding concentric rings from random centres, additive overlap (calm defaults).
 
-- `count` — simultaneous rings (1–8 active).
+- `count` — number of concentric rings (1–255).
 - `speed` — expansion rate.
 - `thickness` — ring band width.
 - `hue_shift` — rotate every ring's hue.

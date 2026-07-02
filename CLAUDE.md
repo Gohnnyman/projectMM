@@ -207,19 +207,12 @@ docs/
     plans/                 ← approved feature plans (Plan-YYYYMMDD - <title>.md; PO reference, agents don't auto-read)
     *-inventory.md         ← prior-project surveys (v1, v2, moonlight)
     <repo>.md              ← friend-repo monthly activity digests (FastLED, WLED, …)
-  moonmodules/             ← one page per MoonModule (specs before code)
+  moonmodules/             ← catalog pages (effects/modifiers/layouts/drivers) + core/light detail pages (see coding-standards § Documentation model)
 ```
 
 Documentation describes the system as it is. Git commits are the history. Module specs are written before implementation. Doc pages are kept current with the code.
 
-**Module specs are end-user / API-integrator documentation, not tech documentation.** Each `docs/moonmodules/<Name>.md` page exists to answer "what does this module do that I can't trivially read off the source file?" Concretely, it should carry:
-
-- **Wire contracts**: REST URLs, JSON shapes, status codes, WebSocket framing, binary frame layouts. Anything an integrator outside the codebase needs.
-- **Cross-domain wiring**: how this module connects to other modules through plain data structures (e.g. `HttpServerModule` reads a `PreviewFrame` that `PreviewDriver` writes; the wiring happens in `main.cpp`). Things that span multiple files and don't belong as a comment in any single one.
-- **Prior art**: the v1/v2/MoonLight lineage links. History/credits the code can't carry.
-- **At minimum, one mention of every control name**: `scripts/check/check_specs.py` enforces this, so the spec stays minimally accurate to the source.
-
-Do **not** repeat facts the `.h` already states: the controls list (the .h has `controls_.addX(...)`), the method signatures (they're declared), the implementation strategy ("uses a TcpServer abstraction", visible in the includes), or architectural rules that belong in `architecture.md` (domain boundary, hot-path discipline, etc.). When in doubt: if a fact is visible in the file's `.h`, the `.md` can drop it. The spec-check script and a comment header in the `.h` together carry the contract; the `.md` carries what the file can't.
+**Documentation model** — the full standard lives in [docs/coding-standards.md § Documentation model](docs/coding-standards.md#documentation-model); the working-memory summary: the four **catalog pages** (`effects/modifiers/layouts/drivers.md`, authored as prose `### ` blocks, rendered as tables by the build hook) are the end-user documentation. A per-module detail `.md` exists **only** for cross-file wiring / design rationale no single source file owns (and doesn't exist otherwise). Test inventories + catalog tables are **generated at build time, not committed**. Where a fact is the same in the `.h` and a doc (a control range, a source URL), `check_specs.py` **validates** they agree rather than duplicating; where a doc would hand-copy a struct/enum/wire format, embed the real source via a `--8<--` snippet. Never re-type a fact the `.h` already states.
 
 The `history/` folder is the distilled experience of years of building LED/light systems, from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons, studied under the [*Industry standards, our own code*](#principles) principle. Per-project credits live in the `history/` digests and the per-module "Prior art" sections.
 

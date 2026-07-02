@@ -77,14 +77,6 @@ HttpServerModule is core infrastructure with **no** light-domain dependencies �
 
 ## Prior art
 
-### projectMM v1 — HttpServer + WsServer ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/HttpServer.h))
-
-HTTP via cpp-httplib (PC) / ESPAsyncWebServer (ESP32). WebSocket on separate port 81.
-
-### projectMM v2 — HttpServerModule + WebSocketModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/network/HttpServerModule.h))
-
-Separate MoonModules for HTTP and WebSocket. projectMM combines them into one module.
-
 ### WLED native app — [WLED-Android](https://github.com/Moustachauve/WLED-Android) by Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))
 
 The WLED-compatibility shim's exact field requirements were reverse-engineered from this client's source: `DeviceDiscovery.kt` (mDNS `_wled._tcp` browse), `DeviceFirstContactService.kt` (the `/json/info` validation + non-empty `mac` check), the `Info`/`State` Moshi models (the non-nullable `name`/`leds`/`wifi` fields that gate acceptance), and `WebsocketClient.kt` (live state over `/ws`, the `sendState` control direction). Credit to @Moustachauve — knowing precisely what the app reads is why the shim is the minimal accepted object rather than a guessed full WLED emulation.

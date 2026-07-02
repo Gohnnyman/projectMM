@@ -1,6 +1,6 @@
 # RMT LED Driver
 
-Overview and controls: [drivers.md § RMT LED](drivers.md#rmtled). This page carries the reference detail a control list can't — the WS2812B wire contract, buffer slicing, the on-device loopback self-test, and the LED-flicker troubleshooting playbook.
+Overview, controls, prior art, source, and tests: [drivers.md § LED output](drivers.md#rmtled). This page carries *only* what no single source file can: the WS2812B wire contract, buffer slicing, the on-device loopback self-test, and the LED-flicker troubleshooting playbook.
 
 Output driver for WS2812B-class addressable LEDs over the ESP32 **[RMT (Remote Control Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)** peripheral — one GPIO and one RMT TX channel per strand. Reads the [Drivers](../Drivers.md) buffer, applies the shared [output correction](../Drivers.md#output-correction) per light, and emits the WS2812 1-wire signal.
 
@@ -50,21 +50,3 @@ When 1–3 all come back clean, the fix is electrical, in rough order of effecti
 - **Shorten / shield the data wire**, and keep it away from the power leads and the antenna.
 - **Share a solid, thick common ground** between the strip's supply and the board.
 - If RF coupling was implicated by step 3, set a per-board `Network.txPowerSetting` cap (the same `deviceModels.json` mechanism the ESP32-S3 N16R8 Dev uses).
-
-## Tests
-
-Full case list in the generated [unit tests § RmtLedDriver](../../../tests/unit-tests.md#rmtleddriver) (regenerated from the test files, never drifts). What's covered:
-
-- **Encoder (CI, host):** the bit→symbol contract — MSB-first, exact T0H/T1H tick widths, GRB ordering via Correction, RGBW → 32 symbols/light — with no hardware; written red before the encoder, pins it now.
-- **Lifecycle (CI, host):** the symbol-buffer ownership — sized in `onBuildState`, survives a rebuild (reinit must not free it), freed on teardown — the class of bug that once reached hardware, now caught on every push.
-- **Pins (CI, host):** the `pins`/`ledsPerPin` parsing (bad tokens, duplicates, chip limit) and slice arithmetic (explicit counts, even-split remainder, clamping) down to the per-pin symbol offsets, plus the empty-default idle (an unconfigured driver claims no GPIO).
-- **`loopbackTxPin` control (CI, host):** the conditional control — bound always (so persistence can load it), shown only while `loopbackTest` is on.
-- **Hardware:** the driver is catalog-added (not boot-wired) — verified on the S3 and classic ESP32 bench: a fresh-erased board has no `RmtLed` until a board is selected, a catalog inject creates it under `Drivers` with its pins, and it persists across a reboot. The `loopbackTxPin` override is set distinct from the operational `pins` (S3: `pins`=18, `loopbackTxPin`=13; classic: `pins`=18, `loopbackTxPin`=4), so flipping `loopbackTest` runs the self-test on the jumper pin without retyping `pins`.
-
-## Prior art
-
-The WS2812 protocol fundamentals and the RMT-first / loopback-test strategy come from the project's [LED driver analysis](../../../backlog/leddriver-analysis-top-down.md), which studies FastLED's `clockless_rmt_esp32`, hpwit's I2S drivers, and WLED — read for the lessons, not copied. FastLED's manual ping-pong refill (their "RMT5" worker, distinct from the IDF *driver* version above) is what makes their path more WiFi-resilient than a naive DMA-less refill ([FastLED #2082](https://github.com/FastLED/FastLED/issues/2082)); we sidestep that whole class of refill deadlines differently — by pre-encoding the entire frame and letting the modern driver stream it, so there is no per-frame refill to miss. Per-output (pin, count) rows are the WLED LED-settings pattern.
-
-## Source
-
-[RmtLedDriver.h](../../../../src/light/drivers/RmtLedDriver.h)

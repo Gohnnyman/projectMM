@@ -155,13 +155,6 @@ The `ssid_` / `password_` member buffers still exist (unconditional struct layou
 
 ## Prior art
 
-### projectMM v1
-
-- `Network.h` — mode selection (STA/AP/OFF)
-- `WifiSta.h` — STA connection with timeout + fallback
-- `WifiAp.h` — soft AP setup
-- `DeviceDiscovery.h` — UDP broadcast (separate module)
-
 ### MoonLight
 
 - mDNS hostname advertising

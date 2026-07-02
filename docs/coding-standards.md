@@ -105,3 +105,27 @@ All targets build warnings-as-errors: `-Wall -Wextra -Werror` on Clang/GCC (macO
 - **Pre-push.** Opus reviewer agent over the push range, scoped to domain boundary, unnecessary abstractions, duplicated patterns, hot-path violations, spec conformance, bloat, platform boundary.
 - **PR merge.** Plan reconciliation, documentation sync, live perf snapshot, permission review, README refresh — applicability-gated, see CLAUDE.md.
 - **CI** — the same set, mandatory on every PR push. Exact CI configuration is set up when the repository's pipeline lands.
+
+## Documentation model
+
+How the docs are structured and where each kind of fact lives. The guiding rule: **document a thing once, in the place closest to the thing, and generate or link the rest.** A fact the source already states is never re-typed in prose.
+
+**Two kinds of module, documented differently.** The distinction is structural, not just editorial:
+
+- **Catalog module types** — effects, modifiers, layouts, drivers. Each is a **library of interchangeable implementations** the user composes into a light show (40 effects, 16 layouts, …), all sharing a `*Base` class and carrying one light-domain `ModuleRole` (`Effect`/`Modifier`/`Driver`/`Layout`). Because they're *a set of options*, they're documented as a **catalog**: one page per type (`effects.md`, `modifiers.md`, `layouts.md`, `drivers.md`), one card per implementation.
+- **Services & infrastructure** — everything else: the core **system services** (`SystemModule`, `NetworkModule`, `HttpServerModule`, …, one instance each, the machinery that runs a show) and the **light infrastructure** (`Layer`, the `Layers`/`Drivers` containers, `MappingLUT`, `Buffer`, the `*Base` classes themselves). Each is a singular thing with its own design, so each gets a **standalone page** (it carries its own prior-art / source / tests — there is no catalog card to move them to).
+
+**Two reader surfaces follow from that:**
+
+1. **The catalog pages** — `docs/moonmodules/light/{effects,modifiers,layouts,drivers}.md` — are the **end-user documentation** for the catalog module types. Each is authored as prose `### ` blocks (one per module); a build-time hook ([`scripts/docs/mkdocs_hooks.py`](../scripts/docs/mkdocs_hooks.py)) renders them as a 4-column table: **name + description · preview · parameters · links** (Tests · `.h` source · detail). The card is the whole story for most modules.
+2. **A detail `.md`** — for a services/infrastructure module (a standalone page), or for a catalog module **only** where there is cross-file wiring or design rationale that no single source file owns (e.g. how PreviewDriver, HttpServerModule, and the Layer buffer interact). A catalog-module detail page carries *only* that cross-file knowledge — no controls list, no prior-art/source/test sections (those are on the card), no per-file mechanics (those live in the `.h`); a catalog module with no such knowledge has **no detail page**. A services/infrastructure page keeps its prior-art/source/tests sections (it's the only home for them).
+
+**Generated, never committed:** the test inventory (`docs/tests/*.md`) and the catalog tables are built from source at site-build time — the test files' `@module` metadata and the `.h`. They are gitignored; editing the source updates the docs on the next build, so they can't drift.
+
+**Drift validation, not duplication:** where a fact *is* the same in the `.h` and a doc but in different forms (a control's numeric range; an author/source URL), `check_specs.py` **validates** they agree rather than trying to single-source them (they serve two audiences — code vs prose). A conflicting range or a missing URL fails the spec check.
+
+**Source-as-spec via snippets:** where a doc would otherwise hand-copy a wire format / enum / constant, embed the real source with a `--8<--` snippet (marked `// --8<-- [start:name]` in the `.h`) so the source *is* the doc — edit the header, the doc follows.
+
+**External prior art is credited; our own dead-ends are not.** Prior-art links point at *other* projects we learned from (FastLED, WLED, MoonLight, datasheets) on the card's `Origin:` line. Superseded internal prototypes (projectMM v1/v2) are not linked — they're abandoned attempts, not lineage.
+
+**Autodoc / source-level API docs — TBD (Phase 4b).** The convention for surfacing full `.h`/`.cpp` API detail *in* the site (comment style, in-site rendering vs the current GitHub source links, Doxide) is undecided; source links currently resolve to GitHub. This section is filled in once that lands. See [docs/backlog/docs-system-overhaul.md](../docs/backlog/docs-system-overhaul.md) for the phased history.

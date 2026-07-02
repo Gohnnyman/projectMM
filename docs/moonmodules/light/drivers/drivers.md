@@ -19,7 +19,11 @@ Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three periphera
 - `loopbackTest` — on/off TX→RX loopback self-test (jumper the first pin to `loopbackRxPin`); verdict in the status field.
 - `loopbackTxPin` / `loopbackRxPin` — optional TX override + the RX pin for the self-test. Shown only while `loopbackTest` is on.
 
-Detail: [RmtLedDriver.md](RmtLedDriver.md) · [LcdLedDriver.md](LcdLedDriver.md) · [ParlioLedDriver.md](ParlioLedDriver.md)
+Origin: WS2812B on FastLED / hpwit / WLED prior art ([analysis](../../../backlog/leddriver-analysis-top-down.md))
+
+[Tests](../../../tests/unit-tests.md#rmtleddriver)
+
+Detail: RMT [.h](../../../../src/light/drivers/RmtLedDriver.h) · [md](RmtLedDriver.md) — LCD [.h](../../../../src/light/drivers/LcdLedDriver.h) · [md](LcdLedDriver.md) — Parlio [.h](../../../../src/light/drivers/ParlioLedDriver.h) · [md](ParlioLedDriver.md)
 
 ## Network drivers
 
@@ -36,7 +40,9 @@ Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one
 - `universe_start` — first universe for Art-Net / E1.31 (DDP is byte-addressed, ignores it).
 - `fps` — frame-rate limit (default 50, 1–120).
 
-Detail: [NetworkSendDriver.md](NetworkSendDriver.md) — per-protocol chunking, interop notes, the synchronous-send caveat.
+Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
+
+[Tests](../../../tests/unit-tests.md#networksenddriver) · [.h](../../../../src/light/drivers/NetworkSendDriver.h) · [detail](NetworkSendDriver.md)
 
 ## Smart light drivers
 
@@ -53,7 +59,9 @@ Drives **Philips Hue bulbs as pixels**: each colour bulb in the driver's window 
 - `pair` — button: press it, then the bridge's physical link button within ~30 s to claim a key.
 - `room` / `light` — dropdowns narrowing which colour lights are driven (both default `All`).
 
-Detail: [HueDriver.md](HueDriver.md) — the rate limit, pairing, and the Hue v1 HTTP wire contract.
+Origin: projectMM, on the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/)
+
+[Tests](../../../tests/unit-tests.md#huedriver) · [.h](../../../../src/light/drivers/HueDriver.h) · [detail](HueDriver.md)
 
 ## Preview drivers
 
@@ -67,7 +75,9 @@ Streams a true-shape 3D preview to the web UI over WebSocket as a **point list**
 
 - `fps` — preview stream rate (default 24, 1–60; independent of the render loop).
 
-Detail: [PreviewDriver.md](PreviewDriver.md) — the binary WebSocket protocol, sparse-layout handling, and large-layout downsample.
+Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h)'s PhysicalLayer model
+
+[Tests](../../../tests/unit-tests.md#previewdriver) · [.h](../../../../src/light/drivers/PreviewDriver.h) · [detail](PreviewDriver.md)
 
 ## LED output — details
 

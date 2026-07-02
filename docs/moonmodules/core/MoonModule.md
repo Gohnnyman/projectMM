@@ -87,18 +87,6 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 - `addControl()` binds to class variable by reference, stores `uintptr_t` pointer.
 - `classSize()` reports actual instance size.
 
-### projectMM v1 — StatefulModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/StatefulModule.h))
-
-- Same addControl-by-reference pattern.
-
-### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))
-
-- `onBuildControls()` / `onBuildState()` separation.
-- `onChildrenReady()` — parent-notified-after-children hook. Not carried over; child setup ordering is handled by Scheduler's 4-phase boot instead.
-- Field order optimized 8B→4B→2B→1B, saving 24 bytes.
-- `classSize` set via `register_type<T>()`.
-- `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. projectMM deliberately uses parent/child only; the DAG was more than the domain needs.
-
 ## Source
 
 [MoonModule.h](../../../src/core/MoonModule.h)

@@ -39,11 +39,6 @@ On desktop these show "desktop" / "N/A" for hardware-specific fields.
 
 ## Prior art
 
-### projectMM v1
-
-- System info displayed in web UI (heap, FPS, chip info)
-- Device name configurable and persisted
-
 ### MoonLight
 
 - System diagnostics via REST API

@@ -61,14 +61,18 @@ Rejected: **classic Doxygen HTML** (separate site, dated UI, not integrated), **
 - On **each effect/module user page**, auto-embed "Tests proving this works: …" from the same test metadata — so an end user reading about *Fire* sees the tests that pin it. This is the PO's *"github issues will be solved adding a new test to proof it, this should be visible to end users."* The link from issue → test → visible-on-the-module-page becomes the norm.
 - **Outcome:** tests visible to users; 25K words of committed generation deleted (subtraction).
 
-### Phase 3 — De-duplicate facts, one fact-type at a time — *incremental, the slow win*
+### Phase 3 — De-duplicate facts, one fact-type at a time — *DONE, but pivoted (see below)*
+
+*As shipped: the snippet-include premise was wrong — `.h` and `.md` hold the same fact in different forms (code vs prose) for two audiences, which `--8<--` can't bridge. The real duplication was narrower: control **ranges** (~50) and author **URLs** (~51) restated in both places. PO chose **validate, not generate** — `check_specs.py` now flags when a doc's stated range/URL drifts from the `.h` (block-scoped on catalog pages; tolerant of human range spellings), pinned by `test/python/test_check_specs_drift.py`. Control *names* and architectural facts were confirmed NOT duplication (audience-aware) and left alone. Original text below for the record.*
 Prove each on **one module**, then sweep. Order by leverage:
 1. **Author/attribution** → single source in the `.h`, `--8<--` snippet-include into the `.md`. Deletes 40+ hand-maintained `Origin:` copies. (Lowest risk: it's a comment.)
 2. **Control names + ranges/defaults** → the `.h` `controls_.addX(...)` block is already the source of truth; either snippet-include it, or extend `check_specs.py` into a *generator* that emits the control table into the spec. Deletes the hand-copied range prose; upgrades `check_specs` from "checks presence" to "owns the table."
 3. **Cross-doc architectural facts** → pick the one true home (usually `architecture.md` or the `.h`), replace the other copies with a link/anchor per *Document a thing once, reference it generically* (already a principle — this enforces it mechanically).
 - **Outcome:** "change a small thing, many files change" shrinks to "change the source, the copies regenerate."
 
-### Phase 4 — Developer drill-down into source — *medium, do last*
+### Phase 4 — Developer drill-down into source — *split: 4a snippets DONE, 4b Doxide next commit*
+
+*As shipped (4a): Doxide can't use `uv` (a from-source C++ binary) and our 139 `.h` files use plain `//` comments, not Doxygen style — so it's heavy on CI + comment-conversion. PO wants Doxide eventually but chose to try `pymdownx.snippets` first (uv-native, no new tool): `--8<--` now embeds the real `ImprovFrameType` enum + Preview wire-format from the source `.h` into their docs — the source IS the doc, no drift. Doxide (4b) is spec'd for its own next commit (Plan-20260702 Docs Phase 4a), informed by what 4a showed about how our `//` comments render. Original Doxide text below.*
 - Add **Doxide**: annotate `.h` public API with its lightweight comment style, generate Markdown into the Developer section of the site. Start with `core/` (the stable base), then light domain.
 - This is where "technical details in the code, not `.md`" lands: the module `.md` shrinks to *wire contracts + cross-wiring + prior art* (its already-stated job per CLAUDE.md), and the *API-level* detail is generated from annotated source.
 - **Outcome:** developers drill user-page → spec → annotated source, one site, search across all of it.

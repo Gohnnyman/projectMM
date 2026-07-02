@@ -17,6 +17,7 @@ namespace mm {
 // per frame). Two message types — PreviewDriver owns both wire formats; the
 // HTTP server is a domain-neutral BinaryBroadcaster that just writes the bytes:
 //
+// --8<-- [start:wire-format]
 //   0x03 coordinate table (sent when the geometry changes — every LUT/layout rebuild
 //        via onBuildState — and when a new client connects, so a refresh gets it; never
 //        per-frame):
@@ -29,6 +30,7 @@ namespace mm {
 //   0x02 per-frame channels: [0x02][count:u32][stride:u16][(r,g,b) × count]
 //        RGB by driver index, every `stride`-th light. The browser positions
 //        triple i at coord-table entry i*stride.
+// --8<-- [end:wire-format]
 //
 // `count` here is the number of points actually sent = ceil(lightCount/stride).
 // stride>1 only when lightCount*3 would exceed the send-buffer cap (a large

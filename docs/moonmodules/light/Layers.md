@@ -18,10 +18,6 @@ The container owns no buffer: each layer owns its own, and the Drivers container
 
 MoonLight's `PhysicalLayer` runs N `VirtualLayer`s and composites their buffers into the display channel. Same idea, different shape: Drivers (not Layers) does the compositing here.
 
-### projectMM v1/v2
-
-Single-layer designs. No prior container for multiple layers.
-
 ## Source
 
 [Layers.h](../../../src/light/layers/Layers.h)

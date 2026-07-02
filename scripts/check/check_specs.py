@@ -104,6 +104,85 @@ def check_spec_freshness(source_path, spec_path):
         if ctrl not in spec:
             issues.append(f"control '{ctrl}' not in spec")
 
+    # On a consolidated catalog page (effects/modifiers/layouts/drivers) the spec
+    # documents MANY modules; scope the drift checks to THIS module's own block so a
+    # control name shared across modules (fps, fadeRate, speed…) doesn't cross-match
+    # another module's prose. The block is the one whose `source [<stem>.h]` link
+    # points at this .h. On a per-module page the block is the whole file.
+    block = _module_block(source_path, spec)
+    issues += _check_range_drift(source, block)
+    issues += _check_author_url_drift(source, block)
+    return issues
+
+
+def _module_block(source_path, spec):
+    """The slice of `spec` documenting the module in `source_path`. On a consolidated
+    page, the `### ` block whose `source [<stem>.h]` link matches; else the whole spec."""
+    stem = source_path.name          # e.g. "BlurzEffect.h"
+    base = source_path.stem          # e.g. "BlurzEffect"
+    lines = spec.splitlines()
+    # Find the line tying this module to its block. Two link shapes across catalog
+    # pages: a direct `source [<stem>.h]` (effects/modifiers/layouts) or a detail-page
+    # reference `[<base>.md]` / `alt="<base> controls"` (drivers link to detail pages).
+    def _match(ln):
+        return (f"[{stem}]" in ln or f"[{base}.md]" in ln
+                or f'alt="{base} ' in ln or f'alt="A {base} ' in ln)
+    link_i = next((i for i, ln in enumerate(lines) if _match(ln)), None)
+    if link_i is None:
+        return spec  # per-module page (or no matching link) — whole file
+    # Block start: the nearest `### ` heading at or above the link.
+    start = next((i for i in range(link_i, -1, -1) if lines[i].startswith("### ")), 0)
+    # Block end: the next `### ` or `## ` heading after the link.
+    end = next((i for i in range(link_i + 1, len(lines))
+                if lines[i].startswith(("### ", "## "))), len(lines))
+    return "\n".join(lines[start:end])
+
+
+# Range-bearing control forms: addUint8/addInt16/addUint16("name", var, MIN, MAX).
+# (addBool/addPin/addSelect/addText/addButton carry no numeric range — skipped.)
+_RANGE_CTRL_RE = re.compile(
+    r'controls_\.add(?:Uint8|Int16|Uint16)\("(?P<name>\w+)"\s*,\s*\w+\s*,\s*'
+    r'(?P<lo>-?\d+)\s*,\s*(?P<hi>-?\d+)'
+)
+# A numeric range as spelled in .md prose: 1–8 / 1-8 / 1 to 8 (en-dash, hyphen, or "to").
+_MD_RANGE_RE = re.compile(r'(-?\d+)\s*(?:[-–]|to)\s*(-?\d+)')
+
+
+def _check_range_drift(source, spec):
+    """Warn when the .md states a numeric range for a control that CONFLICTS with the
+    range declared in the .h. Deliberately not "every control must restate its range"
+    (many legitimately don't — a pin list, an obvious 0–255). We only flag a real
+    mismatch: the .md line for a control gives a range, and it's a different one."""
+    issues = []
+    md_lines = spec.splitlines()
+    for m in _RANGE_CTRL_RE.finditer(source):
+        name, lo, hi = m.group("name"), int(m.group("lo")), int(m.group("hi"))
+        # Find the .md line documenting this control (the `- `name` — …` prose line).
+        for ln in md_lines:
+            if f"`{name}`" not in ln:
+                continue
+            ranges = [(int(a), int(b)) for a, b in _MD_RANGE_RE.findall(ln)]
+            if ranges and (lo, hi) not in ranges:
+                issues.append(
+                    f"control '{name}' range in .h is {lo}–{hi}, but the spec line "
+                    f"states {', '.join(f'{a}–{b}' for a, b in ranges)} (drift)")
+            break  # first line mentioning the control is its doc line
+    return issues
+
+
+# `// Author: … — <url>` (the em-dash separates the credit from the source URL).
+_AUTHOR_URL_RE = re.compile(r'//\s*Author:.*?(https?://\S+)')
+
+
+def _check_author_url_drift(source, spec):
+    """Warn when a URL in the .h `// Author:` line is absent from the .md (whose
+    `Origin:` line wraps it in a markdown link). Catches a source/credit URL that
+    was updated in code but not in the doc. Matches on the bare URL substring."""
+    issues = []
+    for m in _AUTHOR_URL_RE.finditer(source):
+        url = m.group(1).rstrip(".,);")   # trim trailing punctuation the comment may carry
+        if url not in spec:
+            issues.append(f"author URL {url} (from .h) not found in the spec")
     return issues
 
 # Consolidated catalog pages document one module per `### ` block, and each block
@@ -168,6 +247,16 @@ def check_source_links():
                 issue = _resolve_link(md, href)
                 if issue:
                     issues.append((spec_rel, issue))
+            continue
+
+        # A card-backed detail page (a driver detail page) opens with a back-link to
+        # its catalog-card section — `[drivers.md § …](drivers.md#…)` — and the source
+        # link now lives on that card, not repeated here. Validate the back-link
+        # resolves (so the card is reachable); no `## Source` section required.
+        back = re.search(r'\]\(([\w./-]*drivers\.md#[\w-]+)\)', text)
+        if back:
+            issue = _resolve_link(md, back.group(1))
+            issues += ([(spec_rel, issue)] if issue else [])
             continue
 
         # Capture only the Source section body — stop at the next top-level

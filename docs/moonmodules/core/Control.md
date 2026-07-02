@@ -53,14 +53,6 @@ Control values persist via [FilesystemModule](FilesystemModule.md), which overla
 
 Binds via `reinterpret_cast<uintptr_t>(&variable)`; UI types "slider"/"select"/"toggle"/"text"/"display".
 
-### projectMM v1 — addControl ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/StatefulModule.h))
-
-Same pattern; also "display"/"progress"/"button".
-
-### projectMM v2 — ControlDescriptor ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h#L40))
-
-Richer but heavier (default, options array, ownsOptions, system flags) — not all that weight is justified here. Persisted values applied via an `applyPending_` overlay during `onBuildControls()`; projectMM keeps the same timing.
-
 ## Source
 
 [Control.cpp](../../../src/core/Control.cpp) · [Control.h](../../../src/core/Control.h)
