@@ -113,3 +113,6 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+
+# MkDocs — built docs site (rendered fresh in CI, never committed)
+/site/

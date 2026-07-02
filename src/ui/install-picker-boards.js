@@ -1,6 +1,6 @@
 // install-picker-boards.js — the board-catalog + chip-detection half of the
 // release picker. WEB-INSTALLER ONLY. It is imported by the GitHub Pages
-// installer (docs/install/index.html) and passed into installPicker.init() as
+// installer (web-installer/index.html) and passed into installPicker.init() as
 // the `boardSupport` option; the shared install-picker.js never imports it.
 //
 // Why a separate file: install-picker.js is embedded into the firmware binary
@@ -17,7 +17,7 @@
 // install-orchestrator.js and reach this code only via the onDetect callback
 // install-picker.js already owns).
 
-// Boards catalog — same-origin docs/install/deviceModels.json. ~1 KB, no rate-limit
+// Boards catalog — same-origin web-installer/deviceModels.json. ~1 KB, no rate-limit
 // concern (CDN serves it on the public site, preview_installer serves it from
 // disk locally), so no sessionStorage cache: caching adds invalidation bugs
 // without saving bytes. Graceful degradation: any fetch / parse failure returns

@@ -13,7 +13,7 @@ let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
 // Boards catalog loaded from /api/boards (served by moondeck.py from
-// docs/install/deviceModels.json). Replaces the previously-hardcoded boardOptions
+// web-installer/deviceModels.json). Replaces the previously-hardcoded boardOptions
 // list — same file the web installer (Step 2) will fetch directly from
 // GitHub Pages. Empty until init() loads it; renderDevices waits on init.
 let boards = []; // [{ key, label, firmwares: [...] }]  (firmwares[0] is the default)

@@ -1,6 +1,6 @@
 // Improv frame-contract tests — pin the wire format the device C++
 // (src/core/ImprovFrame.h), Python (scripts/build/improv_provision.py), and the
-// installer JS (docs/install/improv-frame.js) must all agree on byte-for-byte.
+// installer JS (web-installer/improv-frame.js) must all agree on byte-for-byte.
 // The golden vectors here are asserted identically in test/python/test_improv_frame.py
 // so the JS and Python builders can't drift; they're hand-verified against the C++
 // checksum (sum-mod-256) too. Run: `node --test test/js`.
@@ -14,7 +14,7 @@ import {
     IMPROV_CMD_APPLY_OP,
     IMPROV_FRAME_TYPE_RPC,
     IMPROV_MAGIC,
-} from "../../docs/install/improv-frame.js";
+} from "../../web-installer/improv-frame.js";
 
 const hex = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, "0")).join(" ");
 const bytes = (s) => Array.from(new TextEncoder().encode(s));

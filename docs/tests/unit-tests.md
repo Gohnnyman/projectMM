@@ -62,6 +62,34 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - No-LUT additive with opacity scales the source then clamps at 255. dst=100, src=200, opacity=128 → 100 + div255(200*128)=100 → 200.
 - No-LUT additive at full opacity saturates: 200 + 100 = 300 → clamp 255.
 
+## BlockModifier
+
+`test/unit/light/unit_BlockModifier.cpp`
+
+- The centre light of the box folds to distance 0 (the innermost ring, y=0); a corner folds to the largest distance, and z is always cleared to 0.
+- The distance is the MAXIMUM of |dx| and |dy| (a square ring), not the sum or the Euclidean length: an off-diagonal light sits on the ring of its larger axis delta.
+- modifyLogicalSize collapses the box to one column, its height = the max block distance + 1 (rings from centre to the far corner, inclusive), depth 1.
+- Degenerate grids never crash and stay well-formed: 0x0x0 and 1x1x1 both fold and size without dividing by zero or producing a zero-height box (the Effects hard rule).
+
+## BlurzEffect
+
+`test/unit/light/unit_BlurzEffect.cpp`
+*Also touches: AudioModule.*
+
+- With no live audio source the buffer stays black: the dot is audio-gated, so silence renders nothing.
+- With a synthesized audio frame the effect lights the buffer: the coloured dot appears and the blur smears it into a soft blob, so at least some lights become non-zero.
+- geqScanner sweeps the dot steadily across the strip: one pixel per frame, so consecutive frames land the lit dot at different linear positions rather than the same spot.
+- The hard rule: the effect runs at any grid size without crashing, including a 0×0×0 and a 1×1 grid.
+
+## BouncingBallsEffect
+
+`test/unit/light/unit_BouncingBallsEffect.cpp`
+
+- On the first frame every ball is at rest (zero-init state) and bounces off the floor, so the effect paints the bottom row of every column and leaves the rows above it black.
+- numBalls=0 draws nothing: the effect clamps below its minimum and the buffer stays black.
+- The effect runs at a degenerate grid size without crashing (the "every grid size" hard rule).
+- A ball reaches its apex mid-flight: once time advances, at least one ball has risen off the bottom row, so the lit column occupies a row above the floor.
+
 ## Buffer
 
 `test/unit/core/unit_Buffer.cpp`
@@ -81,6 +109,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - size=1: every cell is its own square; parity = (x+y+z)&1. Default (invert false) keeps even-parity cells, drops odd-parity. Passing cells keep their coord.
 - invert flips which parity passes.
 - size>1 groups cells into squares: with size=2, the 2×2 block at the origin is all one square (parity 0), so all four pass; the next block over drops.
+
+## CircleModifier
+
+`test/unit/light/unit_CircleModifier.cpp`
+
+- The box centre folds to the origin (distance 0), and every coord collapses onto the single x=0/z=0 column — the box becomes a 1D radial run.
+- A light's ring is its integer-truncated Euclidean distance from the centre, so two lights equidistant from the centre map to the SAME radius — the defining circle property. Centre (4,4): (7,4) and (4,7) are both 3 away; (7,7) is sqrt(18)→4.
+- modifyLogicalSize folds the far corner to its distance, then grows every axis by one: the logical box is a (radius+1)-tall column with x=1 and z=1. Corner (8,8,1) off centre (4,4,0) is sqrt(16+16+1)=5.74→5, so the size is (0+1, 5+1, 0+1).
+- Effects-run-at-every-grid-size hard rule: a degenerate box never crashes and still yields a valid single-column size. 0×0×0 folds to (0,0,0)→+1 = (1,1,1); 1×1×1's corner is sqrt(3)→1, so size (1, 2, 1).
 
 ## Color
 
@@ -225,6 +262,55 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown"). The firmware card owns firmware identity (version/build/firmware) + the partition usage.
 - OTA phase is surfaced through the shared status slot (MoonModule::setStatus()), not a control. publishStatus() runs in setup()/loop1s() and maps the platform OTA status string to a severity: "idle" clears the banner, an "error: " prefix is Severity::Error, anything else is neutral Severity::Status.
+
+## FixedRectangleEffect
+
+`test/unit/light/unit_FixedRectangleEffect.cpp`
+
+- A small box (2×2 at the origin) lights exactly its cells and leaves every cell outside it black.
+- With defaults (origin 0,0,0 + 15×15×15 extent) the box fills the whole grid — the origin corner lights up.
+- The box is offset away from the origin: only the offset cell lights, the origin stays black.
+- A degenerate 0×0×0 grid must not crash (Effects run at every grid size).
+
+## FreqMatrixEffect
+
+`test/unit/light/unit_FreqMatrixEffect.cpp`
+*Also touches: AudioModule.*
+
+- A real tone above the 80 Hz gate paints a lit colour at the source pixel (0,0).
+- The column is a shift register: a lit source pixel scrolls to y=1 on the next tick.
+- Silence (no active mic → the static silent frame) paints black: no tone, no light.
+- The "runs at every grid size" hard rule: degenerate grids never crash.
+
+## FreqSawsEffect
+
+`test/unit/light/unit_FreqSawsEffect.cpp`
+*Also touches: AudioModule.*
+
+- With no audio (silence) and keepOn off, every band decays to rest so the effect draws nothing — the whole buffer stays black. (No mic is active here, so latestFrame() is the static silence.)
+- keepOn keeps every band drawing even when its speed has fully decayed, so on a rested (silent) panel the columns are still lit rather than fully dark between hits.
+- Fed a live (simulated) audio frame, the effect reacts: loud bands rise and paint their columns, leaving the buffer non-black even with keepOn off (so the light comes from the audio, not keepOn).
+- The "runs at every grid size" hard rule: a degenerate 0×0×0 grid and a 1×1 grid both render without crashing (the imap zero-span guard and the sizeX/sizeY<=0 early-out cover them).
+
+## GEQ3DEffect
+
+`test/unit/light/unit_GEQ3DEffect.cpp`
+*Also touches: AudioModule.*
+
+- Silence (no active mic) leaves the buffer all-black — every band magnitude is 0, so no bar rises.
+- A synthesized sweep frame with only the lowest band lit paints the LEFT of the grid and leaves the far RIGHT dark.
+- The effect runs at a degenerate 0×0×0 grid without crashing (the "every grid size" hard rule).
+- A narrow grid with fewer columns than bands still spreads bars (numBands is clamped to the column count, so no divide-by-zero, no bar pile-up at x=0) and never crashes.
+
+## GEQEffect
+
+`test/unit/light/unit_GEQEffect.cpp`
+*Also touches: AudioModule.*
+
+- With no live audio source every band is silent, so no bar rises and the buffer stays black.
+- A bar grows from the floor up: when a column's band is loud, its bottom (floor) pixel is lit while a pixel above the bar's top stays dark — bars fill upward from the bottom row, not top-down or floating.
+- colorBars colours each bar by its column index, so two well-separated lit columns take different hues rather than sharing the row-height gradient — the toggle changes what colour a bar is.
+- The hard rule: the effect runs at any grid size without crashing, including 0×0×0 and 1×1, with a live audio frame feeding it every tick.
 
 ## GameOfLifeEffect
 
@@ -444,6 +530,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Channel order comes from Correction (logical red → GRB wire {0,255,0}); the encoder is order-agnostic.
 - RGBW rows emit 4 channels × 8 bits × 3 slots = 96 bytes.
 
+## LissajousEffect
+
+`test/unit/light/unit_LissajousEffect.cpp`
+
+- A single frame paints part of the grid: the swept curve lights some pixels (not a black frame).
+- The curve is sparse: on a large grid it lights only some pixels, leaving others black.
+- On a 1×1 grid the whole curve collapses onto the single origin light without indexing out of bounds.
+- Effects must run at every grid size (hard rule): a 0×0×0 grid renders without crashing.
+
 ## MappingLUT
 
 `test/unit/core/unit_MappingLUT.cpp`
@@ -461,6 +556,16 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - One tick on a 16×16 grid leaves at least one non-zero byte in the layer buffer (proves the effect rendered).
 - Pixels at opposite corners of a 32×32 grid differ in colour (the effect is not flat-filling the buffer).
+
+## MirrorModifier
+
+`test/unit/light/unit_MirrorModifier.cpp`
+
+- modifyLogicalSize halves each mirrored axis, rounding up: an even 128 → 64, an odd 65 → 33 (the centre column stays unpaired).
+- A coord and its mirror across the box centre map to the same logical position: on an even 8-wide axis, physical 7 folds to 0, 6 to 1, 5 to 2, 4 to 3, while the near half 0..3 passes through unchanged.
+- An odd extent keeps its centre column unpaired: on a 5-wide axis the half-extent is 3, so 0,1,2 pass through and the far edge 4→1, 3→2, leaving logical column 2 unpaired.
+- A disabled axis is left untouched: with only Y mirrored, X and Z sizes are unchanged and X coordinates pass through while Y folds.
+- Degenerate axes don't crash: a 1-wide axis stays 1 ((1+1)/2 == 1) and no coordinate ever reaches the half-extent to fold; a 0-extent axis stays 0.
 
 ## ModuleFactory
 
@@ -645,6 +750,14 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - The built E1.31 packet carries the exact ACN layout strict sACN receivers (and tools like xLights) validate: identifier, the three flags+length fields, CID, source name, priority, universe, property count, start code.
 - The built DDP packet carries version+push bits, RGB data type, default destination, and big-endian offset/length.
 
+## Noise2DEffect
+
+`test/unit/light/unit_Noise2DEffect.cpp`
+
+- A single frame on an 8×8 grid fills the buffer with a palette-mapped noise field (non-zero).
+- The field is spatial: distant pixels read different noise samples, so their colours differ.
+- Effects must run at every grid size: a 0×0×0 layer renders without crashing (the cols/rows guard).
+
 ## NoiseEffect
 
 `test/unit/light/unit_NoiseEffect.cpp`
@@ -655,6 +768,26 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Noise and Rainbow produce visibly different frames on the same grid (sanity check that they're distinct algorithms).
 - With depth > 1, adjacent and distant z-slices each render differently (3D noise, not a stack of identical 2D slices).
 - Same z-slice variation requirement holds for Plasma — each depth plane renders differently.
+
+## NoiseMeterEffect
+
+`test/unit/light/unit_NoiseMeterEffect.cpp`
+*Also touches: AudioModule.*
+
+- With no live audio source the level is 0, so no row lights and the fading buffer settles to black.
+- Fed a loud audio frame the meter fills from the floor upward: a lit row above the floor implies every row below it (down to the floor) is also lit — the column never floats. Extrude also means a lit row is complete across x, so column 0 and the last column of a lit row agree.
+- The `width` gain control scales level→length: width=0 zeroes the length (tmpSound2 = level*2*0/255), so even a loud audio frame lights no row and the buffer stays dark.
+- The "runs at every grid size" hard rule: 0×0×0 and 1×1 both render with a live audio frame every tick without crashing (the sizeX/sizeY<=0 early-out and the maxLen constrain cover them).
+
+## PaintBrushEffect
+
+`test/unit/light/unit_PaintBrushEffect.cpp`
+*Also touches: AudioModule.*
+
+- A live broadband signal draws strokes: at least some lights are lit after a frame.
+- Silence draws nothing: with no active mic the frame is all-zero bands, so every line's length maps to 0 (below the minLength gate) and the buffer stays fully black.
+- The minLength gate suppresses strokes: raised to its maximum, no line is ever long enough to draw, so even a loud broadband frame leaves the buffer black — the gate, not the audio, decides.
+- The "runs at every grid size" hard rule: degenerate grids never crash, with a live frame each tick.
 
 ## Palette
 
@@ -693,6 +826,14 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A single tick is enough to paint particles into the buffer.
 - Disabling the effect releases the trail buffer (dynamicBytes returns to 0).
 
+## PinwheelModifier
+
+`test/unit/light/unit_PinwheelModifier.cpp`
+
+- _PinwheelModifier 2D reshape puts petals on X, radius on Y_
+- _PinwheelModifier 1D reshape puts petals on Y (1 x petals x 1)_
+- The regression: on a 1D layer, sweeping the source x must map to MORE THAN ONE petal cell, and each mapped coordinate must land within the reshaped {1, petals, 1} box (x == 0, 0 <= y < petals). Before the fix the petal index went to pos.x, so every cell mapped to x == value >= 1 (out of the 1-wide logical box) except petal 0 — the pinwheel collapsed to a single petal.
+
 ## PlasmaEffect
 
 `test/unit/light/unit_PlasmaEffect.cpp`
@@ -701,6 +842,14 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - One tick on an 8×8 grid produces at least one non-zero byte.
 - Opposite corners of a 16×16 grid differ in colour (the plasma is not flat-filling).
 - Plasma and Noise produce visibly different frames on the same grid (sanity check that they're distinct algorithms).
+
+## PraxisEffect
+
+`test/unit/light/unit_PraxisEffect.cpp`
+
+- Praxis overwrites EVERY pixel each frame (a full-grid palette field, no black background) — with a non-black palette active, no light is left at (0,0,0).
+- The hue is a function of (x, y): pixels far apart in the grid carry different colours, so the field is spatial, not a uniform fill.
+- Hard rule: the effect runs at a degenerate grid without crashing. width/height <= 0 is guarded, and a 1×1 grid exercises the render loop at its smallest.
 
 ## PreviewDriver
 
@@ -728,6 +877,14 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A single frame on a 4×4 grid leaves the buffer non-zero (rainbow always paints somewhere).
 - Pixel (0,0) carries a lit palette colour — confirms the effect writes a real RGB there.
 - Distant pixels carry different hues (the rainbow gradient is spatial, not uniform).
+
+## RandomEffect
+
+`test/unit/light/unit_RandomEffect.cpp`
+
+- A single frame on a fresh black buffer lights exactly ONE light (one setRGB per frame).
+- Over many frames with light fade the sparkle field fills — more than one light ends up lit.
+- The effect runs at degenerate grid sizes without crashing (Effects-must-run-at-every-grid-size).
 
 ## RandomMapModifier
 
@@ -757,6 +914,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A window entirely off the box maps NO lights — the layer goes dark on that axis, which is how an effect is moved completely out of view. The box still has a valid size (the effect renders), nothing just reaches the screen.
 - A window stretched WIDER than the box (start<0 and end>100) renders the full span; the box shows the middle slice. startX=-50,endX=150 on 64 → window [−32, 96), span 128.
 - Degenerate axes don't crash: a 1-wide axis stays 1, a 0-extent axis yields 0.
+
+## RippleXZModifier
+
+`test/unit/light/unit_RippleXZModifier.cpp`
+
+- Default collapses X only: size.x becomes 1, Y and Z keep their extent.
+- towardsZ collapses Z instead; both flags collapse X and Z, leaving Y as the only axis.
+- shrink=false is the identity: no axis collapses, no coordinate folds.
+- Degenerate boxes don't crash: a 0x0x0 box collapses its X to 1, and folding at the origin still accepts and folds x to 0.
 
 ## RmtLedDriver
 
@@ -816,6 +982,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - z passes through (2D rotation) — a 3D coord's z is untouched.
 - An empty box doesn't divide-by-zero or wrap: the remap is a no-op-ish transform that the Layer's live pass then treats as out-of-box (dark), never a crash.
 
+## RubiksCubeEffect
+
+`test/unit/light/unit_RubiksCubeEffect.cpp`
+
+- The first frame scrambles a fresh cube and projects it onto the volume: with millis() past t=0 the init() path fires (doInit_ is set at construction), so the buffer holds a drawn cube, not black.
+- Every lit voxel carries exactly one of the six Rubik's face colours — the projection only ever writes COLOR_MAP entries, never a blended or arbitrary RGB.
+- turnsPerSecond=0 disables the turn pacing (loop() returns before rotating), but the cube is still drawn on the first frame — init() runs and paints before the turn gate is reached.
+- The effect runs at a degenerate grid size without crashing (the "every grid size" hard rule): loop() bails on a zero extent and the buffer stays empty.
+
 ## Scheduler
 
 `test/unit/core/unit_Scheduler_unique_names.cpp`
@@ -835,6 +1010,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _SineEffect amplitude 0 yields a black buffer_
 - _SineEffect varies across the x axis (R channel follows x)_
 - _SineEffect survives a 0x0x0 grid_
+
+## SolidEffect
+
+`test/unit/light/unit_SolidEffect.cpp`
+
+- Mode 0 (RGB(W)) fills the whole buffer with one uniform colour: every light equals red/green/blue.
+- Brightness scales the flat colour down per channel (channel * brightness / 255).
+- On an RGBW layer mode 0 writes the white channel too (white scaled by brightness).
+- The effect runs at a degenerate 0×0×0 grid and at every colour mode without crashing.
 
 ## Sort
 
@@ -857,6 +1041,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Physical indices are sequential 0..N-1 over the emitted shell points (no gaps from the unindexed lattice voids), so the buffer maps 1:1 to emitted lights.
 - Default radius is a sensible small sphere (not 0, not huge).
 
+## SphereMoveEffect
+
+`test/unit/light/unit_SphereMoveEffect.cpp`
+
+- The effect fully clears the buffer each frame, so a thin shell leaves the vast majority of a large volume black (it is a hollow surface, not a solid fill).
+- Every voxel the effect lights is a real palette colour (non-black) — the shell is drawn, not left as leftover noise.
+- The effect is 3D-native: it declares D3 dimensions.
+- Hard rule: the effect must run at any grid size without crashing, including a 0×0×0 volume and a 1×1×1 volume (the loop guards w/h/d <= 0 and clamps speed so 100-speed is never zero).
+
 ## SpiralEffect
 
 `test/unit/light/unit_effects_render.cpp`
@@ -868,6 +1061,24 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
 - RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column at a sine-driven height. On a flat 2D layer it still paints a visible wavefront — assert it renders something and varies across the surface.
 - Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
+
+## StarFieldEffect
+
+`test/unit/light/unit_StarFieldEffect.cpp`
+
+- A frame past the speed throttle interval lights at least one star (greyscale, so every lit pixel is a pure grey R==G==B) — the field advances and re-projects stars onto the panel.
+- speed=0 pauses the field: the buffer stays fully black no matter how much virtual time passes.
+- The palette variant lights on-panel stars in colour (not forced grey) — usePalette drives hue.
+- Hard rule: the effect runs at a degenerate 0×0×0 grid without crashing (it allocates nothing and the loop bails on the zero dimensions).
+
+## StarSkyEffect
+
+`test/unit/light/unit_StarSkyEffect.cpp`
+
+- A field of stars lights at least some pixels on a populated 3D grid after a frame.
+- White stars (usePalette=false) paint only greyscale: every lit pixel has R==G==B.
+- A zero fill ratio still seeds a pool (nb_stars = ratio*count/10000 + 1) so a lit pixel appears.
+- The effect survives degenerate grids (0x0x0 and 1x1x1) without crashing — the every-grid-size rule.
 
 ## SystemModule
 
@@ -892,6 +1103,14 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _sanitizeHostname trims leading and trailing dashes / invalid runs_
 - _sanitizeHostname yields empty for all-invalid input (caller falls back)_
 
+## TetrixEffect
+
+`test/unit/light/unit_TetrixEffect.cpp`
+
+- During the initial 2 s start delay every column is idle-waiting, so the very first frame renders nothing: the buffer is entirely black even though the effect is enabled and built.
+- Once virtual time advances past the start delay, columns spawn bricks that fall and render: after a span of frames at least one light is lit, and every lit light carries a real (non-black) RGB colour pulled from the palette rather than partial/garbage channels.
+- Effects must run at every grid size: a degenerate 0×0×0 grid and a 1×1 grid both survive a build + several frames across advancing time without crashing (no allocation, no out-of-range write).
+
 ## TextEffect
 
 `test/unit/light/unit_TextEffect.cpp`
@@ -899,6 +1118,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Static text renders glyph pixels top-left. On a grid tall/wide enough for one line of the 6x8 font, a non-empty string lights some pixels; an empty string lights none.
 - A multi-line string wraps: the second line renders on a lower row (font-height down), so a two-line string lights pixels below the first font's height. Uses the 4x6 font (height 6).
 - Scroll mode advances the text over time and never crashes; on a degenerate grid it's a safe no-op.
+
+## TransposeModifier
+
+`test/unit/light/unit_TransposeModifier.cpp`
+
+- Default (XY on): x and y swap on both the box and the coordinate; z is untouched.
+- XZ swaps x and z; YZ swaps y and z. Only the selected pair moves.
+- inverse flips an axis back-to-front within the TRANSPOSED box: x -> size.x-1-x. With the default XY swap, inverse X flips the (post-swap) x axis, whose span is the original box height. On a {128,64,z} box the transposed x span is 64.
+- Degenerate boxes don't crash and the swap still applies to whatever extent exists.
 
 ## Uncategorized
 

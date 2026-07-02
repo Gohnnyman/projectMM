@@ -173,7 +173,7 @@ Set grid height to 128 (alongside default width 128). Measures the heaviest conf
 | `esp32-eth-wifi` | ≥ 10.0 / 12.4 | ≥ 103KB / 93KB | — / 48KB |
 | `esp32p4-eth` | — / 739-880 | — / 33206KB-33218KB | — / 376KB |
 | `esp32s3-n16r8` | — / 106-217 | — / 8315KB-8321KB | — / 104KB-108KB |
-| `pc-macos` | ≥ 8,333 / 3,534-10,526 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 8,333 / 3,155-10,526 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 3,413-4,566 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
@@ -181,7 +181,7 @@ Set grid height to 128 (alongside default width 128). Measures the heaviest conf
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
 - `esp32s3-n16r8`: observed 2026-06-22
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-07-02
 - `pc-windows`: observed 2026-06-07
 
 #### `shrink-to-128x64` (set_control)  📏
@@ -221,7 +221,7 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 52KB |
 | `esp32p4-eth` | — / 762-875 | — / 33206KB-33218KB | — / 376KB |
 | `esp32s3-n16r8` | — / 132-251 | — / 8312KB-8322KB | — / 100KB-112KB |
-| `pc-macos` | ≥ 8,333 / 3,257-10,204 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 8,333 / 3,145-10,204 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 3,436-4,608 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
@@ -229,7 +229,7 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
 - `esp32s3-n16r8`: observed 2026-06-22
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-07-02
 - `pc-windows`: observed 2026-06-07
 
 ## Layer
@@ -922,7 +922,7 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 | `esp32` | — / 3,067-9,804 | — / 132KB-146KB | — / 108KB |
 | `esp32p4-eth` | — / 10,417-10,753 | — / 33226KB-33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 3,802-4,274 | — / 8330KB-8345KB | — / 84KB-100KB |
-| `pc-macos` | — / 333,333-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 250,000-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -1523,10 +1523,10 @@ Add NetworkSendDriver and run the bounded FPS measurement (mirror + LUT path mus
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 8,333 / 3,676-1,000,000 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 8,333 / 3,135-1,000,000 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 3,953-4,444 | — / unlimited | — / unlimited |
 
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-25
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-07-02
 - `pc-windows`: observed 2026-06-07
 
 ## NetworkModule

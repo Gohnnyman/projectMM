@@ -220,7 +220,7 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=45.0,
                     help="Max seconds to wait for a final response (default: 45)")
     ap.add_argument("--board", default=None, metavar="NAME",
-                    help="Board name from docs/install/deviceModels.json (e.g. "
+                    help="Board name from web-installer/deviceModels.json (e.g. "
                          "'ESP32-S3 N16R8 Dev'). Resolves the board's TX-power cap "
                          "(controls.Network.txPowerSetting) automatically and "
                          "pushes the board name via SET_DEVICE_MODEL after "
@@ -230,7 +230,7 @@ def main() -> int:
                     help="Send the SET_TX_POWER vendor RPC (0..21 whole dBm) "
                          "BEFORE the credentials. Required for boards whose LDO "
                          "browns out at full TX power (weak-powered boards → 8, see "
-                         "docs/install/deviceModels.json) — without it the very first "
+                         "web-installer/deviceModels.json) — without it the very first "
                          "association fails and the cap can never arrive over HTTP.")
     args = ap.parse_args()
 
@@ -279,7 +279,7 @@ def main() -> int:
         # same file the web installer and MoonDeck read.
         import json
         from pathlib import Path
-        boards_file = Path(__file__).resolve().parents[2] / "docs" / "install" / "deviceModels.json"
+        boards_file = Path(__file__).resolve().parents[2] / "web-installer" / "deviceModels.json"
         try:
             catalog = json.loads(boards_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:

@@ -15,7 +15,7 @@ Below: the UI behaviours common to every card, described once, then one section 
 - **Tab persistence** — selected tab survives page refresh.
 - **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
 - **Network bar** (top of the sidebar): switch between known networks. Each network holds its own device list, last-used serial port, and WiFi credentials (consumed by Improv). On startup, MoonDeck auto-selects the network whose subnet matches the host's current LAN — moving the laptop between networks usually requires no clicks. Manual override (the dropdown) pins the selection until the pinned network's subnet stops matching the host. Add / Rename buttons next to the dropdown manage the catalog. State persisted in `scripts/moondeck.json` under `networks` + `active_network`.
-- **Board picker** on each device row: dropdown of physical boards from [docs/install/deviceModels.json](../docs/install/deviceModels.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one board (e.g. `esp32-eth` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's `deviceModel` control on [SystemModule](../docs/moonmodules/core/SystemModule.md) via `POST /api/control` on next discover. For firmwares with no unique board (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported board not in the catalog still shows up as `<key> (unknown)` so the value survives. MoonDeck's picker is a **text dropdown for an already-running device** — distinct from the web installer's flash-time *picture* board picker; both read the same catalog, but MoonDeck doesn't need the per-board `image`/`url` fields (those are installer-picker UX). Selecting a board pushes its full catalog config — each entry is a list of `{type, id, parent_id?, controls?}` module units (the [nested catalog schema](../docs/install/README.md), add-then-configure), so MoonDeck adds the board's modules (`POST /api/modules`) then sets their controls (`POST /api/control`); see `_push_board_to_device` in [moondeck.py](moondeck.py).
+- **Board picker** on each device row: dropdown of physical boards from [web-installer/deviceModels.json](../web-installer/deviceModels.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one board (e.g. `esp32-eth` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's `deviceModel` control on [SystemModule](../docs/moonmodules/core/SystemModule.md) via `POST /api/control` on next discover. For firmwares with no unique board (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported board not in the catalog still shows up as `<key> (unknown)` so the value survives. MoonDeck's picker is a **text dropdown for an already-running device** — distinct from the web installer's flash-time *picture* board picker; both read the same catalog, but MoonDeck doesn't need the per-board `image`/`url` fields (those are installer-picker UX). Selecting a board pushes its full catalog config — each entry is a list of `{type, id, parent_id?, controls?}` module units (the [nested catalog schema](../web-installer/README.md), add-then-configure), so MoonDeck adds the board's modules (`POST /api/modules`) then sets their controls (`POST /api/control`); see `_push_board_to_device` in [moondeck.py](moondeck.py).
 - **Pin profiles** on each device row (Save / Apply): a profile captures the device's current pin/peripheral config — the driver, board, network and audio modules and their control values, read from `GET /api/state` (effects/layouts and the always-on Preview are excluded; a profile is the *physical wiring*, not animation state). **Save** (`POST /api/save-profile`) stores it as a named entry under that device in `moondeck.json`; **Apply** (`POST /api/apply-profile`) re-pushes it through the same add-then-configure fan-out the board picker uses (`_apply_modules_to_device`, shared with `_push_board_to_device`). The captured unit shape is identical to a `deviceModels.json` entry's `modules`, so save→apply round-trips. Use it to restore GPIOs after a reflash wipes config, or to clone a working setup onto a second identical rig.
 
 ## PC Tab
@@ -61,16 +61,16 @@ While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll
 ![Installer2](../docs/assets/ui/installer2.png)
 ![Installer3](../docs/assets/ui/installer3.png)
 
-Locally preview the web installer page at <https://moonmodules.org/projectMM/install/> without tagging a release. Stages `docs/install/index.html` + `src/ui/install-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8000.
+Locally preview the web installer page at <https://moonmodules.org/projectMM/install/> without tagging a release. Stages `web-installer/index.html` + `src/ui/install-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8421.
 
 ```bash
 uv run scripts/run/preview_installer.py
-# open http://localhost:8000/ in Chrome / Edge / Opera
+# open http://localhost:8421/ in Chrome / Edge / Opera
 ```
 
 Long-running — MoonDeck shows **Stop** while the server is up. Two modes, picked automatically:
 
-- **Render-only.** When no `build/esp32-*/projectMM.bin` is present, the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML / CSS / JS without burning a build. Equivalent to "Recipe A" in [docs/install/README.md](../docs/install/README.md).
+- **Render-only.** When no `build/esp32-*/projectMM.bin` is present, the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML / CSS / JS without burning a build. Equivalent to "Recipe A" in [web-installer/README.md](../web-installer/README.md).
 - **Flash-ready.** When at least one ESP32 build exists, the script additionally stages every `build/esp32-*/projectMM.bin` it finds into `releases/local-dev/` and generates matching Pages-relative manifests via the same `generate_manifest.py` the release workflow uses. The picker shows `local-dev` as the newest tag; clicking **Install** flashes a USB-connected ESP32 and hands off to the repository's custom orchestrator UI (Improv-Serial provisioning + SET_DEVICE_MODEL + control fan-out, all in `install-orchestrator.js` — not ESP Web Tools). End-to-end, same code paths as the public installer. This is the developer's test ground for the install flow before deploying to GitHub Pages: Web Serial works on `http://localhost` without the secure-origin requirement that gates the public site.
 
 Add `?nocache=1` to the URL to bypass the picker's 5-minute sessionStorage cache while editing.
@@ -135,7 +135,7 @@ Connects to a running projectMM server, builds a minimal pipeline scaffold (Layo
 - `<TypeName>.gif` — 3-second preview animation for effects and modifiers (requires `--gif`)
 - `ui_overview.png` — full-page screenshot of the projectMM UI
 - `moondeck_pc.png`, `moondeck_esp32.png`, `moondeck_live.png` — MoonDeck tab screenshots (requires MoonDeck running on port 8420)
-- `installer.png` — web installer preview (requires `preview_installer` running on port 8000)
+- `installer.png` — web installer preview (requires `preview_installer` running on port 8421)
 
 Without `--force`, existing screenshots are skipped — only missing files are captured. Run with `--force` to re-capture everything (e.g. after a UI change).
 
@@ -155,6 +155,20 @@ uv run scripts/docs/update_module_docs.py --dry-run  # preview without writing
 For each `.md` file, if `docs/assets/<type-folder>/<TypeName>.png` exists and the file doesn't already contain a screenshot reference, inserts the image after the first heading. If a matching `<TypeName>.gif` also exists, inserts the GIF reference on the next line. Safe to re-run — skips files that already have all references.
 
 Also inserts MoonDeck tab screenshots and the installer screenshot into `scripts/MoonDeck.md` and `README.md` at fixed anchor points (defined in the `EXTRA_SHOTS` list in the script).
+
+### build_docs
+
+Render the documentation site (Material for MkDocs) from the `docs/` tree into `site/`, streaming the build log to the window.
+
+```bash
+uv run scripts/docs/build_docs.py            # build to site/ (what this button runs)
+uv run scripts/docs/build_docs.py --serve     # live-preview at localhost:8422 (auto-reload on edit)
+uv run scripts/docs/build_docs.py --strict    # promote every warning to an error (local anchor audit)
+```
+
+The `--serve` preview binds **:8422** — the [Installer Preview](#preview_installer) owns :8421 and MoonDeck :8420, so both local previews can run at once. A stray `mkdocs serve` is killed before a new one starts.
+
+Config is `mkdocs.yml`. The nav is a top-down user → developer order over the existing docs; `history/` and `backlog/` are excluded (internal). Warnings for links to repo files outside `docs/` (`../src/*.h`, `../CLAUDE.md`) and the pre-existing stale cross-doc anchors are expected — the build still succeeds. Deps (`mkdocs-material`) are declared inline in the script, so `uv run` provisions them on first use; nothing to install. This button builds once; use `--serve` from a terminal to iterate live.
 
 Reports unreferenced screenshots — any PNG or GIF in `docs/assets/` not mentioned anywhere in `docs/` or `scripts/`.
 
@@ -415,7 +429,7 @@ Exit codes: `0` = all checks passed, `1` = device-side failure (probe or provisi
 
 - [src/core/ImprovFrame.h](../src/core/ImprovFrame.h) — the on-device parser
 - [src/platform/esp32/platform_esp32_improv.cpp](../src/platform/esp32/platform_esp32_improv.cpp) — the UART listener task
-- [docs/install/index.html](../docs/install/index.html) — the web installer page
+- [web-installer/index.html](../web-installer/index.html) — the web installer page
 - [src/ui/install-picker.js](../src/ui/install-picker.js) — the picker driving the install flow
 - [scripts/build/improv_*.py](build/) — the host-side framing helpers
 

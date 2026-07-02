@@ -26,12 +26,14 @@ on:
       - 'CMakeLists.txt'
       - 'library.json'
       - '.github/workflows/release.yml'
-      # The web installer + landing page are served from Pages by the deploy-pages job
+      # The web installer + docs site are served from Pages by the deploy-pages job
       # below; a change to them must trigger a deploy or it never reaches the live site
       # (the eth-only-provisioning fix shipped a commit that didn't auto-deploy because
-      # docs/install was missing here). src/ui/install-picker*.js is already covered by src/**.
-      - 'docs/install/**'
-      - 'docs/landing/**'
+      # web-installer was missing here). src/ui/install-picker*.js is already covered by src/**.
+      # docs/** covers every page rendered into the Pages root by MkDocs; mkdocs.yml is
+      # the site config (nav/theme) — a nav change with no doc change must still redeploy.
+      - 'docs/**'
+      - 'mkdocs.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -78,7 +80,7 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: uv run scripts/build/verify_version.py --tag "$TAG"
 
-  # The shipping firmware list, read from the generated docs/install/firmwares.json
+  # The shipping firmware list, read from the generated web-installer/firmwares.json
   # (projected from build_esp32.py's FIRMWARES dict, drift-guarded by
   # check_firmwares.py). Emitted as a JSON array so build-esp32's matrix can
   # fromJSON() it — GitHub matrices can't read a file at parse time, so a job
@@ -95,7 +97,7 @@ jobs:
       - id: gen
         run: |
           set -euo pipefail
-          echo "list=$(jq -c '[.firmwares[] | select(.ships) | .name]' docs/install/firmwares.json)" >> "$GITHUB_OUTPUT"
+          echo "list=$(jq -c '[.firmwares[] | select(.ships) | .name]' web-installer/firmwares.json)" >> "$GITHUB_OUTPUT"
 
   build-esp32:
     needs: [verify-version, firmwares]
@@ -338,9 +340,9 @@ jobs:
           # — no CORS). The Pages-relative manifests are generated in the
           # deploy-pages job, where the web installer (CORS-bound) consumes them.
           BASE="https://github.com/${REPO}/releases/download/$TAG"
-          # The shipping firmware list — the same docs/install/firmwares.json the
+          # The shipping firmware list — the same web-installer/firmwares.json the
           # build matrix reads, so manifests and builds can't drift.
-          for F in $(jq -r '.firmwares[] | select(.ships) | .name' docs/install/firmwares.json); do
+          for F in $(jq -r '.firmwares[] | select(.ships) | .name' web-installer/firmwares.json); do
             uv run python scripts/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
@@ -514,7 +516,7 @@ jobs:
           # Install page + the shared install-picker module sit at the root.
           # Each release's binaries + manifests live under releases/<tag>/.
           mkdir -p pages/install
-          cp -r docs/install/. pages/install/
+          cp -r web-installer/. pages/install/
           cp src/ui/install-picker.js pages/install/
           # The board-catalog / chip-detection half of the picker — web-installer
           # only (not embedded in firmware), imported by index.html. Must ship to
@@ -530,15 +532,26 @@ jobs:
           mkdir -p pages/install/assets/boards
           # rel is "assets/boards/<slug>.<ext>" (the path served from /install/);
           # the source file lives in docs/<rel> (i.e. docs/assets/boards/...).
-          jq -r '.[].image // empty' docs/install/deviceModels.json | while read -r rel; do
+          jq -r '.[].image // empty' web-installer/deviceModels.json | while read -r rel; do
             src="docs/$rel"
             [ -f "$src" ] && cp "$src" "pages/install/$rel" \
               || echo "WARNING: deviceModels.json image not found: $src"
           done
-          # Root landing page (moonmodules.org/projectMM/) → Flash button + repo
-          # links. Without it the bare root 404s; only /install/ would exist.
-          cp docs/landing/index.html pages/index.html
           ls -la pages/ pages/install/
+
+      - name: Build docs site into Pages root
+        run: |
+          set -euo pipefail
+          # Render the docs/ tree (Material for MkDocs) as the Pages ROOT
+          # (moonmodules.github.io/projectMM/) — the project's front door.
+          # Config: mkdocs.yml; deps declared inline in the build script (uv
+          # provisions them). Build to a temp dir, then copy INTO pages/ so the
+          # installer staged above under pages/install/ survives (a plain
+          # --site-dir pages would wipe it — mkdocs cleans its output dir).
+          # history/ and backlog/ are excluded in mkdocs.yml (internal docs).
+          uv run scripts/docs/build_docs.py --site-dir "$RUNNER_TEMP/docs-site"
+          cp -r "$RUNNER_TEMP/docs-site/." pages/
+          ls -la pages/
 
       - uses: actions/upload-pages-artifact@v3
         with:

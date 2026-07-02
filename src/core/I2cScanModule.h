@@ -11,7 +11,7 @@
 // read-only `result` string suffices instead of a ListSource.
 //
 // The pins are controls (defaulting unset) so each board sets its bus pins in
-// docs/install/deviceModels.json — the same per-board pin-config pattern as the
+// web-installer/deviceModels.json — the same per-board pin-config pattern as the
 // driver/audio modules. The actual probe is platform::i2cScan (platform.h), a
 // self-contained seam that opens a temporary bus, scans, and tears it down, so
 // the diagnostic never fights a bus another driver owns.

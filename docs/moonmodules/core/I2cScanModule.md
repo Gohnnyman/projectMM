@@ -2,7 +2,7 @@
 
 A **core**, domain-neutral diagnostic that scans an I2C bus and reports which device addresses ACK — the standard [`i2cdetect`](https://manpages.debian.org/i2c-tools/i2cdetect.8.en.html) operation, surfaced in the UI. It is the bring-up tool for any I2C peripheral (an audio codec, a sensor, a port expander): set the bus pins, press scan, read off the addresses present. Confirms wiring before a driver tries to talk to the device.
 
-Not auto-wired. Factory-registered like [AudioModule](AudioModule.md), so a board with an I2C bus adds it through `docs/install/deviceModels.json` (its `sda`/`scl` controls carry that board's bus pins) or the user adds it from the UI.
+Not auto-wired. Factory-registered like [AudioModule](AudioModule.md), so a board with an I2C bus adds it through `web-installer/deviceModels.json` (its `sda`/`scl` controls carry that board's bus pins) or the user adds it from the UI.
 
 ## Controls
 

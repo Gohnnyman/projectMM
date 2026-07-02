@@ -90,4 +90,4 @@ I2C bring-up. The **[AudioModule](../moonmodules/core/AudioModule.md)** ES8311 p
 reads the I2S mic. End-to-end mic validation depends on confirming MCLK at GPIO52; the S31 entry
 keeps **Audio** under `planned` until that bench check passes, so the installer advertises only
 what's confirmed working. The other board capabilities (Ethernet, Bluetooth, SD, USB host, …)
-likewise live in the entry's `planned` list — see the S31 entry in `docs/install/deviceModels.json`.
+likewise live in the entry's `planned` list — see the S31 entry in `web-installer/deviceModels.json`.

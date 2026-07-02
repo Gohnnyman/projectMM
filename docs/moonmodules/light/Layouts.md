@@ -24,7 +24,7 @@ Layout children are reordered by drag-and-drop in the UI (`POST /api/modules/<na
 
 ## Rebuild propagation
 
-A layout control change propagates to every layer (LUT rebuild) and to the Drivers container (output-buffer reallocation) via the mechanism in [architecture.md § Rebuild propagation](../../architecture.md#rebuild-propagation).
+A layout control change propagates to every layer (LUT rebuild) and to the Drivers container (output-buffer reallocation) via the mechanism in [architecture.md § Rebuild propagation](../../architecture.md#event-triggering-between-modules).
 
 ## Source
 

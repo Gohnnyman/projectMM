@@ -1,5 +1,5 @@
 // Installer eth-only contract — the rule the web installer uses to decide whether a firmware is
-// Ethernet-only must agree with docs/install/firmwares.json's `eth_only` flag for EVERY firmware.
+// Ethernet-only must agree with web-installer/firmwares.json's `eth_only` flag for EVERY firmware.
 //
 // Why this matters: an Ethernet-only build (esp32-eth, esp32p4-eth) has WiFi compiled out, so it has
 // no WIFI_SETTINGS Improv RPC. If the installer mis-classifies it as WiFi-capable and the device has
@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const firmwares = JSON.parse(
-    readFileSync(join(ROOT, "docs", "install", "firmwares.json"), "utf8")
+    readFileSync(join(ROOT, "web-installer", "firmwares.json"), "utf8")
 ).firmwares;
 
 // The single rule the installer applies (index.html onInstall): a firmware key ending in `-eth` is
@@ -37,7 +37,7 @@ test("the installer's /-eth$/ rule matches firmwares.json eth_only for every fir
             `firmware "${f.name}": name-rule says eth-only=${isEthOnlyByName(f.name)} but ` +
             `firmwares.json eth_only=${!!f.eth_only}. The installer would make the wrong ` +
             `WiFi-provisioning decision (eth-only builds have no WIFI_SETTINGS RPC → UNKNOWN_RPC). ` +
-            `Reconcile the /-eth$/ rule in docs/install/index.html with this firmware's name/flag.`
+            `Reconcile the /-eth$/ rule in web-installer/index.html with this firmware's name/flag.`
         );
     }
 });

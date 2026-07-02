@@ -75,7 +75,7 @@ The `devices` List serializes (via [Control](Control.md)'s `ControlType::List`) 
 - **mDNS-SD / DNS-SD (Bonjour, Avahi)** — the industry-standard service-discovery pattern this module uses: announce a service, browse for it. WLED, ESPHome, Home Assistant, Hue all speak it.
 - **WLED** — the `_wled._tcp` service it advertises (and that the native WLED iOS/Android/Desktop apps browse) is the interop target the `WledPlugin` + the `_wled._tcp` advertise serve.
 - **MoonLight** ([`ModuleDevices.h`](https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Modules/ModuleDevices.h)) uses a UDP presence broadcast for device discovery; DevicesModule carries that idea forward — the 44-byte WLED-compatible packet on UDP 65506 (see [`WledPacket`](../../../src/core/WledPacket.h)), written fresh against our architecture. mDNS stays advertise-only, for the foreign apps that discover *us* over it (the WLED native app, Home Assistant).
-- The web installer's `docs/install/devices.js` "Your devices" list is the prior art for the device record shape (name / url / type).
+- The web installer's `web-installer/devices.js` "Your devices" list is the prior art for the device record shape (name / url / type).
 
 ## Source
 
