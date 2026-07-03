@@ -450,30 +450,58 @@ static EthPinConfig ethConfig_ = ethConfigDefault;
 
 void setEthConfig(const EthPinConfig& cfg) { ethConfig_ = cfg; }
 
-// Internal-EMAC RMII path — only on chips with an on-chip EMAC (classic ESP32,
-// P4). The S3 has no EMAC, so esp_eth_mac_new_esp32 / eth_esp32_emac_config_t /
-// EMAC_CLK_* don't exist there; gating on CONFIG_ETH_USE_ESP32_EMAC keeps this
-// function out of the S3 build (where Ethernet is W5500-over-SPI instead).
+// Internal-EMAC path (RMII on classic ESP32 / P4, RGMII on the S31) — only on chips
+// with an on-chip EMAC. The S3 has no EMAC, so esp_eth_mac_new_esp32 /
+// eth_esp32_emac_config_t / EMAC_CLK_* don't exist there; gating on
+// CONFIG_ETH_USE_ESP32_EMAC keeps this function out of the S3 build (where Ethernet is
+// W5500-over-SPI instead). RMII and RGMII share the same MAC ctor + driver/netif/event
+// tail; only the interface-select + clock + data-pin config block differs, so they live
+// in one function branched on the chip (a compile-time #ifdef, since the RGMII
+// interface is S31-only) rather than two near-identical copies.
 #ifdef CONFIG_ETH_USE_ESP32_EMAC
-static bool ethInitRmii() {
+static bool ethInitEmac() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     ethNetif_ = esp_netif_new(&netif_cfg);
 
-    // RMII / PHY pins from the runtime ethConfig_ (the default LAN8720 map by default, the
-    // P4-NANO's IP101 map on the P4, or a board override pushed from deviceModels.json).
+    // PHY pins from the runtime ethConfig_ (the default LAN8720 map by default, the
+    // P4-NANO's IP101 map on the P4, the S31 CoreBoard's YT8531 map on the S31, or a
+    // board override pushed from deviceModels.json). ETH_ESP32_EMAC_DEFAULT_CONFIG() is
+    // chip-fixed: RMII on the classic ESP32 / P4, RGMII on the S31 (the S31's on-chip EMAC
+    // is 1 Gb, RGMII-only). So the interface-specific config below branches on the chip at
+    // compile time — the union member (.rmii / .rgmii) that exists is the one the macro set.
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    // Interface-specific config. #ifdef (not if constexpr) because the RGMII union members
+    // (.clock_config.rgmii, .emac_dataif_gpio.rgmii) only exist in the IDF header on chips
+    // with SOC_EMAC_USE_MULTI_IO_MUX (S31, P4) — on the classic ESP32 they're absent, so an
+    // if-constexpr S31 branch would still fail to compile there. The macro's `interface`
+    // field is likewise chip-fixed (RGMII on S31, RMII elsewhere).
+#ifdef CONFIG_IDF_TARGET_ESP32S31
+    // RGMII (S31): the on-chip 1 Gb EMAC drives the YT8531 over a 4-bit data path + TX/RX
+    // clocks. These are the chip's fixed RGMII IO_MUX pads — the ONLY GPIOs the EMAC accepts
+    // for each signal (validated against the IO_MUX table in IDF's esp32s31/emac_periph.c;
+    // a non-IO_MUX pin fails "invalid ... GPIO number"). They also match the CoreBoard
+    // schematic wiring (docs/reference/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
+    // here would make IDF pick these same defaults; we list them explicitly for clarity.
+    emac_config.clock_config.rgmii.clock_tx_gpio = 13;
+    emac_config.clock_config.rgmii.clock_rx_gpio = 14;
+    emac_config.emac_dataif_gpio.rgmii = eth_mac_rgmii_gpio_config_t{
+        /*tx_ctl*/ 12, /*txd0*/ 8, /*txd1*/ 9, /*txd2*/ 10, /*txd3*/ 11,
+        /*rx_ctl*/ 15, /*rxd0*/ 19, /*rxd1*/ 18, /*rxd2*/ 17, /*rxd3*/ 16,
+    };
+#else
     emac_config.clock_config.rmii.clock_mode =
         ethConfig_.rmiiClockExtIn ? EMAC_CLK_EXT_IN : EMAC_CLK_OUT;
     emac_config.clock_config.rmii.clock_gpio =
         static_cast<gpio_num_t>(ethConfig_.rmiiClockGpio);
-    if (ethConfig_.mdcGpio >= 0)  emac_config.smi_gpio.mdc_num  = ethConfig_.mdcGpio;
-    if (ethConfig_.mdioGpio >= 0) emac_config.smi_gpio.mdio_num = ethConfig_.mdioGpio;
     // NOTE: the RMII *data* GPIOs (TX_EN/TXD0/TXD1/CRS_DV/RXD0/RXD1) are left at the
     // ETH_ESP32_EMAC_DEFAULT_CONFIG() defaults. On the classic ESP32 they're fixed in
     // silicon; on the P4 the macro already defaults them to 49/34/35/28/29/30 (the
     // NANO wiring) — the proven round-1 P4 build relied on exactly these defaults, so
     // we don't override them. (deviceModels.json doesn't carry them either.)
+#endif
+    if (ethConfig_.mdcGpio >= 0)  emac_config.smi_gpio.mdc_num  = ethConfig_.mdcGpio;
+    if (ethConfig_.mdioGpio >= 0) emac_config.smi_gpio.mdio_num = ethConfig_.mdioGpio;
 
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = ethConfig_.phyAddr;
@@ -504,7 +532,9 @@ static bool ethInitRmii() {
     if (ethConfig_.phyType == ethIp101) phy = esp_eth_phy_new_ip101(&phy_config);
     else                                phy = esp_eth_phy_new_generic(&phy_config);
 #else
-    phy = esp_eth_phy_new_generic(&phy_config);   // LAN8720 / generic RMII
+    // LAN8720 (classic RMII) and YT8531 (S31 RGMII) are both IEEE-802.3-standard-register
+    // PHYs → the generic ctor drives both; no PHY-specific managed component needed.
+    phy = esp_eth_phy_new_generic(&phy_config);
 #endif
     if (!phy) return fail("PHY create failed", mac, nullptr);
 
@@ -537,7 +567,7 @@ static bool ethInitRmii() {
     // clobber a name set at init time).
 
     ethHandle_ = eth_handle;   // retained (ethStop is W5500-only today, but keep it set)
-    ESP_LOGI(NET_TAG, "Ethernet init done (RMII, non-blocking)");
+    ESP_LOGI(NET_TAG, "Ethernet init done (%s, non-blocking)", isEsp32S31 ? "RGMII, S31" : "RMII");
     return true;
 }
 #endif // CONFIG_ETH_USE_ESP32_EMAC
@@ -666,7 +696,8 @@ bool ethInit() {
 #endif
 #ifdef CONFIG_ETH_USE_ESP32_EMAC
         case ethLan8720:
-        case ethIp101:   return ethInitRmii();
+        case ethIp101:                   // RMII PHYs (classic ESP32, P4)
+        case ethYt8531:  return ethInitEmac();   // RGMII PHY (S31); ethInitEmac's RGMII block is #ifdef'd to the S31 chip
 #endif
         default:         return false;   // ethNone, or a PHY this firmware can't drive
     }

@@ -289,17 +289,22 @@ public:
         // Ethernet pin/PHY config — only on builds with an Ethernet driver. The
         // board's deviceModels.json eth block writes these; an un-provisioned board keeps
         // the per-chip default. ethType picks the PHY (and which pin set applies):
-        // 1=LAN8720(RMII), 2=IP101(RMII), 3=W5500(SPI). The RMII vs SPI pin rows are
-        // shown by type so the UI isn't cluttered with the inapplicable set.
+        // 1=LAN8720(RMII), 2=IP101(RMII), 3=W5500(SPI), 4=YT8531(RGMII). The RMII/SPI pin
+        // rows are shown by type so the UI isn't cluttered with the inapplicable set.
         if constexpr (platform::hasEthernet) {
             // ethType is the switch (always shown on an eth-capable build). When it
             // is 0 (no Ethernet) NO pin rows show; choosing LAN8720/IP101 reveals
             // the RMII rows, W5500 the SPI rows — only the applicable set is ever
             // visible. (Same "show only what's relevant" shape as the LED drivers.)
-            controls_.addSelect("ethType", ethType_, ethTypeOptions_, 4);
-            const bool isRmii = (ethType_ == 1 || ethType_ == 2);
-            const bool isSpi  = (ethType_ == 3);
-            const bool isEth  = isRmii || isSpi;
+            controls_.addSelect("ethType", ethType_, ethTypeOptions_, 5);
+            const bool isRmii  = (ethType_ == 1 || ethType_ == 2);
+            const bool isSpi   = (ethType_ == 3);
+            const bool isRgmii = (ethType_ == 4);
+            // RGMII (S31): the data/clock pins are the chip's fixed IO_MUX pads, set in
+            // ethInitEmac() (not user config); MDC/MDIO come from the per-chip ethConfigDefault
+            // (5/6) via the shared smi_gpio path. Neither needs a UI row, so RGMII shows only
+            // phyAddr + reset (the rest of the RMII rows stay hidden — isRmii-gated below).
+            const bool isEth   = isRmii || isSpi || isRgmii;
             // GPIO controls use addPin → a plain number input (ControlType::Pin),
             // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
             // phyAddr is a PHY MDIO address (0..31), not a GPIO, but it's likewise
@@ -662,8 +667,8 @@ private:
 
     static constexpr const char* addressingOptions_[] = {"DHCP", "Static"};
     // ethType dropdown options — index order MUST match the EthPhyType enum
-    // (None=0, LAN8720=1, IP101=2, W5500=3) since the Select stores the index.
-    static constexpr const char* ethTypeOptions_[] = {"None", "LAN8720", "IP101", "W5500"};
+    // (None=0, LAN8720=1, IP101=2, W5500=3, YT8531=4) since the Select stores the index.
+    static constexpr const char* ethTypeOptions_[] = {"None", "LAN8720", "IP101", "W5500", "YT8531"};
 
     void startAP() {
         // Same identity as the DHCP hostname and the mDNS .local name — all three read

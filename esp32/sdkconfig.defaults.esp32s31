@@ -23,10 +23,20 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # not relied on at boot.
 CONFIG_SPIRAM=y
 
-# Ethernet — on-chip EMAC + RMII (SOC_EMAC_SUPPORTED, SOC_EMAC_SUPPORT_1000M). Pins
-# are runtime config (ethConfig_ in C), not sdkconfig. RMII is the EMAC's default
-# interface, so no CONFIG_ETH_PHY_INTERFACE_RMII (a non-existent symbol in IDF v6).
+# Ethernet — on-chip EMAC (SOC_EMAC_SUPPORTED, SOC_EMAC_SUPPORT_1000M → RGMII 1 Gb).
+# The interface (RGMII on the S31) and PHY pins (YT8531 map) are set in C — the RGMII
+# branch of ethInitEmac() in src/platform/esp32/platform_esp32.cpp, keyed off the
+# ETH_ESP32_EMAC_DEFAULT_CONFIG() macro which IDF fixes to RGMII on the S31 — not via a
+# sdkconfig symbol, so the pin map stays in one place.
 CONFIG_ETH_USE_ESP32_EMAC=y
+
+# RGMII Tx clock source = APLL. The 1 Gb RGMII EMAC needs a clean 125 MHz Tx clock. The
+# default (AUTO) picks the MPLL, but PSRAM owns the MPLL at 400 MHz (SPIRAM_SPEED_200M) —
+# 400 MHz has no integer path to 125 MHz ("unusable frequency 133 MHz"). CPLL can't hit it
+# either ("No CPLL on 40 MHz grid divides 125 MHz"): both are integer PLLs off the 40 MHz
+# XTAL. The APLL is a *fractional* PLL built for exact frequencies (its reason to exist), so
+# it synthesises 125 MHz precisely. Bench-proven on the S31 CoreBoard.
+CONFIG_ETH_EMAC_RGMII_TX_CLK_SRC_APLL=y
 CONFIG_ETH_DMA_BUFFER_SIZE=512
 CONFIG_ETH_DMA_RX_BUFFER_NUM=10
 CONFIG_ETH_DMA_TX_BUFFER_NUM=10

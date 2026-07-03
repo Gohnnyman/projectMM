@@ -45,6 +45,16 @@ constexpr bool isEsp32S3 = true;
 constexpr bool isEsp32S3 = false;
 #endif
 
+// isEsp32S31: the S31 is the only target whose EMAC is RGMII / 1 Gb (SOC_EMAC_SUPPORT_1000M),
+// where classic/P4 are RMII — so its Ethernet default is a distinct RGMII PHY (YT8531) with a
+// different pin set. Not derivable from a SOC flag (the RGMII data pins are board wiring, not a
+// chip property). Used by ethConfigDefault and ethInitEmac's RGMII branch/log.
+#ifdef CONFIG_IDF_TARGET_ESP32S31
+constexpr bool isEsp32S31 = true;
+#else
+constexpr bool isEsp32S31 = false;
+#endif
+
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 / P4 / S31,
 // straight from the IDF RMT HAL — `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
 // Doubles as the RMT capability flag: the RMT LED driver and its main.cpp
@@ -177,6 +187,7 @@ enum EthPhyType {
     ethLan8720 = 1,  // RMII, generic PHY (Olimex Gateway, QuinLED Dig-Octa)
     ethIp101   = 2,  // RMII, IP101 PHY (Waveshare P4-NANO; managed component, P4-only)
     ethW5500   = 3,  // SPI, external W5500 module (ESP32-S3 boards — SE16, LightCrafter)
+    ethYt8531  = 4,  // RGMII, YT8531 PHY (ESP32-S31 CoreBoard; on-chip 1 Gb EMAC, S31-only)
 };
 
 // Per-board Ethernet pin/PHY map — runtime-configurable (no longer a fixed
@@ -213,9 +224,17 @@ struct EthPinConfig {
 //  - S3 → no built-in EMAC, so the default is W5500 SPI but with no pins set
 //    (phyType ethW5500, pins -1): a W5500 S3 board MUST provide its SPI pins via
 //    deviceModels.json — there's no universal S3 default to guess.
+//  - S31 → Function-CoreBoard-1: RGMII YT8531, MDC/MDIO 5/6, reset 7. The RGMII
+//    *data* pins (TX_CTL/TXD0-3, RX_CTL/RXD0-3, clocks) are board-fixed and live in
+//    ethInitEmac()'s S31 branch, not this struct (same reason RMII data pins don't —
+//    see above); rmiiClock* are unused for RGMII (clocks are set there too). See
+//    docs/reference/esp32-s31-coreboard.md for the schematic pin map.
 constexpr EthPinConfig ethConfigDefault =
     isEsp32P4   ? EthPinConfig{ /*phyType*/ ethIp101, /*addr*/ 1, /*mdc*/ 31, /*mdio*/ 52,
                                 /*rst*/ 51, /*rmiiClk*/ 50, /*extIn*/ true,
+                                /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 }
+  : isEsp32S31  ? EthPinConfig{ /*phyType*/ ethYt8531, /*addr*/ -1, /*mdc*/ 5, /*mdio*/ 6,
+                                /*rst*/ 7, /*rmiiClk*/ -1, /*extIn*/ false,
                                 /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 }
   : isEsp32S3   ? EthPinConfig{ /*phyType*/ ethW5500, /*addr*/ 1, /*mdc*/ -1, /*mdio*/ -1,
                                 /*rst*/ -1, /*rmiiClk*/ -1, /*extIn*/ false,

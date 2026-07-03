@@ -48,22 +48,34 @@ The onboard electret mic (J6) and speaker connect through an **ES8311 mono codec
 
 On-chip EMAC → **YT8531** (Motorcomm) PHY (U8) → RJ45, **RGMII** with a 25 MHz crystal (Y2).
 
+Pin map — **bench-verified** (link + DHCP confirmed on the CoreBoard). The RGMII data + clock
+GPIOs are the chip's fixed IO_MUX pads (the only ones the EMAC accepts; from IDF's
+`esp32s31/emac_periph.c`); MDC/MDIO are IDF's S31 SMI defaults (`ETH_ESP32_EMAC_DEFAULT_CONFIG`):
+
 | Signal | GPIO | | Signal | GPIO |
 |---|---|---|---|---|
-| ETH_INTN | 2 | | ETH_TXD3 | 10 |
-| PHY_MDC | 4 | | ETH_TX_CTL | 11 |
-| PHY_MDIO | 5 | | ETH_TXCLK | 13 |
-| ETH_PHY_RST | 6 | | ETH_RX_CLK | 14 |
-| ETH_TXD0 | 7 | | ETH_RX_CTL | 15 |
-| ETH_TXD1 | 8 | | ETH_RXD3 | 16 |
-| ETH_TXD2 | 9 | | ETH_RXD2 | 17 |
+| ETH_INTN | 2 | | ETH_TXD3 | 11 |
+| PHY_MDC | 5 | | ETH_TX_CTL | 12 |
+| PHY_MDIO | 6 | | ETH_TXCLK | 13 |
+| ETH_PHY_RST | 7 | | ETH_RX_CLK | 14 |
+| ETH_TXD0 | 8 | | ETH_RX_CTL | 15 |
+| ETH_TXD1 | 9 | | ETH_RXD3 | 16 |
+| ETH_TXD2 | 10 | | ETH_RXD2 | 17 |
 | | | | ETH_RXD1 | 18 |
 | | | | ETH_RXD0 | 19 |
 
-> **RGMII, not RMII.** projectMM's classic/P4 Ethernet path (`ethInit` in
-> `src/platform/esp32/platform_esp32.cpp`) is RMII (fewer data lines, 50 MHz ref clock). The S31's
-> 1 Gbps EMAC is RGMII (4-bit data each way + TX/RX clocks). Wiring the S31 eth needs an RGMII MAC
-> config branch — it is not a drop-in of the RMII pin struct.
+> **RGMII, not RMII.** projectMM's classic/P4 Ethernet is RMII (fewer data lines, 50 MHz ref clock);
+> the S31's 1 Gbps EMAC is RGMII (4-bit data each way + TX/RX clocks). The shared `ethInitEmac()` in
+> `src/platform/esp32/platform_esp32.cpp` drives both: an `#ifdef CONFIG_IDF_TARGET_ESP32S31` block
+> selects the RGMII interface and sets the CoreBoard's data/clock pins from the table above, then
+> shares the driver-install / netif / DHCP tail with the RMII path. The board's default eth config
+> (`ethConfigDefault` in `platform_config.h`) uses PHY type `ethYt8531` (PHY address auto-detected),
+> driven by the generic IEEE-802.3 PHY ctor since the YT8531 is a standard-register PHY.
+>
+> **RGMII 125 MHz Tx clock = APLL.** The EMAC needs a clean 125 MHz Tx clock; the default MPLL is
+> owned by PSRAM (400 MHz, no integer path to 125) and CPLL can't hit it on the 40 MHz XTAL grid, so
+> `sdkconfig.defaults.esp32s31` sets `CONFIG_ETH_EMAC_RGMII_TX_CLK_SRC_APLL` — the fractional PLL
+> synthesises 125 MHz exactly.
 
 ## Other onboard features
 
