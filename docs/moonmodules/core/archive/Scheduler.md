@@ -31,4 +31,4 @@ Child modules run in their declared order within the parent. Top-level modules a
 
 ## Source
 
-[Scheduler.cpp](../../../src/core/Scheduler.cpp) · [Scheduler.h](../../../src/core/Scheduler.h)
+[Scheduler.cpp](../../../../src/core/Scheduler.cpp) · [Scheduler.h](../../../../src/core/Scheduler.h)

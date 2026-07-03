@@ -4,9 +4,9 @@
 
 Browser-driven WiFi provisioning over USB-serial, using the [Improv-WiFi](https://www.improv-wifi.com/) protocol. Bridges credentials from a Chrome / Edge / Opera tab — or from `scripts/build/improv_provision.py` for rack/CI use — into `NetworkModule::setWifiCredentials`, which writes the same buffers the AP-fallback UI flow uses. The protocol parser + UART task live in the platform layer; this module is the status surface that polls a ready-flag and bridges credentials to NetworkModule on the scheduler thread.
 
-A code-wired child of NetworkModule. The wiring calls `markWiredByCode()` so the persistence-apply step preserves the child across reboots even on devices whose `Network.json` predates the addition (see [Persistence — code-wired children](../../architecture.md#persistence)).
+A code-wired child of NetworkModule. The wiring calls `markWiredByCode()` so the persistence-apply step preserves the child across reboots even on devices whose `Network.json` predates the addition (see [Persistence — code-wired children](../../../architecture.md#persistence)).
 
-The browser flow runs immediately after a Web Serial flash (ESP Web Tools recognises Improv-capable firmware and offers a "Connect to Wi-Fi?" dialog automatically). The CLI flow uses [`scripts/build/improv_provision.py`](../../../scripts/build/improv_provision.py) over the same USB cable for headless or rack provisioning.
+The browser flow runs immediately after a Web Serial flash (ESP Web Tools recognises Improv-capable firmware and offers a "Connect to Wi-Fi?" dialog automatically). The CLI flow uses [`scripts/build/improv_provision.py`](../../../../scripts/build/improv_provision.py) over the same USB cable for headless or rack provisioning.
 
 ## Controls
 
@@ -81,4 +81,4 @@ done
 
 ## Source
 
-[ImprovProvisioningModule.h](../../../src/core/ImprovProvisioningModule.h)
+[ImprovProvisioningModule.h](../../../../src/core/ImprovProvisioningModule.h)

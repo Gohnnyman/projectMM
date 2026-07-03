@@ -24,4 +24,4 @@ The bus-scan-as-a-feature mirrors MoonLight's I2C scan diagnostic; the seam name
 
 ## Source
 
-[I2cScanModule.h](../../../src/core/I2cScanModule.h)
+[I2cScanModule.h](../../../../src/core/I2cScanModule.h)

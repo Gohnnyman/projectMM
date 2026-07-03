@@ -12,7 +12,7 @@ namespace mm {
 /// or network — and is user-add/deletable (the firmware is the same whether or not the device has
 /// the peripheral wired). It covers both readers and writers: gyro/IMU + mic/line-in (in),
 /// relay/GPIO + Home Assistant push (out), and modules that do both. Read-vs-write is NOT a role
-/// distinction — direction and core affinity are per-module decisions — so one role spans the
+/// distinction — direction is a per-module decision, not a role split — so one role spans the
 /// category, justified by that named roster, not one member (core grows slower than the domain,
 /// see CLAUDE.md).
 enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer, Peripheral };

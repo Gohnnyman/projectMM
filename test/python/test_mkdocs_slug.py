@@ -12,8 +12,13 @@ re-hand-rolled, the unicode / consecutive-separator cases below catch the drift.
 import sys
 from pathlib import Path
 
-import markdown
-from markdown.extensions.toc import slugify
+import pytest
+
+# `markdown` ships with MkDocs but isn't in the base test env — skip cleanly rather
+# than error collection where it's absent. CI installs it (--with markdown) so the
+# test actually runs there; a contributor without it just skips this one file.
+markdown = pytest.importorskip("markdown")
+from markdown.extensions.toc import slugify  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts" / "docs"))

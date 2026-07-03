@@ -30,9 +30,9 @@ namespace mm {
 /// multi-device sync a leader synchronizes this clock across devices; no frame counter
 /// is needed.
 ///
-/// **Core affinity:** each top-level module declares a core affinity (0 or 1 on ESP32)
-/// and the scheduler pins the module's task to that core. Child modules inherit the
-/// parent's core. On single-core or desktop systems, core affinity is ignored.
+/// **Execution model:** `tick()` runs every top-level module inline, in one loop, in
+/// declared order; each module then drives its own children. There is no per-module
+/// task and no core-affinity field — a single render loop, not a task-per-module fan-out.
 ///
 /// **Module ordering:** child modules run in their declared order within the parent,
 /// and top-level modules also run in declared order. The UI supports reordering, backed

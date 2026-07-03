@@ -1,6 +1,6 @@
 # Layouts
 
-![Layouts controls](../../assets/core/Layouts.png)
+![Layouts controls](../../../assets/core/Layouts.png)
 
 Top-level container for one or more layouts. Shared by every layer in the Layers container — defines the physical light topology of the installation.
 
@@ -24,8 +24,8 @@ Layout children are reordered by drag-and-drop in the UI (`POST /api/modules/<na
 
 ## Rebuild propagation
 
-A layout control change propagates to every layer (LUT rebuild) and to the Drivers container (output-buffer reallocation) via the mechanism in [architecture.md § Rebuild propagation](../../architecture.md#event-triggering-between-modules).
+A layout control change propagates to every layer (LUT rebuild) and to the Drivers container (output-buffer reallocation) via the mechanism in [architecture.md § Rebuild propagation](../../../architecture.md#event-triggering-between-modules).
 
 ## Source
 
-[Layouts.h](../../../src/light/layouts/Layouts.h)
+[Layouts.h](../../../../src/light/layouts/Layouts.h)

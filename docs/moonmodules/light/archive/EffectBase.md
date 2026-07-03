@@ -16,7 +16,7 @@ Animation is driven by **elapsed millis**, not frame count. This ensures consist
 
 ## Dimensions and auto-extrusion
 
-`dimensions()` (D3 default; the `.h` documents the per-axis contract) is a claim about which axes the effect *iterates*, not what the layer has — so `loop()` must read `width()`/`height()`/`depth()` at frame time and never hardcode a bound. The `dim` int (1/2/3) is emitted in `/api/types`; the UI derives the 📏/🟦/🧊 chip from it, so it isn't repeated in each module's `tags()`. See [architecture.md § Effects](../../architecture.md#effects) for the live declaration per shipped effect, and `unit_Layer_extrude.cpp` for the pinned contract tests.
+`dimensions()` (D3 default; the `.h` documents the per-axis contract) is a claim about which axes the effect *iterates*, not what the layer has — so `loop()` must read `width()`/`height()`/`depth()` at frame time and never hardcode a bound. The `dim` int (1/2/3) is emitted in `/api/types`; the UI derives the 📏/🟦/🧊 chip from it, so it isn't repeated in each module's `tags()`. See [architecture.md § Effects](../../../architecture.md#effects) for the live declaration per shipped effect, and `unit_Layer_extrude.cpp` for the pinned contract tests.
 
 ## Prior art
 
@@ -28,4 +28,4 @@ Animation is driven by **elapsed millis**, not frame count. This ensures consist
 
 ## Source
 
-[EffectBase.h](../../../src/light/effects/EffectBase.h)
+[EffectBase.h](../../../../src/light/effects/EffectBase.h)

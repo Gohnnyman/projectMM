@@ -2,7 +2,7 @@
 
 Embedded HTTP server + WebSocket. Serves the web UI and the REST API that backs it.
 
-> This page is the end-user / API-integrator view of the module. The C++ interface lives in [`src/core/HttpServerModule.h`](../../../src/core/HttpServerModule.h) (+ `.cpp`); facts visible there (private helpers, member layout, lifecycle methods) aren't repeated here. See [CLAUDE.md § Documentation](../../../CLAUDE.md) for the rule.
+> This page is the end-user / API-integrator view of the module. The C++ interface lives in [`src/core/HttpServerModule.h`](../../../../src/core/HttpServerModule.h) (+ `.cpp`); facts visible there (private helpers, member layout, lifecycle methods) aren't repeated here. See [CLAUDE.md § Documentation](../../../../CLAUDE.md) for the rule.
 
 Controls: `port` (uint16_t, default 8080 on desktop / 80 on ESP32).
 
@@ -58,7 +58,7 @@ All JSON responses stream through a `JsonSink` — no fixed-buffer ceiling, so a
   - **Resumable buffered send** — `sendBufferedFrame(header, headerLen, body, bodyLen)`: for a payload that lives in a **stable caller-owned buffer** (PreviewDriver's full-res colour frame, whose body is the driver buffer). The header is copied; `body` is a pointer the caller keeps stable. One WS message is then **drained a memory-adaptive chunk per client per `loop20ms`** via `writeSome` — so a large frame is delivered over wall-clock ticks **without spinning any loop**, yet stays one atomic WS message to the browser. One send in flight at a time: a new `sendBufferedFrame` while one is active is **dropped** (newest-wins backpressure → the producer reads "link busy"). `bufferedSendIdle()` reports when the previous frame finished draining; `cancelBufferedSend()` abandons an in-flight send before its `body` is freed (a geometry rebuild). The chunk size comes from `maxAllocBlock()` so a tight board takes small bites (bounded tick cost) and a roomy board drains fast.
 - **Client → server:** none. Mutations go through the REST API.
 
-Both paths are domain-neutral (the server doesn't interpret the bytes). The resumable drain runs on **`loop20ms` (the 20 ms transport-poll), deliberately NOT the per-render-tick `loop()`** — pushing preview bytes to the socket must not be charged to the LED render hot path. The LED path (the driver output) is never delayed by the preview; the preview frame rate is instead bounded by the 20 ms drain cadence (a few fps at large full-res frames, higher for small grids), which is the right trade since the preview is a *view* and the LEDs are not. The resumable path lets a 128²+ full-res frame stream on a slow link without stalling the device: the effective frame rate self-limits (the next frame waits for `bufferedSendIdle()`), so the link sheds frame rate gracefully instead of freezing. When the two-core render/transport split lands ([architecture.md § Parallelism](../../architecture.md#parallelism)) the drain moves to the transport core and the cadence limit lifts — `loop20ms` is already that seam.
+Both paths are domain-neutral (the server doesn't interpret the bytes). The resumable drain runs on **`loop20ms` (the 20 ms transport-poll), deliberately NOT the per-render-tick `loop()`** — pushing preview bytes to the socket must not be charged to the LED render hot path. The LED path (the driver output) is never delayed by the preview; the preview frame rate is instead bounded by the 20 ms drain cadence (a few fps at large full-res frames, higher for small grids), which is the right trade since the preview is a *view* and the LEDs are not. The resumable path lets a 128²+ full-res frame stream on a slow link without stalling the device: the effective frame rate self-limits (the next frame waits for `bufferedSendIdle()`), so the link sheds frame rate gracefully instead of freezing. When the two-core render/transport split lands ([architecture.md § Parallelism](../../../architecture.md#parallelism)) the drain moves to the transport core and the cadence limit lifts — `loop20ms` is already that seam.
 
 ## WLED-compatibility shim
 
@@ -83,4 +83,4 @@ The WLED-compatibility shim's exact field requirements were reverse-engineered f
 
 ## Source
 
-[HttpServerModule.cpp](../../../src/core/HttpServerModule.cpp) · [HttpServerModule.h](../../../src/core/HttpServerModule.h)
+[HttpServerModule.cpp](../../../../src/core/HttpServerModule.cpp) · [HttpServerModule.h](../../../../src/core/HttpServerModule.h)

@@ -12,7 +12,7 @@ Semaphores are expensive (~150 bytes on ESP32), so prefer lock-free patterns: an
 
 ## Tests
 
-[Unit tests: Buffer](../../tests/unit-tests.md#buffer) — allocate, clear, move semantics, double-free safety, zero-size edge case.
+[Unit tests: Buffer](../../../tests/unit-tests.md#buffer) — allocate, clear, move semantics, double-free safety, zero-size edge case.
 
 ## Prior art
 
@@ -22,4 +22,4 @@ Raw `uint8_t*` buffer, sized by `channelsPerLight * nrOfLights`. Supports RGB, R
 
 ## Source
 
-[Buffer.h](../../../src/light/layers/Buffer.h)
+[Buffer.h](../../../../src/light/layers/Buffer.h)

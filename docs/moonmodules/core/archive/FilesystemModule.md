@@ -1,6 +1,6 @@
 # FilesystemModule
 
-![FilesystemModule controls](../../assets/core/FilesystemModule.png)
+![FilesystemModule controls](../../../assets/core/FilesystemModule.png)
 
 Persists control values to flash so settings survive a reboot. Always loaded, runs first in the scheduler so its load hook fires before any other module's `setup()`.
 
@@ -85,4 +85,4 @@ No files exist → load is a no-op. Modules run with their default member-initia
 
 ## Source
 
-[FilesystemModule.cpp](../../../src/core/FilesystemModule.cpp) · [FilesystemModule.h](../../../src/core/FilesystemModule.h)
+[FilesystemModule.cpp](../../../../src/core/FilesystemModule.cpp) · [FilesystemModule.h](../../../../src/core/FilesystemModule.h)

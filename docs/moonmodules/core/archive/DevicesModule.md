@@ -1,6 +1,6 @@
 # DevicesModule
 
-![DevicesModule controls](../../assets/core/Devices%20module.png)
+![DevicesModule controls](../../../assets/core/Devices%20module.png)
 
 A **core**, domain-neutral module that discovers other devices on the LAN, identifies what each is, and presents them as a browsable list. It focuses on *all* devices on the network (including this one, marked as self), not on the host's own state — so its card looks the same on every projectMM instance, ESP32 or PC. Light-domain modules consume the device list; the discovery machinery itself stays domain-neutral.
 
@@ -16,14 +16,14 @@ Discovery state ("idle", "N devices", "N devices (cached)") is reported through 
 
 Discovery is **passive UDP**: each device **broadcasts** a small presence packet on a well-known port, and this module **listens** (a bound `UdpSocket`, drained non-blocking each tick). No subnet sweep, no per-host probe, **no mDNS query** — a device appears when its broadcast arrives and ages out when it stops.
 
-- **Broadcast.** Every ~10 s (`kBroadcastEverySec`) this module broadcasts a **44-byte WLED-compatible presence packet** (see [`WledPacket`](../../../src/core/WledPacket.h)) to `255.255.255.255:65506`: `token=255, id=1`, our IP, deviceName, board-type byte — plus a projectMM marker stamped into the version field (a region no WLED validator reads). So a peer projectMM device recognises us, **and** a real WLED / WLED app browsing 65506 lists us too. Discovery-only: a WLED that receives it shows us in its instances list, it does **not** sync to it (sync/control is a separate WLED protocol on a port WLED never shares).
-- **Listen.** Each `loop1s` tick drains the bound listener with non-blocking `recvFrom` (bounded per tick) and classifies each datagram through the plugins. Never blocks the tick — the hot-path-safe replacement for the former mDNS query, which destabilised our own advertise (a PTR query for a service we also host exhausts the IDF mDNS pool — see the [discovery-transport lesson](../../history/decisions.md)).
+- **Broadcast.** Every ~10 s (`kBroadcastEverySec`) this module broadcasts a **44-byte WLED-compatible presence packet** (see [`WledPacket`](../../../../src/core/WledPacket.h)) to `255.255.255.255:65506`: `token=255, id=1`, our IP, deviceName, board-type byte — plus a projectMM marker stamped into the version field (a region no WLED validator reads). So a peer projectMM device recognises us, **and** a real WLED / WLED app browsing 65506 lists us too. Discovery-only: a WLED that receives it shows us in its instances list, it does **not** sync to it (sync/control is a separate WLED protocol on a port WLED never shares).
+- **Listen.** Each `loop1s` tick drains the bound listener with non-blocking `recvFrom` (bounded per tick) and classifies each datagram through the plugins. Never blocks the tick — the hot-path-safe replacement for the former mDNS query, which destabilised our own advertise (a PTR query for a service we also host exhausts the IDF mDNS pool — see the [discovery-transport lesson](../../../history/decisions.md)).
 
 **mDNS is advertise-only.** `mdnsInit` still announces `_http._tcp`+`mm=1` and `_wled._tcp`+`mac=` so the **native WLED app + Home Assistant discover us** (they only browse mDNS — UDP can't replace that). But this module never *queries* mDNS; all discovery is UDP.
 
 ### Plugins (the interop seam)
 
-Foreign ecosystems hook in as **plugins**, not hardcoded branches — the adapter pattern (cf. `ListSource`, `ModuleFactory`). A [`DevicePlugin`](../../../src/core/DevicePlugin.h) declares the UDP port it listens on (`discoveryPort()`) and turns a received datagram into a `Device` kind (`classifyPacket`):
+Foreign ecosystems hook in as **plugins**, not hardcoded branches — the adapter pattern (cf. `ListSource`, `ModuleFactory`). A [`DevicePlugin`](../../../../src/core/DevicePlugin.h) declares the UDP port it listens on (`discoveryPort()`) and turns a received datagram into a `Device` kind (`classifyPacket`):
 
 | Plugin | Claims (on UDP 65506) | Classifies as |
 |---|---|---|
@@ -36,7 +36,7 @@ The plugin classification is pure and host-unit-tested (`unit_DeviceIdentify.cpp
 
 ### Out-of-band devices (Hue bridge)
 
-A device not discovered by UDP presence — a Philips Hue bridge, found over HTTP by a [HueDriver](../light/drivers/HueDriver.md) — registers itself through `upsertHueBridge(ip, name, colourCount)`, reached via `active()` (the boot-instance static accessor, the `AudioModule::latestFrame()` seam shape). The bridge then lists like any device, with a `colour` field (its colour-light count, for sizing a layout). This keeps the module domain-neutral: the Hue HTTP/pairing lives entirely in the light-domain driver; the core only stores the resulting row. (`unit_DevicesModule_hue.cpp` pins the row + its persistence round trip.)
+A device not discovered by UDP presence — a Philips Hue bridge, found over HTTP by a [HueDriver](../../light/drivers/HueDriver.md) — registers itself through `upsertHueBridge(ip, name, colourCount)`, reached via `active()` (the boot-instance static accessor, the `AudioModule::latestFrame()` seam shape). The bridge then lists like any device, with a `colour` field (its colour-light count, for sizing a layout). This keeps the module domain-neutral: the Hue HTTP/pairing lives entirely in the light-domain driver; the core only stores the resulting row. (`unit_DevicesModule_hue.cpp` pins the row + its persistence round trip.)
 
 ### Age-out
 
@@ -48,11 +48,11 @@ Because the presence broadcast and the mDNS advertise are WLED-shaped, a project
 
 **In WLED's own "Sync interfaces" instances list** — a real WLED lists every projectMM board it heard on UDP 65506. (The `undefined` columns are WLED-sync fields projectMM doesn't fill — the presence packet carries identity, not the full WLED sync state; listing is what we're after.)
 
-![projectMM devices in WLED's instances list](../../assets/core/Wled%20discovers%20projectMM.png)
+![projectMM devices in WLED's instances list](../../../assets/core/Wled%20discovers%20projectMM.png)
 
 **In the native WLED app** (iOS / Android) — discovered via the mDNS `_wled._tcp` advertise, validated via the `/json/info` shim, with live colour + a working brightness slider over the `/ws` WebSocket. See [HttpServerModule § WLED-compatibility shim](HttpServerModule.md#wled-compatibility-shim) for the wire contract (reverse-engineered from the [WLED-Android](https://github.com/Moustachauve/WLED-Android) client).
 
-![projectMM devices in the native WLED app](../../assets/core/WLED%20Native%20discovers%20projectMM.jpeg)
+![projectMM devices in the native WLED app](../../../assets/core/WLED%20Native%20discovers%20projectMM.jpeg)
 
 ## Transport boundary (discovery vs commands)
 
@@ -74,9 +74,9 @@ The `devices` List serializes (via [Control](Control.md)'s `ControlType::List`) 
 
 - **mDNS-SD / DNS-SD (Bonjour, Avahi)** — the industry-standard service-discovery pattern this module uses: announce a service, browse for it. WLED, ESPHome, Home Assistant, Hue all speak it.
 - **WLED** — the `_wled._tcp` service it advertises (and that the native WLED iOS/Android/Desktop apps browse) is the interop target the `WledPlugin` + the `_wled._tcp` advertise serve.
-- **MoonLight** ([`ModuleDevices.h`](https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Modules/ModuleDevices.h)) uses a UDP presence broadcast for device discovery; DevicesModule carries that idea forward — the 44-byte WLED-compatible packet on UDP 65506 (see [`WledPacket`](../../../src/core/WledPacket.h)), written fresh against our architecture. mDNS stays advertise-only, for the foreign apps that discover *us* over it (the WLED native app, Home Assistant).
+- **MoonLight** ([`ModuleDevices.h`](https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Modules/ModuleDevices.h)) uses a UDP presence broadcast for device discovery; DevicesModule carries that idea forward — the 44-byte WLED-compatible packet on UDP 65506 (see [`WledPacket`](../../../../src/core/WledPacket.h)), written fresh against our architecture. mDNS stays advertise-only, for the foreign apps that discover *us* over it (the WLED native app, Home Assistant).
 - The web installer's `web-installer/devices.js` "Your devices" list is the prior art for the device record shape (name / url / type).
 
 ## Source
 
-[DevicesModule.h](../../../src/core/DevicesModule.h) · [DevicePlugin.h](../../../src/core/DevicePlugin.h)
+[DevicesModule.h](../../../../src/core/DevicesModule.h) · [DevicePlugin.h](../../../../src/core/DevicePlugin.h)

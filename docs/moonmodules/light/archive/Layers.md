@@ -1,6 +1,6 @@
 # Layers
 
-![Layers controls](../../assets/core/Layers.png)
+![Layers controls](../../../assets/core/Layers.png)
 
 Top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream.
 
@@ -20,4 +20,4 @@ MoonLight's `PhysicalLayer` runs N `VirtualLayer`s and composites their buffers 
 
 ## Source
 
-[Layers.h](../../../src/light/layers/Layers.h)
+[Layers.h](../../../../src/light/layers/Layers.h)

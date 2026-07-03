@@ -28,7 +28,7 @@ Naming: `setIdentity()` / `hasLUT()` are used rather than a "one-to-one" flag be
 
 ## Storage
 
-Uses `nrOfLightsType` typedef (see [architecture.md § 3D from the start](../../architecture.md#3d-from-the-start)): `uint16_t` on no-PSRAM, `uint32_t` on PSRAM.
+Uses `nrOfLightsType` typedef (see [architecture.md § 3D from the start](../../../architecture.md#3d-from-the-start)): `uint16_t` on no-PSRAM, `uint32_t` on PSRAM.
 
 CSR (Compressed Sparse Row) format: two arrays — `offsets[logicalCount + 1]` stores where each entry's destinations start, `destinations[]` stores the flat list of physical indices. For entry `i`, destinations are `destinations[offsets[i] .. offsets[i+1])`.
 
@@ -48,4 +48,4 @@ Memory-optimal union. 2 bytes (no-PSRAM) or 4 bytes (PSRAM). Map type stored IN 
 
 ## Source
 
-[MappingLUT.h](../../../src/light/layers/MappingLUT.h)
+[MappingLUT.h](../../../../src/light/layers/MappingLUT.h)

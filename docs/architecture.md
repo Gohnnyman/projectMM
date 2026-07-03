@@ -109,7 +109,7 @@ ModuleFactory is core infrastructure ([`src/core/ModuleFactory.h`](../src/core/M
 
 **Self-reporting.** Every MoonModule reports its own footprint and cost: `classSize()` (the `sizeof` of the class instance, captured at registration), `dynamicBytes()` (heap allocated during `onBuildState`), and `loopTimeUs()` (average time its `loop` took, accumulated per tick). These surface in `/api/system`, console output, and scenario tests: the same numbers for an effect, a driver, or a system service, because they're a base-class feature, not a light-domain one.
 
-Each MoonModule is documented in [`docs/moonmodules/`](moonmodules/) as it is built.
+Each MoonModule has two documentation surfaces under [`docs/moonmodules/`](moonmodules/): an end-user **summary page** — one 4-column table row in its group's page (effects/modifiers/layouts/drivers, or core/light UI/supporting) — and a **generated technical page** built from the header's `///` comments. See [coding-standards § Documentation model](coding-standards.md#documentation-model) for the full model.
 
 ## Controls
 

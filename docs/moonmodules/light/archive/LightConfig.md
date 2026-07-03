@@ -25,7 +25,7 @@ These operate on individual channel values, not on a struct. They live in core (
 
 ## Tests
 
-[Unit tests: Color](../../tests/unit-tests.md#color) — hsvToRgb at cardinal hues, white/black edge cases, scale8, constexpr verification.
+[Unit tests: Color](../../../tests/unit-tests.md#color) — hsvToRgb at cardinal hues, white/black edge cases, scale8, constexpr verification.
 
 ## Prior art
 
@@ -35,4 +35,4 @@ These operate on individual channel values, not on a struct. They live in core (
 
 ## Source
 
-Channel model: [light_types.h](../../../src/light/light_types.h). Colour math: [color.h](../../../src/core/color.h).
+Channel model: [light_types.h](../../../../src/light/light_types.h). Colour math: [color.h](../../../../src/core/color.h).

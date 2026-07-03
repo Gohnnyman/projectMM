@@ -1,6 +1,6 @@
 # NetworkModule
 
-![NetworkModule controls](../../assets/core/NetworkModule.png)
+![NetworkModule controls](../../../assets/core/NetworkModule.png)
 
 Manages all device connectivity with automatic fallback: Ethernet → WiFi STA → WiFi AP. One MoonModule, one UI card — the user sees "Network", not three separate technologies.
 
@@ -28,7 +28,7 @@ When a higher-priority connection becomes available, lower ones are torn down to
 - When Static: `ip`, `gateway`, `subnet`, `dns` (ipv4 controls — 4 bytes of storage each, not 16-char strings; the wire shape is still a dotted-quad string). Shown dynamically via onBuildControls.
 - `mDNS` (bool) — enable/disable mDNS responder
 
-**Ethernet PHY/pin controls** (only on builds with an Ethernet driver — `platform::hasEthernet`). The PHY *driver* is compiled into the firmware per chip (internal-EMAC RMII on classic/P4, W5500 SPI on the S3); these controls pick *which* PHY a board uses and *on which pins* — runtime config, set per board in [`deviceModels.json`](../../../web-installer/deviceModels.json) (→ `setEthConfig` → `ethInit`), seeded from the per-chip default in `platform_config.h`. `ethType` is the switch: with it at 0 no pin rows show; choosing a type reveals only that type's pins (RMII rows for LAN8720/IP101, SPI rows for W5500). A W5500 change applies **live** (the SPI driver tears down + re-inits, no reboot); an RMII change saves and applies on the next boot (status hints "restart to apply"). See [architecture.md § Config provenance](../../architecture.md#config-provenance-mcu-devicemodel).
+**Ethernet PHY/pin controls** (only on builds with an Ethernet driver — `platform::hasEthernet`). The PHY *driver* is compiled into the firmware per chip (internal-EMAC RMII on classic/P4, W5500 SPI on the S3); these controls pick *which* PHY a board uses and *on which pins* — runtime config, set per board in [`deviceModels.json`](../../../../web-installer/deviceModels.json) (→ `setEthConfig` → `ethInit`), seeded from the per-chip default in `platform_config.h`. `ethType` is the switch: with it at 0 no pin rows show; choosing a type reveals only that type's pins (RMII rows for LAN8720/IP101, SPI rows for W5500). A W5500 change applies **live** (the SPI driver tears down + re-inits, no reboot); an RMII change saves and applies on the next boot (status hints "restart to apply"). See [architecture.md § Config provenance](../../../architecture.md#config-provenance-mcu-devicemodel).
 - `ethType` (select) — PHY type dropdown, options `None` / `LAN8720` / `IP101` / `W5500` (stored as the index 0..3, matching the `EthPhyType` enum: 0 = none, 1 = LAN8720 RMII, 2 = IP101 RMII, 3 = W5500 SPI).
 - `ethPhyAddr` (pin) — SMI/PHY address (typically 0 or 1).
 - `ethRstGpio` (pin) — PHY reset GPIO (−1 = none / module self-resets).
@@ -67,7 +67,7 @@ The web installer reads this token from the device's boot serial log right after
 
 ## Ethernet
 
-Ethernet init is part of `NetworkModule::setup()`, which calls `syncEthConfig()` (pushes the eth controls above into `platform::setEthConfig`) then `platform::ethInit()`. The PHY type and pins are **runtime** config (the `ethType` + pin controls above), not compile-time — see the controls list and [architecture.md § Config provenance](../../architecture.md#config-provenance-mcu-devicemodel).
+Ethernet init is part of `NetworkModule::setup()`, which calls `syncEthConfig()` (pushes the eth controls above into `platform::setEthConfig`) then `platform::ethInit()`. The PHY type and pins are **runtime** config (the `ethType` + pin controls above), not compile-time — see the controls list and [architecture.md § Config provenance](../../../architecture.md#config-provenance-mcu-devicemodel).
 
 Which Ethernet *driver* is compiled in is per chip (the firmware variant): classic/P4 carry the internal-EMAC RMII driver, the S3 the W5500 SPI driver; a build with no Ethernet driver (`MM_NO_ETH`) stubs `ethInit()` to return false. When no PHY responds (no cable, or no hardware), `ethInit()` returns false and the cascade falls through to WiFi STA → AP — no GPIO grab, no hang.
 
@@ -170,4 +170,4 @@ The `ssid_` / `password_` member buffers still exist (unconditional struct layou
 
 ## Source
 
-[NetworkModule.h](../../../src/core/NetworkModule.h)
+[NetworkModule.h](../../../../src/core/NetworkModule.h)

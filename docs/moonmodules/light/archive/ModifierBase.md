@@ -20,7 +20,7 @@ Because the build walks physical lights, fan-out (one logical cell driving N phy
 
 ## Affine modifiers and the matrix reference
 
-Most modifiers are **non-affine** (a mask is a predicate, a tile is modulo) and express their fold directly. [RotateModifier](modifiers/modifiers.md) is the exception and the codebase's **transform-matrix reference**: rotation is the canonical affine transform, written as an explicit integer 2×2 rotation matrix in `modifyLive`. A future affine "Transform" modifier (translate+scale+rotate+shear in one) would compose its matrix the same way and apply it through the same hook — the fold interface hosts a matrix-backed modifier with no change.
+Most modifiers are **non-affine** (a mask is a predicate, a tile is modulo) and express their fold directly. [RotateModifier](../modifiers/modifiers.md) is the exception and the codebase's **transform-matrix reference**: rotation is the canonical affine transform, written as an explicit integer 2×2 rotation matrix in `modifyLive`. A future affine "Transform" modifier (translate+scale+rotate+shear in one) would compose its matrix the same way and apply it through the same hook — the fold interface hosts a matrix-backed modifier with no change.
 
 ## Prior art
 
@@ -28,4 +28,4 @@ The mapping bake is the textbook image-warping pattern (precompute a coordinate 
 
 ## Source
 
-[ModifierBase.h](../../../src/light/modifiers/ModifierBase.h) — the hook contract. The Layer-side fold build (physical→logical counting-sort, the live pass) lives in [Layer.h](../../../src/light/layers/Layer.h).
+[ModifierBase.h](../../../../src/light/modifiers/ModifierBase.h) — the hook contract. The Layer-side fold build (physical→logical counting-sort, the live pass) lives in [Layer.h](../../../../src/light/layers/Layer.h).

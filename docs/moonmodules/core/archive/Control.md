@@ -30,7 +30,7 @@ Notes on the non-obvious ones (the rest are self-describing):
 - **Password** serializes XOR-obfuscated + base64 over `/api/state`, not plaintext — a first line of defence, trivially reversible by design (the XOR key is shared with `app.js`), not encryption.
 - **Int16** is for coordinate-style values where negatives are legal. Default bounds are the full int16 range; pass explicit bounds for a tighter one. The UI renders it as a slider (an unbounded int16 falls back to a ±percentage slider).
 - **Pin** is a GPIO number — `int8_t` (one byte; a GPIO never exceeds ~54), `−1` = unused/default. Distinct from Int16 so the UI renders a plain **number input** (a GPIO has no meaningful range to drag) and to keep the byte. `min`/`max` are the valid-GPIO span, used only as a server-side write-clamp. [NetworkModule](NetworkModule.md)'s eth pin controls are the first users; LED-driver pins follow.
-- **ReadOnlyInt** stores 1 byte + a unit suffix instead of a ~10-byte string — see [coding-standards § Prefer integers](../../coding-standards.md#prefer-integers-store-values-in-their-native-shape). [NetworkModule](NetworkModule.md)'s `rssi` (`-58 dBm`) and `txPower` (`19 dBm`) are the first users.
+- **ReadOnlyInt** stores 1 byte + a unit suffix instead of a ~10-byte string — see [coding-standards § Prefer integers](../../../coding-standards.md#prefer-integers-store-values-in-their-native-shape). [NetworkModule](NetworkModule.md)'s `rssi` (`-58 dBm`) and `txPower` (`19 dBm`) are the first users.
 - **IPv4** stores 4 bytes but converts to/from the dotted-quad string at the JSON boundary (`parseDottedQuad`/`formatDottedQuad` in `Control.h`, used by API, persistence, and scenario set-control). Used for [NetworkModule](NetworkModule.md)'s static-IP fields.
 
 No RGB color-picker type — effects use a palette index (uint8_t) instead. `float` and `Coord3D` exist but are used minimally; prefer uint8_t.
@@ -45,7 +45,7 @@ Control values persist via [FilesystemModule](FilesystemModule.md), which overla
 
 ## Tests
 
-[Unit tests: MoonModule](../../tests/unit-tests.md#moonmodule) — control binding by reference, pointer read/write, clear and rebuild.
+[Unit tests: MoonModule](../../../tests/unit-tests.md#moonmodule) — control binding by reference, pointer read/write, clear and rebuild.
 
 ## Prior art
 
@@ -55,4 +55,4 @@ Binds via `reinterpret_cast<uintptr_t>(&variable)`; UI types "slider"/"select"/"
 
 ## Source
 
-[Control.cpp](../../../src/core/Control.cpp) · [Control.h](../../../src/core/Control.h)
+[Control.cpp](../../../../src/core/Control.cpp) · [Control.h](../../../../src/core/Control.h)

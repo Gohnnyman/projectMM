@@ -1,6 +1,6 @@
 # Drivers
 
-![Drivers controls](../../assets/light/drivers/Drivers.png)
+![Drivers controls](../../../assets/light/drivers/Drivers.png)
 
 Top-level container for one or more drivers. The consumer side of the pipeline — owns the shared output buffer (when memory allows) and performs blend+map from every layer's buffer into it each frame.
 
@@ -10,7 +10,7 @@ Top-level container for one or more drivers. The consumer side of the pipeline �
 
 The shared output buffer is necessary because blend+map writes to arbitrary physical positions (via LUT) — the output is not filled sequentially. A driver cannot read chunk-by-chunk until the full buffer is populated.
 
-Exception: when exactly one layer is enabled AND its mapping is 1:1 unshuffled (no LUT — grid layout, no serpentine), Drivers skips its own buffer and lets drivers read directly from the layer's buffer (the zero-copy fast path, at the cost of parallelism). See [architecture.md § Parallelism](../../architecture.md#parallelism).
+Exception: when exactly one layer is enabled AND its mapping is 1:1 unshuffled (no LUT — grid layout, no serpentine), Drivers skips its own buffer and lets drivers read directly from the layer's buffer (the zero-copy fast path, at the cost of parallelism). See [architecture.md § Parallelism](../../../architecture.md#parallelism).
 
 It uses the same `Buffer` type a Layer does, sized by the Layouts container.
 
@@ -28,7 +28,7 @@ The Drivers container owns the shared output-correction state and exposes two co
 | `lightPreset` | select | The physical wire format: channel order and whether the light is RGBW. Options: `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`, `GRBW`. Defaults to `GRB` — the WS2812/SK6812 wire order, so a strip shows correct colours out of the box (PreviewDriver reads the RGB source buffer directly and is unaffected). RGBW presets make each driver emit 4 channels per light with white derived as `min(R,G,B)` from the (brightness-scaled) RGB. |
 | `palette` | select | The **global active colour palette** (`Rainbow`, `Party`, `Lava`, `Ocean`, …). Palette-driven effects read it via `Palettes::active()` and colour their pixels through `colorFromPalette(index)`, so changing this recolours every such effect live. The select index expands the chosen gradient into the active 16-entry palette on `onUpdate` (cheap, off the hot path). Drivers owns this as a global render parameter, alongside `brightness` and `lightPreset`. Palette model + names follow FastLED's, credited as prior art; implementation in `src/light/Palette.h`. |
 
-The state lives on `Correction` (`src/light/drivers/Correction.h`): a brightness LUT, channel-order table, output channel count, derive-white flag. `Drivers::onUpdate` rebuilds it on a `brightness`/`lightPreset` change and hands each child a `const Correction*`. Every driver sees the same composited output; per-driver layer assignment (different drivers reading different layers) is a [backlog](../../backlog/README.md) item.
+The state lives on `Correction` (`src/light/drivers/Correction.h`): a brightness LUT, channel-order table, output channel count, derive-white flag. `Drivers::onUpdate` rebuilds it on a `brightness`/`lightPreset` change and hands each child a `const Correction*`. Every driver sees the same composited output; per-driver layer assignment (different drivers reading different layers) is a [backlog](../../../backlog/README.md) item.
 
 ## Per-driver source window (`start` / `count`)
 
@@ -51,4 +51,4 @@ Owns `channelsD` (display buffer). `compositeLayers()` maps virtualChannels → 
 
 ## Source
 
-[Drivers.h](../../../src/light/drivers/Drivers.h)
+[Drivers.h](../../../../src/light/drivers/Drivers.h)

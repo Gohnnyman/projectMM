@@ -43,8 +43,7 @@ class Scheduler;
 /// deliberately NOT the per-render-tick `loop()`, so pushing preview bytes to the socket is
 /// never charged to the LED render hot path. The LED output is never delayed by the preview;
 /// the preview frame rate is instead bounded by the 20 ms drain cadence, which is the right
-/// trade since the preview is a view and the LEDs are not. When the two-core render/transport
-/// split lands, the drain moves to the transport core and the cadence limit lifts.
+/// trade since the preview is a view and the LEDs are not.
 ///
 /// **WLED-compatibility shim:** a small set of WLED-shaped messages make a projectMM device
 /// appear in — and be controlled from — the native WLED apps (iOS / Android) and Home

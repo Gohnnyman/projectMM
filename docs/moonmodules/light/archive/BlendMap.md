@@ -12,4 +12,4 @@ A dense-grid layer has no LUT, so its buffer blends 1:1 (source index = physical
 
 ## Source
 
-[BlendMap.h](../../../src/light/layers/BlendMap.h)
+[BlendMap.h](../../../../src/light/layers/BlendMap.h)
