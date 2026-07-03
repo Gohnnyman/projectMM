@@ -66,4 +66,4 @@ AudioSpectrumEffect ♫, AudioVolumeEffect ♫, FireEffect, GlowParticlesEffect,
 
 ## Tally
 
-47 MoonLight-listed effects. **Already covered: ~7** (Lines, Particles, Rainbow, Ripples, Sinus, Wave, Distortion Waves, Noise 2D — direct equivalents) + GoL (re-port). **To migrate: ~38**, of which ~14 are audio (Stage 3d) and 7 are moving-head (Stage 5). The non-audio, non-moving-head remainder (~17) are the Stage 3a/b/c batches — the bulk of the parity work the [rename gate](rename-to-moonlight.md#must--the-rename-is-a-downgrade-without-these) needs.
+47 MoonLight-listed effects. **Already covered: ~7** (Lines, Particles, Rainbow, Ripples, Sinus, Wave, Distortion Waves, Noise 2D — direct equivalents) + GoL (re-port). **To migrate: ~38**, of which ~14 are audio (Stage 3d) and 7 are moving-head (Stage 5). The non-audio, non-moving-head remainder (~17) are the Stage 3a/b/c batches — the bulk of the parity work the rename gate needs.

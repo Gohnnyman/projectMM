@@ -161,6 +161,23 @@ def _rewrite_cls_links(md: str, from_domain: str, cls_to_page: dict) -> str:
     return _CLS_LINK_RE.sub(_sub, md)
 
 
+# moxygen in-page `](#anchor)` self-links that don't survive recombination:
+#   - `#_..._8h_source`  — Doxygen's per-header source-file anchor (never rendered here)
+#   - `#name-<n>`         — moxygen's numbered member anchor (`#onbuildstate-13`); the
+#                          number is a per-original-file dedup counter that no longer
+#                          matches the heading id once classes are combined onto one page.
+# Both point at nothing on the recombined page, so drop the link, keeping the `[label]`
+# text. A *bare* self-link (`#modifylive`, `#drivers`) with no numeric suffix and no
+# `_8h_source` shape is left alone — those match a real rendered heading id.
+_BAD_ANCHOR_RE = re.compile(r'\]\(#(?:_\w+_8h_source|[\w-]+-\d+)\)')
+
+
+def _strip_bad_anchor_links(md: str) -> str:
+    """Drop moxygen self-links whose anchor doesn't exist on the recombined page
+    (source-file anchors + numbered member anchors), leaving the link label as text."""
+    return _BAD_ANCHOR_RE.sub("]", md)
+
+
 def _class_to_header(xml_dir: Path) -> dict[str, str]:
     """Map each moxygen class-file key → its source header (repo-relative), read from
     the Doxygen XML `<location file=...>` of every class/struct compound. The key is
@@ -258,6 +275,7 @@ def generate() -> dict[str, str]:
             domain = domain_of(header)
             stem = Path(header).stem
             body = _rewrite_cls_links("".join(blocks), domain, cls_to_page)
+            body = _strip_bad_anchor_links(body)
             md = _migration_crosscheck_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"
             dst = DOCS_MOONMODULES / domain / "moxygen" / f"{stem}.md"

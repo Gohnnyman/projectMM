@@ -53,10 +53,20 @@ _API_MODULES: dict[str, str] = {}
 
 # Repo top-level dirs/files a doc may link into but the site doesn't host.
 _OUT_OF_DOCS = ("src/", "scripts/", "test/", "esp32/", "web-installer/",
-                "CLAUDE.md", "README.md", "library.json")
+                ".github/", "CLAUDE.md", "README.md", "library.json", "CMakeLists.txt")
 
-# A markdown link whose target starts with one or more `../` then an out-of-docs path.
-_OUT_LINK_RE = re.compile(r'\]\((?P<href>(?:\.\./)+(?P<rest>[^)#]+)(?P<frag>#[^)]*)?)\)')
+# A markdown link into a repo file the site doesn't host. Two authored shapes, both
+# common in the transient history/plans + backlog notes:
+#   ../../src/foo   — climbs out of docs/ with `../`
+#   src/foo         — repo-ROOT-relative, no `../` (resolves to a nonexistent docs/src/foo)
+# The pattern accepts an optional `../` run, then the href; _sub sorts out which case.
+_OUT_LINK_RE = re.compile(r'\]\((?P<href>(?:\.\./)*(?P<rest>[^)#]+)(?P<frag>#[^)]*)?)\)')
+
+# The repo-root-relative prefixes a bare (no-`../`) link must start with to be treated
+# as an out-of-docs source link. `docs/` is included because a plan that links
+# `docs/plan.md` / `docs/architecture-light.md` (files that never existed or were
+# renamed) still resolves outside the current page and 404s — send it to GitHub.
+_ROOT_REL_PREFIXES = _OUT_OF_DOCS + ("docs/",)
 
 
 def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
@@ -77,9 +87,13 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
         rel = href.split("#", 1)[0]
         # A `.h` whose module has a generated technical page → point at the in-site
         # page, not GitHub. The generated reference IS the source view we want. The
-        # target nests by domain (core/light), so use the recorded domain.
+        # target nests by domain (core/light), so use the recorded domain. EXCEPT a
+        # `#L<n>` line-number fragment: that only resolves on GitHub's blob view (the
+        # generated page has no line anchors), so such links fall through to the blob
+        # rewrite below.
         stem = Path(rel).stem
-        if rel.endswith(".h") and stem in _API_MODULES:
+        is_line_anchor = re.match(r'#L\d', frag)
+        if rel.endswith(".h") and stem in _API_MODULES and not is_line_anchor:
             domain = _API_MODULES[stem]
             return f"]({up}moonmodules/{domain}/moxygen/{stem}.md{frag})"
         # Resolve against the page dir to a repo-relative path (the correct case).
@@ -90,9 +104,11 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
         # transient history/plans + backlog notes, written before their file sat
         # this deep under docs/): strip leading `../` and see if the remainder is
         # itself an out-of-docs repo path. Catches `../../scripts/x.py` from a
-        # docs/history/plans/ page, which resolves to a nonexistent docs/scripts/x.py.
+        # docs/history/plans/ page, which resolves to a nonexistent docs/scripts/x.py,
+        # AND a bare `src/x.js` / `docs/plan.md` with no `../` at all (same intent,
+        # written root-relative) — both 404 in-site, so send them to the GitHub blob.
         stripped = re.sub(r'^(?:\.\./)+', '', rel)
-        if stripped.startswith(_OUT_OF_DOCS):
+        if stripped.startswith(_ROOT_REL_PREFIXES):
             return f"]({_BLOB_BASE}/{stripped}{frag})"
         return m.group(0)  # in-docs link (incl. ../ into another docs page) — leave it
 

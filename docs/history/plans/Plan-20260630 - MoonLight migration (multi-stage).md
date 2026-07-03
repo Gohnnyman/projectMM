@@ -4,7 +4,7 @@
 
 Bring MoonLight's full library of **effects, modifiers and layouts** into projectMM. This is large, so it is **staged**: each stage ships independently, builds on the previous, and is its own `/plan` + commit. This document is the *map* — the per-stage plans get written when we reach them. Stages 1–2 are specified enough to start; later stages are scoped, not detailed.
 
-**Why this matters beyond features:** this migration is the execution vehicle for the **effect-breadth parity gate** in the [projectMM → MoonLight rename plan](../../backlog/rename-to-moonlight.md#must--the-rename-is-a-downgrade-without-these) — taking the MoonLight name requires the library not to feel thin next to the predecessor's 60+ effects. The rename's bar is "enough batches landed," not "every stage done"; this plan is *how* that bar is reached. (The two docs stay in their folders — the rename is the forward-looking backlog item that sets the bar; this is the approved staged plan that meets it — linked, not duplicated.)
+**Why this matters beyond features:** this migration is the execution vehicle for the **effect-breadth parity gate** in the projectMM → MoonLight rename plan — taking the MoonLight name requires the library not to feel thin next to the predecessor's 60+ effects. The rename's bar is "enough batches landed," not "every stage done"; this plan is *how* that bar is reached. (The two docs stay in their folders — the rename is the forward-looking backlog item that sets the bar; this is the approved staged plan that meets it — linked, not duplicated.)
 
 Two cross-cutting rules govern every stage, from [CLAUDE.md](../../../CLAUDE.md):
 

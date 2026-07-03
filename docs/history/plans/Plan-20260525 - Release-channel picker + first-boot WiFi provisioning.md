@@ -388,7 +388,7 @@ Add to [scripts/MoonDeck.md](../../scripts/MoonDeck.md) under a new "Provisionin
 
 **Step 3.7 — `docs/moonmodules/core/ImprovProvisioningModule.md` + hardware verification (0.4 h).**
 
-Spec page sections (mirror [FirmwareUpdateModule.md](../moonmodules/core/FirmwareUpdateModule.md)'s shape, kept brief):
+Spec page sections (mirror FirmwareUpdateModule.md's shape, kept brief):
 - One-paragraph "what Improv is" + link to <https://www.improv-wifi.com/>.
 - Controls table (the one `provision_status` line — satisfies `check_specs.py`).
 - **ESP32-S3 USB-port footnote**: explicit "connect to the silkscreen-labelled USB (UART) port, not USB (CDC/JTAG)" — the locked decision documented at the user-visible surface.
@@ -447,13 +447,13 @@ Track 3 total: **3.0 h**. Sequential within the track. Hardware verification (st
 | Source | Pattern to reuse | Why |
 |---|---|---|
 | [projectMM-v1 OTA module](../../projectMM-v1/src/modules/system/FirmwareUpdateModule.h) | MoonModule with two display controls + file-scope statics polled by `loop1s()` | Working pattern from v1. v3 ports the architecture using v3 idioms (`controls_.addReadOnly`, anon namespace statics). |
-| [projectMM-v1 `populateGhList()`](../../projectMM-v1/src/frontend/app.js#L1362-L1410) | `fetch(api.github.com/.../releases) + sessionStorage cache + prerelease filter + per-asset install button` | Identical data shape; the picker UX is recognisable from v1. |
+| projectMM-v1 `populateGhList()` | `fetch(api.github.com/.../releases) + sessionStorage cache + prerelease filter + per-asset install button` | Identical data shape; the picker UX is recognisable from v1. |
 | [projectMM-v1 `pal::http_fetch_to_ota`](../../projectMM-v1/src/platform/esp32) | `esp_https_ota_config_t` + `esp_crt_bundle_attach` + perform loop | Working ESP-IDF idiom. Cherry-pick the working numbers (stack size, core pinning) into v3. |
 | [src/ui/embed_ui.cmake](src/ui/embed_ui.cmake) | The whole UI-embedding pipeline | Extend to one more file. No new architecture. |
 | [src/core/SystemModule.h:85](src/core/SystemModule.h#L85) | `controls_.addReadOnly("name", buf, sizeof(buf))` for live-updating diagnostic strings | Same shape for `update_status` and `update_pct`. |
 | [src/core/HttpServerModule.cpp:428+](src/core/HttpServerModule.cpp#L428) | `mm::json::parseString(body, "key", buf, sizeof(buf))` pattern | Reuse for parsing the `{"url":"..."}` body. |
 | [scripts/build/generate_manifest.py](scripts/build/generate_manifest.py) | The whole script | Stays unchanged. Track 2 just calls it twice — once with absolute URLs (release assets) and once with `--release-url .` (Pages copy). |
-| [projectMM-v1 `deploy/wifi.py` + `flashfs.py --wifi`](../../projectMM-v1/deploy/wifi.py) | The "one set of credentials, applied to a rack of devices" use case | The use case is preserved. The mechanism changes: v1 baked credentials into a LittleFS partition image and re-flashed it over USB (device halted). Track 3 talks Improv to running devices via UART — same end state, no flash required, generalises to any-firmware-with-Improv. |
+| projectMM-v1 `deploy/wifi.py` + `flashfs.py --wifi` | The "one set of credentials, applied to a rack of devices" use case | The use case is preserved. The mechanism changes: v1 baked credentials into a LittleFS partition image and re-flashed it over USB (device halted). Track 3 talks Improv to running devices via UART — same end state, no flash required, generalises to any-firmware-with-Improv. |
 | `improv/improv` (ESP Component Registry; source: `improv-wifi/sdk-cpp` on GitHub) | The Improv protocol parser + callbacks | Standard upstream library. We don't reimplement the protocol; we install the listener task that feeds it bytes. |
 | [src/platform/esp32/platform_esp32.cpp:870-891](src/platform/esp32/platform_esp32.cpp#L870-L891) (`http_fetch_to_ota` task) | The xTaskCreate + status-buffer pattern | Improv's listener task is identical shape: heap struct + `xTaskCreate` + status-buffer ownership. Reuses the pattern, not the code. |
 

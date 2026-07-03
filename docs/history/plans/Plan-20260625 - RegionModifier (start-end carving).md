@@ -57,7 +57,7 @@ Mirror `CheckerboardModifier.h`:
 ### Docs
 
 - `docs/moonmodules/light/RegionModifier.md` — new spec page (controls, percent semantics, rounding rule, drop-outside, prior art: a crop/region node; MoonLight has no direct equivalent but its modifier model is the lineage). Mention every control name (spec-check requirement).
-- `docs/moonmodules/light/Layer.md` — delete the `## start/end controls` section; replace with a one-line pointer: region carving is a modifier ([RegionModifier](RegionModifier.md)), not a Layer control. Update the § Status paragraph (it currently says "start/end region carving" reshapes the logical box — still true, but now via the modifier).
+- `docs/moonmodules/light/Layer.md` — delete the `## start/end controls` section; replace with a one-line pointer: region carving is a modifier (RegionModifier), not a Layer control. Update the § Status paragraph (it currently says "start/end region carving" reshapes the logical box — still true, but now via the modifier).
 - `docs/architecture.md` § Effects (line ~362) — the Layer determines buffer dims from "the Layouts, its own start/end percentages, and its modifiers"; change to "the Layouts and its modifiers (region carving among them)".
 - `docs/architecture.md` § Layers and Layer — note RegionModifier as a built-in carve modifier if the modifier list is enumerated.
 - Remove the now-shipped backlog reference to start/end region carving (Layer.md pointed at backlog/README; if backlog has an item, delete it per *Mandatory subtraction*).

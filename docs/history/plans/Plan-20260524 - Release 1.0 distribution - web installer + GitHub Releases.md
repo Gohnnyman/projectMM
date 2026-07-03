@@ -76,7 +76,7 @@ The base file used to carry 7 Olimex-specific Eth lines (`CONFIG_ETH_USE_ESP32_E
 - Profile-change marker: rename `esp32/build/.mm_profile` → `.mm_board`. Migrate on first run (if the legacy file exists, read it once, treat as the equivalent board, then write the new marker).
 - [scripts/moondeck.py](../../scripts/moondeck.py) — add `extra_args` forwarding (3 lines) so a config entry can pass static flags to its script.
 - [scripts/moondeck_config.json](../../scripts/moondeck_config.json) + [scripts/MoonDeck.md](../../scripts/MoonDeck.md) — replace the "Build" / "Build (Ethernet-only)" pair with four board buttons, each baking a `--board` arg via `extra_args`.
-- [docs/moonmodules/core/NetworkModule.md](../moonmodules/core/NetworkModule.md) — update the Ethernet-only section to reference `--board esp32-eth`.
+- docs/moonmodules/core/NetworkModule.md — update the Ethernet-only section to reference `--board esp32-eth`.
 
 ### Step 2 — Version-drift guard (0.5 h)
 
@@ -267,8 +267,8 @@ WLED-style minimal page. URL after Pages deployment: `https://ewowi.github.io/pr
 
 **Files to create:**
 
-- [docs/install/index.html](../install/index.html) — board dropdown + `<esp-web-install-button>`. On dropdown change, swap the `manifest` attribute on the button. Use the unpkg-hosted ESP Web Tools v10.
-- [docs/install/README.md](../install/README.md) — one-paragraph note explaining the manifests are *generated per-release* by `release.yml`, not committed to git. Cloners won't see them locally.
+- docs/install/index.html — board dropdown + `<esp-web-install-button>`. On dropdown change, swap the `manifest` attribute on the button. Use the unpkg-hosted ESP Web Tools v10.
+- docs/install/README.md — one-paragraph note explaining the manifests are *generated per-release* by `release.yml`, not committed to git. Cloners won't see them locally.
 
 Page structure:
 
@@ -292,11 +292,11 @@ One-time repo setting: **Settings → Pages → Source: GitHub Actions**. The `d
 ### Step 8 — README + building.md (0.75 h)
 
 - [README.md](../../README.md) — replace the "From a release" subsection with two crisp paragraphs: ESP32 flash via the installer URL, desktop binaries via the Releases page. Drop the Teensy / RPi / Linux desktop bullets — those aren't shipped in 1.0. They go back in when the binaries exist.
-- [docs/building.md](../building.md) — replace the "Build profiles" subsection with a "Boards" table mirroring step 1's table. Drop the obsolete `--profile` doc (or fold into the `esp32-eth` row note).
+- docs/building.md — replace the "Build profiles" subsection with a "Boards" table mirroring step 1's table. Drop the obsolete `--profile` doc (or fold into the `esp32-eth` row note).
 
 ### Step 9 — plan.md → 2.0 stub (0.25 h)
 
-- [docs/plan.md](../plan.md) — replace the "Release 1.0" milestone section with a forward-looking "Release 2.0" section:
+- docs/plan.md — replace the "Release 1.0" milestone section with a forward-looking "Release 2.0" section:
   - ESP32-P4 board variant.
   - OTA / FirmwareUpdateModule (passive-observer pattern from v1).
   - Linux desktop binary.
@@ -310,7 +310,7 @@ Three test surfaces stacked from cheapest to most production-like. Each catches
 problems the next one would also catch, but later and at higher cost.
 
 **Test surface 1 — Local C+ recipe.** Documented in
-[`docs/install/README.md`](../install/README.md) § "End-to-end with CI-built
+`docs/install/README.md` § "End-to-end with CI-built
 firmware". Runs against the latest branch CI artifacts. Catches manifest
 schema errors, page-render bugs, real Web Serial flash against a real binary
 per board. Zero CI minutes, zero release-page noise. Run this *before* any RC
@@ -375,8 +375,8 @@ These run as the per-release additions to CLAUDE.md's Event 3 (Release tag) gate
 - [scripts/build/package_desktop.py](../../scripts/build/package_desktop.py)
 - [scripts/build/generate_manifest.py](../../scripts/build/generate_manifest.py)
 - [scripts/build/verify_version.py](../../scripts/build/verify_version.py)
-- [docs/install/index.html](../install/index.html)
-- [docs/install/README.md](../install/README.md)
+- docs/install/index.html
+- docs/install/README.md
 
 **Edited:**
 
@@ -389,10 +389,10 @@ These run as the per-release additions to CLAUDE.md's Event 3 (Release tag) gate
 - [library.json](../../library.json) — bump `0.1.0` → `1.0.0` at release time.
 - [scripts/moondeck.py](../../scripts/moondeck.py) — `extra_args` forwarding.
 - [scripts/moondeck_config.json](../../scripts/moondeck_config.json) + [scripts/MoonDeck.md](../../scripts/MoonDeck.md) — four board buttons.
-- [docs/moonmodules/core/NetworkModule.md](../moonmodules/core/NetworkModule.md) — `--board esp32-eth` reference.
+- docs/moonmodules/core/NetworkModule.md — `--board esp32-eth` reference.
 - [README.md](../../README.md) — Quick Start with installer URL.
-- [docs/building.md](../building.md) — boards table.
-- [docs/plan.md](../plan.md) — Release 1.0 → 2.0 stub.
+- docs/building.md — boards table.
+- docs/plan.md — Release 1.0 → 2.0 stub.
 
 **Manual:**
 
@@ -402,7 +402,7 @@ These run as the per-release additions to CLAUDE.md's Event 3 (Release tag) gate
 
 - **Local board builds:** `python scripts/build/build_esp32.py --board esp32`, `--board esp32-eth`, `--board esp32-eth-wifi`, and `--board esp32s3-n16r8` all complete with zero warnings. Each writes `esp32/build/projectMM.bin` + `flasher_args.json` for the right chip.
 - **Local desktop:** `python scripts/build/package_desktop.py` on macOS produces a tarball under `dist/` that runs on a fresh Mac.
-- **Local installer (surface 1):** the C+ recipe in [`docs/install/README.md`](../install/README.md) — pull branch CI artifacts with `gh run download`, serve locally, flash each of the four boards over USB through the install page.
+- **Local installer (surface 1):** the C+ recipe in `docs/install/README.md` — pull branch CI artifacts with `gh run download`, serve locally, flash each of the four boards over USB through the install page.
 - **RC dry run (surface 2):** push `v1.0.0-rcN` tag, all workflow jobs green, pre-release page populated with 22 files, Pages staging + deploy correctly skipped, manual flash per board succeeds against the rcN release URLs.
 - **Real release (surface 3):** tag `v1.0.0`, Pages flips, the live `https://ewowi.github.io/projectMM/install/` flashes each board cleanly.
 
