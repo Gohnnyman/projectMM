@@ -12,7 +12,7 @@ Pages → the installer 404s at fetch-firmware. That exact mismatch (a manifest 
 file the deploy didn't stage, or a shipping firmware with no manifest at all) shipped a broken
 v2.0.0 installer; this test pins the contract so it can't recur:
 
-  1. every `ships: true` firmware in docs/install/firmwares.json generates a valid manifest, and
+  1. every `ships: true` firmware in web-installer/firmwares.json generates a valid manifest, and
   2. every part path in every manifest matches one of the staged-file globs above.
 
 Self-contained: it feeds generate_manifest.py a synthetic flasher_args.json (the real one only
@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-FIRMWARES_JSON = ROOT / "docs" / "install" / "firmwares.json"
+FIRMWARES_JSON = ROOT / "web-installer" / "firmwares.json"
 GENERATE = ROOT / "scripts" / "build" / "generate_manifest.py"
 
 # The exact globs the deploy's `gh release download` stages onto Pages (release.yml,

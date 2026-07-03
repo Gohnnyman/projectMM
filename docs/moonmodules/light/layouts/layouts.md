@@ -1,6 +1,6 @@
 # Layouts
 
-Every layout, one block each: what it does and what each control means — together. A layout maps light indices to physical `(x, y, z)` positions — it defines the *shape* an [effect](../effects/effects.md) draws onto and a [driver](../drivers/) sends out. The [Layouts](../Layouts.md) container holds one or more layout children and composes them into one coordinate space; a [Layer](../Layer.md) renders over that combined space. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
+Every layout, one block each: what it does and what each control means — together. A layout maps light indices to physical `(x, y, z)` positions — it defines the *shape* an [effect](../effects/effects.md) draws onto and a [driver](../drivers/) sends out. The [Layouts](../moxygen/Layouts.md) container holds one or more layout children and composes them into one coordinate space; a [Layer](../moxygen/Layer.md) renders over that combined space. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
 
 ## MoonLight layouts
 
@@ -193,22 +193,5 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 [Tests](../../../tests/unit-tests.md#wheellayout)
 
-The [Layouts](../Layouts.md) container itself takes no controls — see its page for coordinate iteration, reordering, and rebuild propagation.
+The [Layouts](../moxygen/Layouts.md) container itself takes no controls — see its page for coordinate iteration, reordering, and rebuild propagation.
 
-## Source
-
-- [CarLightsLayout.h](../../../../src/light/layouts/CarLightsLayout.h)
-- [CubeLayout.h](../../../../src/light/layouts/CubeLayout.h)
-- [GridLayout.h](../../../../src/light/layouts/GridLayout.h)
-- [HumanSizedCubeLayout.h](../../../../src/light/layouts/HumanSizedCubeLayout.h)
-- [PanelLayout.h](../../../../src/light/layouts/PanelLayout.h)
-- [PanelsLayout.h](../../../../src/light/layouts/PanelsLayout.h)
-- [RingLayout.h](../../../../src/light/layouts/RingLayout.h)
-- [Rings241Layout.h](../../../../src/light/layouts/Rings241Layout.h)
-- [SingleColumnLayout.h](../../../../src/light/layouts/SingleColumnLayout.h)
-- [SingleRowLayout.h](../../../../src/light/layouts/SingleRowLayout.h)
-- [SphereLayout.h](../../../../src/light/layouts/SphereLayout.h)
-- [SpiralLayout.h](../../../../src/light/layouts/SpiralLayout.h)
-- [TorontoBarGourdsLayout.h](../../../../src/light/layouts/TorontoBarGourdsLayout.h)
-- [TubesLayout.h](../../../../src/light/layouts/TubesLayout.h)
-- [WheelLayout.h](../../../../src/light/layouts/WheelLayout.h)

@@ -81,7 +81,7 @@ function makeState() {
         sortedReleases: [],    // releases sorted newest-first; render() fills this
         releaseIdx: 0,         // index into sortedReleases
         firmware: null,        // selected firmware key
-        boards: [],            // parsed docs/install/deviceModels.json, [] if unavailable
+        boards: [],            // parsed web-installer/deviceModels.json, [] if unavailable
         selectedBoard: null,   // user pick from board <select>; "" for (any board)
         hasPort: null,         // web installer only: () => bool, "is a USB port
                                // picked?". When set, Install is disabled until it
@@ -267,7 +267,7 @@ function relativeTime(iso) {
 // Uses the same `.control-row` / `.control-label` / `<select>` shape as the
 // rest of `createControl()` in app.js so the picker visually integrates with
 // the card it's mounted in. The web installer overrides these with its own
-// styles in docs/install/index.html, which gives the installer page the same
+// styles in web-installer/index.html, which gives the installer page the same
 // look without app.js loading.
 // Draw the field rows immediately, before the network fetches resolve, so the
 // user sees the full form straight away instead of a lone "Loading…" line that

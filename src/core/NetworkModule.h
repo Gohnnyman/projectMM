@@ -11,33 +11,106 @@
 
 namespace mm {
 
+/// Manages all device connectivity with an automatic priority cascade: Ethernet → WiFi
+/// STA → WiFi AP. One MoonModule, one UI card — the user sees "Network", not three
+/// separate technologies. ESP32-specific (and Teensy later); desktop and RPi use OS-level
+/// networking and load no NetworkModule.
+///
+/// **Priority cascade:** Ethernet is always preferred (hardware detected, cable plugged),
+/// WiFi STA is next (SSID configured, Ethernet unavailable), WiFi AP is the last resort
+/// (STA fails or no SSID). When a higher-priority connection becomes available, lower ones
+/// are torn down to reclaim memory; when a higher-priority connection drops, the next
+/// activates automatically. The cascade tries each interface unconditionally and relies on
+/// the platform init calls to fail fast when hardware is absent — `platform::ethInit()`
+/// returns false without a PHY, and the WiFi paths return false on chips without a radio,
+/// so no interface hangs waiting on missing hardware.
+///
+/// **AP shutdown delay:** when STA connects successfully, AP stays active for ~10 s (with
+/// a UI message) before tearing down, giving the user time to reconnect via STA. AP always
+/// uses the fixed IP `4.3.2.1` — easy to remember, avoids 192.168.x.x conflicts with home
+/// routers.
+///
+/// **State machine:** `State` (Idle, WaitingEth, WaitingSta, ConnectedEth, ConnectedSta,
+/// AP) is driven from `loop1s()`. The `mode` control mirrors the state in plain language
+/// and is always present, even on the Ethernet-only build. A late-appearing interface
+/// (slow DHCP, cable plugged in after boot, saved WiFi credentials) is promoted from Idle
+/// / AP / ConnectedSta by the periodic upgrade checks — no reboot.
+///
+/// **Ethernet:** which PHY *driver* is compiled in is per chip (classic/P4 carry the
+/// internal-EMAC RMII driver, the S3 the W5500 SPI driver; a `MM_NO_ETH` build stubs
+/// `ethInit()` to return false). *Which* PHY a board uses and *on which pins* is runtime
+/// config — the `ethType` + pin controls, set per board in the device-model catalog and
+/// seeded from the per-chip default in `platform_config.h`. A W5500 change applies live
+/// (the SPI driver tears down and re-inits, no reboot); an RMII change saves and applies
+/// on the next boot (the EMAC/clock teardown is fiddlier).
+///
+/// **mDNS:** included here (not a separate module). Registers the deviceName on whichever
+/// interface is active and re-registers when the active interface changes or the name is
+/// renamed live. Uses ESP-IDF's `mdns_init()` / `mdns_hostname_set()`.
+///
+/// **Device name:** the network name is owned solely by SystemModule; this module only
+/// READS it (see `readDeviceName`), and it is the single identity behind the mDNS
+/// `<name>.local`, the SoftAP SSID, and the DHCP hostname — so a device shows one name
+/// everywhere.
+///
+/// **`MM_IP=` boot token:** `currentIp()` writes the device's current LAN IP as octets;
+/// main.cpp formats it and appends a machine-parseable `MM_IP=<ip>` token to its
+/// once-per-second tick line whenever there is an IP. The web installer reads this from
+/// the boot serial log right after flashing to auto-add the device to "Your devices" —
+/// timing-independent because the token rides the already-periodic tick line. Deliberately
+/// IP-only; once the installer has the IP it reads everything else from the live REST API.
+///
+/// **Memory:** the network stack cost varies by mode (Ethernet ~20 KB, STA ~40 KB, AP
+/// ~30 KB, STA+AP during the shutdown delay ~60 KB, fully reclaimed after teardown). This
+/// is why NetworkModule registers with the Scheduler BEFORE the light pipeline: network
+/// memory is claimed first so the light pipeline's adaptive allocation sees the real
+/// remaining heap. On a mode change the transition sequence checks heap, tears down light
+/// buffers first if heap is tight (display goes dark temporarily — acceptable, a crash is
+/// not), starts the new mode, then re-runs `scheduler_->buildState()` so allocation uses
+/// whatever heap remains. Reported via the standard per-module system; dynamicBytes updates
+/// after each mode change.
+///
+/// **Ethernet-only build:** `esp32-eth` compiles WiFi out entirely
+/// (`platform::hasWiFi == false`), branched via `if constexpr`. The cascade is
+/// Ethernet-only (no STA/AP states reachable), the `ssid` / `password` controls are not
+/// bound, but the `addressing` selector, static-IP controls, and `mDNS` toggle remain. The
+/// `ssid_` / `password_` buffers still exist (unconditional struct layout keeps persistence
+/// stable), simply never displayed or used.
+///
+/// **Security:** AP mode is open (no password) — a fallback for initial setup only. The
+/// STA password is stored in the controls. No HTTPS — an embedded device on the local
+/// network only.
+///
+/// **Prior art:** MoonLight — mDNS hostname advertising, REST API for network config,
+/// credentials persisted to SPIFFS. ESP-IDF — `esp_wifi.h`, `mdns.h`, `esp_netif.h`,
+/// `esp_event.h`.
 class NetworkModule : public MoonModule {
 public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
 
-    // External entry-point for setting WiFi credentials at runtime — used by
-    // ImprovProvisioningModule when the browser/CLI pushes new credentials over
-    // USB-serial. Writes the same buffers the AP-fallback UI flow writes via
-    // POST /api/control on `ssid` / `password`, then drives a clean transition
-    // into State::WaitingSta so loop1s() takes over and either reports
-    // connected (onConnected) or falls back to AP after the 10 s timeout.
-    //
-    // Why the explicit AP→STA tear-down (rather than just calling wifiStaInit
-    // and letting esp_wifi_set_mode handle the mode change): in AP-mode the
-    // platform layer's wifiInitDone_ flag is true, which makes ensureWifiInit
-    // return early without registering the IP_EVENT_STA_GOT_IP handler. Without
-    // that handler the wifiStaConnected_ flag never flips, the WaitingSta
-    // state never sees the STA come up, and the device sits in limbo with
-    // STA mode active but the state machine still thinking it's in AP.
-    // wifiApStop() drops wifiInitDone_=false so the next ensureWifiInit
-    // registers handlers cleanly.
+    /// External entry-point for setting WiFi credentials at runtime — used by
+    /// ImprovProvisioningModule when the browser/CLI pushes new credentials over
+    /// USB-serial. Writes the same buffers the AP-fallback UI flow writes via
+    /// POST /api/control on `ssid` / `password`, then drives a clean transition
+    /// into `State::WaitingSta` so loop1s() takes over and either reports
+    /// connected (onConnected) or falls back to AP after the 10 s timeout.
+    ///
+    /// Why the explicit AP→STA tear-down (rather than just calling wifiStaInit
+    /// and letting esp_wifi_set_mode handle the mode change): in AP-mode the
+    /// platform layer's wifiInitDone_ flag is true, which makes ensureWifiInit
+    /// return early without registering the IP_EVENT_STA_GOT_IP handler. Without
+    /// that handler the wifiStaConnected_ flag never flips, the WaitingSta
+    /// state never sees the STA come up, and the device sits in limbo with
+    /// STA mode active but the state machine still thinking it's in AP.
+    /// wifiApStop() drops wifiInitDone_=false so the next ensureWifiInit
+    /// registers handlers cleanly.
 
-    // Improv SET_TX_POWER path: persist + apply the TX-power cap (whole dBm,
-    // 0 = lift). Must run BEFORE setWifiCredentials when both arrive from one
-    // provisioning flow — a weak-powered board / WiFi module (thin LDO, marginal
-    // USB supply) browns out and fails WiFi auth at full power, so the cap has to
-    // be in place for the association attempt.
+    /// Improv SET_TX_POWER path: persist + apply the TX-power cap (whole dBm,
+    /// 0 = lift). Must run BEFORE setWifiCredentials when both arrive from one
+    /// provisioning flow — a weak-powered board / WiFi module (thin LDO, marginal
+    /// USB supply) browns out and fails WiFi auth at full power, so the cap has to
+    /// be in place for the association attempt.
     void setTxPowerSetting(uint8_t dBm) {
         if (dBm > 21) return;
         txPowerSetting_ = dBm;
@@ -98,9 +171,9 @@ public:
         }
     }
 
-    // Networking is infrastructure — keep the cascade ticking even when the user
-    // toggled "enabled" off, otherwise the device would silently drop off the LAN
-    // and become unreachable.
+    /// Networking is infrastructure — keep the cascade ticking even when the user
+    /// toggled "enabled" off, otherwise the device would silently drop off the LAN
+    /// and become unreachable.
     bool respectsEnabled() const override { return false; }
 
     void setup() override {
@@ -651,17 +724,17 @@ private:
     }
 
 public:
-    // Write the current LAN IP as octets into out[0..3] (all-zero = not connected).
-    // Octets, not a string: the IP's canonical form is uint8_t[4] (matching the
-    // static-IP controls and formatDottedQuad), and no IP string is held as state —
-    // the IP already lives as the netif's binding, so duplicating it into a member
-    // would just waste RAM. Callers that need text format with formatDottedQuad at
-    // their boundary. Read by main.cpp's per-second tick line, which appends it as a
-    // stable `MM_IP=<ip>` token for the web installer's post-flash serial read —
-    // riding the already-periodic tick line means the IP re-emits every second
-    // (timing-independent: DHCP can take several seconds — measured ~7s on the
-    // P4-NANO — and the installer reopens the port at its own pace, so a one-shot
-    // connect-time line is easy to miss).
+    /// Write the current LAN IP as octets into out[0..3] (all-zero = not connected).
+    /// Octets, not a string: the IP's canonical form is `uint8_t[4]` (matching the
+    /// static-IP controls and formatDottedQuad), and no IP string is held as state —
+    /// the IP already lives as the netif's binding, so duplicating it into a member
+    /// would just waste RAM. Callers that need text format with formatDottedQuad at
+    /// their boundary. Read by main.cpp's per-second tick line, which appends it as a
+    /// stable `MM_IP=<ip>` token for the web installer's post-flash serial read —
+    /// riding the already-periodic tick line means the IP re-emits every second
+    /// (timing-independent: DHCP can take several seconds — measured ~7s on the
+    /// P4-NANO — and the installer reopens the port at its own pace, so a one-shot
+    /// connect-time line is easy to miss).
     void currentIp(uint8_t out[4]) const {
         out[0] = out[1] = out[2] = out[3] = 0;
         if (state_ == State::ConnectedEth) platform::ethGetIPv4(out);
@@ -671,14 +744,14 @@ public:
     }
 
 private:
-    // The device's network name is owned solely by SystemModule; NetworkModule only
-    // READS it. This is the single identity behind every network name — the mDNS
-    // `<name>.local`, the SoftAP SSID, and the DHCP hostname are all this exact string,
-    // so a device shows one name everywhere. SystemModule guarantees it is a valid,
-    // non-empty hostname (sanitised + MAC-fallback in its setup/loop1s). Read through
-    // this one null-guard (systemModule_ is wired at boot; "" if somehow unwired — the
-    // platform name setters no-op on an empty string). NOT a deviceName of our own:
-    // it's SystemModule's, fetched.
+    /// The device's network name is owned solely by SystemModule; NetworkModule only
+    /// READS it. This is the single identity behind every network name — the mDNS
+    /// `<name>.local`, the SoftAP SSID, and the DHCP hostname are all this exact string,
+    /// so a device shows one name everywhere. SystemModule guarantees it is a valid,
+    /// non-empty hostname (sanitised + MAC-fallback in its setup/loop1s). Read through
+    /// this one null-guard (systemModule_ is wired at boot; "" if somehow unwired — the
+    /// platform name setters no-op on an empty string). NOT a deviceName of our own:
+    /// it's SystemModule's, fetched.
     const char* readDeviceName() const {
         return systemModule_ ? systemModule_->deviceName() : "";
     }

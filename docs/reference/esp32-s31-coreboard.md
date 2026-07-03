@@ -31,7 +31,7 @@ The onboard electret mic (J6) and speaker connect through an **ES8311 mono codec
 | PA_CTRL | 57 | NS4150B amplifier enable |
 
 > **SDA/SCL are GPIO51/GPIO50** — the *opposite* of what the schematic's `ESP_I2C_SDA` /
-> `ESP_I2C_SCL` net labels suggest. Bench-confirmed: the [I2cScanModule](../moonmodules/core/I2cScanModule.md)
+> `ESP_I2C_SCL` net labels suggest. Bench-confirmed: the [I2cScanModule](../moonmodules/core/moxygen/I2cScanModule.md)
 > (sda=51, scl=50 in the S31 catalog entry) finds the ES8311 ACK at 0x18; with 50/51 nothing
 > ACKs. The other audio pins match the schematic + the chip's GPIO table (all of GPIO50–57 are
 > plain I/O GPIOs routed through the matrix — no special-function conflict).
@@ -84,10 +84,10 @@ Wi-Fi 6 · Bluetooth (no separate BLE soc-flag) · IEEE 802.15.4 (Thread/Zigbee)
 TWAI (CAN) · RMT · Parlio · LCD_CAM i80 · on-chip EMAC · PSRAM. RISC-V dual-core.
 
 The S31 catalog entry drives **LEDs** (RMT on GPIO60) and **Wi-Fi 6**, and wires an
-**[I2cScanModule](../moonmodules/core/I2cScanModule.md)** on the codec bus (SDA 51 / SCL 50) for
-I2C bring-up. The **[AudioModule](../moonmodules/core/AudioModule.md)** ES8311 path is implemented
+**[I2cScanModule](../moonmodules/core/moxygen/I2cScanModule.md)** on the codec bus (SDA 51 / SCL 50) for
+I2C bring-up. The **[AudioModule](../moonmodules/core/moxygen/AudioModule.md)** ES8311 path is implemented
 — the codec seam configures the ES8311 over I2C (codec reachable, ACK at 0x18) and AudioModule
 reads the I2S mic. End-to-end mic validation depends on confirming MCLK at GPIO52; the S31 entry
 keeps **Audio** under `planned` until that bench check passes, so the installer advertises only
 what's confirmed working. The other board capabilities (Ethernet, Bluetooth, SD, USB host, …)
-likewise live in the entry's `planned` list — see the S31 entry in `docs/install/deviceModels.json`.
+likewise live in the entry's `planned` list — see the S31 entry in `web-installer/deviceModels.json`.

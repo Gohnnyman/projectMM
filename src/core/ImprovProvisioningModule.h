@@ -13,35 +13,81 @@
 
 namespace mm {
 
-// ImprovProvisioningModule — listens for Improv WiFi frames on UART0 and
-// pushes credentials into NetworkModule. Browser drives the protocol via
-// ESP Web Tools / improv-wifi.com; a Python CLI mirror lives at
-// scripts/build/improv_provision.py for rack / CI use over USB.
-//
-// The actual protocol parsing + UART task lives in the platform layer
-// (`mm::platform::improvProvisioningInit` at platform.h). This module is the
-// status surface: one read-only `provision_status` Control that reports
-// "listening" / "received credentials" / "connecting" / "connected: <ssid>"
-// / "error: …". Module's loop1s() polls a `ready` flag the platform task
-// sets when credentials arrive, then calls NetworkModule::setWifiCredentials
-// which writes through to the same buffers the AP-fallback UI flow uses.
-//
-// On desktop (platform::hasImprov == false) the module exists for UI
-// uniformity; the listener-install is skipped.
-
+/// Browser-driven WiFi provisioning over USB-serial, using the Improv-WiFi protocol
+/// (https://www.improv-wifi.com/, from Nabu Casa). Improv is an open standard for handing a
+/// device its WiFi credentials over a *local* link — USB serial here — at the moment it has no
+/// network yet, solving the bootstrap chicken-and-egg: a freshly-flashed ESP32 isn't on your
+/// WiFi, so you can't reach it over the network to give it the password; Improv carries that
+/// first handoff over the cable the browser is already connected to from flashing. projectMM
+/// extends this past credentials with the `APPLY_OP` vendor RPC ("Improv = REST over serial")
+/// to push the whole device config (including the deviceModel identity, which is just one of
+/// the config controls) over the same already-there link.
+///
+/// This module is the status surface: one read-only `provision_status` control that reports
+/// `listening` / `received credentials` / `connecting` / `connected: <ssid>` / `error: reason`
+/// / `not supported on this platform` (desktop). The actual protocol parsing + UART task live
+/// in the platform layer (`mm::platform::improvProvisioningInit`, platform.h). loop1s() polls a
+/// `ready` flag the platform task sets when credentials arrive, then calls
+/// NetworkModule::setWifiCredentials, which writes through to the same buffers the AP-fallback
+/// UI flow uses. A code-wired child of NetworkModule (`markWiredByCode()`) so persistence-apply
+/// preserves it across reboots even on devices whose `Network.json` predates the addition. On
+/// desktop (`platform::hasImprov == false`) the module exists for UI uniformity; the
+/// listener-install is skipped.
+///
+/// **Transports.** The listener serves both UART0 (external USB-to-UART bridges) and the S3's
+/// native USB-Serial-JTAG port, so a native-USB-only board provisions over that port directly.
+/// If neither serial path is available, the AP-mode flow remains (the device boots a SoftAP at
+/// `4.3.2.1`, join from a phone, enter credentials). Both transports speak the same Improv-WiFi
+/// serial protocol — frames of `IMPROV` + version byte + type + length + payload + checksum
+/// (full spec: https://www.improv-wifi.com/serial/; the constants are authored in
+/// ImprovFrame.h).
+///
+/// **RPCs.** Four standard commands plus two vendor extensions: `GET_CURRENT_STATE` (authorized
+/// / provisioned), `GET_DEVICE_INFO` (`[firmware, version, chipFamily, deviceName]`),
+/// `GET_WIFI_NETWORKS` (synchronous scan, up to 10 SSIDs — rejected while STA is connected),
+/// `WIFI_SETTINGS` (writes SSID + password, polls `wifiStaConnected()` up to 30 s, replies with
+/// `http://ip/` or `ERROR_UNABLE_TO_CONNECT`). Vendor `SET_TX_POWER` (`0xFD`) persists + applies
+/// a pre-association TX-power cap *before* any association attempt — the escape hatch for boards
+/// whose LDO browns out at full TX power, since the cap must land before the first association or
+/// the board fails auth at 20 dBm before it is ever online. Vendor `APPLY_OP` (`0xFC`) carries
+/// ONE REST op as JSON, routed to HttpServerModule's apply-core — the exact same code the HTTP
+/// handlers call — so a REST call over the network and an `APPLY_OP` over serial execute
+/// identically. The web installer pushes a device-model's whole catalog config this way during
+/// provisioning (the deviceModel identity is just one `set System.deviceModel` op), so the
+/// defaults apply over the serial port the installer already owns during the flash — which is
+/// what lets the HTTPS installer page configure an `http://` device a browser fetch can't reach
+/// (mixed-content). Ops are idempotent; a long value chunks across frames into a reassembly
+/// buffer, applied on the device's main loop when `last=1`; single-buffered (a new op errors
+/// while the previous is unconsumed).
+///
+/// **Eth-only builds.** The serial listener runs on every ESP32 target, including Ethernet-only
+/// builds: they compile in the vendor RPCs plus `GET_CURRENT_STATE` / `GET_DEVICE_INFO`, so the
+/// installer pushes config over serial to an eth device exactly as to a WiFi one. The
+/// WiFi-provisioning RPCs (`WIFI_SETTINGS`, `GET_WIFI_NETWORKS`) build only on WiFi targets; on
+/// eth, `GET_CURRENT_STATE` reports "provisioned" + the URL from the Ethernet link.
+/// `WIFI_SETTINGS` and `GET_WIFI_NETWORKS` are both rejected while `platform::wifiStaConnected()`
+/// — the scan gate protects large installs, since `esp_wifi_scan_start` puts the radio into scan
+/// mode for 2-5 s, dropping inbound ArtNet packets (a visible glitch on a 16K-LED rig).
+///
+/// **Prior art:** Improv-WiFi is the standard ESPHome / Home Assistant use for cross-firmware
+/// WiFi provisioning (spec: https://www.improv-wifi.com/serial/; reference C++:
+/// https://github.com/improv-wifi/sdk-cpp). projectMM-v1's `deploy/wifi.py` +
+/// `deploy/flashfs.py --wifi` covered the same rack-provisioning use case by baking credentials
+/// into a LittleFS partition image and re-flashing; Improv replaces that with live serial
+/// provisioning (devices stay running, no flash mode required).
 class ImprovProvisioningModule : public MoonModule {
 public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
     void setNetworkModule(NetworkModule* n) { networkModule_ = n; }
-    // For the APPLY_OP vendor RPC — the module routes a pushed REST op to the
-    // HttpServerModule's apply-core (the same code /api/modules + /api/control use).
+    /// For the APPLY_OP vendor RPC — the module routes a pushed REST op to the
+    /// HttpServerModule's apply-core (the same code /api/modules + /api/control use).
     void setHttpServerModule(HttpServerModule* h) { httpServerModule_ = h; }
 
-    // Diagnostics keep ticking; matches FirmwareUpdateModule / SystemModule.
+    /// Diagnostics keep ticking; matches FirmwareUpdateModule / SystemModule.
     bool respectsEnabled() const override { return false; }
 
-    // Apparatus, not swappable content — provisioning is a fixed device service.
-    // Not deletable (matches Board / Preview); can still be disabled.
+    /// Apparatus, not swappable content — provisioning is a fixed device service.
+    /// Not deletable (matches Board / Preview); can still be disabled.
     bool userEditable() const override { return false; }
 
     void setup() override {
@@ -71,6 +117,11 @@ public:
         controls_.addReadOnly("provision_status", statusStr_, sizeof(statusStr_));
     }
 
+    /// Poll the SET_TX_POWER cap then the WiFi credentials the Improv task published (an
+    /// acquire-load pairs each atomic flag with the platform task's release-store so the buffer
+    /// writes are visible before we read them). The TX-power cap is applied first on purpose (see
+    /// the inline note), and the deviceModel arrives like any other catalog default via the
+    /// APPLY_OP poll below rather than here.
     void loop1s() override {
         // Vendor SET_TX_POWER RPC — handled BEFORE the credentials on purpose:
         // when an installer sends the cap and the credentials back-to-back,
@@ -98,12 +149,14 @@ public:
         // control's per-control validator (handled in the APPLY_OP poll below).
     }
 
-    // APPLY_OP is polled per-TICK (not loop1s) because the installer pushes a burst
-    // of ops during provisioning and single-buffers them: the Improv task refuses a
-    // new op until this consumes the previous (clears pendingOpReady_), so a fast
-    // poll keeps the busy-window to ~one tick and the install snappy. Applying on the
-    // main loop here (not the Improv task) keeps the factory/tree mutation off the
-    // serial task — the same discipline the credentials/deviceModel paths follow.
+    /// Apply a pending APPLY_OP through HttpServerModule::applyOp. Polled per-TICK (not loop1s)
+    /// because the installer pushes a burst of ops during provisioning and single-buffers them:
+    /// the Improv task refuses a new op until this consumes the previous (clears
+    /// pendingOpReady_), so a fast poll keeps the busy-window to ~one tick and the install
+    /// snappy. Applying on the main loop here (not the Improv task) keeps the factory/tree
+    /// mutation off the serial task — the same discipline the credentials/deviceModel paths
+    /// follow. A failed op can't travel back on the already-spent frame ack, so it's surfaced
+    /// over serial + in provision_status rather than looking like a clean install.
     void loop() override {
         if (pendingOpReady_.load(std::memory_order_acquire) && httpServerModule_) {
             // The Improv task already acked frame RECEIPT; the op is APPLIED here. A

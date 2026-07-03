@@ -64,7 +64,7 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 # `ships`: True for variants the release matrix builds + publishes. A variant can
 # exist here (buildable from the CLI) yet be held out of CI with ships=False.
 # This dict is the SINGLE source of truth — generate_firmwares.py projects it to
-# docs/install/firmwares.json, which the CI matrix, the ESP Web Tools manifest
+# web-installer/firmwares.json, which the CI matrix, the ESP Web Tools manifest
 # loops, and MoonDeck all read (check_firmwares.py guards the projection).
 FIRMWARES: dict[str, dict] = {
     # Default classic ESP32: WiFi AND Ethernet in one binary. The RMII Ethernet

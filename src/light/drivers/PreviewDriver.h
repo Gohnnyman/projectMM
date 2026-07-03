@@ -9,56 +9,68 @@
 
 namespace mm {
 
-// Streams a true-shape 3D preview to the web UI over the binary WebSocket.
-//
-// The preview is a POINT LIST, not a dense grid: only the real lights are sent,
-// at their real (x,y,z) positions. This is the proven MoonLight model (virtual
-// grid → physical sparse lights; positions sent once at mapping time, channels
-// per frame). Two message types — PreviewDriver owns both wire formats; the
-// HTTP server is a domain-neutral BinaryBroadcaster that just writes the bytes:
-//
-//   0x03 coordinate table (sent when the geometry changes — every LUT/layout rebuild
-//        via onBuildState — and when a new client connects, so a refresh gets it; never
-//        per-frame):
-//        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
-//        bx/by/bz = bounding-box extent (for client centring); positions are
-//        1 byte/axis (a layout box ≤255/axis is the realistic case). count is u32 so a
-//        >65535-light panel (big ArtNet/HUB75 walls) isn't capped by the wire format —
-//        it matches nrOfLightsType (u32 on PSRAM boards).
-//
-//   0x02 per-frame channels: [0x02][count:u32][stride:u16][(r,g,b) × count]
-//        RGB by driver index, every `stride`-th light. The browser positions
-//        triple i at coord-table entry i*stride.
-//
-// `count` here is the number of points actually sent = ceil(lightCount/stride).
-// stride>1 only when lightCount*3 would exceed the send-buffer cap (a large
-// dense grid); sparse layouts (sphere) send every light exactly (stride 1).
+/// Streams a true-shape 3D preview to the web UI over the binary WebSocket.
+///
+/// The preview is a POINT LIST, not a dense grid: only the real lights are sent,
+/// at their real (x,y,z) positions. This is the proven MoonLight model (virtual
+/// grid → physical sparse lights; positions sent once at mapping time, channels
+/// per frame). Two message types — PreviewDriver owns both wire formats; the
+/// HTTP server is a domain-neutral BinaryBroadcaster that just writes the bytes:
+///
+// --8<-- [start:wire-format]
+///   0x03 coordinate table (sent when the geometry changes — every LUT/layout rebuild
+///        via onBuildState — and when a new client connects, so a refresh gets it; never
+///        per-frame):
+///        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
+///        bx/by/bz = bounding-box extent (for client centring); positions are
+///        1 byte/axis (a layout box ≤255/axis is the realistic case). count is u32 so a
+///        >65535-light panel (big ArtNet/HUB75 walls) isn't capped by the wire format —
+///        it matches nrOfLightsType (u32 on PSRAM boards).
+///
+///   0x02 per-frame channels: [0x02][count:u32][stride:u16][(r,g,b) × count]
+///        RGB by driver index, every `stride`-th light. The browser positions
+///        triple i at coord-table entry i*stride.
+// --8<-- [end:wire-format]
+///
+/// `count` is the number of points actually kept after lattice downsampling (the
+/// lights whose position satisfies `pos ≡ 0 mod stride`) — a client sizes its buffer
+/// from this `count`, not from the light total. `stride` rises above 1 only when the
+/// point set would exceed the runtime send-buffer cap (`min(display, memory)`); below
+/// the cap every light is sent (stride 1), so a sparse layout streams in full.
 class PreviewDriver : public DriverBase {
 public:
-    // The 3D preview the web UI renders streams from this driver. Deleting or
-    // replacing it from the UI would silently kill that preview, so it opts out
-    // of user-editing — it stays a fixed child of Drivers.
+    /// The 3D preview the web UI renders streams from this driver. Deleting or
+    /// replacing it from the UI would silently kill that preview, so it opts out
+    /// of user-editing — it stays a fixed child of Drivers.
     bool userEditable() const override { return false; }
 
-    // Preview stream rate (Hz), independent of render FPS. User-tunable 1-60.
+    /// Preview stream rate (Hz), independent of render FPS. User-tunable 1-60. This
+    /// is a *ceiling*: the effective rate self-limits to what the link sustains.
     uint8_t fps = 24;
 
-    // The sink each message is pushed to (HttpServerModule, as a
-    // BinaryBroadcaster). Wired in main.cpp. Light depends only on the
-    // interface, not the concrete HTTP server.
+    /// Set the sink each message is pushed to (HttpServerModule, as a
+    /// BinaryBroadcaster). Wired in main.cpp. Light depends only on the
+    /// interface, not the concrete HTTP server.
     void setBroadcaster(BinaryBroadcaster* b) { broadcaster_ = b; }
 
+    /// Bind the one control, `fps` (1-60).
     void onBuildControls() override {
         controls_.addUint8("fps", fps, 1, 60);
     }
 
+    /// Point the driver at the sparse driver buffer the LED/ArtNet drivers also read
+    /// (the MappingLUT fills it with exactly the real lights). The driver streams
+    /// straight from it — no preview-side copy.
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
     }
 
-    // A rebuild (layout add/replace/remove, resize, modifier change) ran — the
-    // light set / positions may have changed, so rebuild + broadcast the
-    // coordinate table. This is the MoonLight "positions once at mapping time".
+    /// A rebuild (layout add/replace/remove, resize, modifier change) ran — the
+    /// light set / positions may have changed, so rebuild + broadcast the coordinate
+    /// table (the MoonLight "positions once at mapping time"). Cancels any in-flight
+    /// resumable colour send *first*: a resize frees+reallocs the producer buffer, so
+    /// a half-sent frame would read freed memory — a use-after-free guard pinned by a
+    /// test. This coupling spans PreviewDriver ↔ HttpServerModule ↔ the Layer buffer.
     void onBuildState() override {
         // A resize frees+reallocs the producer buffer, so any in-flight resumable colour send holds
         // a pointer that's about to dangle — cancel it BEFORE the rebuild (the browser discards the
@@ -68,6 +80,11 @@ public:
         MoonModule::onBuildState();
     }
 
+    /// Per-tick: (re)stream the coordinate table when the geometry or client set
+    /// changed, then stream one colour frame if the previous one finished draining.
+    /// The frame rate self-limits to what the link sustains (sheds rate first, then
+    /// spatial resolution via adaptive downscale), so a large grid never stalls the
+    /// loop or tears — it always delivers a complete frame.
     void loop() override {
         if (fps == 0) return;
         uint32_t now = platform::millis();
@@ -139,8 +156,11 @@ public:
         }
     }
 
-    // Build (or rebuild) the cached coordinate table from the layout's real
-    // lights and broadcast it. Public so tests can drive it deterministically.
+    /// Build (or rebuild) the cached coordinate table from the layout's real lights
+    /// and broadcast it (the `0x03` message). Above the point cap — `min(display,
+    /// memory)`, memory from `maxAllocBlock()` — lights are kept on a spatial lattice
+    /// (position ≡ 0 mod stride), sampling positions not indices so there is no moiré.
+    /// Public so tests can drive it deterministically.
     void buildAndSendCoordTable() {
         coordCount_ = 0;
         if (!layer_ || !layer_->layouts()) return;
@@ -257,9 +277,9 @@ public:
         coordPending_ = !broadcaster_->endBinaryFrame();
     }
 
-    // STREAM one per-frame 0x02 RGB message from the producer buffer — no intermediate buffer.
-    // Returns whether every client got it (false → loop() drives adaptive downscaling). Public
-    // so tests can drive it without the loop() rate-limit.
+    /// Stream one per-frame `0x02` RGB message straight from the producer buffer — no
+    /// intermediate copy. Returns whether every client got it (false → loop() drives
+    /// adaptive downscaling). Public so tests can drive it without loop()'s rate-limit.
     bool sendFrame() {
         if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
         const uint8_t* src = sourceBuffer_->data();

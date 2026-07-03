@@ -16,31 +16,68 @@
 
 namespace mm {
 
-// Discovers other devices on the LAN by UDP presence broadcast and presents them as a
-// browsable list. Core + domain-neutral: it finds "a projectMM / a WLED device" and light
-// modules (Art-Net sync, future SuperSync, device groups) consume the list rather than
-// living here. Submodule of NetworkModule — discovery depends on the network being up.
-// See docs/moonmodules/core/DevicesModule.md.
-//
-// Discovery is PASSIVE UDP: each device BROADCASTS a small presence packet on a well-known
-// port (WLED + projectMM both use UDP 65506 with the 44-byte WLED-compatible header — see
-// WledPacket), and this module LISTENS (a bound UdpSocket per port its DevicePlugins claim,
-// drained non-blocking each tick). A plugin classifies each datagram into a `Device`.
-// projectMM also broadcasts its OWN presence on a slow cadence so peers discover it (and a
-// WLED app browsing 65506 can list it too). This replaces the former mDNS *query* path,
-// which destabilised our own mDNS advertise (a PTR query for a service we also host
-// exhausts the IDF mDNS pool — see docs/history/decisions.md). mDNS is now
-// advertise-ONLY (so the WLED native app + Home Assistant discover us); discovery never
-// queries. Fast (no subnet sweep), hot-path-safe (non-blocking recv), extensible (a new
-// ecosystem is one new plugin file). Reliable device-to-device *commands* ride REST;
-// latency-critical sync rides its own UDP — never this listener (lossy-OK presence only).
+/// Discovers other devices on the LAN by UDP presence broadcast and presents them
+/// as a browsable list, focusing on *all* devices on the network (including this
+/// one, marked as self) rather than the host's own state
+///
+/// Core + domain-neutral: it finds "a projectMM / a WLED device" and light modules
+/// (Art-Net sync, device groups) consume the list rather than living here, so its
+/// card looks the same on every projectMM instance, ESP32 or PC. Submodule of
+/// NetworkModule — discovery depends on the network being up (the same placement
+/// reasoning as the Improv provisioning module), wired in `main.cpp` and marked
+/// wired-by-code so persistence preserves it.
+///
+/// **Discovery is passive UDP.** Each device BROADCASTS a small presence packet on
+/// a well-known port (WLED + projectMM both use UDP 65506 with the 44-byte
+/// WLED-compatible header — see `WledPacket`), and this module LISTENS (a bound
+/// `UdpSocket` per port its `DevicePlugin`s claim, drained non-blocking each tick).
+/// No subnet sweep, no per-host probe, no mDNS query — a device appears when its
+/// broadcast arrives and ages out when it stops. projectMM also broadcasts its OWN
+/// presence on a slow cadence (~10 s) so peers discover it, and a WLED app browsing
+/// 65506 lists it too (discovery-only: a receiving WLED shows us in its instances
+/// list, it does not sync to it). This replaces the former mDNS *query* path, which
+/// destabilised our own mDNS advertise (a PTR query for a service we also host
+/// exhausts the IDF mDNS pool — see docs/history/decisions.md). mDNS is
+/// advertise-ONLY (announcing `_http._tcp`+`mm=1` and `_wled._tcp`+`mac=` so the
+/// WLED native app + Home Assistant, which only browse mDNS, discover us); discovery
+/// never queries.
+///
+/// **Plugins are the interop seam.** Foreign ecosystems hook in as plugins, not
+/// hardcoded branches (the adapter pattern, cf. `ListSource`, `ModuleFactory`): a
+/// `DevicePlugin` declares its UDP port and turns a datagram into a `Device` kind.
+/// `MmPlugin` claims a marked WLED-valid packet as projectMM (offered first, so a
+/// projectMM peer isn't double-claimed as WLED); `WledPlugin` claims an unmarked one
+/// as WLED. A new system is one new plugin file — no core edit. Out-of-band devices
+/// (a Philips Hue bridge found over HTTP by a light-domain driver) register through
+/// `upsertHueBridge()` via the `active()` boot-instance seam, keeping the Hue
+/// pairing entirely in the driver.
+///
+/// **Age-out + persistence.** Each sighting stamps `lastSeenMs`; a live-confirmed
+/// device is kept `kStaleMs` (24 h) as a durable "devices I've seen" history, while
+/// a cached row (restored from persistence, not yet re-heard) gets only a short
+/// `kCachedGraceMs` (60 s) probation so a long-gone persisted device can't survive
+/// forever across reboots. The `devices` List control is persistable, so the
+/// last-known list is restored on boot (shown as "N devices (cached)") before the
+/// first announcement arrives; the self row is re-added live with the current IP.
+/// Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.
+///
+/// **Transport boundary.** This module does *discovery* only (lossy-OK presence,
+/// never device-to-device commands). Consumers reach a found device over the right
+/// transport: must-arrive config rides REST; latency-critical lossy-OK traffic
+/// (time sync, live pixels) rides its own UDP stream.
+///
+/// **Prior art:** the industry-standard mDNS-SD / DNS-SD (Bonjour, Avahi)
+/// announce-and-browse pattern, plus MoonLight's UDP presence broadcast carried
+/// forward as the 44-byte WLED-compatible packet on UDP 65506. See
+/// docs/moonmodules/core/DevicesModule.md for the WLED-interop screenshots + the
+/// wire shape.
 class DevicesModule : public MoonModule, public ListSource {
 public:
-    // Wire this device's own name (deviceName) before setup so the self row matches the
-    // status page / router / mDNS. Borrowed pointer — caller owns stable storage (SystemModule).
+    /// Wire this device's own name (deviceName) before setup so the self row matches the
+    /// status page / router / mDNS. Borrowed pointer — caller owns stable storage (SystemModule).
     void setSelfName(const char* name) { selfName_ = name; }
 
-    // ListSource — rows are produced straight from devices_ (no copy, no alloc).
+    /// ListSource — rows are produced straight from devices_ (no copy, no alloc).
     uint8_t listRowCount() const override { return deviceCount_; }
 
     void writeListRow(JsonSink& sink, uint8_t row) const override {
@@ -82,12 +119,12 @@ public:
         sink.append("}");
     }
 
-    // ListSource restore (persistence load): parse the saved `devices` array with the
-    // recursive mm::json reader and rebuild devices_, so the last-known list shows on
-    // boot before any announcement arrives. Tolerant of a malformed/over-large file
-    // (parse fails → false → empty list). Self is dropped (re-added live via upsertSelf
-    // with the current IP). Tolerates an OLD persisted file with extra keys (e.g. the
-    // former `via`) — the keyed reader ignores them (robust to any input).
+    /// ListSource restore (persistence load): parse the saved `devices` array with the
+    /// recursive mm::json reader and rebuild devices_, so the last-known list shows on
+    /// boot before any announcement arrives. Tolerant of a malformed/over-large file
+    /// (parse fails → false → empty list). Self is dropped (re-added live via upsertSelf
+    /// with the current IP). Tolerates an OLD persisted file with extra keys (such as the
+    /// former `via`) — the keyed reader ignores them (robust to any input).
     bool restoreList(const char* json, const char* key) override {
         deviceCount_ = 0;
         const bool ok = mm::json::forEachListElement(json, key,
@@ -131,16 +168,16 @@ public:
         controls_.addList("devices", *this);   // this module is the ListSource
     }
 
-    // The boot DevicesModule (exactly one exists). A foreign-bridge driver in the light domain
-    // (HueDriver) registers a discovered bridge through this without a compile-time dependency
-    // on DevicesModule's address — the same static-seam shape as AudioModule::latestFrame().
+    /// The boot DevicesModule (exactly one exists). A foreign-bridge driver in the light domain
+    /// (a Hue driver) registers a discovered bridge through this without a compile-time dependency
+    /// on DevicesModule's address — the same static-seam shape as `AudioModule::latestFrame()`.
     static DevicesModule* active() { return active_; }
 
-    // Register a Hue bridge a HueDriver has connected to. Unlike upsertDevice (driven by a UDP
-    // presence packet), a bridge is discovered out-of-band — the driver already holds its IP +
-    // app key — so this is the explicit entry point for that. Idempotent: updates the name +
-    // colour count of the existing row, or inserts one. `colour` is how many of the bridge's
-    // lights are colour-capable, the figure for sizing a layout. Persisted like any device row.
+    /// Register a Hue bridge a light-domain driver has connected to. Unlike upsertDevice (driven by a UDP
+    /// presence packet), a bridge is discovered out-of-band — the driver already holds its IP +
+    /// app key — so this is the explicit entry point for that. Idempotent: updates the name +
+    /// colour count of the existing row, or inserts one. `colour` is how many of the bridge's
+    /// lights are colour-capable, the figure for sizing a layout. Persisted like any device row.
     void upsertHueBridge(const uint8_t ip[4], const char* name, uint8_t colour) {
         Device* d = findByIp(ip);
         bool persistChanged = false;
@@ -179,10 +216,10 @@ public:
         setStatus(statusBuf_);
     }
 
-    // Every tick: ensure we're online, drain inbound presence packets through the plugins,
-    // broadcast our own presence on a slow cadence, and age out devices unheard for
-    // kStaleMs. The drain is non-blocking (recvFrom returns -1 when nothing pending), so it
-    // never stalls the tick — the hot-path-safe replacement for the old mDNS query.
+    /// Every tick: ensure we're online, drain inbound presence packets through the plugins,
+    /// broadcast our own presence on a slow cadence, and age out devices unheard for
+    /// kStaleMs. The drain is non-blocking (recvFrom returns -1 when nothing pending), so it
+    /// never stalls the tick — the hot-path-safe replacement for the old mDNS query.
     void loop1s() override {
         MoonModule::loop1s();
         uint8_t local[4] = {};
@@ -218,10 +255,10 @@ public:
 
     ModuleRole role() const override { return ModuleRole::Generic; }
 
-    // Test seam: feed a synthetic presence datagram through the real classify→upsert
-    // pipeline, exactly as the live recvFrom loop does. The desktop unit/scenario tests
-    // drive the full discovery path (plugin claim, type priority, name/IP merge) with
-    // hand-built packets — no network needed. Not used in production.
+    /// Test seam: feed a synthetic presence datagram through the real classify→upsert
+    /// pipeline, exactly as the live recvFrom loop does. The desktop unit/scenario tests
+    /// drive the full discovery path (plugin claim, type priority, name/IP merge) with
+    /// hand-built packets — no network needed. Not used in production.
     void injectPacketForTest(const uint8_t* data, size_t len, const uint8_t srcIp[4]) {
         mergePacket(data, len, srcIp);
     }
@@ -232,36 +269,36 @@ private:
         char     name[24] = {};
         DevType  type = DevType::Generic;
         bool     self = false;
-        bool     cached = false; // restored from persistence, not yet re-heard live this
-                                 // session. Cleared on the first live sighting.
-        uint32_t lastSeenMs = 0; // platform::millis() at the most recent mDNS sighting.
-                                 // Age-out drops a non-self device unheard for kStaleMs.
-        uint8_t  colourCount = 0; // Hue bridge only: how many of its lights are colour-capable
-                                    // (the figure for sizing a layout). 0 for non-bridge rows.
+        bool     cached = false; ///< restored from persistence, not yet re-heard live this
+                                 ///< session. Cleared on the first live sighting.
+        uint32_t lastSeenMs = 0; ///< platform::millis() at the most recent presence sighting.
+                                 ///< Age-out drops a non-self device unheard for kStaleMs.
+        uint8_t  colourCount = 0; ///< Hue bridge only: how many of its lights are colour-capable
+                                    ///< (the figure for sizing a layout). 0 for non-bridge rows.
     };
 
     // The boot instance, for active() — the foreign-bridge static seam (mirrors AudioModule).
     static inline DevicesModule* active_ = nullptr;
 
-    static constexpr uint8_t  kMaxDevices = 32;   // a LAN's worth; bounded, no heap
-    // Broadcast our presence every this-many loop1s ticks (≈ seconds). Slow + light, like
-    // WLED's ~30 s beacon; a new device appears within this window. A departed device
-    // clears within kStaleMs (sized to a few intervals so a present-but-quiet device isn't
-    // dropped between its broadcasts).
+    static constexpr uint8_t  kMaxDevices = 32;   ///< a LAN's worth; bounded, no heap
+    /// Broadcast our presence every this-many loop1s ticks (≈ seconds). Slow + light, like
+    /// WLED's ~30 s beacon; a new device appears within this window. A departed device
+    /// clears within kStaleMs (sized to a few intervals so a present-but-quiet device isn't
+    /// dropped between its broadcasts).
     static constexpr uint32_t kBroadcastEverySec = 10;
-    // Keep a device listed for 24 h after its last sighting, then drop. The list is a
-    // durable "devices I've seen" history (persisted to flash, restored on boot), not just
-    // "live right now": a device that goes offline survives a reboot and lingers a full day,
-    // its freshness dot ageing green → yellow (>1 min) → red (>1 h) so the UI shows it
-    // fading before it finally purges. A still-present device re-broadcasts every ~10 s, so
-    // 24 h is never hit by a live peer.
+    /// Keep a device listed for 24 h after its last sighting, then drop. The list is a
+    /// durable "devices I've seen" history (persisted to flash, restored on boot), not just
+    /// "live right now": a device that goes offline survives a reboot and lingers a full day,
+    /// its freshness dot ageing green → yellow (>1 min) → red (>1 h) so the UI shows it
+    /// fading before it finally purges. A still-present device re-broadcasts every ~10 s, so
+    /// 24 h is never hit by a live peer.
     static constexpr uint32_t kStaleMs = 24u * 60u * 60u * 1000u;
-    // Probation for a CACHED (restored-from-persistence, never-re-heard) device: keep it
-    // only this long for a live packet to re-confirm it, else drop it as a ghost. Short, so
-    // a stale persisted entry doesn't survive across reboots — the persisted file has no
-    // real last-seen time, so a cached device's clock is "boot", not "actually last seen".
+    /// Probation for a CACHED (restored-from-persistence, never-re-heard) device: keep it
+    /// only this long for a live packet to re-confirm it, else drop it as a ghost. Short, so
+    /// a stale persisted entry doesn't survive across reboots — the persisted file has no
+    /// real last-seen time, so a cached device's clock is "boot", not "actually last seen".
     static constexpr uint32_t kCachedGraceMs = 60u * 1000u;
-    static constexpr int      kMaxDrainPerTick = 16;   // cap packets processed per tick (bounded work)
+    static constexpr int      kMaxDrainPerTick = 16;   ///< cap packets processed per tick (bounded work)
 
     // The interop plugins. Order matters: MmPlugin is first, so a projectMM peer's
     // marker-stamped packet is typed projectMM before WledPlugin would see it as a plain

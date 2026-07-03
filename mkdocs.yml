@@ -1,0 +1,151 @@
+# Docs site config — Material for MkDocs. Phase 0 of the docs overhaul
+# (docs/backlog/docs-system-overhaul.md): render the EXISTING docs as a
+# navigable, searchable site at the Pages root, with zero content changes.
+# The `nav:` below imposes a top-down end-user → developer order over files
+# that already exist; nothing here moves or rewrites a doc.
+#
+# Built in CI (release.yml deploy-pages job) into pages/ root; the web
+# installer keeps its /install/ path untouched. Build locally with
+#   uv run scripts/docs/build_docs.py --strict
+site_name: projectMM
+site_description: High-performance LED & DMX lighting control for ESP32 and beyond.
+# Canonical deployed URL: the custom domain, with the /projectMM/ repo subpath
+# kept (GitHub Pages serves the project site under that path even on the custom
+# domain — every existing link uses moonmodules.org/projectMM/…, e.g. the
+# installer at /projectMM/install/). Drives the sitemap, canonical <link> tags,
+# and the base for absolute URLs.
+site_url: https://moonmodules.org/projectMM/
+repo_url: https://github.com/MoonModules/projectMM
+repo_name: MoonModules/projectMM
+edit_uri: edit/main/docs/
+
+# Flat output (foo.md → foo.html), NOT MkDocs' default directory URLs
+# (foo.md → foo/index.html). The docs' relative links (image `<img src>`, source
+# links) were hand-authored with `../` counts that match the FLAT layout — the
+# same counts GitHub uses when viewing the raw .md. Directory URLs add one path
+# level and break every relative asset link by one hop (a `../../../assets/…`
+# preview resolves to `/moonmodules/assets/…` and 404s). Keeping flat URLs makes
+# the same links resolve in BOTH the rendered site and GitHub's raw view — one
+# link that works everywhere, no per-file rewrite.
+use_directory_urls: false
+
+theme:
+  name: material
+  # The MoonModules moon-man — browser-tab favicon + the header logo (same PNG
+  # the web installer uses, copied into docs/assets/). Paths are relative to docs/.
+  favicon: assets/favicon.png
+  logo: assets/favicon.png
+  palette:
+    # Dark theme matching the retired landing page's accent (#a78bfa).
+    scheme: slate
+    primary: deep purple
+    accent: deep purple
+  features:
+    - navigation.instant   # SPA-style nav, no full reload
+    - navigation.tracking  # URL reflects the active anchor
+    - navigation.top       # back-to-top button
+    - navigation.sections  # top-level nav groups render as sections
+    - search.suggest
+    - search.highlight
+    - content.code.copy    # copy button on code blocks (matters once snippets land)
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  # Renders Material icon shortcodes (`:material-flash:` → the ⚡ glyph) used on
+  # the landing page's buttons and card grid. Without this they show as literal
+  # text. The emoji_index/generator pair is Material's documented icon setup.
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  # Snippets is the Phase-3 de-duplication mechanism: `--8<--` pulls real
+  # source lines into a doc so a fact lives once (in the .h) and renders in
+  # the .md. Enabled now (harmless with no snippets yet) so later phases need
+  # no config change. base_path lets a snippet reference src/ from the repo root.
+  - pymdownx.snippets:
+      base_path: [!relative $config_dir]
+      check_paths: true
+
+plugins:
+  - search
+
+# Column widths + preview-image sizing for the catalog tables (see mkdocs_hooks.py).
+extra_css:
+  - assets/extra.css
+
+# Build-time hooks (scripts/docs/mkdocs_hooks.py): generate the test-inventory pages
+# from the test files (never committed → can't drift), render each catalog page's
+# prose ### blocks as a 4-column table, and rewrite out-of-docs source links to
+# GitHub URLs. See the module docstring.
+hooks:
+  - scripts/docs/mkdocs_hooks.py
+
+# history/ and backlog/ are internal (agent-facing, transient) — kept OFF the top
+# nav (they're not in the `nav:` tree) but still BUILT into the site, so the many
+# doc-to-doc links into them (a spec citing a design study, a decision record)
+# resolve as normal relative links instead of 404ing. Reachable by following a
+# link, not by browsing the menu. They're already public on GitHub. One build
+# mechanism, no exclusion special-case, no dangling internal links.
+# (The web installer is a separate top-level app outside docs_dir — MkDocs never
+# sees it, so it needs no exclusion.)
+
+# Link validation: warn (don't fail) on cross-doc anchors. The existing docs
+# carry a backlog of links to renamed/removed section anchors — surfacing them
+# is useful, but fixing ~400 of them is its own cleanup, not this additive
+# site-standup. Phase 0 fails the build only on missing *files* / bad nav, not
+# stale anchors. (A later phase can flip anchors to `error` once swept.)
+validation:
+  nav:
+    omitted_files: ignore    # history/backlog intentionally absent from nav
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: ignore
+
+# Top-down navigation over the existing files. Two audiences, in order:
+# a user path first (what it is → install → use → effects), then the developer
+# reference (architecture → modules → source-level). history/ and backlog/ are
+# internal and deliberately absent from the published site.
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install & first light: gettingstarted.md
+      # The web installer is a separate app deployed at /install/ (staged
+      # verbatim by the release workflow, not built by MkDocs). Link out to it.
+      - Web installer: /projectMM/install/
+  - Effects & building shows:
+      - Effects: moonmodules/light/effects/effects.md
+      - Layouts: moonmodules/light/layouts/layouts.md
+      - Modifiers: moonmodules/light/modifiers/modifiers.md
+      - Drivers: moonmodules/light/drivers/drivers.md
+      - Live scripting: moonmodules/light/moonlive/MoonLiveEffect.md
+      - Supporting: moonmodules/light/supporting/supporting.md
+  - Core:
+      - UI: moonmodules/core/ui/ui.md
+      - Supporting: moonmodules/core/supporting/supporting.md
+  - Tests (what we verify):
+      - Unit tests: tests/unit-tests.md
+      - Scenario tests: tests/scenario-tests.md
+  - Developer reference:
+      - Architecture: architecture.md
+      - Coding standards: coding-standards.md
+      - Building: building.md
+      - Testing strategy: testing.md
+      - Performance: performance.md
+      - Hardware reference:
+          - ESP32-S31 coreboard: reference/esp32-s31-coreboard.md
+      # The per-module summary pages above (Effects & building shows › Supporting,
+      # Core › UI/Supporting) are the docs-v2 surface: each 4-column table row links
+      # to the module's generated technical page (moonmodules/{core,light}/moxygen/
+      # <Module>.md, from each `.h`'s /// comments) and, temporarily during the
+      # migration, to the original hand-written page. Those per-module pages
+      # (moonmodules/core/*.md, moonmodules/light/*.md, .../drivers/*.md) still BUILD
+      # and are reachable by link, but are OFF the menu — they collapse away entirely
+      # at the Stage-5 switchover once every module's content is absorbed into its /// .

@@ -507,8 +507,14 @@ function createCard(mod, depth) {
         title.appendChild(actions);
     }
 
-    // Help link → the module's spec page on GitHub, at the far right of the row.
-    // docPath comes from /api/types (relative to docs/moonmodules/); omitted if none.
+    // Help link → the module's spec page on the rendered docs site, far right of
+    // the row. docPath comes from /api/types (relative to docs/moonmodules/, e.g.
+    // "core/AudioModule.md" or "light/effects/effects.md#fire"); omitted if none.
+    // The site is Material for MkDocs at moonmodules.org/projectMM/ (flat URLs, so
+    // foo.md → foo.html; the MkDocs heading slugs match these #anchors), reached
+    // via the same /projectMM/ subpath the installer uses. Convert only the `.md`
+    // extension that sits right before the optional `#anchor` (suffix-anchored),
+    // so a docPath that ever contained ".md" mid-string wouldn't be mangled.
     const docPath = docPathForType(mod.type);
     if (docPath) {
         const help = document.createElement("a");
@@ -517,7 +523,8 @@ function createCard(mod, depth) {
         help.title = "Open module documentation";
         help.target = "_blank";
         help.rel = "noopener";
-        help.href = "https://github.com/MoonModules/projectMM/blob/main/docs/moonmodules/" + docPath;
+        const htmlPath = docPath.replace(/\.md(#.*)?$/, ".html$1");
+        help.href = "https://moonmodules.org/projectMM/moonmodules/" + htmlPath;
         title.appendChild(help);
     }
 

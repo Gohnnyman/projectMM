@@ -1,0 +1,88 @@
+/* Catalog tables (effects / modifiers / layouts / drivers), rendered from prose
+   ### blocks by scripts/docs/mkdocs_hooks.py. Give the four columns sensible
+   proportions and let the preview image fill its column instead of the tiny
+   hand-authored width="300".
+
+   Scoped to `.mm-catalog` (a class we add to the rendered table) so it doesn't
+   reshape the generated test-inventory tables or any other table on the site. */
+
+/* Material tables default to width:auto with content-based column sizing, which
+   IGNORES percentage column widths (the Preview column collapsed to ~100px and
+   the GIF rendered as a 68px thumbnail). `table-layout: fixed` + full width makes
+   the browser honour the column percentages below. */
+.md-typeset .mm-catalog-wrap table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* The preview GIF/PNG fills its (now properly-sized) column; auto height keeps
+   the aspect ratio. No max-width — let it use the full column so previews are big. */
+.md-typeset .mm-catalog-wrap table td img.mm-preview {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Column proportions: name+description and parameters get the room; preview and
+   links are narrower. nth-child targets the 4 columns of the catalog table. */
+.md-typeset .mm-catalog-wrap table th:nth-child(1),
+.md-typeset .mm-catalog-wrap table td:nth-child(1) { width: 26%; }   /* Name + description */
+.md-typeset .mm-catalog-wrap table th:nth-child(2),
+.md-typeset .mm-catalog-wrap table td:nth-child(2) { width: 26%; }   /* Preview */
+.md-typeset .mm-catalog-wrap table th:nth-child(3),
+.md-typeset .mm-catalog-wrap table td:nth-child(3) { width: 30%; }   /* Parameters */
+.md-typeset .mm-catalog-wrap table th:nth-child(4),
+.md-typeset .mm-catalog-wrap table td:nth-child(4) { width: 18%; }   /* Links */
+
+/* fixed layout clips overflow by default — allow long param/description text to wrap. */
+.md-typeset .mm-catalog-wrap table td { word-wrap: break-word; overflow-wrap: anywhere; vertical-align: top; }
+
+/* Name column: title distinct from description (was one run-on line). The name is
+   bold and slightly larger; the description sits below in a muted colour with a
+   small gap, reading as title + subtitle. */
+.md-typeset .mm-catalog-wrap .mm-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--md-typeset-a-color);   /* accent purple, matching the param names */
+}
+.md-typeset .mm-catalog-wrap .mm-desc {
+  color: var(--md-default-fg-color--light);
+  display: inline-block;
+  margin-top: 0.3rem;
+}
+
+/* Parameters column: each param on its own line, compact (small gap, no left rule
+   — the earlier version made many-param effects like GameOfLife very tall). What
+   makes each param scannable is the NAME standing out, not the spacing. */
+.md-typeset .mm-catalog-wrap .mm-param {
+  display: block;
+  margin: 0 0 0.25rem 0;
+  line-height: 1.4;
+}
+.md-typeset .mm-catalog-wrap .mm-param:last-child { margin-bottom: 0; }
+
+/* The param NAME (a `code` chip in the source) is the anchor the eye scans for —
+   make it stand out: accent colour, bold, no chip background so it reads as a
+   highlighted term rather than a muted grey box blending into the prose. */
+.md-typeset .mm-catalog-wrap .mm-param code {
+  color: var(--md-typeset-a-color);   /* the theme accent (purple) */
+  background: transparent;
+  font-weight: 600;
+  font-size: 0.82em;
+  padding: 0;
+}
+
+/* Control description (the prose after the em-dash) greyed, matching the muted
+   module description — so within a param, the name pops (purple) and its
+   explanation recedes (grey), consistent with name-vs-description elsewhere. */
+.md-typeset .mm-catalog-wrap .mm-pdesc {
+  color: var(--md-default-fg-color--light);
+}
+
+/* Links column: grey the plain attribution prose (author, project, year). The
+   actual links (Tests, source .h, MoonLight) keep their accent colour — Material's
+   `a` rule is more specific than this, so only the surrounding text greys. */
+.md-typeset .mm-catalog-wrap .mm-links {
+  color: var(--md-default-fg-color--light);
+}

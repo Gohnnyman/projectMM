@@ -1,6 +1,6 @@
 # Effects
 
-Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel colour into its [Layer](../Layer.md)'s buffer each tick; [modifiers](../modifiers/modifiers.md) reshape the result and a [driver](../drivers/PreviewDriver.md) sends it out. Effects that name an index colour read the global palette (the `palette` control on [Drivers](../Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](../Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
+Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel colour into its [Layer](../moxygen/Layer.md)'s buffer each tick; [modifiers](../modifiers/modifiers.md) reshape the result and a [driver](../drivers/PreviewDriver.md) sends it out. Effects that name an index colour read the global palette (the `palette` control on [Drivers](../moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](../moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
 
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
@@ -180,7 +180,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Expanding concentric rings from random centres, additive overlap (calm defaults).
 
-- `count` — simultaneous rings (1–8 active).
+- `count` — number of concentric rings (1–255).
 - `speed` — expansion rate.
 - `thickness` — ring band width.
 - `hue_shift` — rotate every ring's hue.
@@ -572,7 +572,7 @@ Origin: projectMM original (VU meter) · source [AudioVolumeEffect.h](../../../.
 
 ### DemoReel 🎬 · 3D
 
-A demo reel: plays every other registered effect in turn, auto-advancing on a timer, so one Layer cycles the whole library hands-free — the showcase/test tool for everything. It hosts a single live effect at a time (created from the effect registry, rendered into this Layer) and swaps to the next when the interval elapses — new effects are picked up automatically. It can also pick a fresh palette each cycle and overlay the playing effect's name. The `status` line shows which effect is playing (e.g. `playing: Plasma (3/20)`). It never hosts itself, and it plays effects in sequence rather than compositing them (layering is the [Layer](../Layer.md) stack's job).
+A demo reel: plays every other registered effect in turn, auto-advancing on a timer, so one Layer cycles the whole library hands-free — the showcase/test tool for everything. It hosts a single live effect at a time (created from the effect registry, rendered into this Layer) and swaps to the next when the interval elapses — new effects are picked up automatically. It can also pick a fresh palette each cycle and overlay the playing effect's name. The `status` line shows which effect is playing (e.g. `playing: Plasma (3/20)`). It never hosts itself, and it plays effects in sequence rather than compositing them (layering is the [Layer](../moxygen/Layer.md) stack's job).
 
 - `interval` — seconds each effect plays before advancing (1–120).
 - `shuffle` — jump to a random next effect instead of registry order.
@@ -612,44 +612,3 @@ Origin: MoonLight (Sinus, AI-generated) · via [MoonLight](https://github.com/Mo
 
 [Tests](../../../tests/unit-tests.md#sineeffect)
 
-## Source
-
-- [AudioSpectrumEffect.h](../../../../src/light/effects/AudioSpectrumEffect.h)
-- [AudioVolumeEffect.h](../../../../src/light/effects/AudioVolumeEffect.h)
-- [BlurzEffect.h](../../../../src/light/effects/BlurzEffect.h)
-- [BouncingBallsEffect.h](../../../../src/light/effects/BouncingBallsEffect.h)
-- [DemoReelEffect.h](../../../../src/light/effects/DemoReelEffect.h)
-- [DistortionWavesEffect.h](../../../../src/light/effects/DistortionWavesEffect.h)
-- [FireEffect.h](../../../../src/light/effects/FireEffect.h)
-- [FixedRectangleEffect.h](../../../../src/light/effects/FixedRectangleEffect.h)
-- [FreqMatrixEffect.h](../../../../src/light/effects/FreqMatrixEffect.h)
-- [FreqSawsEffect.h](../../../../src/light/effects/FreqSawsEffect.h)
-- [GEQ3DEffect.h](../../../../src/light/effects/GEQ3DEffect.h)
-- [GEQEffect.h](../../../../src/light/effects/GEQEffect.h)
-- [GameOfLifeEffect.h](../../../../src/light/effects/GameOfLifeEffect.h)
-- [LavaLampEffect.h](../../../../src/light/effects/LavaLampEffect.h)
-- [LinesEffect.h](../../../../src/light/effects/LinesEffect.h)
-- [LissajousEffect.h](../../../../src/light/effects/LissajousEffect.h)
-- [MetaballsEffect.h](../../../../src/light/effects/MetaballsEffect.h)
-- [NetworkReceiveEffect.h](../../../../src/light/effects/NetworkReceiveEffect.h)
-- [Noise2DEffect.h](../../../../src/light/effects/Noise2DEffect.h)
-- [NoiseEffect.h](../../../../src/light/effects/NoiseEffect.h)
-- [NoiseMeterEffect.h](../../../../src/light/effects/NoiseMeterEffect.h)
-- [PaintBrushEffect.h](../../../../src/light/effects/PaintBrushEffect.h)
-- [ParticlesEffect.h](../../../../src/light/effects/ParticlesEffect.h)
-- [PlasmaEffect.h](../../../../src/light/effects/PlasmaEffect.h)
-- [PraxisEffect.h](../../../../src/light/effects/PraxisEffect.h)
-- [RainbowEffect.h](../../../../src/light/effects/RainbowEffect.h)
-- [RandomEffect.h](../../../../src/light/effects/RandomEffect.h)
-- [RingsEffect.h](../../../../src/light/effects/RingsEffect.h)
-- [RipplesEffect.h](../../../../src/light/effects/RipplesEffect.h)
-- [RubiksCubeEffect.h](../../../../src/light/effects/RubiksCubeEffect.h)
-- [SineEffect.h](../../../../src/light/effects/SineEffect.h)
-- [SolidEffect.h](../../../../src/light/effects/SolidEffect.h)
-- [SphereMoveEffect.h](../../../../src/light/effects/SphereMoveEffect.h)
-- [SpiralEffect.h](../../../../src/light/effects/SpiralEffect.h)
-- [StarFieldEffect.h](../../../../src/light/effects/StarFieldEffect.h)
-- [StarSkyEffect.h](../../../../src/light/effects/StarSkyEffect.h)
-- [TetrixEffect.h](../../../../src/light/effects/TetrixEffect.h)
-- [TextEffect.h](../../../../src/light/effects/TextEffect.h)
-- [WaveEffect.h](../../../../src/light/effects/WaveEffect.h)

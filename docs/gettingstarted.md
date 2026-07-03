@@ -183,8 +183,8 @@ network — lives here as its own module, and we're adding more all the time.
 
 ![The System module](assets/gettingstarted/02-05-UI-System.png)
 
-> [SystemModule](moonmodules/core/SystemModule.md) ·
-> [AudioModule](moonmodules/core/AudioModule.md)
+> [SystemModule](moonmodules/core/ui/ui.md) ·
+> [AudioModule](moonmodules/core/ui/ui.md)
 
 **Firmware** — which build you're running, and where you update it. The
 **Install** button here does an over-the-air update straight from the device — no
@@ -192,7 +192,7 @@ USB cable needed once it's on your network.
 
 ![The Firmware module](assets/gettingstarted/02-06-UI-Firmware.png)
 
-> [FirmwareUpdateModule](moonmodules/core/FirmwareUpdateModule.md)
+> [FirmwareUpdateModule](moonmodules/core/ui/ui.md)
 
 **Network** — your connection: WiFi or Ethernet, signal strength, and the
 address others reach it at. The **Devices** section underneath finds other
@@ -201,8 +201,8 @@ other.
 
 ![The Network module](assets/gettingstarted/02-07-UI-Network.png)
 
-> [NetworkModule](moonmodules/core/NetworkModule.md) ·
-> [DevicesModule](moonmodules/core/DevicesModule.md)
+> [NetworkModule](moonmodules/core/ui/ui.md) ·
+> [DevicesModule](moonmodules/core/ui/ui.md)
 
 > **Lights are just one use.** Everything above — the modules, the live controls, the
 > 3D view, the web UI, the networking — is a general-purpose engine that knows nothing
@@ -224,7 +224,7 @@ on **serpentine** if your strip zig-zags back and forth.
 
 ![The Layouts module](assets/gettingstarted/02-08-UI-Layouts.png)
 
-> [Layouts](moonmodules/light/Layouts.md)
+> [Layouts](moonmodules/light/supporting/supporting.md)
 
 **Layers** — what plays on the lights. Add an **effect** (a moving pattern), stack
 several to blend them, and reshape them with **modifiers** (mirror, rotate, and
@@ -233,7 +233,7 @@ tweak live.
 
 ![The Layers module](assets/gettingstarted/02-09-UI-Layers.png)
 
-> [Layers](moonmodules/light/Layers.md) · [Layer](moonmodules/light/Layer.md)
+> [Layers](moonmodules/light/supporting/supporting.md) · [Layer](moonmodules/light/supporting/supporting.md)
 
 **Drivers** — where the colours go. Set overall **brightness** and colour order,
 then add an output: real LED strips on a pin, or send the frame over the network
@@ -241,7 +241,7 @@ then add an output: real LED strips on a pin, or send the frame over the network
 
 ![The Drivers module](assets/gettingstarted/02-10-UI-Drivers.png)
 
-> [Drivers](moonmodules/light/Drivers.md) ·
+> [Drivers](moonmodules/light/supporting/supporting.md) ·
 > [NetworkSendDriver](moonmodules/light/drivers/NetworkSendDriver.md)
 
 That's the whole picture: **layout → layers → drivers**, previewed in 3D, all

@@ -24,9 +24,9 @@ import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-const installJs = readFileSync(join(ROOT, "docs", "install", "install.js"), "utf8");
+const installJs = readFileSync(join(ROOT, "web-installer", "install.js"), "utf8");
 const boards = JSON.parse(
-    readFileSync(join(ROOT, "docs", "install", "deviceModels.json"), "utf8")
+    readFileSync(join(ROOT, "web-installer", "deviceModels.json"), "utf8")
 );
 
 // The chip families install.js flags as not-browser-flashable. Parsed from the

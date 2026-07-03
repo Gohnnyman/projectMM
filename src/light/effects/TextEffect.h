@@ -35,7 +35,7 @@ public:
     bool    scroll = false;               // false = static top-left; true = horizontal marquee
     uint8_t font   = 1;                   // index into fonts::kAll (0 = 4x6, 1 = 6x8)
     uint8_t speed  = 30;                  // marquee speed (pixels/sec-ish); only used when scrolling
-    uint8_t hue    = 0;                   // palette index for the text colour
+    uint8_t hue    = 128;                 // palette index for the text colour (mid-palette; 0 is black in some palettes)
 
     void onBuildControls() override {
         controls_.addTextArea("text", text_, sizeof(text_));

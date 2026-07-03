@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that docs/install/firmwares.json is in sync with the FIRMWARES dict.
+"""Check that web-installer/firmwares.json is in sync with the FIRMWARES dict.
 
 firmwares.json is a generated projection of build_esp32.py's FIRMWARES (the single
 source of truth), read by the CI release matrix, the ESP Web Tools manifest loops,
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-COMMITTED = ROOT / "docs" / "install" / "firmwares.json"
+COMMITTED = ROOT / "web-installer" / "firmwares.json"
 
 # Reuse the generator's projection so the checker and generator can't disagree.
 sys.path.insert(0, str(ROOT / "scripts" / "build"))
@@ -36,8 +36,8 @@ def main():
     # newline) can't cause spurious drift; only the data matters.
     if actual != expected:
         print(f"Firmware check: {n} variants, DRIFT")
-        print("  docs/install/firmwares.json is stale — regenerate with:")
-        print("  uv run scripts/build/generate_firmwares.py --out docs/install/firmwares.json")
+        print("  web-installer/firmwares.json is stale — regenerate with:")
+        print("  uv run scripts/build/generate_firmwares.py --out web-installer/firmwares.json")
         sys.exit(1)
 
     print(f"Firmware check: {n} variants, 0 issue(s)")

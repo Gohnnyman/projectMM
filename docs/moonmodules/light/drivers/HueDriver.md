@@ -1,6 +1,6 @@
 # HueDriver
 
-Overview and controls: [drivers.md § HueDriver](drivers.md#hue). This page carries the reference detail a control list can't — what makes Hue different (rate limit, bridge-smoothed transitions, pairing), the Hue v1 HTTP wire contract, and the Devices-module listing.
+Overview, controls, prior art, source, and tests: [drivers.md § Hue](drivers.md#hue). This page carries *only* what no single source file can: what makes Hue different (rate limit, bridge-smoothed transitions, pairing), the Hue v1 HTTP wire contract, and the Devices-module listing.
 
 ![A HueDriver in the UI](../../../assets/light/drivers/Hue%20driver.png)
 
@@ -25,11 +25,3 @@ The driver talks to the bridge over `platform::httpRequest` (declared in `src/pl
 - **List lights** — `GET http://<bridgeIp>/api/<appKey>/lights` → a JSON object keyed by light id (`{"1":{…},"2":{…}}`). A real bridge's response runs several KB; the driver scans it for colour-capable (`"hue"` in state) + reachable (`"reachable":true`) lights and maps window index → light id.
 - **List rooms** — `GET http://<bridgeIp>/api/<appKey>/groups` → a JSON object keyed by group id (`{"1":{"name":…,"lights":["1","2"],"type":"Room"},…}`). The driver scans it for `"type":"Room"` entries, reads each room's `name` and `lights` id array, and records which colour lights belong to each room (a bitmask over the colour-light list). This feeds the `room`/`light` dropdowns and the driven-set filter.
 - **Set a light** — `PUT http://<bridgeIp>/api/<appKey>/lights/<id>/state` with `{"on":true,"bri":0-254,"hue":0-65535,"sat":0-254,"transitiontime":N}` (or `{"on":false,…}` when the pixel is black). `hue`/`sat`/`bri` come from a textbook integer RGB→HSV of the pixel; `transitiontime` (deciseconds) is the cadence-matched fade.
-
-## Prior art
-
-The [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/) (link-button pairing, `/lights/<id>/state`, `transitiontime`). The effect-as-output mapping (bulbs as pixels of the render buffer, driven through the window) is projectMM's own — the same shape its UDP and LED drivers use.
-
-## Source
-
-[HueDriver.h](../../../../src/light/drivers/HueDriver.h)

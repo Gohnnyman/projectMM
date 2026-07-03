@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Locally preview the web installer at docs/install/index.html.
+"""Locally preview the web installer at web-installer/index.html.
 
 Stages a small directory (the install page + the shared install-picker
 module) and serves it with `python -m http.server`, plus the
@@ -12,7 +12,7 @@ depending on what's been built locally:
   - **render-only** (no `build/esp32-*/projectMM.bin` present): the
     picker populates against the real GitHub Releases API, dropdowns
     work, but clicking Install fails because the local server has no
-    `releases/` tree. Equivalent to "Recipe A" in docs/install/README.md.
+    `releases/` tree. Equivalent to "Recipe A" in web-installer/README.md.
     Useful for iterating on HTML/CSS/JS without tagging a release.
 
   - **flash-ready** (at least one local ESP32 build exists): the
@@ -26,7 +26,7 @@ depending on what's been built locally:
 The flash-ready mode is the developer's test ground for the install
 flow before deploying to GitHub Pages: any change to the installer
 page or install-picker.js can be verified against a real ESP32 over
-`http://localhost:8000/` (Web Serial works on localhost without the
+`http://localhost:8421/` (Web Serial works on localhost without the
 secure-origin requirement that gates the public site).
 
 Long-running. MoonDeck shows a Stop button while this is up; pressing
@@ -43,7 +43,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-INSTALL_DIR = ROOT / "docs" / "install"
+INSTALL_DIR = ROOT / "web-installer"
 ASSETS_BOARDS_DIR = ROOT / "docs" / "assets" / "boards"
 PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
 # Board-catalog / chip-detection half of the picker — web-installer only (not
@@ -72,7 +72,7 @@ GENERATE_MANIFEST = ROOT / "scripts" / "build" / "generate_manifest.py"
 # release exists yet the default lands on `latest`, which works.)
 LOCAL_TAG = "latest"
 LOCAL_VERSION = "local-dev"
-PORT = 8000
+PORT = 8421
 
 
 def _stage_runtime_files(src_dir: Path, dst_dir: Path):
@@ -117,7 +117,7 @@ def stage_install_page():
     Layout matches Pages exactly: the installer under /install/, board images
     under /install/assets/boards/, the releases tree under /install/releases/.
     A root index.html redirects / → /install/ so the historical
-    `localhost:8000/` entry point still lands on the installer. The shared
+    `localhost:8421/` entry point still lands on the installer. The shared
     install-picker.js (under src/ui/, shared with the on-device UI) is copied in.
     """
     if STAGE_DIR.exists():

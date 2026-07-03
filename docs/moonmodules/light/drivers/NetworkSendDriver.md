@@ -1,6 +1,6 @@
 # Network Send Driver
 
-Overview and controls: [drivers.md § Network Send](drivers.md#networksend). This page carries the reference detail a control list can't — the per-protocol chunking table, E1.31/Art-Net interop notes, the synchronous-send caveat, and the packet-layout headers.
+Overview, controls, prior art, source, and tests: [drivers.md § Network Send](drivers.md#networksend). This page carries *only* what no single source file can: the per-protocol chunking table, E1.31/Art-Net interop notes, the synchronous-send caveat, and the packet-layout headers.
 
 ![NetworkSendDriver controls](../../../assets/light/drivers/NetworkSendDriver.png)
 
@@ -27,18 +27,6 @@ The whole frame goes out inline in `loop()` — ~35 ms over Ethernet / ~90 ms ov
 
 ## Cross-domain wiring
 
-The driver is added as a child of the `Drivers` container at runtime — not boot-wired, but added per board through the catalog (`POST /api/modules`, the board's [`deviceModels.json`](../../../install/deviceModels.json) `modules` entry), so a device only carries the outputs its board actually has. Once added it receives `setSourceBuffer` / `setCorrection` from `Drivers::passBufferToDrivers` (which wires every child generically, boot-added or runtime-added) and applies the shared `const Correction*` before every send — the same correction the RMT LED driver applies, so network and wired outputs show identical colours. The added child persists across reboot via `FilesystemModule`.
+The driver is added as a child of the `Drivers` container at runtime — not boot-wired, but added per board through the catalog (`POST /api/modules`, the board's [`deviceModels.json`](../../../../web-installer/deviceModels.json) `modules` entry), so a device only carries the outputs its board actually has. Once added it receives `setSourceBuffer` / `setCorrection` from `Drivers::passBufferToDrivers` (which wires every child generically, boot-added or runtime-added) and applies the shared `const Correction*` before every send — the same correction the RMT LED driver applies, so network and wired outputs show identical colours. The added child persists across reboot via `FilesystemModule`.
 
-## Tests
-
-[Unit tests: NetworkSendDriver](../../../tests/unit-tests.md#networksenddriver) — exact wire layouts for all three protocols (the byte offsets strict receivers validate), universe splitting, and the no-allocation-in-loop contract per protocol path.
-
-Live tier: `uv run scripts/scenario/run_network_live.py` ([MoonDeck.md § run_network_live](../../../../scripts/MoonDeck.md#run_network_live)) relays between real boards with the protocol control cycled round-robin.
-
-## Prior art
-
-MoonLight's D_NetworkOut (ArtNet/E1.31/DDP in one node) and the v1/v2 ArtNet senders; protocol specs: Art-Net 4 (Artistic Licence), ANSI E1.31-2016, DDP (3waylabs). Studied for the lessons, never copied.
-
-## Source
-
-[NetworkSendDriver.h](../../../../src/light/drivers/NetworkSendDriver.h)
+The live send tier — `uv run scripts/scenario/run_network_live.py` ([MoonDeck.md § run_network_live](../../../../scripts/MoonDeck.md#run_network_live)) — relays between real boards with the protocol control cycled round-robin, exercising the wire path no host test reaches.

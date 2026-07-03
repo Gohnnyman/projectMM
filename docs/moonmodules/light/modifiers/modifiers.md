@@ -1,6 +1,6 @@
 # Modifiers
 
-Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](../effects/effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](../Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](../ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
+Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](../effects/effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](../moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](../moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
 
 ## MoonLight modifiers
 
@@ -146,16 +146,3 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 
 [Tests](../../../tests/unit-tests.md#rotatemodifier)
 
-## Source
-
-- [BlockModifier.h](../../../../src/light/modifiers/BlockModifier.h)
-- [CheckerboardModifier.h](../../../../src/light/modifiers/CheckerboardModifier.h)
-- [CircleModifier.h](../../../../src/light/modifiers/CircleModifier.h)
-- [MirrorModifier.h](../../../../src/light/modifiers/MirrorModifier.h)
-- [MultiplyModifier.h](../../../../src/light/modifiers/MultiplyModifier.h)
-- [PinwheelModifier.h](../../../../src/light/modifiers/PinwheelModifier.h)
-- [RandomMapModifier.h](../../../../src/light/modifiers/RandomMapModifier.h)
-- [RegionModifier.h](../../../../src/light/modifiers/RegionModifier.h)
-- [RippleXZModifier.h](../../../../src/light/modifiers/RippleXZModifier.h)
-- [RotateModifier.h](../../../../src/light/modifiers/RotateModifier.h)
-- [TransposeModifier.h](../../../../src/light/modifiers/TransposeModifier.h)

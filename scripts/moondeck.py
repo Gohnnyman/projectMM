@@ -44,11 +44,11 @@ APP_VERSION = _app_version()
 # Boards catalog (single source of truth, shared with the web installer)
 # ---------------------------------------------------------------------------
 
-BOARDS_FILE = ROOT / "docs" / "install" / "deviceModels.json"
+BOARDS_FILE = ROOT / "web-installer" / "deviceModels.json"
 
 
 def _load_boards():
-    """Load docs/install/deviceModels.json. Returns [] on missing/malformed file —
+    """Load web-installer/deviceModels.json. Returns [] on missing/malformed file —
     `_deduce_board` then always returns "" (no firmware uniquely identifies
     a board), MoonDeck JS shows only the empty default. The web installer
     Step 2 picker will share this file.
@@ -61,11 +61,11 @@ def _load_boards():
 
 BOARDS = _load_boards()
 
-FIRMWARES_FILE = ROOT / "docs" / "install" / "firmwares.json"
+FIRMWARES_FILE = ROOT / "web-installer" / "firmwares.json"
 
 
 def _load_firmwares():
-    """Shipping firmware-variant names from docs/install/firmwares.json — the
+    """Shipping firmware-variant names from web-installer/firmwares.json — the
     generated projection of build_esp32's FIRMWARES dict (the single source of
     truth, shared with the CI release matrix). Returns [] on missing/malformed
     file, so the MoonDeck UI just shows no firmware entries. Filtering on
@@ -182,7 +182,7 @@ def _deduce_board(firmware: str) -> str:
     """Firmware → board name when exactly one catalog entry claims this
     firmware. Returns "" when zero (unknown firmware) or multiple boards
     claim it (ambiguous — user picks). Catalog lives at
-    docs/install/deviceModels.json; see docs/architecture.md § Firmware vs board.
+    web-installer/deviceModels.json; see docs/architecture.md § Firmware vs board.
     """
     if not firmware:
         return ""
@@ -193,7 +193,7 @@ def _deduce_board(firmware: str) -> str:
 def _push_board_to_device(ip: str, board: str) -> bool:
     """POST /api/control on the device for every per-board control in deviceModels.json.
 
-    For boards that have a catalog entry in docs/install/deviceModels.json: fans
+    For boards that have a catalog entry in web-installer/deviceModels.json: fans
     out the full `controls.<Module>.<control>` block (matching the web
     installer's and the device-side `?deviceModel=` Inject path — same generic
     iteration, so adding a new field to a board entry Just Works without
@@ -910,7 +910,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"modules": test_meta.list_test_modules()})
 
         elif self.path == "/api/boards":
-            # Serves docs/install/deviceModels.json (loaded at startup). The web
+            # Serves web-installer/deviceModels.json (loaded at startup). The web
             # installer (Step 2) will fetch the same file directly from
             # Pages; MoonDeck reads it locally and exposes it here so the
             # JS UI shares one source of truth with the Python deduce path.
@@ -1212,6 +1212,11 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         script_path = SCRIPTS_DIR / script_def["script"]
         cmd = ["uv", "run", str(script_path)]
+
+        # Fixed args a card always passes to its script (e.g. build_docs runs
+        # with `--serve`). Distinct from `flags` (user checkboxes) and the
+        # `needs_*` selectors (UI-driven values) — these are constant per card.
+        cmd.extend(script_def.get("args", []))
 
         # Forward selector state (firmware / port / host) when the script
         # declares it needs them. The UI maintains a single Firmware dropdown

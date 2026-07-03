@@ -7,20 +7,15 @@
 
 namespace mm {
 
-// CSR-style logical→physical map. `offsets_[li]..offsets_[li+1]` index a run of
-// physical destinations for logical light `li`. Identity mode skips the table.
-//
-// The destinations array can be large for a many-to-one modifier on a big grid
-// (a 128×128 XY mirror → 32768 entries × 2 B ≈ 64 KB). On a no-PSRAM ESP32 the
-// largest *contiguous* free block can be smaller than that even when total free
-// heap is fine — a fragmentation cliff, not exhaustion. So when a single block
-// won't allocate but total heap allows it, destinations are split into
-// fixed-size power-of-two PAGES that each fit a fragmented heap. Paging is the
-// exception, not the rule: PSRAM boards (alloc is PSRAM-first → one huge block)
-// and every no-PSRAM case where the single block fits keep the flat single
-// array and the flat hot-path walk, byte-identical to a non-paged build. Only
-// the one failing config (no-PSRAM + large grid + fragmented heap) pages, where
-// the alternative is the modifier silently degrading to 1:1.
+/// Lookup table mapping logical light indices to physical light indices. Four mapping types describe how logical lights relate to physical lights: 1:1 identical (logical index == physical index — a grid with no serpentine and no modifiers, no table needed), 1:1 shuffled (each logical → one physical, reordered — a serpentine grid), 1:0 unmapped (logical has no physical output — a sparse layout like a wheel), and 1:N multimap (logical → multiple physical — a mirror/clone modifier). The last three all need a table.
+///
+/// **API:** the code API answers one question — does this LUT have a mapping table? `hasLUT` returns true when a table is allocated (1:1 shuffled, 1:0, 1:N). `setIdentity(count)` sets the table-free identity mode (`hasLUT` false; `forEachDestination(i, cb)` calls `cb(i)`). `build(logicalCount, maxDest)` allocates the CSR arrays. Callers don't need to know which mapping type is used — Drivers checks `hasLUT` to decide whether to allocate an output buffer, BlendMap checks it to choose between memcpy (identity) and LUT-based mapping. Naming: `setIdentity` / `hasLUT` rather than a "one-to-one" flag, because "one-to-one" reads as covering all 1:1 mappings, but the table-free fast path applies only to the *sequential identity* case.
+///
+/// **Storage (CSR):** two arrays — `offsets_[li]..offsets_[li+1]` index a run of physical destinations for logical light `li`, and the destinations array holds the flat list of physical indices. `nrOfLightsType` is `uint16_t` on no-PSRAM, `uint32_t` on PSRAM. `totalDestinations` is provided by the `Layouts` container, so destinations are always within valid bounds.
+///
+/// **Paged destinations (no-PSRAM fragmentation fallback):** the destinations array can be large for a many-to-one modifier on a big grid (a 128×128 XY mirror → 32768 entries × 2 B ≈ 64 KB). On a no-PSRAM ESP32 the largest *contiguous* free block can be smaller than that even when total free heap is fine — a fragmentation cliff, not exhaustion. So when a single block won't allocate but total heap allows it, destinations are split into fixed-size power-of-two PAGES that each fit a fragmented heap. Paging is the exception, not the rule: PSRAM boards (alloc is PSRAM-first → one huge block) and every no-PSRAM case where the single block fits keep the flat single array and the flat hot-path walk, byte-identical to a non-paged build. Only the one failing config (no-PSRAM + large grid + fragmented heap) pages, where the alternative is the modifier silently degrading to 1:1. `offsets_` is always a single small allocation; output is identical either way, so paging is purely an allocation detail.
+///
+/// **Prior art:** MoonLight's `PhysMap` — a memory-optimal union (2 B no-PSRAM / 4 B PSRAM) with the map type stored in each entry, `oneToOneMapping` / `allOneLight` fast-path flags, and `forEachLightIndex` for 1:N iteration (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysMap.h). projectMM renames `oneToOneMapping` → `setIdentity` / `!hasLUT` for the reason above.
 class MappingLUT {
 public:
     MappingLUT() = default;
@@ -29,28 +24,28 @@ public:
     MappingLUT(const MappingLUT&) = delete;
     MappingLUT& operator=(const MappingLUT&) = delete;
 
-    // Destinations page size. Power of two so the page split/index is a
-    // shift/mask (Xtensa has no hardware divide). 4096 entries × 2 B = 8 KB —
-    // small enough to fit a badly fragmented heap with margin, and to stay
-    // fittable as the heap shrinks with future modules.
+    /// Destinations page size. Power of two so the page split/index is a
+    /// shift/mask (Xtensa has no hardware divide). 4096 entries × 2 B = 8 KB —
+    /// small enough to fit a badly fragmented heap with margin, and to stay
+    /// fittable as the heap shrinks with future modules.
     static constexpr nrOfLightsType kPageEntries = 4096;
     static constexpr nrOfLightsType kPageShift = 12;          // 1<<12 == 4096
     static constexpr nrOfLightsType kPageMask = kPageEntries - 1;
     static constexpr int kMaxPages = 64;                      // 64 × 4096 = 256 K dests (512 KB) cap
     static_assert((kPageEntries & kPageMask) == 0, "kPageEntries must be a power of two");
 
-    // Fast path: logical == physical, no table needed
+    /// Fast path: logical == physical, no table needed. `hasLUT` returns false.
     void setIdentity(nrOfLightsType count) {
         free();
         identity_ = true;
         logicalCount_ = count;
     }
 
-    // Allocate CSR arrays for 1:N mapping. Returns false only on genuine
-    // exhaustion (tier 3) — the caller then degrades to 1:1. The three tiers:
-    //   1. single contiguous block fits        → flat array (today's path)
-    //   2. no single block, total heap allows   → paged array
-    //   3. total heap (minus reserve) too small → false (caller degrades)
+    /// Allocate CSR arrays for 1:N mapping. Returns false only on genuine
+    /// exhaustion (tier 3) — the caller then degrades to 1:1. The three tiers:
+    ///   1. single contiguous block fits        → flat array (today's path)
+    ///   2. no single block, total heap allows   → paged array
+    ///   3. total heap (minus reserve) too small → false (caller degrades)
     bool build(nrOfLightsType logicalCount, nrOfLightsType maxDestinations) {
         free();
         identity_ = false;
@@ -75,7 +70,7 @@ public:
         return true;
     }
 
-    // Fill one logical entry's destinations (call sequentially, idx 0..logicalCount-1)
+    /// Fill one logical entry's destinations (call sequentially, idx 0..logicalCount-1)
     void setMapping(nrOfLightsType logicalIdx, const nrOfLightsType* physicals, nrOfLightsType count) {
         if (!offsets_ || logicalIdx >= logicalCount_) return;
         offsets_[logicalIdx] = destinationCount_;
@@ -85,7 +80,7 @@ public:
         }
     }
 
-    // Call after all setMapping calls to close the last offset
+    /// Call after all setMapping calls to close the last offset
     void finalize() {
         if (offsets_) {
             offsets_[logicalCount_] = destinationCount_;
@@ -115,17 +110,18 @@ public:
     nrOfLightsType logicalCount() const { return logicalCount_; }
     nrOfLightsType destinationCount() const { return destinationCount_; }
 
-    // Whether each physical destination is written by at most one logical light.
-    // True for every current producer (mirror, serpentine shuffle, sparse
-    // box→driver) — their destinations are distinct, so blendMap can plain-copy
-    // (≈4× faster than the read-add-clamp additive path). Set false only for a
-    // map that intentionally folds multiple sources onto one destination (e.g.
-    // future multi-layer compositing), where additive blending is required.
+    /// Whether each physical destination is written by at most one logical light.
+    /// True for every current producer (mirror, serpentine shuffle, sparse
+    /// box→driver) — their destinations are distinct, so blendMap can plain-copy
+    /// (≈4× faster than the read-add-clamp additive path). Set false only for a
+    /// map that intentionally folds multiple sources onto one destination (for
+    /// example future multi-layer compositing), where additive blending is required.
     bool overwrites() const { return overwrites_; }
     void setOverwrites(bool v) { overwrites_ = v; }
 
-    // Memory accounting — actual bytes used, not capacity (destinations may be
-    // over-allocated). Paging doesn't change the total.
+    /// Memory accounting — actual bytes used, not capacity (destinations may be
+    /// over-allocated), 0 for identity. `estimateBytes` returns the total allocation
+    /// size for a prospective build. Paging doesn't change the total.
     size_t memoryUsed() const {
         if (identity_) return 0;
         return static_cast<size_t>(logicalCount_ + 1) * sizeof(nrOfLightsType)
@@ -137,7 +133,9 @@ public:
              + static_cast<size_t>(maxDest) * sizeof(nrOfLightsType);
     }
 
-    // Hot-path: iterate physical destinations for a logical index.
+    /// Hot-path: iterate physical destinations for a logical index. In identity mode
+    /// it calls back with the logical index itself (no table read); otherwise it walks
+    /// the CSR run, switching pages at each 4096 boundary in the paged case.
     template<typename F>
     void forEachDestination(nrOfLightsType logicalIdx, F&& callback) const {
         if (identity_) {

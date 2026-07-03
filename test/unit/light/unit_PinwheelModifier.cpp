@@ -56,6 +56,6 @@ TEST_CASE("PinwheelModifier 1D maps the sweep across distinct petals on Y") {
         CHECK(pos.y < 8);                  // within the reshaped petals-on-y box
         petalYs.insert(pos.y);
     }
-    // The sweep must touch more than one petal — the whole point of the effect. (Was 1 before the fix.)
+    // The sweep must touch more than one petal — the whole point of the effect.
     CHECK(petalYs.size() > 1);
 }
