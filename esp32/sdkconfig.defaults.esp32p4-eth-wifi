@@ -60,3 +60,20 @@ CONFIG_WIFI_RMT_AMPDU_TX_ENABLED=y
 CONFIG_WIFI_RMT_TX_BA_WIN=32
 CONFIG_WIFI_RMT_AMPDU_RX_ENABLED=y
 CONFIG_WIFI_RMT_RX_BA_WIN=16
+
+# --- UNRESOLVED boot crash (IDF 6.1, WiFi build only). KNOWN OPEN IDF BUG: esp-idf
+# #18759 (IDFGH-17859) — on ESP32-P4 + PSRAM, sleep_clock_icg_startup_init (a SECONDARY
+# init fn, priority 106, runs before app_main, NOT gated by CONFIG_PM_ENABLE) allocates
+# REGDMA sleep-retention links needing MALLOC_CAP_RETENTION and aborts with
+# ESP_ERR_NO_MEM (0x101) → reboot loop, once esp_hosted's SDIO stack is pulled in (this
+# WiFi build only; the eth-only P4 boots fine). See docs/backlog § ESP32-P4 round 4 and
+# https://github.com/espressif/esp-idf/issues/18759 for the full trail + upstream status.
+#
+# Bench-tried 2026-07-03, NONE fixed it (the RETENTION pool is a specific reserved region,
+# not general DRAM, so freeing general DRAM does not help):
+#   - CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y     → those buffers allocate after boot init
+#   - CONFIG_PM_POWER_DOWN_PERIPHERAL_IN_LIGHT_SLEEP=y → drops the ICG file, but the next
+#       retention alloc (PCR / int_wdt) fails, then a sleep_retention.c:914 assert
+#   - CONFIG_SPIRAM_ALLOW_{BSS,NOINIT}_SEG_EXTERNAL_MEMORY=y → retention alloc still fails
+# Held here until esp-idf #18759 lands an "disable ICG / retention" option, or a
+# version-matched C6 slave reflash changes the memory picture (see round 4 note).

@@ -46,8 +46,8 @@
       "name": "esp32p4-eth-wifi",
       "chip": "esp32p4",
       "eth_only": false,
-      "ships": false,
-      "description": "Waveshare ESP32-P4-NANO — Ethernet + WiFi. WiFi runs on the on-board ESP32-C6 over SDIO (esp_wifi_remote + esp_hosted, pulled P4-only). First build is longer (managed components)."
+      "ships": true,
+      "description": "⚠️ DOES NOT BOOT — repro build for esp-idf #18759 (github.com/espressif/esp-idf/issues/18759). Waveshare ESP32-P4-NANO, Ethernet + WiFi via the on-board ESP32-C6 over SDIO (esp_hosted). Builds + flashes but crash-loops at boot: sleep_clock_icg_startup_init fails ESP_ERR_NO_MEM on IDF 6.1. Published so the IDF team can one-click-flash the failing binary. Use esp32p4-eth for a working P4."
     },
     {
       "name": "esp32s31",

@@ -791,7 +791,8 @@
     "name": "Waveshare ESP32-P4-NANO",
     "chip": "ESP32-P4",
     "firmwares": [
-      "esp32p4-eth"
+      "esp32p4-eth",
+      "esp32p4-eth-wifi"
     ],
     "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
     "url": "https://www.waveshare.com/esp32-p4-nano.htm",

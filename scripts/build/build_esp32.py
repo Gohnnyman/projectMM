@@ -132,13 +132,19 @@ FIRMWARES: dict[str, dict] = {
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth",
                       "sdkconfig.defaults.esp32p4-eth-wifi"],
         "eth_only": False,
-        "description": "Waveshare ESP32-P4-NANO — Ethernet + WiFi. WiFi runs on the "
-                       "on-board ESP32-C6 over SDIO (esp_wifi_remote + esp_hosted, "
-                       "pulled P4-only). First build is longer (managed components).",
-        # ships=False: the C6-slave WiFi Kconfig defaults don't survive a plain CI
-        # build (no `set-target`), so it isn't reproducible yet — held out of the
-        # release matrix. Buildable from the CLI. See backlog § ESP32-P4 round 3.
-        "ships": False,
+        "description": "⚠️ DOES NOT BOOT — repro build for esp-idf #18759 "
+                       "(github.com/espressif/esp-idf/issues/18759). Waveshare "
+                       "ESP32-P4-NANO, Ethernet + WiFi via the on-board ESP32-C6 over "
+                       "SDIO (esp_hosted). Builds + flashes but crash-loops at boot: "
+                       "sleep_clock_icg_startup_init fails ESP_ERR_NO_MEM on IDF 6.1. "
+                       "Published so the IDF team can one-click-flash the failing "
+                       "binary. Use esp32p4-eth for a working P4.",
+        # ships=True purely to PUBLISH the (crash-looping) binary for the esp-idf
+        # #18759 repro — see backlog § ESP32-P4 round 4. The CI build itself passes
+        # (the $CONFIG{} manifest fix); only the flashed binary crashes at boot, which
+        # CI doesn't boot-test. NOT a usable firmware: the board's deviceModels entry
+        # flags it experimental so the installer warns before flashing.
+        "ships": True,
     },
     "esp32s31": {
         "chip": "esp32s31",
