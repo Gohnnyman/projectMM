@@ -102,6 +102,25 @@ def test_falls_back_to_newest_when_no_version_match(tmp_path, monkeypatch):
     assert picked.name == "idf6.1_py3.13_env", "newest overall when nothing matches"
 
 
+def test_version_prefix_does_not_collide_across_minor(tmp_path, monkeypatch):
+    """A 6.1 target must NOT match an idf6.10 venv. The prefix carries a trailing
+    '_' ('idf6.1_') precisely so 'idf6.1' can't prefix-match 'idf6.10_py...'; this
+    pins that boundary so a refactor that drops the separator regresses loudly.
+    With no genuine idf6.1 venv present, it falls back to newest-overall (idf6.10)
+    rather than wrongly treating idf6.10 as a 6.1 match."""
+    home = tmp_path / "home"
+    _make_venvs(home, ["idf6.1_py3.12_env", "idf6.10_py3.12_env"])  # 6.10 newest
+    monkeypatch.setattr(build_esp32.Path, "home", staticmethod(lambda: home))
+
+    idf61 = _make_idf(tmp_path / "esp-idf", "v6.1-dev-5215-g0d928780081")
+    picked = build_esp32.find_idf_python(idf61)
+    assert picked is not None
+    # Must pick the exact idf6.1 venv, NOT idf6.10 (even though idf6.10 is newer).
+    assert picked.name == "idf6.1_py3.12_env", (
+        "the trailing '_' must keep idf6.1 from matching idf6.10"
+    )
+
+
 def test_none_when_no_venvs(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".espressif" / "python_env").mkdir(parents=True)

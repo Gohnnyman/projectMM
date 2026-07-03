@@ -224,10 +224,10 @@ struct EthPinConfig {
 //  - S3 → no built-in EMAC, so the default is W5500 SPI but with no pins set
 //    (phyType ethW5500, pins -1): a W5500 S3 board MUST provide its SPI pins via
 //    deviceModels.json — there's no universal S3 default to guess.
-//  - S31 → Function-CoreBoard-1: RGMII YT8531, MDC/MDIO 4/5, reset 6. The RGMII
+//  - S31 → Function-CoreBoard-1: RGMII YT8531, MDC/MDIO 5/6, reset 7. The RGMII
 //    *data* pins (TX_CTL/TXD0-3, RX_CTL/RXD0-3, clocks) are board-fixed and live in
-//    ethInitRgmii(), not this struct (same reason RMII data pins don't — see above);
-//    rmiiClock* are unused for RGMII (clocks are set in ethInitRgmii). See
+//    ethInitEmac()'s S31 branch, not this struct (same reason RMII data pins don't —
+//    see above); rmiiClock* are unused for RGMII (clocks are set there too). See
 //    docs/reference/esp32-s31-coreboard.md for the schematic pin map.
 constexpr EthPinConfig ethConfigDefault =
     isEsp32P4   ? EthPinConfig{ /*phyType*/ ethIp101, /*addr*/ 1, /*mdc*/ 31, /*mdio*/ 52,
