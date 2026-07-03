@@ -209,20 +209,44 @@ _VENV_BIN = "Scripts" if sys.platform == "win32" else "bin"
 _PYTHON_EXE = "python.exe" if sys.platform == "win32" else "python"
 
 
-def find_idf_python() -> Path | None:
-    """Find the ESP-IDF Python venv. Prefers most recently modified."""
+def find_idf_python(idf_path: Path | None = None) -> Path | None:
+    """Find the ESP-IDF Python venv for the target IDF version.
+
+    ESP-IDF names each venv `idf<major.minor>_py<X.Y>_env` (e.g.
+    `idf6.1_py3.12_env`) — one per IDF version × Python version — exactly as
+    `idf_tools.py` computes it. We select by matching the *target* IDF version,
+    NOT by mtime: with two IDFs installed (e.g. a 5.5 alongside 6.1 for a
+    version fallback), the most-recently-activated venv is the newest by mtime
+    but belongs to whichever IDF was last sourced, so an mtime pick silently
+    hands a 6.1 build the 5.5 venv (mismatched esptool → "requirements not
+    satisfied"). Matching the version makes selection a function of what we're
+    building, not what was last run.
+
+    Among venvs for the right IDF version (there can be several Python-minor
+    variants) the newest wins. Falls back to newest-overall only when the IDF
+    version can't be determined or no versioned venv matches — preserving the
+    single-IDF behaviour where mtime is unambiguous anyway.
+    """
     venv_dir = Path.home() / ".espressif" / "python_env"
     if not venv_dir.exists():
         return None
     candidates = []
     for d in venv_dir.iterdir():
-        python = d / _VENV_BIN / _PYTHON_EXE
-        if python.exists():
+        if (d / _VENV_BIN / _PYTHON_EXE).exists():
             candidates.append((d.stat().st_mtime, d))
-    if candidates:
-        candidates.sort(reverse=True)
-        return candidates[0][1]
-    return None
+    if not candidates:
+        return None
+
+    if idf_path is not None:
+        # idf_version() → "6.1.0"; the venv prefix uses only major.minor.
+        prefix = "idf" + ".".join(idf_version(idf_path).split(".")[:2]) + "_"
+        matched = [c for c in candidates if c[1].name.startswith(prefix)]
+        if matched:
+            matched.sort(reverse=True)
+            return matched[0][1]
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
 
 
 def idf_version(idf_path: Path) -> str:
@@ -250,7 +274,7 @@ def idf_env(idf_path: Path) -> dict:
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
 
-    venv_path = find_idf_python()
+    venv_path = find_idf_python(idf_path)
     if venv_path:
         env["IDF_PYTHON_ENV_PATH"] = str(venv_path)
 
@@ -301,7 +325,7 @@ def idf_cmd(idf_path: Path) -> list[str]:
     (`locale.getlocale()`) pass on Windows installs whose system locale
     is non-UTF-8 (e.g. Dutch / German / French). See the shim's docstring.
     """
-    venv_path = find_idf_python()
+    venv_path = find_idf_python(idf_path)
     python_exe = (str(venv_path / _VENV_BIN / _PYTHON_EXE)
                   if venv_path else "python")
     if sys.platform == "win32":
@@ -345,16 +369,20 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "") -> 
     # Firmwares that have no Ethernet driver at all (no EMAC sdkconfig and no
     # SPI-PHY sdkconfig) lack the headers platform_esp32.cpp's ethInit() needs,
     # so it won't compile — set MM_NO_ETH and the source provides stubs instead.
-    # A variant "has Ethernet" when any sdkconfig fragment enables a PHY driver:
-    #   * RMII EMAC (classic/P4): `sdkconfig.defaults.eth` (".eth"), board-specific
-    #     ones append "-eth" (e.g. ".esp32p4-eth").
-    #   * W5500 SPI (S3, no EMAC): `sdkconfig.defaults.eth-spi` (".eth-spi").
-    # Match the "eth" segment in any of these forms so a new eth board (RMII or
-    # SPI) doesn't silently stub Ethernet out. The hyphen-suffix forms (`-eth`,
-    # `.eth-spi`) are why a bare endswith(".eth") isn't enough.
-    has_eth_fragment = any(".eth" in f or f.endswith("-eth")
-                           for f in spec["fragments"])
-    if not has_eth_fragment:
+    # A variant "has Ethernet" when any of its sdkconfig fragments enables a PHY
+    # driver — the RMII EMAC (CONFIG_ETH_USE_ESP32_EMAC, classic/P4/S31) or the
+    # W5500 SPI PHY (CONFIG_ETH_USE_SPI_ETHERNET, S3). We read the fragment *files*
+    # and check for the actual enabling line rather than pattern-matching the
+    # filename: the S31 enables EMAC in `sdkconfig.defaults.esp32s31` (no ".eth" in
+    # the name), which a filename heuristic would miss and silently stub eth out.
+    eth_symbols = ("CONFIG_ETH_USE_ESP32_EMAC=y", "CONFIG_ETH_USE_SPI_ETHERNET=y")
+    has_eth = any(
+        (ESP32_DIR / frag).exists()
+        and any(sym in (ESP32_DIR / frag).read_text(encoding="utf-8")
+                for sym in eth_symbols)
+        for frag in spec["fragments"]
+    )
+    if not has_eth:
         args.append("-DMM_NO_ETH=1")
     return args
 
