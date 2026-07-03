@@ -150,10 +150,11 @@ FIRMWARES: dict[str, dict] = {
         "chip": "esp32s31",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s31"],
         "eth_only": False,
-        "description": "Espressif ESP32-S31 Function-CoreBoard-1 — WiFi 6 LED control "
-                       "(RISC-V, 16 MB flash, PSRAM). The board's on-chip 1 Gbps Ethernet "
-                       "is wired in but not yet enabled (pin map pending). esp32s31 is a "
-                       "preview target on the v6.1 IDF line.",
+        "description": "Espressif ESP32-S31 Function-CoreBoard-1 — WiFi 6 + 1 Gbps "
+                       "Ethernet LED control (RISC-V, 16 MB flash, PSRAM). The on-chip "
+                       "EMAC drives the board's YT8531 RGMII PHY; Ethernet is preferred "
+                       "when a cable is present, WiFi otherwise. esp32s31 is a preview "
+                       "target on the v6.1 IDF line.",
         "ships": True,
     },
 }
@@ -375,14 +376,19 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "") -> 
     # and check for the actual enabling line rather than pattern-matching the
     # filename: the S31 enables EMAC in `sdkconfig.defaults.esp32s31` (no ".eth" in
     # the name), which a filename heuristic would miss and silently stub eth out.
-    eth_symbols = ("CONFIG_ETH_USE_ESP32_EMAC=y", "CONFIG_ETH_USE_SPI_ETHERNET=y")
-    has_eth = any(
-        (ESP32_DIR / frag).exists()
-        and any(sym in (ESP32_DIR / frag).read_text(encoding="utf-8")
-                for sym in eth_symbols)
-        for frag in spec["fragments"]
-    )
-    if not has_eth:
+    eth_symbols = {"CONFIG_ETH_USE_ESP32_EMAC=y", "CONFIG_ETH_USE_SPI_ETHERNET=y"}
+
+    def fragment_enables_eth(frag: str) -> bool:
+        path = ESP32_DIR / frag
+        if not path.exists():
+            return False
+        # Match a whole line, not a substring: a disabled symbol is written
+        # "# CONFIG_ETH_USE_ESP32_EMAC is not set" (no "=y"), and a commented-out
+        # "# CONFIG_...=y" would substring-match but is not actually enabled.
+        return any(line.strip() in eth_symbols
+                   for line in path.read_text(encoding="utf-8").splitlines())
+
+    if not any(fragment_enables_eth(frag) for frag in spec["fragments"]):
         args.append("-DMM_NO_ETH=1")
     return args
 

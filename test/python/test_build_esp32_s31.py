@@ -23,7 +23,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "build"))
 
-from build_esp32 import FIRMWARES, TARGET_TO_FAMILY, PREVIEW_TARGETS  # noqa: E402
+from build_esp32 import (  # noqa: E402
+    FIRMWARES,
+    TARGET_TO_FAMILY,
+    PREVIEW_TARGETS,
+    firmware_cmake_args,
+)
 
 
 def test_s31_firmware_entry_is_well_formed():
@@ -36,6 +41,22 @@ def test_s31_firmware_entry_is_well_formed():
     frag = "sdkconfig.defaults.esp32s31"
     assert frag in fw["fragments"], "the S31 entry must layer its own sdkconfig fragment"
     assert (ROOT / "esp32" / frag).is_file(), f"{frag} is referenced but missing on disk"
+
+
+def test_s31_gets_ethernet_not_MM_NO_ETH():
+    """firmware_cmake_args must NOT stub Ethernet out on the S31. The S31 enables its
+    on-chip EMAC in sdkconfig.defaults.esp32s31 (whose filename has no ".eth"), so the
+    eth-detection reads the fragment *content* for CONFIG_ETH_USE_ESP32_EMAC — not the
+    filename. This pins the regression: a filename heuristic set MM_NO_ETH and silently
+    compiled the ethInit() stub, so the board booted with no Ethernet (see decisions.md).
+    """
+    assert "-DMM_NO_ETH=1" not in firmware_cmake_args("esp32s31"), (
+        "the S31 firmware must build with Ethernet enabled — its EMAC is set in "
+        "sdkconfig.defaults.esp32s31, which the content-based check must detect"
+    )
+    # Sanity anchor: a variant whose fragments enable an eth driver stays eth-enabled too,
+    # and the mechanism (content-read) is exercised for a ".eth"-named fragment as well.
+    assert "-DMM_NO_ETH=1" not in firmware_cmake_args("esp32-eth")
 
 
 def test_every_firmware_chip_has_a_family_label():

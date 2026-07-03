@@ -13,6 +13,7 @@ Imports the real function from scripts/build/build_esp32.py (no ESP-IDF needed).
 Run: `uv run --with pytest pytest test/python -q`.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -34,8 +35,7 @@ def _make_venvs(home: Path, names_by_age: list[str]) -> None:
         d.mkdir(parents=True)
         exe = d / build_esp32._PYTHON_EXE
         exe.write_text("#!fake python\n")
-        # Stagger mtimes deterministically (no Date.now equivalent needed): index i.
-        import os
+        # Stagger mtimes deterministically by index so the last name is newest.
         ts = 1_000_000 + i  # strictly increasing → last name is newest
         os.utime(venv_root / name, (ts, ts))
 

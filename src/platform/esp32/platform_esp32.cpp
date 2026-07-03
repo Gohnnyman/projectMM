@@ -456,7 +456,8 @@ void setEthConfig(const EthPinConfig& cfg) { ethConfig_ = cfg; }
 // CONFIG_ETH_USE_ESP32_EMAC keeps this function out of the S3 build (where Ethernet is
 // W5500-over-SPI instead). RMII and RGMII share the same MAC ctor + driver/netif/event
 // tail; only the interface-select + clock + data-pin config block differs, so they live
-// in one function branched on phyType rather than two near-identical copies.
+// in one function branched on the chip (a compile-time #ifdef, since the RGMII
+// interface is S31-only) rather than two near-identical copies.
 #ifdef CONFIG_ETH_USE_ESP32_EMAC
 static bool ethInitEmac() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
@@ -696,7 +697,7 @@ bool ethInit() {
 #ifdef CONFIG_ETH_USE_ESP32_EMAC
         case ethLan8720:
         case ethIp101:                   // RMII PHYs (classic ESP32, P4)
-        case ethYt8531:  return ethInitEmac();   // RGMII PHY (S31); ethInitEmac branches on phyType
+        case ethYt8531:  return ethInitEmac();   // RGMII PHY (S31); ethInitEmac's RGMII block is #ifdef'd to the S31 chip
 #endif
         default:         return false;   // ethNone, or a PHY this firmware can't drive
     }

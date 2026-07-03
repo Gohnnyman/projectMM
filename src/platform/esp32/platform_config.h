@@ -48,7 +48,7 @@ constexpr bool isEsp32S3 = false;
 // isEsp32S31: the S31 is the only target whose EMAC is RGMII / 1 Gb (SOC_EMAC_SUPPORT_1000M),
 // where classic/P4 are RMII — so its Ethernet default is a distinct RGMII PHY (YT8531) with a
 // different pin set. Not derivable from a SOC flag (the RGMII data pins are board wiring, not a
-// chip property). Used only for ethConfigDefault.
+// chip property). Used by ethConfigDefault and ethInitEmac's RGMII branch/log.
 #ifdef CONFIG_IDF_TARGET_ESP32S31
 constexpr bool isEsp32S31 = true;
 #else

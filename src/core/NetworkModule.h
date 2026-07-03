@@ -300,8 +300,10 @@ public:
             const bool isRmii  = (ethType_ == 1 || ethType_ == 2);
             const bool isSpi   = (ethType_ == 3);
             const bool isRgmii = (ethType_ == 4);
-            // RGMII (S31): MDC/MDIO + the data/clock pins are the chip's fixed IO_MUX pads,
-            // set in ethInitEmac() — not user-editable — so only phyAddr + reset show for it.
+            // RGMII (S31): the data/clock pins are the chip's fixed IO_MUX pads, set in
+            // ethInitEmac() (not user config); MDC/MDIO come from the per-chip ethConfigDefault
+            // (5/6) via the shared smi_gpio path. Neither needs a UI row, so RGMII shows only
+            // phyAddr + reset (the rest of the RMII rows stay hidden — isRmii-gated below).
             const bool isEth   = isRmii || isSpi || isRgmii;
             // GPIO controls use addPin → a plain number input (ControlType::Pin),
             // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
@@ -665,7 +667,7 @@ private:
 
     static constexpr const char* addressingOptions_[] = {"DHCP", "Static"};
     // ethType dropdown options — index order MUST match the EthPhyType enum
-    // (None=0, LAN8720=1, IP101=2, W5500=3) since the Select stores the index.
+    // (None=0, LAN8720=1, IP101=2, W5500=3, YT8531=4) since the Select stores the index.
     static constexpr const char* ethTypeOptions_[] = {"None", "LAN8720", "IP101", "W5500", "YT8531"};
 
     void startAP() {
