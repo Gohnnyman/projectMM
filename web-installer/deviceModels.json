@@ -847,12 +847,12 @@
     ]
   },
   {
-    "name": "ABC-WLED ESP32-P4 shield",
+    "name": "MHC-WLED ESP32-P4 shield",
     "chip": "ESP32-P4",
     "firmwares": [
       "esp32p4-eth"
     ],
-    "image": "assets/boards/abc-wled-esp32-p4-shield.jpg",
+    "image": "assets/boards/mhc-wled-esp32-p4-shield.jpg",
     "url": "https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027",
     "supported": [
       "LEDs",
@@ -861,7 +861,7 @@
     ],
     "planned": [
       "WiFi",
-      "RS-485 / DMX",
+      "RS-485 / DMX (in/out)",
       "Inputs",
       "16-ch parallel LEDs (8+ not yet)"
     ],
@@ -870,7 +870,19 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "ABC-WLED ESP32-P4 shield"
+          "deviceModel": "MHC-WLED ESP32-P4 shield"
+        }
+      },
+      {
+        "type": "AudioModule",
+        "id": "Audio",
+        "parent_id": "System",
+        "controls": {
+          "wsPin": 26,
+          "sdPin": 33,
+          "sckPin": 32,
+          "mclkPin": 36,
+          "gain": 100
         }
       },
       {

@@ -45,6 +45,7 @@ add_executable(mm_tests
     unit/light/unit_AudioBands.cpp
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
+    unit/light/unit_WledAudioSyncPacket.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_draw.cpp
     unit/light/unit_GameOfLifeEffect.cpp

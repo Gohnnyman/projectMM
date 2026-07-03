@@ -164,6 +164,12 @@ constexpr bool hasEthernet = false;
 constexpr bool hasEthernet = true;
 #endif
 
+// True when the firmware carries an IP stack at all — WiFi OR Ethernet. UdpSocket
+// (lwIP BSD sockets) is present whenever either is, so features that only need
+// "some network" (WLED audio sync, any UDP interop) gate on this rather than
+// hasWiFi — an Ethernet-only board (the MHC-WLED P4 shield) still has UDP.
+constexpr bool hasNetwork = hasWiFi || hasEthernet;
+
 // Which Ethernet PHY *drivers* this firmware actually carries. The W5500 SPI
 // driver is compiled in only on chips with no internal EMAC and the SPI-eth
 // fragment (the S3 — CONFIG_ETH_USE_SPI_ETHERNET set, CONFIG_ETH_USE_ESP32_EMAC

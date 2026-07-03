@@ -145,6 +145,14 @@ bool wifiApInit(const char* apName, const char* ip);
 bool wifiApConnected();
 void wifiApStop();
 
+// True when it is safe to open/use a socket: the TCP/IP stack is initialised and
+// an interface has an IP. On ESP32 that means Ethernet or WiFi (STA/AP) is up —
+// calling any lwip socket API before then asserts (the core mutex is still null).
+// Desktop: always true (host sockets work regardless of link state). Callers that
+// open sockets at boot (before NetworkModule brings an interface up) must gate on
+// this and open lazily from the tick path once it turns true.
+bool networkReady();
+
 // Current WiFi transmit power, in dBm (ESP-IDF reports quarter-dBm internally
 // and we round to whole). Returns 0 when WiFi isn't initialised or the call
 // fails. Same value for STA and AP — WiFi has one radio at one TX power.

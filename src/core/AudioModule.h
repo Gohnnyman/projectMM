@@ -71,6 +71,7 @@
 #include "core/AudioLevel.h"
 #include "core/AudioBands.h"
 #include "core/math8.h"      // beatsin8 / sin8 — the simulated-audio oscillators
+#include "light/WLEDAudioSyncPacket.h"   // WLED audio-sync wire format (send/receive)
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -106,6 +107,11 @@ public:
     int8_t wsPin = -1;           ///< word-select / LRCLK (-1 = unset). Changing it re-creates the I2S channel live (no reboot).
     int8_t sdPin = -1;           ///< serial data in (-1 = unset). Changing it re-creates the I2S channel live.
     int8_t sckPin = -1;          ///< bit clock (-1 = unset). Changing it re-creates the I2S channel live.
+    int8_t mclkPin = -1;         ///< master clock out (-1 = none). Self-clocked MEMS mics (INMP441) leave this
+                                 ///< -1; an ADC/codec that needs a master clock (e.g. the MHC-WLED P4 shield's
+                                 ///< line-in ADC on GPIO3) sets it so the I2S peripheral drives MCLK. On a codec
+                                 ///< board (CodecType != None) the codec's own mclk is used instead (see reinit()).
+                                 ///< Changing it re-creates the I2S channel live.
     /// Sample rate is a discrete choice (the standard audio rates), so it's a
     /// dropdown over a fixed set, not a free number. sampleRateSel indexes
     /// kSampleRates; sampleRate() resolves it to Hz. Default index 2 = 22050
@@ -128,6 +134,17 @@ public:
     /// A real mic always wins: when `mode` is a fill-in ("silence") mode it only runs while there's no real signal.
     uint8_t  simulate = 0;       ///< 0 = off, 1 = music (fill silence), 2 = sweep (fill silence),
                                  ///< 3 = music (always), 4 = sweep (always)
+    /// WLED audio-sync over UDP (port 11988, broadcast, WLED v2 wire format —
+    /// light/WLEDAudioSyncPacket.h). 0 = Off (local audio only, no socket bound);
+    /// 1 = Send (broadcast this device's AudioFrame for WLED/MoonLight receivers);
+    /// 2 = Receive (bind 11988; a peer's audio overwrites frame_ so effects react to
+    /// it, auto-falling-back to the local mic when packets stop for ~1 s). The socket
+    /// is bound only in Send/Receive — Off costs nothing. Changing it re-binds live.
+    uint8_t  sync = 0;           ///< 0 = off, 1 = send, 2 = receive
+    /// The sync UDP port — the Send destination and the Receive listen port. Defaults
+    /// to WLED's 11988 (interop with WLED/MoonLight); set it the same on both ends to
+    /// run a private projectMM-only sync group on a non-WLED port.
+    uint16_t syncPort = WLED_SYNC_PORT;
 
     static constexpr uint16_t kSampleRates[] = {8000, 16000, 22050, 44100};
     static constexpr uint8_t kSampleRateCount = 4;
@@ -138,13 +155,34 @@ public:
         controls_.addPin("wsPin", wsPin);
         controls_.addPin("sdPin", sdPin);
         controls_.addPin("sckPin", sckPin);
+        controls_.addPin("mclkPin", mclkPin);
         static constexpr const char* kRateOptions[] = {"8000", "16000", "22050", "44100"};
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
+        // floor/gain condition the LOCAL FFT/level mapping. They stay visible in every sync
+        // mode — including Receive, because auto-blend falls back to the local mic when the
+        // peer goes quiet, and floor/gain govern that fallback. (They're only transiently
+        // dead while a peer's audio is actively driving the frame — not permanently, so
+        // hiding them by the sync setting would wrongly hide a control the fallback needs.)
         controls_.addUint8("floor", floor, 0, 255);
         controls_.addUint8("gain", gain, 1, 255);
         static constexpr const char* kSimulateOptions[] = {
             "off", "music (silence)", "sweep (silence)", "music (always)", "sweep (always)"};
         controls_.addSelect("simulate", simulate, kSimulateOptions, 5);
+        // WLED audio sync — only on builds with an IP stack (WiFi OR Ethernet: the UDP
+        // send/receive works over either, so an Ethernet-only board like the MHC-WLED
+        // shield still gets it). A no-network build hides the controls entirely.
+        if constexpr (platform::hasNetwork) {
+            static constexpr const char* kSyncOptions[] = {"off", "send", "receive"};
+            controls_.addSelect("sync", sync, kSyncOptions, 3);
+            // The UDP port — the Send destination and the Receive listen port. Defaults to
+            // WLED's 11988 (interop with WLED/MoonLight); change it on BOTH ends to run a
+            // private projectMM-only sync group on a non-WLED port. Shown whenever sync is on
+            // (Send or Receive), hidden in Off. A `sync` change re-runs this method (it's in
+            // controlChangeTriggersBuildState) so the row toggles live.
+            controls_.addUint16("syncPort", syncPort, 1, 65535);
+            controls_.setHidden(controls_.count() - 1, sync == 0);
+            controls_.addReadOnly("sync status", syncStr_, sizeof(syncStr_));
+        }
         // Read-only live read-outs (formatted in loop1s). Derived every second,
         // nothing to persist, so ReadOnly (the display-only type) not a flipped
         // Text — same idiom as SystemModule's uptime/fps.
@@ -158,19 +196,25 @@ public:
         MoonModule::onBuildControls();
     }
 
-    /// A pin or rate change rebuilds the I2S channel (live, no reboot).
+    /// A pin or rate change rebuilds the I2S channel (live, no reboot); a `sync` /
+    /// `syncPort` change re-binds/unbinds the UDP socket AND re-toggles the port row's
+    /// visibility (all flow through onBuildState → rebuildControls).
     bool controlChangeTriggersBuildState(const char* name) const override {
         return std::strcmp(name, "wsPin") == 0 || std::strcmp(name, "sdPin") == 0
-            || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "sampleRate") == 0;
+            || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "mclkPin") == 0
+            || std::strcmp(name, "sampleRate") == 0 || std::strcmp(name, "sync") == 0
+            || std::strcmp(name, "syncPort") == 0;
     }
 
-    void onBuildState() override { reinit(); MoonModule::onBuildState(); }
+    void onBuildState() override { reinit(); syncReinit(); MoonModule::onBuildState(); }
     void setup() override {
         if (active_ == nullptr) active_ = this;   // first live mic wins; a 2nd mic is captured but not read
         reinit();
+        syncReinit();
     }
     void teardown() override {
         deinit();
+        if constexpr (platform::hasNetwork) { syncSock_.close(); syncOpen_ = false; }
         if (active_ == this) active_ = nullptr;   // vacate; a surviving module re-elects itself in loop()
     }
 
@@ -203,6 +247,17 @@ public:
         // survivor takes over on its next tick (robustness).
         //
         if (active_ == nullptr) active_ = this;
+
+        // WLED audio sync. Send broadcasts the current frame_ (throttled). Receive drains
+        // the socket into frame_ and, while a peer's audio is fresh, RETURNS so the local
+        // mic analysis below is skipped (the received frame drives the effects); once the
+        // peer goes quiet (~1 s) it falls through and the local mic resumes (auto-blend).
+        if constexpr (platform::hasNetwork) {
+            if (sync != 0 && syncEnsureSocket()) {   // lazy-open once the network is up
+                if (sync == 1) syncSend();
+                else if (sync == 2 && syncReceive()) return;
+            }
+        }
 
         // Simulated audio (see the `simulate` control): 0=off, 1=music-on-silence, 2=sweep-on-silence,
         // 3=music-always, 4=sweep-always. Real mic input always wins in the "on-silence" modes — the
@@ -323,6 +378,20 @@ public:
         std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(levelPeak_));
         std::snprintf(peakStr_, sizeof(peakStr_), "%u Hz", static_cast<unsigned>(frame_.peakHz));
         levelPeak_ = 0;   // reset for the next window
+        // Live sync status: "sending" / "receiving" (peer audio fresh) / "listening"
+        // (bound, no peer) / "off". While the socket isn't open yet, leave the baseline
+        // syncReinit/syncEnsureSocket set ("waiting for network" / "…failed"); only once
+        // open do we report the moment-to-moment send/receive state.
+        if constexpr (platform::hasNetwork) {
+            if (sync == 0) std::snprintf(syncStr_, sizeof(syncStr_), "off");
+            else if (syncOpen_) {
+                if (sync == 1) std::snprintf(syncStr_, sizeof(syncStr_), "sending");
+                else std::snprintf(syncStr_, sizeof(syncStr_),
+                              (lastSyncRecv_ != 0
+                               && platform::millis() - lastSyncRecv_ < kSyncFallbackMs)
+                                  ? "receiving" : "listening");
+            }
+        }
         MoonModule::loop1s();
     }
 
@@ -354,6 +423,17 @@ private:
     static constexpr uint16_t kSimRealGraceBlocks = 86;  // ~2 s at ~23 ms/block before the sim takes over
     uint16_t realBlocks_ = 0;   // grace countdown: >0 = mic was recently live, hold off the sim
 
+    // WLED audio sync (light/WLEDAudioSyncPacket.h). One socket, bound only in Send/Receive.
+    platform::UdpSocket syncSock_;
+    uint32_t lastSyncSend_ = 0;      // millis of the last broadcast (send throttle)
+    uint32_t lastSyncRecv_ = 0;      // millis of the last received packet (receive auto-blend)
+    uint8_t  syncFrameCounter_ = 0;  // increments per send (the packet's dup/reorder field)
+    bool     syncOpen_ = false;      // socket opened for the current mode (lazy-open latch)
+    char     syncStr_[32] = {};      // "sync status" read-out
+    static constexpr uint32_t kSyncSendIntervalMs = 25;   // ~40/s — WLED-friendly, well under a flood
+    static constexpr uint32_t kSyncFallbackMs = 1000;     // no packet this long → resume local mic
+    static constexpr int kSyncMaxRecvPerTick = 8;         // bounded non-blocking drain (sync is low-rate)
+
     static constexpr const char* kInitFailMsg = "mic init failed — check pins / rate";
 
     /// (Re)create the I2S channel for the current pins + rate. On a codec board the
@@ -374,16 +454,19 @@ private:
             setStatus("mic: set wsPin / sdPin / sckPin", Severity::Status);
             return;
         }
-        // Bring up the I2S channel FIRST. On a codec board (an analog mic behind an
-        // I2S codec, e.g. the S31's ES8311) the I2S peripheral drives MCLK, and the
-        // codec won't even answer I2C until that clock runs — so I2S precedes the
-        // codec config. The MCLK pin comes from the per-target codec config
-        // (platform::audioCodecPins.mclk); −1 on a direct MEMS mic (self-clocked).
-        const int16_t mclkPin = platform::audioCodecType == platform::CodecType::None
-                              ? -1 : static_cast<int16_t>(platform::audioCodecPins.mclk);
+        // Bring up the I2S channel FIRST. Where MCLK comes from depends on the board:
+        //  - Codec board (an analog mic behind an I2S codec, e.g. the S31's ES8311): the
+        //    codec's MCLK pin from the per-target config (platform::audioCodecPins.mclk).
+        //    The codec won't even answer I2C until that clock runs, so I2S precedes the
+        //    codec config below.
+        //  - No codec: the runtime `mclkPin` control — −1 for a self-clocked MEMS mic
+        //    (INMP441), or a real pin for an I2S ADC that needs a master clock (the
+        //    MHC-WLED P4 shield's line-in ADC on GPIO3, WLED's SR_DMTYPE=4).
+        const int16_t mclk = platform::audioCodecType == platform::CodecType::None
+                           ? mclkPin : static_cast<int16_t>(platform::audioCodecPins.mclk);
         inited_ = platform::audioMicInit(mic_, static_cast<uint16_t>(wsPin),
                                          static_cast<uint16_t>(sdPin),
-                                         static_cast<uint16_t>(sckPin), mclkPin, sampleRate());
+                                         static_cast<uint16_t>(sckPin), mclk, sampleRate());
         if (!inited_) {
             setStatus(kInitFailMsg, Severity::Error);
             return;
@@ -422,6 +505,97 @@ private:
         // would leave the last real frame frozen on the LEDs instead of going dark.
         frame_ = AudioFrame{};
     }
+
+    // --- WLED audio sync (guarded: only compiled where platform::hasNetwork) ---
+
+    /// Reset the sync socket to the current mode. Called from setup()/onBuildState()
+    /// so a `sync` control change applies live (no reboot). This only CLOSES the socket
+    /// and records the mode — it never opens one, because setup() runs at boot before
+    /// NetworkModule brings an interface up, and any lwip socket call before then asserts
+    /// (the core mutex is still null). The actual open() is deferred to syncEnsureSocket(),
+    /// which runs from the tick path once platform::networkReady() is true.
+    void syncReinit() {
+        if constexpr (!platform::hasNetwork) return;
+        syncSock_.close();                 // syncEnsureSocket() re-opens per mode when the net is up
+        syncOpen_ = false;
+        lastSyncRecv_ = 0;
+        std::snprintf(syncStr_, sizeof(syncStr_),
+                      sync == 1 ? "send: waiting for network"
+                      : sync == 2 ? "receive: waiting for network"
+                      : "off");
+    }
+
+    /// Lazily open the sync socket for the current mode, once the network stack is up.
+    /// Idempotent: opens exactly once per mode (syncOpen_ latch), re-armed by syncReinit()
+    /// on a mode change. Returns true when the socket is ready to use this tick. Off is a
+    /// no-op (socket stays closed, zero overhead). Send connects to the LAN broadcast;
+    /// Receive binds the port. Mirrors NetworkSendDriver/NetworkReceiveEffect, but deferred
+    /// past boot so a boot-present AudioModule can't touch lwip before it exists.
+    bool syncEnsureSocket() {
+        if constexpr (!platform::hasNetwork) return false;
+        if (sync == 0) return false;
+        if (syncOpen_) return true;
+        if (!platform::networkReady()) return false;   // interface not up yet — try again next tick
+        if (sync == 1) {                   // send → broadcast destination (configurable port)
+            char bcast[16]; formatDottedQuad(bcast, kBroadcast_);
+            if (syncSock_.open() && syncSock_.connect(bcast, syncPort)) {
+                syncOpen_ = true;
+                std::snprintf(syncStr_, sizeof(syncStr_), "sending");
+            } else {
+                syncSock_.close();
+                std::snprintf(syncStr_, sizeof(syncStr_), "send: socket failed");
+            }
+        } else {                           // receive → bind the port (WLED 11988, or a custom group)
+            if (syncSock_.open() && syncSock_.bind(syncPort)) {
+                syncOpen_ = true;
+                std::snprintf(syncStr_, sizeof(syncStr_), "listening");
+            } else {
+                syncSock_.close();
+                std::snprintf(syncStr_, sizeof(syncStr_), "receive: bind failed");
+            }
+        }
+        return syncOpen_;
+    }
+
+    /// Broadcast the current frame_ as a WLED v2 packet, throttled to ~40/s. Called
+    /// from loop() in Send mode. Cheap: builds a 44-byte packet, one non-blocking sendTo.
+    void syncSend() {
+        if constexpr (!platform::hasNetwork) return;
+        const uint32_t now = platform::millis();
+        if (now - lastSyncSend_ < kSyncSendIntervalMs) return;
+        lastSyncSend_ = now;
+        // samplePeak hint: a beat is a raw level notably above the smoothed average.
+        const bool peak = frame_.level > frame_.levelSmoothed + kSyncPeakMargin;
+        uint8_t pkt[WLED_SYNC_PACKET_SIZE];
+        buildWledAudioSync(pkt, frame_, syncFrameCounter_++, peak);
+        syncSock_.sendTo(pkt, WLED_SYNC_PACKET_SIZE);
+    }
+
+    /// Drain the sync socket (bounded, non-blocking) in Receive mode. A valid v2 packet
+    /// overwrites frame_ and stamps lastSyncRecv_. Returns true while a peer's audio is
+    /// FRESH (within kSyncFallbackMs) so loop() skips the local mic analysis — false once
+    /// the peer goes quiet, letting the local mic resume (auto-blend).
+    bool syncReceive() {
+        if constexpr (!platform::hasNetwork) return false;
+        uint8_t pkt[WLED_SYNC_PACKET_SIZE + 8];   // a little slack over the 44-byte v2
+        uint8_t srcIp[4] = {};
+        for (int i = 0; i < kSyncMaxRecvPerTick; i++) {
+            const int n = syncSock_.recvFrom(pkt, sizeof(pkt), srcIp);
+            if (n <= 0) break;                     // -1 = nothing pending
+            AudioFrame rf;
+            if (parseWledAudioSync(pkt, static_cast<size_t>(n), rf)) {
+                frame_ = rf;                       // received audio drives the effects
+                lastSyncRecv_ = platform::millis();
+            }
+            // else: a v1 / foreign packet — ignore, keep draining.
+        }
+        // Fresh received audio → skip local mic. Stale (peer quiet) → fall through.
+        return lastSyncRecv_ != 0
+            && (platform::millis() - lastSyncRecv_) < kSyncFallbackMs;
+    }
+
+    static constexpr uint16_t kSyncPeakMargin = 8;   // level over smoothed = a beat (samplePeak hint)
+    static constexpr uint8_t kBroadcast_[4] = {255, 255, 255, 255};   // LAN broadcast for send
 };
 
 } // namespace mm

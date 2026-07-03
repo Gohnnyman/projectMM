@@ -1020,6 +1020,14 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 #endif // MM_NO_WIFI
 
+// Socket-safe once any interface has an IP: at that point esp_netif_init() has run
+// and the lwip core mutex exists, so opening a socket won't assert. Each predicate
+// is stubbed to false in the build that lacks its interface, so this OR compiles and
+// answers correctly on every firmware.
+bool networkReady() {
+    return ethConnected() || wifiStaConnected() || wifiApConnected();
+}
+
 // Bring the mDNS stack up (idempotent) and ADVERTISE this device as <deviceName>.local.
 // Advertising is gated by the user's mDNS toggle; the stack init stays — mdnsStop()
 // removes the services + hostname but keeps the stack up, so toggling mDNS back on

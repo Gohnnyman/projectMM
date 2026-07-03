@@ -448,6 +448,10 @@ int wifiStaRssi() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+
+// Host sockets work regardless of the (stubbed) link predicates above, and there is
+// no lwip-style init race — always socket-safe.
+bool networkReady() { return true; }
 int wifiTxPower() { return 0; }
 // Match the API contract: 0 is a successful no-op (matches ESP-IDF
 // MM_NO_WIFI stub semantics). Any non-zero value returns false since
