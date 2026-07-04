@@ -99,6 +99,11 @@ bool fsRemove(const char* path) {
     if (!fsMounted_) return false;
     char full[128];
     if (!fsTranslate(path, full, sizeof(full))) return false;
+    // Match the desktop contract (std::filesystem::remove): delete a file OR an empty directory.
+    // On the LittleFS VFS ::remove() maps to unlink(), which fails on a directory — so stat first
+    // and route a directory to rmdir() (which itself fails cleanly if the directory isn't empty).
+    struct stat st;
+    if (::stat(full, &st) == 0 && S_ISDIR(st.st_mode)) return ::rmdir(full) == 0;
     return ::remove(full) == 0;
 }
 
@@ -158,8 +163,10 @@ void fsList(const char* dir, FsListCb cb, void* user) {
     struct stat st;
     while ((ent = ::readdir(d)) != nullptr) {
         std::snprintf(childPath, sizeof(childPath), "%s/%s", full, ent->d_name);
-        bool isDir = stat(childPath, &st) == 0 && S_ISDIR(st.st_mode);
-        cb(ent->d_name, isDir, user);
+        const bool statOk = stat(childPath, &st) == 0;
+        const bool isDir = statOk && S_ISDIR(st.st_mode);
+        const uint32_t size = (statOk && !isDir) ? static_cast<uint32_t>(st.st_size) : 0;
+        cb(ent->d_name, isDir, size, user);
     }
     ::closedir(d);
 }

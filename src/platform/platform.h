@@ -110,7 +110,9 @@ bool fsRemove(const char* path);                             // file or empty di
 int  fsRead(const char* path, char* buf, size_t maxLen);     // bytes read; -1 on error; null-terminated on success
 bool fsWriteAtomic(const char* path, const char* data, size_t len);
                                                               // writes <path>.tmp, fsync, rename. Caller ensures parent dir exists.
-using FsListCb = void(*)(const char* name, bool isDir, void* user);
+// Per-entry callback for fsList: name, whether it's a directory, and its size in bytes
+// (0 for a directory). One level, one call per child.
+using FsListCb = void(*)(const char* name, bool isDir, uint32_t sizeBytes, void* user);
 void fsList(const char* dir, FsListCb cb, void* user);       // single-level listing
 
 // Network (ESP32 only, stubs on desktop)

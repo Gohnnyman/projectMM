@@ -569,10 +569,17 @@ function createCard(mod, depth) {
 
     if (mod.controls) {
         for (const ctrl of mod.controls) {
-            if (ctrl.hidden) continue;  // plan-10 hidden flag (still respected)
+            if (ctrl.hidden) continue;  // plan-10 hidden flag (FileManager's op controls set it)
             const row = createControl(mod.name, mod.type, ctrl);
             if (row) controlsHost.appendChild(row);
         }
+    }
+
+    // File Manager: a modern expand/collapse folder tree + inline text editor. Browsing is UI-side
+    // over /api/dir; ops go through the module's own (hidden) path/new folder/delete controls via
+    // /api/control. Only the `show hidden` toggle renders as a raw control; the tree is the rest.
+    if (mod.type === "FileManagerModule") {
+        renderFileManager(mod, controlsHost);
     }
 
     // FirmwareUpdate card hosts the shared install picker. Mount once per
@@ -679,6 +686,10 @@ function armPressTwice(btn, onConfirm, opts = {}) {
     let savedText = "";
     let savedTitle = "";
     const disarm = () => {
+        // Only restore label/title if we actually armed — otherwise a mouseleave before the first
+        // click would write the initial empty savedText/savedTitle over the button, collapsing a
+        // text-sized button (e.g. "🗑 delete") to an empty sliver.
+        if (!armed) return;
         armed = false;
         btn.classList.remove("armed");
         if (opts.armedText !== undefined) btn.textContent = savedText;
@@ -2570,6 +2581,364 @@ function setupUpdateBadge() {
     badge.addEventListener("click", () => {
         if (badge.dataset.tag) safeLocalSet(PICKER_RELEASE_KEY, badge.dataset.tag);
         selectModule("Firmware");
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 8b. File Manager view
+// ---------------------------------------------------------------------------
+
+// Format a byte count as a short human size (matches the fs seam's uint32 sizes).
+function fmSize(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+// Per-module File Manager UI state, kept across state refreshes (the DOM is rebuilt on refetch, but
+// the tree's expand-state + selection are the user's, not the module's). Keyed by module name.
+const fmStateByMod = {};
+function fmState(mod) {
+    return (fmStateByMod[mod.name] ||= { expanded: new Set(["/"]), selected: "/" });
+}
+
+// Fetch one directory's children (name/isDir/size) from /api/dir. `hidden` includes dotfiles.
+async function fmFetchDir(absPath, hidden) {
+    const res = await fetch("/api/dir?path=" + encodeURIComponent(absPath) + (hidden ? "&hidden=1" : ""));
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows : [];
+}
+
+// Render the File Manager panel: a lazy expand/collapse folder tree (the standard VS Code / Explorer
+// shape — an expanded folder's children are loaded from /api/dir), plus a toolbar (show
+// hidden, new folder, delete on the selected node). Filesystem ops go through the module's controls
+// (path/new folder/delete); browsing is pure UI over /api/dir, so the module stays minimal.
+function renderFileManager(mod, host) {
+    const ctrl = (n) => (mod.controls || []).find(c => c.name === n);
+    const st = fmState(mod);
+    // The toggle is UI-owned: seed it from the persisted control on first render, then `st` is the
+    // source of truth. Reading it back from `mod` each render would revert the checkbox, since an
+    // in-panel re-render runs against the same (stale) state snapshot, before /api/state updates.
+    if (st.showHidden === undefined) st.showHidden = !!ctrl("show hidden")?.value;
+    const hidden = st.showHidden;
+
+    // Render into a single stable panel that we REPLACE on every re-render (expand / collapse /
+    // select / op) — reusing it in place rather than appending, so the tree updates inline instead
+    // of stacking a fresh copy below the old one.
+    let panel = host.querySelector(":scope > .fm-panel");
+    if (panel) panel.replaceChildren();
+    else { panel = document.createElement("div"); panel.className = "fm-panel"; host.appendChild(panel); }
+
+    // Show-hidden toggle: owned by the panel (not the generic control list) so flipping it can
+    // re-fetch the tree with the new `hidden` filter immediately, rather than waiting for a state
+    // refresh that never re-runs the /api/dir fetch. Reuses the same .switch pill markup every
+    // other bool control uses (common patterns first), so it reads consistently.
+    const hiddenRow = document.createElement("label");
+    hiddenRow.className = "fm-hidden-toggle";
+    hiddenRow.appendChild(document.createTextNode("show hidden"));
+    const sw = document.createElement("span");
+    sw.className = "switch";
+    const hiddenBox = document.createElement("input");
+    hiddenBox.type = "checkbox";
+    hiddenBox.checked = hidden;
+    hiddenBox.addEventListener("change", () => {
+        st.showHidden = hiddenBox.checked;                    // UI-owned source of truth
+        sendControl(mod.name, "show hidden", hiddenBox.checked);   // persist (best-effort, no await)
+        renderFileManager(mod, host);                         // re-list with the new filter
+    });
+    const track = document.createElement("span");
+    track.className = "switch-track";
+    sw.appendChild(hiddenBox);
+    sw.appendChild(track);
+    hiddenRow.appendChild(sw);
+    panel.appendChild(hiddenRow);
+
+    // Select a path level (from a breadcrumb crumb): update the selection, tidy the tree to just the
+    // path, and re-render. "Reveal and collapse siblings" — keep the ancestor chain root→…→crumb
+    // open, fold every other branch AND the clicked node's own descendants. Selecting a directory
+    // drives where ＋ folder/＋ file create and what delete targets.
+    const selectPath = (absPath, isDir) => {
+        st.selected = absPath;
+        st.selectedIsDir = isDir;
+        // Rebuild `expanded` as the ancestor chain root→…→crumb, plus the clicked node itself when
+        // it's a directory (so you see one level into it) — every other branch and anything deeper
+        // folds. Root is always expanded (the tree shows its children).
+        const segs = absPath.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
+        st.expanded = new Set(["/"]);
+        for (let i = 0; i < segs.length; i++) {
+            const p = "/" + segs.slice(0, i + 1).join("/");
+            // Include every ancestor; include the clicked node only if it's a directory.
+            if (i < segs.length - 1 || isDir) st.expanded.add(p);
+        }
+        renderFileManager(mod, host);
+    };
+
+    // Breadcrumb of the selected path, on its OWN row above the toolbar (a deep path wraps freely
+    // without crowding the buttons — key on narrow displays). Click a crumb to jump there; `root`
+    // deselects back to /.
+    const crumbs = document.createElement("div");
+    crumbs.className = "fm-crumbs";
+    const mkCrumb = (label, absPath, isDir) => {
+        const b = document.createElement("button");
+        b.className = "fm-crumb" + (absPath === st.selected ? " fm-crumb--here" : "");
+        b.textContent = label;
+        b.addEventListener("click", () => selectPath(absPath, isDir));
+        return b;
+    };
+    crumbs.appendChild(mkCrumb("root", "/", true));   // always present — the way back to /
+    const segs = st.selected.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
+    segs.forEach((s, i) => {
+        crumbs.appendChild(document.createTextNode(" / "));
+        // A crumb is a directory unless it's the last segment of a selected *file*.
+        const isLast = i === segs.length - 1;
+        const isDir = !isLast || st.selectedIsDir;
+        crumbs.appendChild(mkCrumb(s, "/" + segs.slice(0, i + 1).join("/"), isDir));
+    });
+    panel.appendChild(crumbs);
+
+    // Toolbar (own row below the breadcrumb): New folder / New file / Delete / Refresh.
+    const bar = document.createElement("div");
+    bar.className = "fm-bar";
+
+    // A filesystem op targets the module's `path` control, then we re-render the tree from disk.
+    const runOp = async (button, targetPath) => {
+        await sendControl(mod.name, "path", targetPath);
+        await sendControl(mod.name, button, 1);
+        await refetchState();          // status line + persisted state
+        renderFileManager(mod, host);  // rebuild the tree from /api/dir (fresh listing)
+    };
+
+    // A new file/folder is created inside the selected node if it's a folder, else next to it (in
+    // the selected file's parent). Shared by both create buttons.
+    const createBase = () => (st.selectedIsDir ? st.selected : fmParent(st.selected));
+
+    const newBtn = document.createElement("button");
+    newBtn.className = "fm-tool";
+    newBtn.textContent = "＋ folder";
+    newBtn.title = "create a folder inside the selected folder";
+    newBtn.addEventListener("click", async () => {
+        const base = createBase();
+        const name = prompt("New folder name in " + base + ":");
+        if (!name) return;
+        st.expanded.add(base);         // reveal the new child
+        await runOp("new folder", joinFsPath(base, name.trim()));
+    });
+    bar.appendChild(newBtn);
+
+    // New file: no module op needed — the /api/file POST creates a file at a path (empty body), the
+    // same endpoint the editor saves through. Then re-render the tree from disk.
+    const newFileBtn = document.createElement("button");
+    newFileBtn.className = "fm-tool";
+    newFileBtn.textContent = "＋ file";
+    newFileBtn.title = "create an empty file inside the selected folder";
+    newFileBtn.addEventListener("click", async () => {
+        const base = createBase();
+        const name = prompt("New file name in " + base + ":");
+        if (!name) return;
+        const filePath = joinFsPath(base, name.trim());
+        try {
+            const res = await fetch("/api/file?path=" + encodeURIComponent(filePath), {
+                method: "POST", headers: { "Content-Type": "text/plain" }, body: "",
+            });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+        } catch (err) {
+            alert("create file failed: " + err.message);
+            return;
+        }
+        st.expanded.add(base);         // reveal the new file
+        renderFileManager(mod, host);  // re-list from disk
+    });
+    bar.appendChild(newFileBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "fm-tool fm-tool--danger";
+    delBtn.textContent = "🗑 delete";
+    delBtn.title = "delete the selected file or empty folder";
+    delBtn.disabled = st.selected === "/";   // never delete the root
+    armPressTwice(delBtn, () => runOp("delete", st.selected), { armedText: "✓ confirm" });
+    bar.appendChild(delBtn);
+
+    const refBtn = document.createElement("button");
+    refBtn.className = "fm-tool";
+    refBtn.textContent = "⟳";
+    refBtn.title = "refresh";
+    refBtn.addEventListener("click", () => renderFileManager(mod, host));
+    bar.appendChild(refBtn);
+    panel.appendChild(bar);
+
+    // The tree. Root ("/") is always present and expanded; its children populate asynchronously.
+    const tree = document.createElement("div");
+    tree.className = "fm-tree";
+    panel.appendChild(tree);
+
+    // Render one directory's children into `container` at `depth`, recursing into expanded folders.
+    const renderChildren = async (dirPath, container, depth) => {
+        let rows;
+        try {
+            rows = await fmFetchDir(dirPath, hidden);
+        } catch (err) {
+            const e = document.createElement("div");
+            e.className = "fm-empty";
+            e.textContent = "list failed: " + err.message;
+            container.appendChild(e);
+            return;
+        }
+        if (rows.length === 0) {
+            const e = document.createElement("div");
+            e.className = "fm-empty";
+            e.style.paddingLeft = (depth * 16 + 20) + "px";
+            e.textContent = "empty";
+            container.appendChild(e);
+            return;
+        }
+        // Folders first, then files; each alphabetical — the conventional file-manager sort.
+        rows.sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
+        for (const entry of rows) {
+            const childPath = joinFsPath(dirPath, entry.name);
+            const isOpen = st.expanded.has(childPath);
+
+            const rowEl = document.createElement("div");
+            rowEl.className = "fm-row" + (childPath === st.selected ? " fm-row--sel" : "");
+            rowEl.style.paddingLeft = (depth * 16 + 4) + "px";
+
+            // Chevron: only folders can expand; a file gets a spacer so names line up.
+            const chev = document.createElement("span");
+            chev.className = "fm-chev";
+            chev.textContent = entry.isDir ? (isOpen ? "▾" : "▸") : "";
+            rowEl.appendChild(chev);
+
+            const icon = document.createElement("span");
+            icon.className = "fm-icon";
+            icon.textContent = entry.isDir ? (isOpen ? "📂" : "📁") : "📄";
+            rowEl.appendChild(icon);
+
+            const name = document.createElement("span");
+            name.className = "fm-name";
+            name.textContent = entry.name;
+            rowEl.appendChild(name);
+
+            const size = document.createElement("span");
+            size.className = "fm-size";
+            size.textContent = entry.isDir ? "" : fmSize(entry.size || 0);
+            rowEl.appendChild(size);
+
+            // Select on click (sets the op target). A folder also toggles expand; a file opens the
+            // editor on a second click (or immediately if already selected).
+            rowEl.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                const wasSelected = st.selected === childPath;
+                st.selected = childPath;
+                st.selectedIsDir = entry.isDir;
+                if (entry.isDir) {
+                    if (isOpen) st.expanded.delete(childPath);
+                    else st.expanded.add(childPath);
+                    renderFileManager(mod, host);
+                } else if (wasSelected) {
+                    openFileEditor(childPath, entry.size || 0);
+                } else {
+                    renderFileManager(mod, host);   // reflect selection; click again to open
+                }
+            });
+            container.appendChild(rowEl);
+
+            // Recurse into an expanded folder (its own indented sub-container).
+            if (entry.isDir && isOpen) {
+                const sub = document.createElement("div");
+                sub.className = "fm-subtree";
+                container.appendChild(sub);
+                await renderChildren(childPath, sub, depth + 1);
+            }
+        }
+    };
+
+    renderChildren("/", tree, 0);
+}
+
+// Format a file's text for the editor, by extension. JSON is re-indented (2 spaces) so the persisted
+// config files are readable; anything that doesn't parse is shown verbatim rather than erroring.
+// Extension seam for later: MoonLive `.ml` source wants syntax *highlighting* (a colour layer over
+// the textarea), not reformatting — that's a bigger editor change, added when MoonLive `.ml` files
+// land on disk.
+function fmPrettify(text, relPath) {
+    if (relPath.endsWith(".json")) {
+        try { return JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+    }
+    return text;
+}
+
+// The parent directory of an absolute path ("/a/b" → "/a", "/a" → "/").
+function fmParent(absPath) {
+    const cut = absPath.lastIndexOf("/");
+    return cut <= 0 ? "/" : absPath.slice(0, cut);
+}
+
+// Join a dir + name with one slash (UI-side path building for the editor's path= query).
+function joinFsPath(dir, name) {
+    return dir.endsWith("/") ? dir + name : dir + "/" + name;
+}
+
+// Open a modal text editor for the file at `relPath`. Loads via GET /api/file, saves via POST.
+// Size-capped server-side (kFileApiCap); a larger file loads truncated and saving is blocked with
+// a note. Uses the native <dialog> — modern, accessible, no bespoke overlay code.
+async function openFileEditor(relPath, size) {
+    const dlg = document.createElement("dialog");
+    dlg.className = "fm-editor";
+    dlg.innerHTML =
+        '<form method="dialog" class="fm-editor-head">' +
+        '  <span class="fm-editor-path"></span>' +
+        '  <button value="close" class="fm-editor-x" title="close">✕</button>' +
+        '</form>' +
+        '<textarea class="fm-editor-body" spellcheck="false"></textarea>' +
+        '<div class="fm-editor-foot">' +
+        '  <span class="fm-editor-status"></span>' +
+        '  <button class="action-btn fm-editor-save">Save</button>' +
+        '</div>';
+    dlg.querySelector(".fm-editor-path").textContent = relPath;
+    const body = dlg.querySelector(".fm-editor-body");
+    const status = dlg.querySelector(".fm-editor-status");
+    const saveBtn = dlg.querySelector(".fm-editor-save");
+    document.body.appendChild(dlg);
+    dlg.addEventListener("close", () => dlg.remove());
+    dlg.showModal();
+
+    try {
+        const res = await fetch("/api/file?path=" + encodeURIComponent(relPath));
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const text = await res.text();
+        // The editor + write path are text/config only: the device write measures length by the
+        // NUL terminator (strlen), so saving content with an embedded NUL would truncate it. If the
+        // loaded file is binary (contains a NUL), show it read-only rather than offer a lossy save.
+        if (text.indexOf("\0") !== -1) {
+            body.value = text;
+            body.readOnly = true;
+            saveBtn.disabled = true;
+            status.textContent = "binary file — read-only";
+        } else {
+            body.value = fmPrettify(text, relPath);
+        }
+    } catch (err) {
+        body.value = "";
+        status.textContent = "load failed: " + err.message;
+    }
+
+    saveBtn.addEventListener("click", async () => {
+        status.textContent = "saving…";
+        try {
+            const res = await fetch("/api/file?path=" + encodeURIComponent(relPath), {
+                method: "POST",
+                headers: { "Content-Type": "text/plain" },
+                body: body.value,
+            });
+            if (!res.ok) {
+                let msg = "HTTP " + res.status;
+                try { const j = await res.json(); if (j.error) msg = j.error; } catch (_) {}
+                throw new Error(msg);
+            }
+            status.textContent = "saved";
+        } catch (err) {
+            status.textContent = "save failed: " + err.message;
+        }
     });
 }
 

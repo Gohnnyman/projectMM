@@ -386,7 +386,10 @@ void fsList(const char* dir, FsListCb cb, void* user) {
         // path::filename().c_str() returns wchar_t* on Windows; the callback
         // wants char*. Round-trip through .string() to get a portable view.
         std::string name = entry.path().filename().string();
-        cb(name.c_str(), entry.is_directory(ec), user);
+        const bool isDir = entry.is_directory(ec);
+        std::error_code sizeEc;
+        const auto sz = isDir ? 0u : static_cast<uint32_t>(std::filesystem::file_size(entry.path(), sizeEc));
+        cb(name.c_str(), isDir, sizeEc ? 0u : sz, user);
     }
 }
 

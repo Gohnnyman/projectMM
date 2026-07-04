@@ -1028,3 +1028,97 @@ body {
         display: block;
     }
 }
+
+/* ---------------------------------------------------------------------------
+   File Manager — breadcrumb + entry list + inline editor (FileManagerModule).
+   Theme-aware via the shared --vars; no hardcoded colours.
+   --------------------------------------------------------------------------- */
+.fm-panel { margin-top: 8px; }
+
+/* Show-hidden toggle — the text label + the shared .switch pill, above the toolbar. */
+.fm-hidden-toggle {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    font-size: 0.85rem; color: var(--fg-muted); cursor: pointer; user-select: none;
+}
+
+/* Breadcrumb `root / .config / foo` on its own row — each segment a button; wraps freely on narrow
+   displays without pushing the toolbar buttons around. */
+.fm-crumbs {
+    display: flex; flex-wrap: wrap; align-items: center;
+    font-family: ui-monospace, monospace; font-size: 0.85rem; color: var(--fg-muted);
+    margin-bottom: 8px;
+}
+/* Toolbar row: the folder/file/delete/refresh buttons; wraps if the card is very narrow. */
+.fm-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.fm-crumb {
+    background: none; border: none; color: var(--accent); cursor: pointer;
+    padding: 2px 4px; border-radius: 4px; font: inherit;
+}
+.fm-crumb:hover { background: var(--card-bg-2); }
+.fm-crumb--here { color: var(--fg); font-weight: 600; cursor: default; }
+.fm-crumb--here:hover { background: none; }
+.fm-tool {
+    flex: 0 0 auto; background: var(--card-bg-2); border: 1px solid var(--border);
+    color: var(--fg); cursor: pointer; padding: 4px 10px; border-radius: 6px;
+    font: inherit; font-size: 0.85rem;
+}
+.fm-tool:hover { background: var(--card-bg-1); }
+.fm-tool:disabled { opacity: 0.4; cursor: default; }
+.fm-tool--danger.armed { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* Tree: an indented list of rows; each folder's children nest in a .fm-subtree. */
+.fm-tree {
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    background: var(--card-bg-0); padding: 4px 0;
+}
+.fm-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; cursor: pointer; user-select: none;
+}
+.fm-row:hover { background: var(--card-bg-1); }
+.fm-row--sel { background: var(--card-bg-2); }
+.fm-row--sel:hover { background: var(--card-bg-2); }
+.fm-chev {
+    flex: 0 0 auto; width: 14px; text-align: center;
+    color: var(--fg-muted); font-size: 0.8rem;
+}
+.fm-icon { flex: 0 0 auto; font-size: 1rem; }
+.fm-name {
+    flex: 1 1 auto; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+.fm-row--sel .fm-name { font-weight: 500; }
+.fm-size {
+    flex: 0 0 auto; color: var(--fg-muted); font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+.fm-empty { padding: 6px 8px; color: var(--fg-muted); font-size: 0.85rem; font-style: italic; }
+
+/* Inline editor — native <dialog>, sized to a comfortable text pane. */
+.fm-editor {
+    width: min(720px, 92vw); max-height: 82vh; padding: 0;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--card-bg-0); color: var(--fg);
+    display: flex; flex-direction: column;
+}
+.fm-editor::backdrop { background: rgba(0,0,0,0.5); }
+.fm-editor-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.fm-editor-path { font-family: ui-monospace, monospace; font-size: 0.9rem; color: var(--fg-muted); }
+.fm-editor-x { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 1rem; }
+.fm-editor-x:hover { color: var(--fg); }
+.fm-editor-body {
+    flex: 1 1 auto; min-height: 240px; margin: 0; padding: 12px 14px;
+    border: none; resize: vertical; font-family: ui-monospace, monospace;
+    font-size: 0.85rem; line-height: 1.5; background: var(--bg-1); color: var(--fg);
+}
+.fm-editor-body:focus { outline: none; }
+.fm-editor-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-top: 1px solid var(--border);
+}
+.fm-editor-status { color: var(--fg-muted); font-size: 0.85rem; }

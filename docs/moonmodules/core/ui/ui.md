@@ -68,6 +68,20 @@ Detail: [technical](../moxygen/FilesystemModule.md)
 
 [Tests](../../../tests/unit-tests.md#filesystemmodule)
 
+### File Manager
+
+A boot-wired system tool (distinct from Filesystem, which is the persistence *engine*): browse and manage the device filesystem. It renders a dedicated panel — a lazy expand/collapse folder **tree** (the standard VS Code / Explorer shape: each folder loads its children on first expand) plus an inline text editor. Browsing is UI-side over the `/api/dir` listing endpoint; file contents come over `/api/file`; so the module itself stays minimal, exposing only the operations. Dot-prefixed entries (the `.config` persistence dir) are hidden unless `show hidden` is on.
+
+- `show hidden` — reveal dot-prefixed files/folders (e.g. `.config`); forwarded to `/api/dir` as its `hidden` filter.
+- Click a folder's row to select it and toggle its expansion (▸/▾); click a selected file to open the editor.
+- The toolbar acts on the selected node: **＋ folder** creates a folder inside it, **＋ file** creates an empty file (click it to edit), **🗑 delete** removes the selected file or empty folder (press-twice to confirm), **⟳** refreshes.
+- The editor loads a file's text (size-capped), pretty-prints JSON on open, and saves atomically. **＋ file** and save both go through the `/api/file` write endpoint.
+- `path` — the absolute op target the tree sets (mkdir / delete); not user-typed.
+
+Last-modified dates (needs an NTP time source + LittleFS mtime), drag-and-drop upload, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../../backlog/backlog-core.md#file-manager-follow-ups)).
+
+Detail: [technical](../moxygen/FileManagerModule.md)
+
 ### Audio
 
 A System peripheral (added by the user, not auto-wired): an I²S microphone (or line-in ADC) feeding the FFT that audio-reactive effects consume via `AudioModule::latestFrame()`. It also syncs audio over UDP, WLED-compatible: broadcast the local analysis for the WLED ecosystem, or receive a peer's audio to drive effects with no local mic. Idle until real GPIOs are entered.

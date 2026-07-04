@@ -207,6 +207,17 @@ private:
     void sendPreflightResponse(platform::TcpConnection& conn);
     void serveFile(platform::TcpConnection& conn, const char* filename, const char* contentType);
 
+    // File Manager: read/write an arbitrary filesystem path (the /api/file endpoints). `query` is
+    // the request's query string, read for `path=<rel>`; the path is vetted (no traversal, rooted
+    // at the mount) and size-capped. A file body isn't a control value, so these are their own
+    // endpoints rather than /api/control.
+    void serveFileContents(platform::TcpConnection& conn, const char* query);
+    void handleWriteFile(platform::TcpConnection& conn, const char* query,
+                         const char* body, size_t len);
+    // File Manager: one directory's children as JSON (the /api/dir endpoint) — the source the lazy
+    // tree loads a node's children from. Single-level; `hidden=1` in the query includes dotfiles.
+    void serveDirListing(platform::TcpConnection& conn, const char* query);
+
     // -----------------------------------------------------------------------
     // JSON state
     // -----------------------------------------------------------------------

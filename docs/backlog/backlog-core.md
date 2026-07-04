@@ -34,6 +34,26 @@ Full design + the reasoned transport split: [Plan-20260629 — UDP device discov
 
 ## ESP32 performance and memory
 
+### Flash budget — the 4 MB classic ESP32 is the ceiling (investigation)
+
+The binary has grown ~1.4 → ~1.48 MB as effects, audio sync, IR, and Ethernet landed. Per-board headroom against the app (OTA) partition slot:
+
+| Board | app slot | binary | used |
+|---|---|---|---|
+| **classic esp32 (4 MB)** | 1.75 MB | ~1.48 MB | **~84 %** ⚠️ |
+| esp32s3-n8r8 (8 MB) | 3.00 MB | ~1.48 MB | ~49 % |
+| 16 MB boards | 4.00 MB | ~1.48 MB | ~37 % |
+
+Only the **4 MB classic** is tight (the partition comment itself notes "~200 KB headroom"); the 8/16 MB boards have years of room. So this is a *classic-ESP32-only* constraint, not a global one — the fix should shrink the small-flash build without touching the flagship boards.
+
+Levers, roughly by payoff-per-effort:
+
+1. **`-Os` for the size-bound builds.** The ESP32 build currently runs the IDF default optimization (`CONFIG_COMPILER_OPTIMIZATION_DEBUG`, ~`-Og`), **not** `CONFIG_COMPILER_OPTIMIZATION_SIZE` (`-Os`). Setting size-opt on the classic (and any small-flash) firmware typically buys 5–15 % flash for free — measure the tick/FPS delta, since `-Os` can cost a little hot-path speed; if it does, gate it to the flash-bound firmwares only, not the S3/P4 where headroom is fine.
+2. **`MM_MINIMAL` feature profile for the 4 MB target.** The classic board doesn't need every effect/driver compiled in. A build profile that compiles out heavy optional modules (the same `firmware_cmake_args()` seam the eth/wifi gating already uses) keeps the flagship boards full-featured while the small board ships a curated subset — the standard "small board, smaller build" pattern.
+3. **Repartition the 4 MB classic.** If A/B OTA isn't required on the classic, a single-app-slot layout nearly doubles the app ceiling (1.75 → ~3.5 MB). Trade-off: OTA loses its rollback slot. Decide per-board, not globally.
+
+Start with (1) — it's a one-line sdkconfig change with a measurable payoff and no code churn; (2)/(3) only if (1) plus normal growth still crowds the classic. The UI embed is already gzipped (`app.js` ~140 KB → ~40 KB), so UI growth is cheap in flash; the pressure is C++ `.text`.
+
 ### E1.31 multicast receive (IGMP join)
 
 NetworkReceiveEffect accepts E1.31 via unicast only — the same scope MoonLight ships. Multicast senders address the per-universe group `239.255.{universe_hi}.{universe_lo}`, which a receiver must join via IGMP; the platform `UdpSocket` has no `IP_ADD_MEMBERSHIP` support yet (lwIP `setsockopt` on ESP32, plain `setsockopt` on desktop, plus a join-per-accepted-universe bookkeeping question). Add when a multicast-only sender actually shows up on a bench; until then the spec documents "point sACN senders at the device's IP".
@@ -345,6 +365,14 @@ Forward-looking companion to the shipped UI spec, [moonmodules/core/ui/ui.md](..
 - Log panel (`<details>` + WS `{t:"log",m:"…"}`)
 - Core affinity badge (C0/C1) — only meaningful when core pinning lands
 - Module `category()` field — taxonomy beyond `role()` for the picker (decision: derive from `role()` for now)
+
+### File Manager follow-ups
+
+The shipped File Manager (see [ui.md](../moonmodules/core/ui/ui.md)) is a lazy expand/collapse tree over `/api/dir` + a size-capped text editor over `/api/file`. Deferred capabilities, each self-contained:
+
+- **Drag-and-drop upload from the desktop.** The browser side is small — a `drop` handler on a tree folder node reads `e.dataTransfer.files` and POSTs each to the existing `/api/file?path=<dir>/<name>`, the same write path the editor uses. The device-side work is what makes this a follow-up, in tiers: (1) **text/config ≤ `kFileApiCap` (8 KB):** thread the request **Content-Length** through to `handleWriteFile` instead of the current `std::strlen(body)`, so a write is byte-exact (a NUL in the body truncates today) — then small text/`.ml` drops work as-is; (2) **binary + large files:** a length-based, possibly chunked write path and a flash-space UX (LittleFS is small; the write fails cleanly but the UI should say why); (3) **multi-file / recursive folder drops:** client-side `mkdir` + walk. Ship the tiers in order; tier 1 is the 80% case.
+- **Last-modified dates.** Needs a time source (NTP) + LittleFS mtime storage; the tree is name + size until both land. Backlogged with the NTP work.
+- **`.ml` syntax highlighting in the editor.** MoonLive source wants *highlighting* (a colour layer over the textarea), not the JSON-style reformat — a bigger editor change (a highlight overlay or a small tokenizer), added when MoonLive `.ml` files land on disk. The editor already has an extension seam (`fmPrettify`) for the reformat case; highlighting is the separate, larger tier.
 
 ### Open design questions
 

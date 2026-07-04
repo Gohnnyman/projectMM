@@ -54,6 +54,7 @@ add_library(mm_core STATIC
     src/core/Control.cpp
     src/core/HttpServerModule.cpp
     src/core/FilesystemModule.cpp
+    src/core/FileManagerModule.cpp
     src/core/Scheduler.cpp
     src/core/moonlive/MoonLive.cpp
     src/core/moonlive/MoonLiveCompiler.cpp

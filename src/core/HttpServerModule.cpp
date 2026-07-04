@@ -161,6 +161,11 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
         else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
         else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
+        // File Manager: GET /api/dir?path=<rel>[&hidden=1] → one directory's children as JSON
+        // [{name,isDir,size}] (the lazy tree loads a node's children on expand).
+        else if (std::strcmp(path, "/api/dir") == 0) serveDirListing(conn, queryStart ? queryStart + 1 : "");
+        // File Manager: GET /api/file?path=<rel> → the file's contents (text, size-capped).
+        else if (std::strcmp(path, "/api/file") == 0) serveFileContents(conn, queryStart ? queryStart + 1 : "");
         // WLED-compatibility shim: the native WLED apps (and Home Assistant's WLED
         // integration) discover a device via mDNS `_wled._tcp` then VALIDATE it by
         // GETting /json/info and checking it's WLED-shaped. Serving a minimal
@@ -189,6 +194,10 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             std::strcmp(path + pathLen - 8, "/replace") == 0;
         if (std::strcmp(path, "/api/control") == 0 && body) {
             handleSetControl(conn, body);
+        } else if (std::strcmp(path, "/api/file") == 0 && body) {
+            // File Manager: POST /api/file?path=<rel>, the file body → atomic write. The body is
+            // null-terminated (buf[totalRead]=0) and text, so strlen is the content length.
+            handleWriteFile(conn, queryStart ? queryStart + 1 : "", body, std::strlen(body));
         } else if (std::strcmp(path, "/api/modules") == 0 && body) {
             handleAddModule(conn, body);
         } else if (isMoveRoute && body) {
@@ -296,6 +305,134 @@ void HttpServerModule::sendResponse(platform::TcpConnection& conn, int status, c
         status, statusText, contentType, bodyLen);
     conn.write(reinterpret_cast<const uint8_t*>(header), headerLen);
     conn.write(reinterpret_cast<const uint8_t*>(body), bodyLen);
+}
+
+// --- File Manager file read/write (the /api/file endpoints) ---
+//
+// A file body isn't a control value, so these are their own small endpoints (not /api/control).
+// The path comes as a query param `path=<rel>`; fileQueryPath vets it (reject "..", root at the
+// mount) — the traversal guard for the HTTP entry path, the same check FileManagerModule::safePath
+// applies to the control-driven ops (two filesystem entry points, each guarded at its boundary).
+// Text/config only, size-capped: kFileApiCap bounds both the read buffer and the accepted write,
+// matching LittleFS's small flash. Binary files still read (as bytes); the UI decides what to show.
+static constexpr size_t kFileApiCap = 8192;
+
+// Copy the `path=` query value into `out` (decoding %XX and '+' minimally), rooted at the mount.
+// Returns false on a missing/empty path or a ".." traversal attempt.
+static bool fileQueryPath(const char* query, char* out, size_t cap) {
+    const char* p = query ? std::strstr(query, "path=") : nullptr;
+    if (!p) return false;
+    p += 5;                                   // past "path="
+    size_t i = 0;
+    // The path may be its own query (stop at '&') and percent-encoded ('/' → %2F, ' ' → %20).
+    while (*p && *p != '&' && i + 1 < cap) {
+        char c = *p;
+        if (c == '%' && p[1] && p[2]) {       // %XX → byte
+            auto hex = [](char h) -> int {
+                if (h >= '0' && h <= '9') return h - '0';
+                if (h >= 'a' && h <= 'f') return h - 'a' + 10;
+                if (h >= 'A' && h <= 'F') return h - 'A' + 10;
+                return -1;
+            };
+            const int hi = hex(p[1]), lo = hex(p[2]);
+            if (hi >= 0 && lo >= 0) { c = static_cast<char>((hi << 4) | lo); p += 2; }
+        } else if (c == '+') {
+            c = ' ';
+        }
+        out[i++] = c;
+        p++;
+    }
+    out[i] = 0;
+    if (i == 0 || std::strstr(out, "..")) return false;   // empty or traversal → reject
+    if (out[0] != '/') {                                  // relative → root at the mount
+        char rooted[160];
+        const int n = std::snprintf(rooted, sizeof(rooted), "/%s", out);
+        if (n <= 0 || static_cast<size_t>(n) >= cap) return false;
+        std::strncpy(out, rooted, cap - 1); out[cap - 1] = 0;
+    }
+    return true;
+}
+
+// --- File Manager directory listing (the /api/dir endpoint) ---
+//
+// One directory's children as a JSON array, the source the lazy tree loads a node's children from.
+// Single-level only (platform::fsList) — the recursion is the UI's job, one fetch per expanded node,
+// the standard file-tree shape. The `hidden` query flag (hidden=1) includes dot-prefixed entries.
+// The listing streams straight to the socket (as serveState does) — no whole-listing buffer. The
+// fsList C callback carries the streaming sink + the hidden filter + a first-row flag via `user`.
+namespace {
+struct DirListState {
+    JsonSink* sink;
+    bool showHidden;
+    bool first = true;
+};
+void dirListTrampoline(const char* name, bool isDir, uint32_t size, void* user) {
+    auto* st = static_cast<DirListState*>(user);
+    if (!st->showHidden && name[0] == '.') return;          // dotfile convention
+    if (!st->first) st->sink->append(",");
+    st->first = false;
+    st->sink->append("{\"name\":");
+    st->sink->writeJsonString(name);
+    st->sink->appendf(",\"isDir\":%s,\"size\":%lu}",
+                      isDir ? "true" : "false", static_cast<unsigned long>(size));
+}
+}  // namespace
+
+void HttpServerModule::serveDirListing(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!fileQueryPath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    const char* header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    JsonSink sink(conn);
+    DirListState st{&sink, query && std::strstr(query, "hidden=1") != nullptr, true};
+    sink.append("[");
+    platform::fsList(path, &dirListTrampoline, &st);
+    sink.append("]");
+    sink.flush();
+}
+
+void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!fileQueryPath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    // A fixed-size read buffer (kFileApiCap) — the size cap is the point; a larger file is
+    // truncated to the cap (the UI shows what fits and flags the file as edit-capped elsewhere).
+    static char fileBuf[kFileApiCap + 1];
+    const int n = platform::fsRead(path, fileBuf, sizeof(fileBuf));
+    if (n < 0) { sendResponse(conn, 404, "application/json", "{\"error\":\"not found\"}"); return; }
+    fileBuf[n] = 0;
+    // Serve the raw bytes as text/plain — the UI renders it in the editor. (Content type is
+    // deliberately generic; the manager edits text/config, and a binary preview is the UI's call.)
+    sendResponse(conn, 200, "text/plain", fileBuf);
+}
+
+void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char* query,
+                                       const char* body, size_t len) {
+    char path[160];
+    if (!fileQueryPath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    if (len > kFileApiCap) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"file too large\"}");
+        return;
+    }
+    if (platform::fsWriteAtomic(path, body, len)) {
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    } else {
+        sendResponse(conn, 500, "application/json", "{\"error\":\"write failed\"}");
+    }
 }
 
 void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* filename, const char* contentType) {

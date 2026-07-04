@@ -98,6 +98,7 @@
 #include "core/AudioModule.h"
 #include "core/I2cScanModule.h"
 #include "core/IrModule.h"
+#include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/DevicesModule.h"
@@ -212,6 +213,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/I2cScanModule.md");
     mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/IrModule.md");
+    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/FileManagerModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/DevicesModule.md");
@@ -262,6 +264,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // overlay into other modules' bound variables before their setup() runs)
     auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
     filesystemModule->setScheduler(&scheduler);
+
+    // File Manager — browse/manage the filesystem (a device-wide tool, boot-wired like the other
+    // system modules, not per-board). Distinct from FilesystemModule (the persistence engine).
+    // setName gives the card a clean "File Manager" label (the type stays FileManagerModule).
+    auto* fileManagerModule = static_cast<mm::FileManagerModule*>(mm::ModuleFactory::create("FileManagerModule"));
+    fileManagerModule->setName("File Manager");
 
     // System (deviceName needed by other modules)
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
@@ -403,6 +411,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // roots in this order each tick; child propagation happens inside each root.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
+    scheduler.addModule(fileManagerModule);
     scheduler.addModule(firmwareUpdateModule);
     if (improvModule) networkModule->addChild(improvModule);
     // Devices: discovers other devices on the LAN. Child of Network (discovery
