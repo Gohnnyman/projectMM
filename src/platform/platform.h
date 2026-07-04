@@ -145,6 +145,14 @@ bool wifiApInit(const char* apName, const char* ip);
 bool wifiApConnected();
 void wifiApStop();
 
+// True when it is safe to open/use a socket: the TCP/IP stack is initialised and
+// an interface has an IP. On ESP32 that means Ethernet or WiFi (STA/AP) is up —
+// calling any lwip socket API before then asserts (the core mutex is still null).
+// Desktop: always true (host sockets work regardless of link state). Callers that
+// open sockets at boot (before NetworkModule brings an interface up) must gate on
+// this and open lazily from the tick path once it turns true.
+bool networkReady();
+
 // Current WiFi transmit power, in dBm (ESP-IDF reports quarter-dBm internally
 // and we round to whole). Returns 0 when WiFi isn't initialised or the call
 // fails. Same value for STA and AP — WiFi has one radio at one TX power.
@@ -311,7 +319,7 @@ public:
 
     bool valid() const { return fd_ >= 0; }
     int read(uint8_t* buf, size_t maxLen);   // non-blocking: >0 data, 0 closed, -1 nothing
-    bool write(const uint8_t* data, size_t len);  // blocking — retries until all sent
+    bool write(const uint8_t* data, size_t len);  // blocking — sends all bytes (HTTP responses must complete)
     // Non-blocking partial write: send as many of `len` bytes as the socket accepts right
     // now, return the count actually written (0..len). -1 = socket error (caller closes);
     // 0 = WouldBlock (buffer full, try later) or len==0. The caller advances its own offset
@@ -590,5 +598,13 @@ inline constexpr size_t kI2cBusUnavailable = static_cast<size_t>(-1);
 // `out` (caller-sized, capacity `maxOut`) and return the count found (capped at
 // maxOut), or kI2cBusUnavailable if the bus couldn't be opened.
 size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
+
+// Poll the IR receiver on `pin` for a decoded remote frame. Returns true and writes the
+// frame into `codeOut` when a fresh code is available since the last call, false otherwise
+// (nothing received, or IR decode unavailable on this target). Self-contained like i2cScan —
+// it owns whatever peripheral it needs (an RMT RX channel on ESP32). Non-blocking: safe to
+// call every tick. IrModule is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
+// hardware and always returns false.
+bool irRead(uint16_t pin, uint32_t& codeOut);
 
 } // namespace mm::platform

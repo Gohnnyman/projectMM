@@ -263,7 +263,10 @@ public:
             // (ESP-IDF's minimum) — write 2 or higher for predictable
             // behavior. Always bound on radio-capable builds; the
             // deviceModels.json catalog injects 8 dBm for brown-out-prone boards.
+            // Hidden with the same radioOn gate as the txPower readout above — a WiFi
+            // TX-power cap is meaningless on Ethernet / Idle where the radio is off.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
+            controls_.setHidden(controls_.count() - 1, !radioOn);
         }
         controls_.addBool("mDNS", mdnsEnabled_);
 

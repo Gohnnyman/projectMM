@@ -496,47 +496,19 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
 // free: no TcpConnection, returns an OpResult the caller maps to its own reporting.
 HttpServerModule::OpResult HttpServerModule::applySetControl(
         const char* moduleName, const char* controlName, const char* valueJson) {
-    MoonModule* target = findModuleByName(moduleName);
-    if (!target) return OpResult::ModuleNotFound;
-
-    // Module-level "enabled" pseudo-control.
-    if (std::strcmp(controlName, "enabled") == 0) {
-        target->setEnabled(mm::json::parseBool(valueJson, "value"));
-        target->markDirty();
-        FilesystemModule::noteDirty();
-        if (scheduler_) scheduler_->buildState();
-        return OpResult::Ok;
+    // The generic control-set is a Scheduler primitive (it owns the tree + persistence hook),
+    // shared with every other control writer — Improv, the WLED bridge, IrModule. This wrapper
+    // only maps its result onto the HTTP OpResult so the response carries the right status code.
+    if (!scheduler_) return OpResult::ModuleNotFound;
+    switch (scheduler_->setControl(moduleName, controlName, valueJson)) {
+        case Scheduler::SetControlResult::Ok:              return OpResult::Ok;
+        case Scheduler::SetControlResult::ModuleNotFound:  return OpResult::ModuleNotFound;
+        case Scheduler::SetControlResult::ControlNotFound: return OpResult::ControlNotFound;
+        case Scheduler::SetControlResult::OutOfRange:      return OpResult::OutOfRange;
+        case Scheduler::SetControlResult::Malformed:       return OpResult::Malformed;
+        case Scheduler::SetControlResult::ReadOnly:        return OpResult::ReadOnly;
     }
-
-    auto& ctrls = target->controls();
-    for (uint8_t i = 0; i < ctrls.count(); i++) {
-        auto& c = ctrls[i];
-        if (std::strcmp(c.name, controlName) != 0) continue;
-
-        // Per-type parse + validate + apply lives in Control.cpp. Non-Ok leaves the
-        // storage untouched, so no rollback needed.
-        ApplyResult r = applyControlValue(c, valueJson, "value");
-        switch (r) {
-            case ApplyResult::Ok:        break;
-            case ApplyResult::OutOfRange: return OpResult::OutOfRange;
-            case ApplyResult::Malformed:  return OpResult::Malformed;
-            case ApplyResult::ReadOnly:   return OpResult::ReadOnly;
-        }
-        // Rebuild the control list after every change so onBuildControls() can
-        // re-evaluate which controls are visible for the new value (a Select
-        // revealing fields, etc.). clear()+onBuildControls(), cheap + idempotent.
-        target->rebuildControls();
-        // Three-tier control-change reaction (see MoonModule::onUpdate): onUpdate
-        // always; a tree-wide buildState only when the control reshapes dims/mapping.
-        target->onUpdate(controlName);
-        target->markDirty();
-        FilesystemModule::noteDirty();
-        if (target->controlChangeTriggersBuildState(controlName) && scheduler_) {
-            scheduler_->buildState();
-        }
-        return OpResult::Ok;
-    }
-    return OpResult::ControlNotFound;   // control name not on this module
+    return OpResult::ModuleNotFound;   // unreachable; keeps -Wreturn-type happy
 }
 
 void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const char* body) {

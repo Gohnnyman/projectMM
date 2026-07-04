@@ -53,6 +53,10 @@ struct EthPinConfig {
 // (shared code) `if constexpr (hasEthernet)`s the eth controls off, and seeds its
 // members from this default; both must exist here for that shared code to compile.
 constexpr bool hasEthernet = false;
+// Some-IP-stack flag (WiFi OR Ethernet) — mirrors the esp32 config so shared code
+// (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
+// via the WiFi stubs (UdpSocket has a desktop implementation).
+constexpr bool hasNetwork = hasWiFi || hasEthernet;
 // No SPI-Ethernet (W5500) driver on desktop either — NetworkModule's live-reconfigure
 // path gates on this, so it must exist on every platform (mirrors the esp32 flag).
 constexpr bool hasEthW5500 = false;

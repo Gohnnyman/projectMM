@@ -8,6 +8,8 @@ add_executable(mm_tests
     unit/core/unit_math8.cpp
     unit/core/unit_noise.cpp
     unit/core/unit_crc.cpp
+    unit/core/unit_AudioModule_sync.cpp
+    unit/core/unit_IrModule.cpp
     unit/core/unit_Control_apply_absent_key.cpp
     unit/core/unit_Control_list.cpp
     unit/core/unit_DeviceIdentify.cpp
@@ -45,6 +47,7 @@ add_executable(mm_tests
     unit/light/unit_AudioBands.cpp
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
+    unit/light/unit_WledAudioSyncPacket.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_draw.cpp
     unit/light/unit_GameOfLifeEffect.cpp

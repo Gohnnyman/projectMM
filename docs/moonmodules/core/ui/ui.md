@@ -70,12 +70,15 @@ Detail: [technical](../moxygen/FilesystemModule.md)
 
 ### Audio
 
-A System peripheral (added by the user, not auto-wired): an I²S microphone feeding the FFT that audio-reactive effects consume via `AudioModule::latestFrame()`. Idle until real GPIOs are entered.
+A System peripheral (added by the user, not auto-wired): an I²S microphone (or line-in ADC) feeding the FFT that audio-reactive effects consume via `AudioModule::latestFrame()`. It also syncs audio over UDP, WLED-compatible: broadcast the local analysis for the WLED ecosystem, or receive a peer's audio to drive effects with no local mic. Idle until real GPIOs are entered.
 
-- `wsPin` / `sdPin` / `sckPin` — the I²S microphone GPIOs (unset until entered).
-- `sampleRate` — mic sample rate.
+- `wsPin` / `sdPin` / `sckPin` — the I²S GPIOs (unset until entered).
+- `mclkPin` — master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
+- `sampleRate` — mic/ADC sample rate.
+- `floor` / `gain` — noise floor and input gain for the analysis.
 - `simulate` — feed a synthetic signal instead of the mic (for testing without hardware).
-- read-only — `level` (RMS), `peakHz`.
+- `sync` — Off / Send / Receive: broadcast or receive WLED audio-sync packets. `syncPort` sets the UDP port (default 11988, the WLED standard); Receive auto-blends back to the local mic ~1 s after a peer goes quiet.
+- read-only — `level` (RMS), `peakHz`, `sync status`.
 
 Detail: [technical](../moxygen/AudioModule.md)
 
@@ -90,3 +93,17 @@ A System peripheral that probes the I²C bus (default GPIO21/22) on a button pre
 - read-only — `result` (addresses found).
 
 Detail: [technical](../moxygen/I2cScanModule.md)
+
+### IR
+
+A System peripheral (added per board, not auto-wired): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive — the device's IR input, the counterpart of the WLED-app bridge. It **learns** any remote: pick an action in `learn`, press a remote button to bind its code, and thereafter that button drives the action. Decoding is real NEC-over-RMT; a received code (bound or not) shows in the status line.
+
+<img src="../../../assets/core/IrModule.jpeg" width="300" alt="An IR receiver and the common 21-key RGB remote it decodes">
+
+- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
+- `learn` — pick an action (off / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms.
+- `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
+
+The actions nudge `Drivers.brightness` (±16, clamped 0–255) and step `Drivers.palette` (next/previous). The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding ("learned … = 0x…"), a fired action ("Drivers.brightness → N"), and an unbound code ("received 0x… (unassigned)").
+
+Detail: [technical](../moxygen/IrModule.md)

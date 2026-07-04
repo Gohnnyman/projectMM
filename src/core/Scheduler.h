@@ -54,6 +54,12 @@ public:
     using LoadAllFn = void(*)(Scheduler*);
     void setLoadAllHook(LoadAllFn fn) { loadAllHook_ = fn; }
 
+    /// Hook invoked after a control mutation so the persistence layer can schedule a
+    /// debounced save (FilesystemModule::noteDirty). Same decoupling as setLoadAllHook —
+    /// Scheduler stays independent of FilesystemModule's type. No-op if unset.
+    using NoteDirtyFn = void(*)();
+    void setNoteDirtyHook(NoteDirtyFn fn) { noteDirtyHook_ = fn; }
+
     void addModule(MoonModule* mod);
     void setup();
     void tick();
@@ -83,13 +89,43 @@ public:
     /// First module in tree-walk order with this name, or nullptr if none.
     MoonModule* firstByName(const char* name);
 
+    /// The single live Scheduler, or nullptr before setup() / after teardown(). Mirrors
+    /// FilesystemModule::instance_ — the one Scheduler is statically reachable so a module
+    /// created by the factory (IrModule) can call setControl() without a per-module injection.
+    static Scheduler* instance() { return instance_; }
+
+    /// Outcome of setControl — the generic control-set primitive's result. Transport
+    /// layers map these to their own status (HTTP → 404 / 400 / 409, …).
+    enum class SetControlResult : uint8_t {
+        Ok,
+        ModuleNotFound,   ///< no module with that name in the tree
+        ControlNotFound,  ///< module exists but has no such control
+        OutOfRange,       ///< numeric value outside the control's bounds
+        Malformed,        ///< value didn't parse
+        ReadOnly,         ///< tried to write a display-only control
+    };
+
+    /// Set one control by (module name, control name) to a value, applying the full
+    /// control-change reaction: parse+validate, rebuild the module's control list, fire
+    /// onUpdate, mark dirty for persistence, and buildState() when the control reshapes
+    /// dims/mapping. `valueJson` is a small JSON object read for its "value" key
+    /// (`{"value":128}`) — the same shape /api/control, Improv, and the WLED bridge send.
+    /// This is THE domain-neutral way for any module (IR, buttons, network bridges) to
+    /// drive another module's control: they compose against this one primitive instead of
+    /// reaching into a target's internals. The special control name "enabled" toggles the
+    /// module's enabled flag. Returns the outcome; a transport maps it to its status codes.
+    SetControlResult setControl(const char* moduleName, const char* controlName,
+                                const char* valueJson);
+
 private:
     void walkAndEnsureUnique(MoonModule* mod);
     static MoonModule* firstInTree(MoonModule* mod, const char* name);
 
+    static inline Scheduler* instance_ = nullptr;
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;
     LoadAllFn loadAllHook_ = nullptr;
+    NoteDirtyFn noteDirtyHook_ = nullptr;
     uint32_t startTime_ = 0;
     uint32_t lastLoop20ms_ = 0;
     uint32_t lastLoop1s_ = 0;

@@ -448,6 +448,10 @@ int wifiStaRssi() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+
+// Host sockets work regardless of the (stubbed) link predicates above, and there is
+// no lwip-style init race — always socket-safe.
+bool networkReady() { return true; }
 int wifiTxPower() { return 0; }
 // Match the API contract: 0 is a successful no-op (matches ESP-IDF
 // MM_NO_WIFI stub semantics). Any non-zero value returns false since
@@ -727,6 +731,8 @@ int TcpConnection::read(uint8_t* buf, size_t maxLen) {
 
 bool TcpConnection::write(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
+    // Send ALL bytes (blocking retry on a full buffer) — an HTTP response must arrive complete.
+    // See the ESP32 impl: a healthy interface drains in microseconds so the retry rarely spins.
     size_t sent = 0;
     while (sent < len) {
         auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data + sent),
@@ -950,5 +956,9 @@ void audioFft(const float* windowed, size_t n, float* outMag) {
 size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*maxOut*/) {
     return kI2cBusUnavailable;
 }
+
+// No IR receiver on the host — the seam is a no-op so IrModule runs (its buttons still work
+// through Scheduler::setControl); reception is ESP32-only.
+bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 
 } // namespace mm::platform

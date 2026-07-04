@@ -612,7 +612,21 @@ static bool ethInitSpi() {
     devcfg.queue_size = 20;
 
     eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(kSpiHost, &devcfg);
-    w5500_config.int_gpio_num = ethConfig_.spiIrq;   // -1 → W5500 driver falls back to polling
+    w5500_config.int_gpio_num = ethConfig_.spiIrq;   // wired INT pin (interrupt), or -1 for polling
+    if (ethConfig_.spiIrq >= 0) {
+        // Interrupt-driven RX: the W5500 driver registers its handler with gpio_isr_handler_add(),
+        // which requires the per-pin ISR service to be installed first. Install it once here;
+        // ESP_ERR_INVALID_STATE means another driver already installed it, which is fine.
+        esp_err_t isr = gpio_install_isr_service(0);
+        if (isr != ESP_OK && isr != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(NET_TAG, "gpio_install_isr_service failed (%s) — W5500 INT may not fire",
+                     esp_err_to_name(isr));
+        }
+    } else {
+        // No INT pin: IDF v6's W5500 driver requires a poll period when int_gpio_num < 0, so drive
+        // the MAC by polling — 10 ms services RX promptly without an interrupt.
+        w5500_config.poll_period_ms = 10;
+    }
 
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
@@ -1020,6 +1034,14 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 #endif // MM_NO_WIFI
 
+// Socket-safe once any interface has an IP: at that point esp_netif_init() has run
+// and the lwip core mutex exists, so opening a socket won't assert. Each predicate
+// is stubbed to false in the build that lacks its interface, so this OR compiles and
+// answers correctly on every firmware.
+bool networkReady() {
+    return ethConnected() || wifiStaConnected() || wifiApConnected();
+}
+
 // Bring the mDNS stack up (idempotent) and ADVERTISE this device as <deviceName>.local.
 // Advertising is gated by the user's mDNS toggle; the stack init stays — mdnsStop()
 // removes the services + hostname but keeps the stack up, so toggling mDNS back on
@@ -1331,6 +1353,9 @@ int TcpConnection::read(uint8_t* buf, size_t maxLen) {
 
 bool TcpConnection::write(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
+    // Send every byte, retrying on a full send buffer — an HTTP response must arrive complete.
+    // Blocks the caller until the peer drains, which suits a one-shot response on a per-request
+    // connection; a healthy interface drains in microseconds, so the retry rarely spins.
     size_t sent = 0;
     while (sent < len) {
         auto n = lwip_write(fd_, data + sent, len - sent);
@@ -1418,5 +1443,7 @@ void TcpServer::close() {
         fd_ = -1;
     }
 }
+
+// irRead (IR receive) lives in platform_esp32_ir.cpp — an RMT NEC decoder.
 
 } // namespace mm::platform
