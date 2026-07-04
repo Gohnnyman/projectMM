@@ -46,6 +46,16 @@ constexpr size_t   WLED_SYNC_NUM_BANDS = 16;   // == AudioFrame bands + WLED NUM
 inline void wledPutFloatLE(uint8_t* p, float v) { std::memcpy(p, &v, 4); }
 inline float wledGetFloatLE(const uint8_t* p) { float v; std::memcpy(&v, p, 4); return v; }
 
+// Truncate a wire float into an AudioFrame uint16 field, bounded to [0, 65535].
+// A foreign/garbage packet that passed the header check can carry NaN or an
+// out-of-range magnitude; casting such a float straight to uint16_t is undefined,
+// so clamp first. NaN fails both comparisons and falls through to 0.
+inline uint16_t wledFloatToU16(float v) {
+    if (!(v > 0.0f)) return 0;              // <= 0 or NaN
+    if (v > 65535.0f) return 65535;
+    return static_cast<uint16_t>(v);
+}
+
 // Build a v2 audio-sync packet from an AudioFrame into out (>= 44 bytes).
 // `frameCounter` and `peak` are the two fields not carried by AudioFrame (the
 // caller owns the send counter and the beat flag). Returns the packet size (44).
@@ -68,16 +78,18 @@ inline size_t buildWledAudioSync(uint8_t out[WLED_SYNC_PACKET_SIZE], const Audio
 // the "00002" header. A v1 (83-byte "00001") packet, a short/foreign datagram, or
 // a null buffer returns false so the caller ignores it (be strict on our own
 // format, drop everything else — never crash). The float level/peak fields are
-// rounded back into the AudioFrame's small-integer fields.
+// truncated into the AudioFrame's small-integer fields, bounded to [0, 65535]
+// (wledFloatToU16) so a foreign packet carrying NaN or an out-of-range value
+// can't produce an undefined conversion.
 inline bool parseWledAudioSync(const uint8_t* pkt, size_t len, AudioFrame& out) {
     if (!pkt || len != WLED_SYNC_PACKET_SIZE) return false;
     if (std::memcmp(pkt, WLED_SYNC_HEADER, 6) != 0) return false;
-    out.level         = static_cast<uint16_t>(wledGetFloatLE(pkt + 8));
-    out.levelSmoothed = static_cast<uint16_t>(wledGetFloatLE(pkt + 12));
+    out.level         = wledFloatToU16(wledGetFloatLE(pkt + 8));
+    out.levelSmoothed = wledFloatToU16(wledGetFloatLE(pkt + 12));
     // pkt[16] samplePeak and pkt[17] frameCounter are hints the AudioFrame doesn't carry.
     std::memcpy(out.bands, pkt + 18, WLED_SYNC_NUM_BANDS);
-    out.peakMag = static_cast<uint16_t>(wledGetFloatLE(pkt + 36));
-    out.peakHz  = static_cast<uint16_t>(wledGetFloatLE(pkt + 40));
+    out.peakMag = wledFloatToU16(wledGetFloatLE(pkt + 36));
+    out.peakHz  = wledFloatToU16(wledGetFloatLE(pkt + 40));
     return true;
 }
 

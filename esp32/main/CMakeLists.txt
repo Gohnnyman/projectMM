@@ -22,6 +22,7 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_parlio.cpp"
         "../../src/platform/esp32/platform_esp32_i2s.cpp"
         "../../src/platform/esp32/platform_esp32_i2c.cpp"
+        "../../src/platform/esp32/platform_esp32_ir.cpp"
         "../../src/platform/esp32/platform_esp32_es8311.cpp"
     INCLUDE_DIRS
         "../../src"

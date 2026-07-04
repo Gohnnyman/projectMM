@@ -1,5 +1,7 @@
 #include "core/Scheduler.h"
 
+#include "core/Control.h"    // applyControlValue + ApplyResult in setControl
+#include "core/JsonUtil.h"   // mm::json::parseBool for the "enabled" pseudo-control
 #include "platform/platform.h"
 
 #include <cstdio>   // std::snprintf in ensureUniqueName
@@ -13,6 +15,7 @@ void Scheduler::addModule(MoonModule* mod) {
 }
 
 void Scheduler::setup() {
+    instance_ = this;   // the one live Scheduler, reachable via Scheduler::instance()
     startTime_ = platform::millis();
 
     // Phase 1: bind each module's controls. After this, ControlList descriptors hold
@@ -127,6 +130,7 @@ void Scheduler::teardown() {
         deleteTree(modules_[i - 1]);
     }
     moduleCount_ = 0;
+    instance_ = nullptr;
 }
 
 uint32_t Scheduler::elapsed() const {
@@ -200,6 +204,48 @@ MoonModule* Scheduler::firstByName(const char* name) {
         if (auto* m = firstInTree(modules_[i], name)) return m;
     }
     return nullptr;
+}
+
+Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
+                                                 const char* controlName,
+                                                 const char* valueJson) {
+    MoonModule* target = firstByName(moduleName);
+    if (!target) return SetControlResult::ModuleNotFound;
+
+    // Module-level "enabled" pseudo-control — toggles the flag, then a full rebuild so the
+    // disabled subtree stops/starts ticking.
+    if (std::strcmp(controlName, "enabled") == 0) {
+        target->setEnabled(mm::json::parseBool(valueJson, "value"));
+        target->markDirty();
+        if (noteDirtyHook_) noteDirtyHook_();
+        buildState();
+        return SetControlResult::Ok;
+    }
+
+    auto& ctrls = target->controls();
+    for (uint8_t i = 0; i < ctrls.count(); i++) {
+        auto& c = ctrls[i];
+        if (std::strcmp(c.name, controlName) != 0) continue;
+
+        // Per-type parse + validate + apply lives in Control.cpp. A non-Ok result leaves
+        // the storage untouched, so there is no rollback to do.
+        switch (applyControlValue(c, valueJson, "value")) {
+            case ApplyResult::Ok:         break;
+            case ApplyResult::OutOfRange: return SetControlResult::OutOfRange;
+            case ApplyResult::Malformed:  return SetControlResult::Malformed;
+            case ApplyResult::ReadOnly:   return SetControlResult::ReadOnly;
+        }
+        // Rebuild the control list so onBuildControls() re-evaluates conditional visibility
+        // for the new value; fire the three-tier change reaction (onUpdate always, a
+        // tree-wide buildState only when the control reshapes dims/mapping); persist.
+        target->rebuildControls();
+        target->onUpdate(controlName);
+        target->markDirty();
+        if (noteDirtyHook_) noteDirtyHook_();
+        if (target->controlChangeTriggersBuildState(controlName)) buildState();
+        return SetControlResult::Ok;
+    }
+    return SetControlResult::ControlNotFound;
 }
 
 void Scheduler::walkAndEnsureUnique(MoonModule* mod) {

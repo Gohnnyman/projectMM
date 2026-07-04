@@ -20,7 +20,13 @@ FilesystemModule::~FilesystemModule() {
 void FilesystemModule::setScheduler(Scheduler* s) {
     scheduler_ = s;
     instance_ = this;
-    if (s) s->setLoadAllHook(&loadAllHookTrampoline_);
+    if (s) {
+        s->setLoadAllHook(&loadAllHookTrampoline_);
+        // Scheduler::setControl calls this after a mutation so a control set from anywhere
+        // (IR, WLED bridge, /api/control) schedules the same debounced save. noteDirty is a
+        // static, so a plain function pointer suffices — no trampoline needed.
+        s->setNoteDirtyHook(&FilesystemModule::noteDirty);
+    }
 }
 
 void FilesystemModule::setup() {

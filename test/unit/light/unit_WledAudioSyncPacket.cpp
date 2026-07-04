@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 using namespace mm;
 
@@ -87,6 +88,36 @@ TEST_CASE("parse rejects wrong length, wrong header, v1, and null") {
     CHECK_FALSE(parseWledAudioSync(big, sizeof(big), out));
     // null
     CHECK_FALSE(parseWledAudioSync(nullptr, 44, out));
+}
+
+TEST_CASE("parse clamps NaN / out-of-range floats instead of undefined casts") {
+    // A foreign packet passes the header check but carries hostile float payloads.
+    // wledFloatToU16 must bound them to [0, 65535] rather than let static_cast<uint16_t>
+    // of a NaN / huge / negative float produce an undefined result.
+    AudioFrame f = sampleFrame();
+    uint8_t pkt[WLED_SYNC_PACKET_SIZE];
+    buildWledAudioSync(pkt, f, 0, false);
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    wledPutFloatLE(pkt + 8,  nan);          // level         → NaN
+    wledPutFloatLE(pkt + 12, -5.0f);        // levelSmoothed → negative
+    wledPutFloatLE(pkt + 36, 1e9f);         // peakMag       → far over 65535
+    wledPutFloatLE(pkt + 40, 440.6f);       // peakHz        → normal, truncates to 440
+
+    AudioFrame out;
+    REQUIRE(parseWledAudioSync(pkt, WLED_SYNC_PACKET_SIZE, out));
+    CHECK(out.level == 0);            // NaN → 0
+    CHECK(out.levelSmoothed == 0);    // negative → 0
+    CHECK(out.peakMag == 65535);      // clamped to the u16 ceiling
+    CHECK(out.peakHz == 440);         // in range → truncated
+
+    // The helper directly, at the boundaries.
+    CHECK(wledFloatToU16(nan) == 0);
+    CHECK(wledFloatToU16(-1.0f) == 0);
+    CHECK(wledFloatToU16(0.0f) == 0);
+    CHECK(wledFloatToU16(65535.0f) == 65535);
+    CHECK(wledFloatToU16(70000.0f) == 65535);
+    CHECK(wledFloatToU16(123.9f) == 123);
 }
 
 TEST_CASE("golden vector — the exact bytes on the wire (the compatibility contract)") {

@@ -223,6 +223,16 @@ public:
     /// mic-less build just sees silence.
     const AudioFrame* audioFrame() const { return &frame_; }
 
+    // --- Test seams (host unit tests only; mirror DevicesModule::injectPacketForTest) ---
+    // Read-only views of the sync socket lifecycle so unit_AudioModule_sync can assert it
+    // through the public loop() without befriending the class or exposing internals broadly.
+    bool syncOpenForTest() const { return syncOpen_; }
+    uint8_t syncFrameCounterForTest() const { return syncFrameCounter_; }
+    const char* syncStatusForTest() const { return syncStr_; }
+    static constexpr uint32_t syncSendIntervalMsForTest() { return kSyncSendIntervalMs; }
+    static constexpr uint32_t syncFallbackMsForTest() { return kSyncFallbackMs; }
+    static constexpr uint32_t syncOpenRetryMsForTest() { return kSyncOpenRetryMs; }
+
     /// Process-wide accessor for the consumers (audio effects). There is one mic,
     /// and an effect can be added/removed via the UI at any time, so it can't rely
     /// on a boot-time setter — it asks here
@@ -429,9 +439,11 @@ private:
     uint32_t lastSyncRecv_ = 0;      // millis of the last received packet (receive auto-blend)
     uint8_t  syncFrameCounter_ = 0;  // increments per send (the packet's dup/reorder field)
     bool     syncOpen_ = false;      // socket opened for the current mode (lazy-open latch)
+    uint32_t lastSyncOpenFailMs_ = 0;  // millis of the last failed open (0 = none); bring-up backoff
     char     syncStr_[32] = {};      // "sync status" read-out
     static constexpr uint32_t kSyncSendIntervalMs = 25;   // ~40/s — WLED-friendly, well under a flood
     static constexpr uint32_t kSyncFallbackMs = 1000;     // no packet this long → resume local mic
+    static constexpr uint32_t kSyncOpenRetryMs = 1000;    // pause between socket bring-up retries after a failure
     static constexpr int kSyncMaxRecvPerTick = 8;         // bounded non-blocking drain (sync is low-rate)
 
     static constexpr const char* kInitFailMsg = "mic init failed — check pins / rate";
@@ -518,6 +530,7 @@ private:
         if constexpr (!platform::hasNetwork) return;
         syncSock_.close();                 // syncEnsureSocket() re-opens per mode when the net is up
         syncOpen_ = false;
+        lastSyncOpenFailMs_ = 0;           // a mode change retries bring-up immediately (no stale backoff)
         lastSyncRecv_ = 0;
         std::snprintf(syncStr_, sizeof(syncStr_),
                       sync == 1 ? "send: waiting for network"
@@ -536,6 +549,12 @@ private:
         if (sync == 0) return false;
         if (syncOpen_) return true;
         if (!platform::networkReady()) return false;   // interface not up yet — try again next tick
+        // Back off between failed bring-ups: loop() runs every tick, so without this a
+        // persistent open/bind failure (e.g. the port is busy) would retry — one socket()
+        // syscall per tick — dozens of times a second. lastSyncOpenFailMs_ stamps the last
+        // failure; hold off until kSyncOpenRetryMs has passed (same throttle form as syncSend).
+        const uint32_t now = platform::millis();
+        if (lastSyncOpenFailMs_ != 0 && now - lastSyncOpenFailMs_ < kSyncOpenRetryMs) return false;
         if (sync == 1) {                   // send → broadcast destination (configurable port)
             char bcast[16]; formatDottedQuad(bcast, kBroadcast_);
             if (syncSock_.open() && syncSock_.connect(bcast, syncPort)) {
@@ -554,6 +573,9 @@ private:
                 std::snprintf(syncStr_, sizeof(syncStr_), "receive: bind failed");
             }
         }
+        // Stamp a failure (or clear the timer on success). now==0 is nudged to 1 so the
+        // "!=0 means a failure is pending" sentinel holds even at millis()==0.
+        lastSyncOpenFailMs_ = syncOpen_ ? 0 : (now == 0 ? 1 : now);
         return syncOpen_;
     }
 

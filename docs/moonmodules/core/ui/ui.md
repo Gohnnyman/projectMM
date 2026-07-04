@@ -90,3 +90,17 @@ A System peripheral that probes the I²C bus (default GPIO21/22) on a button pre
 - read-only — `result` (addresses found).
 
 Detail: [technical](../moxygen/I2cScanModule.md)
+
+### IR
+
+A System peripheral (added per board, not auto-wired): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive — the device's IR input, the counterpart of the WLED-app bridge. It **learns** any remote: pick an action in `learn`, press a remote button to bind its code, and thereafter that button drives the action. Decoding is real NEC-over-RMT; a received code (bound or not) shows in the status line.
+
+<img src="../../../assets/core/IrModule.jpeg" width="300" alt="An IR receiver and the common 21-key RGB remote it decodes">
+
+- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
+- `learn` — pick an action (off / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms.
+- `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
+
+The actions nudge `Drivers.brightness` (±16, clamped 0–255) and step `Drivers.palette` (next/previous). The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding ("learned … = 0x…"), a fired action ("Drivers.brightness → N"), and an unbound code ("received 0x… (unassigned)").
+
+Detail: [technical](../moxygen/IrModule.md)

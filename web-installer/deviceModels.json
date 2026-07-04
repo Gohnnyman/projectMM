@@ -711,13 +711,16 @@
       "esp32s3-n8r8"
     ],
     "image": "assets/boards/lightcrafter-16.jpg",
-    "url": "https://lightcrafter.eu/",
+    "url": "https://www.limpkin.fr/",
     "supported": [
       "LEDs",
-      "Ethernet"
+      "WiFi",
+      "Ethernet",
+      "IR"
     ],
     "planned": [
-      "16-ch parallel LEDs (I2S, not yet)"
+      "16-ch parallel LEDs (I2S, not yet)",
+      "Power monitoring"
     ],
     "modules": [
       {
@@ -741,7 +744,16 @@
           "ethSpiMosi": 11,
           "ethSpiSck": 12,
           "ethSpiCs": 10,
-          "ethSpiIrq": 45
+          "ethSpiIrq": 45,
+          "ethRstGpio": 3
+        }
+      },
+      {
+        "type": "IrModule",
+        "id": "Ir",
+        "parent_id": "System",
+        "controls": {
+          "pin": 4
         }
       }
     ]
@@ -753,12 +765,16 @@
       "esp32s3-n8r8"
     ],
     "image": "assets/boards/esp32-s3-stephanelec-16p.jpg",
+    "url": "https://www.limpkin.fr/",
     "supported": [
       "LEDs",
-      "Ethernet"
+      "WiFi",
+      "Ethernet",
+      "IR"
     ],
     "planned": [
-      "16-ch parallel LEDs (I2S, not yet)"
+      "16-ch parallel LEDs (I2S, not yet)",
+      "Power monitoring"
     ],
     "modules": [
       {
@@ -783,6 +799,14 @@
           "ethSpiSck": 7,
           "ethSpiCs": 15,
           "ethSpiIrq": 18
+        }
+      },
+      {
+        "type": "IrModule",
+        "id": "Ir",
+        "parent_id": "System",
+        "controls": {
+          "pin": 5
         }
       }
     ]
