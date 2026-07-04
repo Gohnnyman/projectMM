@@ -66,6 +66,10 @@ size_t totalInternalHeap(); // total internal heap capacity
 constexpr size_t HEAP_RESERVE = 32768;
 
 void getMacAddress(uint8_t mac[6]);
+// The MAC as canonical "XX:XX:XX:XX:XX:XX", formatted once into a static buffer — a stable per-chip
+// identity string a caller can point at without keeping its own copy. (chipModel/sdkVersion likewise
+// return static strings; a ReadOnly control binds straight to these, storing nothing per-module.)
+const char* macString();
 const char* chipModel();
 const char* sdkVersion();
 
@@ -108,8 +112,18 @@ bool fsMkdir(const char* path);                              // mkdir -p; no err
 bool fsExists(const char* path);
 bool fsRemove(const char* path);                             // file or empty dir
 int  fsRead(const char* path, char* buf, size_t maxLen);     // bytes read; -1 on error; null-terminated on success
+long fsSize(const char* path);                               // file size in bytes; -1 if missing/not a file
+int  fsReadAt(const char* path, long offset, char* buf, size_t len);
+                                                             // pread-style: read up to `len` bytes at `offset`; bytes read, 0 at EOF, -1 on error. NOT null-terminated. Lets a caller stream a file in fixed chunks.
 bool fsWriteAtomic(const char* path, const char* data, size_t len);
                                                               // writes <path>.tmp, fsync, rename. Caller ensures parent dir exists.
+// Streamed atomic write: open <path>.tmp, repeatedly call src(buf, cap, user) to pull up to `cap`
+// bytes (returns the count; 0 = end of stream), fwrite each chunk, then fsync + rename into place.
+// Returns false (discarding the temp file) on any write failure, a short read that isn't end, or a
+// rename failure. Lets the HTTP layer stream an upload of any size to the file with a fixed small
+// buffer — the device never holds the whole file in RAM. Caller ensures the parent dir exists.
+using FsWriteSrc = size_t(*)(char* buf, size_t cap, void* user);
+bool fsWriteStream(const char* path, FsWriteSrc src, void* user);
 // Per-entry callback for fsList: name, whether it's a directory, and its size in bytes
 // (0 for a directory). One level, one call per child.
 using FsListCb = void(*)(const char* name, bool isDir, uint32_t sizeBytes, void* user);

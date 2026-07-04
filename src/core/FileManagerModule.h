@@ -6,6 +6,7 @@
 #include "core/MoonModule.h"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace mm {
 
@@ -41,6 +42,8 @@ public:
     ModuleRole role() const override { return ModuleRole::Peripheral; }
 
     void onBuildControls() override;
+    void setup() override;
+    void loop1s() override;
     void onUpdate(const char* c) override;
 
 private:
@@ -55,6 +58,8 @@ private:
     char path_[kPathMax] = "";     // absolute op target (mkdir/delete), set by the tree UI
     char statusBuf_[96] = "";
     bool showHidden_ = false;      // reveal dot-prefixed entries (forwarded to /api/dir by the UI)
+    uint32_t usedBytes_ = 0;       // "filesystem" progress: bytes used, refreshed in loop1s
+    uint32_t totalBytes_ = 0;      // "filesystem" progress: partition total, read once at build
 };
 
 } // namespace mm

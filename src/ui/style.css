@@ -1094,7 +1094,28 @@ body {
     flex: 0 0 auto; color: var(--fg-muted); font-size: 0.8rem;
     font-variant-numeric: tabular-nums;
 }
+/* Per-file download link (⤓) — dim until row hover, like a secondary affordance. */
+.fm-dl {
+    flex: 0 0 auto; color: var(--fg-muted); text-decoration: none;
+    font-size: 0.95rem; padding: 0 4px; opacity: 0.5;
+}
+.fm-row:hover .fm-dl { opacity: 1; }
+.fm-dl:hover { color: var(--accent); }
+/* Drag-drop upload target highlight (a folder row or the tree while a desktop file hovers). */
+.fm-row--drop, .fm-tree.fm-row--drop {
+    outline: 2px dashed var(--accent); outline-offset: -2px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
 .fm-empty { padding: 6px 8px; color: var(--fg-muted); font-size: 0.85rem; font-style: italic; }
+
+/* Filesystem usage bar below the tree (used / total space). Owned by FilesystemModule, shown here. */
+.fm-usage {
+    display: flex; align-items: center; gap: 8px; margin-top: 8px;
+    font-size: 0.8rem; color: var(--fg-muted);
+}
+.fm-usage-name { flex: 0 0 auto; }
+.fm-usage progress { flex: 1 1 auto; height: 8px; }
+.fm-usage-label { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 
 /* Inline editor — native <dialog>, sized to a comfortable text pane. */
 .fm-editor {

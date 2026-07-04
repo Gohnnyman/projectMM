@@ -224,6 +224,19 @@ void getMacAddress(uint8_t mac[6]) {
     esp_efuse_mac_get_default(mac);
 }
 
+const char* macString() {
+    // The base MAC is fixed for the chip's life, so format it once into a static buffer the caller
+    // can point at (no per-module copy). Not called before the first use, single-threaded init.
+    static char buf[18] = {};
+    if (buf[0] == 0) {
+        uint8_t mac[6];
+        esp_efuse_mac_get_default(mac);
+        std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    return buf;
+}
+
 const char* chipModel() {
     esp_chip_info_t info;
     esp_chip_info(&info);

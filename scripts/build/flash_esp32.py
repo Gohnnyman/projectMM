@@ -11,6 +11,7 @@ from yesterday vs an edit five minutes ago) is visible in the log.
 """
 
 import argparse
+import re
 import subprocess
 import sys
 import time
@@ -86,24 +87,40 @@ def main():
     # -b sets the esptool flash baud (idf.py's own default is also 460800).
     # --baud 921600 matches the web installer for ~2x speed, but isn't the
     # default because some USB bridges can't sustain it (see --baud help).
-    r = subprocess.run(cmd + b_arg + ["flash", "-p", args.port, "-b", str(args.baud)],
-                       cwd=ESP32_DIR, env=env)
-    if r.returncode == 0:
-        _record_flash_event(args.port, args.firmware)
-    sys.exit(r.returncode)
+    # Tee the output: esptool prints the board's efuse MAC during its connect
+    # phase ("MAC: xx:xx:..."), which we parse to key the flash breadcrumb by the
+    # board's stable identity — so MoonDeck records last_port on the exact device,
+    # even when two boards share a firmware. Streaming keeps the live progress on
+    # the console; we just also scan it.
+    mac = ""
+    proc = subprocess.Popen(cmd + b_arg + ["flash", "-p", args.port, "-b", str(args.baud)],
+                            cwd=ESP32_DIR, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in proc.stdout:
+        sys.stdout.write(line)          # keep the live flash output visible
+        if not mac:
+            m = re.search(r"MAC:\s*([0-9A-Fa-f:]{17})", line)
+            if m:
+                mac = m.group(1).upper()
+    proc.wait()
+    if proc.returncode == 0:
+        _record_flash_event(args.port, args.firmware, mac)
+    sys.exit(proc.returncode)
 
 
-def _record_flash_event(port: str, firmware: str) -> None:
+def _record_flash_event(port: str, firmware: str, mac: str) -> None:
     """Drop a `scripts/.last_flash.json` breadcrumb so MoonDeck can link the
-    just-flashed serial port to whichever device appears online next.
-    MoonDeck's _probe_device consumes it on the next refresh and clears it.
-    Stored as JSON in the same directory as moondeck.json so the entire
-    "MoonDeck state" lives in one place."""
+    just-flashed serial port to the exact device. `mac` (the board's efuse MAC,
+    parsed from esptool's flash output) is the stable identity MoonDeck matches
+    on — a firmware-only match is ambiguous when two boards share a firmware.
+    MoonDeck's discover/refresh consumes it and clears it. Stored beside
+    moondeck.json so the whole "MoonDeck state" lives in one place."""
     import json, time
     marker = ROOT / "scripts" / ".last_flash.json"
     marker.write_text(json.dumps({
         "port": port,
         "firmware": firmware,
+        "mac": mac,
         "ts": time.time(),
     }))
 

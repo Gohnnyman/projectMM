@@ -302,6 +302,15 @@ select {
     font-size: 11px;
 }
 
+/* last_port chip — click to set this board's known flash port as the network port. */
+.device-port-chip {
+    font-size: 10px; background: #1c2535; color: #8ab4d8;
+    border: 1px solid #2a3547; border-radius: 4px;
+    padding: 1px 5px; cursor: pointer; font-family: inherit;
+}
+.device-port-chip:hover { background: #243044; color: #a9cdf0; }
+.device-port-chip.active { background: #2d4a2d; color: #9fe09f; border-color: #3a5a3a; }
+
 /* Picker + inject button share the board row; the picker flexes, the button
    stays its natural width. */
 .device-row-board { display: flex; gap: 6px; align-items: center; }

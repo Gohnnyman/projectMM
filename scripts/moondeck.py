@@ -44,22 +44,22 @@ APP_VERSION = _app_version()
 # Boards catalog (single source of truth, shared with the web installer)
 # ---------------------------------------------------------------------------
 
-BOARDS_FILE = ROOT / "web-installer" / "deviceModels.json"
+DEVICE_MODELS_FILE = ROOT / "web-installer" / "deviceModels.json"
 
 
-def _load_boards():
+def _load_device_models():
     """Load web-installer/deviceModels.json. Returns [] on missing/malformed file —
-    `_deduce_board` then always returns "" (no firmware uniquely identifies
+    `_deduce_device_model` then always returns "" (no firmware uniquely identifies
     a board), MoonDeck JS shows only the empty default. The web installer
     Step 2 picker will share this file.
     """
     try:
-        return json.loads(BOARDS_FILE.read_text(encoding="utf-8"))
+        return json.loads(DEVICE_MODELS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
 
 
-BOARDS = _load_boards()
+DEVICE_MODELS = _load_device_models()
 
 FIRMWARES_FILE = ROOT / "web-installer" / "firmwares.json"
 
@@ -126,6 +126,23 @@ def _walk_modules(modules):
         yield from _walk_modules(m.get("children", []))
 
 
+def _device_sort_key(d):
+    """Sort devices by name (case-insensitive), IP as tiebreaker — the same order the on-device
+    DevicesModule uses (src/core/DevicesModule.h sortByName / ciLess), so MoonDeck's list and the
+    device's own list read the same. Used everywhere a device list is stored, so the persisted
+    moondeck.json is already in display order."""
+    return (d.get("deviceName", "").lower(), d.get("ip", ""))
+
+
+def _device_key(d):
+    """The device's identity: its MAC (from SystemModule.mac), lower-cased. The MAC is per-chip and
+    the only unchangeable identifier — an IP is a DHCP lease, not an identity, so it is NOT used as a
+    key. A device without a MAC (a WLED peer, or a projectMM device on firmware predating the `mac`
+    control) has NO stable identity: it's shown while online in a live scan but not persisted. Returns
+    "" for such a device — callers persist/dedup only truthy keys."""
+    return (d.get("mac") or "").strip().lower()
+
+
 def _probe_device(ip, port=8080, timeout=0.4):
     """Probe a single IP for /api/state. Returns device info or None.
 
@@ -134,12 +151,12 @@ def _probe_device(ip, port=8080, timeout=0.4):
     silently drop packets (firewalled hosts), and a subnet scan should not
     stall seconds on those.
 
-    Returns: { ip, deviceName, firmware, board }
+    Returns: { ip, deviceName, firmware, deviceModel }
     - `firmware` is the variant flashed (value of the `firmware` control on
       SystemModule, set from kFirmwareName in build_info.h). Used to deduce
-      `board` when the device hasn't been told its board yet. See
+      `deviceModel` when the device hasn't been told its model yet. See
       docs/architecture.md § Firmware vs board.
-    - `board` is the physical hardware key. Preferred source: the device's
+    - `deviceModel` is the physical-hardware identity (a catalog entry). Preferred source: the device's
       own `deviceModel` control on SystemModule (the value MoonDeck pushed earlier
       and the device persisted). Fall back to firmware-based deduction
       (catalog lookup) when the device hasn't been told yet — then MoonDeck
@@ -156,29 +173,38 @@ def _probe_device(ip, port=8080, timeout=0.4):
             modules = data.get("modules", [])
             device_name = ""
             firmware = ""
-            device_board = ""
+            device_model = ""
+            mac = ""
             for m in _walk_modules(modules):
-                # deviceName, firmware AND deviceModel all live on SystemModule now
-                # (the deviceModel identity was folded in from the former BoardModule).
+                # deviceName, deviceModel (the board) and mac live on SystemModule; the flashed
+                # firmware-variant lives on FirmwareUpdateModule (`firmware`, alongside version/build).
                 if m.get("type") == "SystemModule":
                     for c in m.get("controls", []):
                         if c.get("name") == "deviceName":
                             device_name = c.get("value", "") or ""
-                        elif c.get("name") == "firmware":
-                            firmware = c.get("value", "") or ""
                         elif c.get("name") == "deviceModel":
-                            device_board = c.get("value", "") or ""
+                            device_model = c.get("value", "") or ""
+                        elif c.get("name") == "mac":
+                            mac = c.get("value", "") or ""
+                elif m.get("type") == "FirmwareUpdateModule":
+                    for c in m.get("controls", []):
+                        if c.get("name") == "firmware":
+                            firmware = c.get("value", "") or ""
             return {
-                "ip": f"{ip}:{port}",
+                # `mac` is the stable device IDENTITY (per-chip, survives DHCP IP changes); the merge
+                # keys on it. `ip` is just the current location — omit the port when it's HTTP's
+                # default (80, the ESP32 devices), keep a non-default port (8080, the desktop build).
+                "mac": mac,
+                "ip": ip if port == 80 else f"{ip}:{port}",
                 "deviceName": device_name,
                 "firmware": firmware,
-                "board": device_board or _deduce_board(firmware),
+                "deviceModel": device_model or _deduce_device_model(firmware),
             }
     except Exception:
         return None
 
 
-def _deduce_board(firmware: str) -> str:
+def _deduce_device_model(firmware: str) -> str:
     """Firmware → board name when exactly one catalog entry claims this
     firmware. Returns "" when zero (unknown firmware) or multiple boards
     claim it (ambiguous — user picks). Catalog lives at
@@ -186,11 +212,11 @@ def _deduce_board(firmware: str) -> str:
     """
     if not firmware:
         return ""
-    matches = [b["name"] for b in BOARDS if firmware in b.get("firmwares", [])]
+    matches = [b["name"] for b in DEVICE_MODELS if firmware in b.get("firmwares", [])]
     return matches[0] if len(matches) == 1 else ""
 
 
-def _push_board_to_device(ip: str, board: str) -> bool:
+def _push_device(ip: str, model: str) -> bool:
     """POST /api/control on the device for every per-board control in deviceModels.json.
 
     For boards that have a catalog entry in web-installer/deviceModels.json: fans
@@ -210,15 +236,15 @@ def _push_board_to_device(ip: str, board: str) -> bool:
     the port discovery picked). `board` is the catalog key MoonDeck wants
     the device to remember (empty string means "clear" — no push).
     """
-    if not board:
+    if not model:
         return True   # nothing to push; not a failure
     import urllib.request
     import urllib.error
-    # Look up the catalog entry. BOARDS is loaded at module init; we don't
+    # Look up the catalog entry. DEVICE_MODELS is loaded at module init; we don't
     # re-read deviceModels.json per push so a tight discover-refresh cycle
     # doesn't hammer the disk. If the user edits deviceModels.json, restart
     # MoonDeck (same as every other catalog change).
-    entry = next((b for b in BOARDS if b.get("name") == board), None)
+    entry = next((b for b in DEVICE_MODELS if b.get("name") == model), None)
     if entry is not None:
         modules = entry.get("modules") or []
     else:
@@ -226,7 +252,7 @@ def _push_board_to_device(ip: str, board: str) -> bool:
         # control (the identity lives on SystemModule now — no parent_id, it's the
         # boot-wired top-level module, so _apply just sets the control, no add).
         modules = [{"type": "System", "id": "System",
-                    "controls": {"deviceModel": board}}]
+                    "controls": {"deviceModel": model}}]
 
     return _apply_modules_to_device(ip, modules)
 
@@ -235,8 +261,8 @@ def _apply_modules_to_device(ip: str, modules: list) -> bool:
     """Add-then-configure a list of module-with-controls units on a device.
 
     Each unit is `{type, id, parent_id?, controls?}` — the SAME shape deviceModels.json
-    catalog entries use and a saved device-profile stores, so both the board push
-    (_push_board_to_device) and a profile restore share this one fan-out. Per
+    catalog entries use and a saved device-profile stores, so both the deviceModel push
+    (_push_device) and a profile restore share this one fan-out. Per
     module: add it first when it has a parent_id (a fresh flash has no user-added
     modules like AudioModule, so a control write would 404), then set its controls.
     A module without parent_id is boot-wired/top-level (Board under System,
@@ -314,10 +340,11 @@ def _capture_device_profile(ip: str) -> "list | None":
     """
     import urllib.request
     import urllib.error
-    host = ip.split(":")[0]
-    port = ip.split(":")[1] if ":" in ip else "8080"
+    # Use the stored ip:port verbatim (a bare IP resolves to HTTP's default port 80), matching
+    # _apply_modules_to_device. A hard-coded 8080 fallback was wrong: ESP32 devices serve on 80
+    # (only the desktop dev build uses 8080), so capturing a bare-IP device silently failed.
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/api/state", timeout=1.0) as resp:
+        with urllib.request.urlopen(f"http://{ip}/api/state", timeout=1.0) as resp:
             state = json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
@@ -356,8 +383,8 @@ def _capture_device_profile(ip: str) -> "list | None":
     return units
 
 
-def _push_boards_in_parallel(pushes):
-    """Fire _push_board_to_device for each (ip, board) tuple in parallel.
+def _push_devices_in_parallel(pushes):
+    """Fire _push_device for each (ip, board) tuple in parallel.
 
     Discovery + refresh probe a /24, so the push count is bounded by the
     device count (single digits in practice). A small thread pool keeps
@@ -370,7 +397,7 @@ def _push_boards_in_parallel(pushes):
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         # list() forces all futures to start; the with-block waits for them.
-        list(pool.map(lambda p: _push_board_to_device(*p), pushes))
+        list(pool.map(lambda p: _push_device(*p), pushes))
 
 
 def discover_devices(subnet=""):
@@ -398,13 +425,20 @@ def discover_devices(subnet=""):
     # subnet scan finds the LAN-IP entry, the explicit localhost probe finds the
     # other. Keep the LAN IP (usable from any device) and drop the redundant
     # localhost entry so the discovered list shows real network addresses.
+    # Compare on the HOST (ip without port), since a port-80 device is now stored bare.
     localIp = _lan_ip()
-    hasLanEntry = localIp and any(d["ip"].startswith(localIp + ":") for d in devices)
+    hasLanEntry = localIp and any(d["ip"].split(":", 1)[0] == localIp for d in devices)
     if hasLanEntry:
-        devices = [d for d in devices if not d["ip"].startswith("localhost:")]
+        devices = [d for d in devices if d["ip"].split(":", 1)[0] != "localhost"]
 
-    # Sort by IP
-    devices.sort(key=lambda d: d["ip"])
+    # Attribute a recent flash's port to the board it flashed (by MAC) — same as refresh, so
+    # a flash → discover also records last_port. Whichever scan finds the device first links it.
+    _link_last_flash(devices)
+
+    # Sort by device name, case-insensitive — matching the on-device DevicesModule list
+    # (src/core/DevicesModule.h sortByName / ciLess) so both lists read the same. IP is the
+    # tiebreaker so un-named / duplicate-named devices still have a stable order.
+    devices.sort(key=_device_sort_key)
     return devices, subnet
 
 
@@ -414,9 +448,9 @@ _LAST_FLASH_TTL_S = 5 * 60  # ignore markers older than 5 minutes
 
 def _consume_last_flash() -> dict | None:
     """Read the breadcrumb scripts/.last_flash.json that flash_esp32.py drops
-    after a successful flash. Returns {port, firmware} when the marker is
-    recent (< TTL); deletes the file so the link only happens once. Returns
-    None when there's no recent marker."""
+    after a successful flash. Returns {port, mac, firmware} when the marker is
+    recent (< TTL); the caller deletes the file once it links the event so it
+    only applies once. Returns None when there's no recent marker."""
     if not _LAST_FLASH_FILE.exists():
         return None
     try:
@@ -428,16 +462,17 @@ def _consume_last_flash() -> dict | None:
         with suppress(OSError):
             _LAST_FLASH_FILE.unlink()
         return None
-    return {"port": data.get("port", ""), "firmware": data.get("firmware", "")}
+    return {"port": data.get("port", ""), "mac": data.get("mac", ""),
+            "firmware": data.get("firmware", "")}
 
 
 def refresh_devices(known_devices):
     """Probe known devices to check online/offline status.
 
-    Preserves user-set fields (`board`, `last_port`) across refreshes: the
-    probe result carries fresh `firmware`/`deviceName` and a deduced `board`
+    Preserves user-set fields (`deviceModel`, `last_port`) across refreshes: the
+    probe result carries fresh `firmware`/`deviceName` and a deduced `deviceModel`
     (set only when firmware unambiguously identifies hardware), but a user-set
-    `board` for a firmware that can run on multiple boards (e.g. `esp32` on
+    `deviceModel` for a firmware that can run on multiple boards (e.g. `esp32` on
     LOLIN D32 vs generic DevKit) must survive a refresh. Same for `last_port`,
     which is set by the flash-event breadcrumb (see _consume_last_flash).
     """
@@ -458,8 +493,8 @@ def refresh_devices(known_devices):
         fresh["online"] = True
         if "selected" in device:
             fresh["selected"] = device["selected"]
-        if not fresh.get("board") and device.get("board"):
-            fresh["board"] = device["board"]
+        if not fresh.get("deviceModel") and device.get("deviceModel"):
+            fresh["deviceModel"] = device["deviceModel"]
         if device.get("last_port"):
             fresh["last_port"] = device["last_port"]
         return fresh
@@ -470,22 +505,35 @@ def refresh_devices(known_devices):
     with ThreadPoolExecutor(max_workers=16) as pool:
         refreshed = [r for r in pool.map(probe, known_devices) if r]
 
-    # Link a recent flash event to the device whose firmware matches. The
-    # flash flow writes scripts/.last_flash.json after a successful flash;
-    # here we attribute it to a refreshed device with the same firmware
-    # variant (newest "online with matching firmware" wins — usually the
-    # only candidate). After linking we consume the marker so the same
-    # event doesn't keep applying on every refresh.
-    last_flash = _consume_last_flash()
-    if last_flash and last_flash["firmware"]:
-        matches = [d for d in refreshed if d.get("firmware") == last_flash["firmware"]]
-        if len(matches) == 1:
-            matches[0]["last_port"] = last_flash["port"]
-            with suppress(OSError):
-                _LAST_FLASH_FILE.unlink()
-        # If 0 matches (device hasn't booted yet) or 2+ matches (ambiguous),
-        # leave the marker for the next refresh to retry / re-evaluate.
+    _link_last_flash(refreshed)
     return refreshed
+
+
+def _link_last_flash(probed: list) -> None:
+    """Set `last_port` on the device a recent flash targeted. flash_esp32.py writes
+    scripts/.last_flash.json {port, mac, firmware} after a successful flash; the port is
+    attributed to the probed device with that MAC (the board's stable identity — unambiguous
+    even when two boards share a firmware). A legacy breadcrumb without a MAC falls back to a
+    firmware match, kept only for the single-candidate case. The marker is consumed (deleted)
+    once linked so it applies once; if the device isn't in this scan yet it's left for the next.
+    Called by both discover and refresh — whichever finds the device first links it."""
+    last_flash = _consume_last_flash()
+    if not last_flash:
+        return
+    flash_mac = (last_flash.get("mac") or "").strip().lower()
+    if flash_mac:
+        matches = [d for d in probed if (d.get("mac") or "").strip().lower() == flash_mac]
+    elif last_flash.get("firmware"):   # legacy breadcrumb without a MAC
+        matches = [d for d in probed if d.get("firmware") == last_flash["firmware"]]
+    else:
+        matches = []
+    if len(matches) == 1:
+        matches[0]["last_port"] = last_flash["port"]
+        with suppress(OSError):
+            _LAST_FLASH_FILE.unlink()   # linked → consume so it applies once
+    # 0 matches (device hasn't rebooted into the new firmware yet) or 2+ (ambiguous legacy
+    # firmware match) → _consume_last_flash read but did NOT delete the file, so the marker
+    # stays on disk for the next scan to retry, until its TTL lapses.
 
 
 # ---------------------------------------------------------------------------
@@ -600,7 +648,7 @@ def save_state(state):
     invites stale values when the device is reflashed/renamed via another
     host. They are re-read from `/api/state` on each refresh and live only
     in the in-memory device lists until the next save. User-set fields
-    (`board`, `last_port`, `selected`, `online`) persist. Iterates per network.
+    (`deviceModel`, `last_port`, `selected`, `online`) persist. Iterates per network.
 
     Write is atomic + serialized: a temp file in the same dir → fsync → rename.
     The rename is atomic on POSIX (same filesystem); fsync makes the bytes
@@ -640,9 +688,9 @@ def save_state(state):
 def _strip_network_volatiles(network: dict) -> dict:
     """Return a copy of a network with volatile per-device fields stripped.
 
-    `board` is conditionally volatile: when it equals the value `_deduce_board`
+    `deviceModel` is conditionally volatile: when it equals the value `_deduce_device_model`
     produces from the device's current firmware, the next probe will re-derive
-    it for free — no need to persist. When the user picked a board manually
+    it for free — no need to persist. When the user picked a deviceModel manually
     (firmware doesn't deduce to anything, e.g. `esp32` could be LOLIN D32 or
     generic), the picker's choice is the only source so we must keep it.
     """
@@ -655,8 +703,8 @@ def _strip_network_volatiles(network: dict) -> dict:
         # firmware-deduced value (recomputable). Keep when the user picked
         # it (firmware deduces "" so the picker's value is the only source).
         firmware = d.get("firmware") or ""
-        if "board" in c and (not c["board"] or c["board"] == _deduce_board(firmware)):
-            del c["board"]
+        if "deviceModel" in c and (not c["deviceModel"] or c["deviceModel"] == _deduce_device_model(firmware)):
+            del c["deviceModel"]
         cleaned.append(c)
     out["devices"] = cleaned
     return out
@@ -762,7 +810,7 @@ def is_process_running(name: str) -> bool:
 def list_serial_ports() -> list[str]:
     """List available serial ports.
 
-    POSIX hosts: glob the conventional /dev/tty* device files (no deps).
+    POSIX hosts: glob the conventional /dev serial device files (no deps).
     Windows: read HKLM\\HARDWARE\\DEVICEMAP\\SERIALCOMM via winreg (stdlib).
     SERIALCOMM is the authoritative table the OS itself maintains for
     present COM ports — what pyserial reads under the hood — so a registry
@@ -772,7 +820,11 @@ def list_serial_ports() -> list[str]:
     """
     ports: list[str] = []
     import glob
-    ports.extend(glob.glob("/dev/tty.usb*"))
+    # macOS exposes each USB serial as BOTH /dev/tty.X (call-in, blocks on DCD) and /dev/cu.X
+    # (call-out, non-blocking). Flashing (esptool / idf.py) uses the cu.* node, and flash_esp32.py
+    # records last_port as cu.*, so list cu.* here too — otherwise the port dropdown (tty.*) never
+    # matches a stored last_port and the selection silently falls back to "--".
+    ports.extend(glob.glob("/dev/cu.usb*"))
     ports.extend(glob.glob("/dev/ttyUSB*"))
     ports.extend(glob.glob("/dev/ttyACM*"))
     if sys.platform == "win32":
@@ -914,7 +966,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # installer (Step 2) will fetch the same file directly from
             # Pages; MoonDeck reads it locally and exposes it here so the
             # JS UI shares one source of truth with the Python deduce path.
-            self._send_json({"boards": BOARDS})
+            self._send_json({"boards": DEVICE_MODELS})
 
         elif self.path.startswith("/api/unit-tests/"):
             self._serve_unit_tests_for_module()
@@ -981,7 +1033,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             result = mutate_state(_merge)
             self._send_json(result)
 
-        elif self.path == "/api/push-board":
+        elif self.path == "/api/push-device":
             # Push a single (ip, board) to a device. Called by the JS when the
             # user picks a board from the per-device dropdown — saveState
             # alone persists the value in moondeck.json but the device also
@@ -992,11 +1044,11 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             body = self._read_body()
             params = json.loads(body) if body else {}
             ip = params.get("ip", "")
-            board = params.get("board", "")
+            model = params.get("deviceModel", "")
             if not ip:
                 self._send_json({"error": "ip required"}, 400)
                 return
-            ok = _push_board_to_device(ip, board)
+            ok = _push_device(ip, model)
             self._send_json({"ok": ok})
 
         elif self.path == "/api/save-profile":
@@ -1015,15 +1067,15 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             if modules is None:
                 self._send_json({"error": "device unreachable"}, 502)
                 return
-            # Store under the device whose ip matches, in the ACTIVE network only —
-            # scoping to one network avoids a collision when two networks have
-            # overlapping private subnets (both a 192.168.1.x device).
+            # Store under the device with this MAC (the identity — not the IP, a DHCP lease), in the
+            # ACTIVE network only (scoping avoids a collision when two networks share a private subnet).
+            mac = (params.get("mac") or "").strip().lower()
             def _store(state) -> None:
                 net = _active_network(state)
                 if not net:
                     return
                 for d in net.get("devices") or []:
-                    if d.get("ip") == ip:
+                    if mac and (d.get("mac") or "").strip().lower() == mac:
                         profiles = [p for p in d.get("profiles", [])
                                     if p.get("name") != name]   # replace same-named
                         profiles.append({"name": name, "modules": modules})
@@ -1041,15 +1093,15 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             if not ip or not name:
                 self._send_json({"error": "ip and name required"}, 400)
                 return
-            # Scope the profile lookup to the device the UI applied it from, in the
-            # ACTIVE network only (its profile dropdown lists that device's own
-            # profiles). Matching by name across every device — or across networks
-            # with overlapping subnets — would restore the wrong pin map when two
-            # devices share a profile name like "default".
+            # Scope the profile lookup to the device the UI applied it from (matched by MAC — its
+            # identity), in the ACTIVE network only (its dropdown lists that device's own profiles).
+            # Matching by name across every device — or across networks with overlapping subnets —
+            # would restore the wrong pin map when two devices share a name like "default".
+            mac = (params.get("mac") or "").strip().lower()
             modules = None
             net = _active_network(load_state())
             for d in (net.get("devices") or []) if net else []:
-                if d.get("ip") != ip:
+                if not mac or (d.get("mac") or "").strip().lower() != mac:
                     continue
                 for p in d.get("profiles", []):
                     if p.get("name") == name:
@@ -1089,20 +1141,21 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     existing.append(net)
                 if net is None:
                     return  # nothing to merge — state unchanged
-                # Merge found devices into the network: keep existing user
-                # fields (board, last_port, selected), update online + probe
-                # fields. Drop devices no longer reachable — they stay
-                # offline elsewhere if previously known, here we trust the
-                # fresh scan as authoritative for what's on this subnet.
-                by_ip = {d["ip"]: d for d in net.get("devices", [])}
+                # Merge found devices into the network, keyed by MAC (the only persistent identity —
+                # see _device_key). A found device with a MAC updates/creates its record, carrying the
+                # user fields (board, last_port, selected) forward. A found device WITHOUT a MAC is
+                # shown this scan but not persisted (nothing stable to track it by).
+                by_key = {_device_key(d): d for d in net.get("devices", []) if _device_key(d)}
                 merged = []
                 for fresh in devices:
-                    ip = fresh.get("ip", "")
-                    keep = by_ip.get(ip, {})
+                    key = _device_key(fresh)
+                    if not key:
+                        continue   # no MAC → not a persistent device; skip
+                    keep = by_key.get(key, {})
                     out = {**fresh, "online": True,
                            "selected": keep.get("selected", False)}
-                    if keep.get("board") and not out.get("board"):
-                        out["board"] = keep["board"]
+                    if keep.get("deviceModel") and not out.get("deviceModel"):
+                        out["deviceModel"] = keep["deviceModel"]
                     if keep.get("last_port"):
                         out["last_port"] = keep["last_port"]
                     merged.append(out)
@@ -1111,24 +1164,27 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     # because MoonDeck just deduced one from firmware on a
                     # device that hadn't been told yet — schedule a push so
                     # the next probe reads the value back from the device.
-                    device_board = (fresh.get("board") or "")
-                    merged_board = (out.get("board") or "")
-                    if merged_board and merged_board != device_board:
-                        pushes.append((ip, merged_board))
-                # Devices that existed previously but weren't found in the
-                # scan stay in the network as offline (the user may want to
-                # keep them around for when the device comes back). Discover
-                # is additive — refresh is the verb that prunes.
-                found_ips = {d.get("ip") for d in devices}
-                for ip, dev in by_ip.items():
-                    if ip not in found_ips:
+                    device_model = (fresh.get("deviceModel") or "")
+                    merged_model = (out.get("deviceModel") or "")
+                    if merged_model and merged_model != device_model:
+                        pushes.append((fresh.get("ip", ""), merged_model))
+                # Previously-stored (MAC'd) devices not found in this scan stay as offline, so a
+                # known board isn't lost just because it's powered off. Discover is additive; refresh
+                # prunes. (MAC-less entries never entered by_key, so they simply fall away.)
+                found_keys = {_device_key(d) for d in devices if _device_key(d)}
+                for key, dev in by_key.items():
+                    if key not in found_keys:
                         merged.append({**dev, "online": False})
+                # Sort the FULL list (online + carried-over offline) by name so the persisted
+                # moondeck.json is stored in the same order it displays — matching the on-device
+                # DevicesModule (sortByName). IP is the tiebreaker for un-named devices.
+                merged.sort(key=_device_sort_key)
                 net["devices"] = merged
 
             result = mutate_state(_merge_discover)
             # Fire pushes outside the lock — the state write has already
             # landed; pushes are best-effort device-side mirroring.
-            _push_boards_in_parallel(pushes)
+            _push_devices_in_parallel(pushes)
             self._send_json(result)
 
         elif self.path == "/api/refresh":
@@ -1163,12 +1219,18 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 # refresh_devices returns only devices that responded — devices
                 # marked offline (didn't respond) are dropped from the list it
                 # returns. Carry them forward as offline so the UI doesn't lose
-                # known-but-unreachable entries.
-                refreshed_ips = {d.get("ip") for d in refreshed}
-                merged = list(refreshed)
+                # known-but-unreachable entries. Persist only MAC'd devices (the identity rule):
+                # a responding device without a MAC is shown but not stored; a prior MAC'd device
+                # not seen this refresh stays as offline.
+                refreshed_keys = {_device_key(d) for d in refreshed if _device_key(d)}
+                merged = [d for d in refreshed if _device_key(d)]
                 for prior in (target.get("devices") or []):
-                    if prior.get("ip") not in refreshed_ips:
+                    pk = _device_key(prior)
+                    if pk and pk not in refreshed_keys:
                         merged.append({**prior, "online": False})
+                # Sort by name so the persisted list matches the display + the on-device
+                # DevicesModule order (see the discover merge above).
+                merged.sort(key=_device_sort_key)
                 target["devices"] = merged
                 # Schedule a board push for every online device with a
                 # non-empty board. Redundant writes are cheap on the device
@@ -1177,11 +1239,11 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 # where the device lost its persisted value but MoonDeck
                 # still has the user-set / deduced one.
                 for dev in merged:
-                    if dev.get("online") and dev.get("board") and dev.get("ip"):
-                        pushes.append((dev["ip"], dev["board"]))
+                    if dev.get("online") and dev.get("deviceModel") and dev.get("ip"):
+                        pushes.append((dev["ip"], dev["deviceModel"]))
 
             result = mutate_state(_merge_refresh)
-            _push_boards_in_parallel(pushes)
+            _push_devices_in_parallel(pushes)
             self._send_json(result)
 
         else:
@@ -1231,15 +1293,15 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         if script_def.get("needs_module") and params.get("module"):
             cmd.extend(["--module", params["module"]])
         # pass_board: forward the board picked in the UI's provisioning
-        # dropdown (state.provisionBoard) so improv_provision.py injects that
+        # dropdown (state.provisionDeviceModel) so improv_provision.py injects that
         # board's TX-power cap BEFORE provisioning (the weak-power brown-out fix).
         # No firmware-deduce fallback: the only pass_board script
         # (improv_provision) doesn't declare needs_firmware, so params never
         # carries a firmware to deduce from — the dropdown is the sole source.
         if script_def.get("pass_board"):
-            board = params.get("board")
-            if board:
-                cmd.extend(["--board", board])
+            device_model = params.get("deviceModel")
+            if device_model:
+                cmd.extend(["--board", device_model])   # improv_provision.py's CLI flag is --board
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
         for flag in script_def.get("flags", []):

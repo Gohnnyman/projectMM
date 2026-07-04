@@ -852,15 +852,46 @@ function renderDevices() {
 
         const infoText = document.createElement("span");
         infoText.className = "device-info";
-        // last_port lives in the tooltip — it's flash-history, not identity.
         const infoParts = [];
         if (device.deviceName) infoParts.push(device.deviceName);
         if (device.firmware) infoParts.push(`fw:${device.firmware}`);
         infoText.textContent = infoParts.join(" · ");
 
+        // last_port — the serial port this exact board (by MAC) was last flashed via. Click it to
+        // set it as the active network's flash port, so "flash the SE16" is one click → run Flash.
+        // The port lives per-device (keyed by MAC), the flash uses the network-level port; this
+        // chip bridges them. Absent until the board has been flashed once through MoonDeck.
+        if (device.last_port) {
+            const portChip = document.createElement("button");
+            portChip.className = "device-port-chip";
+            portChip.textContent = "⚡ " + device.last_port.replace("/dev/cu.", "").replace("/dev/tty.", "");
+            portChip.title = `Select this board for flashing: set the port` +
+                (device.firmware ? `, firmware (${device.firmware})` : "") +
+                (device.deviceModel ? ` and deviceModel` : "");
+            const active = getActiveNetwork();
+            if (active && active.port === device.last_port) portChip.classList.add("active");
+            // Selecting a board for flashing means matching what it actually runs: the port, AND the
+            // firmware + deviceModel MoonDeck learned from discovery — so Build/Flash target the right
+            // binary for this board (flashing the wrong firmware would brick it). One click, all in sync.
+            portChip.addEventListener("click", async (e) => {
+                e.preventDefault();
+                const a = getActiveNetwork();
+                if (a) a.port = device.last_port;
+                if (device.firmware && firmwares.includes(device.firmware)) state.firmware = device.firmware;
+                if (device.deviceModel) state.provisionBoard = device.deviceModel;
+                await saveState();
+                refreshPorts();
+                renderFirmwareSelect();
+                renderBoardSelect();
+                renderDevices();
+            });
+            infoText.appendChild(document.createTextNode(" "));
+            infoText.appendChild(portChip);
+        }
+
         // Board picker — options derived from deviceModels.json (loaded via
         // /api/boards). Auto-deduced for firmwares that map to a single
-        // board (probe sets device.board); user-set when the firmware can
+        // deviceModel (probe sets device.deviceModel); user-set when the firmware can
         // run on multiple boards (e.g. `esp32` on LOLIN D32 vs generic
         // DevKit). A device-reported value that isn't in the catalog gets
         // prepended as <key> (unknown) so the selection survives — without
@@ -875,36 +906,36 @@ function renderDevices() {
             // single-name catalog (no separate key/label), they're identical.
             ...boards.map(b => [b.name, b.name]),
         ];
-        const deviceBoard = device.board || "";
-        if (deviceBoard && !boardOptions.some(([k]) => k === deviceBoard)) {
-            boardOptions.push([deviceBoard, `${deviceBoard} (unknown)`]);
+        const deviceModel = device.deviceModel || "";
+        if (deviceModel && !boardOptions.some(([k]) => k === deviceModel)) {
+            boardOptions.push([deviceModel, `${deviceModel} (unknown)`]);
         }
         for (const [val, lbl] of boardOptions) {
             const opt = document.createElement("option");
             opt.value = val;
             opt.textContent = lbl;
-            if (deviceBoard === val) opt.selected = true;
+            if (deviceModel === val) opt.selected = true;
             boardPicker.appendChild(opt);
         }
-        // Push a board's full deviceModels.json defaults to the device (POST
-        // /api/push-board → _push_board_to_device fans out controls.<Module>.<control>).
+        // Push a deviceModel's full deviceModels.json defaults to the device (POST
+        // /api/push-device → _push_device fans out controls.<Module>.<control>).
         // `onDone(ok)` lets the explicit button below show success/failure; the picker
         // change path passes nothing (fire-and-forget, recovered on next refresh).
-        const pushBoard = (board, onDone) => {
+        const pushDevice = (deviceModel, onDone) => {
             // Success is the device-side result in the JSON body ({"ok": bool} from
-            // _push_board_to_device) — HTTP 200 alone can wrap a failed push (a device
+            // _push_device) — HTTP 200 alone can wrap a failed push (a device
             // timeout / non-2xx mid-fan-out), so r.ok would falsely report success.
             // 10s AbortSignal timeout so a stalled request can't wedge the button forever.
-            fetch("/api/push-board", {
+            fetch("/api/push-device", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ip: device.ip, board}),
+                body: JSON.stringify({ip: device.ip, deviceModel}),
                 signal: AbortSignal.timeout(10000),
             }).then(r => r.json()).then(j => onDone && onDone(!!j.ok))
               .catch(() => onDone && onDone(false));
         };
         boardPicker.addEventListener("change", () => {
-            device.board = boardPicker.value;
+            device.deviceModel = boardPicker.value;
             saveState();
             // Mirror the change to the device immediately. Without this, the
             // device's SystemModule wouldn't hear about the picker until the
@@ -912,7 +943,7 @@ function renderDevices() {
             // UI to update right after they pick. Fire-and-forget; failure
             // (timeout / device offline) is recovered on the next refresh
             // when discover/refresh's bulk push catches up.
-            pushBoard(boardPicker.value);
+            pushDevice(boardPicker.value);
         });
 
         // Explicit "inject defaults" — re-push the SELECTED board's full config on demand,
@@ -929,7 +960,7 @@ function renderDevices() {
             if (!board) { injectBtn.textContent = "pick a board first"; setTimeout(() => injectBtn.textContent = "inject defaults", 1500); return; }
             injectBtn.disabled = true;
             injectBtn.textContent = "injecting…";
-            pushBoard(board, (ok) => {
+            pushDevice(board, (ok) => {
                 injectBtn.textContent = ok ? "injected ✓" : "failed ✗";
                 setTimeout(() => { injectBtn.textContent = "inject defaults"; injectBtn.disabled = false; }, 1800);
             });
@@ -1004,7 +1035,8 @@ function renderDevices() {
             try {
                 const res = await fetch("/api/save-profile", {
                     method: "POST", headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({ip: device.ip, name}),
+                    // ip reaches the device; mac identifies its record (see moondeck.py _device_key).
+                    body: JSON.stringify({ip: device.ip, mac: device.mac, name}),
                 });
                 const j = await res.json();
                 if (j.ok) {
@@ -1034,7 +1066,8 @@ function renderDevices() {
             try {
                 const res = await fetch("/api/apply-profile", {
                     method: "POST", headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({ip: device.ip, name}),
+                    // ip reaches the device; mac identifies its record (see moondeck.py _device_key).
+                    body: JSON.stringify({ip: device.ip, mac: device.mac, name}),
                 });
                 const j = await res.json();
                 if (!j.ok) alert("Apply failed: " + (j.error || "device unreachable"));

@@ -62,7 +62,7 @@ Detail: [technical](../moxygen/FirmwareUpdateModule.md)
 
 Persists control values as JSON and restores them on boot, overlaying loaded values through each control's pointer during `onBuildControls()`. The home of the no-reboot live-reconfiguration behaviour.
 
-- read-only — `lastSaved`, `filesystem` (usage).
+- read-only — `lastSaved`.
 
 Detail: [technical](../moxygen/FilesystemModule.md)
 
@@ -75,10 +75,12 @@ A boot-wired system tool (distinct from Filesystem, which is the persistence *en
 - `show hidden` — reveal dot-prefixed files/folders (e.g. `.config`); forwarded to `/api/dir` as its `hidden` filter.
 - Click a folder's row to select it and toggle its expansion (▸/▾); click a selected file to open the editor.
 - The toolbar acts on the selected node: **＋ folder** creates a folder inside it, **＋ file** creates an empty file (click it to edit), **🗑 delete** removes the selected file or empty folder (press-twice to confirm), **⟳** refreshes.
-- The editor loads a file's text (size-capped), pretty-prints JSON on open, and saves atomically. **＋ file** and save both go through the `/api/file` write endpoint.
+- **Drag files from the desktop** onto a folder (or the tree) to upload them — the body streams straight to the file (any size, binary-safe; capped only by a sanity limit and the free space, which it reports if short); a per-file **⤓** streams it back to the desktop.
+- The editor loads a file's text, pretty-prints JSON on open, and saves atomically; a binary file (contains a NUL) loads read-only (use ⤓ to fetch it intact). Upload and download both stream, so neither truncates.
+- A filesystem-usage bar (used / total, read from the platform) sits below the tree.
 - `path` — the absolute op target the tree sets (mkdir / delete); not user-typed.
 
-Last-modified dates (needs an NTP time source + LittleFS mtime), drag-and-drop upload, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../../backlog/backlog-core.md#file-manager-follow-ups)).
+Last-modified dates (needs an NTP time source + LittleFS mtime), binary/large + folder upload, folder-as-zip download, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../../backlog/backlog-core.md#file-manager-follow-ups)).
 
 Detail: [technical](../moxygen/FileManagerModule.md)
 

@@ -227,6 +227,17 @@ void getMacAddress(uint8_t mac[6]) {
     mac[3] = 0xEF; mac[4] = 0xCA; mac[5] = 0xFE;
 }
 
+const char* macString() {
+    static char buf[18] = {};
+    if (buf[0] == 0) {
+        uint8_t mac[6];
+        getMacAddress(mac);
+        std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    return buf;
+}
+
 const char* chipModel() {
     return "desktop";
 }
@@ -373,6 +384,57 @@ bool fsWriteAtomic(const char* path, const char* data, size_t len) {
         std::filesystem::remove(tmp, ec);
         return false;
     }
+    return true;
+}
+
+long fsSize(const char* path) {
+    std::error_code ec;
+    auto p = toFsPath(path);
+    if (!std::filesystem::is_regular_file(p, ec)) return -1;
+    const auto sz = std::filesystem::file_size(p, ec);
+    return ec ? -1 : static_cast<long>(sz);
+}
+
+int fsReadAt(const char* path, long offset, char* buf, size_t len) {
+    if (!buf) return -1;
+    FILE* f = std::fopen(toFsPath(path).string().c_str(), "rb");
+    if (!f) return -1;
+    if (std::fseek(f, offset, SEEK_SET) != 0) { std::fclose(f); return -1; }
+    const size_t n = std::fread(buf, 1, len, f);
+    std::fclose(f);
+    return static_cast<int>(n);   // 0 at EOF
+}
+
+bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
+    if (!src) return false;
+    auto target = toFsPath(path);
+    auto tmp = target;
+    tmp += ".tmp";
+
+    FILE* f = std::fopen(tmp.string().c_str(), "wb");
+    if (!f) return false;
+    // Pull chunks from the source and write each straight through — fixed buffer, any file size.
+    char chunk[1024];
+    bool ok = true;
+    for (;;) {
+        const size_t got = src(chunk, sizeof(chunk), user);
+        if (got == 0) break;                                    // end of stream
+        if (std::fwrite(chunk, 1, got, f) != got) { ok = false; break; }
+    }
+    std::fflush(f);
+#ifdef _WIN32
+    int fd = ::_fileno(f);
+    if (fd >= 0) ::_commit(fd);
+#else
+    int fd = ::fileno(f);
+    if (fd >= 0) ::fsync(fd);
+#endif
+    std::fclose(f);
+
+    std::error_code ec;
+    if (!ok) { std::filesystem::remove(tmp, ec); return false; }
+    std::filesystem::rename(tmp, target, ec);
+    if (ec) { std::filesystem::remove(tmp, ec); return false; }
     return true;
 }
 

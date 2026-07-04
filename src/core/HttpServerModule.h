@@ -212,8 +212,11 @@ private:
     // at the mount) and size-capped. A file body isn't a control value, so these are their own
     // endpoints rather than /api/control.
     void serveFileContents(platform::TcpConnection& conn, const char* query);
+    // Streamed atomic upload: `initialBody`/`initialLen` are the body bytes already in the request
+    // buffer; `contentLen` is the declared total. Pulls any remainder off the socket → fsWriteStream,
+    // so an upload of any size streams to the file (rejected if it exceeds kUploadMax or free space).
     void handleWriteFile(platform::TcpConnection& conn, const char* query,
-                         const char* body, size_t len);
+                         const char* initialBody, size_t initialLen, size_t contentLen);
     // File Manager: one directory's children as JSON (the /api/dir endpoint) — the source the lazy
     // tree loads a node's children from. Single-level; `hidden=1` in the query includes dotfiles.
     void serveDirListing(platform::TcpConnection& conn, const char* query);

@@ -101,12 +101,16 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     // the permissive JSON helpers (a silent partial control write). If the full declared
     // body still hasn't arrived within the budget, reject with 400 rather than process it.
     auto* headerEnd = std::strstr(req, "\r\n\r\n");
+    int contentLen = 0;   // declared body length (0 if no Content-Length); used by the streaming route
     if (headerEnd) {
         auto* clh = std::strstr(req, "Content-Length:");
         if (clh) {
-            int contentLen = std::atoi(clh + 15);
+            contentLen = std::atoi(clh + 15);
             int headerSize = static_cast<int>(headerEnd + 4 - req);
             int bodyNeeded = headerSize + contentLen;
+            // Buffer at most a bufferful of the body here. A body larger than the buffer (a file
+            // upload) is NOT drained into buf — the /api/file route streams the remainder straight
+            // off the socket to the file (handleWriteFile). So only wait for the buffered portion.
             if (bodyNeeded > static_cast<int>(sizeof(buf) - 1))
                 bodyNeeded = static_cast<int>(sizeof(buf) - 1);   // cap to buffer
             for (int empties = 0; totalRead < bodyNeeded;) {
@@ -195,9 +199,13 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         if (std::strcmp(path, "/api/control") == 0 && body) {
             handleSetControl(conn, body);
         } else if (std::strcmp(path, "/api/file") == 0 && body) {
-            // File Manager: POST /api/file?path=<rel>, the file body → atomic write. The body is
-            // null-terminated (buf[totalRead]=0) and text, so strlen is the content length.
-            handleWriteFile(conn, queryStart ? queryStart + 1 : "", body, std::strlen(body));
+            // File Manager: POST /api/file?path=<rel>, the body → streamed atomic write. `body`
+            // points at the bytes already buffered (initialLen); the full length is Content-Length,
+            // and handleWriteFile pulls any remainder straight off the socket — so an upload of any
+            // size streams to the file without a whole-request buffer or a strlen (binary-safe).
+            const size_t initialLen = static_cast<size_t>(totalRead) - static_cast<size_t>(body - req);
+            handleWriteFile(conn, queryStart ? queryStart + 1 : "", body, initialLen,
+                            static_cast<size_t>(contentLen));
         } else if (std::strcmp(path, "/api/modules") == 0 && body) {
             handleAddModule(conn, body);
         } else if (isMoveRoute && body) {
@@ -313,9 +321,12 @@ void HttpServerModule::sendResponse(platform::TcpConnection& conn, int status, c
 // The path comes as a query param `path=<rel>`; fileQueryPath vets it (reject "..", root at the
 // mount) — the traversal guard for the HTTP entry path, the same check FileManagerModule::safePath
 // applies to the control-driven ops (two filesystem entry points, each guarded at its boundary).
-// Text/config only, size-capped: kFileApiCap bounds both the read buffer and the accepted write,
-// matching LittleFS's small flash. Binary files still read (as bytes); the UI decides what to show.
-static constexpr size_t kFileApiCap = 8192;
+//
+// Read + write both stream: the write pulls the request body chunk-by-chunk straight to the file
+// (fsWriteStream), the read pulls the file into a size-fit buffer — so a file of any size up- and
+// downloads intact without a fixed cap. kUploadMax is a per-request sanity ceiling; a legit upload
+// is additionally rejected up front if it wouldn't fit the free filesystem space.
+static constexpr size_t kUploadMax = 256 * 1024;   // 256 KB — sanity bound on one upload
 
 // Copy the `path=` query value into `out` (decoding %XX and '+' minimally), rooted at the mount.
 // Returns false on a missing/empty path or a ".." traversal attempt.
@@ -406,29 +417,88 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
-    // A fixed-size read buffer (kFileApiCap) — the size cap is the point; a larger file is
-    // truncated to the cap (the UI shows what fits and flags the file as edit-capped elsewhere).
-    static char fileBuf[kFileApiCap + 1];
-    const int n = platform::fsRead(path, fileBuf, sizeof(fileBuf));
-    if (n < 0) { sendResponse(conn, 404, "application/json", "{\"error\":\"not found\"}"); return; }
-    fileBuf[n] = 0;
-    // Serve the raw bytes as text/plain — the UI renders it in the editor. (Content type is
-    // deliberately generic; the manager edits text/config, and a binary preview is the UI's call.)
-    sendResponse(conn, 200, "text/plain", fileBuf);
+    // Stream the file straight to the socket in fixed 1 KB chunks (fsReadAt) with an explicit
+    // Content-Length header — no whole-file buffer, and NUL-safe (sendResponse strlen()s its body, so
+    // it can't carry binary). Symmetric with the streamed upload: a file of any size downloads whole.
+    const long size = platform::fsSize(path);
+    if (size < 0) { sendResponse(conn, 404, "application/json", "{\"error\":\"not found\"}"); return; }
+    char header[160];
+    const int hn = std::snprintf(header, sizeof(header),
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %ld\r\n"
+        "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", size);
+    conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn));
+    char chunk[1024];
+    for (long offset = 0; offset < size;) {
+        const size_t want = static_cast<size_t>(size - offset) < sizeof(chunk)
+                          ? static_cast<size_t>(size - offset) : sizeof(chunk);
+        const int got = platform::fsReadAt(path, offset, chunk, want);
+        if (got <= 0) break;   // read error / early EOF — the client sees a short (truncated) body
+        conn.write(reinterpret_cast<const uint8_t*>(chunk), static_cast<size_t>(got));
+        offset += got;
+    }
 }
 
+// Source state for the streamed upload: yields the body bytes already sitting in the request buffer,
+// then reads the remainder straight off the socket — feeding fsWriteStream in fixed chunks so the
+// device never holds the whole upload in RAM.
+namespace {
+struct UploadSource {
+    platform::TcpConnection* conn;
+    const char* initial;      // body bytes already read into the request buffer
+    size_t initialLeft;       // how many of those remain to hand out
+    size_t remaining;         // total body bytes still to deliver (Content-Length − delivered)
+};
+size_t uploadPull(char* out, size_t cap, void* user) {
+    auto* s = static_cast<UploadSource*>(user);
+    if (s->remaining == 0) return 0;
+    // Drain the already-buffered prefix first.
+    if (s->initialLeft) {
+        const size_t n = s->initialLeft < cap ? s->initialLeft : cap;
+        std::memcpy(out, s->initial, n);
+        s->initial += n; s->initialLeft -= n; s->remaining -= n;
+        return n;
+    }
+    // Then pull the rest off the socket, with the same bounded patience as the header read.
+    const size_t want = s->remaining < cap ? s->remaining : cap;
+    size_t n = 0;
+    for (int empties = 0; n == 0 && empties <= 50;) {
+        const int r = s->conn->read(reinterpret_cast<uint8_t*>(out), want);
+        if (r > 0) n = static_cast<size_t>(r);
+        else if (r == 0) break;                       // peer closed early
+        else { ++empties; platform::delayMs(1); }
+    }
+    s->remaining -= n;
+    return n;   // 0 → end (short body); fsWriteStream commits what arrived
+}
+}  // namespace
+
 void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char* query,
-                                       const char* body, size_t len) {
+                                       const char* initialBody, size_t initialLen, size_t contentLen) {
     char path[160];
     if (!fileQueryPath(query, path, sizeof(path))) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
-    if (len > kFileApiCap) {
-        sendResponse(conn, 400, "application/json", "{\"error\":\"file too large\"}");
+    if (contentLen > kUploadMax) {
+        sendResponse(conn, 413, "application/json", "{\"error\":\"file too large\"}");
         return;
     }
-    if (platform::fsWriteAtomic(path, body, len)) {
+    // Reject up front if it wouldn't fit the free filesystem space (friendlier than filling the FS
+    // and failing mid-write — fsWriteStream also fails cleanly + discards the temp if it does fill).
+    // total − used = free. An overwrite would reclaim the old file's space, but treat free
+    // conservatively (don't credit the overwrite) so the check never over-promises.
+    const size_t total = platform::filesystemTotal();
+    const size_t used = platform::filesystemUsed();
+    const size_t freeBytes = total > used ? total - used : 0;
+    if (total > 0 && contentLen > freeBytes) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "{\"error\":\"not enough space (%lu free)\"}",
+                      static_cast<unsigned long>(freeBytes));
+        sendResponse(conn, 507, "application/json", msg);   // 507 Insufficient Storage
+        return;
+    }
+    UploadSource src{&conn, initialBody, initialLen, contentLen};
+    if (platform::fsWriteStream(path, &uploadPull, &src)) {
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     } else {
         sendResponse(conn, 500, "application/json", "{\"error\":\"write failed\"}");

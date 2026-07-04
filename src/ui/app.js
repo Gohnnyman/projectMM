@@ -569,7 +569,7 @@ function createCard(mod, depth) {
 
     if (mod.controls) {
         for (const ctrl of mod.controls) {
-            if (ctrl.hidden) continue;  // plan-10 hidden flag (FileManager's op controls set it)
+            if (!controlRendersGenerically(mod, ctrl)) continue;
             const row = createControl(mod.name, mod.type, ctrl);
             if (row) controlsHost.appendChild(row);
         }
@@ -882,6 +882,16 @@ function emojiTagsForMod(mod) {
     if (!mod) return "";
     const t = availableTypes.find(t => t.name === mod.type) || {role: mod.role, tags: ""};
     return emojiTagsFor(t).join("");
+}
+
+// Whether a control appears in the generic control list. False for hidden controls, and for the
+// File Manager's `filesystem` gauge — it renders as the usage bar inside the File Manager panel
+// (renderFileManager), so the generic list must skip it or the bar would show twice. Used by BOTH
+// render paths (renderCards's initial build + updateModuleControls's WS live-patch) so they agree.
+function controlRendersGenerically(mod, ctrl) {
+    if (ctrl.hidden) return false;   // plan-10 hidden flag (FileManager's op controls set it)
+    if (mod.type === "FileManagerModule" && ctrl.name === "filesystem") return false;
+    return true;
 }
 
 function createControl(moduleName, moduleType, ctrl) {
@@ -1744,7 +1754,7 @@ function syncVisibleControls(mod) {
     // other's rows in a loop — tearing down (and closing) any open <select>.
     const host = card.querySelector(":scope > .card-controls-collapse") || card;
 
-    const wantNames = mod.controls.filter(c => !c.hidden).map(c => c.name);
+    const wantNames = mod.controls.filter(c => controlRendersGenerically(mod, c)).map(c => c.name);
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
     const haveNames = haveRows.map(r => r.dataset.key);
     if (wantNames.length === haveNames.length && wantNames.every((n, i) => n === haveNames[i])) {
@@ -1760,7 +1770,7 @@ function syncVisibleControls(mod) {
     // first existing control row that should come AFTER this one; null → append
     // before the children block (insertBefore(node, null) appends to host's end,
     // but control rows precede .card-children which lives on the card, not here).
-    const visibleControls = mod.controls.filter(c => !c.hidden);
+    const visibleControls = mod.controls.filter(c => controlRendersGenerically(mod, c));
     for (let i = 0; i < visibleControls.length; i++) {
         const name = visibleControls[i].name;
         if (host.querySelector(`:scope > .control-row[data-key="${cssEscape(name)}"]`)) continue;
@@ -2770,6 +2780,8 @@ function renderFileManager(mod, host) {
     // The tree. Root ("/") is always present and expanded; its children populate asynchronously.
     const tree = document.createElement("div");
     tree.className = "fm-tree";
+    // Dropping desktop files onto the tree's empty space uploads them into root.
+    fmMakeDropTarget(tree, "/", hidden, () => renderFileManager(mod, host), st);
     panel.appendChild(tree);
 
     // Render one directory's children into `container` at `depth`, recursing into expanded folders.
@@ -2823,6 +2835,21 @@ function renderFileManager(mod, host) {
             size.textContent = entry.isDir ? "" : fmSize(entry.size || 0);
             rowEl.appendChild(size);
 
+            // Per-file download (device → desktop): a plain <a download> on /api/file forces a save
+            // with the right name, every browser, any file type — the portable counterpart to the
+            // drag-drop upload (a true drag-*out* has no cross-browser API). Folders get no ⤓;
+            // folder-as-zip is backlogged (needs a bundled zip lib + recursion).
+            if (!entry.isDir) {
+                const dl = document.createElement("a");
+                dl.className = "fm-dl";
+                dl.textContent = "⤓";
+                dl.title = "download";
+                dl.href = "/api/file?path=" + encodeURIComponent(childPath);
+                dl.setAttribute("download", entry.name);
+                dl.addEventListener("click", (ev) => ev.stopPropagation());   // don't select/open
+                rowEl.appendChild(dl);
+            }
+
             // Select on click (sets the op target). A folder also toggles expand; a file opens the
             // editor on a second click (or immediately if already selected).
             rowEl.addEventListener("click", (ev) => {
@@ -2835,11 +2862,15 @@ function renderFileManager(mod, host) {
                     else st.expanded.add(childPath);
                     renderFileManager(mod, host);
                 } else if (wasSelected) {
-                    openFileEditor(childPath, entry.size || 0);
+                    openFileEditor(childPath);
                 } else {
                     renderFileManager(mod, host);   // reflect selection; click again to open
                 }
             });
+
+            // Drag-drop upload target: dropping desktop files onto a FOLDER row uploads them into
+            // that folder (tier 1: text/config ≤8KB — see fmDropUpload).
+            if (entry.isDir) fmMakeDropTarget(rowEl, childPath, hidden, () => renderFileManager(mod, host), st);
             container.appendChild(rowEl);
 
             // Recurse into an expanded folder (its own indented sub-container).
@@ -2853,6 +2884,34 @@ function renderFileManager(mod, host) {
     };
 
     renderChildren("/", tree, 0);
+
+    // Filesystem usage bar below the tree — the File Manager's own `filesystem` control (used /
+    // total bytes from the platform). Absent (e.g. desktop fs total 0) → nothing shown.
+    const fsCtrl = fmFilesystemUsage(mod);
+    if (fsCtrl) {
+        const usage = document.createElement("div");
+        usage.className = "fm-usage";
+        const name = document.createElement("span");
+        name.className = "fm-usage-name";
+        name.textContent = "Used";      // the bar/value is used space out of total (see the trailing label)
+        const bar = document.createElement("progress");
+        bar.value = Number(fsCtrl.value) || 0;
+        bar.max = Number(fsCtrl.total) || 1;
+        const lbl = document.createElement("span");
+        lbl.className = "fm-usage-label";
+        lbl.textContent = fmtProgressLabel(fsCtrl);
+        usage.appendChild(name);
+        usage.appendChild(bar);
+        usage.appendChild(lbl);
+        panel.appendChild(usage);
+    }
+}
+
+// The File Manager's own `filesystem` usage progress control (used/total bytes), or null if the
+// platform reports no partition. Rendered as the bar below the tree; skipped in the generic control
+// loop so it appears only here.
+function fmFilesystemUsage(mod) {
+    return (mod?.controls || []).find(c => c.name === "filesystem") || null;
 }
 
 // Format a file's text for the editor, by extension. JSON is re-indented (2 spaces) so the persisted
@@ -2878,10 +2937,66 @@ function joinFsPath(dir, name) {
     return dir.endsWith("/") ? dir + name : dir + "/" + name;
 }
 
-// Open a modal text editor for the file at `relPath`. Loads via GET /api/file, saves via POST.
-// Size-capped server-side (kFileApiCap); a larger file loads truncated and saving is blocked with
-// a note. Uses the native <dialog> — modern, accessible, no bespoke overlay code.
-async function openFileEditor(relPath, size) {
+// Drag-drop upload (desktop → device). The device streams the body straight to the file (any size,
+// binary-safe), so the only client-side bound is a sanity cap matching the device's kUploadMax; a
+// file over it is skipped with a visible note (no silent drop). A too-big-for-free-space file is
+// also rejected device-side with a "not enough space" message.
+const FM_UPLOAD_CAP = 256 * 1024;   // matches HttpServerModule::kUploadMax
+
+// Wire an element as a drop target that uploads dropped files into `destDir`, then re-renders.
+function fmMakeDropTarget(el, destDir, hidden, rerender, st) {
+    el.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        el.classList.add("fm-row--drop");
+    });
+    el.addEventListener("dragleave", (e) => {
+        e.stopPropagation();
+        el.classList.remove("fm-row--drop");
+    });
+    el.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        el.classList.remove("fm-row--drop");
+        const files = Array.from(e.dataTransfer?.files || []);
+        if (!files.length) return;
+        const skipped = await fmDropUpload(destDir, files);
+        if (destDir !== "/") st.expanded.add(destDir);   // reveal where they landed
+        rerender();
+        if (skipped.length) {
+            // Tier 1 is text/config ≤8KB — report what was not uploaded rather than dropping silently.
+            alert("Not uploaded (drag-drop is text/config ≤ 8 KB for now):\n" + skipped.join("\n"));
+        }
+    });
+}
+
+// Upload each dropped file into destDir via /api/file. Returns the names skipped (too big / failed)
+// so the caller can report them. The File blob is sent as the body directly — the browser streams
+// its raw bytes (binary-safe), matching the device's streamed, byte-exact write.
+async function fmDropUpload(destDir, files) {
+    const skipped = [];
+    for (const file of files) {
+        if (file.size > FM_UPLOAD_CAP) { skipped.push(file.name + " (" + fmSize(file.size) + ")"); continue; }
+        try {
+            const res = await fetch("/api/file?path=" + encodeURIComponent(joinFsPath(destDir, file.name)), {
+                method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
+            });
+            if (!res.ok) {
+                let msg = "HTTP " + res.status;
+                try { const j = await res.json(); if (j.error) msg = j.error; } catch (_) {}
+                throw new Error(msg);   // surfaces "not enough space (N free)" etc.
+            }
+        } catch (err) {
+            skipped.push(file.name + " (" + err.message + ")");
+        }
+    }
+    return skipped;
+}
+
+// Open a modal text editor for the file at `relPath`. Loads via GET /api/file (streamed whole, any
+// size), saves via POST. A file that isn't valid text (a NUL byte, or UTF-8 decode damage) loads
+// read-only so a lossy re-save can't corrupt it. Uses the native <dialog> — no bespoke overlay code.
+async function openFileEditor(relPath) {
     const dlg = document.createElement("dialog");
     dlg.className = "fm-editor";
     dlg.innerHTML =
@@ -2904,16 +3019,24 @@ async function openFileEditor(relPath, size) {
 
     try {
         const res = await fetch("/api/file?path=" + encodeURIComponent(relPath));
-        if (!res.ok) throw new Error("HTTP " + res.status);
+        if (!res.ok) {
+            // Surface the server's own message (e.g. "not found") rather than a bare status code —
+            // the /api/file error body is JSON {"error": …}.
+            let msg = "HTTP " + res.status;
+            try { const j = await res.json(); if (j.error) msg = j.error; } catch (_) {}
+            throw new Error(msg);
+        }
         const text = await res.text();
-        // The editor + write path are text/config only: the device write measures length by the
-        // NUL terminator (strlen), so saving content with an embedded NUL would truncate it. If the
-        // loaded file is binary (contains a NUL), show it read-only rather than offer a lossy save.
-        if (text.indexOf("\0") !== -1) {
+        // The editor is text/config only: a <textarea> can't faithfully round-trip non-text bytes,
+        // so a re-save would corrupt the file. Treat it as binary — read-only, save disabled — if it
+        // has a NUL OR if res.text()'s UTF-8 decode left a replacement char (U+FFFD), which means the
+        // bytes weren't valid UTF-8 and are already lossy in the textarea. Use the per-row ⤓ to
+        // download such files intact.
+        if (text.indexOf("\0") !== -1 || text.indexOf("�") !== -1) {
             body.value = text;
             body.readOnly = true;
             saveBtn.disabled = true;
-            status.textContent = "binary file — read-only";
+            status.textContent = "binary / non-text file — read-only";
         } else {
             body.value = fmPrettify(text, relPath);
         }

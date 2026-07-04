@@ -20,7 +20,26 @@ void FileManagerModule::onBuildControls() {
     controls_.setHidden(controls_.count() - 1, true);
     controls_.addButton("delete");                      // remove the file or empty folder at `path`
     controls_.setHidden(controls_.count() - 1, true);
+    // Filesystem-usage gauge (used / total bytes), read from the platform. Shown below the tree in
+    // the panel — the File Manager is where filesystem space is relevant, so it owns the control.
+    // Bound only when the platform reports a real partition (desktop / a no-data-partition chip
+    // reports 0). loop1s refreshes the used value; the total is fixed.
+    totalBytes_ = static_cast<uint32_t>(platform::filesystemTotal());
+    usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
+    if (totalBytes_ > 0) controls_.addProgress("filesystem", usedBytes_, totalBytes_);
     MoonModule::onBuildControls();
+}
+
+void FileManagerModule::loop1s() {
+    if (totalBytes_ > 0) usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
+}
+
+void FileManagerModule::setup() {
+    MoonModule::setup();
+    // `show hidden` is a transient view preference, not device config — force it off on every boot
+    // regardless of any persisted value (setup() runs after persistence overlays it). A file manager
+    // opens with hidden entries hidden; the user re-toggles per session.
+    showHidden_ = false;
 }
 
 void FileManagerModule::onUpdate(const char* c) {
