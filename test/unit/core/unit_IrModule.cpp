@@ -162,13 +162,22 @@ TEST_CASE("IrModule: two codes bind to two actions independently") {
     CHECK(r.drivers->brightness == 116);   // unchanged
 }
 
-TEST_CASE("IrModule: an unassigned code and a missing target are no-ops, not crashes") {
+TEST_CASE("IrModule: an unassigned code is a no-op, not a crash") {
     Rig r;
     const uint8_t before = r.drivers->brightness;
     r.fire(0xABCDEF01);                    // no learned binding → nothing happens
     CHECK(r.drivers->brightness == before);
     // The code is still recorded (for the read-out) even though it drove no action.
     CHECK(r.ir->latestCode() == 0xABCDEF01);
-    // Robustness: the path tolerates any input without crashing (setControl returns a typed
-    // not-found rather than dereferencing null), and an unassigned code is simply ignored.
+}
+
+TEST_CASE("IrModule: a learned code whose target module is gone is a no-op, reported") {
+    Rig r;
+    const uint8_t before = r.drivers->brightness;
+    r.learn(1, 0xC0DE);                    // bind 0xC0DE → brightness up (targets "Drivers")
+    // Take the target out of reach: rename it so firstByName("Drivers") returns null.
+    r.drivers->setName("NotDrivers");
+    r.fire(0xC0DE);                        // the action fires but its module is missing
+    CHECK(r.drivers->brightness == before);            // nothing changed
+    CHECK(std::strstr(r.ir->status(), "no Drivers module") != nullptr);  // reported, not crashed
 }

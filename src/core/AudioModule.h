@@ -608,6 +608,11 @@ private:
             if (parseWledAudioSync(pkt, static_cast<size_t>(n), rf)) {
                 frame_ = rf;                       // received audio drives the effects
                 lastSyncRecv_ = platform::millis();
+                // Feed the peer level into the same 1 s peak window the local mic uses, so the
+                // "level RMS" read-out (loop1s → levelStr_) reflects received audio too — otherwise
+                // it freezes at the last local value while a peer is driving the effects.
+                if (frame_.level > levelPeak_)
+                    levelPeak_ = static_cast<uint8_t>(frame_.level > 255 ? 255 : frame_.level);
             }
             // else: a v1 / foreign packet — ignore, keep draining.
         }

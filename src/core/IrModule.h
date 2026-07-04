@@ -1,8 +1,9 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "core/Scheduler.h"     // setControl — the generic control-set primitive
-#include "platform/platform.h"  // irRead
+#include "core/Scheduler.h"           // setControl — the generic control-set primitive
+#include "core/FilesystemModule.h"    // noteDirty — schedule the debounced save on a learned bind
+#include "platform/platform.h"        // irRead
 
 #include <cstdint>
 #include <cstdio>
@@ -137,7 +138,12 @@ private:
                           kActions[idx].button, static_cast<unsigned long>(code));
             setStatus(statusBuf_);
             learn_ = 0;
+            // Persist the new binding: markDirty flags the subtree, noteDirty stamps the debounce
+            // timer loop1s watches. A bound code is written straight to codeStr_ here (not via
+            // setControl), so it must schedule the save itself — else the binding could be lost
+            // before an unrelated save happens to run.
             markDirty();
+            FilesystemModule::noteDirty();
             return;
         }
         for (uint8_t i = 0; i < kActionCount; i++) {
@@ -145,8 +151,7 @@ private:
         }
         std::snprintf(statusBuf_, sizeof(statusBuf_), "received 0x%08lX (unassigned)",
                       static_cast<unsigned long>(code));
-        setStatus(statusBuf_);
-        markDirty();
+        setStatus(statusBuf_);   // status only — nothing persistent changed, so no dirty mark
     }
 
     // Read the target control's current value + bounds, apply the clamped delta, set it through the

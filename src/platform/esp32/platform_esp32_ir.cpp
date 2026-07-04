@@ -124,7 +124,13 @@ bool irRead(uint16_t pin, uint32_t& codeOut) {
     // Decode the captured buffer (task context), then re-arm for the next frame. Re-arming here —
     // not in the ISR — guarantees the decode reads a stable buffer the next capture can't clobber.
     const bool ok = decodeNec(rxBuf_, n, codeOut);
-    arm();
+    if (!arm()) {
+        // Re-arm failed → the channel is enabled but not receiving, and ensureChannel() would
+        // treat it as still-open (pin unchanged) and never recover it. Tear it down so the next
+        // irRead reopens a fresh channel on this pin.
+        closeChannel();
+        return false;
+    }
     return ok;
 }
 

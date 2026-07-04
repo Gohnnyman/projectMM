@@ -70,12 +70,15 @@ Detail: [technical](../moxygen/FilesystemModule.md)
 
 ### Audio
 
-A System peripheral (added by the user, not auto-wired): an I²S microphone feeding the FFT that audio-reactive effects consume via `AudioModule::latestFrame()`. Idle until real GPIOs are entered.
+A System peripheral (added by the user, not auto-wired): an I²S microphone (or line-in ADC) feeding the FFT that audio-reactive effects consume via `AudioModule::latestFrame()`. It also syncs audio over UDP, WLED-compatible: broadcast the local analysis for the WLED ecosystem, or receive a peer's audio to drive effects with no local mic. Idle until real GPIOs are entered.
 
-- `wsPin` / `sdPin` / `sckPin` — the I²S microphone GPIOs (unset until entered).
-- `sampleRate` — mic sample rate.
+- `wsPin` / `sdPin` / `sckPin` — the I²S GPIOs (unset until entered).
+- `mclkPin` — master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
+- `sampleRate` — mic/ADC sample rate.
+- `floor` / `gain` — noise floor and input gain for the analysis.
 - `simulate` — feed a synthetic signal instead of the mic (for testing without hardware).
-- read-only — `level` (RMS), `peakHz`.
+- `sync` — Off / Send / Receive: broadcast or receive WLED audio-sync packets. `syncPort` sets the UDP port (default 11988, the WLED standard); Receive auto-blends back to the local mic ~1 s after a peer goes quiet.
+- read-only — `level` (RMS), `peakHz`, `sync status`.
 
 Detail: [technical](../moxygen/AudioModule.md)
 
