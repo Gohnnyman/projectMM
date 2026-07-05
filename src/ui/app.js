@@ -175,6 +175,17 @@ async function init() {
     preview.setupLayout();
 }
 
+// The message for a failed fetch Response: the server's own `{"error": …}` body (JSON, e.g.
+// "not enough space (N free)") when present, else a bare `HTTP <status>`. Every /api/* handler
+// returns errors as that JSON shape, so this is the one place the extraction lives.
+async function errorMessage(res) {
+    try {
+        const j = await res.json();
+        if (j && j.error) return j.error;
+    } catch (_) { /* non-JSON error body — fall through to the status code */ }
+    return `HTTP ${res.status}`;
+}
+
 async function sendControl(moduleName, controlName, value) {
     // Best-effort by design — failures are not retried here. Non-ok responses +
     // network errors are logged to console so a user with devtools open can see
@@ -509,7 +520,7 @@ function createCard(mod, depth) {
 
     // Help link → the module's spec page on the rendered docs site, far right of
     // the row. docPath comes from /api/types (relative to docs/moonmodules/, e.g.
-    // "core/AudioModule.md" or "light/effects/effects.md#fire"); omitted if none.
+    // "core/ui/ui.md#audio" or "light/effects/effects.md#fire"); omitted if none.
     // The site is Material for MkDocs at moonmodules.org/projectMM/ (flat URLs, so
     // foo.md → foo.html; the MkDocs heading slugs match these #anchors), reached
     // via the same /projectMM/ subpath the installer uses. Convert only the `.md`
@@ -579,8 +590,8 @@ function createCard(mod, depth) {
     }
 
     // File Manager: a modern expand/collapse folder tree + inline text editor. Browsing is UI-side
-    // over /api/dir; ops go through the module's own (hidden) path/new folder/delete controls via
-    // /api/control. Only the `show hidden` toggle renders as a raw control; the tree is the rest.
+    // over /api/dir; a create/delete is a POST/DELETE /api/dir?path= call (the path rides the request,
+    // no persisted control). Only the `show hidden` toggle renders as a raw control; the tree is the rest.
     if (mod.type === "FileManagerModule") {
         renderFileManager(mod, controlsHost);
     }
@@ -617,14 +628,7 @@ function createCard(mod, depth) {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ url: binaryUrl }),
                 });
-                if (!res.ok) {
-                    let msg = `HTTP ${res.status}`;
-                    try {
-                        const j = await res.json();
-                        if (j.error) msg = j.error;
-                    } catch (_) { /* non-JSON error response */ }
-                    throw new Error(msg);
-                }
+                if (!res.ok) throw new Error(await errorMessage(res));
             },
         });
 
@@ -658,11 +662,7 @@ function createCard(mod, depth) {
                 // The device sends a 200 once the image is committed, THEN reboots — so res.ok is the
                 // real success signal. A 4xx/5xx carries the device's ota error in the JSON body.
                 if (res.ok) upStatus.textContent = "flashed — device rebooting";
-                else {
-                    let msg = `HTTP ${res.status}`;
-                    try { msg = (await res.json()).error || msg; } catch (_) {}
-                    throw new Error(msg);
-                }
+                else throw new Error(await errorMessage(res));
             } catch (err) {
                 // A network error mid-upload is a genuine failure now (the device answers before it
                 // reboots), so surface it as such rather than assuming a reboot.
@@ -936,16 +936,13 @@ function emojiTagsForMod(mod) {
     return emojiTagsFor(t).join("");
 }
 
-// Whether a control appears in the generic control list. False for hidden controls, and for the
-// File Manager's `filesystem` gauge — it renders as the usage bar inside the File Manager panel
-// (renderFileManager), so the generic list must skip it or the bar would show twice. Used by BOTH
-// render paths (renderCards's initial build + updateModuleControls's WS live-patch) so they agree.
+// Whether a control appears in the generic control list — false for controls the module marked
+// `hidden`. A module that renders a control in its own panel instead (e.g. the File Manager's
+// `filesystem` usage bar + `lastSaved` readout, drawn by renderFileManager) sets the hidden flag on
+// the C++ side, so the generic list skips it and the value never shows twice. Used by BOTH render
+// paths (renderCards's initial build + updateModuleControls's WS live-patch) so they agree.
 function controlRendersGenerically(mod, ctrl) {
-    if (ctrl.hidden) return false;   // plan-10 hidden flag (e.g. FileManager's `show hidden` sets it)
-    // The File Manager's `filesystem` gauge + `lastSaved` readout render inside the File Manager
-    // panel (renderFileManager), so the generic list skips them or they'd show twice.
-    if (mod.type === "FileManagerModule" && (ctrl.name === "filesystem" || ctrl.name === "lastSaved")) return false;
-    return true;
+    return !ctrl.hidden;
 }
 
 function createControl(moduleName, moduleType, ctrl) {
@@ -2669,7 +2666,7 @@ function fmState(mod) {
 // Fetch one directory's children (name/isDir/size) from /api/dir. `hidden` includes dotfiles.
 async function fmFetchDir(absPath, hidden) {
     const res = await fetch("/api/dir?path=" + encodeURIComponent(absPath) + (hidden ? "&hidden=1" : ""));
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (!res.ok) throw new Error(await errorMessage(res));
     const rows = await res.json();
     return Array.isArray(rows) ? rows : [];
 }
@@ -2771,11 +2768,7 @@ function renderFileManager(mod, host) {
     const runOp = async (op, targetPath) => {
         const method = op === "delete" ? "DELETE" : "POST";
         const res = await fetch("/api/dir?path=" + encodeURIComponent(targetPath), { method });
-        if (!res.ok) {
-            let msg = `HTTP ${res.status}`;
-            try { msg = (await res.json()).error || msg; } catch (_) { /* keep HTTP status */ }
-            alert(`${op} failed: ${msg}`);
-        }
+        if (!res.ok) alert(`${op} failed: ${await errorMessage(res)}`);
         renderFileManager(mod, host);  // rebuild the tree from /api/dir (fresh listing)
     };
 
@@ -2791,10 +2784,10 @@ function renderFileManager(mod, host) {
     newBtn.title = "New folder — create a folder inside the selected folder";
     newBtn.addEventListener("click", async () => {
         const base = createBase();
-        const name = prompt("New folder name in " + base + ":");
-        if (!name) return;
+        const name = (prompt("New folder name in " + base + ":") || "").trim();
+        if (!name) return;             // blank or whitespace-only → no-op
         st.expanded.add(base);         // reveal the new child
-        await runOp("new folder", joinFsPath(base, name.trim()));
+        await runOp("new folder", joinFsPath(base, name));
     });
     bar.appendChild(newBtn);
 
@@ -2806,14 +2799,14 @@ function renderFileManager(mod, host) {
     newFileBtn.title = "New file — create an empty file inside the selected folder";
     newFileBtn.addEventListener("click", async () => {
         const base = createBase();
-        const name = prompt("New file name in " + base + ":");
-        if (!name) return;
-        const filePath = joinFsPath(base, name.trim());
+        const name = (prompt("New file name in " + base + ":") || "").trim();
+        if (!name) return;             // blank or whitespace-only → no-op
+        const filePath = joinFsPath(base, name);
         try {
             const res = await fetch("/api/file?path=" + encodeURIComponent(filePath), {
                 method: "POST", headers: { "Content-Type": "text/plain" }, body: "",
             });
-            if (!res.ok) throw new Error("HTTP " + res.status);
+            if (!res.ok) throw new Error(await errorMessage(res));
         } catch (err) {
             alert("create file failed: " + err.message);
             return;
@@ -2954,7 +2947,7 @@ function renderFileManager(mod, host) {
             if (!entry.isDir) {
                 rowEl.addEventListener("dblclick", (ev) => {
                     ev.stopPropagation();
-                    openFileEditor(childPath);
+                    openFileEditor(childPath, entry.size);   // size lets the editor detect a truncated read
                 });
             }
 
@@ -3083,11 +3076,7 @@ async function fmDropUpload(destDir, files) {
             const res = await fetch("/api/file?path=" + encodeURIComponent(joinFsPath(destDir, file.name)), {
                 method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
             });
-            if (!res.ok) {
-                let msg = "HTTP " + res.status;
-                try { const j = await res.json(); if (j.error) msg = j.error; } catch (_) {}
-                throw new Error(msg);   // surfaces "not enough space (N free)" etc.
-            }
+            if (!res.ok) throw new Error(await errorMessage(res));   // surfaces "not enough space (N free)" etc.
         } catch (err) {
             skipped.push(file.name + " (" + err.message + ")");
         }
@@ -3098,7 +3087,7 @@ async function fmDropUpload(destDir, files) {
 // Open a modal text editor for the file at `relPath`. Loads via GET /api/file (streamed whole, any
 // size), saves via POST. A file that isn't valid text (a NUL byte, or UTF-8 decode damage) loads
 // read-only so a lossy re-save can't corrupt it. Uses the native <dialog> — no bespoke overlay code.
-async function openFileEditor(relPath) {
+async function openFileEditor(relPath, expectedSize) {
     const dlg = document.createElement("dialog");
     dlg.className = "fm-editor";
     dlg.innerHTML =
@@ -3121,20 +3110,25 @@ async function openFileEditor(relPath) {
 
     try {
         const res = await fetch("/api/file?path=" + encodeURIComponent(relPath));
-        if (!res.ok) {
-            // Surface the server's own message (e.g. "not found") rather than a bare status code —
-            // the /api/file error body is JSON {"error": …}.
-            let msg = "HTTP " + res.status;
-            try { const j = await res.json(); if (j.error) msg = j.error; } catch (_) {}
-            throw new Error(msg);
-        }
+        // Surface the server's own message (e.g. "not found") rather than a bare status code.
+        if (!res.ok) throw new Error(await errorMessage(res));
         const text = await res.text();
+        // Truncation guard: serveFileContents streams the whole file but stops short on a read error
+        // (a filesystem fault mid-stream). Saving a short read back would overwrite the file with a
+        // truncated copy — so if the received byte count is under the size the listing reported, load
+        // read-only. TextEncoder gives the byte length (text.length is chars, not bytes).
+        if (typeof expectedSize === "number" &&
+            new TextEncoder().encode(text).length < expectedSize) {
+            body.value = text;
+            body.readOnly = true;
+            saveBtn.disabled = true;
+            status.textContent = "truncated read — read-only (save would corrupt the file)";
         // The editor is text/config only: a <textarea> can't faithfully round-trip non-text bytes,
         // so a re-save would corrupt the file. Treat it as binary — read-only, save disabled — if it
         // has a NUL OR if res.text()'s UTF-8 decode left a replacement char (U+FFFD), which means the
         // bytes weren't valid UTF-8 and are already lossy in the textarea. Use the per-row ⤓ to
         // download such files intact.
-        if (text.indexOf("\0") !== -1 || text.indexOf("�") !== -1) {
+        } else if (text.indexOf("\0") !== -1 || text.indexOf("�") !== -1) {
             body.value = text;
             body.readOnly = true;
             saveBtn.disabled = true;
@@ -3156,11 +3150,7 @@ async function openFileEditor(relPath) {
                 headers: { "Content-Type": "text/plain" },
                 body: body.value,
             });
-            if (!res.ok) {
-                let msg = "HTTP " + res.status;
-                try { const j = await res.json(); if (j.error) msg = j.error; } catch (_) {}
-                throw new Error(msg);
-            }
+            if (!res.ok) throw new Error(await errorMessage(res));
             status.textContent = "saved";
         } catch (err) {
             status.textContent = "save failed: " + err.message;

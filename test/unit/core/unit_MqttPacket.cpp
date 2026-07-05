@@ -49,6 +49,22 @@ TEST_CASE("MqttPacket: remaining-length varint encodes/decodes at the boundaries
     CHECK_FALSE(decodeRemainingLength(trunc, sizeof(trunc), &v, &c));
 }
 
+// mqttWriteFixedHeader must validate space for the WHOLE header (type byte + varint) before it
+// writes any of it — a bodyLen needing a 2-byte varint into a 2-byte buffer must return 0 without
+// touching out[2] (the byte past the buffer). Regression guard for a fixed-header overrun.
+TEST_CASE("MqttPacket: fixed-header write refuses a buffer too small for its varint") {
+    uint8_t guarded[3] = {0xAA, 0xAA, 0xAA};   // sentinel; only [0..1] are "the buffer"
+    // bodyLen 128 → remaining-length is 2 bytes (0x80 0x01), so the full header is 3 bytes and
+    // does not fit in 2. Must reject, and must NOT have written the type byte or scribbled past.
+    CHECK(mqttWriteFixedHeader(guarded, 2, MqttPacketType::Publish, 0, 128) == 0);
+    CHECK(guarded[2] == 0xAA);   // the out-of-bounds byte is untouched
+    // A 3-byte buffer fits exactly: type + 2 varint bytes.
+    uint8_t ok[3] = {};
+    REQUIRE(mqttWriteFixedHeader(ok, sizeof(ok), MqttPacketType::Publish, 0, 128) == 3);
+    CHECK(ok[1] == 0x80);
+    CHECK(ok[2] == 0x01);
+}
+
 // --- CONNECT golden vector (§3.1) ---
 TEST_CASE("MqttPacket: CONNECT is byte-exact (clean session, no auth)") {
     uint8_t out[64] = {};

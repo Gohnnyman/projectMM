@@ -200,6 +200,7 @@ void Scheduler::deduplicateNamesInTree() {
 }
 
 MoonModule* Scheduler::firstByName(const char* name) {
+    if (!name || name[0] == 0) return nullptr;   // firstInTree strcmps name; a null would be UB
     for (uint8_t i = 0; i < moduleCount_; i++) {
         if (auto* m = firstInTree(modules_[i], name)) return m;
     }

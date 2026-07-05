@@ -781,7 +781,7 @@ static int runScenario(const char* path) {
                 //             The floor dominates below ~1ms tick (the realistic case).
                 //   esp32-* — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us floor.
                 // KEEP IN SYNC: the live runner re-declares the same defaults at
-                // scripts/scenario/run_live_scenario.py contract-block handler —
+                // moondeck/scenario/run_live_scenario.py contract-block handler —
                 // tuning one without the other silently desyncs the two tiers.
                 const bool isPc = std::strncmp(hostTarget(), "pc-", 3) == 0;
                 double tickTolPct = exp.has("tick_tolerance_pct") ? exp["tick_tolerance_pct"].num

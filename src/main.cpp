@@ -209,18 +209,18 @@ static void registerModuleTypes() {
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers/ParlioLedDriver.md");
 #endif
-    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
-    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
-    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
-    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/I2cScanModule.md");
-    mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/IrModule.md");
-    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/FileManagerModule.md");
-    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
-    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
-    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/MqttModule.md");
-    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/DevicesModule.md");
-    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
-    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/FilesystemModule.md");
+    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/ui/ui.md");
+    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/ui/ui.md#system");
+    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/ui/ui.md#audio");
+    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/ui/ui.md#i2c-scan");
+    mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/ui/ui.md#ir");
+    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/ui/ui.md#file-manager");
+    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/ui/ui.md#firmware-update");
+    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ui/ui.md#improv-provisioning");
+    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/ui/ui.md#mqtt");
+    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/ui/ui.md#devices");
+    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/ui/ui.md#network");
+    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/ui/ui.md#filesystem");
 }
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {
@@ -417,11 +417,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // Register top-level modules with scheduler (scheduler deletes on teardown).
     // Order matters: filesystem first (load hook runs before any module's setup),
-    // then system (deviceName), firmwareUpdate (status surface, no deps), network
-    // (hosts ImprovProvisioning as a child — same lifecycle, one less top-level
-    // entry, conceptually right since Improv only exists to feed Network credentials),
-    // light pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler walks
-    // roots in this order each tick; child propagation happens inside each root.
+    // then system (deviceName), fileManager (filesystem browser, reads the persistence
+    // engine's "last saved"), firmwareUpdate (status surface, no deps), network (hosts
+    // ImprovProvisioning and Mqtt as children — same lifecycle, one less top-level entry
+    // each; Improv only exists to feed Network credentials, and Mqtt only bridges once the
+    // network is up), light pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler
+    // walks roots in this order each tick; child propagation happens inside each root.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
     scheduler.addModule(fileManagerModule);

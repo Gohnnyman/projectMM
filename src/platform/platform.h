@@ -233,8 +233,10 @@ bool http_fetch_to_ota(const char* url,
 // (an incomplete/timed-out upload). Runs esp_ota_begin → esp_ota_write per chunk → esp_ota_end +
 // set_boot_partition, then RETURNS true (it does NOT reboot — the caller sends its HTTP 200 first,
 // then reboots into the flashed image, the same order /api/reboot uses). SYNCHRONOUS (unlike
-// http_fetch_to_ota): the caller is already off the render hot path (an HTTP request handler) and
-// needs the result to reply.
+// http_fetch_to_ota, which runs on its own task): the caller is the HTTP request handler, which runs
+// on the loop20ms tick INSIDE Scheduler::tick — so this blocks rendering for the flash duration. That
+// is the accepted trade-off (a firmware upload is user-initiated and reboots the device on success),
+// bounded by the same upload idle/hard limits; the caller needs the result to reply.
 // `statusBuf` / `bytesReadOut` are updated in place (bytesTotal is the caller-supplied
 // Content-Length, so no separate out-param). Desktop: returns false (no OTA partition); guard with
 // `if constexpr (mm::platform::hasOta)`. Returns true iff the image flashed + boot pointer flipped.
@@ -349,20 +351,13 @@ public:
         return *this;
     }
 
-    // Outbound client connect to host:port. `host` may be a hostname (DNS-resolved via getaddrinfo)
-    // or a dotted-quad IP — brokers/servers are usually named. Non-blocking connect bounded by
-    // timeoutMs (the same technique httpRequest uses); on success the socket is left NON-BLOCKING for
-    // read()/writeSome(), so a long-lived client (MQTT: subscribe once, receive pushes) never stalls
-    // the caller's loop. Returns true when connected. Caller gates on networkReady(). Desktop + ESP32
-    // (lwip); a fresh TcpConnection (no fd yet) is the expected receiver. Replaces any prior fd.
-    bool connect(const char* host, uint16_t port, uint32_t timeoutMs);
-
-    // Non-blocking outbound connect, for a client that must NOT stall the render loop (MQTT runs on
-    // loop1s inside Scheduler::tick). `connectStart` resolves `host` (getaddrinfo — one bounded DNS
-    // lookup) and kicks off a non-blocking connect, returning immediately; `connectPoll` checks the
-    // in-flight connect WITHOUT blocking and returns Pending / Connected / Failed. The caller polls
-    // across ticks and enforces its own overall timeout. On Connected the socket is non-blocking for
-    // read()/writeSome(). (The blocking connect() above stays for httpRequest's one-shot use.)
+    // Non-blocking outbound connect to host:port, for a client that must NOT stall the render loop
+    // (MQTT runs on loop1s inside Scheduler::tick). `connectStart` resolves `host` (a hostname via
+    // getaddrinfo — one bounded DNS lookup — or a dotted-quad IP) and kicks off a non-blocking
+    // connect, returning immediately; `connectPoll` checks the in-flight connect WITHOUT blocking and
+    // returns Pending / Connected / Failed. The caller polls across ticks and enforces its own overall
+    // timeout, then reads/writes via the non-blocking read()/writeSome(). Caller gates on
+    // networkReady(). Desktop + ESP32 (lwip); a fresh TcpConnection (no fd yet) is the receiver.
     enum class ConnectResult : uint8_t { Pending, Connected, Failed };
     bool connectStart(const char* host, uint16_t port);   // false = immediate failure (DNS/socket)
     ConnectResult connectPoll();                           // non-blocking; call after connectStart

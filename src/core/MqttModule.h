@@ -39,7 +39,7 @@ namespace mm {
 /// reads "No Response"). A dropped socket reconnects with a backoff.
 ///
 /// **Prior art:** the OASIS MQTT 3.1.1 standard + homebridge-mqttthing's topic conventions (see
-/// docs/moonmodules/core/MqttModule.md for the Homebridge accessory config). The MoonLight sibling
+/// docs/moonmodules/core/ui/ui.md#mqtt for the Homebridge accessory config). The MoonLight sibling
 /// bridges the same on/off+brightness surface through a full framework MQTT client + HA discovery;
 /// projectMM writes its own lean client over the platform socket primitive instead.
 class MqttModule : public MoonModule {
@@ -73,12 +73,6 @@ private:
     void maybeRepublishName();              // re-publish the name if it changed (rename while connected)
     void setControlValue(const char* control, const char* valueJson);   // → Scheduler::setControl
     void setStatusLine(const char* msg);
-
-    // Read Drivers' current on/brightness/palette via MoonModule::read* (shared helper) so this core
-    // module needs no light-domain include and the absent-control defaults match HttpServerModule.
-    bool  driversOn();
-    uint8_t driversBrightness();
-    uint8_t driversPalette();
 
     SystemModule* systemModule_ = nullptr;
 

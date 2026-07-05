@@ -61,10 +61,12 @@ public:
     /// doesn't trigger a structural rebuild.
     virtual void onCorrectionChanged() {}
 
-    /// Clear both shared status strings on teardown (frees the owned `failBuf_`). A
-    /// driver that overrides teardown() for its own peripheral cleanup chains to this
-    /// afterwards: `deinit(); DriverBase::teardown();`.
-    void teardown() override { clearFailBuf(); clearConfigErr(); }
+    /// Clear every shared status string on teardown — fail buffer, config error, and config
+    /// warning — so a stopped driver leaves nothing behind (frees the owned `failBuf_`; retracts
+    /// the warning the same "clear only MY status" way as the error). A driver that overrides
+    /// teardown() for its own peripheral cleanup chains to this afterwards:
+    /// `deinit(); DriverBase::teardown();`.
+    void teardown() override { clearFailBuf(); clearConfigErr(); setConfigWarn(nullptr); }
 
 protected:
     Layer* layer_ = nullptr;

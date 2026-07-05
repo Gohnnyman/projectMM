@@ -150,7 +150,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     // and is not part of the path. Browsers send `/?foo=bar` for query-on-
     // root; without this split the GET / route falls through to 404. The web
     // installer's Inject button hits us as `/?deviceModel=<name>` to hand off the
-    // deviceModels.json entry — see docs/moonmodules/core/SystemModule.md.
+    // deviceModels.json entry — see docs/moonmodules/core/moxygen/SystemModule.md.
     char* queryStart = std::strchr(path, '?');
     if (queryStart) *queryStart = 0;
 
@@ -505,17 +505,22 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
 // then reads the remainder straight off the socket — feeding fsWriteStream in fixed chunks so the
 // device never holds the whole upload in RAM.
 namespace {
-// Two bounds guard the upload, because neither alone is enough:
+// This drain runs SYNCHRONOUSLY on the loop20ms() tick, which is inside Scheduler::tick — so it
+// blocks rendering for the duration of the transfer (LEDs freeze until the upload completes or a
+// bound trips). Accepted trade-off: an upload is user-initiated and transient (and a firmware upload
+// reboots the device anyway), so a brief freeze is fine where a persistent one wouldn't be. The two
+// bounds cap how long that freeze can last, because neither alone is enough:
 //   - kUploadIdleMs: max wait for the NEXT byte, reset on every successful read. Scales to
 //     any size the endpoint accepts — a big but steady upload (256 KB over slow LittleFS +
 //     weak WiFi) never trips it, because progress keeps resetting the clock. But idle-only
-//     lets a slowloris trickle one byte just under the idle limit forever, holding the one
-//     connection handleConnection() serves per loop20ms() tick (not the render loop — that
-//     is off this path — but the HTTP server, wedging later requests).
+//     lets a slowloris trickle one byte just under the idle limit forever, freezing rendering
+//     (and the HTTP server) for as long as it keeps dribbling.
 //   - kUploadHardMs: an absolute whole-request ceiling that closes that hole. Sized well
 //     above a legit worst case (256 KB / ~50 KB/s ≈ 5 s, plus wide margin) so a real slow
 //     upload finishes, but far below the days a byte-per-idle-window trickler would need.
-// A single budget can't do both jobs; the pair does (idle scales, hard caps the total).
+// A single budget can't do both jobs; the pair does (idle scales, hard caps the total). The
+// zero-freeze fix (drain a chunk per tick, like drainPreviewSend) is backlogged; the bounded
+// synchronous drain is the accepted interim.
 constexpr uint32_t kUploadIdleMs = 5000;    // max gap between successful reads before abort
 constexpr uint32_t kUploadHardMs = 60000;   // absolute whole-request ceiling (anti-slowloris)
 struct UploadSource {
@@ -607,8 +612,7 @@ void HttpServerModule::handleFirmwareUpload(platform::TcpConnection& conn, const
         return;
     }
     // Same 409 concurrency guard as handleFirmwareUrl: one OTA at a time (both write g_ota* state).
-    if (std::strcmp(g_otaStatus, "starting")    == 0 || std::strcmp(g_otaStatus, "downloading") == 0 ||
-        std::strcmp(g_otaStatus, "flashing")    == 0 || std::strcmp(g_otaStatus, "rebooting")   == 0) {
+    if (otaInFlight()) {
         sendResponse(conn, 409, "application/json", "{\"error\":\"ota already in progress\"}");
         return;
     }
@@ -884,25 +888,11 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
     }
 }
 
+// The Scheduler owns the module tree, so the tree-walk-by-name lives there (firstByName);
+// this only adds the scheduler_ null-guard the request handlers rely on (scheduler_ is unset
+// until setScheduler() runs), then delegates — one recursive lookup, not two.
 MoonModule* HttpServerModule::findModuleByName(const char* name) {
-    if (!name || name[0] == 0 || !scheduler_) return nullptr;
-
-    for (uint8_t m = 0; m < scheduler_->moduleCount(); m++) {
-        auto* mod = scheduler_->module(m);
-        if (!mod) continue;
-        auto* found = findInTree(mod, name);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
-MoonModule* HttpServerModule::findInTree(MoonModule* mod, const char* name) {
-    if (mod->name() && std::strcmp(mod->name(), name) == 0) return mod;
-    for (uint8_t i = 0; i < mod->childCount(); i++) {
-        auto* found = findInTree(mod->child(i), name);
-        if (found) return found;
-    }
-    return nullptr;
+    return scheduler_ ? scheduler_->firstByName(name) : nullptr;
 }
 
 void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
@@ -947,7 +937,7 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
 // WLED fork) does — while `product:"MoonModules"` says what this actually is. We speak
 // WLED's info shape to interoperate, not to impersonate. Built fresh against WLED's
 // public JSON, not copied. (Reference real WLED carries far more; this is the trimmed,
-// known-sufficient field set — see docs/moonmodules/core/HttpServerModule.md.)
+// known-sufficient field set — see docs/moonmodules/core/moxygen/HttpServerModule.md.)
 void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
     const char* header =
         "HTTP/1.1 200 OK\r\n"
@@ -1001,19 +991,6 @@ void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const
 // output brightness the WLED app's slider maps to. Read generically through the control
 // list (by name + Uint8 type, via the stored pointer) so this core module needs no
 // light-domain include — the same domain-neutral reach applySetControl uses to write.
-uint8_t HttpServerModule::driversBrightness() {
-    MoonModule* d = findModuleByName("Drivers");
-    return d ? d->readUint8("brightness", 0) : 0;
-}
-
-// The Drivers master-power state (the `on` Bool control), read the same domain-neutral way as
-// driversBrightness(). Defaults to true when the control is absent (a build without it), so a
-// device still reads as "on" rather than spuriously off.
-bool HttpServerModule::driversOn() {
-    MoonModule* d = findModuleByName("Drivers");
-    return d ? d->readBool("on", true) : true;   // absent → on (shared default with MqttModule)
-}
-
 // The WLED state object, written into an open sink. `on` + `bri` mirror Drivers
 // brightness (off = brightness 0). `seg[0].col[0]` is the colour the WLED app tints the
 // device card with: we send the LIVE first-LED RGB from Drivers, so the card mirrors what
@@ -1021,7 +998,7 @@ bool HttpServerModule::driversOn() {
 // black/off or there's no output (so a dark device still reads as a distinct projectMM,
 // not an indistinct black card).
 void HttpServerModule::writeWledStateBody(JsonSink& sink) {
-    const uint8_t bri = driversBrightness();
+    const uint8_t bri = driversBrightness(scheduler_);
     uint8_t rgb[3] = {0, 0, 0};
     bool haveLed = false;
     if (MoonModule* d = findModuleByName("Drivers")) haveLed = d->firstOutputRgb(rgb);
@@ -1030,7 +1007,7 @@ void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     }
     sink.appendf("{\"on\":%s,\"bri\":%u,"
                  "\"seg\":[{\"id\":0,\"col\":[[%u,%u,%u]]}]}",
-                 driversOn() ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
+                 driversOn(scheduler_) ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
 }
 
 void HttpServerModule::serveWledState(platform::TcpConnection& conn) {
@@ -1226,7 +1203,7 @@ HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* pare
 // field — both feed the one applyAddModule() core, but the two transports parse different
 // JSON keys, so an HTTP payload is NOT a drop-in APPLY_OP (rename parent_id → parent). The
 // serial op stays terse because every byte counts against the 128-byte frame budget; the
-// discrepancy is documented in docs/moonmodules/core/ImprovProvisioningModule.md.
+// discrepancy is documented in docs/moonmodules/core/moxygen/ImprovProvisioningModule.md.
 HttpServerModule::OpResult HttpServerModule::applyOp(const char* opJson) {
     if (!opJson) return OpResult::BadRequest;
     char op[16] = {};
@@ -1508,10 +1485,7 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
     // shows garbled progress. Check g_otaStatus for an in-flight state and
     // reject early with 409. Successful OTAs reboot, so the only path that
     // re-enables a new attempt after an in-flight one is an explicit error.
-    if (std::strcmp(g_otaStatus, "starting")    == 0 ||
-        std::strcmp(g_otaStatus, "downloading") == 0 ||
-        std::strcmp(g_otaStatus, "flashing")    == 0 ||
-        std::strcmp(g_otaStatus, "rebooting")   == 0) {
+    if (otaInFlight()) {
         sendResponse(conn, 409, "application/json",
                      "{\"error\":\"ota already in progress\"}");
         return;

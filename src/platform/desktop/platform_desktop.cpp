@@ -845,52 +845,6 @@ int TcpConnection::writeSome(const uint8_t* data, size_t len) {
 }
 
 
-bool TcpConnection::connect(const char* host, uint16_t port, uint32_t timeoutMs) {
-    if (!host || !host[0]) return false;
-    close();   // drop any prior fd — connect() re-homes this connection
-
-    // Resolve host (a name OR a dotted-quad — getaddrinfo handles both) to an IPv4 address. A named
-    // broker (mqtt.local, homeassistant.lan) needs DNS; a literal IP resolves without a query.
-    char portStr[6];
-    std::snprintf(portStr, sizeof(portStr), "%u", static_cast<unsigned>(port));
-    addrinfo hints{};
-    hints.ai_family = AF_INET;         // IPv4 (matches the rest of the socket layer)
-    hints.ai_socktype = SOCK_STREAM;
-    addrinfo* res = nullptr;
-    if (::getaddrinfo(host, portStr, &hints, &res) != 0 || !res) return false;
-    struct AiGuard { addrinfo* p; ~AiGuard() { if (p) ::freeaddrinfo(p); } } aiGuard{res};
-
-    int fd = open_sock(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd < 0) return false;
-
-    // Bound the CONNECT by timeoutMs, same technique as httpRequest: non-blocking connect, wait
-    // writable via select(), check SO_ERROR. Leave the socket NON-BLOCKING on success (unlike
-    // httpRequest, which flips back to blocking) — a long-lived MQTT client reads/writes through the
-    // non-blocking read()/writeSome() path and must never stall the caller's loop.
-    if (make_nonblocking(fd) != 0) { close_sock(fd); return false; }
-    int cr = ::connect(sock(fd), res->ai_addr, static_cast<int>(res->ai_addrlen));
-#ifdef _WIN32
-    const bool inProgress = (cr != 0 && ::WSAGetLastError() == WSAEWOULDBLOCK);
-#else
-    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
-#endif
-    if (cr != 0 && !inProgress) { close_sock(fd); return false; }   // immediate hard failure
-    if (cr != 0) {                                                  // in progress — wait for writable
-        fd_set wf; FD_ZERO(&wf); FD_SET(sock(fd), &wf);
-        timeval ctv{};
-        ctv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
-        ctv.tv_usec = static_cast<decltype(ctv.tv_usec)>((timeoutMs % 1000) * 1000);
-        if (::select(static_cast<int>(sock(fd)) + 1, nullptr, &wf, nullptr, &ctv) <= 0) {
-            close_sock(fd); return false;                          // timeout / select error
-        }
-        int soerr = 0; socklen_t len = sizeof(soerr);
-        ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
-        if (soerr != 0) { close_sock(fd); return false; }          // connect failed
-    }
-    fd_ = fd;   // connected, socket stays non-blocking
-    return true;
-}
-
 bool TcpConnection::connectStart(const char* host, uint16_t port) {
     if (!host || !host[0]) return false;
     close();

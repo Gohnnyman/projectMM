@@ -1,5 +1,5 @@
 # Ethernet (internal EMAC, RMII) — enables the RMII *driver* for the classic
-# ESP32 / P4. Layered onto sdkconfig.defaults by scripts/build/build_esp32.py.
+# ESP32 / P4. Layered onto sdkconfig.defaults by moondeck/build/build_esp32.py.
 #
 # Only the driver enable + DMA buffers live here (compile-time). The PHY addr,
 # reset GPIO, MDC/MDIO and RMII clock are RUNTIME config now — set per board in

@@ -209,9 +209,11 @@ def main():
                 et = controls.get("ethType")
                 # ethType must be an int (a JSON string like "2" would silently skip the rule below and
                 # also isn't what the device deserializes into the Select) — reject a stringified value.
-                if et is not None and not isinstance(et, int):
+                # `bool` is an int subclass, so exact-type-check (as flashBaud does) or a JSON `true`
+                # would pass as ethType 1 (LAN8720).
+                if et is not None and type(et) is not int:
                     errors.append(f"{where}: NetworkModule ethType must be an integer, got {et!r}")
-                if isinstance(et, int) and et != 0:
+                if type(et) is int and et != 0:
                     # RMII LAN8720(1)/IP101(2): rst + clock. RGMII YT8531(4): mdc/mdio/rst.
                     # W5500 SPI(3): the four SPI bus pins. -1 is an allowed explicit value ("unused /
                     # IDF default"); what the rule forbids is OMITTING a board-wiring pin.

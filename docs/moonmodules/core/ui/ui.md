@@ -49,7 +49,7 @@ Detail: [technical](../moxygen/DevicesModule.md)
 
 ### MQTT
 
-Bridges the light to an MQTT broker so a home-automation hub (Homebridge, and later Home Assistant) can control it. It drives the same `Drivers` controls IR and the WLED app do — every command routes through `Scheduler::setControl`, so MQTT is a transport, not new control logic. The MQTT 3.1.1 client is our own (dependency-free, golden-vector-tested in `MqttPacket.h`), speaking to the broker over the platform TCP socket. Disabled until a broker is set; works over WiFi or Ethernet.
+Bridges the light to an MQTT broker so a home-automation hub (Homebridge) can control it. It drives the same `Drivers` controls IR and the WLED app do — every command routes through `Scheduler::setControl`, so MQTT is a transport, not new control logic. The MQTT 3.1.1 client is our own (dependency-free, golden-vector-tested in `MqttPacket.h`), speaking to the broker over the platform TCP socket. Disabled until a broker is set; works over WiFi or Ethernet.
 
 - `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
 - `port` — broker port (default 1883).
@@ -170,7 +170,7 @@ A System peripheral (added per board, not auto-wired): an IR remote receiver tha
 <img src="../../../assets/core/IrModule.jpeg" width="300" alt="An IR receiver and the common 21-key RGB remote it decodes">
 
 - `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
-- `learn` — pick an action (off / on/off / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms.
+- `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
 - `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
 
 The actions toggle `Drivers.on` (master power), nudge `Drivers.brightness` (±16, clamped 0–255) and step `Drivers.palette` (next/previous). The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding ("learned … = 0x…"), a fired action ("Drivers.brightness → N", "Drivers.on → off"), and an unbound code ("received 0x… (unassigned)").

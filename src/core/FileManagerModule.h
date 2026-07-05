@@ -22,8 +22,9 @@ namespace mm {
 /// keeping the domain module simple and the recursion/paging out of core state and off `/api/state`.
 ///
 /// **Hidden entries.** A leading `.` (e.g. the `.config` persistence dir) is hidden unless the
-/// `show hidden` toggle is on — the standard dotfile convention. The toggle is a persisted bool the
-/// tree reads and forwards to `/api/dir` as the `hidden` filter flag.
+/// `show hidden` toggle is on — the standard dotfile convention. The toggle is a transient
+/// per-session view preference (a bool the tree forwards to `/api/dir` as the `hidden` filter):
+/// `setup()` forces it off on every boot, so a file manager always opens with hidden entries hidden.
 ///
 /// **Operations are HTTP endpoints, not controls.** `POST /api/dir?path=` creates a folder,
 /// `DELETE /api/dir?path=` removes a file or empty folder, and a file's contents are read/written

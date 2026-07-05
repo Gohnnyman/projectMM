@@ -258,9 +258,9 @@ private:
     // -----------------------------------------------------------------------
     void handleSetControl(platform::TcpConnection& conn, const char* body);
 
-    // Find a module anywhere in the scheduler's tree by its name. DFS, first match.
+    // Find a module anywhere in the scheduler's tree by its name — null-guards scheduler_
+    // then delegates to Scheduler::firstByName (the one canonical tree-walk).
     MoonModule* findModuleByName(const char* name);
-    static MoonModule* findInTree(MoonModule* mod, const char* name);
 
     // -----------------------------------------------------------------------
     // System metrics
@@ -276,8 +276,6 @@ private:
     void pollWledStateFromWebSockets();             ///< read app's slider/toggle sent over /ws
     void writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]);
     void writeWledStateBody(JsonSink& sink);
-    uint8_t driversBrightness();
-    bool driversOn();
     void writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first);
 
     // -----------------------------------------------------------------------

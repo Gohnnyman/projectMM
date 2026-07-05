@@ -335,9 +335,10 @@ void MqttModule::maybeRepublishName() {
 
 void MqttModule::publishState(bool force) {
     if (state_ != Conn::Connected) return;
-    const bool on = driversOn();
-    const uint8_t bri = driversBrightness();
-    const uint8_t pal = driversPalette();
+    Scheduler* s = Scheduler::instance();
+    const bool on = driversOn(s);
+    const uint8_t bri = driversBrightness(s);
+    const uint8_t pal = driversPalette(s);
     if (!force && havePublished_ && on == lastOn_ && bri == lastBri_ && pal == lastPalette_) return;
 
     char topic[128];
@@ -381,27 +382,6 @@ void MqttModule::feedForTest(const uint8_t* bytes, size_t len) {
 
 void MqttModule::setStatusLine(const char* msg) {
     std::snprintf(statusStr_, sizeof(statusStr_), "%s", msg);
-}
-
-// --- Domain-neutral reads of the Drivers controls, via the shared MoonModule::read* helpers so the
-// absent-control defaults match everywhere (the on-default must agree with HttpServerModule's). ---
-
-bool MqttModule::driversOn() {
-    Scheduler* s = Scheduler::instance();
-    MoonModule* d = s ? s->firstByName("Drivers") : nullptr;
-    return d ? d->readBool("on", true) : true;   // absent → on (matches the WLED shim)
-}
-
-uint8_t MqttModule::driversBrightness() {
-    Scheduler* s = Scheduler::instance();
-    MoonModule* d = s ? s->firstByName("Drivers") : nullptr;
-    return d ? d->readUint8("brightness", 0) : 0;
-}
-
-uint8_t MqttModule::driversPalette() {
-    Scheduler* s = Scheduler::instance();
-    MoonModule* d = s ? s->firstByName("Drivers") : nullptr;
-    return d ? d->readUint8("palette", 0) : 0;
 }
 
 } // namespace mm

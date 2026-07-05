@@ -135,4 +135,21 @@ private:
     uint32_t lastTimingUpdate_ = 0;   // 1-second window start
 };
 
+// --- Drivers master-state reads, shared by every consumer that mirrors the light state (the WLED
+// /json shim, MQTT). Domain-neutral: they name the `Drivers` module + its controls and read via the
+// generic MoonModule::read* helpers, so the absent-control defaults are defined ONCE here instead of
+// per consumer (a device with no `on` control still reads as on; brightness/palette default to 0). ---
+inline bool driversOn(Scheduler* s) {
+    MoonModule* d = s ? s->firstByName("Drivers") : nullptr;
+    return d ? d->readBool("on", true) : true;   // absent → on
+}
+inline uint8_t driversBrightness(Scheduler* s) {
+    MoonModule* d = s ? s->firstByName("Drivers") : nullptr;
+    return d ? d->readUint8("brightness", 0) : 0;
+}
+inline uint8_t driversPalette(Scheduler* s) {
+    MoonModule* d = s ? s->firstByName("Drivers") : nullptr;
+    return d ? d->readUint8("palette", 0) : 0;
+}
+
 } // namespace mm

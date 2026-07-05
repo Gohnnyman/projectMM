@@ -62,7 +62,7 @@
 /// projectMM's own implementation, designed from the INMP441 datasheet
 /// (https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf) and standard
 /// DSP rather than traced from any one project. See
-/// docs/moonmodules/core/AudioModule.md for the full DSP rationale, the source-seam
+/// docs/moonmodules/core/moxygen/AudioModule.md for the full DSP rationale, the source-seam
 /// backlog (line-in / PDM / analog / I2C codecs), and the forward-looking adaptive
 /// noise-gate analysis.
 

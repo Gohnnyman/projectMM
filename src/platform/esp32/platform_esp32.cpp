@@ -1395,46 +1395,6 @@ int TcpConnection::writeSome(const uint8_t* data, size_t len) {
 }
 
 
-bool TcpConnection::connect(const char* host, uint16_t port, uint32_t timeoutMs) {
-    if (!host || !host[0]) return false;
-    close();   // drop any prior fd — connect() re-homes this connection
-
-    // Resolve host (a name OR a dotted-quad — getaddrinfo handles both) via lwip DNS. A named broker
-    // (mqtt.local, homeassistant.lan) needs the query; a literal IP resolves without one.
-    char portStr[6];
-    std::snprintf(portStr, sizeof(portStr), "%u", static_cast<unsigned>(port));
-    struct addrinfo hints = {};
-    hints.ai_family = AF_INET;         // IPv4 (matches the rest of the socket layer)
-    hints.ai_socktype = SOCK_STREAM;
-    struct addrinfo* res = nullptr;
-    if (lwip_getaddrinfo(host, portStr, &hints, &res) != 0 || !res) return false;
-    struct AiGuard { struct addrinfo* p; ~AiGuard() { if (p) lwip_freeaddrinfo(p); } } aiGuard{res};
-
-    int fd = lwip_socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd < 0) return false;
-
-    // Bound the CONNECT by timeoutMs: non-blocking connect, wait writable via select(), check
-    // SO_ERROR. Leave the socket NON-BLOCKING on success — a long-lived MQTT client reads/writes
-    // through the non-blocking read()/writeSome() path and must never stall the caller's loop.
-    const int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-    int cr = lwip_connect(fd, res->ai_addr, res->ai_addrlen);
-    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
-    if (cr != 0 && !inProgress) { lwip_close(fd); return false; }   // immediate hard failure
-    if (cr != 0) {                                                  // in progress — wait for writable
-        fd_set wf; FD_ZERO(&wf); FD_SET(fd, &wf);
-        struct timeval ctv = {};
-        ctv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
-        ctv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
-        if (lwip_select(fd + 1, nullptr, &wf, nullptr, &ctv) <= 0) { lwip_close(fd); return false; }
-        int soerr = 0; socklen_t len = sizeof(soerr);
-        lwip_getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &len);
-        if (soerr != 0) { lwip_close(fd); return false; }           // connect failed
-    }
-    fd_ = fd;   // connected, socket stays non-blocking
-    return true;
-}
-
 bool TcpConnection::connectStart(const char* host, uint16_t port) {
     if (!host || !host[0]) return false;
     close();

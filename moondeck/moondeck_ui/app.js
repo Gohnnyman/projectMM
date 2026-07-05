@@ -1014,7 +1014,7 @@ function renderDevices() {
         injectBtn.addEventListener("click", (e) => {
             e.preventDefault();
             const deviceModel = deviceModelPicker.value;
-            if (!deviceModel) { injectBtn.textContent = "pick a device first"; setTimeout(() => injectBtn.textContent = "inject", 1500); return; }
+            if (!deviceModel) { injectBtn.textContent = "pick a device model"; setTimeout(() => injectBtn.textContent = "inject", 1500); return; }
             injectBtn.disabled = true;
             injectBtn.textContent = "injecting…";
             pushDevice(deviceModel, (ok) => {
@@ -1047,10 +1047,8 @@ function renderDevices() {
                 });
                 const j = await res.json();
                 otaBtn.textContent = j.ok ? "flashing ✓" : "failed ✗";
-                if (!j.ok) alert(`OTA failed: ${j.error || "unknown"}`);
             } catch (err) {
                 otaBtn.textContent = "failed ✗";
-                alert(`OTA failed: ${err.message || err}`);
             }
             setTimeout(() => { otaBtn.textContent = "OTA"; otaBtn.disabled = !otaFw; }, 2500);
         });

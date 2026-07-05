@@ -40,11 +40,12 @@ void FilesystemModule::setup() {
                 platform::filesystemUsed(), platform::filesystemTotal());
 }
 
-// No onBuildControls override: FilesystemModule is a non-UI persistence engine — it has NO
-// controls, so it renders no card in the module tree (which would confuse an end user next to
-// the File Manager). Its one piece of status, "last saved", is displayed by FileManagerModule,
-// which reads it via FilesystemModule::instance()->lastSavedStr(). The filesystem-usage gauge
-// likewise lives on FileManagerModule (that's where filesystem state is topical).
+// FilesystemModule is a non-UI persistence engine: it holds no controls (hence no
+// onBuildControls override), so it renders no card in the module tree — a card here would
+// confuse an end user next to the File Manager. Its one piece of status, "last saved", is
+// displayed by FileManagerModule, which reads it via FilesystemModule::instance()->lastSavedStr().
+// The filesystem-usage gauge likewise lives on FileManagerModule (that's where filesystem state
+// is topical).
 
 void FilesystemModule::loop1s() {
     if (!mounted_ || !scheduler_) return;

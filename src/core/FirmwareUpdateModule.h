@@ -29,6 +29,16 @@ inline char     g_otaStatus[64]     = "idle";
 inline uint32_t g_otaBytesRead      = 0;
 inline uint32_t g_otaBytesTotal     = 0;
 
+// True while an OTA is running (as opposed to idle / a terminal "success"/"failed:…").
+// The URL and upload flash paths both gate their 409 "already in progress" guard on this,
+// so the set of in-flight states lives in one place instead of a duplicated strcmp chain.
+inline bool otaInFlight() {
+    return std::strcmp(g_otaStatus, "starting")    == 0 ||
+           std::strcmp(g_otaStatus, "downloading") == 0 ||
+           std::strcmp(g_otaStatus, "flashing")    == 0 ||
+           std::strcmp(g_otaStatus, "rebooting")   == 0;
+}
+
 /// A thin status surface for OTA flashing — surfaces flash progress as live
 /// read-only controls plus the per-module status banner
 ///
@@ -65,7 +75,7 @@ inline uint32_t g_otaBytesTotal     = 0;
 ///
 /// **Prior art:** `esp_https_ota` is the standard ESP-IDF OTA-from-HTTP component used by
 /// every ESP32 OTA flow since IDF v4.x; the install-picker UI is the new layer on top. See
-/// docs/moonmodules/core/FirmwareUpdateModule.md for the `POST /api/firmware/url` wire
+/// docs/moonmodules/core/moxygen/FirmwareUpdateModule.md for the `POST /api/firmware/url` wire
 /// contract, the compatibility rules, and the flash lifecycle + error taxonomy.
 class FirmwareUpdateModule : public MoonModule {
 public:

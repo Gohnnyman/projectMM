@@ -3,7 +3,7 @@
 # which SPI pins is runtime config (boards.json → NetworkModule → setEthConfig),
 # not baked here. Boards: SE16, LightCrafter (WIZ850IO).
 #
-# Layered onto sdkconfig.defaults by scripts/build/build_esp32.py. The filename's
+# Layered onto sdkconfig.defaults by moondeck/build/build_esp32.py. The filename's
 # `.eth-spi` segment is what flips the build to an Ethernet build (clears MM_NO_ETH
 # — build_esp32.py matches ".eth" in any fragment name), so platform::hasEthernet
 # becomes true and ethInit()'s W5500 path compiles.

@@ -191,7 +191,6 @@ async function pushDefaultsOverSerial(port, board, applyDefaults, trackProgress,
     return await sendConfigOverSerial(port, board, onLog);
 }
 
-// Push a device-model's whole catalog config to the device over serial. Walks the SAME
 // The installer's default esptool-js flash baud: SAFE, because the installer serves unknown
 // walk-up hardware (a cheap CH340 clone, a bad cable). A well-tested compromise across CH340 /
 // CP2102 / FT232 bridges. A board overrides it in deviceModels.json via `flashBaud` — today
@@ -227,6 +226,7 @@ async function catalogFlashBaud(board, onLog) {
     return entry && Number.isInteger(entry.flashBaud) ? entry.flashBaud : DEFAULT_FLASH_BAUD;
 }
 
+// Push a device-model's whole catalog config to the device over serial. Walks the SAME
 // deviceModels.json entry the HTTP path used (see planConfigOps) but emits APPLY_OP ops
 // instead of HTTP requests — so the defaults apply during provisioning with no HTTP and
 // no browser handoff. Returns true if the entry was found + pushed, false if none.

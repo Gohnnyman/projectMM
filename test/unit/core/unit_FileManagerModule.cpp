@@ -41,7 +41,9 @@ struct Rig {
         fm.onBuildControls();
         fm.setup();
     }
-    ~Rig() { platform::fsSetRoot("."); std::filesystem::remove_all(root); }
+    // Restore the DEFAULT root (fsSetRoot("") → "build"), not ".", so a later test in the same
+    // binary starts from the same baseline this Rig assumed, never a leaked "." repo-root.
+    ~Rig() { platform::fsSetRoot(""); std::filesystem::remove_all(root); }
 
     bool onDisk(const char* rel) const {
         return std::filesystem::exists(std::string(root) + rel);

@@ -19,15 +19,20 @@ void FileManagerModule::onBuildControls() {
     // reports 0). loop1s refreshes the used value; the total is fixed.
     totalBytes_ = static_cast<uint32_t>(platform::filesystemTotal());
     usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
-    if (totalBytes_ > 0) controls_.addProgress("filesystem", usedBytes_, totalBytes_);
+    if (totalBytes_ > 0) {
+        controls_.addProgress("filesystem", usedBytes_, totalBytes_);
+        controls_.setHidden(controls_.count() - 1, true);   // renders as the usage bar in the panel, not generically
+    }
     // "last saved" readout — how long ago config was persisted. The value is OWNED by the
     // FilesystemModule engine (non-UI); the File Manager just displays it here (this is where
     // filesystem state is topical). Bind the control straight to the engine's live buffer — no
     // per-instance copy — the same no-copy pattern SystemModule uses for its static strings. The
     // engine is the boot-wired singleton (alive for the device's life), and its loop1s keeps the
     // string current. Bound only when the engine exists (it's constructed before this module).
-    if (FilesystemModule* fs = FilesystemModule::instance())
+    if (FilesystemModule* fs = FilesystemModule::instance()) {
         controls_.addReadOnly("lastSaved", fs->lastSavedStr());
+        controls_.setHidden(controls_.count() - 1, true);   // shown in the panel header, not generically
+    }
     MoonModule::onBuildControls();
 }
 
@@ -46,6 +51,6 @@ void FileManagerModule::setup() {
 // mkdir/delete are HTTP endpoints (POST/DELETE /api/dir?path=) in HttpServerModule: a create/delete
 // carries its path in the request and touches the filesystem directly, so this module holds no op
 // state and writes nothing to persisted config. The path guard (reject `..`, root at mount) lives
-// once in HttpServerModule::fileQueryPath, shared with /api/file + /api/dir GET.
+// once in HttpServerModule::parseFilePath, shared with /api/file + /api/dir GET.
 
 } // namespace mm

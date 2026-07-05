@@ -108,10 +108,14 @@ inline size_t mqttAppendString(uint8_t* out, size_t outLen, size_t pos,
 // length. This helper writes just the fixed header; callers pass the final bodyLen.
 inline size_t mqttWriteFixedHeader(uint8_t* out, size_t outLen,
                                    MqttPacketType type, uint8_t flags, uint32_t bodyLen) {
-    if (outLen < 1) return 0;
-    out[0] = static_cast<uint8_t>((static_cast<uint8_t>(type) << 4) | (flags & 0x0F));
-    const size_t rl = encodeRemainingLength(bodyLen, out + 1);
+    // Encode the varint into a local scratch first, so we validate 1 + rl <= outLen BEFORE writing
+    // anything into out — encodeRemainingLength is unbounded, and a 2–4-byte length into a 1-byte
+    // buffer would otherwise overrun. Remaining-length is at most 4 bytes (§2.2.3).
+    uint8_t rlBuf[4];
+    const size_t rl = encodeRemainingLength(bodyLen, rlBuf);
     if (rl == 0 || 1 + rl > outLen) return 0;
+    out[0] = static_cast<uint8_t>((static_cast<uint8_t>(type) << 4) | (flags & 0x0F));
+    std::memcpy(out + 1, rlBuf, rl);
     return 1 + rl;   // total fixed-header size
 }
 
