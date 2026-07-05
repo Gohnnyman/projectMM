@@ -178,7 +178,7 @@ The UI is module-driven — it renders whatever the tree says. `acceptsChildren`
 Wait — that adds noise. Let me reconsider:
 
   - **(b) is the lightest:** `acceptsChildren` for `"Layers"` is hardcoded to `[Layer]` (by typeName, not role). The UI already special-cases this kind of containment via `acceptsChildren`. The role chip on each `Layer` card stays Generic (⚙️). Slightly cluttered emoji-wise but no role-enum change.
-  - **(a) is cleaner long-term:** add `ModuleRole::Layer` to the enum. The UI ROLE_EMOJI map gets a new entry (need to pick an emoji — 🪟 / 🎞️ / 🧱 are candidates, will ask the product owner). [check_specs.py](scripts/check/check_specs.py) might depend on the role list; verify.
+  - **(a) is cleaner long-term:** add `ModuleRole::Layer` to the enum. The UI ROLE_EMOJI map gets a new entry (need to pick an emoji — 🪟 / 🎞️ / 🧱 are candidates, will ask the product owner). [check_specs.py](moondeck/check/check_specs.py) might depend on the role list; verify.
 
   **Plan picks (a)** because we're already changing the shape and adding a role is cheaper than a special-case in the UI. **One emoji to pick during implementation.**
 
@@ -212,13 +212,13 @@ Wait — that adds noise. Let me reconsider:
 
 ## Implementation order
 
-1. **Add `ModuleRole::Layer`** to [src/core/MoonModule.h](src/core/MoonModule.h). Update `roleName()`. Verify [scripts/check/check_specs.py](scripts/check/check_specs.py) doesn't have a hardcoded role list. Build to check for warnings.
+1. **Add `ModuleRole::Layer`** to [src/core/MoonModule.h](src/core/MoonModule.h). Update `roleName()`. Verify [moondeck/check/check_specs.py](moondeck/check/check_specs.py) doesn't have a hardcoded role list. Build to check for warnings.
 2. **Rename `LayoutGroup` → `Layouts`** (class + file via `git mv` + factory key). Update all `#include`s, all `static_cast<LayoutGroup*>`, all references in tests + scenarios + spec. Build + run all tests; expect green (no behaviour change).
 3. **Rename `DriverGroup` → `Drivers`** (same treatment).
 4. **Add `class Layers`** in [src/light/Layers.h](src/light/Layers.h). Add `setLayouts()` to `Layer`. main.cpp creates `Layers` containing one `Layer`. Run all tests; live-verify with a desktop run that the pipeline still produces frames.
-5. **Add `start/end` controls to `Layer`** — uint16 (or int16 if available) with sensible bounds. Default = whole layout. `rebuildLUT()` honours them when not at default. Update [test_layer*.cpp](test) and add a test asserting "Layer with default start/end matches old Layer behaviour byte-for-byte."
+5. **Add `start/end` controls to `Layer`** — uint16 (or int16 if available) with sensible bounds. Default = whole layout. `rebuildLUT()` honours them when not at default. Update `test_layer*.cpp` and add a test asserting "Layer with default start/end matches old Layer behaviour byte-for-byte."
 6. **UI emoji pick** for `ModuleRole::Layer` — ask the product owner. Add to `ROLE_EMOJI` map in [src/ui/app.js](src/ui/app.js).
-7. **Update specs** ([Layer.md](docs/moonmodules/light/Layer.md), new [Layouts.md](docs/moonmodules/light/Layouts.md), new [Layers.md](docs/moonmodules/light/Layers.md), new [Drivers.md](docs/moonmodules/light/drivers/Drivers.md), [architecture-light.md](docs/architecture-light.md), [plan.md](docs/plan.md), [README.md](README.md) if needed). Run [check_specs.py](scripts/check/check_specs.py).
+7. **Update specs** ([Layer.md](docs/moonmodules/light/Layer.md), new [Layouts.md](docs/moonmodules/light/Layouts.md), new [Layers.md](docs/moonmodules/light/Layers.md), new [Drivers.md](docs/moonmodules/light/drivers/Drivers.md), [architecture-light.md](docs/architecture-light.md), [plan.md](docs/plan.md), [README.md](README.md) if needed). Run [check_specs.py](moondeck/check/check_specs.py).
 8. **Migration**: FilesystemModule deletes `.config/LayoutGroup.json` and `.config/DriverGroup.json` if present, logs a warning.
 9. **All pre-commit gates 1–6** (build, ctest, scenarios, platform boundary, specs, ESP32). Reviewer agent (gate 7) after.
 
@@ -227,9 +227,9 @@ Wait — that adds noise. Let me reconsider:
 - [ ] `cmake --build build` — zero warnings, builds clean.
 - [ ] `ctest` — all unit tests pass, including the new `test_layers_container.cpp` cases.
 - [ ] `./build/test/mm_scenarios` — all scenarios pass (after their `LayoutGroup`/`DriverGroup` type-name updates).
-- [ ] [check_platform_boundary.py](scripts/check/check_platform_boundary.py) — PASS.
-- [ ] [check_specs.py](scripts/check/check_specs.py) — all specs ok.
-- [ ] [build_esp32.py](scripts/build/build_esp32.py) — clean ESP32 build.
+- [ ] [check_platform_boundary.py](moondeck/check/check_platform_boundary.py) — PASS.
+- [ ] [check_specs.py](moondeck/check/check_specs.py) — all specs ok.
+- [ ] [build_esp32.py](moondeck/build/build_esp32.py) — clean ESP32 build.
 - [ ] Live desktop run: `/api/types` shows `Layouts`, `Layers`, `Drivers` (no longer `LayoutGroup`, `DriverGroup`). `/api/state` shows the new tree shape. Effects render correctly through the new wiring. Tick time within run-to-run jitter of the previous commit.
 - [ ] UI side-nav reads `Layouts`, `Layers`, `Drivers`. Cards under `Layers` contain one `Layer` with effects+modifiers inside. Drag-reorder still works within each container.
 - [ ] One snapshot ESP32 run verifies no regression — same scenario, same FPS within jitter.

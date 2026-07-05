@@ -5,7 +5,7 @@
 // SDK). The orchestrator imports these for the actual send; test/js imports them
 // to pin the byte layout. This is the SAME wire format three implementations must
 // agree on: device C++ (src/core/ImprovFrame.h + platform_esp32_improv.cpp),
-// Python (scripts/build/improv_provision.py), and this file. The frame-contract
+// Python (moondeck/build/improv_provision.py), and this file. The frame-contract
 // tests (test/js, test/python) assert a shared golden vector so they can't drift.
 //
 // Frame layout (matches src/core/ImprovFrame.h):

@@ -234,11 +234,11 @@ saveSubtree(m):
 | 1 | Desktop build | `cmake --build /Users/ewoud/Developer/GitHub/ewowi/projectMM/build` (zero warnings) |
 | 2 | Unit tests | `cd build && ctest --output-on-failure` |
 | 3 | Scenario tests | `./build/test/mm_scenarios` (SIGABRT exit pre-existing on HEAD — accept) |
-| 4 | Platform boundary | `python3 scripts/check/check_platform_boundary.py` — verify no platform leakage in FilesystemModule.h |
-| 5 | Spec check | `python3 scripts/check/check_specs.py` — confirms FilesystemModule.md describes the implemented API |
-| 6 | ESP32 build | `python3 scripts/build/build_esp32.py` — clean. Verify partition + LittleFS still work. |
+| 4 | Platform boundary | `python3 moondeck/check/check_platform_boundary.py` — verify no platform leakage in FilesystemModule.h |
+| 5 | Spec check | `python3 moondeck/check/check_specs.py` — confirms FilesystemModule.md describes the implemented API |
+| 6 | ESP32 build | `python3 moondeck/build/build_esp32.py` — clean. Verify partition + LittleFS still work. |
 | 7 | Reviewer agent | Opus reviewer over staged diff. Flag: no heap alloc in `loop1s()` save path (only stack buffers); platform boundary clean; no duplication of JSON helpers; JsonUtil.h stays at ~50 lines (not growing into a JSON library). |
-| 8 | KPI collection | `python3 scripts/check/collect_kpi.py --commit` |
+| 8 | KPI collection | `python3 moondeck/check/collect_kpi.py --commit` |
 | 9 | Live scenarios | Run on ESP32 hardware: existing 7 scenarios pass. Manual: set deviceName via REST → reboot → verify deviceName persisted. |
 | 10 | Documentation | spec + architecture + testing updated; item 11 removed from `docs/plan.md`. |
 

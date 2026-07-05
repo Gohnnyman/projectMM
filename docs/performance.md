@@ -319,7 +319,7 @@ Board: the default `esp32` (WiFi + Ethernet — the largest classic variant, mea
 Run from project root after a clean build:
 
 ```bash
-uv run scripts/build/build_esp32.py --firmware esp32
+uv run moondeck/build/build_esp32.py --firmware esp32
 idf.py -B build/esp32-esp32 \
        -DSDKCONFIG=build/esp32-esp32/sdkconfig \
        size-components | head -40

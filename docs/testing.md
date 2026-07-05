@@ -5,7 +5,7 @@ What we test and how. The detailed inventory of every test lives in two auto-gen
 - **[Unit tests](tests/unit-tests.md)** — one row per `TEST_CASE`, grouped by module. Generated from `test/unit/{core,light}/unit_*.cpp`.
 - **[Scenario tests](tests/scenario-tests.md)** — one section per scenario JSON, grouped by module. Generated from `test/scenarios/{core,light}/scenario_*.json`. Each scenario runs in two tiers (in-process + live) unless flagged `live_only` (construct-mode scenarios are also skipped on live, since `main.cpp` owns the live shape).
 
-Both are produced by `scripts/docs/generate_test_docs.py`; the source of truth is the test files themselves (see [Adding Tests](#adding-tests) below).
+Both are produced by `moondeck/docs/generate_test_docs.py`; the source of truth is the test files themselves (see [Adding Tests](#adding-tests) below).
 
 ## Testing strategy
 
@@ -54,11 +54,11 @@ A test lives under the subfolder of its **primary** `@module`'s source domain (e
 
 ### Host-side tests (Python + JS)
 
-The C++ `ctest` / scenario suites can't reach the **Python** (MoonDeck, build scripts) or **JS** (web installer) code, so those get their own host-side unit tier — `test/python/` (pytest, run `uv run --with pytest --with pyserial pytest test/python`) and `test/js/` (Node's built-in runner, run `node --test "test/js/**/*.test.mjs"`; no `package.json`/`npm install`). Both run in `.github/workflows/test.yml` on every PR and are commit gates (CLAUDE.md Event 1, gate 10) when `scripts/` / `web-installer/` / the test dirs change. Python test files carry their deps in a PEP-723 `# /// script` block (the repo's convention — there's no central `pyproject.toml`); pyserial is a dep only because `improv_provision.py`'s import guard exits without it, not because the frame logic needs it.
+The C++ `ctest` / scenario suites can't reach the **Python** (MoonDeck, build scripts) or **JS** (web installer) code, so those get their own host-side unit tier — `test/python/` (pytest, run `uv run --with pytest --with pyserial pytest test/python`) and `test/js/` (Node's built-in runner, run `node --test "test/js/**/*.test.mjs"`; no `package.json`/`npm install`). Both run in `.github/workflows/test.yml` on every PR and are commit gates (CLAUDE.md Event 1, gate 10) when `moondeck/` / `web-installer/` / the test dirs change. Python test files carry their deps in a PEP-723 `# /// script` block (the repo's convention — there's no central `pyproject.toml`); pyserial is a dep only because `improv_provision.py`'s import guard exits without it, not because the frame logic needs it.
 
 #### What's covered today: the Improv frame wire format
 
-The Improv serial frame is implemented **three times** — device C++ (`src/core/ImprovFrame.h`), Python (`scripts/build/improv_provision.py`), and installer JS (`web-installer/improv-frame.js`) — so a drift in any one silently breaks provisioning. Both suites assert the **same golden vector** so the Python and JS builders provably agree (hand-verified against the C++ sum-mod-256 checksum):
+The Improv serial frame is implemented **three times** — device C++ (`src/core/ImprovFrame.h`), Python (`moondeck/build/improv_provision.py`), and installer JS (`web-installer/improv-frame.js`) — so a drift in any one silently breaks provisioning. Both suites assert the **same golden vector** so the Python and JS builders provably agree (hand-verified against the C++ sum-mod-256 checksum):
 
 ```
 buildImprovFrame(type=0x03, payload=[0x01])  ==  49 4d 50 52 4f 56 01 03 01 01 e3
@@ -87,9 +87,9 @@ buildImprovFrame(type=0x03, payload=[0x01])  ==  49 4d 50 52 4f 56 01 03 01 01 e
 
 The JS suite proves the installer *chunks* an op correctly; the **device side that reassembles those chunks** is pinned by the C++ `unit_ImprovOpReassembler` suite (`src/core/ImprovOpReassembler.h`, the pure state machine behind the device's `APPLY_OP` handler — extracted from `platform_esp32_improv.cpp` so it's desktop-testable). It covers the full receive contract: in-order multi-chunk reassembly + NUL-termination, **duplicate-chunk rejection** and **out-of-order/skipped-seq rejection** (the guard against an installer retry corrupting the buffer), **overflow** rejection at the buffer-minus-NUL boundary, mid-stream `seq 0` abandoning a partial op, and clean recovery after every error. Encode (JS) + reassemble (C++) together prove APPLY_OP end to end without hardware.
 
-**`test/python/test_installer_manifests.py`** (pytest) — pins the web installer's per-release file contract. For every `ships: true` firmware in `web-installer/firmwares.json` it runs `scripts/build/generate_manifest.py` (with a synthetic `flasher_args.json`, so no firmware build is needed) and asserts the manifest is valid (a `chipFamily` + non-empty `parts[]`) AND that **every part filename matches one of the globs the release workflow stages onto Pages** (`firmware-*.bin` / `shared-ota-data.bin` / `partition-table-*.bin`). A manifest that names a file outside those globs points at something the deploy never stages → the installer 404s at fetch-firmware (the failure that shipped a broken v2.0.0 installer). The test guards the manifest-generation ↔ staged-files contract; the *deploy mechanics* that stage them (per-tag, in `release.yml`) are workflow shell logic a unit test can't reach, so the two are complementary.
+**`test/python/test_installer_manifests.py`** (pytest) — pins the web installer's per-release file contract. For every `ships: true` firmware in `web-installer/firmwares.json` it runs `moondeck/build/generate_manifest.py` (with a synthetic `flasher_args.json`, so no firmware build is needed) and asserts the manifest is valid (a `chipFamily` + non-empty `parts[]`) AND that **every part filename matches one of the globs the release workflow stages onto Pages** (`firmware-*.bin` / `shared-ota-data.bin` / `partition-table-*.bin`). A manifest that names a file outside those globs points at something the deploy never stages → the installer 404s at fetch-firmware (the failure that shipped a broken v2.0.0 installer). The test guards the manifest-generation ↔ staged-files contract; the *deploy mechanics* that stage them (per-tag, in `release.yml`) are workflow shell logic a unit test can't reach, so the two are complementary.
 
-**`test/python/test_check_specs_drift.py`** (pytest) — pins the two spec-drift guards in `scripts/check/check_specs.py` (the spec-check commit gate). Some facts live in both the `.h` and the module doc in different forms: a control's **numeric range** (`addUint8("floor", floor, 0, 255)` vs the prose "noise floor (0–255)") and the **author/source URL** (`// Author: … — <url>` vs the `Origin:` markdown link). Neither can be single-sourced — they're the same fact for two audiences — so instead the gate *validates* them: if the doc restates a control's range and it conflicts with the `.h`, or an `.h` author URL is missing from the doc, the spec check flags it. The checks are block-scoped on the consolidated catalog pages (a control name shared across modules, `fps`/`fadeRate`, matches only its own module's block), and tolerant of the human range spellings (`1–8` / `1-8` / `1 to 8`) — this suite pins both the catch and the no-false-alarm behaviour.
+**`test/python/test_check_specs_drift.py`** (pytest) — pins the two spec-drift guards in `moondeck/check/check_specs.py` (the spec-check commit gate). Some facts live in both the `.h` and the module doc in different forms: a control's **numeric range** (`addUint8("floor", floor, 0, 255)` vs the prose "noise floor (0–255)") and the **author/source URL** (`// Author: … — <url>` vs the `Origin:` markdown link). Neither can be single-sourced — they're the same fact for two audiences — so instead the gate *validates* them: if the doc restates a control's range and it conflicts with the `.h`, or an `.h` author URL is missing from the doc, the spec check flags it. The checks are block-scoped on the consolidated catalog pages (a control name shared across modules, `fps`/`fadeRate`, matches only its own module's block), and tolerant of the human range spellings (`1–8` / `1-8` / `1 to 8`) — this suite pins both the catch and the no-false-alarm behaviour.
 
 MoonDeck's pure logic (catalog reverse-lookup, state migration) and the installer's op-walk / storage are the next host-side candidates as they accrete regression risk.
 
@@ -238,11 +238,11 @@ A contract changes only when there's a reason: a code change improved performanc
 
 ```bash
 # After an optimisation: tighten the ceiling for pc-*
-uv run scripts/scenario/run_scenario.py --update-contract \
+uv run moondeck/scenario/run_scenario.py --update-contract \
     --reason "Layer LUT inline copy"
 
 # After accepting an ESP32 cost: loosen the ceiling on that target
-uv run scripts/scenario/run_live_scenario.py --host 192.168.1.210 \
+uv run moondeck/scenario/run_live_scenario.py --host 192.168.1.210 \
     --update-contract --reason "added DMX driver overhead"
 ```
 
@@ -315,10 +315,10 @@ Unknown JSON keys are ignored by both runners (C++ and Python), so adding a new 
 ### Generated docs and the shared parser
 
 ```text
-scripts/docs/
+moondeck/docs/
 ├── _test_metadata.py        # one parser used by both consumers below
 └── generate_test_docs.py    # writes docs/tests/unit-tests.md + scenario-tests.md
-scripts/moondeck.py          # serves the same data as HTML in MoonDeck views
+moondeck/moondeck.py          # serves the same data as HTML in MoonDeck views
 ```
 
 Both the markdown generator and the MoonDeck endpoints (`/api/test-modules`, `/api/unit-tests/<Module>`, `/api/scenarios/<name>`) import from `_test_metadata.py`. Adding a new metadata field (e.g. `@since`) means one edit there; both consumers pick it up.
@@ -326,8 +326,8 @@ Both the markdown generator and the MoonDeck endpoints (`/api/test-modules`, `/a
 Run the generator after touching any test file:
 
 ```bash
-uv run scripts/docs/generate_test_docs.py            # writes both docs
-uv run scripts/docs/generate_test_docs.py --check    # exits non-zero on drift (CI-friendly)
+uv run moondeck/docs/generate_test_docs.py            # writes both docs
+uv run moondeck/docs/generate_test_docs.py --check    # exits non-zero on drift (CI-friendly)
 ```
 
 `--check` exits non-zero when the docs are stale — a contributor who adds a `TEST_CASE` without re-running the generator gets flagged. Run it in CI or before a commit to keep the generated docs in sync.
@@ -340,11 +340,11 @@ Run them with:
 
 ```bash
 # Replace build/macos with build/linux or build/windows per host. The
-# MoonDeck path below and `uv run scripts/test/test_desktop.py` resolve the
+# MoonDeck path below and `uv run moondeck/test/test_desktop.py` resolve the
 # host build dir automatically; the raw ctest / mm_tests calls don't.
 ctest --test-dir build/macos --output-on-failure   # all
 ./build/macos/test/mm_tests -tc="<case-name>"      # one test case
-uv run scripts/test/test_desktop.py --module Layer # filtered by module
+uv run moondeck/test/test_desktop.py --module Layer # filtered by module
 ```
 
 Or via MoonDeck (PC tab → Unit Test card). Pick a module from the shared module dropdown above the card to filter the run. Tests button shows the per-module inventory.
@@ -358,9 +358,9 @@ Inventory: **[docs/tests/scenario-tests.md](tests/scenario-tests.md)** (auto-gen
 Run them with:
 
 ```bash
-uv run scripts/scenario/run_scenario.py                                      # all
-uv run scripts/scenario/run_scenario.py --name scenario_Layer_base_pipeline  # one by stem
-uv run scripts/scenario/run_scenario.py --module Layer                       # all for one module
+uv run moondeck/scenario/run_scenario.py                                      # all
+uv run moondeck/scenario/run_scenario.py --name scenario_Layer_base_pipeline  # one by stem
+uv run moondeck/scenario/run_scenario.py --module Layer                       # all for one module
 ```
 
 Or via MoonDeck (PC tab → Scenarios card). The module dropdown is shared with the Unit Test card above it: pick a module once and both card's run-set narrows. Steps button shows the per-scenario step list.
@@ -383,10 +383,10 @@ A step can also set `"measure": true` on a non-measure op (e.g. mark the last `a
 Live scenarios run the same JSON against a running device via the REST API.
 
 ```bash
-uv run scripts/scenario/run_live_scenario.py --host localhost:8080       # desktop
-uv run scripts/scenario/run_live_scenario.py --host 192.168.1.210        # ESP32
-uv run scripts/scenario/run_live_scenario.py --update-baseline           # save
-uv run scripts/scenario/run_live_scenario.py --compare-baseline          # check
+uv run moondeck/scenario/run_live_scenario.py --host localhost:8080       # desktop
+uv run moondeck/scenario/run_live_scenario.py --host 192.168.1.210        # ESP32
+uv run moondeck/scenario/run_live_scenario.py --update-baseline           # save
+uv run moondeck/scenario/run_live_scenario.py --compare-baseline          # check
 ```
 
 MoonDeck's Live tab wraps the same workflow: the Network bar at the top selects the LAN, Discover/Refresh populates the device list, the Live Scenarios card runs the selected scenario against every checked device.
@@ -399,7 +399,7 @@ Scenarios that add modules (e.g. `scenario_Layer_base_pipeline`, `scenario_Layer
 
 Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real values. Desktop returns 0 (unlimited). The control-change scenario verifies no memory leaks by checking that heap returns to baseline after a mirror toggle.
 
-One live-tier test lives outside the scenario JSON schema because it spans **multiple devices**: `uv run scripts/scenario/run_network_live.py` runs a lights-over-UDP matrix (ArtNet, E1.31 and DDP) over every online board in moondeck.json — each board is once the sender, all others listen, and reception is asserted by reading each device's `/ws` preview stream (see [MoonDeck.md § run_network_live](../scripts/MoonDeck.md#run_network_live)). A device matrix needs loops and per-round state the declarative scenario JSON can't express, so it follows the `improv_smoke_test.py` script shape instead.
+One live-tier test lives outside the scenario JSON schema because it spans **multiple devices**: `uv run moondeck/scenario/run_network_live.py` runs a lights-over-UDP matrix (ArtNet, E1.31 and DDP) over every online board in moondeck.json — each board is once the sender, all others listen, and reception is asserted by reading each device's `/ws` preview stream (see [MoonDeck.md § run_network_live](../moondeck/MoonDeck.md#run_network_live)). A device matrix needs loops and per-round state the declarative scenario JSON can't express, so it follows the `improv_smoke_test.py` script shape instead.
 
 ## Hardware Verification
 
@@ -414,10 +414,10 @@ All live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative bo
 
 ## Adding Tests
 
-**Unit test:** add a `TEST_CASE` to the appropriate `test/unit/{core,light}/unit_<ExactModuleName>[_<topic>].cpp` file. Each file carries `// @module <ExactCamelCaseName>` at the top, plus a single `//` description line above each `TEST_CASE`. Add a new file when no existing test covers your module — pick the subfolder matching the module's `src/` domain. After adding cases, run `uv run scripts/docs/generate_test_docs.py` so the generated inventory matches.
+**Unit test:** add a `TEST_CASE` to the appropriate `test/unit/{core,light}/unit_<ExactModuleName>[_<topic>].cpp` file. Each file carries `// @module <ExactCamelCaseName>` at the top, plus a single `//` description line above each `TEST_CASE`. Add a new file when no existing test covers your module — pick the subfolder matching the module's `src/` domain. After adding cases, run `uv run moondeck/docs/generate_test_docs.py` so the generated inventory matches.
 
 **Scenario test:** create a JSON file under `test/scenarios/{core,light}/` named `scenario_<ExactModuleName>_<topic>.json`. The top-level needs `name` (matching the filename stem), `module`, optional `also`, `description`, `mode` (`construct` or `mutate`), and optional `"live_only": true` if the scenario can only run against a real device. Each `steps[]` entry has an `op` (`add_module`, `set_control`, `measure`), a `name`, a `description` field that the doc generator picks up, optional `"measure": true` to run a measurement after the op, and optional `bounds` (`fps` and/or `heap`). The scenario runner auto-discovers all `.json` files under `test/scenarios/` recursively.
 
 **Regression test:** when fixing a bug, add a test that reproduces it. The test's description (the `//` line for unit tests, the `description` JSON field for scenarios) should mention the root cause so the connection stays traceable in the generated inventory.
 
-**Doc check:** `scripts/docs/generate_test_docs.py --check` exits non-zero if regeneration would change `docs/tests/*.md` — a CI-friendly way to catch metadata that drifted from the source.
+**Doc check:** `moondeck/docs/generate_test_docs.py --check` exits non-zero if regeneration would change `docs/tests/*.md` — a CI-friendly way to catch metadata that drifted from the source.

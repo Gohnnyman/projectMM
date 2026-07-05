@@ -51,8 +51,8 @@ The ordering is strict — push everything into the source that can go there:
    A module whose entire story fits in `///` comments has **no `.md`** — just its generated API page.
 
 ## Files
-- **Edit:** `scripts/docs/mkdocs_hooks.py` (Doxygen+moxygen generation + link retargeting), `mkdocs.yml` (nav for the generated API section; moxygen template path), `.github/workflows/release.yml` (`apt install doxygen`), the curated infra `.h` files (progressively `///`-enrich, starting Control.h + a few), the shrunk infra overview `.md` (Control.md → cross-file-only + matrix + lineage), `docs/coding-standards.md` (§ Documentation model: record the inversion + the moxygen mechanism, fill the "autodoc TBD" placeholder), CLAUDE.md pointer.
-- **New:** a committed `Doxyfile` (scoped, compact settings) + the moxygen custom template under `scripts/docs/`.
+- **Edit:** `moondeck/docs/mkdocs_hooks.py` (Doxygen+moxygen generation + link retargeting), `mkdocs.yml` (nav for the generated API section; moxygen template path), `.github/workflows/release.yml` (`apt install doxygen`), the curated infra `.h` files (progressively `///`-enrich, starting Control.h + a few), the shrunk infra overview `.md` (Control.md → cross-file-only + matrix + lineage), `docs/coding-standards.md` (§ Documentation model: record the inversion + the moxygen mechanism, fill the "autodoc TBD" placeholder), CLAUDE.md pointer.
+- **New:** a committed `Doxyfile` (scoped, compact settings) + the moxygen custom template under `moondeck/docs/`.
 
 ## Verification
 - Build generates an API page per infra module; a card `.h` link lands on it in-site; `Control` page reproduces Control.md's type reference from `///<`.

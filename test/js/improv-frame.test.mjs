@@ -1,5 +1,5 @@
 // Improv frame-contract tests — pin the wire format the device C++
-// (src/core/ImprovFrame.h), Python (scripts/build/improv_provision.py), and the
+// (src/core/ImprovFrame.h), Python (moondeck/build/improv_provision.py), and the
 // installer JS (web-installer/improv-frame.js) must all agree on byte-for-byte.
 // The golden vectors here are asserted identically in test/python/test_improv_frame.py
 // so the JS and Python builders can't drift; they're hand-verified against the C++

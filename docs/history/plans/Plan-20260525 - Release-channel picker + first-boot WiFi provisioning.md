@@ -22,7 +22,7 @@ projectMM has three installer surfaces, two of which don't exist in v3 yet:
 Plan-18 builds all three with a coherent identity:
 
 - **A shared release-channel picker JS module** powers both installers (Tracks 1+2): visitor (browser, or device-UI tab) picks **Stable** or **Pre-release (beta)** → release → board → click Install. Same code, two surfaces, one mental model.
-- **Improv WiFi over USB-serial** (Track 3) handles first-boot provisioning. Browser drives the protocol immediately after a flash via ESP Web Tools; a Python CLI (`scripts/build/improv_provision.py`) drives it for headless / rack / CI use. Same protocol, two transports.
+- **Improv WiFi over USB-serial** (Track 3) handles first-boot provisioning. Browser drives the protocol immediately after a flash via ESP Web Tools; a Python CLI (`moondeck/build/improv_provision.py`) drives it for headless / rack / CI use. Same protocol, two transports.
 
 **Step 0 of v1 of this plan empirically falsified plan-17 risk #4**: GitHub release-asset URLs (both `github.com/.../releases/download/` and the `release-assets.githubusercontent.com` redirect target) return **no `Access-Control-Allow-Origin` headers**. Cross-origin browser fetches are blocked. WLED works around this with a third-party CORS proxy (`proxy.corsfix.com`); ESPHome self-hosts every binary; projectMM-v1 sidestepped the problem entirely by not having a web installer. v3 chooses **self-host on Pages** (Option 1 from the CORS replan discussion): the release workflow stages the last 5 stable + 5 prerelease releases' binaries into Pages content. End-of-line origin = same as the install page, no CORS.
 
@@ -51,7 +51,7 @@ Track 3 (Improv) closed scope:
 - **Serial source**: UART0 only on every board. ESP32-S3-DevKitC-1's UART USB port works (UART0 routed to the on-board USB-UART bridge); the S3's native USB-Serial-JTAG port doesn't. AP-fallback remains the only path for users with USB-CDC-only connections.
 - **Lifecycle**: always-on listener, no task suspension. Provision requests are rejected (with Improv's wrong-state error frame) when `platform::wifiStaConnected() == true`; scan + info requests stay available so a browser can identify a running device.
 - **What it surfaces**: one read-only `provision_status` Control matching `FirmwareUpdateModule`'s shape. No buttons, no re-provision affordance — the protocol is the entry point.
-- **Rack / CI mode**: `scripts/build/improv_provision.py` — pyserial CLI speaking the Improv protocol. Single-port mode today (`--port + --ssid + --password`); a future `--from-list <devicelist.json>` mode is a separate plan once v3 has a devicelist schema.
+- **Rack / CI mode**: `moondeck/build/improv_provision.py` — pyserial CLI speaking the Improv protocol. Single-port mode today (`--port + --ssid + --password`); a future `--from-list <devicelist.json>` mode is a separate plan once v3 has a devicelist schema.
 - **AP-fallback flow stays unchanged.** Improv adds a third credential-entry path alongside the AP fallback UI and the persistence-loaded values; all three converge on `NetworkModule::ssid_` / `password_`.
 
 Prior art (the design isn't bespoke):
@@ -223,13 +223,13 @@ releasePicker.init({
 
 Keep the SRI-pinned ESP Web Tools `<script>` tag and the browser-warning card.
 
-**Step 2.2 — Per-release manifest URLs become relative (0.5 h).** [scripts/build/generate_manifest.py](scripts/build/generate_manifest.py) already accepts `--release-url`; passing `--release-url .` produces relative paths like `./firmware-esp32-v…bin`. This is the form needed for Pages-hosted manifests (same-origin). The current release-asset manifest stays absolute (used by the OTA picker which still passes binary URLs to the device).
+**Step 2.2 — Per-release manifest URLs become relative (0.5 h).** [moondeck/build/generate_manifest.py](moondeck/build/generate_manifest.py) already accepts `--release-url`; passing `--release-url .` produces relative paths like `./firmware-esp32-v…bin`. This is the form needed for Pages-hosted manifests (same-origin). The current release-asset manifest stays absolute (used by the OTA picker which still passes binary URLs to the device).
 
 Add a second invocation of the manifest generator in the workflow's "Generate ESP Web Tools manifests" step, writing a second set into `pages-manifests/`:
 
 ```bash
 for B in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
-  python scripts/build/generate_manifest.py \
+  python moondeck/build/generate_manifest.py \
     --board "$B" --version "$V" \
     --release-url . \
     --flasher-args "dist/flasher-$B.json" \
@@ -372,7 +372,7 @@ void setWifiCredentials(const char* ssid, const char* password) {
 2. `mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");` in `registerModuleTypes()`.
 3. Create + setters + `scheduler.addModule(...)` **after** `networkModule` (Improv depends on NetworkModule existing so its `setNetworkModule` setter has a valid pointer; the cold-boot order doesn't matter — both modules' `setup()` runs in the same scheduler phase).
 
-**Step 3.6 — Python rack CLI: `scripts/build/improv_provision.py` (0.5 h).** ~150-line pyserial script. Argparse:
+**Step 3.6 — Python rack CLI: `moondeck/build/improv_provision.py` (0.5 h).** ~150-line pyserial script. Argparse:
 
 ```bash
 improv_provision.py --port /dev/tty.usbserial-X --ssid <SSID> --password <PW> [--timeout 30]
@@ -382,9 +382,9 @@ improv_provision.py --port /dev/tty.usbserial-X --ssid <SSID> --password <PW> [-
 - Loop reading frames until "provisioning success" (with URL) or "provisioning fail" (with error code) or timeout.
 - Print: `provisioned <device> on <SSID>; UI at <URL>`. Exit 0 on success, non-zero on any error.
 
-A future `--from-list scripts/devicelist.json` mode for true rack provisioning is **out of scope for plan-18** — v3 doesn't have a devicelist schema yet; single-port mode covers single-device and "shell-loop a hub" today.
+A future `--from-list moondeck/devicelist.json` mode for true rack provisioning is **out of scope for plan-18** — v3 doesn't have a devicelist schema yet; single-port mode covers single-device and "shell-loop a hub" today.
 
-Add to [scripts/MoonDeck.md](../../scripts/MoonDeck.md) under a new "Provisioning" section. No MoonDeck button — the script is CLI-only by design.
+Add to [moondeck/MoonDeck.md](../../moondeck/MoonDeck.md) under a new "Provisioning" section. No MoonDeck button — the script is CLI-only by design.
 
 **Step 3.7 — `docs/moonmodules/core/ImprovProvisioningModule.md` + hardware verification (0.4 h).**
 
@@ -398,7 +398,7 @@ Hardware verification (product-owner gate):
 
 1. Flash to an ESP32 and an ESP32-S3 DevKitC-1 (via the silkscreen UART USB port on the S3).
 2. From Chrome desktop, open <https://www.improv-wifi.com/>, click Connect, pick the device's serial port. Expect device name + chip + version to appear in the browser; SSID scan returns nearby networks; enter creds → device shows `received credentials` → `connecting` → `connected: <ssid>`; URL `http://<ip>/` clickable; opens the device UI.
-3. Same flow via the Python CLI: `python3 scripts/build/improv_provision.py --port <port> --ssid <ssid> --password <pw>`. Expect exit 0 + the IP printed.
+3. Same flow via the Python CLI: `python3 moondeck/build/improv_provision.py --port <port> --ssid <ssid> --password <pw>`. Expect exit 0 + the IP printed.
 4. Confirm ESP_LOGI output still appears on the serial monitor throughout (the step 3.2 risk).
 5. Wipe credentials (`POST /api/control` on `ssid` = empty + reboot) → confirm device boots AP-fallback as before. Re-run Improv via browser → confirm it provisions cleanly. The AP-fallback path stays intact.
 
@@ -417,7 +417,7 @@ Track 3 total: **3.0 h**. Sequential within the track. Hardware verification (st
 - [src/ui/release-picker.js](src/ui/release-picker.js) — shared release-picker module.
 - [src/core/FirmwareUpdateModule.h](src/core/FirmwareUpdateModule.h) — on-device OTA MoonModule (header-only).
 - [src/core/ImprovProvisioningModule.h](src/core/ImprovProvisioningModule.h) — Improv listener MoonModule (header-only). **Track 3.**
-- [scripts/build/improv_provision.py](scripts/build/improv_provision.py) — pyserial CLI for headless / rack provisioning. **Track 3.**
+- [moondeck/build/improv_provision.py](moondeck/build/improv_provision.py) — pyserial CLI for headless / rack provisioning. **Track 3.**
 - [docs/moonmodules/core/ImprovProvisioningModule.md](docs/moonmodules/core/ImprovProvisioningModule.md) — spec page. **Track 3.**
 - [docs/history/plan-18.md](docs/history/plan-18.md) — this plan's archive.
 
@@ -437,9 +437,9 @@ Track 3 total: **3.0 h**. Sequential within the track. Hardware verification (st
 - `main.cpp` — register FirmwareUpdateModule **+ ImprovProvisioningModule (Track 3)**.
 - [docs/install/index.html](docs/install/index.html) — Track 2: use shared module.
 - [.github/workflows/release.yml](.github/workflows/release.yml) — Track 2: cumulative content staging, remove RC-Pages gate.
-- [scripts/build/generate_manifest.py](scripts/build/generate_manifest.py) — comment about the `--release-url .` use case.
+- [moondeck/build/generate_manifest.py](moondeck/build/generate_manifest.py) — comment about the `--release-url .` use case.
 - [docs/install/README.md](docs/install/README.md) — Track 2: simplify recipes.
-- [scripts/MoonDeck.md](scripts/MoonDeck.md) — document `improv_provision.py` (Track 3).
+- [moondeck/MoonDeck.md](moondeck/MoonDeck.md) — document `improv_provision.py` (Track 3).
 - [docs/plan.md](docs/plan.md) — remove installer stub.
 
 ## Reuse map
@@ -448,11 +448,11 @@ Track 3 total: **3.0 h**. Sequential within the track. Hardware verification (st
 |---|---|---|
 | [projectMM-v1 OTA module](../../projectMM-v1/src/modules/system/FirmwareUpdateModule.h) | MoonModule with two display controls + file-scope statics polled by `loop1s()` | Working pattern from v1. v3 ports the architecture using v3 idioms (`controls_.addReadOnly`, anon namespace statics). |
 | projectMM-v1 `populateGhList()` | `fetch(api.github.com/.../releases) + sessionStorage cache + prerelease filter + per-asset install button` | Identical data shape; the picker UX is recognisable from v1. |
-| [projectMM-v1 `pal::http_fetch_to_ota`](../../projectMM-v1/src/platform/esp32) | `esp_https_ota_config_t` + `esp_crt_bundle_attach` + perform loop | Working ESP-IDF idiom. Cherry-pick the working numbers (stack size, core pinning) into v3. |
+| projectMM-v1 `pal::http_fetch_to_ota` (`projectMM-v1/src/platform/esp32`) | `esp_https_ota_config_t` + `esp_crt_bundle_attach` + perform loop | Working ESP-IDF idiom. Cherry-pick the working numbers (stack size, core pinning) into v3. |
 | [src/ui/embed_ui.cmake](src/ui/embed_ui.cmake) | The whole UI-embedding pipeline | Extend to one more file. No new architecture. |
 | [src/core/SystemModule.h:85](src/core/SystemModule.h#L85) | `controls_.addReadOnly("name", buf, sizeof(buf))` for live-updating diagnostic strings | Same shape for `update_status` and `update_pct`. |
 | [src/core/HttpServerModule.cpp:428+](src/core/HttpServerModule.cpp#L428) | `mm::json::parseString(body, "key", buf, sizeof(buf))` pattern | Reuse for parsing the `{"url":"..."}` body. |
-| [scripts/build/generate_manifest.py](scripts/build/generate_manifest.py) | The whole script | Stays unchanged. Track 2 just calls it twice — once with absolute URLs (release assets) and once with `--release-url .` (Pages copy). |
+| [moondeck/build/generate_manifest.py](moondeck/build/generate_manifest.py) | The whole script | Stays unchanged. Track 2 just calls it twice — once with absolute URLs (release assets) and once with `--release-url .` (Pages copy). |
 | projectMM-v1 `deploy/wifi.py` + `flashfs.py --wifi` | The "one set of credentials, applied to a rack of devices" use case | The use case is preserved. The mechanism changes: v1 baked credentials into a LittleFS partition image and re-flashed it over USB (device halted). Track 3 talks Improv to running devices via UART — same end state, no flash required, generalises to any-firmware-with-Improv. |
 | `improv/improv` (ESP Component Registry; source: `improv-wifi/sdk-cpp` on GitHub) | The Improv protocol parser + callbacks | Standard upstream library. We don't reimplement the protocol; we install the listener task that feeds it bytes. |
 | [src/platform/esp32/platform_esp32.cpp:870-891](src/platform/esp32/platform_esp32.cpp#L870-L891) (`http_fetch_to_ota` task) | The xTaskCreate + status-buffer pattern | Improv's listener task is identical shape: heap struct + `xTaskCreate` + status-buffer ownership. Reuses the pattern, not the code. |
@@ -474,7 +474,7 @@ Added under plan-18 (Option A — "cheap + extract parser"):
 
 - **`test/test_improv_frame.cpp`** — 13 cases / 216 assertions over the Improv framing layer. Parser feed-byte-at-a-time, bad-checksum detection, oversize-length rejection, resync on garbage, the "stray 'I' restarts the magic search" edge case, builder/parser round-trip across all four frame types, back-to-back frames. The parser was extracted into [src/core/ImprovFrame.h](../../src/core/ImprovFrame.h) precisely to make this test cheap (no MCU, no `improv/improv` host port). The ESP32 task at [platform_esp32.cpp::improvTask](../../src/platform/esp32/platform_esp32.cpp) now consumes the same parser, so the unit test covers the bytes-in path that runs on-device.
 - **`test/test_network_module.cpp`** — 4 cases on `NetworkModule::setWifiCredentials`: SSID + password copy, dirty-flag toggling, null-SSID no-op, null-password tolerance, oversize-SSID truncation. The desktop `wifiStaInit` stub returns false safely so the test runs without bringing up a radio. This is the bridge Improv uses to hand credentials to the network state machine.
-- **`scripts/build/improv_provision.py --self-test`** — host-side framing/payload round-trip. No serial port needed; re-runnable in CI. Catches a regression in the Python frame builder before any device is involved.
+- **`moondeck/build/improv_provision.py --self-test`** — host-side framing/payload round-trip. No serial port needed; re-runnable in CI. Catches a regression in the Python frame builder before any device is involved.
 
 Documented gaps (not covered by automated tests, called out so reviewers know what hardware verification is buying):
 

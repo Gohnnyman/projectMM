@@ -6,7 +6,7 @@
 #
 # Built in CI (release.yml deploy-pages job) into pages/ root; the web
 # installer keeps its /install/ path untouched. Build locally with
-#   uv run scripts/docs/build_docs.py --strict
+#   uv run moondeck/docs/build_docs.py --strict
 site_name: projectMM
 site_description: High-performance LED & DMX lighting control for ESP32 and beyond.
 # Canonical deployed URL: the custom domain, with the /projectMM/ repo subpath
@@ -80,12 +80,12 @@ plugins:
 extra_css:
   - assets/extra.css
 
-# Build-time hooks (scripts/docs/mkdocs_hooks.py): generate the test-inventory pages
+# Build-time hooks (moondeck/docs/mkdocs_hooks.py): generate the test-inventory pages
 # from the test files (never committed → can't drift), render each catalog page's
 # prose ### blocks as a 4-column table, and rewrite out-of-docs source links to
 # GitHub URLs. See the module docstring.
 hooks:
-  - scripts/docs/mkdocs_hooks.py
+  - moondeck/docs/mkdocs_hooks.py
 
 # history/ and backlog/ are internal (agent-facing, transient) — kept OFF the top
 # nav (they're not in the `nav:` tree) but still BUILT into the site, so the many
@@ -118,8 +118,10 @@ nav:
   - Getting started:
       - Install & first light: gettingstarted.md
       # The web installer is a separate app deployed at /install/ (staged
-      # verbatim by the release workflow, not built by MkDocs). Link out to it.
-      - Web installer: /projectMM/install/
+      # verbatim by the release workflow, not built by MkDocs). A full URL (not a
+      # site-relative /projectMM/install/) so MkDocs treats it as the external
+      # resource it is, rather than warning about an unresolvable absolute path.
+      - Web installer: https://moonmodules.org/projectMM/install/
   - Effects & building shows:
       - Effects: moonmodules/light/effects/effects.md
       - Layouts: moonmodules/light/layouts/layouts.md

@@ -69,7 +69,7 @@ This determines the practical LED limit for WiFi-only boards. Until the `sdkconf
 
 ### Network round-trip test — drop/reorder measurement (deferred)
 
-`scripts/scenario/run_network_roundtrip.py` measures PC→device→PC **latency and jitter** per protocol (ArtNet/E1.31/DDP) by timing how long a sent colour takes to appear in the device's preview stream. It deliberately does **not** measure per-frame **drops or reorder**, because the path can't track individual frames cleanly: `NetworkSendDriver` re-clocks at its own fps (decoupled from receive) and `NetworkReceiveEffect` holds-last-frame, so frames don't pass through 1:1 — a sequence number embedded in frame N may be re-sent 0, 1, or several times downstream. The min/median/max spread the test already reports *is* the jitter signal (it surfaced multi-second outliers on the classic ESP32). To measure true drop/reorder, the firmware would need a sequence-faithful echo path (e.g. a `NetworkReceiveEffect` echo mode that re-emits each received frame 1:1 back to the sender, bypassing the fps re-clock), then the PC could match sent↔received sequence numbers. The test's docstring lists this under "extend later" alongside per-frame sequence matching and the device→device chain.
+`moondeck/scenario/run_network_roundtrip.py` measures PC→device→PC **latency and jitter** per protocol (ArtNet/E1.31/DDP) by timing how long a sent colour takes to appear in the device's preview stream. It deliberately does **not** measure per-frame **drops or reorder**, because the path can't track individual frames cleanly: `NetworkSendDriver` re-clocks at its own fps (decoupled from receive) and `NetworkReceiveEffect` holds-last-frame, so frames don't pass through 1:1 — a sequence number embedded in frame N may be re-sent 0, 1, or several times downstream. The min/median/max spread the test already reports *is* the jitter signal (it surfaced multi-second outliers on the classic ESP32). To measure true drop/reorder, the firmware would need a sequence-faithful echo path (e.g. a `NetworkReceiveEffect` echo mode that re-emits each received frame 1:1 back to the sender, bypassing the fps re-clock), then the PC could match sent↔received sequence numbers. The test's docstring lists this under "extend later" alongside per-frame sequence matching and the device→device chain.
 
 ### Async ArtNet send — decouple the wire from the render tick (PSRAM-only)
 
@@ -94,7 +94,7 @@ On Olimex ESP32-Gateway flashed with `esp32-eth`, Ethernet sometimes takes **a m
 What we know:
 - `build/esp32-esp32-eth/sdkconfig` and `build/esp32-esp32-eth-wifi/sdkconfig` are **byte-identical** (3,617 lines each, `cmp -s` confirms). So lwIP buffer pools, DHCP timeouts, and Ethernet driver settings are the same.
 - Same hardware (Olimex ESP32-Gateway Rev G), same RMII pin/clock config (`EMAC_CLK_OUT` on GPIO17), same `ethInit()` code in `src/platform/esp32/platform_esp32.cpp`.
-- The only difference at link time: `esp32-eth` passes `EXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` to ESP-IDF (see `scripts/build/build_esp32.py:31`).
+- The only difference at link time: `esp32-eth` passes `EXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` to ESP-IDF (see `moondeck/build/build_esp32.py:31`).
 - `esp_coex` (WiFi/Bluetooth coexistence) was an early hypothesis: even though Ethernet doesn't share the radio, `esp_coex`'s init might warm a shared clock path that helps Ethernet auto-negotiation, and the eth-only build excludes it. **Disproven — see below.**
 
 **Firmware is ruled out (the evidence is contradictory across reboots with the *same* build, which by itself proves build-independence).** Over one session, on the same Olimex + cable:
@@ -116,10 +116,10 @@ Bottom line: intermittent, build-independent, reset-correlated → a hardware/PH
 
 ### MoonDeck doc-asset endpoint hardening (backlog)
 
-`scripts/moondeck.py::_serve_doc_asset` accepts any ROOT-relative path and serves the file. Path traversal *is* blocked (`asset_path.relative_to(ROOT.resolve())`), but inside the repo any file is served — including local-only artefacts like `scripts/build/wifi_credentials.json` if present. MoonDeck binds to all interfaces by design (the existing comment in `main()` explicitly enables LAN reach), so anyone on the LAN can hit the endpoint.
+`moondeck/moondeck.py::_serve_doc_asset` accepts any ROOT-relative path and serves the file. Path traversal *is* blocked (`asset_path.relative_to(ROOT.resolve())`), but inside the repo any file is served — including local-only artefacts like `moondeck/build/wifi_credentials.json` if present. MoonDeck binds to all interfaces by design (the existing comment in `main()` explicitly enables LAN reach), so anyone on the LAN can hit the endpoint.
 
 Two improvements when this matters:
-- **Subdirectory whitelist** — only serve under `docs/` (and image asset paths the markdown renderer needs). Reject `scripts/build/wifi_credentials.json` etc. with 403.
+- **Subdirectory whitelist** — only serve under `docs/` (and image asset paths the markdown renderer needs). Reject `moondeck/build/wifi_credentials.json` etc. with 403.
 - **Extension whitelist** — only image / CSS / JS mime types via a small allowlist.
 - **Optional bind-to-localhost flag** — `--bind 127.0.0.1` for users who don't want LAN reachability. Default stays "" (all interfaces) since the LAN-reach is the documented design.
 
@@ -274,7 +274,7 @@ What to build (~4 h):
 - **Platform layer** — implement `ota_begin`/`ota_write`/`ota_end` in [platform_esp32.cpp](../src/platform/esp32/platform_esp32_ota.cpp) wrapping `esp_ota_*` directly (already declared in [platform.h](../src/platform/platform.h), currently bypassed by `esp_https_ota_perform`).
 - **HTTP route** — `POST /api/firmware` in [HttpServerModule.cpp](../src/core/HttpServerModule.cpp); streams `conn.read(chunkBuf, 4096)` → `ota_write`; shares `g_otaStatus`/`g_otaPct` with the URL path.
 - **`device_ip` control on SystemModule** — lets a script discover the device without mDNS.
-- **`scripts/build/flash_over_network.py`** — finds the latest `.bin` in `build/esp32-<board>/`, POSTs it, polls for `rebooting`.
+- **`moondeck/build/flash_over_network.py`** — finds the latest `.bin` in `build/esp32-<board>/`, POSTs it, polls for `rebooting`.
 - **UI file-upload affordance** — `<input type="file" accept=".bin">` in a `<details>` expander on the Firmware card.
 
 ### HTTP file serving blocks the render tick (backlog)
@@ -289,7 +289,7 @@ What to build (~4 h):
 - **UI page load time** — scenario step measuring HTTP response time for `/`, `/api/state`, `/api/system` via the live runner. Verifies acceptable load time on ESP32.
 - **Module teardown memory** — scenario that tears down all modules and verifies heap returns to pre-setup baseline. Confirms no lifecycle leaks.
 - **JavaScript test harness** — `vitest` + `jsdom` for the browser UI: pure helpers in `install-picker.js` (`isCompatible`, `parseFirmwaresFromAssets`, `relativeTime`) **and `app.js`'s conditional-control DOM logic** (`syncVisibleControls` — reconciles which control rows are rendered when a `hidden` flag flips). The C++/backend half of conditional controls IS unit-tested (`conditional_controls.h` + per-module tests pin the binding + `hidden` flag), but the **UI re-render half is not** — `syncVisibleControls` was the source of a real re-render-loop freeze (Network static-IP toggle) caught only on hardware. A `jsdom` test that builds a card, flips a control's `hidden`, runs the reconcile, and asserts the right rows appear/disappear (and that it converges — the unchanged→no-op fast path) would have caught it. **Attempted and reverted (2026-06-17):** stood up vitest + 13 passing tests for the install-picker pure helpers, but the high-value half (`syncVisibleControls`) needs either an `app.js` module seam or extracting its reconcile logic into a separate served `.js` (6 embed/route wiring edits for a firmware-served file). Judged not worth adding a whole Node/npm toolchain to a C++/Python repo to test ~3 small pure functions; the toolchain earns its place only once the `syncVisibleControls` DOM test (and a real body of JS logic) lands with it. **Do it as its own focused branch**, deciding the app.js seam first (it's already `type="module"`, so extracting `reconcileControlRows` into a served file — wired through `embed_ui.cmake` + the two HttpServerModule routes like the other UI .js — is the clean shape). Pure-helper `_test` exports + the reconcile extraction are the two pieces; both were prototyped in that reverted attempt.
-- **Browser-level Improv automation** (deferred) — `scripts/build/improv_smoke_test.py` (added 2026-06-03) exercises the device-side Improv listener over plain serial; what's missing is the browser-side equivalent — Playwright driving Chrome's Web Serial, clicking through ESP Web Tools' install modal, filling the WiFi creds form, asserting `PROVISIONED`. Catches "ESP Web Tools changed its Improv handling in a way that broke our manifest format" failures the serial-only smoke test can't see. Hard to set up reliably (headless Chrome with Web Serial is finicky, needs a wired ESP32 in CI). Pick this up if a regression in the browser flow ever escapes the manual dev-environment test (preview_installer flash-ready mode at <http://localhost:8000/>).
+- **Browser-level Improv automation** (deferred) — `moondeck/build/improv_smoke_test.py` (added 2026-06-03) exercises the device-side Improv listener over plain serial; what's missing is the browser-side equivalent — Playwright driving Chrome's Web Serial, clicking through ESP Web Tools' install modal, filling the WiFi creds form, asserting `PROVISIONED`. Catches "ESP Web Tools changed its Improv handling in a way that broke our manifest format" failures the serial-only smoke test can't see. Hard to set up reliably (headless Chrome with Web Serial is finicky, needs a wired ESP32 in CI). Pick this up if a regression in the browser flow ever escapes the manual dev-environment test (preview_installer flash-ready mode at <http://localhost:8000/>).
 
 ### Live full-suite run leaks state between scenarios (test infra)
 
@@ -313,7 +313,7 @@ The build IDF is `v6.1-dev-399-gd1b91b79b5`, a dev-branch snapshot (2025-11-05) 
 
 ### Three-level device model: MCU → Board → Device (config provenance)
 
-The model itself is now a shipped design — see architecture.md § Config provenance (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is `install/deviceModels.json` (schema). The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
+The model itself is now a shipped design — see architecture.md § Config provenance (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is `web-installer/deviceModels.json` (schema). The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
 
 ### Persistence overlay: partial-save / schema-change audit (backlog)
 

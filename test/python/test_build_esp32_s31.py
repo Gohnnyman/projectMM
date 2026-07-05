@@ -13,7 +13,7 @@ S31 build or its CI matrix entry:
      would build the S31 firmware for the WRONG target (esp32s3). We re-implement the
      same precedence rule here and pin that esp32s31 resolves to esp32s31.
 
-Imports the real dicts from scripts/build/build_esp32.py (no ESP-IDF needed).
+Imports the real dicts from moondeck/build/build_esp32.py (no ESP-IDF needed).
 Run: `uv run --with pytest pytest test/python -q`.
 """
 
@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts" / "build"))
+sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 
 from build_esp32 import (  # noqa: E402
     FIRMWARES,

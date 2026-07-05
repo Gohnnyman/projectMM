@@ -109,7 +109,7 @@ ModuleFactory is core infrastructure ([`src/core/ModuleFactory.h`](../src/core/M
 
 **Self-reporting.** Every MoonModule reports its own footprint and cost: `classSize()` (the `sizeof` of the class instance, captured at registration), `dynamicBytes()` (heap allocated during `onBuildState`), and `loopTimeUs()` (average time its `loop` took, accumulated per tick). These surface in `/api/system`, console output, and scenario tests: the same numbers for an effect, a driver, or a system service, because they're a base-class feature, not a light-domain one.
 
-Each MoonModule has two documentation surfaces under [`docs/moonmodules/`](moonmodules/): an end-user **summary page** — one 4-column table row in its group's page (effects/modifiers/layouts/drivers, or core/light UI/supporting) — and a **generated technical page** built from the header's `///` comments. See [coding-standards § Documentation model](coding-standards.md#documentation-model) for the full model.
+Each MoonModule has two documentation surfaces under `docs/moonmodules/`: an end-user **summary page** — one 4-column table row in its group's page (effects/modifiers/layouts/drivers, or core/light UI/supporting) — and a **generated technical page** built from the header's `///` comments. See [coding-standards § Documentation model](coding-standards.md#documentation-model) for the full model.
 
 ## Controls
 
@@ -218,7 +218,7 @@ Only abstract what you actually need. Currently:
 
 Abstractions are added when a concrete implementation needs them, not pre-designed.
 
-**Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags, never a preprocessor `#ifdef`. The boundary is enforced by [`scripts/check/check_platform_boundary.py`](../scripts/check/check_platform_boundary.py), a commit gate (see [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events)).
+**Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags, never a preprocessor `#ifdef`. The boundary is enforced by [`moondeck/check/check_platform_boundary.py`](../moondeck/check/check_platform_boundary.py), a commit gate (see [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events)).
 
 ## Firmware vs deviceModel vs board
 

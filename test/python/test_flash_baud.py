@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts" / "build"))
+sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 
 from flash_esp32 import _catalog_flash_baud, DEFAULT_FLASH_BAUD  # noqa: E402
 

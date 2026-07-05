@@ -174,7 +174,7 @@ under each ISA's scratch count (2-3 controls fine; flag if a statement needs man
 - **`@effect dim=3D`** role/dimension annotation — Stage 4/5.
 
 ## Verification
-- `ctest` (unit) + `uv run scripts/scenario/run_scenario.py` (scenarios) green at each **step**
+- `ctest` (unit) + `uv run moondeck/scenario/run_scenario.py` (scenarios) green at each **step**
   boundary (each step is independently testable); host codegen proven (step 4) before device
   backends (step 7). The full commit-gate set runs once at the end, before the single combined commit.
 - Disassemble the host + Xtensa + RISC-V output for a control script against the real toolchains;

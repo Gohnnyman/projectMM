@@ -73,7 +73,7 @@ import { planConfigOps } from "./config-ops.js";
 // esptool-js with undefined data.
 //
 // Manifest shape (single build per file — projectMM generates one per
-// firmware variant; see scripts/build/generate_manifest.py):
+// firmware variant; see moondeck/build/generate_manifest.py):
 //   { name, version, builds: [{ chipFamily, parts: [{ path, offset }] }] }
 async function fetchManifest(manifestUrl) {
     // Resolve the manifest URL against the document so a relative path like
@@ -201,38 +201,37 @@ async function pushDefaultsOverSerial(port, board, applyDefaults, trackProgress,
 // flash_esp32.py; same catalog field, opposite default, different audience.)
 const DEFAULT_FLASH_BAUD = 460800;
 
+// Fetch a board's deviceModels.json catalog entry by name, or null (unknown board, or any
+// fetch/parse failure — callers decide how to fall back). The single catalog read both the
+// flash-baud lookup and the serial-config push share, so they can't diverge on how the
+// catalog is fetched or matched.
+async function fetchCatalogEntry(board, onLog) {
+    if (!board) return null;
+    try {
+        const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return null;
+        const catalog = await res.json();
+        return Array.isArray(catalog) ? catalog.find(b => b && b.name === board) || null : null;
+    } catch (e) {
+        if (onLog) onLog(`[orchestrator] catalog lookup failed for ${board} (${e && e.message || e})`);
+        return null;
+    }
+}
+
 // Resolve a board's flash baud from the catalog: the entry's `flashBaud` when set,
 // else DEFAULT_FLASH_BAUD. Best-effort — any fetch/parse failure or unknown board
 // falls back to the safe default, so a catalog hiccup never blocks a flash. Mirrors
 // the CLI's flash_esp32.py `_catalog_flash_baud`, keeping both flash paths in step.
 async function catalogFlashBaud(board, onLog) {
-    if (!board) return DEFAULT_FLASH_BAUD;
-    try {
-        const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) return DEFAULT_FLASH_BAUD;
-        const catalog = await res.json();
-        const entry = Array.isArray(catalog) ? catalog.find(b => b && b.name === board) : null;
-        if (entry && Number.isInteger(entry.flashBaud)) return entry.flashBaud;
-    } catch (e) {
-        if (onLog) onLog(`[orchestrator] flash baud: catalog lookup failed (${e && e.message || e}), using ${DEFAULT_FLASH_BAUD}`);
-    }
-    return DEFAULT_FLASH_BAUD;
+    const entry = await fetchCatalogEntry(board, onLog);
+    return entry && Number.isInteger(entry.flashBaud) ? entry.flashBaud : DEFAULT_FLASH_BAUD;
 }
 
 // deviceModels.json entry the HTTP path used (see planConfigOps) but emits APPLY_OP ops
 // instead of HTTP requests — so the defaults apply during provisioning with no HTTP and
 // no browser handoff. Returns true if the entry was found + pushed, false if none.
 async function sendConfigOverSerial(port, board, onLog) {
-    let entry;
-    try {
-        const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) return false;
-        const catalog = await res.json();
-        entry = Array.isArray(catalog) ? catalog.find(b => b && b.name === board) : null;
-    } catch (e) {
-        if (onLog) onLog(`[orchestrator] serial config: catalog fetch failed (${e && e.message || e})`);
-        return false;
-    }
+    const entry = await fetchCatalogEntry(board, onLog);
     if (!entry) return false;
     for (const op of planConfigOps(entry)) {
         await sendApplyOpFrame(port, op);
@@ -620,6 +619,26 @@ export const installer = {
                 ({ port, transport, esploader } = _detected);
                 const chipName = _detected.chipName;
                 _detected = null;
+                // detect() left the loader connected at its baudrate (before the board was
+                // known). If this board's catalog flashBaud differs, re-negotiate now, so a
+                // reused detect() connection honours the override like the fresh-connect branch.
+                const flashBaud = await catalogFlashBaud(board, onLog);
+                const priorBaud = esploader.baudrate;
+                if (flashBaud !== priorBaud) {
+                    esploader.baudrate = flashBaud;
+                    if (onLog) onLog(`[orchestrator] flash baud: ${flashBaud} (re-negotiated on reused connection)`);
+                    try {
+                        await esploader.changeBaud();
+                    } catch (e) {
+                        // A failed re-negotiation isn't fatal: best case the port is still at the
+                        // prior baud (the change command failed), so restore that and flash at it
+                        // rather than aborting. If the command succeeded but the re-open failed the
+                        // device is at the new baud and the flash will fail fast + visibly — still
+                        // better than aborting outright, and no worse than the pre-existing path.
+                        esploader.baudrate = priorBaud;
+                        if (onLog) onLog(`[orchestrator] baud re-negotiation failed (${e && e.message || e}); flashing at ${priorBaud}`);
+                    }
+                }
                 trackProgress("connect-flash", { chipName });
             } else {
             let probeFailed = false;

@@ -87,7 +87,7 @@ It's the only option that is simultaneously robust (zero parse errors on our rea
 **Still true regardless of tool:** autodoc is for **services & infrastructure** only. For catalog module types the card remains the doc (controls are runtime `add()` calls no static tool sees). moxygen *can* show a catalog class's raw C++ members — useful to a developer — but that's a *secondary* developer view, not the user-facing card.
 
 ### Phase-4b implementation shape (next commit)
-- CI: `apt install doxygen` + `npx moxygen` in the deploy-pages job (and a local `scripts/docs/` wrapper so `build_docs` can run it where doxygen is present; skip gracefully where it isn't, like cxxdox's local-mac gap — but moxygen degrades better since doxygen is brew-installable on mac).
+- CI: `apt install doxygen` + `npx moxygen` in the deploy-pages job (and a local `moondeck/docs/` wrapper so `build_docs` can run it where doxygen is present; skip gracefully where it isn't, like cxxdox's local-mac gap — but moxygen degrades better since doxygen is brew-installable on mac).
 - A `Doxyfile` scoped to a curated `services & infrastructure` file list (core/ + light-base), `GENERATE_XML`, `EXTRACT_ALL`, `JAVADOC_AUTOBRIEF`.
 - moxygen → `.md` into a `Developer / Source` MkDocs nav section.
 - Enrich the highest-value headers' comments with `///`/`///<` incrementally (as files are touched), but structure works from plain `//` on day one.

@@ -96,7 +96,7 @@ A bare recursive-descent slice in `src/core/moonlive/` (neutral): tokenize → p
 
 ## Validation
 
-- `ctest` + `uv run scripts/scenario/run_scenario.py` green at each step.
+- `ctest` + `uv run moondeck/scenario/run_scenario.py` green at each step.
 - **The hardware acceptance is the point:** S3 solid blue (1a), S3 hue sweep (1b), S3 blue-from-source (2) — eyeballed in the preview, the product owner confirms.
 - Desktop build zero-warnings (`-Wall -Wextra -Werror`); platform-boundary check passes (all ISA bytes behind `src/platform/`).
 - `check_specs.py` green — `docs/moonmodules/core/MoonLive.md` written (it is the module's home; carries the neutral engine API, the allocExec contract, the §3.9 boundary, and the ESPLiveScript/ARTI-FX/MoonLight prior-art block staged in the analysis doc).

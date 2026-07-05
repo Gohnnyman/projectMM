@@ -446,22 +446,33 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
 // then reads the remainder straight off the socket — feeding fsWriteStream in fixed chunks so the
 // device never holds the whole upload in RAM.
 namespace {
-// Bound the wait for the NEXT byte, not the whole upload: an idle timeout reset on every
-// successful read. This defeats a slowloris trickler (it can never stall past kUploadIdleMs
-// without sending) yet scales to any size the endpoint accepts — a big but steady upload
-// (256 KB over slow LittleFS + weak WiFi) never trips it, because progress keeps resetting
-// the clock. A single whole-upload budget can't do both: sized for slowloris it aborts a
-// legit max-size upload; sized for the max upload it lets a trickler hold the socket.
-constexpr uint32_t kUploadIdleMs = 5000;   // max gap between successful reads before abort
+// Two bounds guard the upload, because neither alone is enough:
+//   - kUploadIdleMs: max wait for the NEXT byte, reset on every successful read. Scales to
+//     any size the endpoint accepts — a big but steady upload (256 KB over slow LittleFS +
+//     weak WiFi) never trips it, because progress keeps resetting the clock. But idle-only
+//     lets a slowloris trickle one byte just under the idle limit forever, holding the one
+//     connection handleConnection() serves per loop20ms() tick (not the render loop — that
+//     is off this path — but the HTTP server, wedging later requests).
+//   - kUploadHardMs: an absolute whole-request ceiling that closes that hole. Sized well
+//     above a legit worst case (256 KB / ~50 KB/s ≈ 5 s, plus wide margin) so a real slow
+//     upload finishes, but far below the days a byte-per-idle-window trickler would need.
+// A single budget can't do both jobs; the pair does (idle scales, hard caps the total).
+constexpr uint32_t kUploadIdleMs = 5000;    // max gap between successful reads before abort
+constexpr uint32_t kUploadHardMs = 60000;   // absolute whole-request ceiling (anti-slowloris)
 struct UploadSource {
     platform::TcpConnection* conn;
     const char* initial;      // body bytes already read into the request buffer
     size_t initialLeft;       // how many of those remain to hand out
     size_t remaining;         // total body bytes still to deliver (Content-Length − delivered)
+    uint32_t hardDeadline;    // absolute millis by which the whole body must arrive
 };
 size_t uploadPull(char* out, size_t cap, void* user, bool* abort) {
     auto* s = static_cast<UploadSource*>(user);
     if (s->remaining == 0) return 0;   // all body delivered → clean EOF
+    // Whole-request ceiling, checked on EVERY pull (not only while the socket is dry): a paced
+    // trickler that always keeps one byte ready makes each read return > 0 immediately, so a cap
+    // tested only in the wait loop would never fire. Enforcing it here makes it truly absolute.
+    if (static_cast<int32_t>(platform::millis() - s->hardDeadline) >= 0) { *abort = true; return 0; }
     // Drain the already-buffered prefix first.
     if (s->initialLeft) {
         const size_t n = s->initialLeft < cap ? s->initialLeft : cap;
@@ -469,19 +480,21 @@ size_t uploadPull(char* out, size_t cap, void* user, bool* abort) {
         s->initial += n; s->initialLeft -= n; s->remaining -= n;
         return n;
     }
-    // Then pull the rest off the socket. The idle deadline is recomputed here (per pull) and
-    // only advances while we wait, so it bounds a stall, not total transfer time. If the body
-    // is still incomplete when the socket closes early or no byte arrives within kUploadIdleMs,
-    // signal *abort — fsWriteStream then discards the temp file rather than committing a
-    // truncated upload (a 0 here is NOT a clean end). The subtraction compare is wraparound-safe
-    // across the ~49.7-day millis() rollover (unlike `now >= deadline`).
+    // Then pull the rest off the socket, bounded by BOTH the per-pull idle deadline (recomputed
+    // here, only advances while we wait — bounds a stall) and the request-lifetime hardDeadline
+    // (set once at construction — bounds the total). If the body is still incomplete when the
+    // socket closes early or either deadline lapses, signal *abort — fsWriteStream then discards
+    // the temp file rather than committing a truncated upload (a 0 here is NOT a clean end). Both
+    // compares are subtraction-based, wraparound-safe across the ~49.7-day millis() rollover.
     const size_t want = s->remaining < cap ? s->remaining : cap;
     const uint32_t deadline = platform::millis() + kUploadIdleMs;
     for (;;) {
         const int r = s->conn->read(reinterpret_cast<uint8_t*>(out), want);
         if (r > 0) { s->remaining -= static_cast<size_t>(r); return static_cast<size_t>(r); }
         if (r == 0) { *abort = true; return 0; }                 // peer closed with body remaining
-        if (static_cast<int32_t>(platform::millis() - deadline) >= 0) { *abort = true; return 0; }  // idle timeout
+        // Idle timeout (the hard whole-request cap is enforced at the top of uploadPull, so it
+        // covers the pacing case this wait loop can't). Both compares are wraparound-safe.
+        if (static_cast<int32_t>(platform::millis() - deadline) >= 0) { *abort = true; return 0; }
         platform::delayMs(1);
     }
 }
@@ -515,7 +528,8 @@ void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char
     // Never hand the source more than Content-Length of the already-buffered bytes: a buffer can hold
     // bytes past the body (a pipelined next request), which must not be written into the file.
     const size_t initial = initialLen < contentLen ? initialLen : contentLen;
-    UploadSource src{&conn, initialBody, initial, contentLen};
+    UploadSource src{&conn, initialBody, initial, contentLen,
+                     platform::millis() + kUploadHardMs};
     if (platform::fsWriteStream(path, &uploadPull, &src)) {
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     } else {

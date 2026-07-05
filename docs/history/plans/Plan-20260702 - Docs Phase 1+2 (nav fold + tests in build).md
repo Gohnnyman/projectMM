@@ -10,10 +10,10 @@ Phase 0's `nav:` already splits User guide vs Developer reference and excludes `
 
 ## Phase 2 — fold test-doc generation into the build + surface tests per module
 
-Two deliverables, both leaning on existing infrastructure (`scripts/docs/_test_metadata.py` already parses tests and feeds both the doc generator and MoonDeck; `render_unit_tests()`/`render_scenarios()` in `generate_test_docs.py` are importable pure functions; `cases_for_module()`/`paths_for_module()` already return per-module test data).
+Two deliverables, both leaning on existing infrastructure (`moondeck/docs/_test_metadata.py` already parses tests and feeds both the doc generator and MoonDeck; `render_unit_tests()`/`render_scenarios()` in `generate_test_docs.py` are importable pure functions; `cases_for_module()`/`paths_for_module()` already return per-module test data).
 
 ### 2a — generate the test pages at build time (stop committing them)
-- Add **`mkdocs-gen-files`** (standard MkDocs plugin) with a small `scripts/docs/gen_pages.py` hook that, at `mkdocs build` time, calls the existing `render_unit_tests(collect_unit_files())` / `render_scenarios(collect_scenario_files())` and writes `tests/unit-tests.md` + `tests/scenario-tests.md` into MkDocs' virtual file tree.
+- Add **`mkdocs-gen-files`** (standard MkDocs plugin) with a small `moondeck/docs/gen_pages.py` hook that, at `mkdocs build` time, calls the existing `render_unit_tests(collect_unit_files())` / `render_scenarios(collect_scenario_files())` and writes `tests/unit-tests.md` + `tests/scenario-tests.md` into MkDocs' virtual file tree.
 - **Delete the committed `docs/tests/unit-tests.md` + `docs/tests/scenario-tests.md`** (~25K words leave the repo — pure subtraction). They regenerate fresh on every build.
 - **Retire the commit-time drift gate** for these files: `generate_test_docs.py --check` (CLAUDE.md Event 1 context) and any CI drift check become unnecessary — the pages can't drift when they're built from source every time. Keep `generate_test_docs.py` itself (CLI still useful for a quick local look, and MoonDeck may reference it), but it no longer *writes into the repo* as the source of truth for the site. Decision to settle in review: keep the CLI writing to `docs/tests/` for non-site consumers, or make it print-only. Leaning: keep it writing (MoonDeck/CLI convenience) but drop the CI `--check` gate, and gitignore `docs/tests/*.md` so a stray local run doesn't dirty the tree.
 - Add `mkdocs-gen-files` to `build_docs.py`'s inline PEP-723 deps and the CI docs build.
@@ -29,12 +29,12 @@ Two deliverables, both leaning on existing infrastructure (`scripts/docs/_test_m
 - Continues on `next-iteration` (PO's workflow: exercise the branch before merging). No dependency on Phase 0 being *merged* — only on its files, which are on the branch.
 
 ## Files
-- **New:** `scripts/docs/gen_pages.py` (the mkdocs-gen-files hook).
-- **Edit:** `mkdocs.yml` (add `gen-files` [+ `macros` if 2b uses it] plugins; nav tweak), `scripts/docs/build_docs.py` (inline dep), `.gitignore` (`docs/tests/*.md`), `docs/moonmodules/light/effects/effects.md` + `modifiers/modifiers.md` (drop the hand `[Tests]` links, replaced by the injected section), CLAUDE.md (drop the test-doc `--check` gate note), `docs/testing.md` (describe build-time generation).
+- **New:** `moondeck/docs/gen_pages.py` (the mkdocs-gen-files hook).
+- **Edit:** `mkdocs.yml` (add `gen-files` [+ `macros` if 2b uses it] plugins; nav tweak), `moondeck/docs/build_docs.py` (inline dep), `.gitignore` (`docs/tests/*.md`), `docs/moonmodules/light/effects/effects.md` + `modifiers/modifiers.md` (drop the hand `[Tests]` links, replaced by the injected section), CLAUDE.md (drop the test-doc `--check` gate note), `docs/testing.md` (describe build-time generation).
 - **Delete:** `docs/tests/unit-tests.md`, `docs/tests/scenario-tests.md` (regenerated at build).
 
 ## Verification
-- `uv run scripts/docs/build_docs.py` builds; `tests/unit-tests.html` + `tests/scenario-tests.html` exist in `site/` (generated, not from committed source).
+- `uv run moondeck/docs/build_docs.py` builds; `tests/unit-tests.html` + `tests/scenario-tests.html` exist in `site/` (generated, not from committed source).
 - Each effect/modifier page shows its Tests section; a no-test module shows "no tests yet" (none should, after the 24 additions).
 - 0 broken anchors; the 254 intentional out-of-`docs/` source-link warnings unchanged (Phase-4 marker).
 - ctest/scenarios/spec-check still green (Phase 2 touches no C++; the deleted `.md` were generated artifacts).

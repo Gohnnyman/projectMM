@@ -64,7 +64,7 @@ Run it, open `http://localhost:8080/`. Teensy, Raspberry Pi, and Linux build fro
 
 ## Building from source
 
-Develop and build with **MoonDeck**, the browser dev console (`uv run scripts/moondeck.py`):
+Develop and build with **MoonDeck**, the browser dev console (`uv run moondeck/moondeck.py`):
 
 ![MoonDeck](https://raw.githubusercontent.com/MoonModules/projectMM/v1.0.0/docs/assets/screenshots/moondeck_pc.png)
 

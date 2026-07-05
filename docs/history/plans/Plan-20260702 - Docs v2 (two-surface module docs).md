@@ -65,7 +65,7 @@ Re-staged (PO): ship a **working system first** (all generated pages + summary p
 
 ## Files
 
-- **Edit:** `scripts/docs/gen_api.py` (domain-nested output + module discovery), `scripts/docs/mkdocs_hooks.py` (link retarget), `scripts/check/check_specs.py` (exemption path), `mkdocs.yml` (nav), `.gitignore` (moxygen dirs), `docs/architecture.md` (line ~112), the ~29 `src/**/*.h` (enrich `///`), the 4 catalog summary pages (link retarget).
+- **Edit:** `moondeck/docs/gen_api.py` (domain-nested output + module discovery), `moondeck/docs/mkdocs_hooks.py` (link retarget), `moondeck/check/check_specs.py` (exemption path), `mkdocs.yml` (nav), `.gitignore` (moxygen dirs), `docs/architecture.md` (line ~112), the ~29 `src/**/*.h` (enrich `///`), the 4 catalog summary pages (link retarget).
 - **New:** 3 summary pages (`core/ui/`, `core/supporting/`, `light/supporting/`).
 - **Delete:** ~29 per-module `.md` (12 core + `ui.md` + 10 light-supporting + 7 catalog-detail — as each is absorbed), `docs/poc/`.
 

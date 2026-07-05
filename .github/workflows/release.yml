@@ -22,7 +22,7 @@ on:
     paths:
       - 'src/**'
       - 'esp32/**'
-      - 'scripts/build/**'
+      - 'moondeck/build/**'
       - 'CMakeLists.txt'
       - 'library.json'
       - '.github/workflows/release.yml'
@@ -79,7 +79,7 @@ jobs:
         # warning on the direct ${{ }} expansion inside a shell string.
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: uv run scripts/build/verify_version.py --tag "$TAG"
+        run: uv run moondeck/ci/verify_version.py --tag "$TAG"
 
   # The shipping firmware list, read from the generated web-installer/firmwares.json
   # (projected from build_esp32.py's FIRMWARES dict, drift-guarded by
@@ -160,7 +160,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          V=$(python scripts/build/compute_version.py --tag "$TAG")
+          V=$(python moondeck/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build firmware
@@ -188,7 +188,7 @@ jobs:
           # We run our own builder (not the action's default `idf.py build`)
           # so the sdkconfig fragments and EXCLUDE_COMPONENTS go through the
           # same code path as local builds. --release burns the channel tag in.
-          command: python ../scripts/build/build_esp32.py --firmware ${{ matrix.firmware }} --release "${{ steps.tag.outputs.tag }}" --version "${{ steps.ver.outputs.version }}"
+          command: python ../moondeck/build/build_esp32.py --firmware ${{ matrix.firmware }} --release "${{ steps.tag.outputs.tag }}" --version "${{ steps.ver.outputs.version }}"
 
       - name: Stage release artifacts
         run: |
@@ -234,7 +234,7 @@ jobs:
       # runners don't ship uv by default — install it before package_desktop.
       - uses: astral-sh/setup-uv@v3
       - name: Build + package macOS arm64
-        run: uv run scripts/build/package_desktop.py
+        run: uv run moondeck/ci/package_desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
@@ -250,7 +250,7 @@ jobs:
       # Same uv prerequisite as build-macos — see the comment there.
       - uses: astral-sh/setup-uv@v3
       - name: Build + package Windows x64
-        run: uv run scripts/build/package_desktop.py
+        run: uv run moondeck/ci/package_desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows
@@ -326,7 +326,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          V=$(uv run python scripts/build/compute_version.py --tag "$TAG")
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Generate ESP Web Tools manifests (release-asset URLs)
@@ -344,7 +344,7 @@ jobs:
           # The shipping firmware list — the same web-installer/firmwares.json the
           # build matrix reads, so manifests and builds can't drift.
           for F in $(jq -r '.firmwares[] | select(.ships) | .name' web-installer/firmwares.json); do
-            uv run python scripts/build/generate_manifest.py \
+            uv run python moondeck/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
               --release-url "$BASE" \
@@ -567,7 +567,7 @@ jobs:
           # installer staged above under pages/install/ survives (a plain
           # --site-dir pages would wipe it — mkdocs cleans its output dir).
           # history/ and backlog/ are excluded in mkdocs.yml (internal docs).
-          uv run scripts/docs/build_docs.py --site-dir "$RUNNER_TEMP/docs-site"
+          uv run moondeck/docs/build_docs.py --site-dir "$RUNNER_TEMP/docs-site"
           cp -r "$RUNNER_TEMP/docs-site/." pages/
           ls -la pages/
 

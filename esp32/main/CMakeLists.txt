@@ -38,7 +38,7 @@ idf_component_register(
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
-# Firmware-variant defines, set by scripts/build/build_esp32.py via firmware_cmake_args().
+# Firmware-variant defines, set by moondeck/build/build_esp32.py via firmware_cmake_args().
 # See docs/architecture.md § Firmware vs board — "firmware" is the compiled
 # binary variant; the physical "board" is a separate concept the device
 # cannot identify on its own.
@@ -126,8 +126,8 @@ add_custom_target(ui_embed DEPENDS ${UI_DIR}/ui_embedded.h)
 set(BUILD_INFO_DIR ${COMPONENT_DIR}/../../src/core)
 add_custom_command(
     OUTPUT ${BUILD_INFO_DIR}/build_info.h
-    COMMAND ${Python3_EXECUTABLE} ${COMPONENT_DIR}/../../scripts/build/generate_build_info.py
-    DEPENDS ${COMPONENT_DIR}/../../library.json ${COMPONENT_DIR}/../../scripts/build/generate_build_info.py
+    COMMAND ${Python3_EXECUTABLE} ${COMPONENT_DIR}/../../moondeck/build/generate_build_info.py
+    DEPENDS ${COMPONENT_DIR}/../../library.json ${COMPONENT_DIR}/../../moondeck/build/generate_build_info.py
     COMMENT "Generating build_info.h"
 )
 add_custom_target(build_info_gen DEPENDS ${BUILD_INFO_DIR}/build_info.h)

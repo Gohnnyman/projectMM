@@ -79,7 +79,7 @@ The set is **closed under the rest of the ladder**: 2D/3D addressing is more ind
 
 ## Validation
 
-- `ctest` + `uv run scripts/scenario/run_scenario.py` green at each step; desktop-first so steps 1–3 are pure in-process.
+- `ctest` + `uv run moondeck/scenario/run_scenario.py` green at each step; desktop-first so steps 1–3 are pure in-process.
 - **Golden-bytes regression** (assembler `fill` == hand blob) is the anchor proving the assembler reproduces hand-quality code.
 - Hardware: S3 (Xtensa) + P4 (RISC-V) run `setRGB`/`random16` live via the scenario, including the out-of-range-index safety step.
 - Build zero-warnings; platform-boundary check (assembler bytes behind `src/platform/`); `check_specs` green.

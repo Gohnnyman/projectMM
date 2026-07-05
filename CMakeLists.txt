@@ -38,7 +38,7 @@ else()
     add_compile_options(-Wall -Wextra -Werror)
 endif()
 
-# `uv` is the project's Python launcher (see CLAUDE.md / scripts/MoonDeck.md).
+# `uv` is the project's Python launcher (see CLAUDE.md / moondeck/MoonDeck.md).
 # The build invokes Python helpers for build_info.h generation and UI embedding;
 # resolving them through `uv run python …` keeps Windows (where `python3` isn't
 # on PATH) on the same path as macOS / Linux without a `find_package(Python3)`
@@ -78,8 +78,8 @@ target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)
 # Generate build_info.h from library.json (carries version, build date, board name).
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/core/build_info.h
-    COMMAND ${UV_EXECUTABLE} run python ${CMAKE_SOURCE_DIR}/scripts/build/generate_build_info.py
-    DEPENDS ${CMAKE_SOURCE_DIR}/library.json ${CMAKE_SOURCE_DIR}/scripts/build/generate_build_info.py
+    COMMAND ${UV_EXECUTABLE} run python ${CMAKE_SOURCE_DIR}/moondeck/build/generate_build_info.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/library.json ${CMAKE_SOURCE_DIR}/moondeck/build/generate_build_info.py
     COMMENT "Generating build_info.h"
 )
 add_custom_target(build_info_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/build_info.h)

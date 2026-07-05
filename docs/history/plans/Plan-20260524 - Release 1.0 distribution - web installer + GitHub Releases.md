@@ -20,7 +20,7 @@ Closed scope (decided before this plan, not revisited here):
 - **Desktop binaries = macOS arm64 + Windows x64.** No Linux, no macOS x64.
 - **No OTA in 1.0.** Users re-flash via Web Tools when a new release lands.
 - **Tag matches `library.json` version.** CI fails fast on drift — maintainer bumps version, commits, tags as one act.
-- **MoonDeck developer flow unchanged.** `git clone` + `uv run scripts/moondeck.py` stays the dev bootstrap; the slow part is the prerequisite chain (uv, ESP-IDF), not the clone.
+- **MoonDeck developer flow unchanged.** `git clone` + `uv run moondeck/moondeck.py` stays the dev bootstrap; the slow part is the prerequisite chain (uv, ESP-IDF), not the clone.
 
 ## Architecture
 
@@ -29,7 +29,7 @@ git tag v1.0.0
   └─> .github/workflows/release.yml
         ├─ verify-version            (tag == library.json["version"]?)
         ├─ build-esp32 (matrix: esp32, esp32-eth, esp32-eth-wifi, esp32s3-n16r8)
-        │     └─ scripts/build/build_esp32.py --board <key>
+        │     └─ moondeck/build/build_esp32.py --board <key>
         ├─ build-macos               (macos-14, cmake Release, tar.gz)
         ├─ build-windows             (windows-latest, cmake/MSVC Release, zip)
         └─ release
@@ -68,14 +68,14 @@ The base file used to carry 7 Olimex-specific Eth lines (`CONFIG_ETH_USE_ESP32_E
 
 **Files to edit:**
 
-- [scripts/build/build_esp32.py](../../scripts/build/build_esp32.py) — replace the `--profile` argument logic with a `BOARDS` dict + `--board` argument. `--profile` becomes a deprecated alias (`eth-only` → `esp32-eth`, `default` → `esp32`) for one release. Replace `profile_cmake_args()` with `board_cmake_args(board)`.
-- [scripts/build/build_esp32_ethonly.py](../../scripts/build/build_esp32_ethonly.py) — forward `--board esp32-eth` instead of `--profile eth-only`. Kept for any external scripting that already calls the filename.
+- [moondeck/build/build_esp32.py](../../moondeck/build/build_esp32.py) — replace the `--profile` argument logic with a `BOARDS` dict + `--board` argument. `--profile` becomes a deprecated alias (`eth-only` → `esp32-eth`, `default` → `esp32`) for one release. Replace `profile_cmake_args()` with `board_cmake_args(board)`.
+- [moondeck/build/build_esp32_ethonly.py](../../moondeck/build/build_esp32_ethonly.py) — forward `--board esp32-eth` instead of `--profile eth-only`. Kept for any external scripting that already calls the filename.
 - [esp32/sdkconfig.defaults](../../esp32/sdkconfig.defaults) — remove the 7 Eth-block lines. File becomes board-neutral WiFi-default.
 - [esp32/sdkconfig.defaults.eth](../../esp32/sdkconfig.defaults.eth) — renamed from `.olimex_gw`. Self-sufficient (carries every Eth setting the working Olimex build needs); comment names Olimex as the default pin map and points at the 2.0 PHY-runtime-config plan.
 - [esp32/sdkconfig.defaults.esp32s3-n16r8](../../esp32/sdkconfig.defaults.esp32s3-n16r8) — renamed from `.esp32s3_n16r8` (hyphen instead of underscore — matches the board key). No content change.
 - Profile-change marker: rename `esp32/build/.mm_profile` → `.mm_board`. Migrate on first run (if the legacy file exists, read it once, treat as the equivalent board, then write the new marker).
-- [scripts/moondeck.py](../../scripts/moondeck.py) — add `extra_args` forwarding (3 lines) so a config entry can pass static flags to its script.
-- [scripts/moondeck_config.json](../../scripts/moondeck_config.json) + [scripts/MoonDeck.md](../../scripts/MoonDeck.md) — replace the "Build" / "Build (Ethernet-only)" pair with four board buttons, each baking a `--board` arg via `extra_args`.
+- [moondeck/moondeck.py](../../moondeck/moondeck.py) — add `extra_args` forwarding (3 lines) so a config entry can pass static flags to its script.
+- [moondeck/moondeck_config.json](../../moondeck/moondeck_config.json) + [moondeck/MoonDeck.md](../../moondeck/MoonDeck.md) — replace the "Build" / "Build (Ethernet-only)" pair with four board buttons, each baking a `--board` arg via `extra_args`.
 - docs/moonmodules/core/NetworkModule.md — update the Ethernet-only section to reference `--board esp32-eth`.
 
 ### Step 2 — Version-drift guard (0.5 h)
@@ -84,7 +84,7 @@ CI must verify `git tag == library.json["version"]` and fail before building. No
 
 **Files to create:**
 
-- [scripts/build/verify_version.py](../../scripts/build/verify_version.py) — short script that reads `GITHUB_REF_NAME` (without leading `v`) and `library.json` `"version"`, fails the workflow if they differ.
+- [moondeck/ci/verify_version.py](../../moondeck/ci/verify_version.py) — short script that reads `GITHUB_REF_NAME` (without leading `v`) and `library.json` `"version"`, fails the workflow if they differ.
 
 **Action at release time:**
 
@@ -96,7 +96,7 @@ Static-link what we can; accept dynamic libc++ on macOS (Apple doesn't ship a st
 
 **Files to create / edit:**
 
-- [scripts/build/package_desktop.py](../../scripts/build/package_desktop.py) — new. Reads version from `library.json`, detects host platform, runs the right CMake invocation, packages.
+- [moondeck/ci/package_desktop.py](../../moondeck/ci/package_desktop.py) — new. Reads version from `library.json`, detects host platform, runs the right CMake invocation, packages.
   - macOS arm64: `cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 && cmake --build build --config Release`. Tarball as `dist/projectMM-macos-arm64-vX.Y.Z.tar.gz` with the binary + a short `README.txt`.
   - Windows x64: `cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded && cmake --build build --config Release`. Zip as `dist/projectMM-windows-x64-vX.Y.Z.zip`.
 - [CMakeLists.txt](../../CMakeLists.txt) — gate the warning flags by compiler:
@@ -122,7 +122,7 @@ Don't hardcode the offset table — read from `esp32/build/flasher_args.json` pr
 
 **Files to create:**
 
-- [scripts/build/generate_manifest.py](../../scripts/build/generate_manifest.py) — takes `--board <key> --version <ver> --release-url <url> --flasher-args <path> --out <path>`, writes the manifest JSON with parts ordered by offset.
+- [moondeck/build/generate_manifest.py](../../moondeck/build/generate_manifest.py) — takes `--board <key> --version <ver> --release-url <url> --flasher-args <path> --out <path>`, writes the manifest JSON with parts ordered by offset.
 
 Schema:
 
@@ -168,7 +168,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python scripts/build/verify_version.py
+      - run: python moondeck/ci/verify_version.py
 
   build-esp32:
     needs: verify-version
@@ -190,7 +190,7 @@ jobs:
           esp_idf_version: v5.4
           target: ${{ startsWith(matrix.board, 'esp32s3') && 'esp32s3' || 'esp32' }}
           path: 'esp32'
-          command: python ../scripts/build/build_esp32.py --board ${{ matrix.board }}
+          command: python ../moondeck/build/build_esp32.py --board ${{ matrix.board }}
       - name: Stage artifacts
         run: |
           mkdir -p dist
@@ -209,7 +209,7 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - run: python scripts/build/package_desktop.py
+      - run: python moondeck/ci/package_desktop.py
       - uses: actions/upload-artifact@v4
         with: { name: desktop-macos, path: dist/ }
 
@@ -218,7 +218,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python scripts/build/package_desktop.py
+      - run: python moondeck/ci/package_desktop.py
       - uses: actions/upload-artifact@v4
         with: { name: desktop-windows, path: dist/ }
 
@@ -237,7 +237,7 @@ jobs:
           V=$(jq -r .version library.json)
           BASE=https://github.com/${{ github.repository }}/releases/download/v$V
           for B in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
-            python scripts/build/generate_manifest.py \
+            python moondeck/build/generate_manifest.py \
               --board $B --version $V --release-url $BASE \
               --flasher-args dist/flasher-$B.json --out dist/manifest-$B.json
           done
@@ -372,23 +372,23 @@ These run as the per-release additions to CLAUDE.md's Event 3 (Release tag) gate
 **New:**
 
 - [.github/workflows/release.yml](../../.github/workflows/release.yml)
-- [scripts/build/package_desktop.py](../../scripts/build/package_desktop.py)
-- [scripts/build/generate_manifest.py](../../scripts/build/generate_manifest.py)
-- [scripts/build/verify_version.py](../../scripts/build/verify_version.py)
+- [moondeck/ci/package_desktop.py](../../moondeck/ci/package_desktop.py)
+- [moondeck/build/generate_manifest.py](../../moondeck/build/generate_manifest.py)
+- [moondeck/ci/verify_version.py](../../moondeck/ci/verify_version.py)
 - docs/install/index.html
 - docs/install/README.md
 
 **Edited:**
 
-- [scripts/build/build_esp32.py](../../scripts/build/build_esp32.py) — add `--board`, deprecate `--profile`.
-- [scripts/build/build_esp32_ethonly.py](../../scripts/build/build_esp32_ethonly.py) — forwards to `--board esp32-eth`.
+- [moondeck/build/build_esp32.py](../../moondeck/build/build_esp32.py) — add `--board`, deprecate `--profile`.
+- [moondeck/build/build_esp32_ethonly.py](../../moondeck/build/build_esp32_ethonly.py) — forwards to `--board esp32-eth`.
 - [esp32/sdkconfig.defaults](../../esp32/sdkconfig.defaults) — drop the 7 Eth lines.
 - [esp32/sdkconfig.defaults.eth](../../esp32/sdkconfig.defaults.eth) — renamed from `.olimex_gw`. Self-sufficient (carries the full Olimex pin set).
 - [esp32/sdkconfig.defaults.esp32s3-n16r8](../../esp32/sdkconfig.defaults.esp32s3-n16r8) — renamed from `.esp32s3_n16r8`. No content change.
 - [CMakeLists.txt](../../CMakeLists.txt) — MSVC-gated warning flags + static MSVC runtime.
 - [library.json](../../library.json) — bump `0.1.0` → `1.0.0` at release time.
-- [scripts/moondeck.py](../../scripts/moondeck.py) — `extra_args` forwarding.
-- [scripts/moondeck_config.json](../../scripts/moondeck_config.json) + [scripts/MoonDeck.md](../../scripts/MoonDeck.md) — four board buttons.
+- [moondeck/moondeck.py](../../moondeck/moondeck.py) — `extra_args` forwarding.
+- [moondeck/moondeck_config.json](../../moondeck/moondeck_config.json) + [moondeck/MoonDeck.md](../../moondeck/MoonDeck.md) — four board buttons.
 - docs/moonmodules/core/NetworkModule.md — `--board esp32-eth` reference.
 - [README.md](../../README.md) — Quick Start with installer URL.
 - docs/building.md — boards table.
@@ -400,8 +400,8 @@ These run as the per-release additions to CLAUDE.md's Event 3 (Release tag) gate
 
 ## Verification
 
-- **Local board builds:** `python scripts/build/build_esp32.py --board esp32`, `--board esp32-eth`, `--board esp32-eth-wifi`, and `--board esp32s3-n16r8` all complete with zero warnings. Each writes `esp32/build/projectMM.bin` + `flasher_args.json` for the right chip.
-- **Local desktop:** `python scripts/build/package_desktop.py` on macOS produces a tarball under `dist/` that runs on a fresh Mac.
+- **Local board builds:** `python moondeck/build/build_esp32.py --board esp32`, `--board esp32-eth`, `--board esp32-eth-wifi`, and `--board esp32s3-n16r8` all complete with zero warnings. Each writes `esp32/build/projectMM.bin` + `flasher_args.json` for the right chip.
+- **Local desktop:** `python moondeck/ci/package_desktop.py` on macOS produces a tarball under `dist/` that runs on a fresh Mac.
 - **Local installer (surface 1):** the C+ recipe in `docs/install/README.md` — pull branch CI artifacts with `gh run download`, serve locally, flash each of the four boards over USB through the install page.
 - **RC dry run (surface 2):** push `v1.0.0-rcN` tag, all workflow jobs green, pre-release page populated with 22 files, Pages staging + deploy correctly skipped, manual flash per board succeeds against the rcN release URLs.
 - **Real release (surface 3):** tag `v1.0.0`, Pages flips, the live `https://ewowi.github.io/projectMM/install/` flashes each board cleanly.

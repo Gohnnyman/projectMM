@@ -8,7 +8,7 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 📦 **Release + downloads:** [latest release](https://github.com/MoonModules/projectMM/releases/latest)
 
-🛠️ **Building / hacking on it?** [MoonDeck](scripts/MoonDeck.md), our browser-based dev console (build · flash · test · live device discovery), comes in the repo.
+🛠️ **Building / hacking on it?** [MoonDeck](moondeck/MoonDeck.md), our browser-based dev console (build · flash · test · live device discovery), comes in the repo.
 
 Open Chrome or Edge, plug in your device, and you'll see lights in under a minute.
 
@@ -108,10 +108,10 @@ You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a 
 Once prerequisites are in place, launch MoonDeck, the browser-based dev console:
 
 ```sh
-uv run scripts/moondeck.py
+uv run moondeck/moondeck.py
 ```
 
-Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [scripts/MoonDeck.md](scripts/MoonDeck.md).
+Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [moondeck/MoonDeck.md](moondeck/MoonDeck.md).
 
 ![Moondeck Pc](docs/assets/ui/moondeck_pc.png)
 

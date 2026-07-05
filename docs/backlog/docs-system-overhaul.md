@@ -8,7 +8,7 @@ Follows the *Refactor for simplicity* process rule: alternatives enumerated, gai
 
 - **~259K words / 19.5K lines** of `.md`. Biggest buckets: `docs/history/` (97K words, incl. 47 plan files), `docs/backlog/` (57K), `docs/moonmodules/` (38K), `docs/tests/` (25K, **auto-generated**), top-level `docs/` (29K).
 - **GitHub Pages today publishes only the web installer** (`docs/install/`), *not the docs*. So the docs are read as raw `.md` on github.com — no nav, no search, no landing page. This is the root of "impossible for end users to read": **there is no doc *site* at all yet.**
-- **One generation loop already works and proves the model:** `scripts/docs/generate_test_docs.py` reads test metadata (`// @module` tags in `test/unit/*.cpp`, JSON fields in `test/scenarios/*.json`) and emits `docs/tests/{unit,scenario}-tests.md`. The same parser (`_test_metadata.py`) feeds MoonDeck's `/api/tests` UI. Source of truth = the test file. This is the pattern to extend, not replace.
+- **One generation loop already works and proves the model:** `moondeck/docs/generate_test_docs.py` reads test metadata (`// @module` tags in `test/unit/*.cpp`, JSON fields in `test/scenarios/*.json`) and emits `docs/tests/{unit,scenario}-tests.md`. The same parser (`_test_metadata.py`) feeds MoonDeck's `/api/tests` UI. Source of truth = the test file. This is the pattern to extend, not replace.
 - **Duplication hotspots** — each fact lives in N places, changing one forces the others:
 
   | Fact | Lives in | Sync today |
@@ -54,7 +54,7 @@ Rejected: **classic Doxygen HTML** (separate site, dated UI, not integrated), **
 - Move the *most* end-user-hostile prose (deep architecture) below a "Developer" fold so a user's top-down path never hits it unless they drill.
 - **Outcome:** the "top-to-down, easy navigate" structure, still additive.
 
-### Phase 2 — Fold generated tests into the site + surface them to users — *DONE (scripts/docs/mkdocs_hooks.py)*
+### Phase 2 — Fold generated tests into the site + surface them to users — *DONE (moondeck/docs/mkdocs_hooks.py)*
 
 *As shipped: the two inventory pages are generated at build time (never committed). Each effect/modifier keeps a compact card (heading, GIF, params, source link) with a one-line `[Tests]` link into its inventory section — an early attempt to expand that link into the full inline case list bloated the cards and was reverted; tests are a link, not a dump.*
 - Run the existing test-doc generation *at site-build time* via `mkdocs-gen-files` (stop committing `docs/tests/*.md` — the 25K generated words leave the repo, generated fresh each build). Kills the "forgot to regenerate" drift class entirely.
@@ -89,7 +89,7 @@ Prove each on **one module**, then sweep. Order by leverage:
 - **Scope:** Phase 0 approved (stand up the site). Phases 1–4 each need a separate go-ahead.
 - **Site URL:** docs at Pages root `/`; installer stays at `/install/`. The site is assembled in CI into a throwaway dir; the repo addition is `mkdocs.yml`.
 - **`docs/` de-overloading (landed with Phase 0):** `docs/` had held three unlike things. The standalone web installer moved out to a top-level **`web-installer/`** (it's an app, not docs; deployed URL unchanged at `/install/`). The transient `history/` + `backlog/` stay in `docs/` but excluded from the site — they're compaction-bound, so relocating them is discarded churn. Result: `docs/` = published doc-site source + transient internal notes (excluded).
-- **`scripts/` → `moondeck/`:** approved, but deferred to its own next commit (see `rename-scripts-to-moondeck.md`).
+- **`moondeck/` → `moondeck/`:** approved, but deferred to its own next commit (see `rename-scripts-to-moondeck.md`).
 - **Doxide comment style:** approved as the source-annotation convention for Phase 4 (Doxygen-family, recognised standard).
 
 ## Open questions for the PO
@@ -100,5 +100,5 @@ Prove each on **one module**, then sweep. Order by leverage:
 
 ## Source
 
-- Investigation basis: `scripts/docs/generate_test_docs.py`, `scripts/check/check_specs.py`, `.github/workflows/release.yml` (Pages deploy), the `docs/` tree.
+- Investigation basis: `moondeck/docs/generate_test_docs.py`, `moondeck/check/check_specs.py`, `.github/workflows/release.yml` (Pages deploy), the `docs/` tree.
 - Prior art / tooling: [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/), [pymdownx snippets](https://facelessuser.github.io/pymdown-extensions/extensions/snippets/), [Doxide](https://github.com/lawmurray/doxide).

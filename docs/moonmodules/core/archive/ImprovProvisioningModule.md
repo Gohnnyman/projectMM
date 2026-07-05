@@ -2,11 +2,11 @@
 
 **What Improv is.** [Improv-Wifi](https://www.improv-wifi.com/) (from Nabu Casa, the Home Assistant / ESPHome company) is an open standard for handing a device its WiFi credentials over a *local* link — USB serial here (it also has a BLE variant) — at the moment it has no network yet. That's the bootstrap chicken-and-egg it solves: a freshly-flashed ESP32 isn't on your WiFi, so you can't reach it over the network to tell it the WiFi password; Improv carries that first handoff over the cable the browser is already connected to from flashing. The name is short for *improvise* — the device has no pre-configured network, so it improvises its first connection from whatever local link is already there. projectMM extends this past credentials with the `APPLY_OP` vendor RPC — "Improv = REST over serial", see below — reusing the same already-there-before-the-network link to push the whole device config (including the deviceModel identity, which is just one of the config controls).
 
-Browser-driven WiFi provisioning over USB-serial, using the [Improv-WiFi](https://www.improv-wifi.com/) protocol. Bridges credentials from a Chrome / Edge / Opera tab — or from `scripts/build/improv_provision.py` for rack/CI use — into `NetworkModule::setWifiCredentials`, which writes the same buffers the AP-fallback UI flow uses. The protocol parser + UART task live in the platform layer; this module is the status surface that polls a ready-flag and bridges credentials to NetworkModule on the scheduler thread.
+Browser-driven WiFi provisioning over USB-serial, using the [Improv-WiFi](https://www.improv-wifi.com/) protocol. Bridges credentials from a Chrome / Edge / Opera tab — or from `moondeck/build/improv_provision.py` for rack/CI use — into `NetworkModule::setWifiCredentials`, which writes the same buffers the AP-fallback UI flow uses. The protocol parser + UART task live in the platform layer; this module is the status surface that polls a ready-flag and bridges credentials to NetworkModule on the scheduler thread.
 
 A code-wired child of NetworkModule. The wiring calls `markWiredByCode()` so the persistence-apply step preserves the child across reboots even on devices whose `Network.json` predates the addition (see [Persistence — code-wired children](../../../architecture.md#persistence)).
 
-The browser flow runs immediately after a Web Serial flash (ESP Web Tools recognises Improv-capable firmware and offers a "Connect to Wi-Fi?" dialog automatically). The CLI flow uses [`scripts/build/improv_provision.py`](../../../../scripts/build/improv_provision.py) over the same USB cable for headless or rack provisioning.
+The browser flow runs immediately after a Web Serial flash (ESP Web Tools recognises Improv-capable firmware and offers a "Connect to Wi-Fi?" dialog automatically). The CLI flow uses [`moondeck/build/improv_provision.py`](../../../../moondeck/build/improv_provision.py) over the same USB cable for headless or rack provisioning.
 
 ## Controls
 
@@ -56,10 +56,10 @@ ESP32 tab → pick the device's port → hit **Improv WiFi**. The script reads t
 
 ```bash
 # Reuse the host's currently-joined WiFi (same path as the MoonDeck button):
-uv run scripts/build/improv_provision.py --port /dev/tty.usbserial-XXXX
+uv run moondeck/build/improv_provision.py --port /dev/tty.usbserial-XXXX
 
 # Or override to push a different network's credentials:
-uv run scripts/build/improv_provision.py \
+uv run moondeck/build/improv_provision.py \
   --port /dev/tty.usbserial-XXXX \
   --ssid "MyWiFi" \
   --password "hunter2"
@@ -70,7 +70,7 @@ For multiple devices on a USB hub:
 
 ```bash
 for port in /dev/tty.usbserial-*; do
-  uv run scripts/build/improv_provision.py --port "$port"
+  uv run moondeck/build/improv_provision.py --port "$port"
 done
 ```
 

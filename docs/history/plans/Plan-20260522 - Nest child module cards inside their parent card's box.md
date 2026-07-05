@@ -26,7 +26,7 @@ Two files changed: `src/ui/app.js` and `src/ui/style.css`. No backend change. `s
 
 ## Verification
 
-- **Build** — `python3 scripts/build/build_desktop.py` from a clean `build/` (the old build cache held stale `projectMM-v3` paths from the directory rename and was removed). Zero warnings; `ui_embed` regenerated `ui_embedded.h` from the edited assets.
+- **Build** — `python3 moondeck/build/build_desktop.py` from a clean `build/` (the old build cache held stale `projectMM-v3` paths from the directory rename and was removed). Zero warnings; `ui_embed` regenerated `ui_embedded.h` from the edited assets.
 - **Rendered DOM** — drove headless Chrome via CDP, selected the `Layer` root (`localStorage['mm_selectedRoot']`), asserted on the live DOM: root card is `Layer`; its child order is exactly `["card-title", "card-children", "card-footer"]`; the `.card-children` wrapper holds 2 child cards (`Noise`, `Mirror`) as direct descendants; `+ add child` sits below the children block. All assertions passed.
 - **Tests** — `ctest` 1/1 passed, `./build/test/mm_scenarios` 8/8 passed. UI-only change, no C++ touched, so test results unaffected as expected.
 

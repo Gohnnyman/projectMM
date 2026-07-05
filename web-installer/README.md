@@ -69,7 +69,7 @@ labelled summary with a thumbnail:
 A flat JSON array of catalog entries. Each entry is the single source of truth
 for one piece of hardware and what to set up on it at install time. Two clients
 consume it identically — the web installer (`install-orchestrator.js`, which emits
-the entry's units as APPLY_OP ops over serial) and MoonDeck (`scripts/moondeck.py`,
+the entry's units as APPLY_OP ops over serial) and MoonDeck (`moondeck/moondeck.py`,
 which POSTs them over HTTP REST on the LAN) — so **adding another module-with-controls
 unit needs no client change** (both walk the same entry; only the transport differs).
 
@@ -240,7 +240,7 @@ same two operations per module: `add_module {type, id, parent_id}` (==
 "create a module, then configure it." (A scenario keeps a separate `props` block
 for in-process C++ construction wiring — `setLayouts`/`setChannelsPerLight`/grid
 dims that aren't control writes — which the catalog never needs, so the catalog
-unit carries only `controls`.) `scripts/scenario/run_live_scenario.py` already
+unit carries only `controls`.) `moondeck/scenario/run_live_scenario.py` already
 runs these ops over HTTP against a live device, the same channel the installer uses.
 
 ## What's *not* in this directory
@@ -272,7 +272,7 @@ the install button can actually flash.
 Quickest. In MoonDeck: **PC tab → Preview Installer**. Or from the CLI:
 
 ```bash
-uv run scripts/run/preview_installer.py
+uv run moondeck/run/preview_installer.py
 # open http://localhost:8000/ in Chrome / Edge / Opera
 ```
 
@@ -310,7 +310,7 @@ for F in esp32 esp32-eth esp32s3-n16r8; do
   TMP=$(mktemp -d)
   gh run download "$RUN_ID" -n "esp32-$F" -D "$TMP"
   cp "$TMP"/*.bin "$DIST/releases/$TAG/"
-  python3 scripts/build/generate_manifest.py \
+  python3 moondeck/build/generate_manifest.py \
     --firmware "$F" --version "$V" \
     --release-url . \
     --flasher-args "$TMP/flasher-$F.json" \

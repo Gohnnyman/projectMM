@@ -80,7 +80,7 @@ Actually, for live scenarios we just need the values. The Python runner calls `G
 
 ### 5. Python live scenario runner
 
-`scripts/scenario/run_live_scenario.py`:
+`moondeck/scenario/run_live_scenario.py`:
 - Connects to a device via HTTP (host:port)
 - Reads scenario JSON (same format as in-process)
 - Executes steps:
@@ -113,10 +113,10 @@ src/light/DriverGroup.h               # MODIFY: addChild/removeChild, role()
 src/light/LayoutGroup.h               # MODIFY: addChild/removeChild, role()
 src/light/Layer.h                     # MODIFY: addChild/removeChild, role()
 src/main.cpp                          # MODIFY: register module types with factory
-scripts/scenario/run_live_scenario.py # NEW: Python HTTP scenario runner
-scripts/moondeck_config.json          # MODIFY: add Live tab entries
-scripts/moondeck_ui/index.html        # MODIFY: Live tab content
-scripts/moondeck_ui/app.js            # MODIFY: device discovery UI
+moondeck/scenario/run_live_scenario.py # NEW: Python HTTP scenario runner
+moondeck/moondeck_config.json          # MODIFY: add Live tab entries
+moondeck/moondeck_ui/index.html        # MODIFY: Live tab content
+moondeck/moondeck_ui/app.js            # MODIFY: device discovery UI
 test/scenarios/control-change.json    # NEW: scenario with set_control steps
 docs/moonmodules/core/HttpServerModule.md # MODIFY: new endpoints
 docs/testing.md                       # MODIFY: live scenario section
