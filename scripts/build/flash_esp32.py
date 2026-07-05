@@ -24,6 +24,52 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_esp32 import find_idf, idf_env, idf_cmd, FIRMWARES, build_dir_for
 
 
+CATALOG = ROOT / "web-installer" / "deviceModels.json"
+# MoonDeck / CLI flashing defaults FAST: this path is the DIY bench, where the operator
+# knows their board and the USB bridge is almost always a modern one that sustains 921600
+# (~2x faster). A board with a flaky bridge opts DOWN via its catalog `flashBaud` (e.g. a
+# CH340 clone that stalls at 921600). This is the opposite of the web installer, which
+# defaults to the safe 460800 because it serves unknown walk-up hardware (see
+# install-orchestrator.js) — same catalog, different audience, different default.
+DEFAULT_FLASH_BAUD = 921600
+
+
+def _catalog_flash_baud(firmware: str, device_model: str | None = None) -> int:
+    """The flash baud to use, from the deviceModel catalog.
+
+    A deviceModel pins its own baud with a `flashBaud` field — down for a flaky bridge
+    (a CH340 clone at 460800) or up/explicit for a verified one (the S31 at 921600).
+
+    Resolution:
+      - When the EXACT `device_model` is known (MoonDeck maps it from the port's device):
+        that entry's `flashBaud` if it sets one, else DEFAULT_FLASH_BAUD. Keying on the
+        exact board stops a per-model opt-down leaking to firmware-siblings — the LOLIN's
+        460800 must not slow the Dig-Uno, which shares the `esp32` firmware but has a fine
+        bridge and no flashBaud of its own (so it gets the fast default, not the LOLIN's).
+      - When no device_model is given (a plain --firmware flash): the LOWEST `flashBaud`
+        among models sharing this firmware, so an opt-down still protects a board flashed
+        without a known model; else DEFAULT_FLASH_BAUD.
+    An unreadable catalog always yields DEFAULT_FLASH_BAUD.
+    """
+    import json
+    try:
+        catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return DEFAULT_FLASH_BAUD
+    if device_model:
+        for e in catalog:
+            if isinstance(e, dict) and e.get("name") == device_model:
+                b = e.get("flashBaud")
+                return b if isinstance(b, int) else DEFAULT_FLASH_BAUD
+        # device_model given but not in the catalog — fall through to firmware/default.
+    bauds = {
+        e["flashBaud"] for e in catalog
+        if isinstance(e, dict) and firmware in (e.get("firmwares") or [])
+        and isinstance(e.get("flashBaud"), int)
+    }
+    return min(bauds) if bauds else DEFAULT_FLASH_BAUD
+
+
 def _fmt_age(seconds: float) -> str:
     """Compact human-readable age (5s, 12m, 3h, 2d)."""
     s = int(seconds)
@@ -41,13 +87,28 @@ def main():
                              "firmware must exist at build/esp32-<firmware>/ — "
                              "i.e. you must have run Build with the same "
                              "--firmware first.")
-    parser.add_argument("--baud", type=int, default=460800,
-                        help="esptool flash baud rate (default: 460800 — reliable on "
-                             "every board). The web installer uses 921600 (~2x faster); "
-                             "pass --baud 921600 to match it, but some USB bridges "
-                             "(CP210x/CH340) drop to 'chip stopped responding' mid-flash "
-                             "at that rate, so it's opt-in, not the default.")
+    parser.add_argument("--baud", type=int, default=None,
+                        help="esptool flash baud rate. When omitted, defaults to 921600 "
+                             "(~2x faster — the DIY-bench assumption is a modern bridge), "
+                             "unless the deviceModel's catalog 'flashBaud' pins it lower "
+                             "for a flaky bridge (a CH340 clone that stalls at 921600 with "
+                             "'chip stopped responding'). Pass --baud to override either. "
+                             "(The web installer defaults to 460800 instead — it serves "
+                             "unknown walk-up hardware.)")
+    parser.add_argument("--device-model", dest="device_model", default=None,
+                        help="The deviceModel of the board being flashed (MoonDeck passes "
+                             "it, mapped from the port's device). Lets the baud resolve by "
+                             "the EXACT board so a per-model flashBaud opt-down doesn't leak "
+                             "to firmware-siblings. Optional — omitted flashes resolve by "
+                             "firmware then the fast default.")
     args = parser.parse_args()
+
+    # Default fast (921600) for the DIY bench; a deviceModel with a flaky bridge pins its
+    # own `flashBaud` in the catalog to slow down. An explicit --baud always wins; else the
+    # catalog value (exact deviceModel first, then lowest across firmware-siblings) applies;
+    # else the fast default. Data-driven per-board, like the rest of deviceModels.json.
+    baud = args.baud if args.baud is not None \
+        else _catalog_flash_baud(args.firmware, args.device_model)
 
     if not ESP32_DIR.exists():
         print(f"ESP32 project directory not found: {ESP32_DIR}")
@@ -92,8 +153,9 @@ def main():
     # board's stable identity — so MoonDeck records last_port on the exact device,
     # even when two boards share a firmware. Streaming keeps the live progress on
     # the console; we just also scan it.
+    print(f"==> flash baud: {baud}")
     mac = ""
-    proc = subprocess.Popen(cmd + b_arg + ["flash", "-p", args.port, "-b", str(args.baud)],
+    proc = subprocess.Popen(cmd + b_arg + ["flash", "-p", args.port, "-b", str(baud)],
                             cwd=ESP32_DIR, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for line in proc.stdout:

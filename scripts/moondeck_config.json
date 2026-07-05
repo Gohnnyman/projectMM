@@ -205,7 +205,8 @@
       "help": "flash_esp32",
       "script": "build/flash_esp32.py",
       "needs_port": true,
-      "needs_firmware": true
+      "needs_firmware": true,
+      "pass_port_device_model": true
     },
     {
       "id": "erase_flash_esp32",
@@ -236,7 +237,7 @@
       "help": "improv_provision",
       "script": "build/improv_provision.py",
       "needs_port": true,
-      "pass_board": true
+      "pass_device_model": true
     },
     {
       "id": "improv_probe",

@@ -41,7 +41,7 @@ def _app_version():
 APP_VERSION = _app_version()
 
 # ---------------------------------------------------------------------------
-# Boards catalog (single source of truth, shared with the web installer)
+# Device-model catalog (single source of truth, shared with the web installer)
 # ---------------------------------------------------------------------------
 
 DEVICE_MODELS_FILE = ROOT / "web-installer" / "deviceModels.json"
@@ -198,15 +198,20 @@ def _probe_device(ip, port=8080, timeout=0.4):
                 "ip": ip if port == 80 else f"{ip}:{port}",
                 "deviceName": device_name,
                 "firmware": firmware,
+                # `deviceModel` is the merged value (device-reported, else the firmware-deduced
+                # fallback). `_reportedModel` is what the DEVICE actually said (empty if it hasn't been
+                # told) — the merge compares against this to know whether to push the model to the
+                # device; using the already-deduced value would make them equal and skip the push.
                 "deviceModel": device_model or _deduce_device_model(firmware),
+                "_reportedModel": device_model,
             }
     except Exception:
         return None
 
 
 def _deduce_device_model(firmware: str) -> str:
-    """Firmware → board name when exactly one catalog entry claims this
-    firmware. Returns "" when zero (unknown firmware) or multiple boards
+    """Firmware → deviceModel name when exactly one catalog entry claims this
+    firmware. Returns "" when zero (unknown firmware) or multiple device models
     claim it (ambiguous — user picks). Catalog lives at
     web-installer/deviceModels.json; see docs/architecture.md § Firmware vs board.
     """
@@ -219,11 +224,11 @@ def _deduce_device_model(firmware: str) -> str:
 def _push_device(ip: str, model: str) -> bool:
     """POST /api/control on the device for every per-board control in deviceModels.json.
 
-    For boards that have a catalog entry in web-installer/deviceModels.json: fans
+    For device models that have a catalog entry in web-installer/deviceModels.json: fans
     out the full `controls.<Module>.<control>` block (matching the web
     installer's and the device-side `?deviceModel=` Inject path — same generic
-    iteration, so adding a new field to a board entry Just Works without
-    code changes here). For boards without a catalog entry (custom names,
+    iteration, so adding a new field to a deviceModel entry Just Works without
+    code changes here). For device models without a catalog entry (custom names,
     unknown firmware): still pushes `System.deviceModel` so the bare name lands —
     keeps the legacy single-field behaviour as the fallback.
 
@@ -233,7 +238,7 @@ def _push_device(ip: str, model: str) -> bool:
     field shape.
 
     `ip` is the "host:port" string from the device record (already includes
-    the port discovery picked). `board` is the catalog key MoonDeck wants
+    the port discovery picked). `deviceModel` is the catalog key MoonDeck wants
     the device to remember (empty string means "clear" — no push).
     """
     if not model:
@@ -261,8 +266,7 @@ def _apply_modules_to_device(ip: str, modules: list) -> bool:
     """Add-then-configure a list of module-with-controls units on a device.
 
     Each unit is `{type, id, parent_id?, controls?}` — the SAME shape deviceModels.json
-    catalog entries use and a saved device-profile stores, so both the deviceModel push
-    (_push_device) and a profile restore share this one fan-out. Per
+    catalog entries use, so the deviceModel push (_push_device) drives it. Per
     module: add it first when it has a parent_id (a fresh flash has no user-added
     modules like AudioModule, so a control write would 404), then set its controls.
     A module without parent_id is boot-wired/top-level (Board under System,
@@ -306,85 +310,8 @@ def _apply_modules_to_device(ip: str, modules: list) -> bool:
     return True
 
 
-# Module types whose controls a device-profile captures: the drivers + the
-# system/network/audio config a user sets by hand. Effects/layouts/layers are
-# animation state, not the device's physical pin wiring, so they're left out —
-# a profile is "the GPIO/peripheral setup", re-applied after a reflash wipes it.
-# SystemModule carries the device identity (deviceName + deviceModel, the latter
-# folded in from the former BoardModule); its read-only telemetry controls are
-# dropped by the _NON_REPLAYABLE_CONTROL_TYPES filter, leaving just the Text config.
-_PROFILE_MODULE_TYPES = {
-    "SystemModule", "NetworkModule", "AudioModule",
-    "RmtLedDriver", "LcdLedDriver", "ParlioLedDriver", "NetworkSendDriver",
-}
-
-# Control types that must NOT go into a captured profile: password values are
-# XOR-obfuscated in /api/state (re-pushing double-encodes them), and display /
-# display-int / progress are device-derived read-outs. These mirror the device's
-# own isPersistable() exclusions (src/core/Control.cpp); strings are the JSON
-# `type` values from controlTypeName().
-_NON_REPLAYABLE_CONTROL_TYPES = {"password", "display", "display-int", "progress"}
-
-
-def _capture_device_profile(ip: str) -> "list | None":
-    """Read /api/state and flatten the module tree into profile units.
-
-    Returns a list of `{type, id, parent_id?, controls}` units (the same shape
-    _apply_modules_to_device + deviceModels.json use), or None if the device is
-    unreachable. Only the config-bearing module types in _PROFILE_MODULE_TYPES are
-    captured (the physical pin/peripheral setup), and each module's controls list
-    `[{name, value}]` is collapsed to a `{name: value}` dict. parent_id comes from
-    the tree position so restore re-creates user-added modules under the right
-    container. The catalog `type` is the short id the device reports as the module
-    type; we keep it verbatim (e.g. "RmtLedDriver"), matching deviceModels.json.
-    """
-    import urllib.request
-    import urllib.error
-    # Use the stored ip:port verbatim (a bare IP resolves to HTTP's default port 80), matching
-    # _apply_modules_to_device. A hard-coded 8080 fallback was wrong: ESP32 devices serve on 80
-    # (only the desktop dev build uses 8080), so capturing a bare-IP device silently failed.
-    try:
-        with urllib.request.urlopen(f"http://{ip}/api/state", timeout=1.0) as resp:
-            state = json.loads(resp.read())
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        return None
-
-    units: list = []
-
-    def _collect(modules, parent_id) -> None:
-        for m in modules or []:
-            mtype = m.get("type")
-            mid = m.get("name")   # /api/state reports the instance id under "name"
-            if mtype in _PROFILE_MODULE_TYPES and mid:
-                controls = {}
-                for c in m.get("controls", []):
-                    cn = c.get("name")
-                    # Skip non-replayable control types: password values are
-                    # XOR-obfuscated in /api/state (replaying them would double-
-                    # encode), and display / display-int / progress are device-
-                    # derived read-outs the device overwrites every tick. These are
-                    # exactly the types the device's own isPersistable() (Control.cpp)
-                    # refuses to save — mirror that here so a profile only carries
-                    # writable config. Type strings come from controlTypeName().
-                    if c.get("type") in _NON_REPLAYABLE_CONTROL_TYPES:
-                        continue
-                    if cn is not None and "value" in c:
-                        controls[cn] = c["value"]
-                unit = {"type": mtype, "id": mid}
-                if parent_id:
-                    unit["parent_id"] = parent_id
-                if controls:
-                    unit["controls"] = controls
-                units.append(unit)
-            # recurse with THIS module's id as the parent for its children
-            _collect(m.get("children", []), m.get("name"))
-
-    _collect(state.get("modules", []), None)
-    return units
-
-
 def _push_devices_in_parallel(pushes):
-    """Fire _push_device for each (ip, board) tuple in parallel.
+    """Fire _push_device for each (ip, deviceModel) tuple in parallel.
 
     Discovery + refresh probe a /24, so the push count is bounded by the
     device count (single digits in practice). A small thread pool keeps
@@ -431,7 +358,7 @@ def discover_devices(subnet=""):
     if hasLanEntry:
         devices = [d for d in devices if d["ip"].split(":", 1)[0] != "localhost"]
 
-    # Attribute a recent flash's port to the board it flashed (by MAC) — same as refresh, so
+    # Attribute a recent flash's port to the device it flashed (by MAC) — same as refresh, so
     # a flash → discover also records last_port. Whichever scan finds the device first links it.
     _link_last_flash(devices)
 
@@ -472,7 +399,7 @@ def refresh_devices(known_devices):
     Preserves user-set fields (`deviceModel`, `last_port`) across refreshes: the
     probe result carries fresh `firmware`/`deviceName` and a deduced `deviceModel`
     (set only when firmware unambiguously identifies hardware), but a user-set
-    `deviceModel` for a firmware that can run on multiple boards (e.g. `esp32` on
+    `deviceModel` for a firmware that can run on multiple device models (e.g. `esp32` on
     LOLIN D32 vs generic DevKit) must survive a refresh. Same for `last_port`,
     which is set by the flash-event breadcrumb (see _consume_last_flash).
     """
@@ -482,7 +409,9 @@ def refresh_devices(known_devices):
             host, port = ip.rsplit(":", 1)
             fresh = _probe_device(host, int(port))
         else:
-            fresh = _probe_device(ip)
+            # A bare IP is a port-80 device (that's why it's stored without a port) — probe 80, NOT
+            # _probe_device's 8080 default, or the ESP32 refresh would fail and mark it offline.
+            fresh = _probe_device(ip, 80)
         if not fresh:
             return None
         # Merge: probe wins for live-readable fields; user-set / flash-tracked
@@ -509,6 +438,33 @@ def refresh_devices(known_devices):
     return refreshed
 
 
+def _mac_matches(flash_mac: str, device_mac: str) -> bool:
+    """True if a probed device's self-reported MAC identifies the just-flashed chip.
+
+    esptool reads the raw 6-byte efuse MAC (e.g. 30:ED:A0:F3:D4:68), which is what the
+    breadcrumb stores. Most chips' `esp_efuse_mac_get_default()` returns that same value,
+    so an exact compare is the common case. But on some chips (the ESP32-S31) that API
+    returns the EUI-64 encoding of the efuse MAC — FF:FE inserted after the 3-byte OUI —
+    truncated back to 6 bytes: 30:ED:A0:F3:D4:68 → 30:ED:A0:FF:FE:F3. The device then
+    reports *that* everywhere (its `mac` control, its MM-xxxx name), so a raw-efuse
+    breadcrumb never matches it. Accept both the raw form and its EUI-64-truncated
+    derivation, computed forward from the efuse MAC (the reverse is lossy — the dropped
+    bytes are gone). A pure widening of the exact compare: it never breaks a real match.
+    """
+    flash_mac = (flash_mac or "").strip().lower()
+    device_mac = (device_mac or "").strip().lower()
+    if not flash_mac or not device_mac:
+        return False
+    if flash_mac == device_mac:
+        return True
+    b = flash_mac.split(":")
+    if len(b) != 6:
+        return False
+    # EUI-64(efuse) = OUI(3) + ff:fe + rest(3); the device reports its first 6 bytes.
+    eui64_trunc = ":".join([b[0], b[1], b[2], "ff", "fe", b[3]])
+    return device_mac == eui64_trunc
+
+
 def _link_last_flash(probed: list) -> None:
     """Set `last_port` on the device a recent flash targeted. flash_esp32.py writes
     scripts/.last_flash.json {port, mac, firmware} after a successful flash; the port is
@@ -522,13 +478,22 @@ def _link_last_flash(probed: list) -> None:
         return
     flash_mac = (last_flash.get("mac") or "").strip().lower()
     if flash_mac:
-        matches = [d for d in probed if (d.get("mac") or "").strip().lower() == flash_mac]
+        matches = [d for d in probed if _mac_matches(flash_mac, d.get("mac"))]
     elif last_flash.get("firmware"):   # legacy breadcrumb without a MAC
         matches = [d for d in probed if d.get("firmware") == last_flash["firmware"]]
     else:
         matches = []
     if len(matches) == 1:
-        matches[0]["last_port"] = last_flash["port"]
+        port = last_flash["port"]
+        # A physical serial port maps to exactly ONE device at a time — boards get swapped on
+        # the same USB port, and ports drift between sessions. So before attributing it, strip
+        # this port from any OTHER device that still carries it (a stale link from a previous
+        # flash), else two records share a last_port and port→device lookups (baud resolution,
+        # the flash chip) can pick the wrong, stale board.
+        for d in probed:
+            if d is not matches[0] and d.get("last_port") == port:
+                d.pop("last_port", None)
+        matches[0]["last_port"] = port
         with suppress(OSError):
             _LAST_FLASH_FILE.unlink()   # linked → consume so it applies once
     # 0 matches (device hasn't rebooted into the new firmware yet) or 2+ (ambiguous legacy
@@ -720,6 +685,29 @@ def _active_network(state: dict) -> dict | None:
         if n.get("name") == name:
             return n
     return None
+
+
+def _strip_probe_transient(device: dict) -> dict:
+    """A copy of `device` without `_reportedModel` — the raw model string a probe attaches
+    for the push-compare, which must not be persisted to moondeck.json. One idiom for the
+    drop so discover and refresh can't diverge on which key(s) count as probe-transient."""
+    return {k: v for k, v in device.items() if k != "_reportedModel"}
+
+
+def _device_model_for_port(port: str) -> str:
+    """The deviceModel of the device last flashed via `port`, or "" if none.
+
+    Maps a serial port back to a board by the `last_port` breadcrumb (set at flash time,
+    keyed per-device by MAC) in the active network. Used so a port-based flash can resolve
+    its baud by the exact deviceModel rather than the shared firmware. Returns "" when the
+    port isn't linked to any device, or the linked device has no deviceModel set."""
+    if not port:
+        return ""
+    net = _active_network(load_state())
+    for d in (net.get("devices") or []) if net else []:
+        if d.get("last_port") == port:
+            return d.get("deviceModel") or ""
+    return ""
 
 
 def _subnet_from_host_subnet(host_subnet: str) -> str:
@@ -961,12 +949,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/test-modules":
             self._send_json({"modules": test_meta.list_test_modules()})
 
-        elif self.path == "/api/boards":
+        elif self.path == "/api/device-models":
             # Serves web-installer/deviceModels.json (loaded at startup). The web
-            # installer (Step 2) will fetch the same file directly from
-            # Pages; MoonDeck reads it locally and exposes it here so the
-            # JS UI shares one source of truth with the Python deduce path.
-            self._send_json({"boards": DEVICE_MODELS})
+            # installer (Step 2) fetches the same file directly from Pages;
+            # MoonDeck reads it locally and exposes it here so the JS UI shares
+            # one source of truth with the Python deduce path.
+            self._send_json({"deviceModels": DEVICE_MODELS})
 
         elif self.path.startswith("/api/unit-tests/"):
             self._serve_unit_tests_for_module()
@@ -1051,67 +1039,6 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             ok = _push_device(ip, model)
             self._send_json({"ok": ok})
 
-        elif self.path == "/api/save-profile":
-            # Capture a device's current pin/peripheral config (drivers, board,
-            # network, audio) and store it as a named profile under the device
-            # record in moondeck.json. Lets a user re-apply the GPIO setup after a
-            # reflash wipes config, or clone it to a second identical rig.
-            body = self._read_body()
-            params = json.loads(body) if body else {}
-            ip = params.get("ip", "")
-            name = (params.get("name") or "").strip()
-            if not ip or not name:
-                self._send_json({"error": "ip and name required"}, 400)
-                return
-            modules = _capture_device_profile(ip)
-            if modules is None:
-                self._send_json({"error": "device unreachable"}, 502)
-                return
-            # Store under the device with this MAC (the identity — not the IP, a DHCP lease), in the
-            # ACTIVE network only (scoping avoids a collision when two networks share a private subnet).
-            mac = (params.get("mac") or "").strip().lower()
-            def _store(state) -> None:
-                net = _active_network(state)
-                if not net:
-                    return
-                for d in net.get("devices") or []:
-                    if mac and (d.get("mac") or "").strip().lower() == mac:
-                        profiles = [p for p in d.get("profiles", [])
-                                    if p.get("name") != name]   # replace same-named
-                        profiles.append({"name": name, "modules": modules})
-                        d["profiles"] = profiles
-            mutate_state(_store)
-            self._send_json({"ok": True, "moduleCount": len(modules)})
-
-        elif self.path == "/api/apply-profile":
-            # Re-apply a stored profile to a device (same or a second identical
-            # board) via the shared add-then-configure fan-out.
-            body = self._read_body()
-            params = json.loads(body) if body else {}
-            ip = params.get("ip", "")
-            name = (params.get("name") or "").strip()
-            if not ip or not name:
-                self._send_json({"error": "ip and name required"}, 400)
-                return
-            # Scope the profile lookup to the device the UI applied it from (matched by MAC — its
-            # identity), in the ACTIVE network only (its dropdown lists that device's own profiles).
-            # Matching by name across every device — or across networks with overlapping subnets —
-            # would restore the wrong pin map when two devices share a name like "default".
-            mac = (params.get("mac") or "").strip().lower()
-            modules = None
-            net = _active_network(load_state())
-            for d in (net.get("devices") or []) if net else []:
-                if not mac or (d.get("mac") or "").strip().lower() != mac:
-                    continue
-                for p in d.get("profiles", []):
-                    if p.get("name") == name:
-                        modules = p.get("modules")
-            if modules is None:
-                self._send_json({"error": "profile not found"}, 404)
-                return
-            ok = _apply_modules_to_device(ip, modules)
-            self._send_json({"ok": ok})
-
         elif self.path == "/api/discover":
             body = self._read_body()
             params = json.loads(body) if body else {}
@@ -1150,23 +1077,26 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 for fresh in devices:
                     key = _device_key(fresh)
                     if not key:
-                        continue   # no MAC → not a persistent device; skip
+                        # No MAC → not a MoonDeck-manageable device (a WLED peer, or projectMM
+                        # firmware predating the `mac` control). Dropped from the list entirely — not
+                        # shown, not persisted — since MoonDeck can't flash it anyway. This is
+                        # deliberate (the product-owner "MAC or it's not a device" rule), not an omission.
+                        continue
                     keep = by_key.get(key, {})
-                    out = {**fresh, "online": True,
+                    out = {**_strip_probe_transient(fresh), "online": True,
                            "selected": keep.get("selected", False)}
                     if keep.get("deviceModel") and not out.get("deviceModel"):
                         out["deviceModel"] = keep["deviceModel"]
                     if keep.get("last_port"):
                         out["last_port"] = keep["last_port"]
                     merged.append(out)
-                    # The device's `board` (from probe) is what's persisted
-                    # device-side. If the merged value differs — typically
-                    # because MoonDeck just deduced one from firmware on a
-                    # device that hadn't been told yet — schedule a push so
-                    # the next probe reads the value back from the device.
-                    device_model = (fresh.get("deviceModel") or "")
+                    # Compare the device's OWN reported model (`_reportedModel`, empty if it hasn't
+                    # been told) against the merged value. When they differ — typically MoonDeck just
+                    # deduced a model from firmware, or the user picked one, for a device that hasn't
+                    # heard it — schedule a push so the device persists it and reports it back next scan.
+                    reported_model = (fresh.get("_reportedModel") or "")
                     merged_model = (out.get("deviceModel") or "")
-                    if merged_model and merged_model != device_model:
+                    if merged_model and merged_model != reported_model:
                         pushes.append((fresh.get("ip", ""), merged_model))
                 # Previously-stored (MAC'd) devices not found in this scan stay as offline, so a
                 # known board isn't lost just because it's powered off. Discover is additive; refresh
@@ -1223,7 +1153,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 # a responding device without a MAC is shown but not stored; a prior MAC'd device
                 # not seen this refresh stays as offline.
                 refreshed_keys = {_device_key(d) for d in refreshed if _device_key(d)}
-                merged = [d for d in refreshed if _device_key(d)]
+                merged = [_strip_probe_transient(d)
+                          for d in refreshed if _device_key(d)]
                 for prior in (target.get("devices") or []):
                     pk = _device_key(prior)
                     if pk and pk not in refreshed_keys:
@@ -1288,20 +1219,29 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             cmd.extend(["--firmware", params["firmware"]])
         if script_def.get("needs_port") and params.get("port"):
             cmd.extend(["--port", params["port"]])
+            # For a port-based flash, hand the script the deviceModel of the device last
+            # flashed via that port (matched by last_port in the active network), so its
+            # baud resolves by the EXACT board — a per-model flashBaud opt-down (the LOLIN's
+            # 460800) then can't leak to a firmware-sibling with a fine bridge (the Dig-Uno).
+            # No-op when the port maps to no known device or that device has no model.
+            if script_def.get("pass_port_device_model"):
+                model = _device_model_for_port(params["port"])
+                if model:
+                    cmd.extend(["--device-model", model])
         if script_def.get("needs_scenario") and params.get("scenario"):
             cmd.extend(["--name", params["scenario"]])
         if script_def.get("needs_module") and params.get("module"):
             cmd.extend(["--module", params["module"]])
-        # pass_board: forward the board picked in the UI's provisioning
+        # pass_device_model: forward the deviceModel picked in the UI's provisioning
         # dropdown (state.provisionDeviceModel) so improv_provision.py injects that
         # board's TX-power cap BEFORE provisioning (the weak-power brown-out fix).
-        # No firmware-deduce fallback: the only pass_board script
+        # No firmware-deduce fallback: the only pass_device_model script
         # (improv_provision) doesn't declare needs_firmware, so params never
         # carries a firmware to deduce from — the dropdown is the sole source.
-        if script_def.get("pass_board"):
+        if script_def.get("pass_device_model"):
             device_model = params.get("deviceModel")
             if device_model:
-                cmd.extend(["--board", device_model])   # improv_provision.py's CLI flag is --board
+                cmd.extend(["--device-model", device_model])   # improv_provision.py's CLI flag
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
         for flag in script_def.get("flags", []):

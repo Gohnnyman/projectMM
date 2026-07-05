@@ -2964,8 +2964,9 @@ function fmMakeDropTarget(el, destDir, hidden, rerender, st) {
         if (destDir !== "/") st.expanded.add(destDir);   // reveal where they landed
         rerender();
         if (skipped.length) {
-            // Tier 1 is text/config ≤8KB — report what was not uploaded rather than dropping silently.
-            alert("Not uploaded (drag-drop is text/config ≤ 8 KB for now):\n" + skipped.join("\n"));
+            // Report what wasn't uploaded (over the size cap or a write error) rather than dropping
+            // it silently. The limit is derived from FM_UPLOAD_CAP so the text never drifts from it.
+            alert(`Not uploaded (over ${fmSize(FM_UPLOAD_CAP)} or failed):\n` + skipped.join("\n"));
         }
     });
 }
@@ -3043,6 +3044,7 @@ async function openFileEditor(relPath) {
     } catch (err) {
         body.value = "";
         status.textContent = "load failed: " + err.message;
+        saveBtn.disabled = true;   // never let a Save post an empty body over a file that failed to load
     }
 
     saveBtn.addEventListener("click", async () => {

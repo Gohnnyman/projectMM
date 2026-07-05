@@ -219,11 +219,11 @@ def main() -> int:
                          "on Windows; empty for open networks)")
     ap.add_argument("--timeout", type=float, default=45.0,
                     help="Max seconds to wait for a final response (default: 45)")
-    ap.add_argument("--board", default=None, metavar="NAME",
-                    help="Board name from web-installer/deviceModels.json (e.g. "
-                         "'ESP32-S3 N16R8 Dev'). Resolves the board's TX-power cap "
+    ap.add_argument("--device-model", dest="device_model", default=None, metavar="NAME",
+                    help="deviceModel name from web-installer/deviceModels.json (e.g. "
+                         "'ESP32-S3 N16R8 Dev'). Resolves the deviceModel's TX-power cap "
                          "(controls.Network.txPowerSetting) automatically and "
-                         "pushes the board name via SET_DEVICE_MODEL after "
+                         "pushes the name via SET_DEVICE_MODEL after "
                          "provisioning — the same injection the web installer "
                          "does. An explicit --tx-power overrides the lookup.")
     ap.add_argument("--tx-power", type=int, default=None, metavar="DBM",
@@ -274,7 +274,7 @@ def main() -> int:
         print(f"ERROR: password too long ({len(args.password)} > 63 bytes)", file=sys.stderr)
         return 2
 
-    if args.board:
+    if args.device_model:
         # deviceModels.json is the single source of truth for per-board injection —
         # same file the web installer and MoonDeck read.
         import json
@@ -285,16 +285,16 @@ def main() -> int:
         except (OSError, json.JSONDecodeError) as e:
             print(f"ERROR: cannot read {boards_file}: {e}", file=sys.stderr)
             return 2
-        entry = next((b for b in catalog if b.get("name") == args.board), None)
+        entry = next((b for b in catalog if b.get("name") == args.device_model), None)
         if entry is None:
             names = ", ".join(b.get("name", "?") for b in catalog)
-            print(f"ERROR: board {args.board!r} not in deviceModels.json ({names})",
+            print(f"ERROR: deviceModel {args.device_model!r} not in deviceModels.json ({names})",
                   file=sys.stderr)
             return 2
         cap = entry.get("controls", {}).get("Network", {}).get("txPowerSetting")
         if args.tx_power is None and isinstance(cap, int):
             args.tx_power = cap
-            print(f"==> board {args.board!r}: TX-power cap {cap} dBm from deviceModels.json")
+            print(f"==> deviceModel {args.device_model!r}: TX-power cap {cap} dBm from deviceModels.json")
 
     try:
         ser = serial.Serial(args.port, baudrate=115200, timeout=0.1)
@@ -360,16 +360,16 @@ def main() -> int:
                 idx += slen
             url = urls[0] if urls else "(no URL reported)"
             print(f"==> provisioned: {url}")
-            if args.board:
+            if args.device_model:
                 # SET_DEVICE_MODEL vendor RPC (0xFE): [cmd][1+len][len][name] —
                 # the same post-provision push the web installer does, so
                 # the device persists its physical-board identity.
-                name = args.board.encode("utf-8")
+                name = args.device_model.encode("utf-8")
                 ser.write(build_frame(TYPE_RPC,
                                       bytes([0xFE, 1 + len(name), len(name)]) + name))
                 ser.flush()
                 time.sleep(0.5)   # let the device's serial task consume it
-                print(f"==> pushed SET_DEVICE_MODEL {args.board!r}")
+                print(f"==> pushed SET_DEVICE_MODEL {args.device_model!r}")
             ser.close()
             return 0
 

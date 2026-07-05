@@ -107,12 +107,13 @@ TEST_CASE("FileManager: an empty target path is refused, not a crash") {
 // byte-for-byte — the streamed-upload contract.
 namespace {
 struct SpanSrc { const char* p; size_t left; };
-size_t spanPull(char* out, size_t cap, void* user) {
+size_t spanPull(char* out, size_t cap, void* user, bool* abort) {
+    (void)abort;   // this source always ends cleanly (no early close / timeout to signal)
     auto* s = static_cast<SpanSrc*>(user);
     const size_t n = s->left < cap ? s->left : cap;
     std::memcpy(out, s->p, n);
     s->p += n; s->left -= n;
-    return n;   // 0 when exhausted
+    return n;   // 0 when exhausted → clean EOF
 }
 }  // namespace
 
@@ -147,4 +148,20 @@ TEST_CASE("FileManager: fsWriteStream commits atomically (no torn file)") {
     CHECK(std::memcmp(back, data, sizeof(data)) == 0);
     // No leftover temp file beside it.
     CHECK(!std::filesystem::exists(std::string(r.root) + "/atomic.bin.tmp"));
+}
+
+// A source that aborts mid-stream (an incomplete/timed-out upload) must NOT commit — fsWriteStream
+// discards the temp and returns false, so a truncated body never lands as a real file.
+TEST_CASE("FileManager: fsWriteStream discards on abort (incomplete upload)") {
+    Rig r;
+    struct AbortSrc { int calls = 0; };
+    AbortSrc a;
+    auto src = [](char* out, size_t cap, void* user, bool* abort) -> size_t {
+        auto* s = static_cast<AbortSrc*>(user);
+        if (s->calls++ == 0) { const size_t n = cap < 3 ? cap : 3; std::memcpy(out, "abc", n); return n; }
+        *abort = true; return 0;   // second call: the rest never arrived
+    };
+    CHECK(!platform::fsWriteStream("/partial.bin", src, &a));   // aborted → false
+    CHECK(platform::fsSize("/partial.bin") < 0);                // no file committed
+    CHECK(!std::filesystem::exists(std::string(r.root) + "/partial.bin.tmp"));   // temp discarded
 }

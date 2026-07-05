@@ -192,6 +192,33 @@ async function pushDefaultsOverSerial(port, board, applyDefaults, trackProgress,
 }
 
 // Push a device-model's whole catalog config to the device over serial. Walks the SAME
+// The installer's default esptool-js flash baud: SAFE, because the installer serves unknown
+// walk-up hardware (a cheap CH340 clone, a bad cable). A well-tested compromise across CH340 /
+// CP2102 / FT232 bridges. A board overrides it in deviceModels.json via `flashBaud` — today
+// only down, for a bridge known to stall faster (the LOLIN D32's CH340 → 460800, already the
+// default here, so a no-op in the installer but a real opt-down for the CLI's fast default).
+// Native-USB boards (P4) ignore baud. (The CLI / MoonDeck path defaults FAST instead — see
+// flash_esp32.py; same catalog field, opposite default, different audience.)
+const DEFAULT_FLASH_BAUD = 460800;
+
+// Resolve a board's flash baud from the catalog: the entry's `flashBaud` when set,
+// else DEFAULT_FLASH_BAUD. Best-effort — any fetch/parse failure or unknown board
+// falls back to the safe default, so a catalog hiccup never blocks a flash. Mirrors
+// the CLI's flash_esp32.py `_catalog_flash_baud`, keeping both flash paths in step.
+async function catalogFlashBaud(board, onLog) {
+    if (!board) return DEFAULT_FLASH_BAUD;
+    try {
+        const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return DEFAULT_FLASH_BAUD;
+        const catalog = await res.json();
+        const entry = Array.isArray(catalog) ? catalog.find(b => b && b.name === board) : null;
+        if (entry && Number.isInteger(entry.flashBaud)) return entry.flashBaud;
+    } catch (e) {
+        if (onLog) onLog(`[orchestrator] flash baud: catalog lookup failed (${e && e.message || e}), using ${DEFAULT_FLASH_BAUD}`);
+    }
+    return DEFAULT_FLASH_BAUD;
+}
+
 // deviceModels.json entry the HTTP path used (see planConfigOps) but emits APPLY_OP ops
 // instead of HTTP requests — so the defaults apply during provisioning with no HTTP and
 // no browser handoff. Returns true if the entry was found + pushed, false if none.
@@ -639,14 +666,15 @@ export const installer = {
 
             trackProgress("connect-flash");
             transport = new Transport(port, false);
-            // 460800 baud is ESP Web Tools' default — a well-tested compromise
-            // that works across CH340 / CP2102 / FT232 USB-serial chips and
-            // cheap cables. 921600 is faster but caused FLASH_DEFL_BEGIN
-            // timeouts on the LOLIN D32's CH340. Bootloader sync runs at
-            // 115200 first (romBaudrate); esptool-js negotiates up after.
+            // Flash baud: the board's catalog `flashBaud` if set, else the safe 460800
+            // default (a LOLIN-style CH340 pins 460800; native-USB boards ignore it).
+            // Bootloader sync runs at 115200 first (romBaudrate); esptool-js negotiates
+            // up to `baudrate` after.
+            const flashBaud = await catalogFlashBaud(board, onLog);
+            if (onLog) onLog(`[orchestrator] flash baud: ${flashBaud}`);
             esploader = new ESPLoader({
                 transport,
-                baudrate: 460800,
+                baudrate: flashBaud,
                 romBaudrate: 115200,
                 terminal: espTerminal,
             });

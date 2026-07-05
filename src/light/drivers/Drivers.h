@@ -123,6 +123,7 @@ protected:
     // rule). Preview-style drivers never touch these, so the cost is a couple of
     // null pointers they ignore.
     const char* configErr_ = nullptr;
+    const char* configWarn_ = nullptr;
     char* failBuf_ = nullptr;
     static constexpr size_t kFailBufLen = 48;
 
@@ -136,6 +137,22 @@ protected:
         if (configErr_) {
             if (status() == configErr_) clearStatus();
             configErr_ = nullptr;
+        }
+    }
+
+    // A non-fatal config warning (a borrowed literal, like configErr_): the driver keeps
+    // running but flags something the user should see (e.g. a per-pin count clamped to the
+    // WS2812 ceiling). `warn` non-null sets it; null retracts a stale one — so a driver calls
+    // setConfigWarn(warn) unconditionally each parse and the warning tracks the live state.
+    // Same "clear only MY status" rule as configErr_. Factored here so the WS2812 drivers
+    // (Rmt / LCD / Parlio) don't each inline it — the No-duplication rule this block records.
+    void setConfigWarn(const char* warn) {
+        if (warn) {
+            configWarn_ = warn;
+            setStatus(warn, Severity::Warning);
+        } else if (configWarn_) {
+            if (status() == configWarn_) clearStatus();
+            configWarn_ = nullptr;
         }
     }
 

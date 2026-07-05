@@ -31,11 +31,24 @@ CATALOG = ROOT / "web-installer" / "deviceModels.json"
 MAIN_CPP = ROOT / "src" / "main.cpp"
 DOCS = ROOT / "docs"
 
+# The device stores the injected deviceModel in SystemModule's deviceModel_[32] buffer (31 usable
+# chars + NUL); a longer catalog name is truncated on-device and stops matching. Keep in step with
+# that buffer in src/core/SystemModule.h.
+DEVICE_MODEL_MAX = 31
+
 # Capability vocabulary. supported = what a module drives today; keep this list
 # in lockstep with the modules that actually exist. planned = peripherals with no
 # module yet (the backlog seed) — open-ended by design, so it is NOT whitelisted,
 # only type-checked. Adding a new supported capability means a module backs it.
 SUPPORTED_VOCAB = {"LEDs", "WiFi", "Ethernet", "Audio", "IR"}
+
+# Flash bauds a board may pin via `flashBaud` — the standard esptool rates. The default
+# differs by audience: the CLI / MoonDeck path defaults FAST (921600 — DIY bench, modern
+# bridge), the web installer defaults SAFE (460800 — unknown walk-up hardware). A board
+# sets `flashBaud` to override its resolved default in either direction — down for a flaky
+# bridge (the LOLIN's CH340), up where a slow default needs raising. Keep in step with
+# flash_esp32.py (_catalog_flash_baud) and install-orchestrator.js.
+FLASH_BAUDS = {115200, 230400, 460800, 921600}
 
 # Boot-wired singletons: present on every device, added by code, so the catalog
 # references them by id without the factory creating them. Their catalog `type`
@@ -84,6 +97,13 @@ def main():
         if name in names_seen:
             errors.append(f"{where}: duplicate board name")
         names_seen.add(name)
+        # The name is injected into the device's SystemModule.deviceModel control, whose buffer is
+        # deviceModel_[32] (31 chars + NUL). A longer name is silently truncated on-device, so it no
+        # longer matches the catalog — MoonDeck then can't map it back and shows a duplicate
+        # "(unknown)" entry. Cap the source data so it always round-trips whole.
+        if isinstance(name, str) and len(name) > DEVICE_MODEL_MAX:
+            errors.append(f"{where}: name is {len(name)} chars; max {DEVICE_MODEL_MAX} "
+                          f"(SystemModule.deviceModel_[32] truncates longer names on-device)")
 
         # --- firmwares (firmwares[0] is the default the picker pre-selects) ---
         fws = e.get("firmwares")
@@ -103,6 +123,14 @@ def main():
                 # exact firmware-key match downstream (picker, dedup, manifest names).
                 errors.append(f"{where}: firmwares entries must not be whitespace-only "
                               f"or have leading/trailing whitespace")
+
+        # --- flashBaud (optional) — a board opts into a faster flash baud only when
+        #     its USB bridge is verified to sustain it (flash_esp32.py reads this). ---
+        baud = e.get("flashBaud")
+        # `bool` is an int subclass and `1.0 in {int}` is True, so guard the type
+        # explicitly — a float/bool flashBaud would stringify wrong for esptool.
+        if baud is not None and (type(baud) is not int or baud not in FLASH_BAUDS):
+            errors.append(f"{where}: flashBaud must be one of {sorted(FLASH_BAUDS)}, got {baud!r}")
 
         # --- image resolves on disk + is a local path ---
         img = e.get("image")

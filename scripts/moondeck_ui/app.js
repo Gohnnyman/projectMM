@@ -12,18 +12,18 @@ let scripts = [];
 let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
-// Boards catalog loaded from /api/boards (served by moondeck.py from
-// web-installer/deviceModels.json). Replaces the previously-hardcoded boardOptions
+// Device-model catalog loaded from /api/device-models (served by moondeck.py from
+// web-installer/deviceModels.json). Replaces the previously-hardcoded deviceModelOptions
 // list — same file the web installer (Step 2) will fetch directly from
 // GitHub Pages. Empty until init() loads it; renderDevices waits on init.
-let boards = []; // [{ key, label, firmwares: [...] }]  (firmwares[0] is the default)
+let deviceModels = []; // [{ key, label, firmwares: [...] }]  (firmwares[0] is the default)
 // State shape (post-networks refactor):
 //   { networks: [{name, subnet, wifi: {ssid, password}, port, devices: [...]}],
 //     active_network: "Home",
 //     active_network_user_pinned: bool,   // set true when user picks the dropdown
 //     firmware, scenario, module, tab, flag_* }
 // `firmware` is the variant flashed onto the ESP32 (esp32 / esp32-eth /
-// esp32-16mb / esp32s3-n16r8) — separate from the per-device `board`
+// esp32-16mb / esp32s3-n16r8) — separate from the per-device `deviceModel`
 // (physical hardware) inside each network's devices list. See
 // docs/architecture.md § Firmware vs board.
 // Devices and the active serial port now live INSIDE the active network.
@@ -34,6 +34,16 @@ let state = { networks: [], active_network: "", firmware: "", scenario: "", modu
 // touch state.devices or state.port now routes through this.
 function getActiveNetwork() {
     return (state.networks || []).find(n => n.name === state.active_network) || null;
+}
+
+// A fetch abort signal that fires after `ms`. AbortSignal.timeout is unsupported on older browsers
+// (and throws if called), which would abort the fetch before it starts — fall back to an
+// AbortController + setTimeout so the request still runs.
+function timeoutSignal(ms) {
+    if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) return AbortSignal.timeout(ms);
+    const c = new AbortController();
+    setTimeout(() => c.abort(), ms);
+    return c.signal;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +69,11 @@ async function init() {
         delete state.board;
     }
     if (!firmwares.includes(state.firmware)) state.firmware = "";
+    // Migrate the provisioning-picker key from its old name (board → device model).
+    if (state.provisionBoard !== undefined && state.provisionDeviceModel === undefined) {
+        state.provisionDeviceModel = state.provisionBoard;
+        delete state.provisionBoard;
+    }
 
     const scenResp = await fetch("/api/scenarios");
     const scenData = await scenResp.json();
@@ -69,15 +84,15 @@ async function init() {
     testModules = modData.modules || [];
 
     try {
-        const boardsResp = await fetch("/api/boards");
-        const boardsData = await boardsResp.json();
-        boards = boardsData.boards || [];
+        const modelsResp = await fetch("/api/device-models");
+        const modelsData = await modelsResp.json();
+        deviceModels = modelsData.deviceModels || [];
     } catch {
-        boards = [];   // empty catalog → picker shows only "(unknown board)"
+        deviceModels = [];   // empty catalog → picker shows only "(unknown model)"
     }
 
     renderFirmwareSelect();
-    renderBoardSelect();
+    renderDeviceModelSelect();
     renderScripts();
     renderNetworkBar();
     try { renderDevices(); } catch (e) { console.error("renderDevices:", e); }
@@ -507,7 +522,7 @@ async function runScriptOnce(script, btn, extraParams) {
     if (script.needs_port) params.port = (getActiveNetwork()?.port) || "";
     if (script.needs_scenario) params.scenario = state.scenario;
     if (script.needs_module) params.module = state.module;
-    if (script.pass_board) params.board = state.provisionBoard || "";
+    if (script.pass_device_model) params.device_model = state.provisionDeviceModel || "";
     for (const flag of (script.flags || [])) {
         const stateKey = `flag_${script.id}_${flag.id}`;
         params[`flag_${flag.id}`] = stateKey in state ? state[stateKey] : flag.default;
@@ -585,31 +600,31 @@ async function runScriptOnce(script, btn, extraParams) {
 // ESP32 controls
 // ---------------------------------------------------------------------------
 
-// Board picker for provisioning scripts (pass_board): deviceModels.json entries
-// whose `firmwares` include the selected firmware. "(any board)" = no
+// Device-model picker for provisioning scripts (pass_device_model): deviceModels.json entries
+// whose `firmwares` include the selected firmware. "(any model)" = no
 // injection. Distinct state key from the LEGACY `state.board` (which meant
-// firmware — see the migration in init) and from per-device boards.
-function renderBoardSelect() {
-    const select = document.getElementById("board-select");
+// firmware — see the migration in init) and from per-device deviceModels.
+function renderDeviceModelSelect() {
+    const select = document.getElementById("devicemodel-select");
     if (!select) return;
     select.innerHTML = "";
-    const candidates = boards.filter(b => (b.firmwares || []).includes(state.firmware));
-    const options = [["", "(any board)"], ...candidates.map(b => [b.name, b.name])];
-    if (state.provisionBoard && !options.some(([v]) => v === state.provisionBoard)) {
-        state.provisionBoard = "";   // firmware changed; stale pick no longer applies
+    const candidates = deviceModels.filter(b => (b.firmwares || []).includes(state.firmware));
+    const options = [["", "(any model)"], ...candidates.map(b => [b.name, b.name])];
+    if (state.provisionDeviceModel && !options.some(([v]) => v === state.provisionDeviceModel)) {
+        state.provisionDeviceModel = "";   // firmware changed; stale pick no longer applies
     }
     for (const [val, lbl] of options) {
         const opt = document.createElement("option");
         opt.value = val;
         opt.textContent = lbl;
-        if (val === (state.provisionBoard || "")) opt.selected = true;
+        if (val === (state.provisionDeviceModel || "")) opt.selected = true;
         select.appendChild(opt);
     }
     // onchange (assigned, not addEventListener) so a re-render replaces the
     // handler instead of stacking another — addEventListener here would fire
     // saveState() once per past render.
     select.onchange = async () => {
-        state.provisionBoard = select.value;
+        state.provisionDeviceModel = select.value;
         await saveState();
     };
 }
@@ -631,7 +646,7 @@ function renderFirmwareSelect() {
     select.addEventListener("change", async () => {
         state.firmware = select.value;
         await saveState();
-        renderBoardSelect();   // board candidates follow the firmware
+        renderDeviceModelSelect();   // device-model candidates follow the firmware
     });
 }
 
@@ -819,7 +834,11 @@ function renderDevices() {
     }
     el.innerHTML = "";
     for (const device of devices) {
-        const label = document.createElement("label");
+        // A plain <div>, NOT a <label>: a <label> wrapper toggles its checkbox on a click
+        // ANYWHERE inside it (native behaviour), so clicking the IP/name to open the device
+        // UI also flipped the selection. The checkbox has its own change handler, so it
+        // toggles only when clicked directly.
+        const label = document.createElement("div");
         label.className = "device-item";
 
         const dot = document.createElement("span");
@@ -835,87 +854,101 @@ function renderDevices() {
         });
 
         // Two-row layout: row 1 carries identity at-a-glance (dot, checkbox,
-        // IP). Row 2 carries secondary info (deviceName + fw:<firmware>) plus
-        // the board picker + remove button. Splitting keeps the IP — the
-        // single most-clicked-on field — next to the checkbox and stops the
-        // board picker from being pushed off the right edge by long
-        // device-name / firmware strings.
-        const ipText = document.createElement("span");
-        ipText.textContent = device.ip;
-        const tooltipLines = [device.ip];
+        // deviceName). Row 2 carries secondary info (IP + fw:<firmware>) plus
+        // the device picker + remove button. The deviceName is the prominent
+        // line — it's how a human recognises the device ("the S31") — with the
+        // IP demoted to the info row (still clickable to open the device UI).
+        // A device with no name yet falls back to showing its IP as the primary.
+        const nameText = document.createElement("span");
+        nameText.className = "device-name";
+        nameText.textContent = device.deviceName || device.ip;
+        const tooltipLines = ["Open this device's UI in the view pane", device.ip];
         if (device.last_port) tooltipLines.push(`last flashed via ${device.last_port}`);
-        ipText.title = tooltipLines.join("\n");
-        ipText.style.cursor = "pointer";
-        ipText.addEventListener("click", (e) => {
-            if (e.target === ipText) showInView("http://" + device.ip);
-        });
+        nameText.title = tooltipLines.join("\n");
+        nameText.style.cursor = "pointer";
+        nameText.addEventListener("click", () => showInView("http://" + device.ip));
 
+        // Info row: clickable IP · fw. The IP is its own span so clicking it opens the
+        // device UI in the view pane (same as the name), while the fw text stays inert.
         const infoText = document.createElement("span");
         infoText.className = "device-info";
-        const infoParts = [];
-        if (device.deviceName) infoParts.push(device.deviceName);
-        if (device.firmware) infoParts.push(`fw:${device.firmware}`);
-        infoText.textContent = infoParts.join(" · ");
+        const ipLink = document.createElement("span");
+        ipLink.className = "device-ip-link";
+        ipLink.textContent = device.ip;
+        ipLink.title = "Open this device's UI in the view pane";
+        ipLink.addEventListener("click", () => showInView("http://" + device.ip));
+        infoText.appendChild(ipLink);
+        if (device.firmware) {
+            infoText.appendChild(document.createTextNode(` · fw:${device.firmware}`));
+        }
 
-        // last_port — the serial port this exact board (by MAC) was last flashed via. Click it to
+        // last_port — the serial port this exact device (by MAC) was last flashed via. Click it to
         // set it as the active network's flash port, so "flash the SE16" is one click → run Flash.
         // The port lives per-device (keyed by MAC), the flash uses the network-level port; this
-        // chip bridges them. Absent until the board has been flashed once through MoonDeck.
+        // chip bridges them. Absent until the device has been flashed once through MoonDeck.
         if (device.last_port) {
             const portChip = document.createElement("button");
             portChip.className = "device-port-chip";
             portChip.textContent = "⚡ " + device.last_port.replace("/dev/cu.", "").replace("/dev/tty.", "");
-            portChip.title = `Select this board for flashing: set the port` +
+            portChip.title = `Select this device model for flashing: set the port` +
                 (device.firmware ? `, firmware (${device.firmware})` : "") +
                 (device.deviceModel ? ` and deviceModel` : "");
             const active = getActiveNetwork();
             if (active && active.port === device.last_port) portChip.classList.add("active");
-            // Selecting a board for flashing means matching what it actually runs: the port, AND the
+            // Selecting a device model for flashing means matching what it actually runs: the port, AND the
             // firmware + deviceModel MoonDeck learned from discovery — so Build/Flash target the right
-            // binary for this board (flashing the wrong firmware would brick it). One click, all in sync.
+            // binary for this device model (flashing the wrong firmware would brick it). One click, all in sync.
             portChip.addEventListener("click", async (e) => {
                 e.preventDefault();
                 const a = getActiveNetwork();
                 if (a) a.port = device.last_port;
                 if (device.firmware && firmwares.includes(device.firmware)) state.firmware = device.firmware;
-                if (device.deviceModel) state.provisionBoard = device.deviceModel;
+                if (device.deviceModel) state.provisionDeviceModel = device.deviceModel;
                 await saveState();
                 refreshPorts();
                 renderFirmwareSelect();
-                renderBoardSelect();
+                renderDeviceModelSelect();
                 renderDevices();
             });
             infoText.appendChild(document.createTextNode(" "));
             infoText.appendChild(portChip);
         }
 
-        // Board picker — options derived from deviceModels.json (loaded via
-        // /api/boards). Auto-deduced for firmwares that map to a single
+        // Device-model picker — options derived from deviceModels.json (loaded via
+        // /api/device-models). Auto-deduced for firmwares that map to a single
         // deviceModel (probe sets device.deviceModel); user-set when the firmware can
-        // run on multiple boards (e.g. `esp32` on LOLIN D32 vs generic
+        // run on multiple device models (e.g. `esp32` on LOLIN D32 vs generic
         // DevKit). A device-reported value that isn't in the catalog gets
         // prepended as <key> (unknown) so the selection survives — without
         // that, <select> would silently snap to "" and the next saveState
         // would clobber the device's stored value with empty.
-        const boardPicker = document.createElement("select");
-        boardPicker.className = "device-board";
-        boardPicker.title = "Physical board (pick when firmware can't tell us)";
-        const boardOptions = [
-            ["", "(unknown board)"],
+        const deviceModelPicker = document.createElement("select");
+        deviceModelPicker.className = "devicemodel-picker";
+        deviceModelPicker.title = "Device model (pick when firmware can't tell us)";
+        // Only offer deviceModels that can run this device's firmware — a model whose `firmwares`
+        // don't include it is not a valid choice for this unit (same filter the provisioning picker
+        // uses). If the firmware is unknown (empty), we can't filter, so show all.
+        const fwModels = device.firmware
+            ? deviceModels.filter(b => (b.firmwares || []).includes(device.firmware))
+            : deviceModels;
+        const deviceModelOptions = [
+            ["", "(unknown model)"],
             // Each entry is [value, label] for the <select>; with the
             // single-name catalog (no separate key/label), they're identical.
-            ...boards.map(b => [b.name, b.name]),
+            ...fwModels.map(b => [b.name, b.name]),
         ];
         const deviceModel = device.deviceModel || "";
-        if (deviceModel && !boardOptions.some(([k]) => k === deviceModel)) {
-            boardOptions.push([deviceModel, `${deviceModel} (unknown)`]);
+        if (deviceModel && !deviceModelOptions.some(([k]) => k === deviceModel)) {
+            // Keep the current value selectable even if it's filtered out (firmware mismatch) or
+            // not in the catalog — marked (unknown) so the selection survives.
+            deviceModelOptions.push([deviceModel, `${deviceModel} (unknown)`]);
         }
-        for (const [val, lbl] of boardOptions) {
+        for (const [val, lbl] of deviceModelOptions) {
             const opt = document.createElement("option");
             opt.value = val;
             opt.textContent = lbl;
             if (deviceModel === val) opt.selected = true;
-            boardPicker.appendChild(opt);
+            deviceModelPicker.appendChild(opt);
         }
         // Push a deviceModel's full deviceModels.json defaults to the device (POST
         // /api/push-device → _push_device fans out controls.<Module>.<control>).
@@ -930,12 +963,12 @@ function renderDevices() {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ip: device.ip, deviceModel}),
-                signal: AbortSignal.timeout(10000),
+                signal: timeoutSignal(10000),
             }).then(r => r.json()).then(j => onDone && onDone(!!j.ok))
               .catch(() => onDone && onDone(false));
         };
-        boardPicker.addEventListener("change", () => {
-            device.deviceModel = boardPicker.value;
+        deviceModelPicker.addEventListener("change", () => {
+            device.deviceModel = deviceModelPicker.value;
             saveState();
             // Mirror the change to the device immediately. Without this, the
             // device's SystemModule wouldn't hear about the picker until the
@@ -943,26 +976,26 @@ function renderDevices() {
             // UI to update right after they pick. Fire-and-forget; failure
             // (timeout / device offline) is recovered on the next refresh
             // when discover/refresh's bulk push catches up.
-            pushDevice(boardPicker.value);
+            pushDevice(deviceModelPicker.value);
         });
 
-        // Explicit "inject defaults" — re-push the SELECTED board's full config on demand,
+        // Explicit "inject" — re-push the SELECTED device model's full config on demand,
         // without having to change the picker. Distinct intent from the implicit on-change
         // push: re-apply after a reflash wiped config, or re-assert defaults a user edited
         // away. Brief inline feedback so a no-op (timeout / offline) isn't silent.
         const injectBtn = document.createElement("button");
         injectBtn.className = "device-inject";
-        injectBtn.textContent = "inject defaults";
+        injectBtn.textContent = "inject";
         injectBtn.title = "Push the selected device-model's deviceModels.json defaults to this device now";
         injectBtn.addEventListener("click", (e) => {
             e.preventDefault();
-            const board = boardPicker.value;
-            if (!board) { injectBtn.textContent = "pick a board first"; setTimeout(() => injectBtn.textContent = "inject defaults", 1500); return; }
+            const deviceModel = deviceModelPicker.value;
+            if (!deviceModel) { injectBtn.textContent = "pick a device first"; setTimeout(() => injectBtn.textContent = "inject", 1500); return; }
             injectBtn.disabled = true;
             injectBtn.textContent = "injecting…";
-            pushDevice(board, (ok) => {
+            pushDevice(deviceModel, (ok) => {
                 injectBtn.textContent = ok ? "injected ✓" : "failed ✗";
-                setTimeout(() => { injectBtn.textContent = "inject defaults"; injectBtn.disabled = false; }, 1800);
+                setTimeout(() => { injectBtn.textContent = "inject"; injectBtn.disabled = false; }, 1800);
             });
         });
 
@@ -982,17 +1015,17 @@ function renderDevices() {
 
         // Three-row layout, each row a flex-basis:100% wrapper inside
         // .device-item (which is flex-wrap:wrap):
-        //   row 1 — dot · checkbox · IP · X        (identity + remove)
-        //   row 2 — deviceName · fw:firmware        (secondary info)
-        //   row 3 — [board picker]                  (right-aligned)
+        //   row 1 — dot · checkbox · deviceName · X  (identity + remove)
+        //   row 2 — IP · fw:firmware                  (secondary info)
+        //   row 3 — [device picker]                   (right-aligned)
         // Splitting like this keeps each row narrow enough to fit the
         // sidebar without truncation, and puts the most-clicked items
-        // (checkbox, IP, board picker) at predictable y-positions.
+        // (checkbox, name, device picker) at predictable y-positions.
         const row1 = document.createElement("div");
         row1.className = "device-row device-row-identity";
         row1.appendChild(dot);
         row1.appendChild(cb);
-        row1.appendChild(ipText);
+        row1.appendChild(nameText);
         row1.appendChild(removeBtn);
 
         const row2 = document.createElement("div");
@@ -1000,89 +1033,13 @@ function renderDevices() {
         row2.appendChild(infoText);
 
         const row3 = document.createElement("div");
-        row3.className = "device-row device-row-board";
-        row3.appendChild(boardPicker);
+        row3.className = "device-row devicemodel-row";
+        row3.appendChild(deviceModelPicker);
         row3.appendChild(injectBtn);
-
-        // row 4 — pin-profile save/apply. A profile is the device's captured
-        // GPIO/peripheral config (drivers, board, network, audio); saving stores
-        // it under this device in moondeck.json, applying re-pushes it (handy
-        // after a reflash wipes config, or to clone to a second identical rig).
-        const row4 = document.createElement("div");
-        row4.className = "device-row device-row-profile";
-
-        const profileSel = document.createElement("select");
-        profileSel.className = "device-profile-select";
-        profileSel.title = "Saved pin profiles for this device";
-        const phOpt = document.createElement("option");
-        phOpt.value = ""; phOpt.textContent = "(profiles)";
-        profileSel.appendChild(phOpt);
-        for (const p of (device.profiles || [])) {
-            const o = document.createElement("option");
-            o.value = p.name; o.textContent = p.name;
-            profileSel.appendChild(o);
-        }
-
-        const saveBtn = document.createElement("button");
-        saveBtn.className = "device-profile-btn";
-        saveBtn.textContent = "Save";
-        saveBtn.title = "Capture this device's current pins as a named profile";
-        saveBtn.addEventListener("click", async (e) => {
-            e.preventDefault();
-            const name = prompt(`Save pin profile for ${device.deviceName || device.ip} as:`);
-            if (!name) return;
-            saveBtn.disabled = true; saveBtn.textContent = "…";
-            try {
-                const res = await fetch("/api/save-profile", {
-                    method: "POST", headers: {"Content-Type": "application/json"},
-                    // ip reaches the device; mac identifies its record (see moondeck.py _device_key).
-                    body: JSON.stringify({ip: device.ip, mac: device.mac, name}),
-                });
-                const j = await res.json();
-                if (j.ok) {
-                    // The server captured + persisted the real modules. Re-fetch the
-                    // authoritative state so device.profiles holds the actual captured
-                    // config — NOT a {modules: []} placeholder, which the next
-                    // saveState() would POST back and clobber the server's real copy.
-                    try {
-                        const sr = await fetch("/api/state");
-                        state = await sr.json();
-                    } catch (_) { /* keep current state; dropdown refreshes on next load */ }
-                    renderDevices();
-                } else { alert("Save failed: " + (j.error || "unknown")); }
-            } catch (err) { alert("Save failed: " + err); }
-            finally { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
-        });
-
-        const applyBtn = document.createElement("button");
-        applyBtn.className = "device-profile-btn";
-        applyBtn.textContent = "Apply";
-        applyBtn.title = "Re-apply the selected profile to this device";
-        applyBtn.addEventListener("click", async (e) => {
-            e.preventDefault();
-            const name = profileSel.value;
-            if (!name) { alert("Pick a profile to apply"); return; }
-            applyBtn.disabled = true; applyBtn.textContent = "…";
-            try {
-                const res = await fetch("/api/apply-profile", {
-                    method: "POST", headers: {"Content-Type": "application/json"},
-                    // ip reaches the device; mac identifies its record (see moondeck.py _device_key).
-                    body: JSON.stringify({ip: device.ip, mac: device.mac, name}),
-                });
-                const j = await res.json();
-                if (!j.ok) alert("Apply failed: " + (j.error || "device unreachable"));
-            } catch (err) { alert("Apply failed: " + err); }
-            finally { applyBtn.disabled = false; applyBtn.textContent = "Apply"; }
-        });
-
-        row4.appendChild(profileSel);
-        row4.appendChild(saveBtn);
-        row4.appendChild(applyBtn);
 
         label.appendChild(row1);
         label.appendChild(row2);
         label.appendChild(row3);
-        label.appendChild(row4);
         el.appendChild(label);
     }
 }

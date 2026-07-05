@@ -49,6 +49,7 @@
     "firmwares": [
       "esp32"
     ],
+    "flashBaud": 460800,
     "image": "assets/boards/lolin-d32.jpg",
     "url": "https://www.wemos.cc/en/latest/d32/d32.html",
     "supported": [
@@ -942,7 +943,7 @@
     ]
   },
   {
-    "name": "Espressif ESP32-S31 Function-CoreBoard-1",
+    "name": "Espressif ESP32-S31 CoreBoard",
     "chip": "ESP32-S31",
     "firmwares": [
       "esp32s31"
@@ -968,7 +969,7 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "Espressif ESP32-S31 Function-CoreBoard-1"
+          "deviceModel": "Espressif ESP32-S31 CoreBoard"
         }
       },
       {

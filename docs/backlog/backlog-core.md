@@ -313,7 +313,7 @@ The build IDF is `v6.1-dev-399-gd1b91b79b5`, a dev-branch snapshot (2025-11-05) 
 
 ### Three-level device model: MCU → Board → Device (config provenance)
 
-The model itself is now a shipped design — see architecture.md § Config provenance (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is `install/deviceModels.json` (schema). **MoonDeck device-profile save/restore is shipped** — capture a device's pin/peripheral config (`/api/save-profile`) and re-apply it after a reflash or to a clone (`/api/apply-profile`), stored per-device in `moondeck.json`. The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
+The model itself is now a shipped design — see architecture.md § Config provenance (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is `install/deviceModels.json` (schema). The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
 
 ### Persistence overlay: partial-save / schema-change audit (backlog)
 
@@ -374,6 +374,7 @@ The shipped File Manager (see [ui.md](../moonmodules/core/ui/ui.md)) is a lazy e
 - **Download — folder as `.zip`.** Per-file download streams (`<a download>` on `/api/file`). A folder download needs the browser to walk `/api/dir` recursively, fetch each file, and build a `.zip` client-side — which means bundling a zip library into `app.js`. That's a permanent app.js size bump, and app.js is embedded in firmware, so it weighs on the flash budget (see the flash-budget item above). Gate on real demand; symmetric with the folder-upload tier.
 - **Last-modified dates.** Needs a time source (NTP) + LittleFS mtime storage; the tree is name + size until both land. Backlogged with the NTP work.
 - **`.ml` syntax highlighting in the editor.** MoonLive source wants *highlighting* (a colour layer over the textarea), not the JSON-style reformat — a bigger editor change (a highlight overlay or a small tokenizer), added when MoonLive `.ml` files land on disk. The editor already has an extension seam (`fmPrettify`) for the reformat case; highlighting is the separate, larger tier.
+- **Keyboard + screen-reader access for the tree.** The `fm-row` tree entries are mouse-only today (click to select/expand/open). Making them keyboard-operable (focusable, Enter/Space activation) with ARIA tree semantics (`role="treeitem"`, `aria-expanded` from `isOpen`, `aria-level`) is a real accessibility win but adds JS that lands in the firmware-embedded `app.js` (flash cost). Do it when a11y is a stated goal, together across the whole generic UI, not just this panel.
 
 ### Open design questions
 

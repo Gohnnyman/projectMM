@@ -227,11 +227,14 @@ protected:
         if constexpr (Derived::kExactLaneCount) {
             if (!err && n != kMaxLanes) err = "LCD bus needs exactly 8 pins";
         }
+        const char* warn = nullptr;
         if (!err) {
             // Distribute over this driver's window slice, not the whole buffer.
+            // assignCounts clamps each lane to kMaxWs2812LedsPerPin (drives that many
+            // rather than choking a whole grid onto one WS2812 line).
             const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
             windowSlice(bufN, winStart_, winLen_);
-            err = assignCounts(ledsPerPin, n, winLen_, laneCounts_);
+            err = assignCounts(ledsPerPin, n, winLen_, laneCounts_, kMaxWs2812LedsPerPin, &warn);
         }
         if (err) {
             setConfigErr(err);
@@ -247,6 +250,8 @@ protected:
         const uint8_t outCh = correction_ ? correction_->outChannels : 0;
         frameBytes_ = frameBytesFor(maxLaneLights_, outCh);
         clearConfigErr();
+        // A lane clamped to the WS2812 ceiling still drives — Warning, not error (see RmtLed).
+        setConfigWarn(warn);
         return true;
     }
 

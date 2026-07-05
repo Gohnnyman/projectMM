@@ -183,11 +183,13 @@ bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
     FILE* f = std::fopen(tmp, "wb");
     if (!f) return false;
     // Pull chunks from the source and write each straight through — fixed buffer, any file size.
+    // `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.
     char chunk[1024];
-    bool ok = true;
+    bool ok = true, abort = false;
     for (;;) {
-        const size_t got = src(chunk, sizeof(chunk), user);
-        if (got == 0) break;                                    // end of stream
+        const size_t got = src(chunk, sizeof(chunk), user, &abort);
+        if (abort) { ok = false; break; }
+        if (got == 0) break;                                    // clean end of stream
         if (std::fwrite(chunk, 1, got, f) != got) { ok = false; break; }
     }
     std::fflush(f);

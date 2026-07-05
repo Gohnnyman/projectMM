@@ -117,12 +117,14 @@ int  fsReadAt(const char* path, long offset, char* buf, size_t len);
                                                              // pread-style: read up to `len` bytes at `offset`; bytes read, 0 at EOF, -1 on error. NOT null-terminated. Lets a caller stream a file in fixed chunks.
 bool fsWriteAtomic(const char* path, const char* data, size_t len);
                                                               // writes <path>.tmp, fsync, rename. Caller ensures parent dir exists.
-// Streamed atomic write: open <path>.tmp, repeatedly call src(buf, cap, user) to pull up to `cap`
-// bytes (returns the count; 0 = end of stream), fwrite each chunk, then fsync + rename into place.
-// Returns false (discarding the temp file) on any write failure, a short read that isn't end, or a
-// rename failure. Lets the HTTP layer stream an upload of any size to the file with a fixed small
-// buffer — the device never holds the whole file in RAM. Caller ensures the parent dir exists.
-using FsWriteSrc = size_t(*)(char* buf, size_t cap, void* user);
+// Streamed atomic write: open <path>.tmp, repeatedly call src(buf, cap, user, &abort) to pull up to
+// `cap` bytes, fwrite each chunk, then fsync + rename into place. The source returns the byte count;
+// 0 means *end*, BUT it distinguishes a clean end from a failed/incomplete one via `*abort`: a 0
+// with `*abort == false` is a clean EOF (commit), a 0 (or any return) with `*abort == true` is an
+// error (a short/timed-out upload) → the temp file is DISCARDED, not renamed. Returns false on abort,
+// a write failure, or a rename failure. Lets the HTTP layer stream an upload of any size with a fixed
+// small buffer — the device never holds the whole file in RAM. Caller ensures the parent dir exists.
+using FsWriteSrc = size_t(*)(char* buf, size_t cap, void* user, bool* abort);
 bool fsWriteStream(const char* path, FsWriteSrc src, void* user);
 // Per-entry callback for fsList: name, whether it's a directory, and its size in bytes
 // (0 for a directory). One level, one call per child.

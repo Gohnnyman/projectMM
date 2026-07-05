@@ -353,6 +353,10 @@ static bool fileQueryPath(const char* query, char* out, size_t cap) {
         out[i++] = c;
         p++;
     }
+    // Reject an overlong path outright rather than routing on a truncated prefix: if the loop stopped
+    // because the buffer filled (still more path bytes to come, i.e. not at '\0' or the '&' delimiter),
+    // the decoded value is incomplete and must not be treated as a valid path.
+    if (*p && *p != '&') return false;
     out[i] = 0;
     if (i == 0 || std::strstr(out, "..")) return false;   // empty or traversal → reject
     if (out[0] != '/') {                                  // relative → root at the mount
@@ -442,15 +446,22 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
 // then reads the remainder straight off the socket — feeding fsWriteStream in fixed chunks so the
 // device never holds the whole upload in RAM.
 namespace {
+// Bound the wait for the NEXT byte, not the whole upload: an idle timeout reset on every
+// successful read. This defeats a slowloris trickler (it can never stall past kUploadIdleMs
+// without sending) yet scales to any size the endpoint accepts — a big but steady upload
+// (256 KB over slow LittleFS + weak WiFi) never trips it, because progress keeps resetting
+// the clock. A single whole-upload budget can't do both: sized for slowloris it aborts a
+// legit max-size upload; sized for the max upload it lets a trickler hold the socket.
+constexpr uint32_t kUploadIdleMs = 5000;   // max gap between successful reads before abort
 struct UploadSource {
     platform::TcpConnection* conn;
     const char* initial;      // body bytes already read into the request buffer
     size_t initialLeft;       // how many of those remain to hand out
     size_t remaining;         // total body bytes still to deliver (Content-Length − delivered)
 };
-size_t uploadPull(char* out, size_t cap, void* user) {
+size_t uploadPull(char* out, size_t cap, void* user, bool* abort) {
     auto* s = static_cast<UploadSource*>(user);
-    if (s->remaining == 0) return 0;
+    if (s->remaining == 0) return 0;   // all body delivered → clean EOF
     // Drain the already-buffered prefix first.
     if (s->initialLeft) {
         const size_t n = s->initialLeft < cap ? s->initialLeft : cap;
@@ -458,17 +469,21 @@ size_t uploadPull(char* out, size_t cap, void* user) {
         s->initial += n; s->initialLeft -= n; s->remaining -= n;
         return n;
     }
-    // Then pull the rest off the socket, with the same bounded patience as the header read.
+    // Then pull the rest off the socket. The idle deadline is recomputed here (per pull) and
+    // only advances while we wait, so it bounds a stall, not total transfer time. If the body
+    // is still incomplete when the socket closes early or no byte arrives within kUploadIdleMs,
+    // signal *abort — fsWriteStream then discards the temp file rather than committing a
+    // truncated upload (a 0 here is NOT a clean end). The subtraction compare is wraparound-safe
+    // across the ~49.7-day millis() rollover (unlike `now >= deadline`).
     const size_t want = s->remaining < cap ? s->remaining : cap;
-    size_t n = 0;
-    for (int empties = 0; n == 0 && empties <= 50;) {
+    const uint32_t deadline = platform::millis() + kUploadIdleMs;
+    for (;;) {
         const int r = s->conn->read(reinterpret_cast<uint8_t*>(out), want);
-        if (r > 0) n = static_cast<size_t>(r);
-        else if (r == 0) break;                       // peer closed early
-        else { ++empties; platform::delayMs(1); }
+        if (r > 0) { s->remaining -= static_cast<size_t>(r); return static_cast<size_t>(r); }
+        if (r == 0) { *abort = true; return 0; }                 // peer closed with body remaining
+        if (static_cast<int32_t>(platform::millis() - deadline) >= 0) { *abort = true; return 0; }  // idle timeout
+        platform::delayMs(1);
     }
-    s->remaining -= n;
-    return n;   // 0 → end (short body); fsWriteStream commits what arrived
 }
 }  // namespace
 
@@ -497,7 +512,10 @@ void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char
         sendResponse(conn, 507, "application/json", msg);   // 507 Insufficient Storage
         return;
     }
-    UploadSource src{&conn, initialBody, initialLen, contentLen};
+    // Never hand the source more than Content-Length of the already-buffered bytes: a buffer can hold
+    // bytes past the body (a pipelined next request), which must not be written into the file.
+    const size_t initial = initialLen < contentLen ? initialLen : contentLen;
+    UploadSource src{&conn, initialBody, initial, contentLen};
     if (platform::fsWriteStream(path, &uploadPull, &src)) {
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     } else {
