@@ -21,6 +21,15 @@ using namespace mm;
 
 namespace {
 
+// Write a seed file, failing the test cleanly if the handle can't be opened (never fputs/fclose a
+// null FILE*, which would crash the whole binary).
+void writeFile(const std::string& path, const char* contents) {
+    FILE* f = std::fopen(path.c_str(), "w");
+    REQUIRE(f != nullptr);
+    std::fputs(contents, f);
+    std::fclose(f);
+}
+
 // A file-manager on a fresh temp filesystem root. Seeds a known layout the ops act against.
 struct Rig {
     char root[256];
@@ -29,13 +38,14 @@ struct Rig {
         // A monotonic per-process counter, not millis() — several Rigs construct within the same
         // millisecond in one test run, so a time-based name could collide.
         static unsigned counter = 0;
-        std::snprintf(root, sizeof(root), "/tmp/mm_fm_test_%u", counter++);
+        // temp_directory_path() is the portable temp root (/tmp on POSIX, %TEMP% on Windows), not a
+        // hardcoded "/tmp"; the counter keeps each Rig's dir unique within the run.
+        std::snprintf(root, sizeof(root), "%s/mm_fm_test_%u",
+                      std::filesystem::temp_directory_path().string().c_str(), counter++);
         std::filesystem::remove_all(root);
         std::filesystem::create_directories(std::string(root) + "/.config");
-        { FILE* f = std::fopen((std::string(root) + "/.config/Drivers.json").c_str(), "w");
-          std::fputs("{\"brightness\":20}", f); std::fclose(f); }
-        { FILE* f = std::fopen((std::string(root) + "/readme.txt").c_str(), "w");
-          std::fputs("hello", f); std::fclose(f); }
+        writeFile(std::string(root) + "/.config/Drivers.json", "{\"brightness\":20}");
+        writeFile(std::string(root) + "/readme.txt", "hello");
         platform::fsSetRoot(root);
         fm.setTypeName("FileManagerModule");
         fm.onBuildControls();

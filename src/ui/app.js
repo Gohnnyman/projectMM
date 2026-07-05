@@ -2747,16 +2747,30 @@ function renderFileManager(mod, host) {
         b.addEventListener("click", () => selectPath(absPath, isDir));
         return b;
     };
-    crumbs.appendChild(mkCrumb("root", "/", true));   // always present — the way back to /
-    const segs = st.selected.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
-    segs.forEach((s, i) => {
-        crumbs.appendChild(document.createTextNode(" / "));
-        // A crumb is a directory unless it's the last segment of a selected *file*.
-        const isLast = i === segs.length - 1;
-        const isDir = !isLast || st.selectedIsDir;
-        crumbs.appendChild(mkCrumb(s, "/" + segs.slice(0, i + 1).join("/"), isDir));
-    });
+    // (Re)build the breadcrumb from the current selection, into the stable `crumbs` element — called
+    // on first render and by refreshSelectionControls() when a file click updates the selection in place.
+    const rebuildCrumbs = () => {
+        crumbs.replaceChildren();
+        crumbs.appendChild(mkCrumb("root", "/", true));   // always present — the way back to /
+        const segs = st.selected.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
+        segs.forEach((s, i) => {
+            crumbs.appendChild(document.createTextNode(" / "));
+            // A crumb is a directory unless it's the last segment of a selected *file*.
+            const isLast = i === segs.length - 1;
+            const isDir = !isLast || st.selectedIsDir;
+            crumbs.appendChild(mkCrumb(s, "/" + segs.slice(0, i + 1).join("/"), isDir));
+        });
+    };
+    rebuildCrumbs();
     panel.appendChild(crumbs);
+
+    // Refresh the controls that depend on the current selection WITHOUT rebuilding the tree: the
+    // breadcrumb and the delete button's disabled state. Used by the in-place file-click path so a
+    // file's row survives for its dblclick. (delBtn's press-twice handler reads st.selected live.)
+    const refreshSelectionControls = () => {
+        rebuildCrumbs();
+        delBtn.disabled = st.selected === "/";
+    };
 
     // Toolbar (own row below the breadcrumb): New folder / New file / Delete / Refresh.
     const bar = document.createElement("div");
@@ -2767,9 +2781,13 @@ function renderFileManager(mod, host) {
     // server's error; on success, re-render the tree from disk.
     const runOp = async (op, targetPath) => {
         const method = op === "delete" ? "DELETE" : "POST";
-        const res = await fetch("/api/dir?path=" + encodeURIComponent(targetPath), { method });
-        if (!res.ok) alert(`${op} failed: ${await errorMessage(res)}`);
-        renderFileManager(mod, host);  // rebuild the tree from /api/dir (fresh listing)
+        try {
+            const res = await fetch("/api/dir?path=" + encodeURIComponent(targetPath), { method });
+            if (!res.ok) alert(`${op} failed: ${await errorMessage(res)}`);
+        } catch (err) {   // a network error (offline / reset) would otherwise be an unhandled rejection
+            alert(`${op} failed: ${err.message || err}`);
+        }
+        renderFileManager(mod, host);  // rebuild the tree from /api/dir (fresh listing), success or handled failure
     };
 
     // A new file/folder is created inside the selected node if it's a folder, else next to it (in
@@ -2939,10 +2957,20 @@ function renderFileManager(mod, host) {
                 st.selected = childPath;
                 st.selectedIsDir = entry.isDir;
                 if (entry.isDir) {
+                    // A folder click also expands/collapses — rows appear/disappear, so a full
+                    // re-render is needed.
                     if (isOpen) st.expanded.delete(childPath);
                     else st.expanded.add(childPath);
+                    renderFileManager(mod, host);
+                } else {
+                    // A file click only moves the selection — update the highlight IN PLACE, never
+                    // re-render. A re-render here would destroy this row mid-gesture, so the dblclick
+                    // that follows a double-click would land on a fresh element and openFileEditor
+                    // might not fire. Move the --sel class + refresh the selection-dependent controls.
+                    for (const r of panel.querySelectorAll(".fm-row--sel")) r.classList.remove("fm-row--sel");
+                    rowEl.classList.add("fm-row--sel");
+                    refreshSelectionControls();
                 }
-                renderFileManager(mod, host);   // reflect the selection highlight / expand
             });
             if (!entry.isDir) {
                 rowEl.addEventListener("dblclick", (ev) => {

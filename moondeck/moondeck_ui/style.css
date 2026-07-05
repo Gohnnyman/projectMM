@@ -310,6 +310,20 @@ select {
 .device-status.offline { background: #666; }
 /* Device name — the prominent identity line (how a human recognises the device,
    e.g. "MM-S31"). Bigger + bolder than the secondary IP/fw info row below it. */
+/* A <button> that reads as inline text: strip the native chrome so device-name / device-ip-link
+   keep their text styling, while staying keyboard-focusable (Enter/Space activate). */
+.link-button {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.link-button:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
 .device-name {
     font-size: 14px;
     font-weight: 600;

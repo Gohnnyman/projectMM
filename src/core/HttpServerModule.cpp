@@ -22,6 +22,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>   // strtol — bounded Content-Length parse
+#include <cerrno>    // errno / ERANGE — Content-Length overflow check
 #include <cstring>
 #include <cstdint>
 
@@ -109,11 +110,21 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             // Bounded parse (not atoi): a malformed/negative/overflowing Content-Length must not
             // flow downstream, where it's cast to size_t — a negative int would become a huge
             // length that UploadSource/handleFirmwareUpload would treat as "gigabytes still to
-            // come". strtol catches non-numeric (→0) and we reject negative + clamp to a firmware-
-            // sized ceiling (8 MB > any image we flash), returning 400 rather than acting on it.
+            // come". We reject anything that isn't a clean unsigned integer: strtol with an end
+            // pointer catches non-numeric, trailing junk ("123abc"), and ERANGE overflow; then we
+            // reject negative and clamp to a firmware-sized ceiling (8 MB > any image we flash),
+            // returning 400 rather than acting on it. The value ends at CR/LF/space or the string end.
             constexpr long kContentLenMax = 8L * 1024 * 1024;
-            const long parsed = std::strtol(clh + 15, nullptr, 10);
-            if (parsed < 0 || parsed > kContentLenMax) {
+            const char* valStart = clh + 15;
+            while (*valStart == ' ' || *valStart == '\t') valStart++;   // skip OWS after the colon
+            char* valEnd = nullptr;
+            errno = 0;
+            const long parsed = std::strtol(valStart, &valEnd, 10);
+            const bool consumedDigits = valEnd != valStart;
+            const bool endsCleanly = *valEnd == '\r' || *valEnd == '\n' || *valEnd == ' ' ||
+                                     *valEnd == '\t' || *valEnd == '\0';
+            if (!consumedDigits || !endsCleanly || errno == ERANGE ||
+                parsed < 0 || parsed > kContentLenMax) {
                 sendResponse(conn, 400, "application/json",
                              "{\"error\":\"invalid content-length\"}");
                 return;
@@ -121,11 +132,23 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             contentLen = static_cast<int>(parsed);
             int headerSize = static_cast<int>(headerEnd + 4 - req);
             int bodyNeeded = headerSize + contentLen;
-            // Buffer at most a bufferful of the body here. A body larger than the buffer (a file
-            // upload) is NOT drained into buf — the /api/file route streams the remainder straight
-            // off the socket to the file (handleWriteFile). So only wait for the buffered portion.
-            if (bodyNeeded > static_cast<int>(sizeof(buf) - 1))
-                bodyNeeded = static_cast<int>(sizeof(buf) - 1);   // cap to buffer
+            // Only the STREAMING routes (/api/file, /api/firmware/upload) may carry a body larger than
+            // buf — they take the buffered prefix and pull the remainder straight off the socket. For
+            // every OTHER route the body is parsed whole from buf, so a body over the buffer must be
+            // REJECTED (413), not truncated: a capped read would parse a JSON prefix as if complete
+            // (its own bodyNeeded check wouldn't fire, since the cap makes the short read "enough").
+            // The request line sits at the start of req; a substring match on the path is sufficient.
+            const bool isStreamingRoute =
+                std::strncmp(req, "POST /api/file", 14) == 0 ||
+                std::strncmp(req, "POST /api/firmware/upload", 25) == 0;
+            if (bodyNeeded > static_cast<int>(sizeof(buf) - 1)) {
+                if (!isStreamingRoute) {
+                    sendResponse(conn, 413, "application/json",
+                                 "{\"error\":\"request body too large\"}");
+                    return;
+                }
+                bodyNeeded = static_cast<int>(sizeof(buf) - 1);   // streaming: buffer the prefix only
+            }
             for (int empties = 0; totalRead < bodyNeeded;) {
                 int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
                 if (n > 0) { totalRead += n; empties = 0; }

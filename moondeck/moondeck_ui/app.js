@@ -883,21 +883,24 @@ function renderDevices() {
         // line — it's how a human recognises the device ("the S31") — with the
         // IP demoted to the info row (still clickable to open the device UI).
         // A device with no name yet falls back to showing its IP as the primary.
-        const nameText = document.createElement("span");
-        nameText.className = "device-name";
+        // A <button> (not a clickable <span>) so it's keyboard-focusable and Enter/Space activate it
+        // — the .link-button class strips the button chrome to read as inline text.
+        const nameText = document.createElement("button");
+        nameText.type = "button";
+        nameText.className = "device-name link-button";
         nameText.textContent = device.deviceName || device.ip;
         const tooltipLines = ["Open this device's UI in the view pane", device.ip];
         if (device.last_port) tooltipLines.push(`last flashed via ${device.last_port}`);
         nameText.title = tooltipLines.join("\n");
-        nameText.style.cursor = "pointer";
         nameText.addEventListener("click", () => showInView("http://" + device.ip));
 
-        // Info row: clickable IP · fw. The IP is its own span so clicking it opens the
+        // Info row: clickable IP · fw. The IP is its own button so activating it opens the
         // device UI in the view pane (same as the name), while the fw text stays inert.
         const infoText = document.createElement("span");
         infoText.className = "device-info";
-        const ipLink = document.createElement("span");
-        ipLink.className = "device-ip-link";
+        const ipLink = document.createElement("button");
+        ipLink.type = "button";
+        ipLink.className = "device-ip-link link-button";
         ipLink.textContent = device.ip;
         ipLink.title = "Open this device's UI in the view pane";
         ipLink.addEventListener("click", () => showInView("http://" + device.ip));
@@ -926,8 +929,11 @@ function renderDevices() {
                 e.preventDefault();
                 const a = getActiveNetwork();
                 if (a) a.port = device.last_port;
-                if (device.firmware && firmwares.includes(device.firmware)) state.firmware = device.firmware;
-                if (device.deviceModel) state.provisionDeviceModel = device.deviceModel;
+                // Set the flash target to THIS device's firmware/deviceModel — and clear it when this
+                // device doesn't have one, so the next Build/Flash can't reuse the PREVIOUS device's
+                // values (flashing the wrong firmware would brick it). The reset is unconditional.
+                state.firmware = (device.firmware && firmwares.includes(device.firmware)) ? device.firmware : "";
+                state.provisionDeviceModel = device.deviceModel || "";
                 await saveState();
                 refreshPorts();
                 renderFirmwareSelect();

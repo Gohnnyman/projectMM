@@ -163,8 +163,13 @@ void MqttModule::sendConnectPacket() {
     uint8_t buf[kSendBufLen];
     const char* user = username_[0] ? username_ : nullptr;
     const char* pass = password_[0] ? password_ : nullptr;
-    char clientId[64];
-    topicPrefix(clientId, sizeof(clientId));   // stable MAC-based id
+    // A stable, slash-free clientId (MQTT-3.1.3-5 allows only [0-9a-zA-Z], and a broker may reject a
+    // '/'): "projectMM-<last6-of-MAC>", alphanumeric + one hyphen. NOT topicPrefix() — that carries a
+    // slash. Same MAC identity as the topics, just without the path separator.
+    uint8_t mac[6] = {};
+    platform::getMacAddress(mac);
+    char clientId[32];
+    std::snprintf(clientId, sizeof(clientId), "projectMM-%02x%02x%02x", mac[3], mac[4], mac[5]);
     const size_t n = buildMqttConnect(clientId, user, pass, kKeepaliveSec, buf, sizeof(buf));
     if (n == 0 || !sendPacket(buf, n)) {
         resetConnection("error: connect send failed");
@@ -344,29 +349,30 @@ void MqttModule::publishState(bool force) {
     char topic[128];
     uint8_t buf[kSendBufLen];
 
-    // on/get
-    buildTopic(topic, sizeof(topic), "on/get");
-    const char* onStr = on ? "true" : "false";
-    size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(onStr), std::strlen(onStr),
-                                buf, sizeof(buf));
-    if (n) sendPacket(buf, n);
+    // A publish here is one of the three get-topics. On ANY send failure, reset the connection and
+    // DON'T commit last*/havePublished_ — so after the reconnect the change is republished, not lost
+    // (a committed-but-unsent state would leave the hub showing stale values forever). Same "stamp
+    // only on success" rule as publishName / the ping path.
+    auto publish = [&](const char* suffix, const char* payload) -> bool {
+        buildTopic(topic, sizeof(topic), suffix);
+        const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(payload),
+                                          std::strlen(payload), buf, sizeof(buf));
+        return n != 0 && sendPacket(buf, n);
+    };
 
-    // brightness/get (0..100 for mqttthing)
-    buildTopic(topic, sizeof(topic), "brightness/get");
     char briStr[8];
     std::snprintf(briStr, sizeof(briStr), "%d", (bri * 100) / 255);
-    n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(briStr), std::strlen(briStr),
-                         buf, sizeof(buf));
-    if (n) sendPacket(buf, n);
-
     // hsv/get — the chosen palette's representative hue, full sat, value = brightness%.
-    buildTopic(topic, sizeof(topic), "hsv/get");
     char hsvStr[16];
     std::snprintf(hsvStr, sizeof(hsvStr), "%u,100,%d",
                   static_cast<unsigned>(Palettes::representativeHue(pal)), (bri * 100) / 255);
-    n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(hsvStr), std::strlen(hsvStr),
-                         buf, sizeof(buf));
-    if (n) sendPacket(buf, n);
+
+    if (!publish("on/get", on ? "true" : "false") ||
+        !publish("brightness/get", briStr) ||
+        !publish("hsv/get", hsvStr)) {
+        resetConnection("error: state publish failed");
+        return;
+    }
 
     lastOn_ = on; lastBri_ = bri; lastPalette_ = pal;
     havePublished_ = true;
