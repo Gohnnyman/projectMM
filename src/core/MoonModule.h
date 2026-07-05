@@ -256,6 +256,30 @@ public:
     ControlList& controls() { return controls_; }
     const ControlList& controls() const { return controls_; }
 
+    /// Read one of this module's controls by name generically (no per-consumer control scan). Returns
+    /// `dflt` when the control is absent or the wrong type. The domain-neutral way for another module
+    /// (HttpServerModule's WLED shim, MqttModule) to read a target's control without a light include
+    /// or a hand-rolled scan — one implementation, so the absent-control default can't disagree
+    /// between callers.
+    bool readBool(const char* name, bool dflt) const {
+        for (uint8_t i = 0; i < controls_.count(); i++) {
+            const ControlDescriptor& c = controls_[i];
+            if (c.ptr && c.type == ControlType::Bool && std::strcmp(c.name, name) == 0)
+                return *static_cast<const bool*>(c.ptr);
+        }
+        return dflt;
+    }
+    uint8_t readUint8(const char* name, uint8_t dflt) const {
+        for (uint8_t i = 0; i < controls_.count(); i++) {
+            const ControlDescriptor& c = controls_[i];
+            // Uint8 covers both a plain uint8 (brightness) and a Select stored as uint8 (palette).
+            if (c.ptr && std::strcmp(c.name, name) == 0 &&
+                (c.type == ControlType::Uint8 || c.type == ControlType::Select))
+                return *static_cast<const uint8_t*>(c.ptr);
+        }
+        return dflt;
+    }
+
     /// Role for type identification (no RTTI needed).
     virtual ModuleRole role() const { return ModuleRole::Generic; }
 

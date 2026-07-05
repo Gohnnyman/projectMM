@@ -1038,12 +1038,23 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # the plain-http LAN URL). Same "flash my local build" as USB, over WiFi. Body: {ip, firmware}.
             import urllib.request
             import urllib.error
+            import re
             body = self._read_body()
             params = json.loads(body) if body else {}
             ip = params.get("ip", "")
             firmware = params.get("firmware", "")
             if not ip or not firmware:
                 self._send_json({"error": "ip and firmware required"}, 400)
+                return
+            # Validate both inputs before they reach a filesystem path or an outbound POST. `firmware`
+            # is a build-dir name (same "/" + ".." guard _serve_firmware_bin uses); `ip` must be a
+            # bare host/IP (a device on the LAN), not an arbitrary URL/authority — this handler POSTs
+            # to `http://<ip>/…`, so an unchecked value would let a caller aim MoonDeck at any host.
+            if "/" in firmware or ".." in firmware:
+                self._send_json({"error": "bad firmware name"}, 400)
+                return
+            if not re.fullmatch(r"[A-Za-z0-9.\-]{1,253}", ip):
+                self._send_json({"error": "bad ip/host"}, 400)
                 return
             bin_path = ROOT / "build" / f"esp32-{firmware}" / "projectMM.bin"
             if not bin_path.exists():

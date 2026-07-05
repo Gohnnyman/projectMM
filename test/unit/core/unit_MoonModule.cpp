@@ -219,3 +219,26 @@ TEST_CASE("MoonModule appearsInUi defaults true, overridable false") {
     mm::MoonModule* asBase = &hidden;
     CHECK_FALSE(asBase->appearsInUi());
 }
+
+// readBool/readUint8 — the shared generic control reader (reviewer #8): one implementation so the
+// absent-control default can't disagree between callers (HttpServerModule + MqttModule both read
+// Drivers.on through this). Returns the bound value; returns the caller's default when absent/wrong-type.
+TEST_CASE("MoonModule readBool/readUint8 return the value, or the default when absent") {
+    TestModule mod;
+    mod.onBuildControls();   // binds brightness(Uint8), speed(Uint8), enabled(Bool)
+
+    // Present controls read their live value.
+    CHECK(mod.readUint8("brightness", 99) == 128);   // TestModule brightness default
+    CHECK(mod.readBool("enabled", false) == true);
+
+    // The live field updates flow through (the reader dereferences the bound pointer).
+    mod.brightness = 42;
+    CHECK(mod.readUint8("brightness", 99) == 42);
+    mod.enabled = false;
+    CHECK(mod.readBool("enabled", true) == false);
+
+    // Absent control → the caller's default, not a hard-coded one (the bug this shared reader fixes).
+    CHECK(mod.readBool("on", true) == true);         // no "on" control → default true
+    CHECK(mod.readBool("on", false) == false);       // ...and the OTHER default, from the same call
+    CHECK(mod.readUint8("missing", 7) == 7);
+}

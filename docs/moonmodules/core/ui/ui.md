@@ -47,6 +47,59 @@ Detail: [technical](../moxygen/DevicesModule.md)
 
 [Tests](../../../tests/unit-tests.md#devicesmodule)
 
+### MQTT
+
+Bridges the light to an MQTT broker so a home-automation hub (Homebridge, and later Home Assistant) can control it. It drives the same `Drivers` controls IR and the WLED app do — every command routes through `Scheduler::setControl`, so MQTT is a transport, not new control logic. The MQTT 3.1.1 client is our own (dependency-free, golden-vector-tested in `MqttPacket.h`), speaking to the broker over the platform TCP socket. Disabled until a broker is set; works over WiFi or Ethernet.
+
+- `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
+- `port` — broker port (default 1883).
+- `username` / `password` — broker credentials (optional; the password is stored obfuscated like the WiFi password).
+- The topic prefix is `projectMM/<mac>` — a **stable** identifier (the last 6 hex of the device's MAC), fixed for the device's life. Renaming the device does **not** change its topics, so a hub's config never breaks on a rename (the WLED/Tasmota/Home-Assistant convention). Not a stored control.
+- read-only — `mqtt_status` (`disabled` / `idle` / `connecting` / `connected` / `disconnected` / an error).
+
+**Topics** (for a device whose MAC ends `563cfe`): the device SUBSCRIBEs to the `set` topics and PUBLISHes the `get` topics on change (and on connect, so a controller never reads "No Response"). It also publishes its friendly `deviceName` on the retained `name` topic, so a hub can show the human name while the topics stay MAC-stable:
+
+| direction | topic | payload |
+|---|---|---|
+| set → device | `projectMM/563cfe/on/set` | `true` / `false` |
+| device → get | `projectMM/563cfe/on/get` | `true` / `false` |
+| set → device | `projectMM/563cfe/brightness/set` | `0`–`100` |
+| device → get | `projectMM/563cfe/brightness/get` | `0`–`100` |
+| set → device | `projectMM/563cfe/hsv/set` | `h,s,v` (hue `0`–`359`, sat/val `0`–`100`) |
+| device → get | `projectMM/563cfe/hsv/get` | `h,s,v` |
+| device → get | `projectMM/563cfe/name` | the friendly `deviceName` (retained) |
+
+The HomeKit colour wheel has no "palette" concept, so `hsv/set`'s hue+saturation pick the **nearest palette** (each built-in palette has a representative colour; the closest one is selected) and the value drives brightness — the colour wheel becomes a natural palette selector.
+
+**Homebridge** — install [`homebridge-mqttthing`](https://github.com/arachnetech/homebridge-mqttthing) and add a `lightbulb` accessory. Use the device's own MAC suffix (read it from the `mqtt_status`/topics, or `mosquitto_sub -t 'projectMM/#'`) in place of `563cfe`:
+
+```json
+{
+  "accessory": "mqttthing",
+  "type": "lightbulb",
+  "name": "projectMM",
+  "url": "mqtt://<broker>:1883",
+  "username": "<user>",
+  "password": "<pass>",
+  "topics": {
+    "getOn": "projectMM/563cfe/on/get",
+    "setOn": "projectMM/563cfe/on/set",
+    "getBrightness": "projectMM/563cfe/brightness/get",
+    "setBrightness": "projectMM/563cfe/brightness/set",
+    "getHSV": "projectMM/563cfe/hsv/get",
+    "setHSV": "projectMM/563cfe/hsv/set"
+  },
+  "onValue": "true",
+  "offValue": "false"
+}
+```
+
+Home Assistant does not need MQTT: it adopts the device through its built-in WLED integration over the existing WLED `/json` API.
+
+Detail: [technical](../moxygen/MqttModule.md)
+
+[Tests](../../../tests/unit-tests.md#mqttmodule)
+
 ### Firmware update
 
 Over-the-air firmware flashing — the one operation that swaps the binary and needs a power cycle (every *config* change applies live; a firmware OTA does not).
@@ -117,9 +170,9 @@ A System peripheral (added per board, not auto-wired): an IR remote receiver tha
 <img src="../../../assets/core/IrModule.jpeg" width="300" alt="An IR receiver and the common 21-key RGB remote it decodes">
 
 - `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
-- `learn` — pick an action (off / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms.
-- `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
+- `learn` — pick an action (off / on/off / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms.
+- `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
 
-The actions nudge `Drivers.brightness` (±16, clamped 0–255) and step `Drivers.palette` (next/previous). The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding ("learned … = 0x…"), a fired action ("Drivers.brightness → N"), and an unbound code ("received 0x… (unassigned)").
+The actions toggle `Drivers.on` (master power), nudge `Drivers.brightness` (±16, clamped 0–255) and step `Drivers.palette` (next/previous). The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding ("learned … = 0x…"), a fired action ("Drivers.brightness → N", "Drivers.on → off"), and an unbound code ("received 0x… (unassigned)").
 
 Detail: [technical](../moxygen/IrModule.md)

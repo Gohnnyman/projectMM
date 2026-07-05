@@ -540,7 +540,10 @@ function createCard(mod, depth) {
     // Network) never collapses its own controls, even though it accepts children
     // (System hosts peripherals). It's the card the user is looking at, so its
     // settings should be visible, not hidden behind a "controls" disclosure.
-    const hasVisibleControls = mod.controls && mod.controls.some(c => !c.hidden);
+    // Use the SAME predicate the row loop renders by (controlRendersGenerically), not a bare
+    // !c.hidden — else the disclosure could open for a module whose only "visible" controls render
+    // elsewhere (e.g. FileManager's filesystem/lastSaved render inside its own panel, not generically).
+    const hasVisibleControls = mod.controls && mod.controls.some(c => controlRendersGenerically(mod, c));
     const wrapInDetails = depth > 0 && acceptsNewChildren(mod) && hasVisibleControls;
     const controlsHost = wrapInDetails ? (() => {
         const d = document.createElement("details");

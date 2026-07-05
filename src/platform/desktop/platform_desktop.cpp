@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>      // getaddrinfo — hostname resolution for TcpConnection::connect
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
@@ -843,6 +844,100 @@ int TcpConnection::writeSome(const uint8_t* data, size_t len) {
     return -1;                              // real socket error
 }
 
+
+bool TcpConnection::connect(const char* host, uint16_t port, uint32_t timeoutMs) {
+    if (!host || !host[0]) return false;
+    close();   // drop any prior fd — connect() re-homes this connection
+
+    // Resolve host (a name OR a dotted-quad — getaddrinfo handles both) to an IPv4 address. A named
+    // broker (mqtt.local, homeassistant.lan) needs DNS; a literal IP resolves without a query.
+    char portStr[6];
+    std::snprintf(portStr, sizeof(portStr), "%u", static_cast<unsigned>(port));
+    addrinfo hints{};
+    hints.ai_family = AF_INET;         // IPv4 (matches the rest of the socket layer)
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    if (::getaddrinfo(host, portStr, &hints, &res) != 0 || !res) return false;
+    struct AiGuard { addrinfo* p; ~AiGuard() { if (p) ::freeaddrinfo(p); } } aiGuard{res};
+
+    int fd = open_sock(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd < 0) return false;
+
+    // Bound the CONNECT by timeoutMs, same technique as httpRequest: non-blocking connect, wait
+    // writable via select(), check SO_ERROR. Leave the socket NON-BLOCKING on success (unlike
+    // httpRequest, which flips back to blocking) — a long-lived MQTT client reads/writes through the
+    // non-blocking read()/writeSome() path and must never stall the caller's loop.
+    if (make_nonblocking(fd) != 0) { close_sock(fd); return false; }
+    int cr = ::connect(sock(fd), res->ai_addr, static_cast<int>(res->ai_addrlen));
+#ifdef _WIN32
+    const bool inProgress = (cr != 0 && ::WSAGetLastError() == WSAEWOULDBLOCK);
+#else
+    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
+#endif
+    if (cr != 0 && !inProgress) { close_sock(fd); return false; }   // immediate hard failure
+    if (cr != 0) {                                                  // in progress — wait for writable
+        fd_set wf; FD_ZERO(&wf); FD_SET(sock(fd), &wf);
+        timeval ctv{};
+        ctv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
+        ctv.tv_usec = static_cast<decltype(ctv.tv_usec)>((timeoutMs % 1000) * 1000);
+        if (::select(static_cast<int>(sock(fd)) + 1, nullptr, &wf, nullptr, &ctv) <= 0) {
+            close_sock(fd); return false;                          // timeout / select error
+        }
+        int soerr = 0; socklen_t len = sizeof(soerr);
+        ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
+        if (soerr != 0) { close_sock(fd); return false; }          // connect failed
+    }
+    fd_ = fd;   // connected, socket stays non-blocking
+    return true;
+}
+
+bool TcpConnection::connectStart(const char* host, uint16_t port) {
+    if (!host || !host[0]) return false;
+    close();
+
+    // One bounded DNS lookup (getaddrinfo) up front — resolving is synchronous, but it's the one
+    // unavoidable blocking bit; the CONNECT itself then proceeds non-blocking and is polled.
+    char portStr[6];
+    std::snprintf(portStr, sizeof(portStr), "%u", static_cast<unsigned>(port));
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    if (::getaddrinfo(host, portStr, &hints, &res) != 0 || !res) return false;
+    struct AiGuard { addrinfo* p; ~AiGuard() { if (p) ::freeaddrinfo(p); } } aiGuard{res};
+
+    int fd = open_sock(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd < 0) return false;
+    if (make_nonblocking(fd) != 0) { close_sock(fd); return false; }
+    int cr = ::connect(sock(fd), res->ai_addr, static_cast<int>(res->ai_addrlen));
+#ifdef _WIN32
+    const bool inProgress = (cr != 0 && ::WSAGetLastError() == WSAEWOULDBLOCK);
+#else
+    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
+#endif
+    if (cr != 0 && !inProgress) { close_sock(fd); return false; }   // immediate hard failure
+    fd_ = fd;   // in flight (or already connected) — connectPoll() resolves which
+    return true;
+}
+
+TcpConnection::ConnectResult TcpConnection::connectPoll() {
+    if (fd_ < 0) return ConnectResult::Failed;
+    // Zero-timeout select: is the socket writable yet? Never blocks.
+    // Watch BOTH writability and the exception set: a completed connect signals writable on POSIX,
+    // but a FAILED (refused) non-blocking connect signals via the exception set on Winsock — checking
+    // only writefds there leaves a refused connect reading Pending until the caller's timeout.
+    fd_set wf; FD_ZERO(&wf); FD_SET(sock(fd_), &wf);
+    fd_set ef; FD_ZERO(&ef); FD_SET(sock(fd_), &ef);
+    timeval zero{};   // 0s / 0us
+    const int r = ::select(static_cast<int>(sock(fd_)) + 1, nullptr, &wf, &ef, &zero);
+    if (r == 0) return ConnectResult::Pending;                       // neither writable nor errored yet
+    if (r < 0)  { close(); return ConnectResult::Failed; }
+    // SO_ERROR distinguishes a real connect from an errored one on both platforms.
+    int soerr = 0; socklen_t len = sizeof(soerr);
+    ::getsockopt(sock(fd_), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
+    if (soerr != 0) { close(); return ConnectResult::Failed; }
+    return ConnectResult::Connected;                                 // socket stays non-blocking
+}
 
 void TcpConnection::close() {
     if (fd_ >= 0) {

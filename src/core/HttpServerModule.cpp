@@ -21,6 +21,7 @@
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>   // strtol — bounded Content-Length parse
 #include <cstring>
 #include <cstdint>
 
@@ -105,7 +106,19 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     if (headerEnd) {
         auto* clh = std::strstr(req, "Content-Length:");
         if (clh) {
-            contentLen = std::atoi(clh + 15);
+            // Bounded parse (not atoi): a malformed/negative/overflowing Content-Length must not
+            // flow downstream, where it's cast to size_t — a negative int would become a huge
+            // length that UploadSource/handleFirmwareUpload would treat as "gigabytes still to
+            // come". strtol catches non-numeric (→0) and we reject negative + clamp to a firmware-
+            // sized ceiling (8 MB > any image we flash), returning 400 rather than acting on it.
+            constexpr long kContentLenMax = 8L * 1024 * 1024;
+            const long parsed = std::strtol(clh + 15, nullptr, 10);
+            if (parsed < 0 || parsed > kContentLenMax) {
+                sendResponse(conn, 400, "application/json",
+                             "{\"error\":\"invalid content-length\"}");
+                return;
+            }
+            contentLen = static_cast<int>(parsed);
             int headerSize = static_cast<int>(headerEnd + 4 - req);
             int bodyNeeded = headerSize + contentLen;
             // Buffer at most a bufferful of the body here. A body larger than the buffer (a file
@@ -990,14 +1003,15 @@ void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const
 // light-domain include — the same domain-neutral reach applySetControl uses to write.
 uint8_t HttpServerModule::driversBrightness() {
     MoonModule* d = findModuleByName("Drivers");
-    if (!d) return 0;
-    const ControlList& cl = d->controls();
-    for (uint8_t i = 0; i < cl.count(); i++) {
-        const ControlDescriptor& c = cl[i];
-        if (c.ptr && c.type == ControlType::Uint8 && std::strcmp(c.name, "brightness") == 0)
-            return *static_cast<const uint8_t*>(c.ptr);
-    }
-    return 0;
+    return d ? d->readUint8("brightness", 0) : 0;
+}
+
+// The Drivers master-power state (the `on` Bool control), read the same domain-neutral way as
+// driversBrightness(). Defaults to true when the control is absent (a build without it), so a
+// device still reads as "on" rather than spuriously off.
+bool HttpServerModule::driversOn() {
+    MoonModule* d = findModuleByName("Drivers");
+    return d ? d->readBool("on", true) : true;   // absent → on (shared default with MqttModule)
 }
 
 // The WLED state object, written into an open sink. `on` + `bri` mirror Drivers
@@ -1016,7 +1030,7 @@ void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     }
     sink.appendf("{\"on\":%s,\"bri\":%u,"
                  "\"seg\":[{\"id\":0,\"col\":[[%u,%u,%u]]}]}",
-                 bri > 0 ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
+                 driversOn() ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
 }
 
 void HttpServerModule::serveWledState(platform::TcpConnection& conn) {
@@ -1053,19 +1067,18 @@ void HttpServerModule::serveWledStateInfo(platform::TcpConnection& conn) {
     sink.flush();
 }
 
-// Apply a WLED state-set body ({on?, bri?}) to the Drivers brightness control through the
-// shared apply-core (the same path /api/control and Improv APPLY_OP use). `on:false` → 0;
-// `on:true` with no `bri` → restore a visible default; `bri:N` → set N. Shared by the HTTP
-// POST /json/state handler and the inbound-WebSocket path (the app uses both channels).
+// Apply a WLED state-set body ({on?, bri?}) to the Drivers controls through the shared apply-core
+// (the same path /api/control and Improv APPLY_OP use). `on` and `bri` are independent: `on` sets
+// the real master-power control (so toggling off preserves the brightness level), `bri` sets the
+// level. Shared by the HTTP POST /json/state handler and the inbound-WebSocket path.
 void HttpServerModule::applyWledState(const char* body) {
-    int bri = -1;
-    if (mm::json::hasKey(body, "bri")) bri = mm::json::parseInt(body, "bri");
     if (mm::json::hasKey(body, "on")) {
-        const bool on = mm::json::parseBool(body, "on");
-        if (!on) bri = 0;
-        else if (bri < 0) bri = driversBrightness() > 0 ? -1 : 128;  // turn on → visible default
+        applySetControl("Drivers", "on",
+                        mm::json::parseBool(body, "on") ? "{\"value\":true}" : "{\"value\":false}");
     }
-    if (bri >= 0) {
+    if (mm::json::hasKey(body, "bri")) {
+        int bri = mm::json::parseInt(body, "bri");
+        if (bri < 0) bri = 0;
         if (bri > 255) bri = 255;
         char valueJson[32];
         std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", bri);

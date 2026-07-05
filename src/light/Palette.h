@@ -234,7 +234,76 @@ public:
         return p;
     }
 
+    // --- Representative colour of a palette (for the HomeKit color-wheel → palette mapping) ---
+    //
+    // HomeKit (via MQTT/Homebridge) has no "palette" concept but a native colour wheel, so we map a
+    // wheel colour to the nearest palette. Each palette's representative (hue, sat) is COMPUTED from
+    // its expanded entries — the textbook "dominant colour": average the 16 RGB entries, convert to
+    // HSV. No hand-maintained table (it auto-covers every built-in + any future one). A rainbow/
+    // multi-hue palette averages toward grey → low saturation, which correctly matches the wheel's
+    // desaturated centre rather than any single hue. Off the hot path (called on an MQTT set / get).
+
+    // Representative hue (0..359) of built-in `index`. See representativeHueSat().
+    static uint16_t representativeHue(uint8_t index) {
+        uint16_t hue = 0, sat = 0;
+        representativeHueSat(index, hue, sat);
+        return hue;
+    }
+
+    // The palette whose representative (hue, sat) is closest to the target, by 2D distance in
+    // (circular-hue, saturation) space. `hue` 0..359, `sat` 0..255. Low target saturation snaps to a
+    // desaturated palette (e.g. Rainbow); a vivid hue snaps to the matching single-hue palette.
+    static uint8_t nearestForHue(uint16_t hue, uint8_t sat) {
+        hue %= 360;   // fold any caller's value into 0..359 — a >=360 hue would otherwise make the
+                      // circular-distance fold below underflow and the squared distance overflow int32
+        uint8_t best = 0;
+        uint32_t bestDist = 0xFFFFFFFF;
+        for (uint8_t i = 0; i < palettes::kCount; i++) {
+            uint16_t ph = 0, ps = 0;
+            representativeHueSat(i, ph, ps);
+            // Circular hue distance (0..180), scaled so hue and sat weigh comparably (hue 0..359 vs
+            // sat 0..255): fold the hue delta to ≤180, then to a 0..255-ish range.
+            uint16_t dh = static_cast<uint16_t>((hue > ph) ? (hue - ph) : (ph - hue));
+            if (dh > 180) dh = static_cast<uint16_t>(360 - dh);
+            const int32_t hueDelta = (static_cast<int32_t>(dh) * 255) / 180;   // 0..255
+            const int32_t satDelta = static_cast<int32_t>(sat) - static_cast<int32_t>(ps);
+            const uint32_t dist = static_cast<uint32_t>(hueDelta * hueDelta + satDelta * satDelta);
+            if (dist < bestDist) { bestDist = dist; best = i; }
+        }
+        return best;
+    }
+
+    // Compute a palette's representative hue (0..359) + saturation (0..255) from the average of its
+    // expanded RGB entries. Pure; no allocation.
+    static void representativeHueSat(uint8_t index, uint16_t& hueOut, uint16_t& satOut) {
+        const Palette p = fromBuiltin(index);
+        uint32_t rs = 0, gs = 0, bs = 0;
+        for (uint8_t i = 0; i < Palette::kEntries; i++) {
+            rs += p.entry[i].r; gs += p.entry[i].g; bs += p.entry[i].b;
+        }
+        const uint8_t r = static_cast<uint8_t>(rs / Palette::kEntries);
+        const uint8_t g = static_cast<uint8_t>(gs / Palette::kEntries);
+        const uint8_t b = static_cast<uint8_t>(bs / Palette::kEntries);
+        rgbToHueSat(r, g, b, hueOut, satOut);
+    }
+
 private:
+    // Integer RGB → (hue 0..359, saturation 0..255). The textbook max/min/delta HSV derivation; V is
+    // unused (we only match on hue+sat). Achromatic (delta 0) → hue 0, sat 0.
+    static void rgbToHueSat(uint8_t r, uint8_t g, uint8_t b, uint16_t& hue, uint16_t& sat) {
+        const uint8_t mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        const uint8_t mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        const uint8_t delta = static_cast<uint8_t>(mx - mn);
+        if (delta == 0 || mx == 0) { hue = 0; sat = 0; return; }
+        sat = static_cast<uint16_t>((static_cast<uint32_t>(delta) * 255) / mx);
+        int32_t h;
+        if (mx == r)      h = 60 * (static_cast<int32_t>(g) - b) / delta;
+        else if (mx == g) h = 120 + 60 * (static_cast<int32_t>(b) - r) / delta;
+        else              h = 240 + 60 * (static_cast<int32_t>(r) - g) / delta;
+        if (h < 0) h += 360;
+        hue = static_cast<uint16_t>(h % 360);
+    }
+
     // Default to a full rainbow (index 0): always colourful, so an effect renders visible output
     // before any palette is selected. setActive() (Drivers setup) overrides from the saved index.
     static inline Palette active_ = fromBuiltin(0);

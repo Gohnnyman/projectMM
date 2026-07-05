@@ -101,6 +101,7 @@
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
+#include "core/MqttModule.h"
 #include "core/DevicesModule.h"
 #include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
@@ -216,6 +217,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/FileManagerModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
+    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/MqttModule.md");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/DevicesModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
     mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/FilesystemModule.md");
@@ -333,6 +335,17 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         improvModule->markWiredByCode();
     }
 
+    // MQTT service: a code-wired child of Network (like Improv), bridging the light controls to a
+    // broker for Homebridge/Home-Assistant. Built on every networked target (it uses TCP, so it
+    // works over WiFi or Ethernet); disabled until the user sets a broker. systemModule is injected
+    // for the default topic prefix (the device name).
+    mm::MqttModule* mqttModule = nullptr;
+    if constexpr (mm::platform::hasNetwork) {
+        mqttModule = static_cast<mm::MqttModule*>(mm::ModuleFactory::create("MqttModule"));
+        mqttModule->setSystemModule(systemModule);
+        mqttModule->markWiredByCode();
+    }
+
     // Layouts: top-level container; one or more layouts. Today one GridLayout,
     // which self-initialises to defaultGridSize (persistence overlays any saved
     // size before setup()). No boot-time dimensions threaded in here.
@@ -414,6 +427,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(fileManagerModule);
     scheduler.addModule(firmwareUpdateModule);
     if (improvModule) networkModule->addChild(improvModule);
+    if (mqttModule) networkModule->addChild(mqttModule);
     // Devices: discovers other devices on the LAN. Child of Network (discovery
     // depends on the network being up); wired-by-code so persistence preserves it
     // on devices whose saved Network.json predates the child (see DevicesModule.md).

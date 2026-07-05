@@ -29,7 +29,7 @@ namespace mm {
 /// `DELETE /api/dir?path=` removes a file or empty folder, and a file's contents are read/written
 /// over `/api/file` — the path rides the request query, so an op carries its target in the request
 /// rather than a stored control (nothing to persist to flash per op). All share the one path guard
-/// (`HttpServerModule::fileQueryPath`: reject `..`, root at the mount), and each fails cleanly on a
+/// (`HttpServerModule::parseFilePath`: reject `..`, root at the mount), and each fails cleanly on a
 /// bad path / non-empty-dir delete — never crashes (the Robustness rule). This module itself owns
 /// only the `show hidden` toggle + the read-only usage gauges.
 ///

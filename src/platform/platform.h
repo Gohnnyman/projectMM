@@ -231,8 +231,10 @@ bool http_fetch_to_ota(const char* url,
 // e.g. straight off an HTTP upload body). Same producer callback shape as fsWriteStream: `src`
 // fills up to `cap` bytes, returns the count (0 = clean EOF), and sets `*abort` to fail the OTA
 // (an incomplete/timed-out upload). Runs esp_ota_begin → esp_ota_write per chunk → esp_ota_end +
-// set_boot_partition, then reboots on success. SYNCHRONOUS (unlike http_fetch_to_ota): the caller
-// is already off the render hot path (an HTTP request handler) and needs the result to reply.
+// set_boot_partition, then RETURNS true (it does NOT reboot — the caller sends its HTTP 200 first,
+// then reboots into the flashed image, the same order /api/reboot uses). SYNCHRONOUS (unlike
+// http_fetch_to_ota): the caller is already off the render hot path (an HTTP request handler) and
+// needs the result to reply.
 // `statusBuf` / `bytesReadOut` are updated in place (bytesTotal is the caller-supplied
 // Content-Length, so no separate out-param). Desktop: returns false (no OTA partition); guard with
 // `if constexpr (mm::platform::hasOta)`. Returns true iff the image flashed + boot pointer flipped.
@@ -346,6 +348,24 @@ public:
         if (this != &other) { close(); fd_ = other.fd_; other.fd_ = -1; }
         return *this;
     }
+
+    // Outbound client connect to host:port. `host` may be a hostname (DNS-resolved via getaddrinfo)
+    // or a dotted-quad IP — brokers/servers are usually named. Non-blocking connect bounded by
+    // timeoutMs (the same technique httpRequest uses); on success the socket is left NON-BLOCKING for
+    // read()/writeSome(), so a long-lived client (MQTT: subscribe once, receive pushes) never stalls
+    // the caller's loop. Returns true when connected. Caller gates on networkReady(). Desktop + ESP32
+    // (lwip); a fresh TcpConnection (no fd yet) is the expected receiver. Replaces any prior fd.
+    bool connect(const char* host, uint16_t port, uint32_t timeoutMs);
+
+    // Non-blocking outbound connect, for a client that must NOT stall the render loop (MQTT runs on
+    // loop1s inside Scheduler::tick). `connectStart` resolves `host` (getaddrinfo — one bounded DNS
+    // lookup) and kicks off a non-blocking connect, returning immediately; `connectPoll` checks the
+    // in-flight connect WITHOUT blocking and returns Pending / Connected / Failed. The caller polls
+    // across ticks and enforces its own overall timeout. On Connected the socket is non-blocking for
+    // read()/writeSome(). (The blocking connect() above stays for httpRequest's one-shot use.)
+    enum class ConnectResult : uint8_t { Pending, Connected, Failed };
+    bool connectStart(const char* host, uint16_t port);   // false = immediate failure (DNS/socket)
+    ConnectResult connectPoll();                           // non-blocking; call after connectStart
 
     bool valid() const { return fd_ >= 0; }
     int read(uint8_t* buf, size_t maxLen);   // non-blocking: >0 data, 0 closed, -1 nothing

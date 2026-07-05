@@ -19,12 +19,15 @@ using namespace mm;
 
 namespace {
 
-// Stands in for Drivers: a brightness Uint8 (0–255) and a palette Select (0–3). Named "Drivers"
-// so IrModule's kActions ("Drivers"/"brightness", "Drivers"/"palette") resolve to it.
+// Stands in for Drivers: an `on` Bool, a brightness Uint8 (0–255) and a palette Select (0–3). Named
+// "Drivers" so IrModule's kActions ("Drivers"/"on", "Drivers"/"brightness", "Drivers"/"palette")
+// resolve to it.
 struct FakeDrivers : public MoonModule {
+    bool on = true;
     uint8_t brightness = 100;
     uint8_t palette = 1;
     void onBuildControls() override {
+        controls_.addBool("on", on);
         controls_.addUint8("brightness", brightness, 0, 255);
         // A Select's max is (optionCount - 1); addSelect binds min 0 / max count-1.
         static const char* kPalettes[] = {"A", "B", "C", "D"};
@@ -46,9 +49,9 @@ struct Rig {
         scheduler.setup();   // binds controls + sets Scheduler::instance()
     }
     ~Rig() { scheduler.teardown(); }
-    // Learn `code` to the action at `learnIndex` (1-based: 1=brightness up, 2=down, 3=palette
-    // next, 4=prev), then that code drives the action on later inject. Mirrors the on-device flow:
-    // arm the learn select → the next received code binds → subsequent codes fire the action.
+    // Learn `code` to the action at `learnIndex` (1-based: 1=on/off, 2=brightness up, 3=down,
+    // 4=palette next, 5=prev), then that code drives the action on later inject. Mirrors the on-device
+    // flow: arm the learn select → the next received code binds → subsequent codes fire the action.
     void learn(int learnIndex, uint32_t code) {
         char v[24]; std::snprintf(v, sizeof(v), "{\"value\":%d}", learnIndex);
         Scheduler::instance()->setControl("Ir", "learn", v);
@@ -62,8 +65,8 @@ struct Rig {
 TEST_CASE("IrModule: a learned code adjusts Drivers brightness by the step") {
     Rig r;
     r.drivers->brightness = 100;
-    r.learn(1, 0xB1);   // bind code 0xB1 → brightness up
-    r.learn(2, 0xB2);   // bind code 0xB2 → brightness down
+    r.learn(2, 0xB1);   // bind code 0xB1 → brightness up
+    r.learn(3, 0xB2);   // bind code 0xB2 → brightness down
     r.fire(0xB1);
     CHECK(r.drivers->brightness == 116);   // +16
     r.fire(0xB2);
@@ -71,12 +74,26 @@ TEST_CASE("IrModule: a learned code adjusts Drivers brightness by the step") {
     CHECK(r.drivers->brightness == 84);    // 116 - 32
 }
 
+TEST_CASE("IrModule: a learned on/off code toggles the Drivers on control") {
+    Rig r;
+    r.drivers->on = true;
+    r.learn(1, 0xA0);   // bind code 0xA0 → on/off (learn index 1 = first action)
+    r.fire(0xA0);
+    CHECK(r.drivers->on == false);   // toggled off
+    r.fire(0xA0);
+    CHECK(r.drivers->on == true);    // toggled back on
+    r.fire(0xA0);
+    CHECK(r.drivers->on == false);   // and off again — a genuine toggle, not a saturating nudge
+    // The status names the new state, not a numeric value.
+    CHECK(std::strcmp(r.ir->status(), "Drivers.on → off") == 0);
+}
+
 TEST_CASE("IrModule: firing a learned code reports what it changed via status") {
     Rig r;
     r.drivers->brightness = 100;
     // Before setup drives anything, the pin is unset in the rig → readiness warns to set it.
     CHECK(std::strstr(r.ir->status(), "set pin") != nullptr);
-    r.learn(1, 0xB1);
+    r.learn(2, 0xB1);
     r.fire(0xB1);
     // The action acknowledges the change it made, naming the target control + new value.
     CHECK(std::strcmp(r.ir->status(), "Drivers.brightness → 116") == 0);
@@ -95,8 +112,8 @@ TEST_CASE("IrModule: pin state drives readiness status") {
 
 TEST_CASE("IrModule: a learned brightness code clamps at 0 and 255") {
     Rig r;
-    r.learn(1, 0xB1);   // brightness up
-    r.learn(2, 0xB2);   // brightness down
+    r.learn(2, 0xB1);   // brightness up
+    r.learn(3, 0xB2);   // brightness down
     r.drivers->brightness = 250;
     r.fire(0xB1);
     CHECK(r.drivers->brightness == 255);   // 250+16 clamps to 255, not wrap
@@ -107,8 +124,8 @@ TEST_CASE("IrModule: a learned brightness code clamps at 0 and 255") {
 
 TEST_CASE("IrModule: learned palette codes step the Select and clamp at the ends") {
     Rig r;
-    r.learn(3, 0xB3);   // palette next
-    r.learn(4, 0xB4);   // palette prev
+    r.learn(4, 0xB3);   // palette next
+    r.learn(5, 0xB4);   // palette prev
     r.drivers->palette = 1;
     r.fire(0xB3);
     CHECK(r.drivers->palette == 2);
@@ -125,8 +142,8 @@ TEST_CASE("IrModule: learned palette codes step the Select and clamp at the ends
 TEST_CASE("IrModule: learn binds a code to an action, then that code drives it") {
     Rig r;
     r.drivers->brightness = 100;
-    // Arm learning for "brightness up" (learn select index 1 = first action).
-    Scheduler::instance()->setControl("Ir", "learn", "{\"value\":1}");
+    // Arm learning for "brightness up" (learn select index 2; index 1 is on/off).
+    Scheduler::instance()->setControl("Ir", "learn", "{\"value\":2}");
     // A code arrives → it binds to "brightness up" and learning disarms; brightness unchanged yet.
     r.ir->injectCodeForTest(0xFA057F80);
     CHECK(r.drivers->brightness == 100);
@@ -151,8 +168,8 @@ TEST_CASE("IrModule: two codes bind to two actions independently") {
     Rig r;
     r.drivers->brightness = 100;
     r.drivers->palette = 1;
-    r.learn(1, 0x11111111);   // brightness up
-    r.learn(3, 0x22222222);   // palette next
+    r.learn(2, 0x11111111);   // brightness up
+    r.learn(4, 0x22222222);   // palette next
     // Each code drives only its own action.
     r.fire(0x11111111);
     CHECK(r.drivers->brightness == 116);
@@ -174,7 +191,7 @@ TEST_CASE("IrModule: an unassigned code is a no-op, not a crash") {
 TEST_CASE("IrModule: a learned code whose target module is gone is a no-op, reported") {
     Rig r;
     const uint8_t before = r.drivers->brightness;
-    r.learn(1, 0xC0DE);                    // bind 0xC0DE → brightness up (targets "Drivers")
+    r.learn(2, 0xC0DE);                    // bind 0xC0DE → brightness up (targets "Drivers")
     // Take the target out of reach: rename it so firstByName("Drivers") returns null.
     r.drivers->setName("NotDrivers");
     r.fire(0xC0DE);                        // the action fires but its module is missing

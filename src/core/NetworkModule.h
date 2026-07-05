@@ -566,7 +566,15 @@ private:
     // ethType_ is uint8_t (not int16_t like the pins) so it binds as a Select
     // dropdown via addSelect — the value is the option index, which matches the
     // EthPhyType enum order (None/LAN8720/IP101/W5500).
-    uint8_t ethType_       = static_cast<uint8_t>(platform::ethConfigDefault.phyType);
+    //
+    // Defaults to 0 (None) — Ethernet is OPT-IN per board, set explicitly by the
+    // deviceModels.json eth block (ethType: 1/2/3/4). A WiFi-only board (no eth block)
+    // must NOT try to bring up a PHY it doesn't have — that wasted RMII/SPI init is the
+    // bug this default avoids. The pins below stay seeded from the per-chip
+    // ethConfigDefault so a board that DOES opt in gets its chip's historical pins without
+    // re-listing them; only the PHY *selection* defaults off. Matches the installer UI,
+    // whose Ethernet pill is "active" (green) only when ethType is set (ethConfigured()).
+    uint8_t ethType_       = 0;   // 0 = None; a board opts in via its catalog eth block
     // GPIO/address members are int8_t (one byte; -1 = unused). A GPIO never exceeds
     // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
     // → number input). ethConfigDefault's fields are plain int; the values are all

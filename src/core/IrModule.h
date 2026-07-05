@@ -102,25 +102,31 @@ public:
     void injectCodeForTest(uint32_t code) { processCode(code); }
 
 private:
-    // One action: a UI button + a learnable remote code, nudging (module, control) by delta,
-    // clamped to the control's own bounds. Adding an action is one row here.
+    // How an action changes its target control: a relative nudge (clamped to the control's bounds)
+    // or a boolean toggle (read the current value, write its inverse). A toggle can't be expressed
+    // as a delta — +1 on a 0/1 control clamps 0→1 but leaves 1→1 — so it's its own kind.
+    enum class ActionKind : uint8_t { Delta, Toggle };
+    // One action: a UI button + a learnable remote code, changing (module, control). Adding an
+    // action is one row here. `delta` is used by Delta actions; Toggle ignores it.
     struct Action {
         const char* button;    // the UI button name
         const char* codeCtrl;  // the readonly control showing this action's learned code
         const char* module;
         const char* control;
-        int delta;
+        int delta;             // Delta actions: the signed nudge; Toggle actions: unused (0)
+        ActionKind kind;
     };
     static constexpr Action kActions[] = {
-        {"brightness up",   "code brightness up",   "Drivers", "brightness", +16},
-        {"brightness down", "code brightness down", "Drivers", "brightness", -16},
-        {"palette next",    "code palette next",    "Drivers", "palette",    +1},
-        {"palette prev",    "code palette prev",    "Drivers", "palette",    -1},
+        {"on/off",          "code on/off",          "Drivers", "on",         0,   ActionKind::Toggle},
+        {"brightness up",   "code brightness up",   "Drivers", "brightness", +16, ActionKind::Delta},
+        {"brightness down", "code brightness down", "Drivers", "brightness", -16, ActionKind::Delta},
+        {"palette next",    "code palette next",    "Drivers", "palette",    +1,  ActionKind::Delta},
+        {"palette prev",    "code palette prev",    "Drivers", "palette",    -1,  ActionKind::Delta},
     };
     static constexpr uint8_t kActionCount = sizeof(kActions) / sizeof(kActions[0]);
     // learn select: index 0 = off, 1..N = arm learning for kActions[index-1].
     static constexpr const char* kLearnOptions[] = {
-        "off", "brightness up", "brightness down", "palette next", "palette prev",
+        "off", "on/off", "brightness up", "brightness down", "palette next", "palette prev",
     };
 
     // Handle a decoded code: in learn mode bind it to the armed action (and persist); otherwise
@@ -171,6 +177,16 @@ private:
         for (uint8_t i = 0; i < ctrls.count(); i++) {
             auto& c = ctrls[i];
             if (std::strcmp(c.name, a.control) != 0) continue;
+            if (a.kind == ActionKind::Toggle) {
+                // Read the current bool (stored as a 1-byte value) and write its inverse.
+                const bool next = controlIntValue(c) == 0;
+                sched->setControl(a.module, a.control, next ? "{\"value\":true}" : "{\"value\":false}");
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "%s.%s → %s",
+                              a.module, a.control, next ? "on" : "off");
+                setStatus(statusBuf_);
+                markDirty();
+                return;
+            }
             int next = controlIntValue(c) + a.delta;
             if (next < c.min) next = c.min;
             if (next > c.max) next = c.max;
@@ -190,8 +206,9 @@ private:
         else          setStatus("ready");
     }
 
-    // A 1-byte numeric control (Uint8 / Select) read as int via its descriptor pointer — covers
-    // every kActions target (brightness Uint8, palette Select both store a uint8_t).
+    // A 1-byte control (Uint8 / Select / Bool) read as int via its descriptor pointer — covers every
+    // kActions target: the brightness Uint8, the palette Select, and the on/off Bool (a bool is a
+    // 1-byte object, so reading it through the same uint8_t* yields 0/1 for the Toggle action).
     static int controlIntValue(const ControlDescriptor& c) {
         return c.ptr ? *static_cast<const uint8_t*>(c.ptr) : 0;
     }

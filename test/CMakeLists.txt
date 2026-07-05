@@ -10,6 +10,9 @@ add_executable(mm_tests
     unit/core/unit_crc.cpp
     unit/core/unit_AudioModule_sync.cpp
     unit/core/unit_IrModule.cpp
+    unit/core/unit_TcpConnect.cpp
+    unit/core/unit_MqttPacket.cpp
+    unit/core/unit_MqttModule.cpp
     unit/core/unit_FileManagerModule.cpp
     unit/core/unit_Control_apply_absent_key.cpp
     unit/core/unit_Control_list.cpp

@@ -160,6 +160,11 @@ public:
     /// mkdir/delete). Public + static so it's unit-testable without a socket fixture.
     static bool parseFilePath(const char* query, char* out, size_t cap);
 
+    /// Apply a WLED `{on?, bri?}` state body onto the Drivers `on` / `brightness` controls through
+    /// the shared apply-core (`on` and `bri` independent — off preserves the level). The transport-
+    /// free entry the HTTP `POST /json/state`, the inbound-`/ws` path, and the unit tests all drive.
+    void applyWledState(const char* body);
+
 private:
     platform::TcpServer server_;
     Scheduler* scheduler_ = nullptr;
@@ -268,11 +273,11 @@ private:
     void serveWledState(platform::TcpConnection& conn);
     void serveWledStateInfo(platform::TcpConnection& conn);
     void handleWledState(platform::TcpConnection& conn, const char* body);
-    void applyWledState(const char* body);          ///< `{on,bri}` → Drivers brightness (HTTP + WS)
     void pollWledStateFromWebSockets();             ///< read app's slider/toggle sent over /ws
     void writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]);
     void writeWledStateBody(JsonSink& sink);
     uint8_t driversBrightness();
+    bool driversOn();
     void writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first);
 
     // -----------------------------------------------------------------------

@@ -40,7 +40,7 @@ DEVICE_MODEL_MAX = 31
 # in lockstep with the modules that actually exist. planned = peripherals with no
 # module yet (the backlog seed) — open-ended by design, so it is NOT whitelisted,
 # only type-checked. Adding a new supported capability means a module backs it.
-SUPPORTED_VOCAB = {"LEDs", "WiFi", "Ethernet", "Audio", "IR"}
+SUPPORTED_VOCAB = {"LEDs", "WiFi", "Ethernet", "Audio", "IR", "MQTT", "Hue"}
 
 # Flash bauds a board may pin via `flashBaud` — the standard esptool rates. The default
 # differs by audience: the CLI / MoonDeck path defaults FAST (921600 — DIY bench, modern
@@ -197,6 +197,36 @@ def main():
             # A `pins` control only makes sense on an LED driver module.
             if isinstance(controls, dict) and "pins" in controls and not str(mtype).endswith("LedDriver"):
                 errors.append(f"{where}: module '{mtype}' has a 'pins' control but is not a *LedDriver")
+
+            # Ethernet is explicit, not defaulted: a board that turns Ethernet ON (NetworkModule with
+            # a non-None ethType) must declare its board-wiring GPIOs, so the firmware never falls
+            # back to a per-chip default that is really one specific board's pins. (The Dig-Octa is
+            # why: GPIO5 is the classic-ESP32 default reset but that board uses it as an LED output;
+            # inheriting the default would drive an LED pin as an Ethernet reset.) Only the pins that
+            # are genuine BOARD WIRING are required — MDC/MDIO may stay at the IDF default (omit or
+            # -1) on RMII, since that's a real standard, not a board-specific value.
+            if mtype == "NetworkModule" and isinstance(controls, dict):
+                et = controls.get("ethType")
+                # ethType must be an int (a JSON string like "2" would silently skip the rule below and
+                # also isn't what the device deserializes into the Select) — reject a stringified value.
+                if et is not None and not isinstance(et, int):
+                    errors.append(f"{where}: NetworkModule ethType must be an integer, got {et!r}")
+                if isinstance(et, int) and et != 0:
+                    # RMII LAN8720(1)/IP101(2): rst + clock. RGMII YT8531(4): mdc/mdio/rst.
+                    # W5500 SPI(3): the four SPI bus pins. -1 is an allowed explicit value ("unused /
+                    # IDF default"); what the rule forbids is OMITTING a board-wiring pin.
+                    required = {
+                        1: ["ethRstGpio", "ethClockGpio"],
+                        2: ["ethRstGpio", "ethClockGpio"],
+                        4: ["ethMdcGpio", "ethMdioGpio", "ethRstGpio"],
+                        3: ["ethSpiMiso", "ethSpiMosi", "ethSpiSck", "ethSpiCs"],
+                    }.get(et, [])
+                    missing = [p for p in required if p not in controls]
+                    if missing:
+                        errors.append(f"{where}: NetworkModule sets ethType={et} but omits board-wiring "
+                                      f"pin(s) {missing} — Ethernet must be pinned explicitly, not "
+                                      f"inherited from a per-chip default (use -1 for a genuinely "
+                                      f"unused pin)")
 
         # Every entry must carry the deviceModel identity (a System unit with the
         # `deviceModel` control). An empty `modules` list is also a failure — it has no
