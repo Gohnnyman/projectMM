@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "build" / "verify_version.py"
+SCRIPT = ROOT / "moondeck" / "ci" / "verify_version.py"
 
 
 def run(tag, version, tmp_path):
@@ -28,7 +28,7 @@ def run(tag, version, tmp_path):
     # (it resolves ROOT from __file__), so patch by running a tiny wrapper that swaps the path.
     code = (
         f"import runpy, sys; "
-        f"import scripts.build.verify_version as v; "
+        f"import moondeck.ci.verify_version as v; "
         f"v.LIBRARY_JSON = __import__('pathlib').Path(r'{lib}'); "
         f"sys.argv = ['verify_version', '--tag', r'{tag}']; "
         f"sys.exit(v.main())"

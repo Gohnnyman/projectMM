@@ -88,7 +88,7 @@ test/scenarios/light/{effects,layouts,drivers,…}/   (mirror)
 | `docs/moonmodules/` | per-library pages (`effects_<library>.md`) with compact rows + the `check_specs.py` rewrite; delete the ~21 per-module effect `.md`s. | Medium | **Migration Stage 2** (already planned) |
 | `src/` | **unchanged** (already `domain/type`, flat). | none | — |
 
-**Not reshaped** (correctly orthogonal): `test/js`, `test/python` (host-side; test scripts/installer, not modules), `src/platform/{desktop,esp32}` (platform split, already consistent), `src/{core,light}/moonlive` (feature sub-tree).
+**Not reshaped** (correctly orthogonal): `test/js`, `test/python` (host-side; test moondeck/installer, not modules), `src/platform/{desktop,esp32}` (platform split, already consistent), `src/{core,light}/moonlive` (feature sub-tree).
 
 ## Sequencing
 

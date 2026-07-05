@@ -9,7 +9,7 @@ aborts with "The following Python requirements are not satisfied"). This pins th
 selection follows the *target* IDF version, so it's a function of what we build, not of
 what was last sourced.
 
-Imports the real function from scripts/build/build_esp32.py (no ESP-IDF needed).
+Imports the real function from moondeck/build/build_esp32.py (no ESP-IDF needed).
 Run: `uv run --with pytest pytest test/python -q`.
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts" / "build"))
+sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 
 import build_esp32  # noqa: E402
 

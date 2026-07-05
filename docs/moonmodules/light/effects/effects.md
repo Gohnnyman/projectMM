@@ -4,6 +4,8 @@ Every effect, one block each: its preview, what it does, and what each control m
 
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
+**Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, colour mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
+
 > Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../../assets/…` gif show our own output.
 
 ## MoonLight effects
@@ -213,6 +215,7 @@ A 3D Rubik's Cube projected onto the volume: it scrambles, then plays its soluti
 - `turnsPerSecond` — how fast the cube turns.
 - `cubeSize` — the cube order (2×2 up to 8×8).
 - `randomTurning` — turn endlessly at random instead of scramble-then-solve.
+- `usePalette` — colour the six faces from the system-wide palette instead of the classic Rubik's colours.
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h) · source [RubiksCubeEffect.h](../../../../src/light/effects/RubiksCubeEffect.h)
 

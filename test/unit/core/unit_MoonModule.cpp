@@ -24,6 +24,13 @@ public:
     }
 };
 
+// A module that hides from the UI (the FilesystemModule / HttpServerModule pattern): the state
+// serializer skips any module whose appearsInUi() is false.
+class HiddenModule : public mm::MoonModule {
+public:
+    bool appearsInUi() const override { return false; }
+};
+
 } // namespace
 
 // setup() and teardown() each fire exactly when called and update their respective state flags.
@@ -194,4 +201,44 @@ TEST_CASE("Bool control binding") {
 
     mod.enabled = false;
     CHECK(*static_cast<bool*>(ctrl.ptr) == false);
+}
+
+// appearsInUi() defaults to true (every ordinary module shows in the UI) and is overridable to
+// false so infrastructure modules (FilesystemModule, HttpServerModule) can hide — the flag the
+// state serializer reads to skip a module. A base MoonModule and a control-bearing one both
+// appear; only a module that overrides to false hides.
+TEST_CASE("MoonModule appearsInUi defaults true, overridable false") {
+    TestModule visible;
+    CHECK(visible.appearsInUi());       // ordinary module: shown
+
+    HiddenModule hidden;
+    CHECK_FALSE(hidden.appearsInUi());  // infrastructure module: skipped by the serializer
+
+    // Through the base-class pointer the virtual still dispatches to the override — the path the
+    // serializer actually takes (it holds MoonModule*).
+    mm::MoonModule* asBase = &hidden;
+    CHECK_FALSE(asBase->appearsInUi());
+}
+
+// readBool/readUint8 — the shared generic control reader (reviewer #8): one implementation so the
+// absent-control default can't disagree between callers (HttpServerModule + MqttModule both read
+// Drivers.on through this). Returns the bound value; returns the caller's default when absent/wrong-type.
+TEST_CASE("MoonModule readBool/readUint8 return the value, or the default when absent") {
+    TestModule mod;
+    mod.onBuildControls();   // binds brightness(Uint8), speed(Uint8), enabled(Bool)
+
+    // Present controls read their live value.
+    CHECK(mod.readUint8("brightness", 99) == 128);   // TestModule brightness default
+    CHECK(mod.readBool("enabled", false) == true);
+
+    // The live field updates flow through (the reader dereferences the bound pointer).
+    mod.brightness = 42;
+    CHECK(mod.readUint8("brightness", 99) == 42);
+    mod.enabled = false;
+    CHECK(mod.readBool("enabled", true) == false);
+
+    // Absent control → the caller's default, not a hard-coded one (the bug this shared reader fixes).
+    CHECK(mod.readBool("on", true) == true);         // no "on" control → default true
+    CHECK(mod.readBool("on", false) == false);       // ...and the OTHER default, from the same call
+    CHECK(mod.readUint8("missing", 7) == 7);
 }

@@ -30,9 +30,9 @@ Reuse the existing `-D` override pattern (`MM_FIRMWARE_NAME`/`MM_RELEASE` alread
 Extend `checkFirmwareUpdate`: if the device version is a prerelease (`parse(...).prerelease.length > 0`) and no stable update is shown, fetch the `latest` release (cache key `projectMM.update.dev.v1`), read its version from `manifest-<firmware>.json` (`.version`), `isNewer(latestDev, deviceVersion)` → badge → click opens Firmware with `latest` pre-selected. Stable update takes precedence. Best-effort, cached, compatible-`.bin` check applies.
 
 ## Files
-- `scripts/build/compute_version.py` (NEW) + `test/python/test_compute_version.py` (NEW)
-- `scripts/build/generate_build_info.py` — `MM_VERSION` overridable `#ifndef`
-- `scripts/build/build_esp32.py` — `--version` → `-DMM_VERSION`
+- `moondeck/build/compute_version.py` (NEW) + `test/python/test_compute_version.py` (NEW)
+- `moondeck/build/generate_build_info.py` — `MM_VERSION` overridable `#ifndef`
+- `moondeck/build/build_esp32.py` — `--version` → `-DMM_VERSION`
 - `.github/workflows/release.yml` — compute V, fetch-depth 0, thread through
 - `src/ui/app.js` — dev-channel branch
 - `src/ui/semver.js` tests — `2.1.0-dev.7 > 2.1.0-dev.6`, `2.1.0-dev.1 > 2.1.0-dev`

@@ -26,6 +26,44 @@ public:
 
 } // namespace
 
+// A driver that captures the Correction* it's handed, so a test can read the resulting LUT.
+class CorrectionCapturingDriver : public mm::DriverBase {
+public:
+    void setSourceBuffer(mm::Buffer*) override {}
+    void loop() override {}
+    void setCorrection(const mm::Correction* c) override { correction = c; }
+    const mm::Correction* correction = nullptr;
+};
+
+// The `on` control is master power: on=false scales the correction LUT to zero (output black) while
+// PRESERVING the brightness value, so on=true restores the exact level. It rides the same cheap LUT
+// rebuild as brightness (no pipeline realloc). This pins the shared power control IR/MQTT/WLED drive.
+TEST_CASE("Drivers::on gates the correction LUT without clobbering brightness") {
+    mm::Drivers drivers;
+    CorrectionCapturingDriver drv;
+    drivers.addChild(&drv);
+    drivers.setup();                       // seeds correction_ from on(true)+brightness, hands it to drv
+    REQUIRE(drv.correction != nullptr);
+
+    drivers.brightness = 200;
+    drivers.on = true;
+    drivers.onUpdate("brightness");        // rebuild LUT at full power
+    CHECK(drivers.effectiveBrightness() == 200);
+    CHECK(drv.correction->briLut[255] == 200);   // (255 * 200) / 255 == 200
+
+    // Turn off → LUT scales to black, but the brightness value is untouched.
+    drivers.on = false;
+    drivers.onUpdate("on");
+    CHECK(drivers.brightness == 200);            // value preserved
+    CHECK(drivers.effectiveBrightness() == 0);
+    CHECK(drv.correction->briLut[255] == 0);     // output black
+
+    // Turn back on → the exact level returns, no stored-value juggling.
+    drivers.on = true;
+    drivers.onUpdate("on");
+    CHECK(drv.correction->briLut[255] == 200);
+}
+
 // Disabled child drivers don't tick: toggling `enabled` flips whether that driver's loop() runs.
 TEST_CASE("Drivers::loop() skips disabled child drivers") {
     mm::Drivers drivers;

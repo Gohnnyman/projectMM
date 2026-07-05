@@ -49,6 +49,7 @@
     "firmwares": [
       "esp32"
     ],
+    "flashBaud": 460800,
     "image": "assets/boards/lolin-d32.jpg",
     "url": "https://www.wemos.cc/en/latest/d32/d32.html",
     "supported": [
@@ -284,7 +285,8 @@
           "ethClockGpio": 17,
           "ethClockExtIn": false,
           "ethMdcGpio": 23,
-          "ethMdioGpio": 18
+          "ethMdioGpio": 18,
+          "ethRstGpio": -1
         }
       }
     ]
@@ -701,6 +703,19 @@
         "type": "NetworkReceiveEffect",
         "id": "NetworkReceive",
         "parent_id": "Layer"
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "ethType": 2,
+          "ethPhyAddr": 1,
+          "ethMdcGpio": 31,
+          "ethMdioGpio": 52,
+          "ethRstGpio": 51,
+          "ethClockGpio": 50,
+          "ethClockExtIn": true
+        }
       }
     ]
   },
@@ -942,7 +957,7 @@
     ]
   },
   {
-    "name": "Espressif ESP32-S31 Function-CoreBoard-1",
+    "name": "Espressif ESP32-S31 CoreBoard",
     "chip": "ESP32-S31",
     "firmwares": [
       "esp32s31"
@@ -968,7 +983,7 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "Espressif ESP32-S31 Function-CoreBoard-1"
+          "deviceModel": "Espressif ESP32-S31 CoreBoard"
         }
       },
       {
@@ -982,7 +997,13 @@
       {
         "type": "NetworkModule",
         "id": "Network",
-        "controls": {}
+        "controls": {
+          "ethType": 4,
+          "ethPhyAddr": -1,
+          "ethMdcGpio": 5,
+          "ethMdioGpio": 6,
+          "ethRstGpio": 7
+        }
       },
       {
         "type": "AudioModule",
@@ -1002,6 +1023,81 @@
           "sda": 51,
           "scl": 50
         }
+      }
+    ]
+  },
+  {
+    "name": "Shelly",
+    "chip": "ESP32",
+    "firmwares": [
+      "esp32"
+    ],
+    "flashBaud": 460800,
+    "image": "assets/boards/shelly.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "MQTT",
+      "Hue"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "Shelly",
+          "deviceName": "Shelly"
+        }
+      },
+      {
+        "type": "GridLayout",
+        "id": "Grid",
+        "parent_id": "Layouts",
+        "controls": {
+          "width": 1,
+          "height": 24
+        }
+      },
+      {
+        "type": "Layer",
+        "id": "Layer",
+        "parent_id": "Layers"
+      },
+      {
+        "type": "SolidEffect",
+        "id": "Solid",
+        "parent_id": "Layer"
+      },
+      {
+        "type": "Drivers",
+        "id": "Drivers",
+        "controls": {
+          "lightPreset": 0
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "2"
+        }
+      },
+      {
+        "type": "HueDriver",
+        "id": "Hue",
+        "parent_id": "Drivers"
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
+      },
+      {
+        "type": "MqttModule",
+        "id": "Mqtt"
       }
     ]
   }

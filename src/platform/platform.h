@@ -66,6 +66,10 @@ size_t totalInternalHeap(); // total internal heap capacity
 constexpr size_t HEAP_RESERVE = 32768;
 
 void getMacAddress(uint8_t mac[6]);
+// The MAC as canonical "XX:XX:XX:XX:XX:XX", formatted once into a static buffer — a stable per-chip
+// identity string a caller can point at without keeping its own copy. (chipModel/sdkVersion likewise
+// return static strings; a ReadOnly control binds straight to these, storing nothing per-module.)
+const char* macString();
 const char* chipModel();
 const char* sdkVersion();
 
@@ -108,9 +112,23 @@ bool fsMkdir(const char* path);                              // mkdir -p; no err
 bool fsExists(const char* path);
 bool fsRemove(const char* path);                             // file or empty dir
 int  fsRead(const char* path, char* buf, size_t maxLen);     // bytes read; -1 on error; null-terminated on success
+long fsSize(const char* path);                               // file size in bytes; -1 if missing/not a file
+int  fsReadAt(const char* path, long offset, char* buf, size_t len);
+                                                             // pread-style: read up to `len` bytes at `offset`; bytes read, 0 at EOF, -1 on error. NOT null-terminated. Lets a caller stream a file in fixed chunks.
 bool fsWriteAtomic(const char* path, const char* data, size_t len);
                                                               // writes <path>.tmp, fsync, rename. Caller ensures parent dir exists.
-using FsListCb = void(*)(const char* name, bool isDir, void* user);
+// Streamed atomic write: open <path>.tmp, repeatedly call src(buf, cap, user, &abort) to pull up to
+// `cap` bytes, fwrite each chunk, then fsync + rename into place. The source returns the byte count;
+// 0 means *end*, BUT it distinguishes a clean end from a failed/incomplete one via `*abort`: a 0
+// with `*abort == false` is a clean EOF (commit), a 0 (or any return) with `*abort == true` is an
+// error (a short/timed-out upload) → the temp file is DISCARDED, not renamed. Returns false on abort,
+// a write failure, or a rename failure. Lets the HTTP layer stream an upload of any size with a fixed
+// small buffer — the device never holds the whole file in RAM. Caller ensures the parent dir exists.
+using FsWriteSrc = size_t(*)(char* buf, size_t cap, void* user, bool* abort);
+bool fsWriteStream(const char* path, FsWriteSrc src, void* user);
+// Per-entry callback for fsList: name, whether it's a directory, and its size in bytes
+// (0 for a directory). One level, one call per child.
+using FsListCb = void(*)(const char* name, bool isDir, uint32_t sizeBytes, void* user);
 void fsList(const char* dir, FsListCb cb, void* user);       // single-level listing
 
 // Network (ESP32 only, stubs on desktop)
@@ -208,6 +226,22 @@ void setHostname(const char* name);
 bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
                        uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
+
+// OTA — flash a firmware image STREAMED from `src` (no URL fetch; the caller pulls the bytes,
+// e.g. straight off an HTTP upload body). Same producer callback shape as fsWriteStream: `src`
+// fills up to `cap` bytes, returns the count (0 = clean EOF), and sets `*abort` to fail the OTA
+// (an incomplete/timed-out upload). Runs esp_ota_begin → esp_ota_write per chunk → esp_ota_end +
+// set_boot_partition, then RETURNS true (it does NOT reboot — the caller sends its HTTP 200 first,
+// then reboots into the flashed image, the same order /api/reboot uses). SYNCHRONOUS (unlike
+// http_fetch_to_ota, which runs on its own task): the caller is the HTTP request handler, which runs
+// on the loop20ms tick INSIDE Scheduler::tick — so this blocks rendering for the flash duration. That
+// is the accepted trade-off (a firmware upload is user-initiated and reboots the device on success),
+// bounded by the same upload idle/hard limits; the caller needs the result to reply.
+// `statusBuf` / `bytesReadOut` are updated in place (bytesTotal is the caller-supplied
+// Content-Length, so no separate out-param). Desktop: returns false (no OTA partition); guard with
+// `if constexpr (mm::platform::hasOta)`. Returns true iff the image flashed + boot pointer flipped.
+bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
+                    char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut);
 
 // Synchronous outbound HTTP request to a LAN host — plain HTTP, no TLS (the Philips Hue v1
 // API, which HueDriver drives, allows it). Connects to `host:port`, sends `method path`
@@ -316,6 +350,17 @@ public:
         if (this != &other) { close(); fd_ = other.fd_; other.fd_ = -1; }
         return *this;
     }
+
+    // Non-blocking outbound connect to host:port, for a client that must NOT stall the render loop
+    // (MQTT runs on loop1s inside Scheduler::tick). `connectStart` resolves `host` (a hostname via
+    // getaddrinfo — one bounded DNS lookup — or a dotted-quad IP) and kicks off a non-blocking
+    // connect, returning immediately; `connectPoll` checks the in-flight connect WITHOUT blocking and
+    // returns Pending / Connected / Failed. The caller polls across ticks and enforces its own overall
+    // timeout, then reads/writes via the non-blocking read()/writeSome(). Caller gates on
+    // networkReady(). Desktop + ESP32 (lwip); a fresh TcpConnection (no fd yet) is the receiver.
+    enum class ConnectResult : uint8_t { Pending, Connected, Failed };
+    bool connectStart(const char* host, uint16_t port);   // false = immediate failure (DNS/socket)
+    ConnectResult connectPoll();                           // non-blocking; call after connectStart
 
     bool valid() const { return fd_ >= 0; }
     int read(uint8_t* buf, size_t maxLen);   // non-blocking: >0 data, 0 closed, -1 nothing

@@ -67,6 +67,7 @@
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
+#include "lwip/netdb.h"   // getaddrinfo — hostname resolution for TcpConnection::connect
 
 #include <atomic>
 #include <cstdarg>
@@ -222,6 +223,19 @@ size_t totalInternalHeap() {
 
 void getMacAddress(uint8_t mac[6]) {
     esp_efuse_mac_get_default(mac);
+}
+
+const char* macString() {
+    // The base MAC is fixed for the chip's life, so format it once into a static buffer the caller
+    // can point at (no per-module copy). Not called before the first use, single-threaded init.
+    static char buf[18] = {};
+    if (buf[0] == 0) {
+        uint8_t mac[6];
+        esp_efuse_mac_get_default(mac);
+        std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    return buf;
 }
 
 const char* chipModel() {
@@ -1380,6 +1394,45 @@ int TcpConnection::writeSome(const uint8_t* data, size_t len) {
     return -1;                                              // real socket error
 }
 
+
+bool TcpConnection::connectStart(const char* host, uint16_t port) {
+    if (!host || !host[0]) return false;
+    close();
+
+    // One bounded DNS lookup up front (lwip_getaddrinfo is synchronous — the one unavoidable block);
+    // the CONNECT itself then proceeds non-blocking and is polled across ticks.
+    char portStr[6];
+    std::snprintf(portStr, sizeof(portStr), "%u", static_cast<unsigned>(port));
+    struct addrinfo hints = {};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo* res = nullptr;
+    if (lwip_getaddrinfo(host, portStr, &hints, &res) != 0 || !res) return false;
+    struct AiGuard { struct addrinfo* p; ~AiGuard() { if (p) lwip_freeaddrinfo(p); } } aiGuard{res};
+
+    int fd = lwip_socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd < 0) return false;
+    const int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    int cr = lwip_connect(fd, res->ai_addr, res->ai_addrlen);
+    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
+    if (cr != 0 && !inProgress) { lwip_close(fd); return false; }   // immediate hard failure
+    fd_ = fd;   // in flight — connectPoll() resolves which
+    return true;
+}
+
+TcpConnection::ConnectResult TcpConnection::connectPoll() {
+    if (fd_ < 0) return ConnectResult::Failed;
+    fd_set wf; FD_ZERO(&wf); FD_SET(fd_, &wf);
+    struct timeval zero = {};   // 0s / 0us — never blocks
+    const int r = lwip_select(fd_ + 1, nullptr, &wf, nullptr, &zero);
+    if (r == 0) return ConnectResult::Pending;
+    if (r < 0)  { close(); return ConnectResult::Failed; }
+    int soerr = 0; socklen_t len = sizeof(soerr);
+    lwip_getsockopt(fd_, SOL_SOCKET, SO_ERROR, &soerr, &len);
+    if (soerr != 0) { close(); return ConnectResult::Failed; }
+    return ConnectResult::Connected;
+}
 
 void TcpConnection::close() {
     if (fd_ >= 0) {

@@ -24,7 +24,7 @@ This is the pragmatic Phase 3: it solves the actual "change one thing, the other
 
 ## Deliverables
 
-Extend `scripts/check/check_specs.py` (the existing spec-drift gate — already parses `.h` control names and `.md` prose) with two new drift checks:
+Extend `moondeck/check/check_specs.py` (the existing spec-drift gate — already parses `.h` control names and `.md` prose) with two new drift checks:
 
 ### 3a — control-range drift
 - Parse each control's numeric bounds from the `.h` (`addUint8("floor", floor, 0, 255)` → `floor: 0–255`; also `addInt`, `addUint16`, etc.).
@@ -53,5 +53,5 @@ Extend `scripts/check/check_specs.py` (the existing spec-drift gate — already 
 - No change to rendered docs (checks only); catalog tables/build unaffected.
 
 ## Files
-- **Edit:** `scripts/check/check_specs.py` (two drift checks), `docs/testing.md` (document them), any `.md` where the checks surface real drift (fix the prose).
+- **Edit:** `moondeck/check/check_specs.py` (two drift checks), `docs/testing.md` (document them), any `.md` where the checks surface real drift (fix the prose).
 - **Maybe new:** `test/python/test_check_specs_drift.py` (unit-test the new checks).

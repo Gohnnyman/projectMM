@@ -710,17 +710,17 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     resize: vertical;          /* draggable grip, vertical only */
     min-height: 1.5em;
-    height: 1.9em;             /* default ~one row; resize/typing grows it */
+    height: 3.4em;             /* default ~two rows; resize/typing grows it */
     line-height: 1.4;
     width: 100%;
     white-space: pre;          /* don't wrap long script lines */
     overflow: auto;
-    /* A small solid corner triangle (no transparency) — a compact, prominent
-       resize affordance. */
+    /* A solid corner triangle (no transparency) — a prominent, easy-to-grab resize
+       affordance (bigger than the browser's faint native handle). */
     background-image: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
     background-repeat: no-repeat;
     background-position: bottom 1px right 1px;
-    background-size: 7px 7px;
+    background-size: 12px 12px;
 }
 .control-row input[type="checkbox"] {
     accent-color: var(--accent);
@@ -1028,3 +1028,130 @@ body {
         display: block;
     }
 }
+
+/* ---------------------------------------------------------------------------
+   File Manager — breadcrumb + entry list + inline editor (FileManagerModule).
+   Theme-aware via the shared --vars; no hardcoded colours.
+   --------------------------------------------------------------------------- */
+.fm-panel { margin-top: 8px; }
+
+/* Show-hidden toggle — the text label + the shared .switch pill, above the toolbar. */
+.fm-hidden-toggle {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    font-size: 0.85rem; color: var(--fg-muted); cursor: pointer; user-select: none;
+}
+
+/* Breadcrumb `root / .config / foo` on its own row — each segment a button; wraps freely on narrow
+   displays without pushing the toolbar buttons around. */
+.fm-crumbs {
+    display: flex; flex-wrap: wrap; align-items: center;
+    font-family: ui-monospace, monospace; font-size: 0.85rem; color: var(--fg-muted);
+    margin-bottom: 8px;
+}
+/* Toolbar row: the folder/file/delete/refresh buttons; wraps if the card is very narrow. */
+.fm-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+/* Install-from-file row under the Firmware card: the .bin picker button + its live status. */
+.fw-upload-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px;
+}
+.fw-upload-status { color: var(--muted); font-size: 0.85em; }
+.fm-crumb {
+    background: none; border: none; color: var(--accent); cursor: pointer;
+    padding: 2px 4px; border-radius: 4px; font: inherit;
+}
+.fm-crumb:hover { background: var(--card-bg-2); }
+.fm-crumb--here { color: var(--fg); font-weight: 600; cursor: default; }
+.fm-crumb--here:hover { background: none; }
+.fm-tool {
+    flex: 0 0 auto; background: var(--card-bg-2); border: 1px solid var(--border);
+    color: var(--fg); cursor: pointer; padding: 4px 10px; border-radius: 6px;
+    font: inherit; font-size: 0.85rem;
+}
+.fm-tool:hover { background: var(--card-bg-1); }
+.fm-tool:disabled { opacity: 0.4; cursor: default; }
+.fm-tool--danger.armed { background: var(--red); border-color: var(--red); color: #fff; }
+/* Icon-only toolbar buttons: square, centered glyph, a touch larger than the text size so the
+   icons read cleanly. The `title` still carries the label (tooltip + a11y). */
+.fm-tool--icon {
+    width: 34px; height: 34px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.05rem; line-height: 1;
+}
+
+/* Tree: an indented list of rows; each folder's children nest in a .fm-subtree. */
+.fm-tree {
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    background: var(--card-bg-0); padding: 4px 0;
+}
+.fm-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; cursor: pointer; user-select: none;
+}
+.fm-row:hover { background: var(--card-bg-1); }
+.fm-row--sel { background: var(--card-bg-2); }
+.fm-row--sel:hover { background: var(--card-bg-2); }
+.fm-chev {
+    flex: 0 0 auto; width: 14px; text-align: center;
+    color: var(--fg-muted); font-size: 0.8rem;
+}
+.fm-icon { flex: 0 0 auto; font-size: 1rem; }
+.fm-name {
+    flex: 1 1 auto; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+.fm-row--sel .fm-name { font-weight: 500; }
+.fm-size {
+    flex: 0 0 auto; color: var(--fg-muted); font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+/* Per-file download link (⤓) — dim until row hover, like a secondary affordance. */
+.fm-dl {
+    flex: 0 0 auto; color: var(--fg-muted); text-decoration: none;
+    font-size: 0.95rem; padding: 0 4px; opacity: 0.5;
+}
+.fm-row:hover .fm-dl { opacity: 1; }
+.fm-dl:hover { color: var(--accent); }
+/* Drag-drop upload target highlight (a folder row or the tree while a desktop file hovers). */
+.fm-row--drop, .fm-tree.fm-row--drop {
+    outline: 2px dashed var(--accent); outline-offset: -2px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.fm-empty { padding: 6px 8px; color: var(--fg-muted); font-size: 0.85rem; font-style: italic; }
+
+/* Filesystem usage bar below the tree (used / total space). Owned by FilesystemModule, shown here. */
+.fm-usage {
+    display: flex; align-items: center; gap: 8px; margin-top: 8px;
+    font-size: 0.8rem; color: var(--fg-muted);
+}
+.fm-usage-name { flex: 0 0 auto; }
+.fm-usage progress { flex: 1 1 auto; height: 8px; }
+.fm-usage-label { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+/* Inline editor — native <dialog>, sized to a comfortable text pane. */
+.fm-editor {
+    width: min(720px, 92vw); max-height: 82vh; padding: 0;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--card-bg-0); color: var(--fg);
+    display: flex; flex-direction: column;
+}
+.fm-editor::backdrop { background: rgba(0,0,0,0.5); }
+.fm-editor-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.fm-editor-path { font-family: ui-monospace, monospace; font-size: 0.9rem; color: var(--fg-muted); }
+.fm-editor-x { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 1rem; }
+.fm-editor-x:hover { color: var(--fg); }
+.fm-editor-body {
+    flex: 1 1 auto; min-height: 240px; margin: 0; padding: 12px 14px;
+    border: none; resize: vertical; font-family: ui-monospace, monospace;
+    font-size: 0.85rem; line-height: 1.5; background: var(--bg-1); color: var(--fg);
+}
+.fm-editor-body:focus { outline: none; }
+.fm-editor-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-top: 1px solid var(--border);
+}
+.fm-editor-status { color: var(--fg-muted); font-size: 0.85rem; }

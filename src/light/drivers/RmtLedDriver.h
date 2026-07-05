@@ -326,13 +326,16 @@ private:
     bool parseConfig() {
         pinCount_ = 0;
         uint8_t n = 0;
+        const char* warn = nullptr;
         const char* err = parsePinList(pins, pinList_, maxPinsForTarget(), n);
         if (!err) {
             // Distribute over the driver's window slice, not the whole buffer, so
             // ledsPerPin's "rest" only fills this driver's [start, start+count).
+            // assignCounts clamps each pin to kMaxWs2812LedsPerPin (the driver drives
+            // that many rather than choking a whole grid onto one WS2812 line).
             const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
             windowSlice(bufN, winStart_, winLen_);
-            err = assignCounts(ledsPerPin, n, winLen_, pinCounts_);
+            err = assignCounts(ledsPerPin, n, winLen_, pinCounts_, kMaxWs2812LedsPerPin, &warn);
         }
         if (err) {
             setConfigErr(err);
@@ -348,6 +351,11 @@ private:
             txLightCount_ = static_cast<nrOfLightsType>(txLightCount_ + pinCounts_[i]);
         }
         clearConfigErr();
+        // assignCounts sets `warn` when it clamped a pin to the WS2812 ceiling — the output
+        // still runs (the first 2048/pin), so it's a Warning, not an idling error. Passing it
+        // (or null when nothing clamped) to setConfigWarn tracks the live state and retracts a
+        // stale warning once the user drops back under the ceiling.
+        setConfigWarn(warn);
         return true;
     }
 

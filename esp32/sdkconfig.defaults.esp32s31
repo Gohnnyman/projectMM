@@ -2,7 +2,7 @@
 #   Board: the Espressif ESP32-S31 Function-CoreBoard (RISC-V dual-core, Wi-Fi 6,
 #   BT 5.4, on-chip 1 Gbps EMAC, 16 MB flash, PSRAM).
 #
-# Layered onto sdkconfig.defaults by scripts/build/build_esp32.py.
+# Layered onto sdkconfig.defaults by moondeck/build/build_esp32.py.
 #
 # The RMII / PHY *pins* are NOT set here — they live in C (the per-target ethPins
 # struct in src/platform/esp32/platform_config.h, read by ethInit), so the pin map

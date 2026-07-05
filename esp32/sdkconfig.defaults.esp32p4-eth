@@ -3,7 +3,7 @@
 #   Schematic / pin map confirmed against the Waveshare wiki + the ESPHome
 #   device page (devices.esphome.io/devices/waveshare-esp32-p4-nano).
 #
-# Layered onto sdkconfig.defaults by scripts/build/build_esp32.py.
+# Layered onto sdkconfig.defaults by moondeck/build/build_esp32.py.
 #
 # The RMII / PHY *pins* are NOT set here — they live in C (the per-target
 # ethPins struct in src/platform/esp32/platform_config.h, read by ethInit),

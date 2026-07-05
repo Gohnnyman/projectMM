@@ -19,7 +19,7 @@ On top of that clean version, add a status-bar **"firmware update available" bad
 
 ### 1. Semver-clean version (build pipeline + firmware)
 - `library.json`: version `2.0.0` → `2.1.0-dev`. `build_info.h` is gitignored + generated from this, so `MM_VERSION` follows.
-- `scripts/build/verify_version.py`: a stable `vX.Y.Z` tag matches `library.json` **with any prerelease suffix stripped** (so `v2.1.0` ↔ `2.1.0-dev` passes — the release of what was in dev; a wrong *core* like `v2.2.0` ↔ `2.1.0-dev` still fails). Keep the `latest`-skips behaviour. Doc the ritual.
+- `moondeck/ci/verify_version.py`: a stable `vX.Y.Z` tag matches `library.json` **with any prerelease suffix stripped** (so `v2.1.0` ↔ `2.1.0-dev` passes — the release of what was in dev; a wrong *core* like `v2.2.0` ↔ `2.1.0-dev` still fails). Keep the `latest`-skips behaviour. Doc the ritual.
 - `src/core/FirmwareUpdateModule.h` (`setup()`): `version` control = **just `kVersion`** (pure semver). Drop the `(kRelease)` concatenation. Update inline comment + spec doc.
 - `docs/moonmodules/core/FirmwareUpdateModule.md`: `version` description → "pure semver; a `-dev`/prerelease suffix marks a moving/pre-release build."
 
@@ -38,12 +38,13 @@ On top of that clean version, add a status-bar **"firmware update available" bad
   - Graceful: any failure → badge hidden, `console.warn` only.
 
 ## Files
-- `library.json` · `scripts/build/verify_version.py` · `src/core/FirmwareUpdateModule.h` · `docs/moonmodules/core/FirmwareUpdateModule.md`
+- `library.json` · `moondeck/ci/verify_version.py` · `src/core/FirmwareUpdateModule.h` · `docs/moonmodules/core/FirmwareUpdateModule.md`
 - `src/ui/semver.js` (NEW) · `src/ui/index.html` · `src/ui/style.css` · `src/ui/app.js`
 - `test/js/semver.test.mjs` (NEW)
 
 ## Verification
-- Host: `node --test "test/js/**/*.test.mjs"`; `node --check` the JS + extract-check index.html; `cmake --build build` + `ctest`; `uv run scripts/scenario/run_scenario.py`; `uv run scripts/check/check_specs.py`; a `test/python` verify_version case (`v2.1.0` ↔ `2.1.0-dev` OK; `v2.2.0` ↔ `2.1.0-dev` fails).
+
+- Host: `node --test "test/js/**/*.test.mjs"`; `node --check` the JS + extract-check index.html; `cmake --build build` + `ctest`; `uv run moondeck/scenario/run_scenario.py`; `uv run moondeck/check/check_specs.py`; a `test/python` verify_version case (`v2.1.0` ↔ `2.1.0-dev` OK; `v2.2.0` ↔ `2.1.0-dev` fails).
 - Bench/preview: Firmware card shows clean semver; badge appears on an older device, opens Firmware pre-selected; no badge on newest stable; no error offline.
 
 ## Existing releases — already semver-compatible (no migration)

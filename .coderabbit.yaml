@@ -68,7 +68,7 @@ reviews:
         Root CMake build. Must use C++20, -Wall -Wextra -Werror. Core library is
         INTERFACE (header-only). Only platform .cpp files need compilation.
 
-    - path: "scripts/**"
+    - path: "moondeck/**"
       instructions: |
         MoonDeck dev console and build/test/run scripts. Scripts must resolve
-        ROOT path correctly relative to their location in scripts/subdir/.
+        ROOT path correctly relative to their location in moondeck/subdir/.

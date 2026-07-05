@@ -49,7 +49,7 @@ Three confirmed seams make this a wiring job, not new infrastructure:
 
 ## Verification
 
-- **Host:** `cmake --build build` (0 warnings), `ctest` (incl. the new apply-core test), `uv run scripts/scenario/run_scenario.py`, `check_specs.py`, `check_platform_boundary.py`, `check_devices.py`.
+- **Host:** `cmake --build build` (0 warnings), `ctest` (incl. the new apply-core test), `uv run moondeck/scenario/run_scenario.py`, `check_specs.py`, `check_platform_boundary.py`, `check_devices.py`.
 - **ESP32 build** (`build_esp32.py --firmware esp32s3-n16r8` + `esp32` classic) — compiles the new vendor RPC under `-Werror`.
 - **Serial APPLY_OP probe** — send a hand-built `APPLY_OP` frame to a connected S3, confirm the op applies (e.g. set Grid width 8) + the device acks. Pins the wire contract without the browser.
 - **Real install (the actual fix):** from the local preview, flash the S3 with erase + apply-defaults; confirm it comes up as 8×8 + AudioSpectrum + RandomMap with the serial monitor showing the ops applied, **no handoff link involved**. Repeat on the P4. Confirm no duplicate AudioModule. Serial push is now the *only* install-time path, so preview and deployed behave identically — the HTTPS-vs-HTTP difference that caused the original bug no longer exists.

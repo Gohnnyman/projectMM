@@ -21,6 +21,8 @@
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>   // strtol — bounded Content-Length parse
+#include <cerrno>    // errno / ERANGE — Content-Length overflow check
 #include <cstring>
 #include <cstdint>
 
@@ -101,14 +103,52 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     // the permissive JSON helpers (a silent partial control write). If the full declared
     // body still hasn't arrived within the budget, reject with 400 rather than process it.
     auto* headerEnd = std::strstr(req, "\r\n\r\n");
+    int contentLen = 0;   // declared body length (0 if no Content-Length); used by the streaming route
     if (headerEnd) {
         auto* clh = std::strstr(req, "Content-Length:");
         if (clh) {
-            int contentLen = std::atoi(clh + 15);
+            // Bounded parse (not atoi): a malformed/negative/overflowing Content-Length must not
+            // flow downstream, where it's cast to size_t — a negative int would become a huge
+            // length that UploadSource/handleFirmwareUpload would treat as "gigabytes still to
+            // come". We reject anything that isn't a clean unsigned integer: strtol with an end
+            // pointer catches non-numeric, trailing junk ("123abc"), and ERANGE overflow; then we
+            // reject negative and clamp to a firmware-sized ceiling (8 MB > any image we flash),
+            // returning 400 rather than acting on it. The value ends at CR/LF/space or the string end.
+            constexpr long kContentLenMax = 8L * 1024 * 1024;
+            const char* valStart = clh + 15;
+            while (*valStart == ' ' || *valStart == '\t') valStart++;   // skip OWS after the colon
+            char* valEnd = nullptr;
+            errno = 0;
+            const long parsed = std::strtol(valStart, &valEnd, 10);
+            const bool consumedDigits = valEnd != valStart;
+            const bool endsCleanly = *valEnd == '\r' || *valEnd == '\n' || *valEnd == ' ' ||
+                                     *valEnd == '\t' || *valEnd == '\0';
+            if (!consumedDigits || !endsCleanly || errno == ERANGE ||
+                parsed < 0 || parsed > kContentLenMax) {
+                sendResponse(conn, 400, "application/json",
+                             "{\"error\":\"invalid content-length\"}");
+                return;
+            }
+            contentLen = static_cast<int>(parsed);
             int headerSize = static_cast<int>(headerEnd + 4 - req);
             int bodyNeeded = headerSize + contentLen;
-            if (bodyNeeded > static_cast<int>(sizeof(buf) - 1))
-                bodyNeeded = static_cast<int>(sizeof(buf) - 1);   // cap to buffer
+            // Only the STREAMING routes (/api/file, /api/firmware/upload) may carry a body larger than
+            // buf — they take the buffered prefix and pull the remainder straight off the socket. For
+            // every OTHER route the body is parsed whole from buf, so a body over the buffer must be
+            // REJECTED (413), not truncated: a capped read would parse a JSON prefix as if complete
+            // (its own bodyNeeded check wouldn't fire, since the cap makes the short read "enough").
+            // The request line sits at the start of req; a substring match on the path is sufficient.
+            const bool isStreamingRoute =
+                std::strncmp(req, "POST /api/file", 14) == 0 ||
+                std::strncmp(req, "POST /api/firmware/upload", 25) == 0;
+            if (bodyNeeded > static_cast<int>(sizeof(buf) - 1)) {
+                if (!isStreamingRoute) {
+                    sendResponse(conn, 413, "application/json",
+                                 "{\"error\":\"request body too large\"}");
+                    return;
+                }
+                bodyNeeded = static_cast<int>(sizeof(buf) - 1);   // streaming: buffer the prefix only
+            }
             for (int empties = 0; totalRead < bodyNeeded;) {
                 int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
                 if (n > 0) { totalRead += n; empties = 0; }
@@ -133,7 +173,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     // and is not part of the path. Browsers send `/?foo=bar` for query-on-
     // root; without this split the GET / route falls through to 404. The web
     // installer's Inject button hits us as `/?deviceModel=<name>` to hand off the
-    // deviceModels.json entry — see docs/moonmodules/core/SystemModule.md.
+    // deviceModels.json entry — see docs/moonmodules/core/moxygen/SystemModule.md.
     char* queryStart = std::strchr(path, '?');
     if (queryStart) *queryStart = 0;
 
@@ -161,6 +201,11 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
         else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
         else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
+        // File Manager: GET /api/dir?path=<rel>[&hidden=1] → one directory's children as JSON
+        // [{name,isDir,size}] (the lazy tree loads a node's children on expand).
+        else if (std::strcmp(path, "/api/dir") == 0) serveDirListing(conn, queryStart ? queryStart + 1 : "");
+        // File Manager: GET /api/file?path=<rel> → the file's contents (text, size-capped).
+        else if (std::strcmp(path, "/api/file") == 0) serveFileContents(conn, queryStart ? queryStart + 1 : "");
         // WLED-compatibility shim: the native WLED apps (and Home Assistant's WLED
         // integration) discover a device via mDNS `_wled._tcp` then VALIDATE it by
         // GETting /json/info and checking it's WLED-shaped. Serving a minimal
@@ -189,6 +234,19 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             std::strcmp(path + pathLen - 8, "/replace") == 0;
         if (std::strcmp(path, "/api/control") == 0 && body) {
             handleSetControl(conn, body);
+        } else if (std::strcmp(path, "/api/file") == 0 && body) {
+            // File Manager: POST /api/file?path=<rel>, the body → streamed atomic write. `body`
+            // points at the bytes already buffered (initialLen); the full length is Content-Length,
+            // and handleWriteFile pulls any remainder straight off the socket — so an upload of any
+            // size streams to the file without a whole-request buffer or a strlen (binary-safe).
+            const size_t initialLen = static_cast<size_t>(totalRead) - static_cast<size_t>(body - req);
+            handleWriteFile(conn, queryStart ? queryStart + 1 : "", body, initialLen,
+                            static_cast<size_t>(contentLen));
+        } else if (std::strcmp(path, "/api/dir") == 0) {
+            // File Manager: POST /api/dir?path=<rel> → mkdir. The path is the whole operation (a
+            // create is a filesystem action, not a stored control), so it rides the request query
+            // — same path-as-query shape as /api/file, no persisted control holds it.
+            handleMakeDir(conn, queryStart ? queryStart + 1 : "");
         } else if (std::strcmp(path, "/api/modules") == 0 && body) {
             handleAddModule(conn, body);
         } else if (isMoveRoute && body) {
@@ -222,6 +280,12 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             handleReboot(conn);
         } else if (std::strcmp(path, "/api/firmware/url") == 0 && body) {
             handleFirmwareUrl(conn, body);
+        } else if (std::strcmp(path, "/api/firmware/upload") == 0 && body) {
+            // OTA from an uploaded .bin body (no URL, no host to serve it) — the browser POSTs the
+            // firmware image straight to the device, which streams it into the OTA partition. Same
+            // streamed-body handling as /api/file (initial buffered bytes + socket remainder).
+            const size_t initialLen = static_cast<size_t>(totalRead) - static_cast<size_t>(body - req);
+            handleFirmwareUpload(conn, body, initialLen, static_cast<size_t>(contentLen));
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
@@ -229,6 +293,9 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         // DELETE /api/modules/ModuleName
         if (std::strncmp(path, "/api/modules/", 13) == 0) {
             handleDeleteModule(conn, path + 13);
+        } else if (std::strcmp(path, "/api/dir") == 0) {
+            // File Manager: DELETE /api/dir?path=<rel> → remove a file or empty dir.
+            handleRemoveEntry(conn, queryStart ? queryStart + 1 : "");
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
@@ -296,6 +363,303 @@ void HttpServerModule::sendResponse(platform::TcpConnection& conn, int status, c
         status, statusText, contentType, bodyLen);
     conn.write(reinterpret_cast<const uint8_t*>(header), headerLen);
     conn.write(reinterpret_cast<const uint8_t*>(body), bodyLen);
+}
+
+// --- File Manager file read/write (the /api/file endpoints) ---
+//
+// A file body isn't a control value, so these are their own small endpoints (not /api/control).
+// The path comes as a query param `path=<rel>`; parseFilePath vets it (reject "..", root at the
+// mount) — the single traversal guard shared by every filesystem HTTP entry (read, write, dir
+// listing, mkdir, delete).
+//
+// Read + write both stream: the write pulls the request body chunk-by-chunk straight to the file
+// (fsWriteStream), the read pulls the file into a size-fit buffer — so a file of any size up- and
+// downloads intact without a fixed cap. kUploadMax is a per-request sanity ceiling; a legit upload
+// is additionally rejected up front if it wouldn't fit the free filesystem space.
+static constexpr size_t kUploadMax = 256 * 1024;   // 256 KB — sanity bound on one upload
+
+// Copy the `path=` query value into `out` (decoding %XX and '+' minimally), rooted at the mount.
+// Returns false on a missing/empty path or a ".." traversal attempt.
+//
+// Deliberately NOT a `.config`/dotfile denylist (PO decision): the File Manager is a device-admin
+// tool on a trusted LAN, and reading the persisted `.config/*.json` is a feature (inspect/back up
+// the device's own config), not a leak — there are no third-party secrets on the device, and the
+// WiFi password is XOR-obfuscated in what it writes. The weak-protection is `show hidden` defaulting
+// off (FileManagerModule), so `.config` isn't shown unless the operator asks. Reviewers periodically
+// flag this as a secrets-exposure — it's an accepted design, not an oversight; leave it.
+bool HttpServerModule::parseFilePath(const char* query, char* out, size_t cap) {
+    const char* p = query ? std::strstr(query, "path=") : nullptr;
+    if (!p) return false;
+    p += 5;                                   // past "path="
+    size_t i = 0;
+    // The path may be its own query (stop at '&') and percent-encoded ('/' → %2F, ' ' → %20).
+    while (*p && *p != '&' && i + 1 < cap) {
+        char c = *p;
+        if (c == '%' && p[1] && p[2]) {       // %XX → byte
+            auto hex = [](char h) -> int {
+                if (h >= '0' && h <= '9') return h - '0';
+                if (h >= 'a' && h <= 'f') return h - 'a' + 10;
+                if (h >= 'A' && h <= 'F') return h - 'A' + 10;
+                return -1;
+            };
+            const int hi = hex(p[1]), lo = hex(p[2]);
+            if (hi >= 0 && lo >= 0) { c = static_cast<char>((hi << 4) | lo); p += 2; }
+        } else if (c == '+') {
+            c = ' ';
+        }
+        out[i++] = c;
+        p++;
+    }
+    // Reject an overlong path outright rather than routing on a truncated prefix: if the loop stopped
+    // because the buffer filled (still more path bytes to come, i.e. not at '\0' or the '&' delimiter),
+    // the decoded value is incomplete and must not be treated as a valid path.
+    if (*p && *p != '&') return false;
+    out[i] = 0;
+    if (i == 0 || std::strstr(out, "..")) return false;   // empty or traversal → reject
+    if (out[0] != '/') {                                  // relative → root at the mount
+        char rooted[160];
+        const int n = std::snprintf(rooted, sizeof(rooted), "/%s", out);
+        if (n <= 0 || static_cast<size_t>(n) >= cap) return false;
+        std::strncpy(out, rooted, cap - 1); out[cap - 1] = 0;
+    }
+    return true;
+}
+
+// --- File Manager directory listing (the /api/dir endpoint) ---
+//
+// One directory's children as a JSON array, the source the lazy tree loads a node's children from.
+// Single-level only (platform::fsList) — the recursion is the UI's job, one fetch per expanded node,
+// the standard file-tree shape. The `hidden` query flag (hidden=1) includes dot-prefixed entries.
+// The listing streams straight to the socket (as serveState does) — no whole-listing buffer. The
+// fsList C callback carries the streaming sink + the hidden filter + a first-row flag via `user`.
+namespace {
+struct DirListState {
+    JsonSink* sink;
+    bool showHidden;
+    bool first = true;
+};
+void dirListTrampoline(const char* name, bool isDir, uint32_t size, void* user) {
+    auto* st = static_cast<DirListState*>(user);
+    if (!st->showHidden && name[0] == '.') return;          // dotfile convention
+    if (!st->first) st->sink->append(",");
+    st->first = false;
+    st->sink->append("{\"name\":");
+    st->sink->writeJsonString(name);
+    st->sink->appendf(",\"isDir\":%s,\"size\":%lu}",
+                      isDir ? "true" : "false", static_cast<unsigned long>(size));
+}
+}  // namespace
+
+void HttpServerModule::serveDirListing(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    const char* header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    JsonSink sink(conn);
+    DirListState st{&sink, query && std::strstr(query, "hidden=1") != nullptr, true};
+    sink.append("[");
+    platform::fsList(path, &dirListTrampoline, &st);
+    sink.append("]");
+    sink.flush();
+}
+
+// POST /api/dir?path=<rel> → mkdir. The path rides the query and is vetted by parseFilePath (the
+// same `..`-reject + root-at-mount guard /api/file and /api/dir GET use). A create is a filesystem
+// action, not a stored control — no persisted `path` control holds it, so no flash write.
+void HttpServerModule::handleMakeDir(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    if (platform::fsMkdir(path)) sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    else sendResponse(conn, 500, "application/json", "{\"error\":\"mkdir failed\"}");
+}
+
+// DELETE /api/dir?path=<rel> → remove a file or EMPTY dir (fsRemove fails cleanly on a non-empty
+// dir). Same path guard as handleMakeDir.
+void HttpServerModule::handleRemoveEntry(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    if (platform::fsRemove(path)) sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    else sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed (folder not empty?)\"}");
+}
+
+void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    // Stream the file straight to the socket in fixed 1 KB chunks (fsReadAt) with an explicit
+    // Content-Length header — no whole-file buffer, and NUL-safe (sendResponse strlen()s its body, so
+    // it can't carry binary). Symmetric with the streamed upload: a file of any size downloads whole.
+    const long size = platform::fsSize(path);
+    if (size < 0) { sendResponse(conn, 404, "application/json", "{\"error\":\"not found\"}"); return; }
+    char header[160];
+    const int hn = std::snprintf(header, sizeof(header),
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %ld\r\n"
+        "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", size);
+    conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn));
+    char chunk[1024];
+    for (long offset = 0; offset < size;) {
+        const size_t want = static_cast<size_t>(size - offset) < sizeof(chunk)
+                          ? static_cast<size_t>(size - offset) : sizeof(chunk);
+        const int got = platform::fsReadAt(path, offset, chunk, want);
+        if (got <= 0) break;   // read error / early EOF — the client sees a short (truncated) body
+        conn.write(reinterpret_cast<const uint8_t*>(chunk), static_cast<size_t>(got));
+        offset += got;
+    }
+}
+
+// Source state for the streamed upload: yields the body bytes already sitting in the request buffer,
+// then reads the remainder straight off the socket — feeding fsWriteStream in fixed chunks so the
+// device never holds the whole upload in RAM.
+namespace {
+// This drain runs SYNCHRONOUSLY on the loop20ms() tick, which is inside Scheduler::tick — so it
+// blocks rendering for the duration of the transfer (LEDs freeze until the upload completes or a
+// bound trips). Accepted trade-off: an upload is user-initiated and transient (and a firmware upload
+// reboots the device anyway), so a brief freeze is fine where a persistent one wouldn't be. The two
+// bounds cap how long that freeze can last, because neither alone is enough:
+//   - kUploadIdleMs: max wait for the NEXT byte, reset on every successful read. Scales to
+//     any size the endpoint accepts — a big but steady upload (256 KB over slow LittleFS +
+//     weak WiFi) never trips it, because progress keeps resetting the clock. But idle-only
+//     lets a slowloris trickle one byte just under the idle limit forever, freezing rendering
+//     (and the HTTP server) for as long as it keeps dribbling.
+//   - kUploadHardMs: an absolute whole-request ceiling that closes that hole. Sized well
+//     above a legit worst case (256 KB / ~50 KB/s ≈ 5 s, plus wide margin) so a real slow
+//     upload finishes, but far below the days a byte-per-idle-window trickler would need.
+// A single budget can't do both jobs; the pair does (idle scales, hard caps the total). The
+// zero-freeze fix (drain a chunk per tick, like drainPreviewSend) is backlogged; the bounded
+// synchronous drain is the accepted interim.
+constexpr uint32_t kUploadIdleMs = 5000;    // max gap between successful reads before abort
+constexpr uint32_t kUploadHardMs = 60000;   // absolute whole-request ceiling (anti-slowloris)
+struct UploadSource {
+    platform::TcpConnection* conn;
+    const char* initial;      // body bytes already read into the request buffer
+    size_t initialLeft;       // how many of those remain to hand out
+    size_t remaining;         // total body bytes still to deliver (Content-Length − delivered)
+    uint32_t hardDeadline;    // absolute millis by which the whole body must arrive
+};
+size_t uploadPull(char* out, size_t cap, void* user, bool* abort) {
+    auto* s = static_cast<UploadSource*>(user);
+    if (s->remaining == 0) return 0;   // all body delivered → clean EOF
+    // Whole-request ceiling, checked on EVERY pull (not only while the socket is dry): a paced
+    // trickler that always keeps one byte ready makes each read return > 0 immediately, so a cap
+    // tested only in the wait loop would never fire. Enforcing it here makes it truly absolute.
+    if (static_cast<int32_t>(platform::millis() - s->hardDeadline) >= 0) { *abort = true; return 0; }
+    // Drain the already-buffered prefix first.
+    if (s->initialLeft) {
+        const size_t n = s->initialLeft < cap ? s->initialLeft : cap;
+        std::memcpy(out, s->initial, n);
+        s->initial += n; s->initialLeft -= n; s->remaining -= n;
+        return n;
+    }
+    // Then pull the rest off the socket, bounded by BOTH the per-pull idle deadline (recomputed
+    // here, only advances while we wait — bounds a stall) and the request-lifetime hardDeadline
+    // (set once at construction — bounds the total). If the body is still incomplete when the
+    // socket closes early or either deadline lapses, signal *abort — fsWriteStream then discards
+    // the temp file rather than committing a truncated upload (a 0 here is NOT a clean end). Both
+    // compares are subtraction-based, wraparound-safe across the ~49.7-day millis() rollover.
+    const size_t want = s->remaining < cap ? s->remaining : cap;
+    const uint32_t deadline = platform::millis() + kUploadIdleMs;
+    for (;;) {
+        const int r = s->conn->read(reinterpret_cast<uint8_t*>(out), want);
+        if (r > 0) { s->remaining -= static_cast<size_t>(r); return static_cast<size_t>(r); }
+        if (r == 0) { *abort = true; return 0; }                 // peer closed with body remaining
+        // Idle timeout (the hard whole-request cap is enforced at the top of uploadPull, so it
+        // covers the pacing case this wait loop can't). Both compares are wraparound-safe.
+        if (static_cast<int32_t>(platform::millis() - deadline) >= 0) { *abort = true; return 0; }
+        platform::delayMs(1);
+    }
+}
+}  // namespace
+
+void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char* query,
+                                       const char* initialBody, size_t initialLen, size_t contentLen) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    if (contentLen > kUploadMax) {
+        sendResponse(conn, 413, "application/json", "{\"error\":\"file too large\"}");
+        return;
+    }
+    // Reject up front if it wouldn't fit the free filesystem space (friendlier than filling the FS
+    // and failing mid-write — fsWriteStream also fails cleanly + discards the temp if it does fill).
+    // total − used = free. An overwrite would reclaim the old file's space, but treat free
+    // conservatively (don't credit the overwrite) so the check never over-promises.
+    const size_t total = platform::filesystemTotal();
+    const size_t used = platform::filesystemUsed();
+    const size_t freeBytes = total > used ? total - used : 0;
+    if (total > 0 && contentLen > freeBytes) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "{\"error\":\"not enough space (%lu free)\"}",
+                      static_cast<unsigned long>(freeBytes));
+        sendResponse(conn, 507, "application/json", msg);   // 507 Insufficient Storage
+        return;
+    }
+    // Never hand the source more than Content-Length of the already-buffered bytes: a buffer can hold
+    // bytes past the body (a pipelined next request), which must not be written into the file.
+    const size_t initial = initialLen < contentLen ? initialLen : contentLen;
+    UploadSource src{&conn, initialBody, initial, contentLen,
+                     platform::millis() + kUploadHardMs};
+    if (platform::fsWriteStream(path, &uploadPull, &src)) {
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    } else {
+        sendResponse(conn, 500, "application/json", "{\"error\":\"write failed\"}");
+    }
+}
+
+// OTA from an uploaded .bin body: stream the request body straight into the OTA partition
+// (platform::otaWriteStream), reusing the exact uploadPull the file-upload path uses — the only
+// difference is the sink (OTA partition vs a file). On success the device reboots into the new
+// image; the 200 goes out first (otaWriteStream's ~600 ms pre-reboot delay covers the round-trip).
+void HttpServerModule::handleFirmwareUpload(platform::TcpConnection& conn, const char* initialBody,
+                                            size_t initialLen, size_t contentLen) {
+    if constexpr (!platform::hasOta) {
+        sendResponse(conn, 501, "application/json", "{\"error\":\"OTA not supported on this platform\"}");
+        return;
+    }
+    // Same 409 concurrency guard as handleFirmwareUrl: one OTA at a time (both write g_ota* state).
+    if (otaInFlight()) {
+        sendResponse(conn, 409, "application/json", "{\"error\":\"ota already in progress\"}");
+        return;
+    }
+    const size_t initial = initialLen < contentLen ? initialLen : contentLen;
+    UploadSource src{&conn, initialBody, initial, contentLen, platform::millis() + kUploadHardMs};
+    g_otaBytesTotal = static_cast<uint32_t>(contentLen);   // the UI's "Y KB" (Content-Length up front)
+    g_otaBytesRead = 0;                                    // clear any stale count from a prior OTA
+    // Stream the body into the OTA partition. otaWriteStream commits the image + flips the boot
+    // pointer but does NOT reboot — it returns so we can send a 200 first, then reboot the same
+    // way /api/reboot does (response, close, brief drain, platform::reboot). That gives the browser
+    // a clean "flashed" response instead of an aborted socket it can't tell from a real failure.
+    const bool ok = platform::otaWriteStream(&uploadPull, &src, contentLen,
+                                             g_otaStatus, sizeof(g_otaStatus), &g_otaBytesRead);
+    if (!ok) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "{\"error\":\"ota failed: %.60s\"}", g_otaStatus);
+        sendResponse(conn, 500, "application/json", msg);
+        return;
+    }
+    FilesystemModule::flushPending();
+    sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    conn.close();
+    platform::delayMs(200);
+    platform::reboot();  // noreturn — boots the flashed image
 }
 
 void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* filename, const char* contentType) {
@@ -388,7 +752,10 @@ void HttpServerModule::buildStateJson(JsonSink& sink) {
         bool first = true;
         for (uint8_t m = 0; m < scheduler_->moduleCount(); m++) {
             auto* mod = scheduler_->module(m);
-            if (!mod || mod == this) continue; // skip self
+            // Skip modules that opt out of the UI via appearsInUi() — the one mechanism for
+            // "not a card in /api/state": HttpServerModule (the server itself) and FilesystemModule
+            // (a pure persistence engine, no controls) both return false.
+            if (!mod || !mod->appearsInUi()) continue;
             if (!first) sink.append(",");
             first = false;
             writeModuleJson(sink, mod);
@@ -544,25 +911,11 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
     }
 }
 
+// The Scheduler owns the module tree, so the tree-walk-by-name lives there (firstByName);
+// this only adds the scheduler_ null-guard the request handlers rely on (scheduler_ is unset
+// until setScheduler() runs), then delegates — one recursive lookup, not two.
 MoonModule* HttpServerModule::findModuleByName(const char* name) {
-    if (!name || name[0] == 0 || !scheduler_) return nullptr;
-
-    for (uint8_t m = 0; m < scheduler_->moduleCount(); m++) {
-        auto* mod = scheduler_->module(m);
-        if (!mod) continue;
-        auto* found = findInTree(mod, name);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
-MoonModule* HttpServerModule::findInTree(MoonModule* mod, const char* name) {
-    if (mod->name() && std::strcmp(mod->name(), name) == 0) return mod;
-    for (uint8_t i = 0; i < mod->childCount(); i++) {
-        auto* found = findInTree(mod->child(i), name);
-        if (found) return found;
-    }
-    return nullptr;
+    return scheduler_ ? scheduler_->firstByName(name) : nullptr;
 }
 
 void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
@@ -607,7 +960,7 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
 // WLED fork) does — while `product:"MoonModules"` says what this actually is. We speak
 // WLED's info shape to interoperate, not to impersonate. Built fresh against WLED's
 // public JSON, not copied. (Reference real WLED carries far more; this is the trimmed,
-// known-sufficient field set — see docs/moonmodules/core/HttpServerModule.md.)
+// known-sufficient field set — see docs/moonmodules/core/moxygen/HttpServerModule.md.)
 void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
     const char* header =
         "HTTP/1.1 200 OK\r\n"
@@ -661,18 +1014,6 @@ void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const
 // output brightness the WLED app's slider maps to. Read generically through the control
 // list (by name + Uint8 type, via the stored pointer) so this core module needs no
 // light-domain include — the same domain-neutral reach applySetControl uses to write.
-uint8_t HttpServerModule::driversBrightness() {
-    MoonModule* d = findModuleByName("Drivers");
-    if (!d) return 0;
-    const ControlList& cl = d->controls();
-    for (uint8_t i = 0; i < cl.count(); i++) {
-        const ControlDescriptor& c = cl[i];
-        if (c.ptr && c.type == ControlType::Uint8 && std::strcmp(c.name, "brightness") == 0)
-            return *static_cast<const uint8_t*>(c.ptr);
-    }
-    return 0;
-}
-
 // The WLED state object, written into an open sink. `on` + `bri` mirror Drivers
 // brightness (off = brightness 0). `seg[0].col[0]` is the colour the WLED app tints the
 // device card with: we send the LIVE first-LED RGB from Drivers, so the card mirrors what
@@ -680,7 +1021,7 @@ uint8_t HttpServerModule::driversBrightness() {
 // black/off or there's no output (so a dark device still reads as a distinct projectMM,
 // not an indistinct black card).
 void HttpServerModule::writeWledStateBody(JsonSink& sink) {
-    const uint8_t bri = driversBrightness();
+    const uint8_t bri = driversBrightness(scheduler_);
     uint8_t rgb[3] = {0, 0, 0};
     bool haveLed = false;
     if (MoonModule* d = findModuleByName("Drivers")) haveLed = d->firstOutputRgb(rgb);
@@ -689,7 +1030,7 @@ void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     }
     sink.appendf("{\"on\":%s,\"bri\":%u,"
                  "\"seg\":[{\"id\":0,\"col\":[[%u,%u,%u]]}]}",
-                 bri > 0 ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
+                 driversOn(scheduler_) ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
 }
 
 void HttpServerModule::serveWledState(platform::TcpConnection& conn) {
@@ -726,19 +1067,18 @@ void HttpServerModule::serveWledStateInfo(platform::TcpConnection& conn) {
     sink.flush();
 }
 
-// Apply a WLED state-set body ({on?, bri?}) to the Drivers brightness control through the
-// shared apply-core (the same path /api/control and Improv APPLY_OP use). `on:false` → 0;
-// `on:true` with no `bri` → restore a visible default; `bri:N` → set N. Shared by the HTTP
-// POST /json/state handler and the inbound-WebSocket path (the app uses both channels).
+// Apply a WLED state-set body ({on?, bri?}) to the Drivers controls through the shared apply-core
+// (the same path /api/control and Improv APPLY_OP use). `on` and `bri` are independent: `on` sets
+// the real master-power control (so toggling off preserves the brightness level), `bri` sets the
+// level. Shared by the HTTP POST /json/state handler and the inbound-WebSocket path.
 void HttpServerModule::applyWledState(const char* body) {
-    int bri = -1;
-    if (mm::json::hasKey(body, "bri")) bri = mm::json::parseInt(body, "bri");
     if (mm::json::hasKey(body, "on")) {
-        const bool on = mm::json::parseBool(body, "on");
-        if (!on) bri = 0;
-        else if (bri < 0) bri = driversBrightness() > 0 ? -1 : 128;  // turn on → visible default
+        applySetControl("Drivers", "on",
+                        mm::json::parseBool(body, "on") ? "{\"value\":true}" : "{\"value\":false}");
     }
-    if (bri >= 0) {
+    if (mm::json::hasKey(body, "bri")) {
+        int bri = mm::json::parseInt(body, "bri");
+        if (bri < 0) bri = 0;
         if (bri > 255) bri = 255;
         char valueJson[32];
         std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", bri);
@@ -886,7 +1226,7 @@ HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* pare
 // field — both feed the one applyAddModule() core, but the two transports parse different
 // JSON keys, so an HTTP payload is NOT a drop-in APPLY_OP (rename parent_id → parent). The
 // serial op stays terse because every byte counts against the 128-byte frame budget; the
-// discrepancy is documented in docs/moonmodules/core/ImprovProvisioningModule.md.
+// discrepancy is documented in docs/moonmodules/core/moxygen/ImprovProvisioningModule.md.
 HttpServerModule::OpResult HttpServerModule::applyOp(const char* opJson) {
     if (!opJson) return OpResult::BadRequest;
     char op[16] = {};
@@ -1168,10 +1508,7 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
     // shows garbled progress. Check g_otaStatus for an in-flight state and
     // reject early with 409. Successful OTAs reboot, so the only path that
     // re-enables a new attempt after an in-flight one is an explicit error.
-    if (std::strcmp(g_otaStatus, "starting")    == 0 ||
-        std::strcmp(g_otaStatus, "downloading") == 0 ||
-        std::strcmp(g_otaStatus, "flashing")    == 0 ||
-        std::strcmp(g_otaStatus, "rebooting")   == 0) {
+    if (otaInFlight()) {
         sendResponse(conn, 409, "application/json",
                      "{\"error\":\"ota already in progress\"}");
         return;

@@ -76,3 +76,50 @@ TEST_CASE("Palettes::active swaps the global palette on setActive") {
     // Restore the default active palette — it's a global other effects' tests read.
     mm::Palettes::setActive(0);
 }
+
+// The HomeKit-colour-wheel → palette mapping (MQTT/Homebridge). Each palette's representative
+// (hue, sat) is computed from its expanded entries; nearestForHue picks the closest. A vivid hue
+// snaps to that hue's palette family; a low-saturation target snaps to the desaturated Rainbow.
+TEST_CASE("Palettes::nearestForHue maps a colour to the closest palette") {
+    // A vivid red hue lands on a red/orange-family palette (Party≈13° / Lava≈24° are the reds),
+    // never on the all-hue Rainbow (index 0, which has ~0 saturation).
+    const uint8_t redIdx = mm::Palettes::nearestForHue(5, 255);
+    CHECK(redIdx != 0);
+    uint16_t rh = 0, rs = 0; mm::Palettes::representativeHueSat(redIdx, rh, rs);
+    CHECK(rh < 45);                       // the picked palette is genuinely red/orange
+
+    // A vivid blue hue lands on a blue-family palette (Ocean≈195° / Fierce Ice≈213°).
+    const uint8_t blueIdx = mm::Palettes::nearestForHue(210, 255);
+    CHECK(blueIdx != 0);
+    uint16_t bh = 0, bs = 0; mm::Palettes::representativeHueSat(blueIdx, bh, bs);
+    CHECK(bh > 150);
+    CHECK(bh < 260);                      // genuinely blue, not green or red
+
+    // A vivid green hue lands on a green-family palette (Forest≈111°).
+    const uint8_t greenIdx = mm::Palettes::nearestForHue(120, 255);
+    uint16_t gh = 0, gs = 0; mm::Palettes::representativeHueSat(greenIdx, gh, gs);
+    CHECK(gh > 60);
+    CHECK(gh < 180);
+
+    // Very low saturation (the wheel's desaturated centre) → the low-sat Rainbow (index 0).
+    CHECK(mm::Palettes::nearestForHue(0, 5) == 0);
+
+    // Hue wraps: 359° is adjacent to 0°, so it picks the same red family as ~0°.
+    const uint8_t wrapIdx = mm::Palettes::nearestForHue(359, 255);
+    uint16_t wh = 0, ws = 0; mm::Palettes::representativeHueSat(wrapIdx, wh, ws);
+    CHECK((wh < 45 || wh > 315));         // red/orange either side of the 0/360 seam
+}
+
+// Regression (reviewer #4): a hue >= 360 (a broker client can send "400,…" on hsv/set) must not
+// overflow the int32 squared-distance math — nearestForHue folds any input into 0..359 up front.
+// 400 % 360 == 40 (orange), 720 % 360 == 0 (red), so both resolve to a valid, sensible index.
+TEST_CASE("Palettes::nearestForHue folds an out-of-range hue instead of overflowing") {
+    const uint8_t i400 = mm::Palettes::nearestForHue(400, 255);   // == 40°
+    const uint8_t i40  = mm::Palettes::nearestForHue(40, 255);
+    CHECK(i400 == i40);                    // 400 folds to 40 → same palette
+    const uint8_t i720 = mm::Palettes::nearestForHue(720, 255);   // == 0°
+    const uint8_t i0   = mm::Palettes::nearestForHue(0, 255);
+    CHECK(i720 == i0);                     // 720 folds to 0 → same palette
+    // A large value doesn't crash / return garbage — any index < kCount is acceptable.
+    CHECK(mm::Palettes::nearestForHue(65535, 200) < mm::palettes::kCount);
+}

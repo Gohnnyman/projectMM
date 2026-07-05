@@ -50,6 +50,17 @@ struct Tag : public mm::MoonModule {
     }
 };
 
+// A stand-in for the real Drivers module the WLED shim targets: an `on` Bool + a `brightness`
+// Uint8, the two controls applyWledState drives. Named "Drivers" so findModuleByName resolves it.
+struct FakeDrivers : public mm::MoonModule {
+    bool on = true;
+    uint8_t brightness = 20;
+    void onBuildControls() override {
+        controls_.addBool("on", on);
+        controls_.addUint8("brightness", brightness, 0, 255);
+    }
+};
+
 // Build a tree: scheduler root "Root" (a Box) with HttpServerModule wired to it.
 // Returns via out-params so each case starts clean. Caller owns teardown via the
 // scheduler.
@@ -59,6 +70,7 @@ void registerTestTypes() {
     mm::ModuleFactory::registerType<Knob>("Knob");
     mm::ModuleFactory::registerType<Box>("Box");
     mm::ModuleFactory::registerType<Tag>("Tag");
+    mm::ModuleFactory::registerType<FakeDrivers>("Drivers");
     done = true;
 }
 
@@ -225,4 +237,44 @@ TEST_CASE("apply-core: a control validator rejects bad input on the set/APPLY_OP
     CHECK(std::strcmp(tag->label, "Living Room") == 0);
 
     s.deleteTree(root);
+}
+
+// The WLED shim's `{on,bri}` apply drives the real `on` + `brightness` controls independently:
+// turning off must NOT clobber the brightness value (the whole point of the shared `on` control,
+// replacing the old bri=0 fudge). Home Assistant + the WLED app both post through this path.
+TEST_CASE("apply-core: applyWledState sets on + bri independently (no brightness clobber)") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box();
+    root->setName("Root");
+    s.addModule(root);
+    auto* drivers = new FakeDrivers();
+    drivers->setName("Drivers");
+    drivers->onBuildControls();       // register on + brightness so applyWledState can find them
+    s.addModule(drivers);
+    mm::HttpServerModule http;
+    http.setScheduler(&s);
+
+    // Set a real brightness first.
+    http.applyWledState("{\"bri\":200}");
+    CHECK(drivers->brightness == 200);
+    CHECK(drivers->on == true);
+
+    // Turn OFF → on flips false, brightness value is PRESERVED (the fudge would have zeroed it).
+    http.applyWledState("{\"on\":false}");
+    CHECK(drivers->on == false);
+    CHECK(drivers->brightness == 200);   // preserved — this is the subtraction's payoff
+
+    // Turn back ON → on true, brightness still the level the user had.
+    http.applyWledState("{\"on\":true}");
+    CHECK(drivers->on == true);
+    CHECK(drivers->brightness == 200);
+
+    // Combined {on,bri} applies both.
+    http.applyWledState("{\"on\":true,\"bri\":50}");
+    CHECK(drivers->on == true);
+    CHECK(drivers->brightness == 50);
+
+    s.deleteTree(root);
+    s.deleteTree(drivers);
 }

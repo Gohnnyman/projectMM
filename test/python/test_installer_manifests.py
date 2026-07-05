@@ -29,7 +29,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 FIRMWARES_JSON = ROOT / "web-installer" / "firmwares.json"
-GENERATE = ROOT / "scripts" / "build" / "generate_manifest.py"
+GENERATE = ROOT / "moondeck" / "build" / "generate_manifest.py"
 
 # The exact globs the deploy's `gh release download` stages onto Pages (release.yml,
 # "Stage cumulative release content"). A manifest part must match one of these, or the

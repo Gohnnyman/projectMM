@@ -45,6 +45,17 @@ TEST_CASE("Desktop ethConfigDefault is ethNone (no Ethernet)") {
     CHECK(mm::platform::ethConfigDefault.phyType == mm::platform::ethNone);
 }
 
+// Ethernet is OPT-IN: NetworkModule's `ethType` control defaults to ethNone(0), so a board whose
+// deviceModels.json entry has no `ethType` brings up NO PHY (a WiFi-only board like Shelly, or the
+// QuinLED Dig-Uno/Quad with optional-only eth, must not waste an RMII/SPI init on a PHY it lacks).
+// A board with real Ethernet sets `ethType` explicitly in its catalog eth block. On ESP32 the
+// control default seeds ethType_ = 0; the platform's ethConfigDefault (whose phyType is the chip's
+// historical PHY) still seeds the PINS so an opt-in board gets them without re-listing — but the
+// PHY *selection* is off until the catalog turns it on. ethNone==0 is what makes "unset → off" work.
+TEST_CASE("Ethernet is opt-in: ethNone is the zero value (unset ethType → no PHY)") {
+    CHECK(mm::platform::ethNone == 0);   // an absent/zero ethType control resolves to None
+}
+
 // The platform seam must accept any runtime config and never bring Ethernet up on
 // desktop — ethInit() returns false so NetworkModule cascades to WiFi/AP. Pushing a
 // fully-populated W5500 config and an RMII config both leave ethInit() false and

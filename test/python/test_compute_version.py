@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "build"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "moondeck" / "build"))
 import compute_version as cv  # noqa: E402
 
 

@@ -91,16 +91,11 @@ public:
                           mac[4], mac[5]);
         }
 
-        // Snprintf static display strings into the bound buffers. onBuildControls already
-        // bound these buffers by pointer; we fill them now and the UI picks up the content
-        // on the next WebSocket push.
-        std::snprintf(chipInfo_, sizeof(chipInfo_), "%s", platform::chipModel());
-        std::snprintf(sdkInfo_, sizeof(sdkInfo_), "%s", platform::sdkVersion());
-        // version / build / firmware (firmware identity, incl. the build date) moved to
-        // FirmwareUpdateModule — SystemModule keeps only the IDF version string (`sdk`).
-        std::snprintf(bootReasonStr_, sizeof(bootReasonStr_), "%s", platform::resetReason());
+        // chip / sdk / mac / bootReason controls bind straight to the platform's static strings (no
+        // per-module copy — see onBuildControls). version / build / firmware (firmware identity, incl.
+        // the build date) moved to FirmwareUpdateModule — SystemModule keeps only the IDF `sdk`.
         if constexpr (platform::hasWifiCoprocessor) {
-            std::snprintf(coprocStr_, sizeof(coprocStr_), "%s", platform::coprocessorWifi());
+            (void)platform::coprocessorWifi();   // prime the static (the control points at it)
         }
 
         if (chipFlashVal_ > 0) {
@@ -163,18 +158,22 @@ public:
             controls_.addReadOnly("flash", flashStr_, sizeof(flashStr_));
         }
 
-        // Static info
-        controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
-        controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
-        controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
+        // Static info — the platform returns these as permanent static strings (a chip's MAC / model
+        // / SDK never change at runtime), so the ReadOnly control binds straight to the platform
+        // buffer. Nothing stored per-module: don't copy a static string into a member (minimise
+        // memory; don't store what's derivable). const_cast is safe — ReadOnly never writes.
+        // bufSize is unused for a ReadOnly (never written), so the default is fine.
+        controls_.addReadOnly("mac", const_cast<char*>(platform::macString()));   // stable per-chip identity (tooling keys on it)
+        controls_.addReadOnly("chip", const_cast<char*>(platform::chipModel()));
+        controls_.addReadOnly("sdk", const_cast<char*>(platform::sdkVersion()));
+        controls_.addReadOnly("bootReason", const_cast<char*>(platform::resetReason()));
         // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
         // cost — vanishes on native-radio builds (classic/S3/desktop) and the
         // eth-only P4. Its value proves the C6 slave-firmware state ("C6 fw 2.12.9"
         // vs "not detected"). loop1s() refreshes it.
         if constexpr (platform::hasWifiCoprocessor) {
-            std::snprintf(coprocStr_, sizeof(coprocStr_), "%s", platform::coprocessorWifi());
-            controls_.addReadOnly("wifiCoproc", coprocStr_, sizeof(coprocStr_));
+            controls_.addReadOnly("wifiCoproc", const_cast<char*>(platform::coprocessorWifi()));
         }
 
         // Chain into children (user-added Peripherals). Per the override-and-chain
@@ -230,9 +229,11 @@ public:
 
         // Refresh the WiFi co-processor status, so the displayed C6 firmware state
         // stays current if the link comes up after boot or the C6 is reflashed
-        // without a host reboot. Compiled out where there's no co-processor.
+        // without a host reboot. coprocessorWifi() re-queries the C6 and updates its own
+        // static buffer in place — the wifiCoproc control points straight at it, so we
+        // just call it to refresh (no per-module copy). Compiled out where there's no co-proc.
         if constexpr (platform::hasWifiCoprocessor) {
-            std::snprintf(coprocStr_, sizeof(coprocStr_), "%s", platform::coprocessorWifi());
+            (void)platform::coprocessorWifi();
         }
 
         // Chain to base so children get their loop1s() — a Peripheral formats
@@ -291,10 +292,6 @@ private:
     uint32_t psramUsedVal_ = 0;
 
     // Static (set in setup)
-    char chipInfo_[16] = {};
-    char sdkInfo_[24] = {};
-    char bootReasonStr_[16] = {};
-    char coprocStr_[24] = {};   // WiFi co-processor status, e.g. "C6 fw 2.12.9" / "not detected"
     uint32_t totalInternalVal_ = 0;
     uint32_t totalHeapVal_ = 0;
     char flashStr_[12] = {};

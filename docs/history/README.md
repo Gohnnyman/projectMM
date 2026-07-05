@@ -1,6 +1,6 @@
 # History — index
 
-The backward-looking half of the docs (the forward-looking half is [`../backlog/`](../backlog/)). This folder is **not** present-tense and agents don't read it automatically — only when planning new work. See [CLAUDE.md § Documentation](../../CLAUDE.md) for how `history/` and `backlog/` relate.
+The backward-looking half of the docs (the forward-looking half is [`../backlog/`](../backlog/README.md)). This folder is **not** present-tense and agents don't read it automatically — only when planning new work. See [CLAUDE.md § Documentation](../../CLAUDE.md) for how `history/` and `backlog/` relate.
 
 *Living index — kept current as the friend-repo digests are updated each month; the git log carries exact dates.*
 

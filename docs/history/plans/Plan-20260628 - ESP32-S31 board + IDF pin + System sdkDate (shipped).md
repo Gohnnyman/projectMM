@@ -52,7 +52,7 @@ unchanged — the risk is in the *board* layer (Ethernet PHY, pin map, PSRAM mod
 
 The pin is named in several files (from the inventory); update **all** so they agree:
 
-- **`scripts/build/setup_esp_idf.py`** — `PINNED_IDF_COMMIT` → `0d9287800812c95662921c2c5e812023939e3d58`,
+- **`moondeck/build/setup_esp_idf.py`** — `PINNED_IDF_COMMIT` → `0d9287800812c95662921c2c5e812023939e3d58`,
   `PINNED_IDF_VERSION` → `v6.1-dev-5215-g0d928780081`. **Plus the convergence change:** after the drift
   warning, prompt "Check out the pinned commit now? [Y/n]" and run `git checkout <PINNED_IDF_COMMIT>` +
   `git submodule update --init --recursive` when accepted. Add a `--no-checkout` flag to opt out (the
@@ -65,7 +65,7 @@ The pin is named in several files (from the inventory); update **all** so they a
 - **`docs/building.md`** — the clone instructions (`--branch v6.1-dev` → `--branch release/v6.1`), the
   "Tested IDF version" line, the pinned-commit line, and the "moving to a different release" procedure.
   Add a one-liner that S31 needs `install.sh esp32s31`.
-- **`scripts/MoonDeck.md`** — the `setup_esp_idf` section: document the new checkout-offer behaviour +
+- **`moondeck/MoonDeck.md`** — the `setup_esp_idf` section: document the new checkout-offer behaviour +
   the `install.sh esp32s31` note for S31 builders.
 
 **Re-verify gate (do this before Part B):** with the new IDF active, build the existing targets
@@ -80,7 +80,7 @@ Follow the established new-firmware pattern (inventory mapped every touch point)
 the real PSRAM-mode / flash / EMAC symbol names), starting from the P4 (RISC-V) fragment as the closest
 analog. Touch points:
 
-- **`scripts/build/build_esp32.py`** — add the `FIRMWARES["esp32s31"]` entry: `"chip": "esp32s31"`,
+- **`moondeck/build/build_esp32.py`** — add the `FIRMWARES["esp32s31"]` entry: `"chip": "esp32s31"`,
   `"fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s31"]`, `"eth_only": False`,
   `"ships": True`, a one-line description. Add `"esp32s31": "ESP32-S31"` to `TARGET_TO_FAMILY` (line
   153). Confirm `set-target` (line 505) passes the chip through; the preview target may need
@@ -103,7 +103,7 @@ analog. Touch points:
   `deviceModel` control = the entry name, an LED-driver module with `pins`, and a NetworkModule with the
   S31 Ethernet config (mirroring the P4 entry's `ethType`/`ethPhyAddr`/`eth*Gpio`). Passes
   `check_devices.py`.
-- **Regenerate the projection** — `uv run scripts/build/generate_firmwares.py --out
+- **Regenerate the projection** — `uv run moondeck/build/generate_firmwares.py --out
   docs/install/firmwares.json` (so `esp32s31` lands in the installer-read JSON; `check_firmwares.py`
   guards drift). `generate_manifest.py` derives chip family from `TARGET_TO_FAMILY` automatically — no
   change.
@@ -128,9 +128,9 @@ IDF outside `src/platform/`):
 
 ## Files (summary)
 
-- IDF pin + convergence: `scripts/build/setup_esp_idf.py`, `.github/workflows/release.yml`,
-  `docs/building.md`, `scripts/MoonDeck.md`.
-- S31 firmware: `scripts/build/build_esp32.py`, `esp32/sdkconfig.defaults.esp32s31` (new),
+- IDF pin + convergence: `moondeck/build/setup_esp_idf.py`, `.github/workflows/release.yml`,
+  `docs/building.md`, `moondeck/MoonDeck.md`.
+- S31 firmware: `moondeck/build/build_esp32.py`, `esp32/sdkconfig.defaults.esp32s31` (new),
   `src/platform/esp32/platform_config.h` (S31 eth pins), `docs/install/deviceModels.json`,
   `docs/install/firmwares.json` (regenerated), `assets/boards/<s31 photo>` (new).
 - System sdkDate: `src/platform/platform.h`, `src/platform/{esp32,desktop}/platform_{esp32,desktop}.cpp`,
@@ -151,10 +151,10 @@ IDF outside `src/platform/`):
 
 ## Verification
 
-- **Part A:** `uv run scripts/build/setup_esp_idf.py` shows no drift warning (installed == new pin);
+- **Part A:** `uv run moondeck/build/setup_esp_idf.py` shows no drift warning (installed == new pin);
   the checkout-offer path moves a deliberately-stale checkout onto the pin. Re-verify gate: `esp32`,
   `esp32s3-n16r8`, `esp32p4-eth` build zero-warning green on the new IDF.
-- **Part B:** `uv run scripts/build/build_esp32.py --firmware esp32s31` builds clean →
+- **Part B:** `uv run moondeck/build/build_esp32.py --firmware esp32s31` builds clean →
   `flash_esp32.py` to `/dev/tty.usbserial-20213420` → device boots, joins WiFi/Eth, serves the UI.
   Author a MoonLive control script (`uint8_t speed = 50; // @control 0..99  setRGB(speed,0,0,255);`),
   confirm the slider appears + moves the pixel live with no recompile (RISC-V codegen, P4-proven).

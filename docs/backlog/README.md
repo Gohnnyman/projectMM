@@ -1,6 +1,6 @@
 # Backlog — index
 
-The forward-looking half of the docs (the backward-looking half is [`../history/`](../history/)). This folder is **not** present-tense and agents don't read it automatically — only when planning new work. See [CLAUDE.md § Documentation](../../CLAUDE.md) for how `backlog/` and `history/` relate.
+The forward-looking half of the docs (the backward-looking half is [`../history/`](../history/README.md)). This folder is **not** present-tense and agents don't read it automatically — only when planning new work. See [CLAUDE.md § Documentation](../../CLAUDE.md) for how `backlog/` and `history/` relate.
 
 This README is the **landing page**: the rest of the system links here, not into individual items, so the present-tense docs stay present-tense.
 
@@ -42,7 +42,7 @@ A map of everything in the three files, by theme.
 
 ## In-flight draft specs
 
-A spec for a not-yet-built module can live here as a plain draft `.md` (alongside the design studies below) until the module ships — at which point its final spec is written in [`../moonmodules/`](../moonmodules/) and the draft is deleted. None are in flight right now.
+A spec for a not-yet-built module can live here as a plain draft `.md` (alongside the design studies below) until the module ships — at which point its final spec is written under `../moonmodules/` (e.g. [drivers](../moonmodules/light/drivers/drivers.md)) and the draft is deleted. None are in flight right now.
 
 ## Design studies
 

@@ -257,7 +257,7 @@ keep going.
 - **Run it on your computer** instead of (or alongside) an ESP32 — macOS, Windows,
   Linux: [project overview → Getting started](../README.md#getting-started).
 - **Manage several devices, build, and flash from one console** with MoonDeck, our
-  developer tool: [MoonDeck guide](../scripts/MoonDeck.md).
+  developer tool: [MoonDeck guide](../moondeck/MoonDeck.md).
 - **Build from source** or target Teensy / Raspberry Pi: [building.md](building.md).
 
 Stuck, or something didn't work? Open an

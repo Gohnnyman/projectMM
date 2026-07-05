@@ -52,9 +52,11 @@ void otaTask(void* arg) {
     *p->bytesReadOut = 0;
     *p->bytesTotalOut = 0;   // unknown until esp_https_ota reports it
 
-    // `esp_crt_bundle_attach` enables the bundled-trust-anchor mode for TLS
-    // verification — the same mechanism Chrome/curl use for general HTTPS
-    // (api.github.com, objects.githubusercontent.com, …). No baked cert.
+    // `esp_crt_bundle_attach` enables the bundled-trust-anchor mode for TLS verification — the same
+    // mechanism Chrome/curl use for general HTTPS (api.github.com, objects.githubusercontent.com, …).
+    // No baked cert. It's attached unconditionally: for an https URL it verifies the server; for a
+    // plain-http LAN OTA (MoonDeck serving a local build) it goes unused, but its presence satisfies
+    // esp_https_ota_begin's "server verification enabled" check, so the fetch proceeds over plain TCP.
     esp_http_client_config_t http_config = {};
     http_config.url = p->url;
     http_config.crt_bundle_attach = esp_crt_bundle_attach;
@@ -182,6 +184,67 @@ bool http_fetch_to_ota(const char* url,
         delete p;
         return false;
     }
+    return true;
+}
+
+bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
+                    char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
+    if (!src || !statusBuf || statusBufLen == 0 || !bytesReadOut) return false;
+    auto setStatus = [&](const char* fmt, auto... a) {
+        std::snprintf(statusBuf, statusBufLen, fmt, a...);
+    };
+
+    const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
+    if (!part) { setStatus("error: no OTA partition"); return false; }
+
+    setStatus("flashing");
+    esp_ota_handle_t handle = 0;
+    // OTA_SIZE_UNKNOWN: the upload streams, so we don't pre-declare the exact size (Content-Length
+    // is advisory for the UI); esp_ota_begin erases lazily as writes arrive.
+    esp_err_t err = esp_ota_begin(part, OTA_SIZE_UNKNOWN, &handle);
+    if (err != ESP_OK) { setStatus("error: ota begin %s", esp_err_to_name(err)); return false; }
+
+    // Pull the upload body chunk-by-chunk and write each into the partition — the same producer
+    // callback fsWriteStream drives, here feeding esp_ota_write instead of a file. `abort` from the
+    // caller (an incomplete/timed-out upload) fails the OTA, and esp_ota_abort discards the partial.
+    static uint8_t buf[4096];   // static: keep it off this call's stack (4 KB is large for a task frame)
+    uint32_t written = 0;
+    for (;;) {
+        bool abort = false;
+        const size_t n = src(reinterpret_cast<char*>(buf), sizeof(buf), user, &abort);
+        if (abort) {
+            setStatus("error: upload aborted");
+            esp_ota_abort(handle);
+            return false;
+        }
+        if (n == 0) break;   // clean EOF — whole body delivered
+        err = esp_ota_write(handle, buf, n);
+        if (err != ESP_OK) {
+            setStatus("error: ota write %s", esp_err_to_name(err));
+            esp_ota_abort(handle);
+            return false;
+        }
+        written += static_cast<uint32_t>(n);
+        *bytesReadOut = written;
+    }
+    // Guard a truncated upload: if the client sent fewer bytes than Content-Length, the image is
+    // incomplete — don't commit a half-image. (contentLen 0 = unknown; skip the check then.)
+    if (contentLen && written < contentLen) {
+        setStatus("error: incomplete upload (%u/%u)",
+                  static_cast<unsigned>(written), static_cast<unsigned>(contentLen));
+        esp_ota_abort(handle);
+        return false;
+    }
+
+    err = esp_ota_end(handle);   // validates the image (magic/checksum); consumes the handle
+    if (err != ESP_OK) { setStatus("error: ota end %s", esp_err_to_name(err)); return false; }
+    err = esp_ota_set_boot_partition(part);
+    if (err != ESP_OK) { setStatus("error: set boot %s", esp_err_to_name(err)); return false; }
+
+    setStatus("rebooting");
+    // Image committed + boot pointer flipped. Return to the caller so it can send its HTTP 200
+    // BEFORE the reboot (the caller closes the socket + reboots, same sequence as /api/reboot) —
+    // that's what lets the browser see a clean "flashed" response instead of an aborted socket.
     return true;
 }
 

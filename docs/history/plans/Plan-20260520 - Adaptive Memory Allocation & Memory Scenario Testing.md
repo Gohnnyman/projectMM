@@ -118,7 +118,7 @@ Scenarios that verify memory behavior. Both in-process and live.
 - Each step: measure heap, check bounds
 - On ESP32: observe degradation cascade kicking in at some grid size
 
-**Live runner** (`scripts/scenario/run_live_scenario.py`):
+**Live runner** (`moondeck/scenario/run_live_scenario.py`):
 - Parse heap/maxBlock bounds from scenario JSON
 - Report memory deltas per step
 
@@ -177,7 +177,7 @@ test/scenarios/memory-boot.json
 test/scenarios/memory-1to1.json
 test/scenarios/memory-shuffled.json
 test/scenarios/memory-scaling.json
-scripts/scenario/run_live_scenario.py  # memory bounds support
+moondeck/scenario/run_live_scenario.py  # memory bounds support
 docs/architecture-light.md      # memory tiers, invariants
 docs/moonmodules/core/MoonModule.md
 docs/moonmodules/light/Layer.md

@@ -4,12 +4,12 @@ How to get the system running on a desktop, an ESP32, a Teensy, or a Raspberry P
 
 ## MoonDeck — the dev console
 
-Everything that builds, flashes, runs, tests, monitors, or checks the project — for every target — lives as a script under `scripts/`. The full per-script reference is [scripts/MoonDeck.md](../scripts/MoonDeck.md).
+Everything that builds, flashes, runs, tests, monitors, or checks the project — for every target — lives as a script under `moondeck/`. The full per-script reference is [moondeck/MoonDeck.md](../moondeck/MoonDeck.md).
 
 The scripts have two front ends with the same code and arguments:
 
-- **CLI** — `uv run scripts/<group>/<name>.py`. What agents use; what CI uses. Composes with shell, captures exit codes, parses output.
-- **MoonDeck** — `uv run scripts/moondeck.py`, then open `http://localhost:8420`. A browser dev console wrapping the same scripts: status dots, run/stop toggles for long-running processes, grouped tabs, output panes. The human control deck.
+- **CLI** — `uv run moondeck/<group>/<name>.py`. What agents use; what CI uses. Composes with shell, captures exit codes, parses output.
+- **MoonDeck** — `uv run moondeck/moondeck.py`, then open `http://localhost:8420`. A browser dev console wrapping the same scripts: status dots, run/stop toggles for long-running processes, grouped tabs, output panes. The human control deck.
 
 Use whichever fits. Neither path is "more official" than the other; the scripts are the source of truth and the front ends are interfaces. New work adds a script first; both interfaces follow.
 
@@ -19,7 +19,7 @@ MoonDeck has three tabs:
 - **ESP32** — chip type and USB port selection. Build, flash, monitor.
 - **Live** — device discovery and monitoring against running devices on the network.
 
-Script definitions and configuration live in `scripts/moondeck_config.json` (committed). Script documentation lives in `scripts/MoonDeck.md`, one section per script. Runtime state (selected devices, ports) persists in `scripts/moondeck.json` (gitignored).
+Script definitions and configuration live in `moondeck/moondeck_config.json` (committed). Script documentation lives in `moondeck/MoonDeck.md`, one section per script. Runtime state (selected devices, ports) persists in `moondeck/moondeck.json` (gitignored).
 
 ## Tooling overview
 
@@ -52,9 +52,9 @@ The project is structured as a small set of CMake libraries: a core library (pla
 Desktop and RPi both build with the root `CMakeLists.txt`. RPi can cross-compile against the same tree or build natively on the device — same source.
 
 ```sh
-uv run scripts/build/build_desktop.py        # build
-uv run scripts/run/run_desktop.py            # run as detached background process
-uv run scripts/test/test_desktop.py          # unit tests
+uv run moondeck/build/build_desktop.py        # build
+uv run moondeck/run/run_desktop.py            # run as detached background process
+uv run moondeck/test/test_desktop.py          # unit tests
 ```
 
 Or use MoonDeck's PC tab for the same operations with a status dot per card. The desktop run detaches and outlives the launching script — the same model as flashing an ESP32, where the device runs independently afterwards.
@@ -103,13 +103,13 @@ git config --global core.longpaths true
 git clone --depth 1 --branch release/v6.1 https://github.com/espressif/esp-idf.git "$env:USERPROFILE\esp\esp-idf"
 ```
 
-Then run the one-time Python environment setup — either open MoonDeck (`uv run scripts/moondeck.py`), go to the ESP32 tab, and click **Setup ESP-IDF**, or run it directly:
+Then run the one-time Python environment setup — either open MoonDeck (`uv run moondeck/moondeck.py`), go to the ESP32 tab, and click **Setup ESP-IDF**, or run it directly:
 
 ```sh
-uv run scripts/build/setup_esp_idf.py                                 # one-time
-uv run scripts/build/build_esp32.py --firmware esp32                  # WiFi-only
-uv run scripts/build/flash_esp32.py --firmware esp32 --port /dev/tty.usbserial-XXXX
-uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
+uv run moondeck/build/setup_esp_idf.py                                 # one-time
+uv run moondeck/build/build_esp32.py --firmware esp32                  # WiFi-only
+uv run moondeck/build/flash_esp32.py --firmware esp32 --port /dev/tty.usbserial-XXXX
+uv run moondeck/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
 
 `setup_esp_idf.py` runs the upstream installer for the host: `install.sh` on macOS/Linux, `install.bat` on Windows. Both create the same `~/.espressif/python_env/...` venv and download the same toolchains (~1.5 GB more) — only the wrapper differs. The Windows installer needs roughly 5 minutes on a fast link. It also offers to move a drifted checkout onto the pinned commit (see [ESP-IDF version](#esp-idf-version)); pass `--no-checkout` to keep it warn-only.
@@ -170,7 +170,7 @@ Each row below states where we are and the trigger to move.
 | **PSA Crypto** — legacy mbedTLS crypto APIs deprecated in favour of the PSA API | No direct exposure: we never call mbedTLS ourselves; OTA uses `esp_https_ota` + `esp_crt_bundle_attach` ([platform_esp32_ota.cpp](../src/platform/esp32/platform_esp32_ota.cpp)), which wrap crypto internally. | Nothing to migrate while we stay on high-level components. **Watch** only: if a future feature needs hashing/signing directly (e.g. signed-OTA verification, a device identity), write it against the **PSA API** from the start, not legacy mbedTLS. Trigger: first direct crypto use. |
 | **`network_provisioning`** — Espressif's Unified Provisioning subsystem, renamed from `wifi_provisioning` in v6.0. Transports: **BLE (GATT)** + **Wi-Fi SoftAP**. Clients: official iOS/Android apps for both, plus `esp_prov` (a Python CLI on Linux/macOS/Windows). Transport-agnostic but ships no web/serial client. | We provision over [Improv](../src/core/ImprovProvisioningModule.h) — serial (USB) + BLE, driven from the **browser** (ESP Web Tools) or a serial CLI. That covers the *web-installer / no-app* onboarding well. What we **don't** have is the IDF-native **phone-app + SoftAP** flow (open the ESP app, pick the device's AP, hand it credentials) that most shipping ESP32 products offer. So this is a real coverage gap, not a duplicate: the two standards meet only on BLE and own different front-ends. | **Adopt to close the gap — this is a planned capability, not a maybe.** `network_provisioning` is in v6.0 (clears the floor) and is *the* IDF-native standard, so embracing it is exactly the stance above. Add it as a **sibling provisioning module** beside ImprovProvisioning (both live as Peripheral/System modules; the device can offer whichever transports its chip supports), reusing the same WiFi-credential plumbing. Not a replacement for Improv — they cover different front-ends (browser vs phone-app), and a product can want either. The phone-app + SoftAP path is the part that makes ESP32 deployment feel product-grade. Trigger: scheduled as one of the v6.0-adoption iterations (see below). |
 | **CMake Build System v2** — the named successor to the current build system; technical preview in v6.0/6.1, has its own migration guide | Standard `idf.py` build (v1). Our component is a thin `idf_component_register()` wrapper, so the migration surface is small. | **Watch until it's GA** (not while it's preview — adopting a preview build system would be the opposite of "common patterns first"). Trigger: v2 ships as the default. Then dry-run a build under v2, fix any `idf_component_register()` / Kconfig-dependency fallout, switch. Low risk given how little custom CMake we have. |
-| **Built-in MCP server** (`idf.py mcp-server`) — lets an AI assistant drive build/flash/monitor/debug directly | Not used. Agents and humans both go through the `scripts/<group>/*.py` layer (the uniform interface in [scripts/MoonDeck.md](../scripts/MoonDeck.md)), which wraps pin-drift checks, per-firmware build dirs, and KPI collection. | **Evaluate, don't default to it.** The risk is a *second control path* that bypasses our script policy, and it's ESP32-only (no desktop), so it can't be the uniform path. If adopted, wrap it *behind* a script (`scripts/run/idf_mcp.py`) so the policy layer still applies, rather than pointing the agent at raw `idf.py`. Trigger: a concrete debug workflow the scripts can't cover. |
+| **Built-in MCP server** (`idf.py mcp-server`) — lets an AI assistant drive build/flash/monitor/debug directly | Not used. Agents and humans both go through the `moondeck/<group>/*.py` layer (the uniform interface in [moondeck/MoonDeck.md](../moondeck/MoonDeck.md)), which wraps pin-drift checks, per-firmware build dirs, and KPI collection. | **Evaluate, don't default to it.** The risk is a *second control path* that bypasses our script policy, and it's ESP32-only (no desktop), so it can't be the uniform path. If adopted, wrap it *behind* a script (`moondeck/run/idf_mcp.py`) so the policy layer still applies, rather than pointing the agent at raw `idf.py`. Trigger: a concrete debug workflow the scripts can't cover. |
 
 The general rule: **anything already in v6.0 we adopt proactively** (it clears the floor, so there's no reason to wait — EIM and `network_provisioning` are both here), while **preview / not-yet-in-v6.0 features wait** until they're stable *and* in our floor. Each adoption is its own commit with its own hardware re-test, and none may regress the Teensy / desktop paths.
 
@@ -186,11 +186,11 @@ Tracked in [backlog](backlog/README.md).
 
 `build_esp32.py --firmware` selects one of the shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module. ("Firmware" here is the compiled binary; the physical product (deviceModel) is a separate concept — see [architecture.md § Firmware vs deviceModel vs board](architecture.md#firmware-vs-devicemodel-vs-board).) `build_esp32.py --help` lists the full set.
 
-The canonical list is the **`FIRMWARES` dict** in [`scripts/build/build_esp32.py`](../scripts/build/build_esp32.py) — the single source of truth, carrying each variant's `chip`, sdkconfig `fragments`, `eth_only`, `ships`, and `description`. Its machine-readable projection is [`web-installer/firmwares.json`](../web-installer/firmwares.json) (generated by `generate_firmwares.py`, drift-guarded by `check_firmwares.py`), which the CI release matrix, the ESP Web Tools manifest loops, and MoonDeck all read — so the list lives in exactly one place. `esp32p4-eth-wifi` has `ships: false` (its C6-slave Kconfig isn't reproducible in CI yet), so it builds from the CLI but stays out of the release matrix.
+The canonical list is the **`FIRMWARES` dict** in [`moondeck/build/build_esp32.py`](../moondeck/build/build_esp32.py) — the single source of truth, carrying each variant's `chip`, sdkconfig `fragments`, `eth_only`, `ships`, and `description`. Its machine-readable projection is [`web-installer/firmwares.json`](../web-installer/firmwares.json) (generated by `generate_firmwares.py`, drift-guarded by `check_firmwares.py`), which the CI release matrix, the ESP Web Tools manifest loops, and MoonDeck all read — so the list lives in exactly one place. `esp32p4-eth-wifi` has `ships: false` (its C6-slave Kconfig isn't reproducible in CI yet), so it builds from the CLI but stays out of the release matrix.
 
 ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so dropping WiFi at compile time happens via `EXCLUDE_COMPONENTS` plus `MM_NO_WIFI` (set when `MM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). The `esp32-eth` variant takes this path; the default `esp32` keeps both stacks compiled in and uses the runtime cascade in `NetworkModule` (Ethernet first, WiFi fallback when no PHY responds).
 
-Each firmware has its own build dir at `build/esp32-<firmware>/`, so all variants can coexist on disk. `build_esp32.py` points `idf.py -B` at the per-firmware dir; switching firmwares is just a different `--firmware` argument, no clean rebuild penalty. Same-firmware rebuilds stay incremental, as before. Disk usage scales with the number of firmwares built (≈100 MB each), and a future rename would orphan the old dir — clean with `scripts/build/clean_esp32.py --firmware <name>` or `--all`.
+Each firmware has its own build dir at `build/esp32-<firmware>/`, so all variants can coexist on disk. `build_esp32.py` points `idf.py -B` at the per-firmware dir; switching firmwares is just a different `--firmware` argument, no clean rebuild penalty. Same-firmware rebuilds stay incremental, as before. Disk usage scales with the number of firmwares built (≈100 MB each), and a future rename would orphan the old dir — clean with `moondeck/build/clean_esp32.py --firmware <name>` or `--all`.
 
 If a firmware *key* changes its feature set (e.g. the classic `esp32` collapse turned a WiFi-only key into WiFi+Ethernet), its existing build dir would otherwise keep the old `MM_NO_ETH` / `MM_ETH_ONLY` in `CMakeCache.txt` — CMake `-D` flags are written to the cache, and omitting one on a later configure does *not* clear it, so the stale value would silently build the old feature set (Ethernet stubbed out, no link, no LED, and a flash erase wouldn't help because it's a compile-time define). `build_esp32.py` guards this: before reusing a dir it compares the cached feature flags to what the firmware wants and wipes the dir for a clean reconfigure on a mismatch (printing the reason). Same-feature rebuilds are untouched, so the incremental fast path is preserved.
 
@@ -198,7 +198,7 @@ Each ESP32-S3 SKU has its own firmware key because the sdkconfig fragment encode
 
 The Ethernet PHY type and pin map are runtime config, not baked into the build: each firmware carries the driver(s) its chip can host (RMII EMAC for classic/P4, W5500 SPI for S3), and `deviceModels.json` supplies the per-board PHY/pins (pushed into NetworkModule's eth controls at provision). The classic chip default is the common LAN8720 RMII wiring (reset GPIO 5, MDIO addr 0, clock GPIO 17 — e.g. the Olimex ESP32-Gateway), so a board with the same PHY but a different pinout (e.g. WT32-ETH01 with reset on GPIO 16) just needs a different `deviceModels.json` entry — no rebuild.
 
-`--profile` is accepted one release for migration: `--profile default` → `--firmware esp32`, `--profile eth-only` → `--firmware esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--firmware esp32-eth`).
+`--profile` is accepted one release for migration: `--profile default` → `--firmware esp32`, `--profile eth-only` → `--firmware esp32-eth`.
 
 ### Why not Arduino
 

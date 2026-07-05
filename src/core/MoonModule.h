@@ -222,6 +222,13 @@ public:
     /// Network, Filesystem) so the user can re-enable other modules through them.
     virtual bool respectsEnabled() const { return true; }
 
+    /// Whether this module appears in the UI (/api/state → nav card). Default true. A pure engine
+    /// with no user-facing controls returns false so it isn't shown as an empty card — e.g.
+    /// FilesystemModule (the persistence engine; its one status readout lives on FileManagerModule)
+    /// and HttpServerModule (the web server itself). The state serializer skips any module whose
+    /// appearsInUi() is false.
+    virtual bool appearsInUi() const { return true; }
+
     /// Dirty flag — set by HttpServerModule when a control changes. FilesystemModule (or any
     /// consumer interested in "this module's state has been touched") observes it in loop1s()
     /// and clears it after persisting.
@@ -248,6 +255,30 @@ public:
 
     ControlList& controls() { return controls_; }
     const ControlList& controls() const { return controls_; }
+
+    /// Read one of this module's controls by name generically (no per-consumer control scan). Returns
+    /// `dflt` when the control is absent or the wrong type. The domain-neutral way for another module
+    /// (HttpServerModule's WLED shim, MqttModule) to read a target's control without a light include
+    /// or a hand-rolled scan — one implementation, so the absent-control default can't disagree
+    /// between callers.
+    bool readBool(const char* name, bool dflt) const {
+        for (uint8_t i = 0; i < controls_.count(); i++) {
+            const ControlDescriptor& c = controls_[i];
+            if (c.ptr && c.type == ControlType::Bool && std::strcmp(c.name, name) == 0)
+                return *static_cast<const bool*>(c.ptr);
+        }
+        return dflt;
+    }
+    uint8_t readUint8(const char* name, uint8_t dflt) const {
+        for (uint8_t i = 0; i < controls_.count(); i++) {
+            const ControlDescriptor& c = controls_[i];
+            // Uint8 covers both a plain uint8 (brightness) and a Select stored as uint8 (palette).
+            if (c.ptr && std::strcmp(c.name, name) == 0 &&
+                (c.type == ControlType::Uint8 || c.type == ControlType::Select))
+                return *static_cast<const uint8_t*>(c.ptr);
+        }
+        return dflt;
+    }
 
     /// Role for type identification (no RTTI needed).
     virtual ModuleRole role() const { return ModuleRole::Generic; }

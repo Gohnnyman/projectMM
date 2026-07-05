@@ -59,7 +59,7 @@ The preview is a *live view* — one viewer at a time is the real use case, and 
 
 ## Verification
 
-- **Host:** `cmake --build build` (-Werror), `ctest`, `uv run scripts/scenario/run_scenario.py`, `check_specs.py`, `check_platform_boundary.py`.
+- **Host:** `cmake --build build` (-Werror), `ctest`, `uv run moondeck/scenario/run_scenario.py`, `check_specs.py`, `check_platform_boundary.py`.
 - **ESP32 build** (`esp32p4-eth` + `esp32s3-n16r8` + classic `esp32`).
 - **Live — find where it breaks (test-first):** websockets probe — sweep Grid 48²→64²→128²→195²→256²→512², recording at each size: WS open?, frame point-count (full vs downsampled), `/api/system` tick, preview fps. Locate the real break point **per board** and set the cap from that. Assert the WS never closes and the tick never stalls.
 - **Classic board (the key test):** sweep toward 16K+, find where internal RAM / drain-latency forces downsampling, confirm the device degrades-never-crashes. Sets the classic-tier cap.

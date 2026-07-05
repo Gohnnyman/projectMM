@@ -3,6 +3,7 @@
 #include "light/effects/EffectBase.h"
 #include "light/layers/Layer.h"   // layer()->buffer()
 #include "light/draw.h"           // draw::pixel
+#include "light/Palette.h"        // colorFromPalette + the active palette (usePalette)
 #include "core/math8.h"           // Random8
 
 #include <array>
@@ -36,11 +37,28 @@ public:
     uint8_t turnsPerSecond = 2;       // 0..20
     uint8_t cubeSize       = 3;       // 1..8 (cube order)
     bool    randomTurning  = false;
+    bool    usePalette     = false;   // off = the classic 6 Rubik's face colours; on = 6 samples
+                                      // of the system-wide palette (advised: a primary-ish palette)
 
     void onBuildControls() override {
         controls_.addUint8("turnsPerSecond", turnsPerSecond, 0, 20);
         controls_.addUint8("cubeSize", cubeSize, 1, 8);
         controls_.addBool("randomTurning", randomTurning);
+        controls_.addBool("usePalette", usePalette);
+    }
+
+    // The 6 face colours drawCube paints with. Classic Rubik's set (red, dark-orange, blue, green,
+    // yellow, white) by default; with usePalette, 6 evenly-spaced samples of the system-wide active
+    // palette (0, 51, 102, … 255) so the cube recolours to whatever palette is chosen — advised: a
+    // primary-ish palette so the 6 faces stay distinct.
+    std::array<RGB, 6> faceColors() const {
+        if (!usePalette)
+            return {{{255, 0, 0}, {255, 140, 0}, {0, 0, 255}, {0, 128, 0}, {255, 255, 0}, {255, 255, 255}}};
+        std::array<RGB, 6> pal{};
+        const Palette& active = *Palettes::active();
+        for (int i = 0; i < 6; i++)
+            pal[i] = colorFromPalette(active, static_cast<uint8_t>(i * 255 / 5));
+        return pal;
     }
 
     // cubeSize / randomTurning changes re-scramble (MoonLight reinitialises on those controls). No
@@ -80,7 +98,7 @@ public:
                                         : unpackMove(moveList_[moveIndex_]);
         // Playback applies the inverse direction so the scramble unwinds toward solved.
         (cube_.*kRotateFuncs[move.face])(!move.direction, static_cast<uint8_t>(move.width + 1));
-        cube_.drawCube(buf, dims, w, h, d);
+        cube_.drawCube(buf, dims, w, h, d, faceColors());
 
         if (!randomTurning && moveIndex_ == 0) {
             step_ = now + 3000;   // solved: hold for 3 s, then re-scramble
@@ -205,7 +223,9 @@ private:
 
         // Project the cube onto the LED volume: every in-bounds voxel is coloured by the outer face
         // it sits nearest. (MoonLight's drawCube, with the isMapped()-skip and sizeX++/etc dropped.)
-        void drawCube(Buffer& buf, Coord3D dims, lengthType sx, lengthType sy, lengthType sz) const {
+        // The 6 face colours are supplied by the caller (classic Rubik's set, or palette samples).
+        void drawCube(Buffer& buf, Coord3D dims, lengthType sx, lengthType sy, lengthType sz,
+                      const std::array<RGB, 6>& COLOR_MAP) const {
             // This effect owns its background: drawCube writes only the SURFACE voxels (the loop has
             // no else for the interior), and a turn moves stickers to new positions, so without a
             // wipe the old pose's stickers linger and the cube accretes garbage — it never settles.
@@ -219,10 +239,6 @@ private:
             const int num = 2 * (SIZE + 1);
             const int denX = 2 * sizeX, denY = 2 * sizeY, denZ = 2 * sizeZ;
             const int halfX = sizeX / 2, halfY = sizeY / 2, halfZ = sizeZ / 2;
-
-            // Red, DarkOrange, Blue, Green, Yellow, White.
-            const RGB COLOR_MAP[6] = {
-                {255, 0, 0}, {255, 140, 0}, {0, 0, 255}, {0, 128, 0}, {255, 255, 0}, {255, 255, 255}};
 
             for (int x = 0; x < sx; x++)
                 for (int y = 0; y < sy; y++)
@@ -291,7 +307,7 @@ private:
             (cube_.*kRotateFuncs[move.face])(move.direction, static_cast<uint8_t>(move.width + 1));
         }
         moveIndex_ = static_cast<uint8_t>(cappedMoves - 1);
-        cube_.drawCube(buf, dims, w, h, d);
+        cube_.drawCube(buf, dims, w, h, d, faceColors());
     }
 
     // Inline integer helpers (MoonLight's MIN/MAX/constrain).

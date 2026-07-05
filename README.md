@@ -8,7 +8,7 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 📦 **Release + downloads:** [latest release](https://github.com/MoonModules/projectMM/releases/latest)
 
-🛠️ **Building / hacking on it?** [MoonDeck](scripts/MoonDeck.md), our browser-based dev console (build · flash · test · live device discovery), comes in the repo.
+🛠️ **Building / hacking on it?** [MoonDeck](moondeck/MoonDeck.md), our browser-based dev console (build · flash · test · live device discovery), comes in the repo.
 
 Open Chrome or Edge, plug in your device, and you'll see lights in under a minute.
 
@@ -31,6 +31,10 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 🌐 **Industry protocols, both directions**: send *and* receive [Art-Net](https://art-net.org.uk/), [E1.31/sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/) over the network — interoperable with Falcon, Advatek, xLights, Resolume, LedFx and other industry gear.
 
 🎵 **Audio-reactive**: an I²S microphone drives a 16-band FFT spectrum + sound level, consumed by audio-reactive effects — all built fresh from the mic datasheet and textbook DSP.
+
+🏠 **Home-automation control**: a device joins Homebridge (and any MQTT hub) over a dependency-free MQTT 3.1.1 client — on/off, brightness, and a HomeKit colour wheel that picks the nearest palette. See [the MQTT module docs](docs/moonmodules/core/ui/ui.md#mqtt).
+
+📁 **On-device File Manager**: browse and edit the device filesystem from the browser — a lazy folder tree with an inline editor, drag-drop upload, and create/delete, plus [firmware upload OTA](docs/moonmodules/core/ui/ui.md#firmware-update) (flash a `.bin` over the LAN, no USB). See [the File Manager docs](docs/moonmodules/core/ui/ui.md#file-manager).
 
 🛡️ **Robust to any input**: add, delete, replace, or reconfigure any module in any order, at any grid size, and the device keeps running — degraded or idle, never crashed. Every crash that's ever found becomes a regression test, so it stays fixed.
 
@@ -108,10 +112,10 @@ You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a 
 Once prerequisites are in place, launch MoonDeck, the browser-based dev console:
 
 ```sh
-uv run scripts/moondeck.py
+uv run moondeck/moondeck.py
 ```
 
-Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [scripts/MoonDeck.md](scripts/MoonDeck.md).
+Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [moondeck/MoonDeck.md](moondeck/MoonDeck.md).
 
 ![Moondeck Pc](docs/assets/ui/moondeck_pc.png)
 

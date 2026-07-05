@@ -95,14 +95,25 @@ public:
     /// the UI before the 2s debounce expires.
     bool respectsEnabled() const override { return false; }
 
+    /// Non-UI: a pure persistence engine with no controls — not shown as a card (its "last saved"
+    /// status is displayed by FileManagerModule). See MoonModule::appearsInUi.
+    bool appearsInUi() const override { return false; }
+
     void setScheduler(Scheduler* s);
     void setup() override;
-
-    /// Binds the read-only "lastSaved" display (how long ago the config was last written,
-    /// or "never" before any save) and the "filesystem" partition-usage progress bar (bound
-    /// only when the platform reports a real data partition; 0 → omitted).
-    void onBuildControls() override;
     void loop1s() override;
+
+    /// The engine's live "last saved" buffer — "never" before the first save, else "5m ago". This
+    /// is the persistence engine's status; FileManagerModule binds its read-only "lastSaved" control
+    /// straight to this buffer (no copy — same no-per-instance-copy pattern SystemModule uses for
+    /// its statics), and this module's loop1s keeps it current. Returns the mutable buffer because
+    /// addReadOnly takes a char* it points the control at. FilesystemModule itself has NO controls —
+    /// it's a non-UI engine, not a card in the module tree.
+    char* lastSavedStr() { return lastSaveStr_; }
+
+    /// The live singleton (the main-wired instance registered in setScheduler), or null before
+    /// boot wiring. FileManagerModule reads lastSavedStr() through this.
+    static FilesystemModule* instance() { return instance_; }
 
     /// Synchronous save of every dirty subtree, bypassing the debounce. Same work
     /// loop1s does once the debounce expires. Exposed for tests so they can assert
@@ -125,9 +136,7 @@ private:
     bool everSaved_ = false;       ///< false until the first successful save
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
-    char lastSaveStr_[24] = "never";  ///< "lastSaved" read-only control value
-    uint32_t fsUsedVal_ = 0;          ///< "filesystem" progress: bytes used, refreshed in loop1s
-    uint32_t totalFsVal_ = 0;         ///< "filesystem" progress: partition total, read once in onBuildControls
+    char lastSaveStr_[24] = "never";  ///< "last saved" status string; FileManagerModule reads it via lastSavedStr()
     /// Shared load/save buffer — load runs once at boot (phase 2), save runs in loop1s after
     /// the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
     /// since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32

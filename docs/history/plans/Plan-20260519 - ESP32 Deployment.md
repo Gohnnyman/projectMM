@@ -122,7 +122,7 @@ Actual `wifi_credentials.h` is gitignored.
 1. `cmake --build build` — desktop still builds, zero warnings
 2. `cd build && ctest --output-on-failure` — all tests pass
 3. `./build/test/mm_scenarios` — scenario passes
-4. `python scripts/check/check_platform_boundary.py` — passes
+4. `python moondeck/check/check_platform_boundary.py` — passes
 5. `cd esp32 && idf.py set-target esp32 && idf.py build` — ESP32 builds
 6. Flash + monitor: WiFi connects, serial shows "mmv3 running", ArtNet packets arrive at receiver
 7. Lights visible on hub75 panel from ESP32

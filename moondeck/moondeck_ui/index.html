@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoonDeck</title>
+    <link rel="icon" type="image/png" href="/assets/moonlight-logo.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <img src="/assets/moonlight-logo.png" alt="MoonDeck" class="header-logo">
+        <h1>MoonDeck</h1>
+        <span class="app-version">v{{VERSION}}</span>
+        <nav id="tabs">
+            <button class="tab active" data-tab="pc">PC</button>
+            <button class="tab" data-tab="esp32">ESP32</button>
+            <button class="tab" data-tab="live">Live</button>
+        </nav>
+    </header>
+
+    <div class="content">
+        <aside class="sidebar">
+            <!-- Network bar: app-wide selector for the active LAN. Holds the
+                 active port (serial), WiFi credentials (used by Improv), and
+                 the device list (rendered on the Live tab). Auto-selected
+                 from the host's current subnet on each /api/state load. -->
+            <div id="network-bar" class="network-bar">
+                <label>Network:
+                    <select id="network-select"></select>
+                </label>
+                <button id="network-rename" title="Rename this network">Rename</button>
+                <button id="network-add" title="Add a network for the current host subnet">Add</button>
+                <div id="network-wifi" class="network-wifi">
+                    <label>SSID: <input id="network-wifi-ssid" type="text" autocomplete="off"></label>
+                    <label>Password: <input id="network-wifi-password" type="password" autocomplete="off"></label>
+                </div>
+            </div>
+
+            <section id="tab-pc" class="tab-content active">
+                <div id="scripts-pc" class="script-grid"></div>
+            </section>
+
+            <section id="tab-esp32" class="tab-content">
+                <!-- ESP32 tab layout, top → bottom:
+                       1. Setup (firmware-independent: ESP-IDF, Clean).
+                       2. Firmware dropdown — drives Build.
+                       3. Build group.
+                       4. Port dropdown — drives Flash + run-group scripts
+                          (Monitor, Improv, …). Sits between Build and the
+                          downstream actions because every script below it
+                          needs a port; Build doesn't.
+                       5. Flash group + remaining run-group scripts. -->
+                <div id="scripts-esp32-setup" class="script-grid"></div>
+                <div class="esp32-controls">
+                    <label>Firmware: <select id="firmware-select"></select></label>
+                    <label>Device model: <select id="devicemodel-select" title="Device model — provisioning injects its deviceModels.json settings (e.g. the weak-power TX-power cap) before WiFi association"></select></label>
+                </div>
+                <div id="scripts-esp32-build" class="script-grid"></div>
+                <div class="esp32-controls">
+                    <div class="port-header">
+                        <span>Port:</span>
+                        <button id="refresh-ports" title="Refresh">&#x21bb;</button>
+                    </div>
+                    <select id="port-select"><option value="">--</option></select>
+                    <!-- Names the device MoonDeck last flashed on the selected port (from
+                         moondeck.json's last_port breadcrumb) so you know which board you're
+                         about to reflash. Empty when the port has no known device. -->
+                    <div id="port-device-hint" class="port-device-hint"></div>
+                </div>
+                <div id="scripts-esp32" class="script-grid"></div>
+            </section>
+
+            <section id="tab-live" class="tab-content">
+                <div class="live-controls">
+                    <button id="discover-btn">Discover</button>
+                    <button id="refresh-devices-btn">Refresh</button>
+                </div>
+                <div id="device-list"></div>
+                <div id="scripts-live" class="script-grid"></div>
+            </section>
+        </aside>
+
+        <main class="main-pane">
+            <div class="pane-header">
+                <div class="pane-tabs">
+                    <button class="pane-tab active" data-pane="log">Log</button>
+                    <button class="pane-tab" data-pane="view">View</button>
+                </div>
+                <div class="pane-header-right">
+                    <div id="view-nav" class="view-nav" hidden>
+                        <button id="view-back" title="Back">&#x2190;</button>
+                        <button id="view-forward" title="Forward">&#x2192;</button>
+                        <button id="view-refresh" title="Refresh">&#x21bb;</button>
+                        <button id="view-open" title="Open in a new tab">&#x2197;</button>
+                    </div>
+                    <button id="clear-log">Clear</button>
+                </div>
+            </div>
+            <div id="pane-log" class="pane-content active">
+                <pre id="log"></pre>
+            </div>
+            <div id="pane-view" class="pane-content">
+                <!-- allow-modals: the embedded device UI uses window.prompt/alert/confirm (e.g. the
+                     File Manager's new-folder/new-file name prompt). Without this flag a sandboxed
+                     frame silently blocks them ("Use of window.prompt is not allowed…"). It permits
+                     modal dialogs only — it does NOT relax the origin/script isolation. -->
+                <iframe id="view-frame" title="Device UI preview" sandbox="allow-same-origin allow-scripts allow-forms allow-modals"></iframe>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

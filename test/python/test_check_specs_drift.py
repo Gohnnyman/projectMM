@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts" / "check"))
+sys.path.insert(0, str(ROOT / "moondeck" / "check"))
 
 from check_specs import _check_range_drift, _check_author_url_drift  # noqa: E402
 

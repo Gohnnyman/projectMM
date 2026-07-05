@@ -119,7 +119,7 @@ This resolves the Plan-agent's concern: dynamic modifiers do **not** force the f
 - **Per-frame seam scratch buffer**: the live remap needs a logical-sized scratch (allocated when `hasLive_`, off the hot path). Confirm it degrades gracefully on OOM (fall back to static LUT, no live motion, status warning).
 
 ## Verification
-- `ctest` + `uv run scripts/scenario/run_scenario.py` green at each commit boundary.
+- `ctest` + `uv run moondeck/scenario/run_scenario.py` green at each commit boundary.
 - New `unit_Layer_modifier_chain` proves Region∘Multiply composes (A∘B ≠ B∘A, disabled-middle skipped).
 - Live on the bench: build a Region + Multiply(mirror) stack on the S3, confirm the carved-then-mirrored result in the preview; add a Rotate on top, confirm smooth (not stepped) dynamic rotation with the static chain underneath.
 - Perf: capture single-layer (no modifier) tick on S3/classic/P4 — must match today (max-speed guarantee); capture a static 2-chain and a dynamic (Rotate) chain to quantify the live-seam cost.

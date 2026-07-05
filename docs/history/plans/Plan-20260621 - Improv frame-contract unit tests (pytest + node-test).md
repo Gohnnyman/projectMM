@@ -5,7 +5,7 @@
 MoonDeck (Python) and the web installer (JS) have **no unit tests** today (no pytest dep, no package.json). The single highest-value target is the **Improv wire frame**, implemented **three times** that must agree byte-for-byte:
 
 - device C++ — `src/core/ImprovFrame.h` (parser) + `src/platform/esp32/platform_esp32_improv.cpp` (handlers)
-- Python — `scripts/build/improv_provision.py::build_frame` / `checksum`
+- Python — `moondeck/build/improv_provision.py::build_frame` / `checksum`
 - installer JS — `docs/install/install-orchestrator.js::buildImprovFrame` + the APPLY_OP chunker
 
 All three use `IMPROV` magic + version 1 + type + length + payload + **sum-mod-256** checksum (verified: `ImprovFrame.h:115`, JS `& 0xff`, Py `& 0xFF`). Drift here silently breaks provisioning. Pin it with a **golden vector** asserted on both the Python and JS sides (and hand-checked against C++).
@@ -26,7 +26,7 @@ All three use `IMPROV` magic + version 1 + type + length + payload + **sum-mod-2
 4. **New** `test/python/test_improv_frame.py` — pytest over `improv_provision.build_frame`/`checksum` (imported via `sys.path`), same golden vector. (`import serial` is already lazy/`try`-guarded, so the import is clean without pyserial.)
 5. **Edit** `pyproject.toml` — add `pytest` dev dependency.
 6. **New** `.github/workflows/test.yml` — PR-triggered: `uv run pytest test/python` + `node --test test/js`.
-7. **Edit** `CLAUDE.md` Event 1 (commit gates) — add the pytest + node:test step (trigger: `scripts/**`, `docs/install/**`, `test/python/**`, `test/js/**` changed).
+7. **Edit** `CLAUDE.md` Event 1 (commit gates) — add the pytest + node:test step (trigger: `moondeck/**`, `docs/install/**`, `test/python/**`, `test/js/**` changed).
 
 ## Golden vector
 

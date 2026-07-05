@@ -34,7 +34,7 @@ Today: `check_specs.py` rglobs each module `.h` → requires a matching per-modu
 
 - **New:** `docs/moonmodules/light/effects.md`, `modifiers.md`, `layouts.md` (compact-row pages with library sections).
 - **Delete:** the ~17 `docs/moonmodules/light/effects/*.md`, ~5 `modifiers/*.md`, ~4 `layouts/*.md` (folded into the pages).
-- **Edit:** `src/main.cpp` (registered `.md` path per effect/modifier/layout → the page), `scripts/check/check_specs.py` (page-scoped control-name check + the type→page map), `scripts/docs/generate_test_docs.py` if it links per-module `.md` anchors, and any doc that links a deleted per-module page (re-point to `effects.md#name`).
+- **Edit:** `src/main.cpp` (registered `.md` path per effect/modifier/layout → the page), `moondeck/check/check_specs.py` (page-scoped control-name check + the type→page map), `moondeck/docs/generate_test_docs.py` if it links per-module `.md` anchors, and any doc that links a deleted per-module page (re-point to `effects.md#name`).
 - **Unchanged:** `src/light/effects/*.h` etc. (code), `docs/moonmodules/light/drivers/*.md` (per-driver), `docs/moonmodules/core/*`.
 
 ## Origin sections (from each module's `tags()` today)

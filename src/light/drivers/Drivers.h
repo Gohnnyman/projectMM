@@ -61,10 +61,12 @@ public:
     /// doesn't trigger a structural rebuild.
     virtual void onCorrectionChanged() {}
 
-    /// Clear both shared status strings on teardown (frees the owned `failBuf_`). A
-    /// driver that overrides teardown() for its own peripheral cleanup chains to this
-    /// afterwards: `deinit(); DriverBase::teardown();`.
-    void teardown() override { clearFailBuf(); clearConfigErr(); }
+    /// Clear every shared status string on teardown — fail buffer, config error, and config
+    /// warning — so a stopped driver leaves nothing behind (frees the owned `failBuf_`; retracts
+    /// the warning the same "clear only MY status" way as the error). A driver that overrides
+    /// teardown() for its own peripheral cleanup chains to this afterwards:
+    /// `deinit(); DriverBase::teardown();`.
+    void teardown() override { clearFailBuf(); clearConfigErr(); setConfigWarn(nullptr); }
 
 protected:
     Layer* layer_ = nullptr;
@@ -123,6 +125,7 @@ protected:
     // rule). Preview-style drivers never touch these, so the cost is a couple of
     // null pointers they ignore.
     const char* configErr_ = nullptr;
+    const char* configWarn_ = nullptr;
     char* failBuf_ = nullptr;
     static constexpr size_t kFailBufLen = 48;
 
@@ -136,6 +139,22 @@ protected:
         if (configErr_) {
             if (status() == configErr_) clearStatus();
             configErr_ = nullptr;
+        }
+    }
+
+    // A non-fatal config warning (a borrowed literal, like configErr_): the driver keeps
+    // running but flags something the user should see (e.g. a per-pin count clamped to the
+    // WS2812 ceiling). `warn` non-null sets it; null retracts a stale one — so a driver calls
+    // setConfigWarn(warn) unconditionally each parse and the warning tracks the live state.
+    // Same "clear only MY status" rule as configErr_. Factored here so the WS2812 drivers
+    // (Rmt / LCD / Parlio) don't each inline it — the No-duplication rule this block records.
+    void setConfigWarn(const char* warn) {
+        if (warn) {
+            configWarn_ = warn;
+            setStatus(warn, Severity::Warning);
+        } else if (configWarn_) {
+            if (status() == configWarn_) clearStatus();
+            configWarn_ = nullptr;
         }
     }
 
@@ -220,6 +239,14 @@ public:
     /// first boot can't brown out the board before the user sets a safe level.
     /// The user raises it via the brightness control once their supply is known.
     uint8_t brightness = 20;
+    /// Master power. `on=false` outputs black without touching `brightness`, so toggling back
+    /// to `on=true` restores the exact level. Implemented by scaling the correction LUT to zero
+    /// (effectiveBrightness()) — the same cold-path rebuild brightness uses, no hot-path branch.
+    /// This is the single power control every consumer drives: the UI toggle, IR's on/off action,
+    /// the WLED app / Home Assistant (`{"on":…}`), and MQTT/Homebridge all set THIS control through
+    /// `Scheduler::setControl` — define-once, reuse everywhere (the first slice of a global
+    /// lights-control surface). Default on so a freshly-flashed board lights up.
+    bool on = true;
     /// Physical wire format: channel order and whether the light is RGBW (index into
     /// `kLightPresetOptions`; options `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`,
     /// `GRBW`). RGBW presets make each driver emit 4 channels per light with white
@@ -254,7 +281,12 @@ public:
         layer_ = layer;
     }
 
+    // The brightness actually fed to the LUT: 0 when powered off, else the set brightness. Keeping
+    // `on` and `brightness` independent means "off" never clobbers the level the user chose.
+    uint8_t effectiveBrightness() const { return on ? brightness : 0; }
+
     void onBuildControls() override {
+        controls_.addBool("on", on);   // master power — first so it renders at the top of the card
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addSelect("lightPreset", lightPreset, kLightPresetOptions, kLightPresetCount);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
@@ -269,9 +301,10 @@ public:
             Palettes::setActive(palette);   // rebuild the active 16-entry lookup (cheap, off the hot path)
             return;
         }
-        if (std::strcmp(controlName, "brightness") == 0 ||
+        if (std::strcmp(controlName, "on") == 0 ||
+            std::strcmp(controlName, "brightness") == 0 ||
             std::strcmp(controlName, "lightPreset") == 0) {
-            correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
+            correction_.rebuild(effectiveBrightness(), static_cast<LightPreset>(lightPreset));
             // Propagate so physical drivers that maintain a correction-applied
             // buffer (today: ArtNet) can resize off the hot path. A brightness-
             // only change is a no-op for resizing (outChannels stays 3); the
@@ -283,7 +316,7 @@ public:
     }
 
     void setup() override {
-        correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
+        correction_.rebuild(effectiveBrightness(), static_cast<LightPreset>(lightPreset));
         Palettes::setActive(palette);   // seed the global active palette from the persisted index
         MoonModule::setup();
         passBufferToDrivers();

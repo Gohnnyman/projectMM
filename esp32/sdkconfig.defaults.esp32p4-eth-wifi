@@ -2,7 +2,7 @@
 #   Board: https://www.waveshare.com/wiki/ESP32-P4-Nano-StartPage
 #
 # Layered onto sdkconfig.defaults + sdkconfig.defaults.esp32p4-eth by
-# scripts/build/build_esp32.py. The eth fragment brings the EMAC / RMII / flash /
+# moondeck/build/build_esp32.py. The eth fragment brings the EMAC / RMII / flash /
 # PSRAM / partition layout; this fragment adds WiFi over the on-board ESP32-C6
 # co-processor.
 #

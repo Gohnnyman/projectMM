@@ -69,7 +69,7 @@ namespace mm {
 /// **Prior art:** the industry-standard mDNS-SD / DNS-SD (Bonjour, Avahi)
 /// announce-and-browse pattern, plus MoonLight's UDP presence broadcast carried
 /// forward as the 44-byte WLED-compatible packet on UDP 65506. See
-/// docs/moonmodules/core/DevicesModule.md for the WLED-interop screenshots + the
+/// docs/moonmodules/core/moxygen/DevicesModule.md for the WLED-interop screenshots + the
 /// wire shape.
 class DevicesModule : public MoonModule, public ListSource {
 public:

@@ -98,8 +98,10 @@
 #include "core/AudioModule.h"
 #include "core/I2cScanModule.h"
 #include "core/IrModule.h"
+#include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
+#include "core/MqttModule.h"
 #include "core/DevicesModule.h"
 #include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
@@ -207,16 +209,18 @@ static void registerModuleTypes() {
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers/ParlioLedDriver.md");
 #endif
-    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
-    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
-    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
-    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/I2cScanModule.md");
-    mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/IrModule.md");
-    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
-    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
-    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/DevicesModule.md");
-    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
-    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/FilesystemModule.md");
+    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/ui/ui.md");
+    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/ui/ui.md#system");
+    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/ui/ui.md#audio");
+    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/ui/ui.md#i2c-scan");
+    mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/ui/ui.md#ir");
+    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/ui/ui.md#file-manager");
+    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/ui/ui.md#firmware-update");
+    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ui/ui.md#improv-provisioning");
+    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/ui/ui.md#mqtt");
+    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/ui/ui.md#devices");
+    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/ui/ui.md#network");
+    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/ui/ui.md#filesystem");
 }
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {
@@ -262,6 +266,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // overlay into other modules' bound variables before their setup() runs)
     auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
     filesystemModule->setScheduler(&scheduler);
+
+    // File Manager — browse/manage the filesystem (a device-wide tool, boot-wired like the other
+    // system modules, not per-board). Distinct from FilesystemModule (the persistence engine).
+    // setName gives the card a clean "File Manager" label (the type stays FileManagerModule).
+    auto* fileManagerModule = static_cast<mm::FileManagerModule*>(mm::ModuleFactory::create("FileManagerModule"));
+    fileManagerModule->setName("File Manager");
 
     // System (deviceName needed by other modules)
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
@@ -323,6 +333,17 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         // Mark wired-by-code so applyNode's trim loop preserves it on devices
         // whose saved Network.json predates the Improv child (the upgrade case).
         improvModule->markWiredByCode();
+    }
+
+    // MQTT service: a code-wired child of Network (like Improv), bridging the light controls to a
+    // broker for Homebridge/Home-Assistant. Built on every networked target (it uses TCP, so it
+    // works over WiFi or Ethernet); disabled until the user sets a broker. systemModule is injected
+    // for the default topic prefix (the device name).
+    mm::MqttModule* mqttModule = nullptr;
+    if constexpr (mm::platform::hasNetwork) {
+        mqttModule = static_cast<mm::MqttModule*>(mm::ModuleFactory::create("MqttModule"));
+        mqttModule->setSystemModule(systemModule);
+        mqttModule->markWiredByCode();
     }
 
     // Layouts: top-level container; one or more layouts. Today one GridLayout,
@@ -396,15 +417,18 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // Register top-level modules with scheduler (scheduler deletes on teardown).
     // Order matters: filesystem first (load hook runs before any module's setup),
-    // then system (deviceName), firmwareUpdate (status surface, no deps), network
-    // (hosts ImprovProvisioning as a child — same lifecycle, one less top-level
-    // entry, conceptually right since Improv only exists to feed Network credentials),
-    // light pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler walks
-    // roots in this order each tick; child propagation happens inside each root.
+    // then system (deviceName), fileManager (filesystem browser, reads the persistence
+    // engine's "last saved"), firmwareUpdate (status surface, no deps), network (hosts
+    // ImprovProvisioning and Mqtt as children — same lifecycle, one less top-level entry
+    // each; Improv only exists to feed Network credentials, and Mqtt only bridges once the
+    // network is up), light pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler
+    // walks roots in this order each tick; child propagation happens inside each root.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
+    scheduler.addModule(fileManagerModule);
     scheduler.addModule(firmwareUpdateModule);
     if (improvModule) networkModule->addChild(improvModule);
+    if (mqttModule) networkModule->addChild(mqttModule);
     // Devices: discovers other devices on the LAN. Child of Network (discovery
     // depends on the network being up); wired-by-code so persistence preserves it
     // on devices whose saved Network.json predates the child (see DevicesModule.md).

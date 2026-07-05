@@ -230,9 +230,9 @@ Per CLAUDE.md pre-commit checklist (10 steps). Specific to this plan:
 1. `cmake --build build` — zero warnings (UI changes don't affect build but engine changes do)
 2. `ctest --output-on-failure` — existing tests pass + 2 new (`test_movechild`, `test_module_factory`)
 3. `./build/test/mm_scenarios` — exit 0
-4. `python3 scripts/check/check_platform_boundary.py` — PASS (new `platform::reboot` correctly placed)
-5. `python3 scripts/check/check_specs.py` — `10+ modules ok` (HttpServer/SystemModule/MoonModule specs updated)
-6. `python3 scripts/build/build_esp32.py` — clean; `ui_embedded.h` regenerated
+4. `python3 moondeck/check/check_platform_boundary.py` — PASS (new `platform::reboot` correctly placed)
+5. `python3 moondeck/check/check_specs.py` — `10+ modules ok` (HttpServer/SystemModule/MoonModule specs updated)
+6. `python3 moondeck/build/build_esp32.py` — clean; `ui_embedded.h` regenerated
 7. Reviewer agent (Opus) over the staged diff
 8. KPI one-liner with PC + ESP32 tick/FPS per CLAUDE.md step 8
 9. Hardware smoke test at `http://192.168.1.210/`:

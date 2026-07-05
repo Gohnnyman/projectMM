@@ -392,7 +392,7 @@ Each platform reaches hello-world when:
 1. A 100-pixel solid-color test frame renders on a real strip.
 2. The on-board loopback test (5.2) passes on real hardware.
 3. The fx2lafw cross-check (5.3) passes — same bytes, same reset gap.
-4. The fps/jitter KPI line (per [collect_kpi.py](../../scripts/collect/collect_kpi.py)) is captured and stored.
+4. The fps/jitter KPI line (per [collect_kpi.py](../../moondeck/check/collect_kpi.py)) is captured and stored.
 5. (ESP32 only) the test still passes with WiFi associated and a packet flood running.
 
 ## 7. Product-owner decisions

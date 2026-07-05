@@ -39,11 +39,11 @@
 *.out
 *.app
 
-# Build directories (anchored to root, not scripts/build/)
+# Build directories (anchored to root, not moondeck/build/)
 /build/
 /build-*/
 
-# Packaging output from scripts/build/package_desktop.py — the .tar.gz / .zip
+# Packaging output from moondeck/build/package_desktop.py — the .tar.gz / .zip
 # bundles attached to GitHub releases. CI is the authoritative producer
 # (release.yml on tag/main push); local runs are scratch for dev verification.
 # Never commit these — they bloat the repo and can drift from source.
@@ -74,10 +74,10 @@ Testing/
 .cache/
 
 # MoonDeck state
-scripts/moondeck.json
+moondeck/moondeck.json
 # Flash-event breadcrumb dropped by flash_esp32.py and consumed by MoonDeck
 # on the next device refresh to link last_port → device.
-scripts/.last_flash.json
+moondeck/.last_flash.json
 
 # Generated files
 src/ui/ui_embedded.h
@@ -117,11 +117,11 @@ __pycache__/
 # MkDocs — built docs site (rendered fresh in CI, never committed)
 /site/
 
-# Generated test inventory pages — built into the site by scripts/docs/mkdocs_hooks.py
+# Generated test inventory pages — built into the site by moondeck/docs/mkdocs_hooks.py
 # (the CLI generate_test_docs.py can still write them locally, but they are not committed).
 /docs/tests/*.md
 
 # Generated per-module technical pages — Doxygen+moxygen from each `.h`, built into
-# the site by scripts/docs/mkdocs_hooks.py (via gen_api.py). Regenerated every build.
+# the site by moondeck/docs/mkdocs_hooks.py (via gen_api.py). Regenerated every build.
 /docs/moonmodules/core/moxygen/
 /docs/moonmodules/light/moxygen/

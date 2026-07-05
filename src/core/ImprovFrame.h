@@ -14,7 +14,7 @@
 //   - Keep the ESP32 task (platform_esp32.cpp) thin: feed bytes from the
 //     UART driver into ImprovFrameParser, react to complete frames.
 //   - Re-use the builder for both the ESP32 send path and the Python CLI
-//     spec (which reimplements the same framing in scripts/build/
+//     spec (which reimplements the same framing in moondeck/build/
 //     improv_provision.py — same wire format, two languages).
 
 #include <cstdint>

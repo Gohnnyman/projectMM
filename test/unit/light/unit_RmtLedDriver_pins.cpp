@@ -124,6 +124,46 @@ TEST_CASE("assignCounts clamps so the sum never exceeds the buffer") {
     CHECK(counts[0] == 250);
 }
 
+TEST_CASE("assignCounts clamps a pin to the WS2812 ceiling and warns (drives 2048, not zero)") {
+    // A 128×128 grid (16384 lights) all on one pin is ~490 ms/frame (FPS 1) on a WS2812
+    // line. The driver drives the first kMaxWs2812LedsPerPin (output stays lit) — count
+    // clamped, not zeroed — and `warn` is set (not nullptr) so the driver shows a Warning
+    // while still running. The return stays nullptr (a clamp is not an idling error).
+    mm::nrOfLightsType counts[8] = {};
+    const char* warn = nullptr;
+    CHECK(mm::assignCounts("", 1, 16384, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
+    CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);
+    CHECK(warn == mm::kClampedWarning);           // warned, but not an error
+
+    // Without a cap (a clocked-SPI type), the same 16384 passes unclamped, no warning.
+    warn = mm::kClampedWarning;  // ensure it's reset to null on the no-clamp path
+    CHECK(mm::assignCounts("", 1, 16384, counts, /*maxPerPin=*/0, &warn) == nullptr);
+    CHECK(counts[0] == 16384);
+    CHECK(warn == nullptr);
+
+    // The ceiling is per-pin, not total: 4096 over two pins (2048 each) fits, no warning.
+    CHECK(mm::assignCounts("", 2, 4096, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
+    CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);
+    CHECK(counts[1] == mm::kMaxWs2812LedsPerPin);
+    CHECK(warn == nullptr);
+
+    // An explicit SMALL count is the user's choice, not a clamp — must NOT warn.
+    CHECK(mm::assignCounts("100", 1, 1000, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
+    CHECK(counts[0] == 100);
+    CHECK(warn == nullptr);
+
+    // An explicit OVERSIZED count on pin 0 clamps + warns, while the unlisted pins still
+    // split the correct remainder. Buffer 6000 over 3 pins, "5000" explicit on pin 0:
+    // pin 0 wants 5000 → clamped to 2048 (warn); remaining 6000-5000=1000 splits over the
+    // 2 unlisted pins (500 each). The clamp does NOT redistribute the trimmed 2952 — the
+    // remainder is computed from the REQUESTED count, matching the driver's slice offsets.
+    CHECK(mm::assignCounts("5000", 3, 6000, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
+    CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);   // clamped from 5000
+    CHECK(counts[1] == 500);                        // (6000 - 5000) / 2
+    CHECK(counts[2] == 500);
+    CHECK(warn == mm::kClampedWarning);
+}
+
 TEST_CASE("assignCounts handles a zero-light buffer (0×0×0 grid) as all-zero") {
     mm::nrOfLightsType counts[8] = {0xFF, 0xFF, 0xFF};
     CHECK(mm::assignCounts("", 3, 0, counts) == nullptr);

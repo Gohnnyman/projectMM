@@ -69,7 +69,7 @@ labelled summary with a thumbnail:
 A flat JSON array of catalog entries. Each entry is the single source of truth
 for one piece of hardware and what to set up on it at install time. Two clients
 consume it identically — the web installer (`install-orchestrator.js`, which emits
-the entry's units as APPLY_OP ops over serial) and MoonDeck (`scripts/moondeck.py`,
+the entry's units as APPLY_OP ops over serial) and MoonDeck (`moondeck/moondeck.py`,
 which POSTs them over HTTP REST on the LAN) — so **adding another module-with-controls
 unit needs no client change** (both walk the same entry; only the transport differs).
 
@@ -140,6 +140,7 @@ declares only what is actually on that board.
 | `url` | no | product-page link the picker shows next to the board (the vendor's own page, e.g. `https://quinled.info/quinled-dig2go/`). A remote URL is fine here — it's a click-through link, not an asset the installer fetches |
 | `supported` | no | short capability labels the firmware drives on this board *today* (e.g. `["LEDs", "WiFi", "Ethernet"]`), grounded in the modules the entry actually adds. Rendered as solid chips on the picker card |
 | `planned` | no | short labels for peripherals the board physically has but no module drives *yet* (e.g. `["IR receiver", "Onboard button"]`) — the backlog seed for future spec + test work. Rendered as dashed "(soon)" chips on the picker card |
+| `flashBaud` | no | esptool flash baud for this board, overriding the audience default (installer 460800, CLI/MoonDeck 921600). Set it only when a board's USB bridge needs a non-default rate — e.g. a flaky CH340 pinned to `460800`. One of the standard rates (`115200`/`230400`/`460800`/`921600`); `check_devices.py` validates it |
 | `modules` | yes | the list of module-with-controls units that set the board up |
 
 Each `modules[]` unit is `{ type, id, parent_id?, controls? }`:
@@ -239,7 +240,7 @@ same two operations per module: `add_module {type, id, parent_id}` (==
 "create a module, then configure it." (A scenario keeps a separate `props` block
 for in-process C++ construction wiring — `setLayouts`/`setChannelsPerLight`/grid
 dims that aren't control writes — which the catalog never needs, so the catalog
-unit carries only `controls`.) `scripts/scenario/run_live_scenario.py` already
+unit carries only `controls`.) `moondeck/scenario/run_live_scenario.py` already
 runs these ops over HTTP against a live device, the same channel the installer uses.
 
 ## What's *not* in this directory
@@ -271,7 +272,7 @@ the install button can actually flash.
 Quickest. In MoonDeck: **PC tab → Preview Installer**. Or from the CLI:
 
 ```bash
-uv run scripts/run/preview_installer.py
+uv run moondeck/run/preview_installer.py
 # open http://localhost:8000/ in Chrome / Edge / Opera
 ```
 
@@ -309,7 +310,7 @@ for F in esp32 esp32-eth esp32s3-n16r8; do
   TMP=$(mktemp -d)
   gh run download "$RUN_ID" -n "esp32-$F" -D "$TMP"
   cp "$TMP"/*.bin "$DIST/releases/$TAG/"
-  python3 scripts/build/generate_manifest.py \
+  python3 moondeck/build/generate_manifest.py \
     --firmware "$F" --version "$V" \
     --release-url . \
     --flasher-args "$TMP/flasher-$F.json" \

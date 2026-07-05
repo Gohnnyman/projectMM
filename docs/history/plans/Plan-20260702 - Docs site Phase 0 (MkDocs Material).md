@@ -10,7 +10,7 @@ End users currently read 259K words of docs as raw `.md` on github.com — no la
 
 1. **`mkdocs.yml`** at repo root — Material for MkDocs, instant search, `pymdownx.snippets` (for later phases), and a `nav:` tree imposing a top-down end-user → developer order over the *existing* files. No file is moved or rewritten; `nav:` just orders what's there. `history/` and `backlog/` stay out of the published nav (internal).
 2. **`docs/index.md`** — the landing page end users lack: what projectMM is → a prominent "Flash an ESP32" call-to-action routing to `/install/` → first-light → effects → developer drill-down. Preserves every affordance of the old `docs/landing/index.html` (Flash button, GitHub/Releases links) but as the docs home, with Docs/Getting-started links now resolving to *rendered* pages instead of github.com blobs.
-3. **`scripts/docs/build_docs.py`** — a PEP-723 (`# /// script`) uv wrapper around `mkdocs build`, matching the existing `scripts/docs/` convention and the uv-everywhere rule. (As shipped: CI runs a plain `build`, which fails on missing pages / bad nav; broken links and stale anchors stay `warn`-level per the `validation:` block in `mkdocs.yml`. `--strict` is a *local* anchor-audit option, documented in `scripts/MoonDeck.md`, not the CI gate — the intentional out-of-`docs/` source links would make `--strict` fail the build.)
+3. **`moondeck/docs/build_docs.py`** — a PEP-723 (`# /// script`) uv wrapper around `mkdocs build`, matching the existing `moondeck/docs/` convention and the uv-everywhere rule. (As shipped: CI runs a plain `build`, which fails on missing pages / bad nav; broken links and stale anchors stay `warn`-level per the `validation:` block in `mkdocs.yml`. `--strict` is a *local* anchor-audit option, documented in `moondeck/MoonDeck.md`, not the CI gate — the intentional out-of-`docs/` source links would make `--strict` fail the build.)
 4. **CI wiring** — the existing `deploy-pages` job (in `.github/workflows/release.yml`, gated to `main`) builds the MkDocs site into `pages/` root **instead of** copying the single `docs/landing/index.html`. `pages/install/` staging is untouched. Add `docs/**` + `mkdocs.yml` to the workflow's `paths:` so a docs-only change to `main` redeploys.
 
 ## Decisions locked (PO)
@@ -28,13 +28,13 @@ End users currently read 259K words of docs as raw `.md` on github.com — no la
 
 ## Verification
 
-- `uv run scripts/docs/build_docs.py --strict` builds locally with no warnings; every nav entry resolves; search index generates.
+- `uv run moondeck/docs/build_docs.py --strict` builds locally with no warnings; every nav entry resolves; search index generates.
 - Old `docs/landing/index.html` retired (its Flash button + links live on in `docs/index.md`); `check_specs.py` + the doc-generation `--check` still green (Phase 0 touches no specs/tests).
 - CI `deploy-pages` publishes the rendered docs at `/`, installer still reachable at `/install/`.
 
 ## Files
 
-- **New:** `mkdocs.yml`, `docs/index.md`, `scripts/docs/build_docs.py`.
+- **New:** `mkdocs.yml`, `docs/index.md`, `moondeck/docs/build_docs.py`.
 - **Edit:** `.github/workflows/release.yml` (build MkDocs into `pages/` root; add docs paths to `paths:`).
 - **Delete:** `docs/landing/index.html` (folded into `docs/index.md`) — and drop its `docs/landing/**` from the workflow `paths:`.
 

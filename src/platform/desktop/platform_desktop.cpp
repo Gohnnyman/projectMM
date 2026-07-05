@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>      // getaddrinfo — hostname resolution for TcpConnection::connect
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
@@ -227,6 +228,17 @@ void getMacAddress(uint8_t mac[6]) {
     mac[3] = 0xEF; mac[4] = 0xCA; mac[5] = 0xFE;
 }
 
+const char* macString() {
+    static char buf[18] = {};
+    if (buf[0] == 0) {
+        uint8_t mac[6];
+        getMacAddress(mac);
+        std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    return buf;
+}
+
 const char* chipModel() {
     return "desktop";
 }
@@ -376,6 +388,59 @@ bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     return true;
 }
 
+long fsSize(const char* path) {
+    std::error_code ec;
+    auto p = toFsPath(path);
+    if (!std::filesystem::is_regular_file(p, ec)) return -1;
+    const auto sz = std::filesystem::file_size(p, ec);
+    return ec ? -1 : static_cast<long>(sz);
+}
+
+int fsReadAt(const char* path, long offset, char* buf, size_t len) {
+    if (!buf) return -1;
+    FILE* f = std::fopen(toFsPath(path).string().c_str(), "rb");
+    if (!f) return -1;
+    if (std::fseek(f, offset, SEEK_SET) != 0) { std::fclose(f); return -1; }
+    const size_t n = std::fread(buf, 1, len, f);
+    std::fclose(f);
+    return static_cast<int>(n);   // 0 at EOF
+}
+
+bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
+    if (!src) return false;
+    auto target = toFsPath(path);
+    auto tmp = target;
+    tmp += ".tmp";
+
+    FILE* f = std::fopen(tmp.string().c_str(), "wb");
+    if (!f) return false;
+    // Pull chunks from the source and write each straight through — fixed buffer, any file size.
+    // `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.
+    char chunk[1024];
+    bool ok = true, abort = false;
+    for (;;) {
+        const size_t got = src(chunk, sizeof(chunk), user, &abort);
+        if (abort) { ok = false; break; }
+        if (got == 0) break;                                    // clean end of stream
+        if (std::fwrite(chunk, 1, got, f) != got) { ok = false; break; }
+    }
+    std::fflush(f);
+#ifdef _WIN32
+    int fd = ::_fileno(f);
+    if (fd >= 0) ::_commit(fd);
+#else
+    int fd = ::fileno(f);
+    if (fd >= 0) ::fsync(fd);
+#endif
+    std::fclose(f);
+
+    std::error_code ec;
+    if (!ok) { std::filesystem::remove(tmp, ec); return false; }
+    std::filesystem::rename(tmp, target, ec);
+    if (ec) { std::filesystem::remove(tmp, ec); return false; }
+    return true;
+}
+
 void fsList(const char* dir, FsListCb cb, void* user) {
     if (!cb) return;
     std::error_code ec;
@@ -386,7 +451,10 @@ void fsList(const char* dir, FsListCb cb, void* user) {
         // path::filename().c_str() returns wchar_t* on Windows; the callback
         // wants char*. Round-trip through .string() to get a portable view.
         std::string name = entry.path().filename().string();
-        cb(name.c_str(), entry.is_directory(ec), user);
+        const bool isDir = entry.is_directory(ec);
+        std::error_code sizeEc;
+        const auto sz = isDir ? 0u : static_cast<uint32_t>(std::filesystem::file_size(entry.path(), sizeEc));
+        cb(name.c_str(), isDir, sizeEc ? 0u : sz, user);
     }
 }
 
@@ -482,6 +550,14 @@ bool http_fetch_to_ota(const char* /*url*/,
     }
     if (bytesReadOut) *bytesReadOut = 0;
     if (bytesTotalOut) *bytesTotalOut = 0;
+    return false;
+}
+
+bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
+                    char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
+    // No OTA partition on desktop — call sites guard with `if constexpr (mm::platform::hasOta)`.
+    if (statusBuf && statusBufLen > 0) std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    if (bytesReadOut) *bytesReadOut = 0;
     return false;
 }
 
@@ -768,6 +844,54 @@ int TcpConnection::writeSome(const uint8_t* data, size_t len) {
     return -1;                              // real socket error
 }
 
+
+bool TcpConnection::connectStart(const char* host, uint16_t port) {
+    if (!host || !host[0]) return false;
+    close();
+
+    // One bounded DNS lookup (getaddrinfo) up front — resolving is synchronous, but it's the one
+    // unavoidable blocking bit; the CONNECT itself then proceeds non-blocking and is polled.
+    char portStr[6];
+    std::snprintf(portStr, sizeof(portStr), "%u", static_cast<unsigned>(port));
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    if (::getaddrinfo(host, portStr, &hints, &res) != 0 || !res) return false;
+    struct AiGuard { addrinfo* p; ~AiGuard() { if (p) ::freeaddrinfo(p); } } aiGuard{res};
+
+    int fd = open_sock(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd < 0) return false;
+    if (make_nonblocking(fd) != 0) { close_sock(fd); return false; }
+    int cr = ::connect(sock(fd), res->ai_addr, static_cast<int>(res->ai_addrlen));
+#ifdef _WIN32
+    const bool inProgress = (cr != 0 && ::WSAGetLastError() == WSAEWOULDBLOCK);
+#else
+    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
+#endif
+    if (cr != 0 && !inProgress) { close_sock(fd); return false; }   // immediate hard failure
+    fd_ = fd;   // in flight (or already connected) — connectPoll() resolves which
+    return true;
+}
+
+TcpConnection::ConnectResult TcpConnection::connectPoll() {
+    if (fd_ < 0) return ConnectResult::Failed;
+    // Zero-timeout select: is the socket writable yet? Never blocks.
+    // Watch BOTH writability and the exception set: a completed connect signals writable on POSIX,
+    // but a FAILED (refused) non-blocking connect signals via the exception set on Winsock — checking
+    // only writefds there leaves a refused connect reading Pending until the caller's timeout.
+    fd_set wf; FD_ZERO(&wf); FD_SET(sock(fd_), &wf);
+    fd_set ef; FD_ZERO(&ef); FD_SET(sock(fd_), &ef);
+    timeval zero{};   // 0s / 0us
+    const int r = ::select(static_cast<int>(sock(fd_)) + 1, nullptr, &wf, &ef, &zero);
+    if (r == 0) return ConnectResult::Pending;                       // neither writable nor errored yet
+    if (r < 0)  { close(); return ConnectResult::Failed; }
+    // SO_ERROR distinguishes a real connect from an errored one on both platforms.
+    int soerr = 0; socklen_t len = sizeof(soerr);
+    ::getsockopt(sock(fd_), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
+    if (soerr != 0) { close(); return ConnectResult::Failed; }
+    return ConnectResult::Connected;                                 // socket stays non-blocking
+}
 
 void TcpConnection::close() {
     if (fd_ >= 0) {
