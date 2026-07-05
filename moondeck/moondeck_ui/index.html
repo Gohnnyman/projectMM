@@ -92,6 +92,7 @@
                         <button id="view-back" title="Back">&#x2190;</button>
                         <button id="view-forward" title="Forward">&#x2192;</button>
                         <button id="view-refresh" title="Refresh">&#x21bb;</button>
+                        <button id="view-open" title="Open in a new tab">&#x2197;</button>
                     </div>
                     <button id="clear-log">Clear</button>
                 </div>
@@ -100,7 +101,11 @@
                 <pre id="log"></pre>
             </div>
             <div id="pane-view" class="pane-content">
-                <iframe id="view-frame" sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
+                <!-- allow-modals: the embedded device UI uses window.prompt/alert/confirm (e.g. the
+                     File Manager's new-folder/new-file name prompt). Without this flag a sandboxed
+                     frame silently blocks them ("Use of window.prompt is not allowed…"). It permits
+                     modal dialogs only — it does NOT relax the origin/script isolation. -->
+                <iframe id="view-frame" sandbox="allow-same-origin allow-scripts allow-forms allow-modals"></iframe>
             </div>
         </main>
     </div>

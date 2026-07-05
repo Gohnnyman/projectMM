@@ -24,6 +24,13 @@ public:
     }
 };
 
+// A module that hides from the UI (the FilesystemModule / HttpServerModule pattern): the state
+// serializer skips any module whose appearsInUi() is false.
+class HiddenModule : public mm::MoonModule {
+public:
+    bool appearsInUi() const override { return false; }
+};
+
 } // namespace
 
 // setup() and teardown() each fire exactly when called and update their respective state flags.
@@ -194,4 +201,21 @@ TEST_CASE("Bool control binding") {
 
     mod.enabled = false;
     CHECK(*static_cast<bool*>(ctrl.ptr) == false);
+}
+
+// appearsInUi() defaults to true (every ordinary module shows in the UI) and is overridable to
+// false so infrastructure modules (FilesystemModule, HttpServerModule) can hide — the flag the
+// state serializer reads to skip a module. A base MoonModule and a control-bearing one both
+// appear; only a module that overrides to false hides.
+TEST_CASE("MoonModule appearsInUi defaults true, overridable false") {
+    TestModule visible;
+    CHECK(visible.appearsInUi());       // ordinary module: shown
+
+    HiddenModule hidden;
+    CHECK_FALSE(hidden.appearsInUi());  // infrastructure module: skipped by the serializer
+
+    // Through the base-class pointer the virtual still dispatches to the override — the path the
+    // serializer actually takes (it holds MoonModule*).
+    mm::MoonModule* asBase = &hidden;
+    CHECK_FALSE(asBase->appearsInUi());
 }

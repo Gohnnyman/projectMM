@@ -552,6 +552,14 @@ bool http_fetch_to_ota(const char* /*url*/,
     return false;
 }
 
+bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
+                    char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
+    // No OTA partition on desktop — call sites guard with `if constexpr (mm::platform::hasOta)`.
+    if (statusBuf && statusBufLen > 0) std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    if (bytesReadOut) *bytesReadOut = 0;
+    return false;
+}
+
 // Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. Blocking, bounded by a
 // receive/send timeout. Builds the request into a stack buffer, connects, sends, reads the
 // response, and returns the status code + the body (after the \r\n\r\n). Used by HueDriver

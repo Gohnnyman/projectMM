@@ -1,4 +1,4 @@
-# Rename top-level `moondeck/` → `moondeck/`
+# Rename top-level `scripts/` → `moondeck/`
 
 Forward-looking (backlog is exempt from present-tense). Decided by the PO on 2026-07-02, to be done as its **own separate commit** in the next cycle — deliberately NOT folded into the docs-site / `web-installer/` commit (that one is scoped to the `docs/` separation; this is a larger orthogonal sweep and stays isolated for a clean, revertible diff).
 

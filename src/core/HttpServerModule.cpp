@@ -206,6 +206,11 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             const size_t initialLen = static_cast<size_t>(totalRead) - static_cast<size_t>(body - req);
             handleWriteFile(conn, queryStart ? queryStart + 1 : "", body, initialLen,
                             static_cast<size_t>(contentLen));
+        } else if (std::strcmp(path, "/api/dir") == 0) {
+            // File Manager: POST /api/dir?path=<rel> → mkdir. The path is the whole operation (a
+            // create is a filesystem action, not a stored control), so it rides the request query
+            // — same path-as-query shape as /api/file, no persisted control holds it.
+            handleMakeDir(conn, queryStart ? queryStart + 1 : "");
         } else if (std::strcmp(path, "/api/modules") == 0 && body) {
             handleAddModule(conn, body);
         } else if (isMoveRoute && body) {
@@ -239,6 +244,12 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             handleReboot(conn);
         } else if (std::strcmp(path, "/api/firmware/url") == 0 && body) {
             handleFirmwareUrl(conn, body);
+        } else if (std::strcmp(path, "/api/firmware/upload") == 0 && body) {
+            // OTA from an uploaded .bin body (no URL, no host to serve it) — the browser POSTs the
+            // firmware image straight to the device, which streams it into the OTA partition. Same
+            // streamed-body handling as /api/file (initial buffered bytes + socket remainder).
+            const size_t initialLen = static_cast<size_t>(totalRead) - static_cast<size_t>(body - req);
+            handleFirmwareUpload(conn, body, initialLen, static_cast<size_t>(contentLen));
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
@@ -246,6 +257,9 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         // DELETE /api/modules/ModuleName
         if (std::strncmp(path, "/api/modules/", 13) == 0) {
             handleDeleteModule(conn, path + 13);
+        } else if (std::strcmp(path, "/api/dir") == 0) {
+            // File Manager: DELETE /api/dir?path=<rel> → remove a file or empty dir.
+            handleRemoveEntry(conn, queryStart ? queryStart + 1 : "");
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
@@ -318,9 +332,9 @@ void HttpServerModule::sendResponse(platform::TcpConnection& conn, int status, c
 // --- File Manager file read/write (the /api/file endpoints) ---
 //
 // A file body isn't a control value, so these are their own small endpoints (not /api/control).
-// The path comes as a query param `path=<rel>`; fileQueryPath vets it (reject "..", root at the
-// mount) — the traversal guard for the HTTP entry path, the same check FileManagerModule::safePath
-// applies to the control-driven ops (two filesystem entry points, each guarded at its boundary).
+// The path comes as a query param `path=<rel>`; parseFilePath vets it (reject "..", root at the
+// mount) — the single traversal guard shared by every filesystem HTTP entry (read, write, dir
+// listing, mkdir, delete).
 //
 // Read + write both stream: the write pulls the request body chunk-by-chunk straight to the file
 // (fsWriteStream), the read pulls the file into a size-fit buffer — so a file of any size up- and
@@ -330,7 +344,14 @@ static constexpr size_t kUploadMax = 256 * 1024;   // 256 KB — sanity bound on
 
 // Copy the `path=` query value into `out` (decoding %XX and '+' minimally), rooted at the mount.
 // Returns false on a missing/empty path or a ".." traversal attempt.
-static bool fileQueryPath(const char* query, char* out, size_t cap) {
+//
+// Deliberately NOT a `.config`/dotfile denylist (PO decision): the File Manager is a device-admin
+// tool on a trusted LAN, and reading the persisted `.config/*.json` is a feature (inspect/back up
+// the device's own config), not a leak — there are no third-party secrets on the device, and the
+// WiFi password is XOR-obfuscated in what it writes. The weak-protection is `show hidden` defaulting
+// off (FileManagerModule), so `.config` isn't shown unless the operator asks. Reviewers periodically
+// flag this as a secrets-exposure — it's an accepted design, not an oversight; leave it.
+bool HttpServerModule::parseFilePath(const char* query, char* out, size_t cap) {
     const char* p = query ? std::strstr(query, "path=") : nullptr;
     if (!p) return false;
     p += 5;                                   // past "path="
@@ -395,7 +416,7 @@ void dirListTrampoline(const char* name, bool isDir, uint32_t size, void* user) 
 
 void HttpServerModule::serveDirListing(platform::TcpConnection& conn, const char* query) {
     char path[160];
-    if (!fileQueryPath(query, path, sizeof(path))) {
+    if (!parseFilePath(query, path, sizeof(path))) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
@@ -415,9 +436,34 @@ void HttpServerModule::serveDirListing(platform::TcpConnection& conn, const char
     sink.flush();
 }
 
+// POST /api/dir?path=<rel> → mkdir. The path rides the query and is vetted by parseFilePath (the
+// same `..`-reject + root-at-mount guard /api/file and /api/dir GET use). A create is a filesystem
+// action, not a stored control — no persisted `path` control holds it, so no flash write.
+void HttpServerModule::handleMakeDir(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    if (platform::fsMkdir(path)) sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    else sendResponse(conn, 500, "application/json", "{\"error\":\"mkdir failed\"}");
+}
+
+// DELETE /api/dir?path=<rel> → remove a file or EMPTY dir (fsRemove fails cleanly on a non-empty
+// dir). Same path guard as handleMakeDir.
+void HttpServerModule::handleRemoveEntry(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    if (platform::fsRemove(path)) sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    else sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed (folder not empty?)\"}");
+}
+
 void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const char* query) {
     char path[160];
-    if (!fileQueryPath(query, path, sizeof(path))) {
+    if (!parseFilePath(query, path, sizeof(path))) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
@@ -503,7 +549,7 @@ size_t uploadPull(char* out, size_t cap, void* user, bool* abort) {
 void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char* query,
                                        const char* initialBody, size_t initialLen, size_t contentLen) {
     char path[160];
-    if (!fileQueryPath(query, path, sizeof(path))) {
+    if (!parseFilePath(query, path, sizeof(path))) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
@@ -535,6 +581,45 @@ void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char
     } else {
         sendResponse(conn, 500, "application/json", "{\"error\":\"write failed\"}");
     }
+}
+
+// OTA from an uploaded .bin body: stream the request body straight into the OTA partition
+// (platform::otaWriteStream), reusing the exact uploadPull the file-upload path uses — the only
+// difference is the sink (OTA partition vs a file). On success the device reboots into the new
+// image; the 200 goes out first (otaWriteStream's ~600 ms pre-reboot delay covers the round-trip).
+void HttpServerModule::handleFirmwareUpload(platform::TcpConnection& conn, const char* initialBody,
+                                            size_t initialLen, size_t contentLen) {
+    if constexpr (!platform::hasOta) {
+        sendResponse(conn, 501, "application/json", "{\"error\":\"OTA not supported on this platform\"}");
+        return;
+    }
+    // Same 409 concurrency guard as handleFirmwareUrl: one OTA at a time (both write g_ota* state).
+    if (std::strcmp(g_otaStatus, "starting")    == 0 || std::strcmp(g_otaStatus, "downloading") == 0 ||
+        std::strcmp(g_otaStatus, "flashing")    == 0 || std::strcmp(g_otaStatus, "rebooting")   == 0) {
+        sendResponse(conn, 409, "application/json", "{\"error\":\"ota already in progress\"}");
+        return;
+    }
+    const size_t initial = initialLen < contentLen ? initialLen : contentLen;
+    UploadSource src{&conn, initialBody, initial, contentLen, platform::millis() + kUploadHardMs};
+    g_otaBytesTotal = static_cast<uint32_t>(contentLen);   // the UI's "Y KB" (Content-Length up front)
+    g_otaBytesRead = 0;                                    // clear any stale count from a prior OTA
+    // Stream the body into the OTA partition. otaWriteStream commits the image + flips the boot
+    // pointer but does NOT reboot — it returns so we can send a 200 first, then reboot the same
+    // way /api/reboot does (response, close, brief drain, platform::reboot). That gives the browser
+    // a clean "flashed" response instead of an aborted socket it can't tell from a real failure.
+    const bool ok = platform::otaWriteStream(&uploadPull, &src, contentLen,
+                                             g_otaStatus, sizeof(g_otaStatus), &g_otaBytesRead);
+    if (!ok) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "{\"error\":\"ota failed: %.60s\"}", g_otaStatus);
+        sendResponse(conn, 500, "application/json", msg);
+        return;
+    }
+    FilesystemModule::flushPending();
+    sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    conn.close();
+    platform::delayMs(200);
+    platform::reboot();  // noreturn — boots the flashed image
 }
 
 void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* filename, const char* contentType) {
@@ -627,7 +712,10 @@ void HttpServerModule::buildStateJson(JsonSink& sink) {
         bool first = true;
         for (uint8_t m = 0; m < scheduler_->moduleCount(); m++) {
             auto* mod = scheduler_->module(m);
-            if (!mod || mod == this) continue; // skip self
+            // Skip modules that opt out of the UI via appearsInUi() — the one mechanism for
+            // "not a card in /api/state": HttpServerModule (the server itself) and FilesystemModule
+            // (a pure persistence engine, no controls) both return false.
+            if (!mod || !mod->appearsInUi()) continue;
             if (!first) sink.append(",");
             first = false;
             writeModuleJson(sink, mod);

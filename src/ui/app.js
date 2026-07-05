@@ -624,6 +624,55 @@ function createCard(mod, depth) {
                 }
             },
         });
+
+        // Install-from-file: pick a locally-built .bin and stream its bytes to /api/firmware/upload,
+        // which feeds platform::otaWriteStream (esp_ota_write). Complements the release picker above —
+        // the release path has the device fetch a URL; this path has the browser push the body, so a
+        // dev build that isn't a published release can be flashed straight over the network. The device
+        // reboots on success (no response body), so a completed POST that closes mid-flight is success.
+        const fileRow = document.createElement("div");
+        fileRow.className = "fw-upload-row";
+        const upBtn = document.createElement("button");
+        upBtn.className = "fm-tool fm-tool--icon";
+        upBtn.textContent = "↥";   // same upload glyph as the file-manager toolbar
+        upBtn.title = "Install from file — flash a firmware .bin from your computer over the network (OTA)";
+        const upStatus = document.createElement("span");
+        upStatus.className = "fw-upload-status";
+        const upInput = document.createElement("input");
+        upInput.type = "file";
+        upInput.accept = ".bin,application/octet-stream";
+        upInput.style.display = "none";
+        upInput.addEventListener("change", async () => {
+            const file = (upInput.files || [])[0];
+            upInput.value = "";                   // reset so re-picking the same file re-fires change
+            if (!file) return;
+            upBtn.disabled = true;
+            upStatus.textContent = `uploading ${fmSize(file.size)}…`;
+            try {
+                const res = await fetch("/api/firmware/upload", {
+                    method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
+                });
+                // The device sends a 200 once the image is committed, THEN reboots — so res.ok is the
+                // real success signal. A 4xx/5xx carries the device's ota error in the JSON body.
+                if (res.ok) upStatus.textContent = "flashed — device rebooting";
+                else {
+                    let msg = `HTTP ${res.status}`;
+                    try { msg = (await res.json()).error || msg; } catch (_) {}
+                    throw new Error(msg);
+                }
+            } catch (err) {
+                // A network error mid-upload is a genuine failure now (the device answers before it
+                // reboots), so surface it as such rather than assuming a reboot.
+                upStatus.textContent = "upload failed: " + err.message;
+            } finally {
+                upBtn.disabled = false;
+            }
+        });
+        upBtn.addEventListener("click", () => upInput.click());
+        fileRow.appendChild(upBtn);
+        fileRow.appendChild(upStatus);
+        fileRow.appendChild(upInput);
+        controlsHost.appendChild(fileRow);
     }
 
     // -- Children block + footer --
@@ -889,8 +938,10 @@ function emojiTagsForMod(mod) {
 // (renderFileManager), so the generic list must skip it or the bar would show twice. Used by BOTH
 // render paths (renderCards's initial build + updateModuleControls's WS live-patch) so they agree.
 function controlRendersGenerically(mod, ctrl) {
-    if (ctrl.hidden) return false;   // plan-10 hidden flag (FileManager's op controls set it)
-    if (mod.type === "FileManagerModule" && ctrl.name === "filesystem") return false;
+    if (ctrl.hidden) return false;   // plan-10 hidden flag (e.g. FileManager's `show hidden` sets it)
+    // The File Manager's `filesystem` gauge + `lastSaved` readout render inside the File Manager
+    // panel (renderFileManager), so the generic list skips them or they'd show twice.
+    if (mod.type === "FileManagerModule" && (ctrl.name === "filesystem" || ctrl.name === "lastSaved")) return false;
     return true;
 }
 
@@ -1117,7 +1168,7 @@ function createControl(moduleName, moduleType, ctrl) {
             input.value = ctrl.value ?? "";
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
-            input.rows = 1;            // default compact; CSS height + resize grip control size
+            input.rows = 2;            // default 2 lines; CSS height + resize grip control size
             input.spellcheck = false;
             if (ctrl.readonly) {
                 input.readOnly = true;
@@ -2711,11 +2762,17 @@ function renderFileManager(mod, host) {
     const bar = document.createElement("div");
     bar.className = "fm-bar";
 
-    // A filesystem op targets the module's `path` control, then we re-render the tree from disk.
-    const runOp = async (button, targetPath) => {
-        await sendControl(mod.name, "path", targetPath);
-        await sendControl(mod.name, button, 1);
-        await refetchState();          // status line + persisted state
+    // A filesystem op is an HTTP call on /api/dir?path= (POST=mkdir, DELETE=remove) — the path
+    // rides the query, so nothing is stored/persisted on the device. On failure, surface the
+    // server's error; on success, re-render the tree from disk.
+    const runOp = async (op, targetPath) => {
+        const method = op === "delete" ? "DELETE" : "POST";
+        const res = await fetch("/api/dir?path=" + encodeURIComponent(targetPath), { method });
+        if (!res.ok) {
+            let msg = `HTTP ${res.status}`;
+            try { msg = (await res.json()).error || msg; } catch (_) { /* keep HTTP status */ }
+            alert(`${op} failed: ${msg}`);
+        }
         renderFileManager(mod, host);  // rebuild the tree from /api/dir (fresh listing)
     };
 
@@ -2723,10 +2780,12 @@ function renderFileManager(mod, host) {
     // the selected file's parent). Shared by both create buttons.
     const createBase = () => (st.selectedIsDir ? st.selected : fmParent(st.selected));
 
+    // Icon-only toolbar: each button shows a glyph; the `title` carries the word for the tooltip +
+    // screen readers (the standard icon-button pattern — an icon with an accessible label).
     const newBtn = document.createElement("button");
-    newBtn.className = "fm-tool";
-    newBtn.textContent = "＋ folder";
-    newBtn.title = "create a folder inside the selected folder";
+    newBtn.className = "fm-tool fm-tool--icon";
+    newBtn.textContent = "📁";
+    newBtn.title = "New folder — create a folder inside the selected folder";
     newBtn.addEventListener("click", async () => {
         const base = createBase();
         const name = prompt("New folder name in " + base + ":");
@@ -2739,9 +2798,9 @@ function renderFileManager(mod, host) {
     // New file: no module op needed — the /api/file POST creates a file at a path (empty body), the
     // same endpoint the editor saves through. Then re-render the tree from disk.
     const newFileBtn = document.createElement("button");
-    newFileBtn.className = "fm-tool";
-    newFileBtn.textContent = "＋ file";
-    newFileBtn.title = "create an empty file inside the selected folder";
+    newFileBtn.className = "fm-tool fm-tool--icon";
+    newFileBtn.textContent = "📝";
+    newFileBtn.title = "New file — create an empty file inside the selected folder";
     newFileBtn.addEventListener("click", async () => {
         const base = createBase();
         const name = prompt("New file name in " + base + ":");
@@ -2761,18 +2820,43 @@ function renderFileManager(mod, host) {
     });
     bar.appendChild(newFileBtn);
 
+    // Upload: pick desktop files and stream them into the selected folder via the same /api/file
+    // POST the drag-drop path uses (fmDropUpload) — a button for people who don't drag. A hidden
+    // <input type=file multiple> is the recognizable browser file-picker; clicking the button opens it.
+    const upBtn = document.createElement("button");
+    upBtn.className = "fm-tool fm-tool--icon";
+    upBtn.textContent = "↥";   // pairs with the per-row ↓ download glyph
+    upBtn.title = "Upload — upload files from your computer into the selected folder";
+    const upInput = document.createElement("input");
+    upInput.type = "file";
+    upInput.multiple = true;
+    upInput.style.display = "none";
+    upInput.addEventListener("change", async () => {
+        const files = Array.from(upInput.files || []);
+        upInput.value = "";                       // reset so re-picking the same file re-fires change
+        if (!files.length) return;
+        const base = createBase();
+        st.expanded.add(base);                    // reveal the destination folder
+        const skipped = await fmDropUpload(base, files);
+        renderFileManager(mod, host);             // re-list from disk
+        if (skipped.length) alert("Not uploaded:\n" + skipped.join("\n"));
+    });
+    upBtn.addEventListener("click", () => upInput.click());
+    bar.appendChild(upBtn);
+    bar.appendChild(upInput);
+
     const delBtn = document.createElement("button");
-    delBtn.className = "fm-tool fm-tool--danger";
-    delBtn.textContent = "🗑 delete";
-    delBtn.title = "delete the selected file or empty folder";
+    delBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
+    delBtn.textContent = "🗑";
+    delBtn.title = "Delete — delete the selected file or empty folder";
     delBtn.disabled = st.selected === "/";   // never delete the root
-    armPressTwice(delBtn, () => runOp("delete", st.selected), { armedText: "✓ confirm" });
+    armPressTwice(delBtn, () => runOp("delete", st.selected), { armedText: "✓" });
     bar.appendChild(delBtn);
 
     const refBtn = document.createElement("button");
-    refBtn.className = "fm-tool";
+    refBtn.className = "fm-tool fm-tool--icon";
     refBtn.textContent = "⟳";
-    refBtn.title = "refresh";
+    refBtn.title = "Refresh";
     refBtn.addEventListener("click", () => renderFileManager(mod, host));
     bar.appendChild(refBtn);
     panel.appendChild(bar);
@@ -2850,23 +2934,26 @@ function renderFileManager(mod, host) {
                 rowEl.appendChild(dl);
             }
 
-            // Select on click (sets the op target). A folder also toggles expand; a file opens the
-            // editor on a second click (or immediately if already selected).
+            // Single-click SELECTS (highlights, sets the op target for delete); a folder also
+            // toggles expand. DOUBLE-click OPENS a file in the editor — the VS Code / Finder /
+            // Explorer norm, and it keeps a distinct "selected but not opened" state for future
+            // rename / multi-select / context-menu features.
             rowEl.addEventListener("click", (ev) => {
                 ev.stopPropagation();
-                const wasSelected = st.selected === childPath;
                 st.selected = childPath;
                 st.selectedIsDir = entry.isDir;
                 if (entry.isDir) {
                     if (isOpen) st.expanded.delete(childPath);
                     else st.expanded.add(childPath);
-                    renderFileManager(mod, host);
-                } else if (wasSelected) {
-                    openFileEditor(childPath);
-                } else {
-                    renderFileManager(mod, host);   // reflect selection; click again to open
                 }
+                renderFileManager(mod, host);   // reflect the selection highlight / expand
             });
+            if (!entry.isDir) {
+                rowEl.addEventListener("dblclick", (ev) => {
+                    ev.stopPropagation();
+                    openFileEditor(childPath);
+                });
+            }
 
             // Drag-drop upload target: dropping desktop files onto a FOLDER row uploads them into
             // that folder (tier 1: text/config ≤8KB — see fmDropUpload).
@@ -2904,6 +2991,17 @@ function renderFileManager(mod, host) {
         usage.appendChild(bar);
         usage.appendChild(lbl);
         panel.appendChild(usage);
+    }
+
+    // "last saved" readout below the usage bar — how long ago config was persisted. The value is
+    // owned by the FilesystemModule engine (non-UI); the File Manager displays it because this is
+    // where filesystem state is topical (same reasoning as the usage bar).
+    const savedCtrl = (mod?.controls || []).find(c => c.name === "lastSaved");
+    if (savedCtrl) {
+        const row = document.createElement("div");
+        row.className = "fm-lastsaved";
+        row.textContent = `saved: ${savedCtrl.value ?? "never"}`;
+        panel.appendChild(row);
     }
 }
 

@@ -116,7 +116,7 @@ Where each kind of fact lives. The guiding rule: **document a thing once, in the
 
 ### The two surfaces
 
-1. **Summary page (hand-written, end-user).** One `.md` per module *group*, a 4-column table — **name + description · gif/image · controls · links** (per module: tests · its technical page · attribution · anchors to any extra prose). One row per module, authored as `### ` prose blocks that a build-time hook ([`moondeck/docs/mkdocs_hooks.py`](../moondeck/docs/mkdocs_hooks.py)) renders as the table. Catalog controls live here because a catalog module's user surface is its runtime `controls_.add(...)` calls, which no static tool sees. Each group is nested in its own subfolder, consistent with the catalog:
+1. **Summary page (hand-written, end-user).** One `.md` per module *group*, a 4-column table — **name + description · gif/image · controls · links** (per module: tests · its technical page · attribution · anchors to any extra prose). One row per module, authored as `###` prose blocks that a build-time hook ([`moondeck/docs/mkdocs_hooks.py`](../moondeck/docs/mkdocs_hooks.py)) renders as the table. Catalog controls live here because a catalog module's user surface is its runtime `controls_.add(...)` calls, which no static tool sees. Each group is nested in its own subfolder, consistent with the catalog:
    - `light/{effects,modifiers,layouts,drivers}/<name>.md` — the four light-catalog pages (may later split, e.g. `effects_wled.md` / `effects_moonmodules.md`).
    - `core/ui/`, `core/supporting/`, `light/supporting/` — the core-UI, core-supporting, and light-supporting summary pages.
 

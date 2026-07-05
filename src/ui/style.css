@@ -710,17 +710,17 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     resize: vertical;          /* draggable grip, vertical only */
     min-height: 1.5em;
-    height: 1.9em;             /* default ~one row; resize/typing grows it */
+    height: 3.4em;             /* default ~two rows; resize/typing grows it */
     line-height: 1.4;
     width: 100%;
     white-space: pre;          /* don't wrap long script lines */
     overflow: auto;
-    /* A small solid corner triangle (no transparency) — a compact, prominent
-       resize affordance. */
+    /* A solid corner triangle (no transparency) — a prominent, easy-to-grab resize
+       affordance (bigger than the browser's faint native handle). */
     background-image: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
     background-repeat: no-repeat;
     background-position: bottom 1px right 1px;
-    background-size: 7px 7px;
+    background-size: 12px 12px;
 }
 .control-row input[type="checkbox"] {
     accent-color: var(--accent);
@@ -1052,6 +1052,11 @@ body {
 .fm-bar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px;
 }
+/* Install-from-file row under the Firmware card: the .bin picker button + its live status. */
+.fw-upload-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px;
+}
+.fw-upload-status { color: var(--muted); font-size: 0.85em; }
 .fm-crumb {
     background: none; border: none; color: var(--accent); cursor: pointer;
     padding: 2px 4px; border-radius: 4px; font: inherit;
@@ -1067,6 +1072,13 @@ body {
 .fm-tool:hover { background: var(--card-bg-1); }
 .fm-tool:disabled { opacity: 0.4; cursor: default; }
 .fm-tool--danger.armed { background: var(--red); border-color: var(--red); color: #fff; }
+/* Icon-only toolbar buttons: square, centered glyph, a touch larger than the text size so the
+   icons read cleanly. The `title` still carries the label (tooltip + a11y). */
+.fm-tool--icon {
+    width: 34px; height: 34px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.05rem; line-height: 1;
+}
 
 /* Tree: an indented list of rows; each folder's children nest in a .fm-subtree. */
 .fm-tree {

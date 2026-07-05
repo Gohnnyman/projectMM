@@ -22,10 +22,12 @@ class MultiplyModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
 
-    // Tiles per axis. 1 = no multiplication on that axis.
+    // Tiles per axis. 1 = no multiplication on that axis. All default to 2 (tile on every
+    // axis the layout has); on a 2D grid multiplyZ clamps to 1 (a no-op), so it only tiles
+    // Z on an actual 3D volume — consistent with X/Y rather than a silent exception.
     uint8_t multiplyX = 2;
     uint8_t multiplyY = 2;
-    uint8_t multiplyZ = 1;
+    uint8_t multiplyZ = 2;
     // Reflect alternate (odd-numbered) tiles on this axis. All default on — a
     // mirror on an axis the layout doesn't use (e.g. Z on a 2D grid) is a no-op,
     // so defaulting them true gives a kaleidoscope on whatever axes exist.

@@ -87,7 +87,7 @@ def main() -> int:
     # Step 1: GET_DEVICE_INFO. The device responds with an RPC_RESPONSE frame
     # carrying 4 strings: firmware name, version, chip family, device name.
     frame = build_frame(TYPE_RPC, build_simple_rpc(RPC_GET_DEVICE_INFO))
-    print(f"    → GET_DEVICE_INFO")
+    print("    → GET_DEVICE_INFO")
     ser.write(frame)
     ser.flush()
 
@@ -142,7 +142,7 @@ def main() -> int:
                 # device URL when the state is `provisioned`.
                 if not sent_state:
                     frame2 = build_frame(TYPE_RPC, build_simple_rpc(RPC_GET_CURRENT_STATE))
-                    print(f"    → GET_CURRENT_STATE")
+                    print("    → GET_CURRENT_STATE")
                     ser.write(frame2)
                     ser.flush()
                     sent_state = True

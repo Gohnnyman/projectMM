@@ -43,6 +43,7 @@ On top of that clean version, add a status-bar **"firmware update available" bad
 - `test/js/semver.test.mjs` (NEW)
 
 ## Verification
+
 - Host: `node --test "test/js/**/*.test.mjs"`; `node --check` the JS + extract-check index.html; `cmake --build build` + `ctest`; `uv run moondeck/scenario/run_scenario.py`; `uv run moondeck/check/check_specs.py`; a `test/python` verify_version case (`v2.1.0` ↔ `2.1.0-dev` OK; `v2.2.0` ↔ `2.1.0-dev` fails).
 - Bench/preview: Firmware card shows clean semver; badge appears on an older device, opens Firmware pre-selected; no badge on newest stable; no error offline.
 

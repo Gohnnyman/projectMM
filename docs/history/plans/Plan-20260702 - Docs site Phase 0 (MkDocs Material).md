@@ -47,4 +47,4 @@ During implementation the PO asked to fix the deeper structural issue the site s
 
 Swept ~104 references (`docs/install/` → `web-installer/`) across scripts, both CI workflows, three check scripts, MoonDeck, JS + Python test suites, CLAUDE.md commit-gate triggers, and published docs. **Gotcha caught:** a literal-path regex misses split-component construction — `join(ROOT, "docs", "install", …)` (3 JS tests) and `"docs" / "install"` (moondeck.py) needed separate patterns; verified by running the JS/Python suites (all green).
 
-Deferred to a **separate next commit** (PO): top-level `moondeck/` → `moondeck/` — larger orthogonal sweep, spec'd in `docs/backlog/rename-scripts-to-moondeck.md`.
+Deferred to a **separate next commit** (PO): top-level `scripts/` → `moondeck/` — larger orthogonal sweep, spec'd in `docs/backlog/rename-scripts-to-moondeck.md`.

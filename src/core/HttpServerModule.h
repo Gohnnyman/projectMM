@@ -26,8 +26,11 @@ class Scheduler;
 /// role-suffix-stripped `displayName`, `acceptsChildRoles`, and per-type `defaults` captured
 /// from a fresh probe instance). Mutations: `POST /api/control` `{module,control,value}`,
 /// `POST /api/modules` create, `POST /api/modules/{name}/move` reorder, `.../replace` swap,
-/// `POST /api/reboot`, `DELETE /api/modules/{name}`. All JSON responses stream through a
-/// `JsonSink` — no fixed-buffer ceiling, so a tree of any size serialises correctly.
+/// `POST /api/reboot`, `DELETE /api/modules/{name}`. File Manager: `GET /api/dir?path=` lists a
+/// directory, `POST /api/dir?path=` creates a folder, `DELETE /api/dir?path=` removes a file or
+/// empty folder, `GET|POST /api/file?path=` reads / writes a file body (the path rides the query,
+/// so a filesystem op carries its target in the request, not a stored control). All JSON responses
+/// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serialises correctly.
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
 /// base64), up to 4 concurrent clients. Server pushes full state JSON as text frames from
@@ -107,9 +110,13 @@ public:
     uint32_t clientGeneration() const override { return wsClientGeneration_; }
 
     /// Keep running even when "disabled" via the UI — otherwise the user has no way
-    /// to re-enable themselves through the same UI. The `enabled` checkbox on this
-    /// card has no effect; that's intentional.
+    /// to re-enable themselves through the same UI.
     bool respectsEnabled() const override { return false; }
+
+    /// Non-UI: this IS the server that renders /api/state — it doesn't list itself as a card.
+    /// The "not a UI module" opt-out (shared with FilesystemModule), read by the state serializer's
+    /// module loop to skip this module.
+    bool appearsInUi() const override { return false; }
 
     void onBuildControls() override;
     void setup() override;
@@ -146,6 +153,12 @@ public:
     /// Parse a single REST op object (`{"op":"add|set|clearChildren", …}`) and dispatch
     /// to the three above. The wire shape the Improv APPLY_OP frame carries.
     OpResult applyOp(const char* opJson);
+
+    /// Decode a `path=<rel>` query value into `out` (%XX + '+' decoding), rooted at the mount.
+    /// Returns false on a missing/empty path, a `..` traversal, or an overlong (buffer-filling)
+    /// value. The single filesystem-path guard shared by every fs HTTP entry (read/write/dir/
+    /// mkdir/delete). Public + static so it's unit-testable without a socket fixture.
+    static bool parseFilePath(const char* query, char* out, size_t cap);
 
 private:
     platform::TcpServer server_;
@@ -220,6 +233,8 @@ private:
     // File Manager: one directory's children as JSON (the /api/dir endpoint) — the source the lazy
     // tree loads a node's children from. Single-level; `hidden=1` in the query includes dotfiles.
     void serveDirListing(platform::TcpConnection& conn, const char* query);
+    void handleMakeDir(platform::TcpConnection& conn, const char* query);      // POST /api/dir?path=
+    void handleRemoveEntry(platform::TcpConnection& conn, const char* query);  // DELETE /api/dir?path=
 
     // -----------------------------------------------------------------------
     // JSON state
@@ -274,6 +289,8 @@ private:
     /// to platform::http_fetch_to_ota which spawns a task and returns. Caller
     /// gets 202 immediately; progress streams via FirmwareUpdateModule controls.
     void handleFirmwareUrl(platform::TcpConnection& conn, const char* body);
+    void handleFirmwareUpload(platform::TcpConnection& conn, const char* initialBody,
+                              size_t initialLen, size_t contentLen);   // POST /api/firmware/upload
 
     // -----------------------------------------------------------------------
     // WebSocket

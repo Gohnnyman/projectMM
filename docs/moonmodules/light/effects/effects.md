@@ -215,6 +215,7 @@ A 3D Rubik's Cube projected onto the volume: it scrambles, then plays its soluti
 - `turnsPerSecond` — how fast the cube turns.
 - `cubeSize` — the cube order (2×2 up to 8×8).
 - `randomTurning` — turn endlessly at random instead of scramble-then-solve.
+- `usePalette` — colour the six faces from the system-wide palette instead of the classic Rubik's colours.
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h) · source [RubiksCubeEffect.h](../../../../src/light/effects/RubiksCubeEffect.h)
 

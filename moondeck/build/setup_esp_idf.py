@@ -94,7 +94,7 @@ def main():
         if args.no_checkout:
             print(f"   To pin: (cd {idf_path} && git checkout {PINNED_IDF_COMMIT})\n")
         else:
-            answer = input(f"   Check out the pinned commit now? [Y/n] ").strip().lower()
+            answer = input("   Check out the pinned commit now? [Y/n] ").strip().lower()
             if answer in ("", "y", "yes"):
                 if _checkout_pinned(idf_path):
                     print(f"   Checked out {PINNED_IDF_COMMIT[:12]} ({PINNED_IDF_VERSION}).\n")

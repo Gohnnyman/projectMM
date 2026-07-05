@@ -89,7 +89,7 @@ Prove each on **one module**, then sweep. Order by leverage:
 - **Scope:** Phase 0 approved (stand up the site). Phases 1–4 each need a separate go-ahead.
 - **Site URL:** docs at Pages root `/`; installer stays at `/install/`. The site is assembled in CI into a throwaway dir; the repo addition is `mkdocs.yml`.
 - **`docs/` de-overloading (landed with Phase 0):** `docs/` had held three unlike things. The standalone web installer moved out to a top-level **`web-installer/`** (it's an app, not docs; deployed URL unchanged at `/install/`). The transient `history/` + `backlog/` stay in `docs/` but excluded from the site — they're compaction-bound, so relocating them is discarded churn. Result: `docs/` = published doc-site source + transient internal notes (excluded).
-- **`moondeck/` → `moondeck/`:** approved, but deferred to its own next commit (see `rename-scripts-to-moondeck.md`).
+- **`scripts/` → `moondeck/`:** approved, but deferred to its own next commit (see `rename-scripts-to-moondeck.md`).
 - **Doxide comment style:** approved as the source-annotation convention for Phase 4 (Doxygen-family, recognised standard).
 
 ## Open questions for the PO

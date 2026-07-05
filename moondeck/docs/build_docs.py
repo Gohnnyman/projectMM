@@ -110,7 +110,7 @@ def main() -> int:
         print(f"==> docs built to {site}")
         print(f"    preview locally: uv run moondeck/docs/build_docs.py --serve"
               f"  → http://localhost:{SERVE_PORT}/projectMM/")
-        print(f"    deployed (after merge to main): https://moonmodules.org/projectMM/")
+        print("    deployed (after merge to main): https://moonmodules.org/projectMM/")
     elif args.serve:
         # A serve that just exited: remind where it was.
         print()

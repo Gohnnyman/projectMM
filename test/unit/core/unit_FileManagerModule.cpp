@@ -1,12 +1,15 @@
 // @module FileManagerModule
 
 // Drives the file-manager create/delete ops against the real platform::fs* seam, isolated to a temp
-// dir via fsSetRoot (the FilesystemModule-test pattern). Browsing is UI-side over the /api/dir HTTP
-// endpoint (covered in the HttpServerModule tests) — this pins the module's own surface: the two
-// path-targeted ops and their robustness (bad path / non-empty-dir / '..' traversal never crash).
+// dir via fsSetRoot (the FilesystemModule-test pattern). The mkdir/delete ops are HTTP endpoints
+// (POST/DELETE /api/dir?path=) whose handlers do parseFilePath(query) → fsMkdir/fsRemove; the HTTP
+// framing needs a socket fixture (backlogged), so here we exercise the same seam contract the
+// handler runs on — the create/delete behaviour + robustness (non-empty-dir / '..' traversal) — plus
+// HttpServerModule::parseFilePath directly (it's pure string→string, so it needs no socket).
 
 #include "doctest.h"
 #include "core/FileManagerModule.h"
+#include "core/HttpServerModule.h"   // parseFilePath — the shared filesystem-path guard
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -40,63 +43,87 @@ struct Rig {
     }
     ~Rig() { platform::fsSetRoot("."); std::filesystem::remove_all(root); }
 
-    // Set the `path` op-target control, then press a button (new folder / delete).
-    void op(const char* button, const char* path) {
-        auto& ctrls = fm.controls();
-        for (uint8_t i = 0; i < ctrls.count(); i++)
-            if (std::strcmp(ctrls[i].name, "path") == 0) {
-                std::strncpy(static_cast<char*>(ctrls[i].ptr), path, 127);
-                static_cast<char*>(ctrls[i].ptr)[127] = 0; break;
-            }
-        fm.onUpdate(button);
-    }
     bool onDisk(const char* rel) const {
         return std::filesystem::exists(std::string(root) + rel);
     }
 };
 
+// The mkdir op (POST /api/dir?path=), sans HTTP: the handler is fsMkdir on the guarded path.
+// Returns the seam result. fsSetRoot has already rooted the temp dir, so a plain rel path maps in.
+bool mkdirOp(const char* rel) { return platform::fsMkdir(rel); }
+// The delete op (DELETE /api/dir?path=): fsRemove a file or EMPTY dir.
+bool deleteOp(const char* rel) { return platform::fsRemove(rel); }
+
 }  // namespace
 
-TEST_CASE("FileManager: new folder creates a dir at the target path; delete removes it") {
+TEST_CASE("FileManager: mkdir creates a dir at the target path; delete removes it") {
     Rig r;
-    r.op("new folder", "/newdir");
+    CHECK(mkdirOp("/newdir"));
     CHECK(r.onDisk("/newdir"));
-    CHECK(std::strstr(r.fm.status(), "created") != nullptr);
-    r.op("delete", "/newdir");
+    CHECK(deleteOp("/newdir"));
     CHECK(!r.onDisk("/newdir"));
-    CHECK(std::strstr(r.fm.status(), "deleted") != nullptr);
 }
 
-TEST_CASE("FileManager: new folder nested under an existing dir") {
+TEST_CASE("FileManager: mkdir nested under an existing dir") {
     Rig r;
-    r.op("new folder", "/.config/sub");
+    CHECK(mkdirOp("/.config/sub"));
     CHECK(r.onDisk("/.config/sub"));
 }
 
 TEST_CASE("FileManager: delete of a non-empty folder is rejected, not a crash") {
     Rig r;
-    r.op("delete", "/.config");        // .config holds Drivers.json → not empty
-    CHECK(r.onDisk("/.config"));       // still there
-    CHECK(std::strstr(r.fm.status(), "not empty") != nullptr);
+    CHECK(!deleteOp("/.config"));       // .config holds Drivers.json → not empty → fails cleanly
+    CHECK(r.onDisk("/.config"));        // still there
 }
 
 TEST_CASE("FileManager: delete removes a file too") {
     Rig r;
-    r.op("delete", "/readme.txt");
+    CHECK(deleteOp("/readme.txt"));
     CHECK(!r.onDisk("/readme.txt"));
 }
 
-TEST_CASE("FileManager: a '..' traversal in the path is refused") {
+TEST_CASE("FileManager: a '..' traversal never escapes root (the seam's confinement)") {
     Rig r;
-    r.op("new folder", "/../escape");
-    CHECK(std::strstr(r.fm.status(), "invalid") != nullptr);
+    // fsSetRoot confines the seam to the temp root; even a raw '..' can't create outside it. The HTTP
+    // handler additionally rejects '..' up front in parseFilePath before reaching the seam (below).
+    (void)mkdirOp("/../escape");
     CHECK(!std::filesystem::exists(std::string(r.root) + "/../escape"));   // nothing outside root
 }
 
-TEST_CASE("FileManager: an empty target path is refused, not a crash") {
-    Rig r;
-    r.op("delete", "");
-    CHECK(std::strstr(r.fm.status(), "invalid") != nullptr);
+// parseFilePath is the single path guard every filesystem HTTP entry (read/write/dir/mkdir/delete)
+// runs on — pure string→string, so it's tested directly here without a socket. It decodes the
+// `path=` query value (%XX + '+'), roots a relative path at the mount, and rejects a missing/empty
+// path, a `..` traversal (raw OR percent-encoded), and an overlong (buffer-filling) value.
+TEST_CASE("HttpServer::parseFilePath accepts a valid path and roots a relative one") {
+    char out[64];
+    // Absolute path passes through as-is.
+    CHECK(HttpServerModule::parseFilePath("path=/foo/bar.json", out, sizeof(out)));
+    CHECK(std::strcmp(out, "/foo/bar.json") == 0);
+    // Relative path is rooted at the mount ('/').
+    CHECK(HttpServerModule::parseFilePath("path=readme.txt", out, sizeof(out)));
+    CHECK(std::strcmp(out, "/readme.txt") == 0);
+    // %XX + '+' decode: "%2Ffoo bar" → "/foo bar".
+    CHECK(HttpServerModule::parseFilePath("path=%2Ffoo+bar", out, sizeof(out)));
+    CHECK(std::strcmp(out, "/foo bar") == 0);
+    // The path stops at the '&' delimiter (further query params are ignored).
+    CHECK(HttpServerModule::parseFilePath("path=/a.json&hidden=1", out, sizeof(out)));
+    CHECK(std::strcmp(out, "/a.json") == 0);
+}
+
+TEST_CASE("HttpServer::parseFilePath rejects traversal, empty, missing, and overlong") {
+    char out[64];
+    // Raw '..' anywhere → reject.
+    CHECK_FALSE(HttpServerModule::parseFilePath("path=/../etc/passwd", out, sizeof(out)));
+    CHECK_FALSE(HttpServerModule::parseFilePath("path=foo/../../bar", out, sizeof(out)));
+    // Percent-encoded '..' (%2e%2e) decodes to '..' BEFORE the check → also reject.
+    CHECK_FALSE(HttpServerModule::parseFilePath("path=%2e%2e/secret", out, sizeof(out)));
+    // Missing path= key, and an empty value → reject.
+    CHECK_FALSE(HttpServerModule::parseFilePath("hidden=1", out, sizeof(out)));
+    CHECK_FALSE(HttpServerModule::parseFilePath("path=", out, sizeof(out)));
+    CHECK_FALSE(HttpServerModule::parseFilePath(nullptr, out, sizeof(out)));
+    // Overlong value (fills the buffer before the terminator) → reject, not a truncated prefix.
+    char small[8];
+    CHECK_FALSE(HttpServerModule::parseFilePath("path=/this/is/way/too/long", small, sizeof(small)));
 }
 
 // The /api/file upload streams the body to fsWriteStream (any size, binary-safe) and downloads via

@@ -299,12 +299,12 @@ def main() -> int:
             print(f"==> staged `{LOCAL_TAG}` release with firmwares: {', '.join(firmwares)}")
             print(f"    pick the `{LOCAL_TAG}` tag in the picker to flash a USB-connected ESP32")
         else:
-            print(f"==> no firmwares could be staged (all skipped — see warnings above)")
-            print(f"    falling back to render-only mode")
+            print("==> no firmwares could be staged (all skipped — see warnings above)")
+            print("    falling back to render-only mode")
     else:
         print(f"==> no local ESP32 builds found under {BUILD_ROOT.relative_to(ROOT)}")
-        print(f"    render-only mode — `Install` will fail")
-        print(f"    run `uv run moondeck/build/build_esp32.py --firmware <variant>` first to enable end-to-end flash")
+        print("    render-only mode — `Install` will fail")
+        print("    run `uv run moondeck/build/build_esp32.py --firmware <variant>` first to enable end-to-end flash")
 
     print(f"==> serving at http://localhost:{PORT}/")
     print(f"    installer: http://localhost:{PORT}/install/")

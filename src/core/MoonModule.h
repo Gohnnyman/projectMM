@@ -222,6 +222,13 @@ public:
     /// Network, Filesystem) so the user can re-enable other modules through them.
     virtual bool respectsEnabled() const { return true; }
 
+    /// Whether this module appears in the UI (/api/state → nav card). Default true. A pure engine
+    /// with no user-facing controls returns false so it isn't shown as an empty card — e.g.
+    /// FilesystemModule (the persistence engine; its one status readout lives on FileManagerModule)
+    /// and HttpServerModule (the web server itself). The state serializer skips any module whose
+    /// appearsInUi() is false.
+    virtual bool appearsInUi() const { return true; }
+
     /// Dirty flag — set by HttpServerModule when a control changes. FilesystemModule (or any
     /// consumer interested in "this module's state has been touched") observes it in loop1s()
     /// and clears it after persisting.

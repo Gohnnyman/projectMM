@@ -1002,6 +1002,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith("/api/doc-asset/"):
             self._serve_doc_asset()
 
+        elif self.path.startswith("/firmware/") and self.path.endswith(".bin"):
+            self._serve_firmware_bin()
+
         else:
             self._serve_static()
 
@@ -1028,9 +1031,46 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             result = mutate_state(_merge)
             self._send_json(result)
 
+        elif self.path == "/api/ota":
+            # Wireless flash of a LOCAL build: MoonDeck serves build/esp32-<fw>/projectMM.bin over
+            # its own HTTP (the GET /firmware/<fw>.bin route) and hands the device that URL via the
+            # device's POST /api/firmware/url — the device pulls + flashes it (esp_https_ota accepts
+            # the plain-http LAN URL). Same "flash my local build" as USB, over WiFi. Body: {ip, firmware}.
+            import urllib.request
+            import urllib.error
+            body = self._read_body()
+            params = json.loads(body) if body else {}
+            ip = params.get("ip", "")
+            firmware = params.get("firmware", "")
+            if not ip or not firmware:
+                self._send_json({"error": "ip and firmware required"}, 400)
+                return
+            bin_path = ROOT / "build" / f"esp32-{firmware}" / "projectMM.bin"
+            if not bin_path.exists():
+                self._send_json({"error": f"no build for {firmware!r} — run Build first"}, 404)
+                return
+            host_ip = _lan_ip()
+            if not host_ip:
+                self._send_json({"error": "MoonDeck can't determine its LAN IP (offline?)"}, 502)
+                return
+            bin_url = f"http://{host_ip}:{PORT}/firmware/{firmware}.bin"
+            # POST the URL to the device; it fetches + flashes. The device 202/200s immediately and
+            # reboots on success — the ota status is polled from the device's Firmware module.
+            try:
+                req = urllib.request.Request(
+                    f"http://{ip}/api/firmware/url",
+                    data=json.dumps({"url": bin_url}).encode(),
+                    method="POST", headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    self._send_json({"ok": True, "url": bin_url, "device_status": resp.status})
+            except urllib.error.HTTPError as e:
+                self._send_json({"error": f"device rejected OTA (HTTP {e.code})"}, 502)
+            except (urllib.error.URLError, OSError) as e:
+                self._send_json({"error": f"device unreachable: {e}"}, 502)
+
         elif self.path == "/api/push-device":
-            # Push a single (ip, board) to a device. Called by the JS when the
-            # user picks a board from the per-device dropdown — saveState
+            # Push a single (ip, deviceModel) to a device. Called by the JS when the
+            # user picks a deviceModel from the per-device dropdown — saveState
             # alone persists the value in moondeck.json but the device also
             # needs to hear about it (the device persists its `deviceModel` control,
             # now on SystemModule, to /.config/SystemModule.json). The bulk push from discover /
@@ -1056,7 +1096,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # under the lock via mutate_state.
             devices, scanned_subnet = discover_devices(subnet)
             target_subnet = _subnet_from_host_subnet(scanned_subnet)
-            pushes = []   # (ip, board) tuples populated by _merge_discover
+            pushes = []   # (ip, deviceModel) tuples populated by _merge_discover
 
             def _merge_discover(state):
                 # Attribute found devices to the network whose subnet matches
@@ -1077,7 +1117,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     return  # nothing to merge — state unchanged
                 # Merge found devices into the network, keyed by MAC (the only persistent identity —
                 # see _device_key). A found device with a MAC updates/creates its record, carrying the
-                # user fields (board, last_port, selected) forward. A found device WITHOUT a MAC is
+                # user fields (deviceModel, last_port, selected) forward. A found device WITHOUT a MAC is
                 # shown this scan but not persisted (nothing stable to track it by).
                 by_key = {_device_key(d): d for d in net.get("devices", []) if _device_key(d)}
                 merged = []
@@ -1142,7 +1182,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(state)
                 return
             refreshed = refresh_devices(snapshot)
-            pushes = []   # (ip, board) tuples populated by _merge_refresh
+            pushes = []   # (ip, deviceModel) tuples populated by _merge_refresh
 
             def _merge_refresh(state):
                 # Re-resolve `net` under the second lock — the network may have
@@ -1170,7 +1210,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 # DevicesModule order (see the discover merge above).
                 merged.sort(key=_device_sort_key)
                 target["devices"] = merged
-                # Schedule a board push for every online device with a
+                # Schedule a deviceModel push for every online device with a
                 # non-empty board. Redundant writes are cheap on the device
                 # (Text-control write hits a 2s debounce — repeated identical
                 # writes coalesce into one disk write). Catches the case
@@ -1248,7 +1288,10 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         # (improv_provision) doesn't declare needs_firmware, so params never
         # carries a firmware to deduce from — the dropdown is the sole source.
         if script_def.get("pass_device_model"):
-            device_model = params.get("deviceModel")
+            # The UI sends this as `device_model` (app.js sets params.device_model); accept the
+            # camelCase form too so either key reaches the flag. Without the snake_case key the
+            # value was silently dropped — the TX-power cap then never injected before provisioning.
+            device_model = params.get("device_model") or params.get("deviceModel")
             if device_model:
                 cmd.extend(["--device-model", device_model])   # improv_provision.py's CLI flag
         if params.get("host"):
@@ -1623,6 +1666,26 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
         data = asset_path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", mime or "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_firmware_bin(self):
+        """Serve a local firmware image for a device OTA: GET /firmware/<fw>.bin →
+        build/esp32-<fw>/projectMM.bin. The device (handed this URL by /api/ota) fetches it over
+        the LAN and flashes it. Only the exact <fw>.bin shape is served, mapped to the known build
+        dir — no arbitrary path, so this can't read outside build/esp32-*/."""
+        fw = self.path[len("/firmware/"):-len(".bin")]
+        if not fw or "/" in fw or ".." in fw:
+            self.send_error(400, "bad firmware name")
+            return
+        bin_path = ROOT / "build" / f"esp32-{fw}" / "projectMM.bin"
+        if not bin_path.exists():
+            self.send_error(404, f"no build for {fw}")
+            return
+        data = bin_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

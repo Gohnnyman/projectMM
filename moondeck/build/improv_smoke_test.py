@@ -192,14 +192,14 @@ def main() -> int:
 
     # ----- Step 3: reachable (optional) -----------------------------------
     if args.no_network:
-        print(f"==> [3/3] network   skipped (--no-network)")
+        print("==> [3/3] network   skipped (--no-network)")
         return finish(0)
     if not url:
         # Provisioning succeeded but we couldn't parse the URL from the
         # output — older firmware variants may not report the URL line.
         # Don't fail (device IS provisioned), but skip the reachability
         # check with a clear message.
-        print(f"==> [3/3] network   skipped (no device URL in provision output)")
+        print("==> [3/3] network   skipped (no device URL in provision output)")
         summary["failure"] = "provision succeeded but device URL not parseable from output"
         return finish(0)
 

@@ -241,8 +241,8 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     pending_contract_originals: dict = {}
 
     if mode == "construct":
-        print(f"\n  SKIP (mode=construct — runs in-process only; the live device's "
-              f"main.cpp owns the top-level shape)")
+        print("\n  SKIP (mode=construct — runs in-process only; the live device's "
+              "main.cpp owns the top-level shape)")
         results["skipped"] = True
         return results
     if mode != "mutate":
@@ -765,11 +765,11 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         print(f"  WROTE  {scenario_path.name} ({' + '.join(what)})")
 
     # Summary
-    print(f"\n---")
+    print("\n---")
     if results["passed"]:
-        print(f"PASSED")
+        print("PASSED")
     else:
-        print(f"FAILED")
+        print("FAILED")
 
     return results
 

@@ -40,13 +40,11 @@ void FilesystemModule::setup() {
                 platform::filesystemUsed(), platform::filesystemTotal());
 }
 
-void FilesystemModule::onBuildControls() {
-    controls_.addReadOnly("lastSaved", lastSaveStr_, sizeof(lastSaveStr_));
-    // The filesystem-usage gauge (used / total bytes) is a FileManagerModule control — it's where
-    // the value is shown (below the tree) and read from platform::filesystemUsed/Total. This module
-    // is the persistence engine; it doesn't display the partition gauge.
-    MoonModule::onBuildControls();
-}
+// No onBuildControls override: FilesystemModule is a non-UI persistence engine — it has NO
+// controls, so it renders no card in the module tree (which would confuse an end user next to
+// the File Manager). Its one piece of status, "last saved", is displayed by FileManagerModule,
+// which reads it via FilesystemModule::instance()->lastSavedStr(). The filesystem-usage gauge
+// likewise lives on FileManagerModule (that's where filesystem state is topical).
 
 void FilesystemModule::loop1s() {
     if (!mounted_ || !scheduler_) return;

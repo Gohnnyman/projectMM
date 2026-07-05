@@ -25,11 +25,13 @@ namespace mm {
 /// `show hidden` toggle is on — the standard dotfile convention. The toggle is a persisted bool the
 /// tree reads and forwards to `/api/dir` as the `hidden` filter flag.
 ///
-/// **Operations.** `path` is set by the UI to the absolute target (a selected tree node); `new
-/// folder` creates the folder at `path`, `delete` removes the file or empty folder at `path`. A
-/// file's contents are read/written over the `/api/file` HTTP endpoints (a file body isn't a control
-/// value). Every op is bounded and robust: a bad path, a non-empty-dir delete, or a `..` traversal
-/// fails with a status line and never crashes (the Robustness rule).
+/// **Operations are HTTP endpoints, not controls.** `POST /api/dir?path=` creates a folder,
+/// `DELETE /api/dir?path=` removes a file or empty folder, and a file's contents are read/written
+/// over `/api/file` — the path rides the request query, so an op carries its target in the request
+/// rather than a stored control (nothing to persist to flash per op). All share the one path guard
+/// (`HttpServerModule::fileQueryPath`: reject `..`, root at the mount), and each fails cleanly on a
+/// bad path / non-empty-dir delete — never crashes (the Robustness rule). This module itself owns
+/// only the `show hidden` toggle + the read-only usage gauges.
 ///
 /// **Not shown yet:** last-modified dates need a time source (NTP) + LittleFS mtime storage, both
 /// backlogged — the tree is name + size for now.
@@ -44,19 +46,8 @@ public:
     void onBuildControls() override;
     void setup() override;
     void loop1s() override;
-    void onUpdate(const char* c) override;
 
 private:
-    static constexpr size_t kPathMax = 128;   // matches the platform fsTranslate ceiling
-
-    void makeDir();                // mkdir the folder at path_
-    void removeEntry();            // remove the file / empty dir at path_
-
-    // Reject a ".." traversal, root the path at the mount — the one place traversal is checked.
-    static bool safePath(const char* rel, char* out, size_t cap);
-
-    char path_[kPathMax] = "";     // absolute op target (mkdir/delete), set by the tree UI
-    char statusBuf_[96] = "";
     bool showHidden_ = false;      // reveal dot-prefixed entries (forwarded to /api/dir by the UI)
     uint32_t usedBytes_ = 0;       // "filesystem" progress: bytes used, refreshed in loop1s
     uint32_t totalBytes_ = 0;      // "filesystem" progress: partition total, read once at build

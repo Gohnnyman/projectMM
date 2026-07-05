@@ -235,7 +235,8 @@ def _read_grid(host):
 
 def _online_devices():
     """ip[:port] for every online device on moondeck.json's active network."""
-    cfg = json.load(open(os.path.join(_ROOT, "moondeck", "moondeck.json")))
+    with open(os.path.join(_ROOT, "moondeck", "moondeck.json")) as f:
+        cfg = json.load(f)
     nets = cfg.get("networks", [])
     active = cfg.get("active_network")
     net = next((n for n in nets if n.get("name") == active), nets[0] if nets else None)

@@ -77,8 +77,8 @@ A boot-wired system tool (distinct from Filesystem, which is the persistence *en
 - The toolbar acts on the selected node: **＋ folder** creates a folder inside it, **＋ file** creates an empty file (click it to edit), **🗑 delete** removes the selected file or empty folder (press-twice to confirm), **⟳** refreshes.
 - **Drag files from the desktop** onto a folder (or the tree) to upload them — the body streams straight to the file (any size, binary-safe; capped only by a sanity limit and the free space, which it reports if short); a per-file **⤓** streams it back to the desktop.
 - The editor loads a file's text, pretty-prints JSON on open, and saves atomically; a binary file (contains a NUL) loads read-only (use ⤓ to fetch it intact). Upload and download both stream, so neither truncates.
-- A filesystem-usage bar (used / total, read from the platform) sits below the tree.
-- `path` — the absolute op target the tree sets (mkdir / delete); not user-typed.
+- A filesystem-usage bar (used / total, read from the platform) sits below the tree, with a `last saved` line under it (how long ago config was persisted — read from the FilesystemModule engine).
+- Create / delete are HTTP calls (`POST` / `DELETE /api/dir?path=`), not controls — the path rides the request, so nothing is stored on the device per op.
 
 Last-modified dates (needs an NTP time source + LittleFS mtime), binary/large + folder upload, folder-as-zip download, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../../backlog/backlog-core.md#file-manager-follow-ups)).
 

@@ -227,6 +227,18 @@ bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
                        uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
 
+// OTA — flash a firmware image STREAMED from `src` (no URL fetch; the caller pulls the bytes,
+// e.g. straight off an HTTP upload body). Same producer callback shape as fsWriteStream: `src`
+// fills up to `cap` bytes, returns the count (0 = clean EOF), and sets `*abort` to fail the OTA
+// (an incomplete/timed-out upload). Runs esp_ota_begin → esp_ota_write per chunk → esp_ota_end +
+// set_boot_partition, then reboots on success. SYNCHRONOUS (unlike http_fetch_to_ota): the caller
+// is already off the render hot path (an HTTP request handler) and needs the result to reply.
+// `statusBuf` / `bytesReadOut` are updated in place (bytesTotal is the caller-supplied
+// Content-Length, so no separate out-param). Desktop: returns false (no OTA partition); guard with
+// `if constexpr (mm::platform::hasOta)`. Returns true iff the image flashed + boot pointer flipped.
+bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
+                    char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut);
+
 // Synchronous outbound HTTP request to a LAN host — plain HTTP, no TLS (the Philips Hue v1
 // API, which HueDriver drives, allows it). Connects to `host:port`, sends `method path`
 // with `reqBody` (NUL-terminated; "" for none — a Content-Length + JSON content-type are

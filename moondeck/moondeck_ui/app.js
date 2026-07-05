@@ -13,10 +13,10 @@ let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
 // Device-model catalog loaded from /api/device-models (served by moondeck.py from
-// web-installer/deviceModels.json). Replaces the previously-hardcoded deviceModelOptions
-// list — same file the web installer (Step 2) will fetch directly from
-// GitHub Pages. Empty until init() loads it; renderDevices waits on init.
-let deviceModels = []; // [{ key, label, firmwares: [...] }]  (firmwares[0] is the default)
+// web-installer/deviceModels.json) — the same file the web installer fetches. Empty until
+// init() loads it; renderDevices waits on init.
+let deviceModels = []; // [{ name, firmwares: [...], ... }] — `name` is the identifier + label
+                       // (single-name catalog, matched by b.name); firmwares[0] is the default.
 // State shape (post-networks refactor):
 //   { networks: [{name, subnet, wifi: {ssid, password}, port, devices: [...]}],
 //     active_network: "Home",
@@ -203,6 +203,11 @@ document.getElementById("view-back").addEventListener("click", () => viewNavActi
 document.getElementById("view-forward").addEventListener("click", () => viewNavAction(w => w.history.forward()));
 document.getElementById("view-refresh").addEventListener("click", () => {
     if (viewFrame.src) viewFrame.src = viewFrame.src;
+});
+// Open the currently-viewed URL (the device UI) in a real browser tab — escapes the sandboxed
+// iframe entirely, so anything the frame restricts (modals, popups, downloads) works natively.
+document.getElementById("view-open").addEventListener("click", () => {
+    if (viewFrame.src) window.open(viewFrame.src, "_blank", "noopener");
 });
 
 function showInView(url) {
@@ -1018,6 +1023,38 @@ function renderDevices() {
             });
         });
 
+        // "OTA" — wireless flash of the local build for this device's firmware. MoonDeck serves
+        // build/esp32-<fw>/projectMM.bin and hands the device its URL (POST /api/ota); the device
+        // pulls + flashes over WiFi. No USB. Needs a local build for the device's firmware.
+        const otaBtn = document.createElement("button");
+        otaBtn.className = "device-inject";       // same compact style as inject
+        const otaFw = device.firmware && device.firmware !== "unknown" ? device.firmware : "";
+        otaBtn.textContent = "OTA";
+        otaBtn.disabled = !otaFw;
+        otaBtn.title = otaFw
+            ? `Flash the local ${otaFw} build to this device over WiFi (no USB)`
+            : "OTA needs the device's firmware known (discover it first)";
+        otaBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            if (!otaFw) return;
+            otaBtn.disabled = true;
+            otaBtn.textContent = "OTA…";
+            try {
+                const res = await fetch("/api/ota", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ip: device.ip, firmware: otaFw}),
+                    signal: timeoutSignal(15000),
+                });
+                const j = await res.json();
+                otaBtn.textContent = j.ok ? "flashing ✓" : "failed ✗";
+                if (!j.ok) alert(`OTA failed: ${j.error || "unknown"}`);
+            } catch (err) {
+                otaBtn.textContent = "failed ✗";
+                alert(`OTA failed: ${err.message || err}`);
+            }
+            setTimeout(() => { otaBtn.textContent = "OTA"; otaBtn.disabled = !otaFw; }, 2500);
+        });
+
         const removeBtn = document.createElement("button");
         removeBtn.className = "device-remove";
         removeBtn.textContent = "x";
@@ -1055,6 +1092,7 @@ function renderDevices() {
         row3.className = "device-row devicemodel-row";
         row3.appendChild(deviceModelPicker);
         row3.appendChild(injectBtn);
+        row3.appendChild(otaBtn);
 
         label.appendChild(row1);
         label.appendChild(row2);

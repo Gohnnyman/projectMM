@@ -389,7 +389,7 @@ def main() -> int:
             ok = False
 
     if args.check and not ok:
-        print("Run moondeck/docs/generate_test_docs.py to regenerate.")
+        print("Run `uv run moondeck/docs/generate_test_docs.py` to regenerate.")
         return 1
     return 0
 

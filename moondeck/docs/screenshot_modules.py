@@ -373,10 +373,10 @@ def check_server_freshness(host: str) -> None:
         print(f"  ⚠️  STALE SERVER: {host} is missing {len(missing)} type(s) the "
               f"source registers: {', '.join(missing[:6])}"
               + (" …" if len(missing) > 6 else ""))
-        print(f"      The running binary is older than the current source. Most likely a")
-        print(f"      second projectMM (a stale build/<host>/projectMM) is still on :8080.")
-        print(f"      Fix:  pkill -f projectMM  then rebuild + run ONE server:")
-        print(f"        uv run moondeck/build/build_desktop.py && ./build/<host>/projectMM")
+        print("      The running binary is older than the current source. Most likely a")
+        print("      second projectMM (a stale build/<host>/projectMM) is still on :8080.")
+        print("      Fix:  pkill -f projectMM  then rebuild + run ONE server:")
+        print("        uv run moondeck/build/build_desktop.py && ./build/<host>/projectMM")
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +669,7 @@ def main() -> int:
         if uncaptured:
             print(f"  ⚠️  {len(uncaptured)} registered effect/modifier(s) are NOT in this "
                   f"script's MODULES list, so they get no screenshot: {', '.join(uncaptured)}")
-            print(f"      Add them to MODULES (near the top of this file) to capture them.")
+            print("      Add them to MODULES (near the top of this file) to capture them.")
 
         # Optional pipeline tweaks for nicer effect previews (raw, higher-res).
         if args.no_modifier or args.grid:
@@ -852,7 +852,7 @@ def main() -> int:
                     ok = screenshot_module(page, args.host, actual_name,
                                            nav_root, out_path)
                     if ok:
-                        print(f"png ", end="", flush=True)
+                        print("png ", end="", flush=True)
                         captured.append(type_name)
                     else:
                         print("png-failed ", end="", flush=True)
@@ -862,7 +862,7 @@ def main() -> int:
                     ok = capture_preview_gif(page, args.host, actual_name,
                                              nav_root, gif_path)
                     if ok:
-                        print(f"gif ", end="", flush=True)
+                        print("gif ", end="", flush=True)
                         gif_captured.append(type_name)
                     else:
                         print("gif-failed ", end="", flush=True)
