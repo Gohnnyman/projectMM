@@ -24,6 +24,7 @@ namespace mm {
 // MoonLight's per-strip pin plumbing (nextPin) is dropped: a projectMM layout
 // emits coordinates only; the driver owns wiring.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout winding LEDs up a conical spiral.
 class SpiralLayout : public LayoutBase {
 public:
     lengthType ledCount = 640;      // total lights along the spiral

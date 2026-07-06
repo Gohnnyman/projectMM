@@ -225,6 +225,7 @@ protected:
 /// `compositeLayers()` maps virtualChannels → channelsD, parallelism via a semaphore
 /// (driver signals completion, compositor writes)
 /// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h).
+/// @card Drivers.png
 class Drivers : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "driver"; }

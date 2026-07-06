@@ -12,6 +12,7 @@ namespace mm {
 // live frame from AudioModule::latestFrame(); with no mic (or silence) the frame is
 // zero and the grid stays dark, so the effect is safe on any target.
 // Author: projectMM original (VU-meter)
+/// Audio-reactive effect: drives brightness/colour from the overall sound level.
 class AudioVolumeEffect : public EffectBase {
 public:
     const char* tags() const override { return "🔊"; }

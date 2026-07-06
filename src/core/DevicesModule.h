@@ -71,6 +71,7 @@ namespace mm {
 /// forward as the 44-byte WLED-compatible packet on UDP 65506. See
 /// docs/moonmodules/core/moxygen/DevicesModule.md for the WLED-interop screenshots + the
 /// wire shape.
+/// @card DevicesModule.png
 class DevicesModule : public MoonModule, public ListSource {
 public:
     /// Wire this device's own name (deviceName) before setup so the self row matches the

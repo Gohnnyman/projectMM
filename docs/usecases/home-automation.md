@@ -9,9 +9,9 @@ Integration goes **both directions**, and this page covers both:
 
 The recipes below are each self-contained:
 
-- **[Homebridge (Apple Home / HomeKit)](#homebridge-apple-home-homekit)** — bridge the device over MQTT so it appears as a HomeKit accessory. Full walkthrough (the worked example today).
+- **[Homebridge (Apple Home / HomeKit)](#homebridge-apple-home-homekit)** — bridge the device over MQTT so it appears as a HomeKit accessory. The full walkthrough.
 - **[Drive Hue lights](#drive-hue-lights)** — point an effect at your Hue bulbs.
-- **[Other platforms](#other-platforms)** — Home Assistant and beyond (an overview of the paths; detailed recipes as they land).
+- **[Other platforms](#other-platforms)** — how Home Assistant and other MQTT hubs reach the same device.
 
 The control surface these integrations drive — the MQTT controls, topics, and accessory config — is documented once in [Core › Services › MQTT](../moonmodules/core/services/services.md#mqtt); this page is the setup, and links there for the reference.
 
@@ -62,13 +62,15 @@ Install Homebridge via the official Debian repository ([the apt-package guide](h
 
 #### macOS
 
+Mosquitto 2.x binds only to `localhost` by default, so open the LAN listener with a one-line config (`test.conf` with `listener 1883 0.0.0.0` and `allow_anonymous true`), then run it in the foreground so you see every packet (Ctrl-C to stop):
+
 ```bash
-# broker — run in the foreground so you see every packet (Ctrl-C to stop)
 brew install mosquitto
-/opt/homebrew/sbin/mosquitto -v
+printf 'listener 1883 0.0.0.0\nallow_anonymous true\n' > test.conf
+/opt/homebrew/sbin/mosquitto -v -c test.conf
 ```
 
-The foreground broker listens on `1883` on all interfaces, so the device reaches it at your Mac's LAN IP while Homebridge reaches it on loopback.
+Now the device reaches the broker at your Mac's LAN IP while Homebridge reaches it on loopback. (Allow `mosquitto` through the macOS firewall on `1883` if prompted.)
 
 Install Homebridge ([homebridge.io](https://homebridge.io) has the macOS installer; `npm i -g homebridge homebridge-config-ui-x` is the CLI route). Start it with `homebridge` in a terminal, or via the menu-bar app.
 
@@ -137,10 +139,10 @@ To set it up:
 
 Homebridge above is the worked example; other home-automation platforms adopt the same device through the same primitives. The building blocks are shared — the [MQTT control surface](../moonmodules/core/services/services.md#mqtt) (broker + the `on`/`brightness`/`hsv` topics) and, for hubs that speak it, the device's WLED compatibility — so a new integration is a new front-end on top, not new device work.
 
-- **Home Assistant** — HA adopts the device **without MQTT**: its built-in WLED integration discovers it over the existing WLED `/json` API the device already serves (the same interface the WLED apps use), so on/off + brightness work with no broker in the middle. An MQTT path (HA's MQTT Discovery, for the full control surface) is the natural next step. *Detailed recipe to be added.*
-- **Others** (Node-RED, openHAB, voice assistants via a hub, …) — anything that speaks MQTT can drive the device through the [control topics](../moonmodules/core/services/services.md#mqtt); the broker setup is the same [install step](#install-a-broker-homebridge) as above, only the consumer differs. *Recipes added as they're worked through.*
+- **Home Assistant** — HA adopts the device **without MQTT**: its built-in WLED integration discovers it over the WLED `/json` API the device already serves (the same interface the WLED apps use), so on/off + brightness work with no broker in the middle. For the full control surface, HA's MQTT Discovery reaches the same [control topics](../moonmodules/core/services/services.md#mqtt) below.
+- **Others** (Node-RED, openHAB, voice assistants via a hub, …) — anything that speaks MQTT drives the device through the [control topics](../moonmodules/core/services/services.md#mqtt); the broker setup is the same [install step](#install-a-broker-homebridge) as above, only the consumer differs.
 
-When a platform gets a full walkthrough, it becomes its own `##` section beside Homebridge, listed in the intro — the per-integration recipe is self-contained, while the shared reference stays in [Core › Services › MQTT](../moonmodules/core/services/services.md#mqtt).
+Each integration is a self-contained recipe; the shared MQTT reference lives once in [Core › Services › MQTT](../moonmodules/core/services/services.md#mqtt).
 
 ## Troubleshooting
 

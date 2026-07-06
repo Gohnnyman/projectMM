@@ -11,6 +11,8 @@ namespace mm {
 // Useful for verifying preview axis orientation: each colour names its axis.
 // Port of MoonLight's Lines effect via projectMM-v1/LinesEffect.h.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Test effect: axis-aligned planes sweeping in sync (RGB = XYZ).
+/// @card LinesEffect.png
 class LinesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }

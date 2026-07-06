@@ -26,6 +26,7 @@ namespace mm {
 // shared draw primitives. Per-column ball state lives on the heap (sized to width()×maxNumBalls),
 // allocated in onBuildState and freed in teardown — never a large inline member.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Physics effect: gravity-bounced balls trailing along the layer.
 class BouncingBallsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🐙"; }  // MoonLight origin · 2D

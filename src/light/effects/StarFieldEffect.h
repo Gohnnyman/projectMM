@@ -31,6 +31,7 @@ namespace mm {
 // + the shared draw/palette primitives. The star table lives on the heap (platform::alloc), sized
 // to the control maximum, rather than as a large inline member.
 // Author: @Brandon502 (MoonLight), inspired by Daniel Shiffman / Coding Train — https://www.youtube.com/watch?v=17WoOqgXsRM , https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Star-field effect: drifting points like flying through stars.
 class StarFieldEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

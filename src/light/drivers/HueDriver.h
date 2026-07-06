@@ -41,6 +41,8 @@ namespace mm {
 //
 // Plain HTTP, no TLS — the Hue v1 API allows it (bench-confirmed on a BSB002 bridge). Prior
 // art: the Hue v1 CLIP API (public docs); the effect-as-output mapping is projectMM's own.
+/// Output driver: sends the buffer to Philips Hue bulbs as pixels.
+/// @card HueDriver.png
 class HueDriver : public DriverBase {
 public:
     uint8_t  bridgeIp[4] = {};           // the bridge's LAN IP (from the UI)

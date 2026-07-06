@@ -32,6 +32,7 @@ namespace mm {
 // reconstruction. The reconstructed logic is marked // RECONSTRUCTED and, on the
 // defaults, cross-checks against a plain serpentine tiling.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout tiling multiple panels into one grid.
 class PanelsLayout : public LayoutBase {
 public:
     // Outer level — the panel grid (MoonLight `panels`, default 2×2 panels).

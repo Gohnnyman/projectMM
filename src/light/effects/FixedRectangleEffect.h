@@ -23,6 +23,7 @@ namespace mm {
 // per-row when height>width), and the white-vs-colour chequerboard are reproduced exactly,
 // written fresh on EffectBase + the shared draw primitives.
 // Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Test effect: draws a fixed rectangle at set coordinates.
 class FixedRectangleEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

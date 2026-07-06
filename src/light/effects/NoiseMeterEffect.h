@@ -27,6 +27,7 @@ namespace mm {
 // palette / noise / beatsin8 primitives. Reads AudioModule::latestFrame(); silence → level 0 →
 // maxLen 0 → the panel fades to dark, safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Audio-reactive effect: a noise field modulated by sound level.
 class NoiseMeterEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙📊"; }   // WLED origin · audio

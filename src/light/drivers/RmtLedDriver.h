@@ -31,6 +31,8 @@ namespace mm {
 // `if constexpr (platform::rmtTxChannels == 0)` so it compiles everywhere.
 // The pin/count parsing and buffer slicing run on every platform, which is what
 // lets the host unit tests (unit_RmtLedDriver_pins.cpp) pin them.
+/// Output driver: WS2812 LEDs over the RMT peripheral.
+/// @card RmtLedDriver.png
 class RmtLedDriver : public DriverBase {
 public:
     // Hard cap on the pin arrays: the largest RMT TX group of any supported

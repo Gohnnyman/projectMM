@@ -16,6 +16,8 @@ namespace mm {
 /// the Lava palette (black->red->orange->yellow->white) gives the classic look; any
 /// palette works (Ocean/Forest turn the flame blue/green).
 // Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits — https://github.com/toggledbits/MatrixFireFast
+/// Fire2012-style heat-field effect coloured through the active palette.
+/// @card FireEffect.png
 class FireEffect : public EffectBase {
 public:
     const char* tags() const override { return "⚡️🦅"; }  // FastLED origin (Fire2012-style) · David Jupijn / Rising Step

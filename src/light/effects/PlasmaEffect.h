@@ -8,6 +8,8 @@
 namespace mm {
 
 // Author: classic plasma, FastLED / WLED lineage
+/// Plasma effect: summed sine waves forming rolling blobs.
+/// @card PlasmaEffect.gif
 class PlasmaEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step

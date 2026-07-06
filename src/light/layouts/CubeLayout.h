@@ -26,6 +26,7 @@ namespace mm {
 // layouts emit coordinates only — the driver owns pins — so that plumbing is
 // dropped and only the geometry is kept.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of a 3D cube volume (width×height×depth).
 class CubeLayout : public LayoutBase {
 public:
     // Cube edges. Defaults 10×10×10, range 1..128 — MoonLight's exact defaults.

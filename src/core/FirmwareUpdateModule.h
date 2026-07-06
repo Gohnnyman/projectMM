@@ -77,6 +77,7 @@ inline bool otaInFlight() {
 /// every ESP32 OTA flow since IDF v4.x; the install-picker UI is the new layer on top. See
 /// docs/moonmodules/core/moxygen/FirmwareUpdateModule.md for the `POST /api/firmware/url` wire
 /// contract, the compatibility rules, and the flash lifecycle + error taxonomy.
+/// @card FirmwareUpdateModule.png
 class FirmwareUpdateModule : public MoonModule {
 public:
     /// Diagnostics keep ticking regardless of the user toggle; matches

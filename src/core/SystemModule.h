@@ -60,6 +60,7 @@ namespace mm {
 ///
 /// **Prior art:** MoonLight — system diagnostics via REST API; device name used for
 /// mDNS.
+/// @card SystemModule.png
 class SystemModule : public MoonModule {
 public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }

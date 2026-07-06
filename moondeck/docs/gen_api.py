@@ -178,6 +178,34 @@ def _strip_bad_anchor_links(md: str) -> str:
     return _BAD_ANCHOR_RE.sub("]", md)
 
 
+# A `@card <file>` directive in a class `///` comment — the module's UI-card screenshot.
+# Doxygen with GENERATE_HTML=NO drops `\image`/`@htmlonly`/raw `<img>` from the XML, but
+# preserves plain text, so `@card foo.png` survives Doxygen → moxygen as-is and we render
+# it to an `<img>` here (post-process). The asset lives at docs/assets/<domain>[/<sub>]/<file>;
+# from a moxygen page (moonmodules/<domain>/moxygen/) that resolves to ../../../assets/… .
+# `@card <file>` can land mid-line: Doxygen flows consecutive `///` lines into one paragraph,
+# so in a richly-commented class the directive trails the last text run (`… esp_event.h. @card x.png`)
+# rather than sitting on its own line. Match it ANYWHERE, with optional surrounding whitespace, and
+# render to an <img> on its own block (a leading newline lifts it out of the trailing paragraph).
+_CARD_RE = re.compile(r'[ \t]*@card\s+(?P<file>\S+\.(?:png|jpe?g|gif))[ \t]*')
+_ASSETS = ROOT / "docs" / "assets"
+
+
+def _render_card_directives(md: str, domain: str, stem: str) -> str:
+    """Replace each `@card <file>` directive with an <img> pointing at the resolved asset.
+    A file that doesn't exist on disk drops the directive (no broken image) — the same
+    fail-soft as a missing generated page."""
+    def repl(m: re.Match) -> str:
+        fname = m.group("file")
+        # Search under docs/assets/<domain>/ for the file (handles the light/{drivers,effects,…} subdir).
+        hits = list((_ASSETS / domain).rglob(fname))
+        if not hits:
+            return ""   # asset absent → emit nothing rather than a broken link
+        rel = os.path.relpath(hits[0], DOCS_MOONMODULES / domain / "moxygen")
+        return f'\n\n<img src="{rel}" alt="{stem} card" width="300">\n'
+    return _CARD_RE.sub(repl, md)
+
+
 def _class_to_header(xml_dir: Path) -> dict[str, str]:
     """Map each moxygen class-file key → its source header (repo-relative), read from
     the Doxygen XML `<location file=...>` of every class/struct compound. The key is
@@ -276,6 +304,7 @@ def generate() -> dict[str, str]:
             stem = Path(header).stem
             body = _rewrite_cls_links("".join(blocks), domain, cls_to_page)
             body = _strip_bad_anchor_links(body)
+            body = _render_card_directives(body, domain, stem)
             md = _migration_crosscheck_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"
             dst = DOCS_MOONMODULES / domain / "moxygen" / f"{stem}.md"

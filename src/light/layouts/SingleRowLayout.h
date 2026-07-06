@@ -18,6 +18,7 @@ namespace mm {
 // ledPinDIO select, its "LED NN" pin menu, and nextPin()): a projectMM layout
 // emits coordinates only, the driver owns pin assignment.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of one horizontal LED row (1D).
 class SingleRowLayout : public LayoutBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

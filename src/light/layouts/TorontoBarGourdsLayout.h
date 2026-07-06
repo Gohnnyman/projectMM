@@ -31,6 +31,8 @@ namespace mm {
 // count and the emitted set can never disagree (the RingLayout/SphereLayout
 // pattern). Integer math throughout; this is the cold build path.
 // Author: projectMM / custom fixture
+/// Layout for the Toronto bar decorative-gourd installation.
+/// @card TorontoBarGourdsLayout.gif
 class TorontoBarGourdsLayout : public LayoutBase {
 public:
     // Mode 0 only: how many stacked lights one gourd contributes. MoonLight

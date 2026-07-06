@@ -42,6 +42,7 @@ namespace mm {
 /// docs/moonmodules/core/services/services.md#mqtt for the Homebridge accessory config). The MoonLight sibling
 /// bridges the same on/off+brightness surface through a full framework MQTT client + HA discovery;
 /// projectMM writes its own lean client over the platform socket primitive instead.
+/// @card MqttModule.png
 class MqttModule : public MoonModule {
 public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }

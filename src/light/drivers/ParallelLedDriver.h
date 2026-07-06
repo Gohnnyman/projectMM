@@ -39,6 +39,7 @@ namespace mm {
 // configErr_/failBuf_ and their clear/ensure helpers come from DriverBase (shared
 // with RmtLedDriver too).
 template <class Derived>
+/// Base for parallel WS2812 LED-output drivers.
 class ParallelLedDriver : public DriverBase {
 public:
     // Bus width this increment: 8 of the peripheral's 16 lanes (matches the

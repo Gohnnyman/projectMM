@@ -35,6 +35,8 @@ namespace mm {
 // pin/wiring plumbing (nextPin / doNextPin) is dropped — a projectMM layout
 // emits coordinates only; the driver owns pins.
 // Author: projectMM / custom fixture
+/// Layout mapping automotive light-strip coordinates.
+/// @card CarLightsLayout.gif
 class CarLightsLayout : public LayoutBase {
 public:
     // Verbatim MoonLight default and range (the commented-out nrOfSpokes /

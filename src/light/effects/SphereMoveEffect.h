@@ -27,6 +27,7 @@ namespace mm {
 // expression) so the origin sweep and diameter breathing integrate continuously rather than in
 // quantised integer-time steps — a smooth sweep at every speed.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Effect moving a lit sphere through a 3D layout.
 class SphereMoveEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🧊"; }  // MoonLight origin · 3D-native

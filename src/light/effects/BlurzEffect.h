@@ -31,6 +31,7 @@ namespace mm {
 //
 // 1D in spirit (a strip of `nrOfLights` pixels) but declared D2 so it spans a 2D panel as a flat run
 // along the buffer's pixel index; the dot and blur work over the whole pixel count either way.
+/// Audio-reactive effect: blurred dots positioned by frequency band.
 class BlurzEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙📊"; }  // WLED-lineage · audio

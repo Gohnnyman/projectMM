@@ -17,6 +17,7 @@
 
 namespace mm {
 
+/// Effect whose render is a live-authored MoonLive script.
 class MoonLiveEffect : public EffectBase {
 public:
     const char* tags() const override { return "📝"; }   // scripted

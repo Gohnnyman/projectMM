@@ -84,6 +84,7 @@ namespace mm {
 /// **Prior art:** MoonLight — mDNS hostname advertising, REST API for network config,
 /// credentials persisted to SPIFFS. ESP-IDF — `esp_wifi.h`, `mdns.h`, `esp_netif.h`,
 /// `esp_event.h`.
+/// @card NetworkModule.png
 class NetworkModule : public MoonModule {
 public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }

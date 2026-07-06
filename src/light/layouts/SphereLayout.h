@@ -18,6 +18,7 @@ namespace mm {
 // though layout iteration is a cold path, because the same pattern reads
 // uniformly across the codebase.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout mapping LEDs onto a sphere surface.
 class SphereLayout : public LayoutBase {
 public:
     // Surface radius in light-units. Min 1 (the smallest hollow sphere: 18

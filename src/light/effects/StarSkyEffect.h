@@ -24,6 +24,8 @@ namespace mm {
 // colorFromPalette, draw::). The per-star arrays live on the heap (platform::alloc), never as inline
 // members, so sizeof(StarSkyEffect) stays tiny.
 // Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Night-sky effect: twinkling stars over a dark field.
+/// @card StarSkyEffect.gif
 class StarSkyEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

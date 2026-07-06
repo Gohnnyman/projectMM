@@ -75,6 +75,7 @@ namespace mm {
 /// `deploy/flashfs.py --wifi` covered the same rack-provisioning use case by baking credentials
 /// into a LittleFS partition image and re-flashing; Improv replaces that with live serial
 /// provisioning (devices stay running, no flash mode required).
+/// @card ImprovProvisioningModule.png
 class ImprovProvisioningModule : public MoonModule {
 public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }

@@ -18,6 +18,8 @@ namespace mm {
 // 480 RGB lights per packet vs 170, and per-packet cost is what dominates the
 // wire time). The single-node-multiple-protocols shape follows MoonLight's
 // D_NetworkOut (architecture studied, not copied).
+/// Output driver: streams the buffer over Art-Net/E1.31/DDP.
+/// @card NetworkSendDriver.png
 class NetworkSendDriver : public DriverBase {
 public:
     // Index-aligned with the protocol constants used in loop()'s switch:

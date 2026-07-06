@@ -18,6 +18,7 @@ namespace mm {
 // Prior art: projectMM v1/v2 SineEffect (same 3D sine; those used float sinf and a
 // KvStore brightness publish we don't carry).
 // Author: MoonLight (Sinus, AI-generated) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Effect of a moving sine wave across the layer.
 class SineEffect : public EffectBase {
 public:
     const char* tags() const override { return "🌀"; }

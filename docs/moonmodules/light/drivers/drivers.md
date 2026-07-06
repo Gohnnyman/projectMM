@@ -52,7 +52,7 @@ Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 
 ### Hue 💫 · bridge
 
-<img src="../../../assets/light/drivers/Hue driver.png" width="300" alt="A HueDriver in the UI">
+<img src="../../../assets/light/drivers/HueDriver.png" width="300" alt="A HueDriver in the UI">
 
 Drives **Philips Hue bulbs as pixels**: each colour bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit — smooth ambient colour, not strobing.
 

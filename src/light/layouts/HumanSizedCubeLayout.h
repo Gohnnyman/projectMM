@@ -24,6 +24,7 @@ namespace mm {
 // layout emits coordinates only (the driver owns pins), and the sixth face
 // is disabled in the source. tags 💫 marks the MoonLight lineage.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of a walk-in cube built from five LED-curtain faces.
 class HumanSizedCubeLayout : public LayoutBase {
 public:
     // Verbatim MoonLight defaults and ranges: a 10×10×10 cube, each edge 1..20.

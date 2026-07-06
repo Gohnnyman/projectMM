@@ -23,6 +23,7 @@ namespace mm {
 // MoonLight spec, written fresh on EffectBase + the shared draw primitives. One drop per X column;
 // safe at any grid size.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Tetris-style effect: falling, stacking blocks.
 class TetrixEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙"; }  // MoonLight origin · MoonModules

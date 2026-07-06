@@ -24,6 +24,7 @@ namespace mm {
 //     lanes — whatever `pins` names.
 // Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812
 // lineage — architecture studied, never copied (see ParlioLedDriver.md).
+/// Output driver: parallel WS2812 LEDs over the P4 Parlio engine.
 class ParlioLedDriver : public ParallelLedDriver<ParlioLedDriver> {
 public:
     // All controls default to UNSET — pins="", ledsPerPin="" (= all lights on the

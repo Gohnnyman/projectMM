@@ -1,5 +1,19 @@
 #pragma once
 
+#include "core/MoonModule.h"
+#include "core/AudioFrame.h"
+#include "core/AudioLevel.h"
+#include "core/AudioBands.h"
+#include "core/math8.h"      // beatsin8 / sin8 — the simulated-audio oscillators
+#include "light/WLEDAudioSyncPacket.h"   // WLED audio-sync wire format (send/receive)
+#include "platform/platform.h"
+
+#include <cstdint>
+#include <cstdio>   // snprintf for the read-out strings
+#include <cstring>
+
+namespace mm {
+
 /// Acquires an audio source and publishes an `AudioFrame` — an overall sound
 /// **level**, a 16-band frequency **spectrum**, and the **dominant peak** — as the
 /// producer half of the audio-reactive pipeline
@@ -65,21 +79,7 @@
 /// docs/moonmodules/core/moxygen/AudioModule.md for the full DSP rationale, the source-seam
 /// backlog (line-in / PDM / analog / I2C codecs), and the forward-looking adaptive
 /// noise-gate analysis.
-
-#include "core/MoonModule.h"
-#include "core/AudioFrame.h"
-#include "core/AudioLevel.h"
-#include "core/AudioBands.h"
-#include "core/math8.h"      // beatsin8 / sin8 — the simulated-audio oscillators
-#include "light/WLEDAudioSyncPacket.h"   // WLED audio-sync wire format (send/receive)
-#include "platform/platform.h"
-
-#include <cstdint>
-#include <cstdio>   // snprintf for the read-out strings
-#include <cstring>
-
-namespace mm {
-
+/// @card AudioModule.png
 class AudioModule : public MoonModule {
 public:
     /// Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of

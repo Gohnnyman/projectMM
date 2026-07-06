@@ -36,6 +36,7 @@ public:
 /// **Reordering:** layout children reorder by drag-and-drop (`POST /api/modules/<name>/move` with `{"to": <index>}`), with insert (not swap) semantics — the standard reorderable-list behaviour (Finder, Trello, SortableJS). Order sets the physical index range each layout occupies, which drives ArtNet universe assignment. The same `move` op applies to every container.
 ///
 /// **Status:** the status slot shows the physical setup it describes — `` `<N> lights · <W>×<H>×<D>` `` — the total light count summed across enabled children (the driver output buffer size) and the physical bounding box (the extent of all light coordinates, the dense render buffer size). For a dense grid the count equals the box volume; for a sparse layout (a sphere shell) the count is smaller than the box, and that gap is the at-a-glance signal that the layout is sparse. An empty setup reports Warning severity. Recomputed on every rebuild, not per tick.
+/// @card Layouts.png
 class Layouts : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "layout"; }

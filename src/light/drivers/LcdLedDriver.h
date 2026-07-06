@@ -27,6 +27,7 @@ namespace mm {
 // WiFi-induced bit-slip of refill-based drivers can't occur. Prior art: Adafruit's
 // LCD_CAM discovery, hpwit's I2SClockless lineage, FastLED's S3 driver —
 // architecture studied, never copied (see LcdLedDriver.md).
+/// Output driver: parallel WS2812 LEDs over the S3 LCD_CAM bus.
 class LcdLedDriver : public ParallelLedDriver<LcdLedDriver> {
 public:
     // Data pins + loopback pin default to UNSET: they are user-soldered (the strand

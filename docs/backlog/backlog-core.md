@@ -389,7 +389,7 @@ Forward-looking companion to the shipped UI spec, [moonmodules/core/services/ser
 
 ### File Manager follow-ups
 
-The shipped File Manager (see [ui.md](../moonmodules/core/services/services.md)) is a lazy expand/collapse tree over `/api/dir` + a size-capped text editor over `/api/file`, with drag-drop upload (tier 1) + per-file download + a filesystem-usage bar. Deferred capabilities, each self-contained:
+The shipped File Manager (see [services.md](../moonmodules/core/services/services.md#file-manager)) is a lazy expand/collapse tree over `/api/dir` + a size-capped text editor over `/api/file`, with drag-drop upload (tier 1) + per-file download + a filesystem-usage bar. Deferred capabilities, each self-contained:
 
 - **Upload — recursive folder tier.** Single-file upload of **any size** streams to the file (`fsWriteStream`, binary-safe, `kUploadMax` + free-space guarded) and downloads stream back (`fsReadAt`), so text/config/binary all work. Remaining: **multi-file / recursive folder drops** — client-side `mkdir` + walk via `dataTransfer.items` `webkitGetAsEntry()`.
 - **Download — folder as `.zip`.** Per-file download streams (`<a download>` on `/api/file`). A folder download needs the browser to walk `/api/dir` recursively, fetch each file, and build a `.zip` client-side — which means bundling a zip library into `app.js`. That's a permanent app.js size bump, and app.js is embedded in firmware, so it weighs on the flash budget (see the flash-budget item above). Gate on real demand; symmetric with the folder-upload tier.

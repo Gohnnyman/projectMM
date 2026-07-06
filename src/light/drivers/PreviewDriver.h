@@ -37,6 +37,7 @@ namespace mm {
 /// from this `count`, not from the light total. `stride` rises above 1 only when the
 /// point set would exceed the runtime send-buffer cap (`min(display, memory)`); below
 /// the cap every light is sent (stride 1), so a sparse layout streams in full.
+/// @card PreviewDriver.png
 class PreviewDriver : public DriverBase {
 public:
     /// The 3D preview the web UI renders streams from this driver. Deleting or

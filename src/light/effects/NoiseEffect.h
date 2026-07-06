@@ -7,6 +7,8 @@
 namespace mm {
 
 // Author: FastLED inoise field (Mark Kriegsman)
+/// Smooth animated value-noise effect (3D on volumetric layouts).
+/// @card NoiseEffect.gif
 class NoiseEffect : public EffectBase {
 public:
     const char* tags() const override { return "⚡️"; }  // FastLED-style noise

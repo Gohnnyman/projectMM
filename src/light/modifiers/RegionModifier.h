@@ -36,6 +36,7 @@ namespace mm {
 // its identity/memcpy path with zero carving cost. Adding a full-region (0/100)
 // RegionModifier is correct but not free; the default is to not add one.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
+/// Modifier carving the layer to a percentage sub-rectangle.
 class RegionModifier : public ModifierBase {
 public:
     lengthType startX = 0,   startY = 0,   startZ = 0;
