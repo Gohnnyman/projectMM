@@ -110,26 +110,11 @@ DOCS_MOONMODULES = ROOT / "docs" / "moonmodules"
 _BLOB_BASE = "https://github.com/MoonModules/projectMM/blob/main"
 
 
-def _migration_crosscheck_header(header_rel: str, domain: str, stem: str) -> str:
-    """A TEMPORARY banner prepended to each generated page during the docs-v2
-    migration: a link to the source `.h` (GitHub blob — `src/` isn't published to the
-    site) and, if one still exists, the original hand-written `<stem>.md` as an
-    IN-SITE relative link (that page still builds during the migration, so the link
-    resolves to its rendered `.html`), so a reviewer can cross-check that the `.md`'s
-    content was absorbed into the `.h`'s `///` comments. Removed at Stage 5."""
-    parts = [f"[source `{Path(header_rel).name}`]({_BLOB_BASE}/{header_rel})"]
-    # The old per-module .md now lives under docs/moonmodules/<domain>/archive/. Find
-    # it by name (excluding the generated moxygen/ dirs); SORT so rglob's unspecified
-    # order can't make the chosen match (and thus the emitted relative path) vary build
-    # to build. Link RELATIVE to this generated page so MkDocs resolves it in-site.
-    this_dir = DOCS_MOONMODULES / domain / "moxygen"
-    for md in sorted(DOCS_MOONMODULES.rglob(f"{stem}.md")):
-        if "moxygen" in md.parts:
-            continue
-        rel = os.path.relpath(md, this_dir).replace(os.sep, "/")
-        parts.append(f"[original `{md.name}`]({rel})")
-        break
-    return f"> _Migration cross-check (temporary):_ {' · '.join(parts)}\n\n"
+def _source_header(header_rel: str, domain: str, stem: str) -> str:
+    """A one-line banner linking each generated page to its source `.h` on GitHub —
+    `src/` isn't published to the site, so this is the only way to reach the header the
+    page is generated from."""
+    return f"> _Source:_ [`{Path(header_rel).name}`]({_BLOB_BASE}/{header_rel})\n\n"
 
 
 # A moxygen inter-class link: `](cls_mm-<Class>.md#<anchor>)`, plus the namespace file
@@ -176,6 +161,77 @@ def _strip_bad_anchor_links(md: str) -> str:
     """Drop moxygen self-links whose anchor doesn't exist on the recombined page
     (source-file anchors + numbered member anchors), leaving the link label as text."""
     return _BAD_ANCHOR_RE.sub("]", md)
+
+
+# A `@card <file>` directive in a class `///` comment — the module's UI-card screenshot.
+# Doxygen with GENERATE_HTML=NO drops `\image`/`@htmlonly`/raw `<img>` from the XML, but
+# preserves plain text, so `@card foo.png` survives Doxygen → moxygen as-is and we render
+# it to an `<img>` here (post-process). The asset lives at docs/assets/<domain>[/<sub>]/<file>;
+# from a moxygen page (moonmodules/<domain>/moxygen/) that resolves to ../../../assets/… .
+# `@card <file>` can land mid-line: Doxygen flows consecutive `///` lines into one paragraph,
+# so in a richly-commented class the directive trails the last text run (`… esp_event.h. @card x.png`)
+# rather than sitting on its own line. Match it ANYWHERE, with optional surrounding whitespace, and
+# render to an <img> on its own block (a leading newline lifts it out of the trailing paragraph).
+_CARD_RE = re.compile(r'[ \t]*@card\s+(?P<file>\S+\.(?:png|jpe?g|gif))[ \t]*')
+_ASSETS = ROOT / "docs" / "assets"
+
+
+def _render_card_directives(md: str, domain: str, stem: str) -> str:
+    """Replace each `@card <file>` directive with an <img> pointing at the resolved asset.
+    A file that doesn't exist on disk drops the directive (no broken image) — the same
+    fail-soft as a missing generated page."""
+    def repl(m: re.Match) -> str:
+        fname = m.group("file")
+        # Search under docs/assets/<domain>/ for the file (handles the light/{drivers,effects,…} subdir).
+        hits = list((_ASSETS / domain).rglob(fname))
+        if not hits:
+            return ""   # asset absent → emit nothing rather than a broken link
+        rel = os.path.relpath(hits[0], DOCS_MOONMODULES / domain / "moxygen")
+        return f'\n\n<img src="{rel}" alt="{stem} card" width="300">\n'
+    return _CARD_RE.sub(repl, md)
+
+
+# A member signature line moxygen emits as its own paragraph: a backtick-delimited
+# code span alone on a line — an attribute (`uint8_t protocol = 0`) or a method
+# (`virtual inline void onBuildControls() override`). The template wraps each in
+# backticks; nothing else on the site opens a line with a bare code span, so this
+# anchors the match to member signatures only.
+_SIG_LINE_RE = re.compile(r'^`(?P<sig>[^`\n]+)`[ \t]*$', re.MULTILINE)
+# A METHOD name is the identifier immediately before the FIRST argument-list `(`
+# (`… onBuildControls(…) override` → `onBuildControls`) — trailing `const`/`override`
+# come after and must NOT win. An ATTRIBUTE name is the identifier before ` =` or at
+# the end of the declarator (`uint8_t protocol = 0` → `protocol`; `char pins[24] = ""`
+# → `pins`, skipping the `[N]` array bound). Two anchored patterns, method tried first.
+_SIG_METHOD_NAME_RE = re.compile(r'(?P<name>[A-Za-z_]\w*)\s*\(')
+_SIG_ATTR_NAME_RE = re.compile(r'(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*(?:=|$)')
+
+
+def _highlight_signature_names(md: str) -> str:
+    """Wrap the declared member NAME in each generated signature so the theme can
+    highlight it while the type/args stay muted (CSS: `.mm-sig-name`). moxygen emits
+    a flat `<code>` string with no internal markup, so 'colour only the name' can't
+    be done in CSS alone — we split the code span here into
+    `<code>…<span class="mm-sig-name">name</span>…</code>` (raw HTML the markdown
+    passes through). The signature reads as one code chip; only the identifier pops."""
+    def repl(m: re.Match) -> str:
+        sig = m.group("sig")
+        # Method (has an arg list) → the id before the FIRST `(`; else attribute →
+        # the id before `=` / end. Falls through to the whole span if neither matches.
+        h = _SIG_METHOD_NAME_RE.search(sig) if "(" in sig else _SIG_ATTR_NAME_RE.search(sig)
+        if not h:
+            return m.group(0)
+        start, end = h.start("name"), h.end("name")
+        wrapped = (_html_escape(sig[:start])
+                   + f'<span class="mm-sig-name">{_html_escape(sig[start:end])}</span>'
+                   + _html_escape(sig[end:]))
+        return f'<code class="mm-sig">{wrapped}</code>'
+    return _SIG_LINE_RE.sub(repl, md)
+
+
+def _html_escape(s: str) -> str:
+    # Signatures carry `<`, `>`, `&` (templates, refs) — escape so the raw-HTML
+    # <code> we emit renders them as text, not markup.
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _class_to_header(xml_dir: Path) -> dict[str, str]:
@@ -276,7 +332,9 @@ def generate() -> dict[str, str]:
             stem = Path(header).stem
             body = _rewrite_cls_links("".join(blocks), domain, cls_to_page)
             body = _strip_bad_anchor_links(body)
-            md = _migration_crosscheck_header(header, domain, stem) + body
+            body = _render_card_directives(body, domain, stem)
+            body = _highlight_signature_names(body)
+            md = _source_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"
             dst = DOCS_MOONMODULES / domain / "moxygen" / f"{stem}.md"
             dst.parent.mkdir(parents=True, exist_ok=True)

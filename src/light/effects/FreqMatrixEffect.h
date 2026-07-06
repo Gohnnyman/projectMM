@@ -41,6 +41,7 @@ namespace mm {
 // /2560 divisor so a full-scale level·fx·sensitivity lands near 255 — the same response curve on our
 // integer level. These two scale conversions are the only deviations from the verbatim WLED math;
 // every constant (80 Hz, 0.25, 42·highBin, 3·lowBin) is otherwise preserved.
+/// Audio-reactive effect: scrolls the dominant frequency as a colour column.
 class FreqMatrixEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙📊"; }  // 1D · audio

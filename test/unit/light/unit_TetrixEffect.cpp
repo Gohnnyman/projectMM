@@ -1,6 +1,7 @@
 // @module TetrixEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/TetrixEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time

@@ -1,6 +1,7 @@
 // @module FireEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/FireEffect.h"
 #include "light/layouts/GridLayout.h"
 

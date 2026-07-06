@@ -31,7 +31,7 @@ The first effect-migration batch of [MoonLight migration Stage 3](./Plan-2026063
 ## Files
 
 - **New:** `src/light/effects/GameOfLifeEffect.h`, `GEQ3DEffect.h`, `PaintBrushEffect.h`; `src/core/crc.h` (crc16 for GoL stasis).
-- **Edit:** `src/main.cpp` (register the 3, each → `light/effects/effects.md#<anchor>`), `test/scenario_runner.cpp` (register for scenarios), `docs/moonmodules/light/effects/effects.md` (3 rows + `## Source` links + anchors), `test/CMakeLists.txt` (the new unit tests).
+- **Edit:** `src/main.cpp` (register the 3, each → `light/effects.md#<anchor>`), `test/scenario_runner.cpp` (register for scenarios), `docs/moonmodules/light/effects.md` (3 rows + `## Source` links + anchors), `test/CMakeLists.txt` (the new unit tests).
 - **Tests (new):** `unit_GameOfLifeEffect.cpp` (Conway still-life stays, blinker oscillates, B/S parser, neighbour count 2D+3D, no-crash on 0×0×0), `unit_crc.cpp` (crc16 known vectors), and GEQ3D/PaintBrush covered by the shared render test (`unit_effects_render` STATELESS / non-zero with a fed AudioFrame) + a scenario. Audio effects render dark on silence (safe) — assert structure on a synthetic frame where testable.
 - **Scenarios:** add the 3 to the perf/all-effects sweep; GoL gets its own scenario (gen progression renders + doesn't crash at any grid size).
 

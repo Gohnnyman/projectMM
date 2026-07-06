@@ -1,6 +1,7 @@
 // @module DistortionWavesEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/DistortionWavesEffect.h"
 #include "light/layouts/GridLayout.h"
 

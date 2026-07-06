@@ -2,7 +2,7 @@
 
 #include <limits>
 #include <cstdint>
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {
@@ -14,6 +14,8 @@ namespace mm {
 constexpr lengthType defaultGridSize = 16;
 
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of a dense row-major 3D grid.
+/// @card GridLayout.png
 class GridLayout : public LayoutBase {
 public:
     lengthType width = defaultGridSize;

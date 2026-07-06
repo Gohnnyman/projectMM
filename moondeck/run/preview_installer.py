@@ -51,8 +51,8 @@ PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
 PICKER_BOARDS_JS = ROOT / "src" / "ui" / "install-picker-boards.js"
 STAGE_DIR = ROOT / "build" / "install-preview"
 # The preview mirrors the GitHub Pages layout: the installer at /install/,
-# board images under /install/assets/boards/, and the releases tree under
-# /install/releases/ — so an "image": "assets/boards/<slug>.jpg" path and the
+# board images under /install/assets/deviceModels/, and the releases tree under
+# /install/releases/ — so an "image": "assets/deviceModels/<slug>.jpg" path and the
 # "./releases/<tag>/" firmware path resolve identically here and on Pages, no
 # per-context special casing. A root redirect (/ → /install/) keeps the old
 # entry point working.
@@ -87,7 +87,7 @@ def _stage_runtime_files(src_dir: Path, dst_dir: Path):
 
 def _stage_referenced_board_images(dst_dir: Path):
     """Stage only the board images a deviceModels.json entry references (mirrors the
-    deploy's filtered copy), under <dst_dir>/assets/boards/."""
+    deploy's filtered copy), under <dst_dir>/assets/deviceModels/."""
     boards_json = INSTALL_DIR / "deviceModels.json"
     if not boards_json.exists():
         return
@@ -96,10 +96,10 @@ def _stage_referenced_board_images(dst_dir: Path):
     except (ValueError, OSError):
         return
     for b in boards:
-        rel = b.get("image")            # e.g. "assets/boards/<slug>.jpg"
+        rel = b.get("image")            # e.g. "assets/deviceModels/<slug>.jpg"
         if not rel:
             continue
-        src = ROOT / "docs" / rel       # source lives in docs/assets/boards/
+        src = ROOT / "docs" / rel       # source lives in docs/assets/deviceModels/
         if src.is_file():
             out = dst_dir / rel
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +115,7 @@ def stage_install_page():
     query parameter the picker honours).
 
     Layout matches Pages exactly: the installer under /install/, board images
-    under /install/assets/boards/, the releases tree under /install/releases/.
+    under /install/assets/deviceModels/, the releases tree under /install/releases/.
     A root index.html redirects / → /install/ so the historical
     `localhost:8421/` entry point still lands on the installer. The shared
     install-picker.js (under src/ui/, shared with the on-device UI) is copied in.

@@ -11,7 +11,7 @@ gate that pins the invariants the clients assume.
 Invariants checked per entry:
   - required fields present (name, chip, firmwares, modules)
   - firmwares is a non-empty list of non-empty strings (entry[0] is the default)
-  - image (if set) is a local assets/boards/ path that resolves on disk
+  - image (if set) is a local assets/deviceModels/ path that resolves on disk
   - url (if set) is an absolute http(s) link
   - the System module's `deviceModel` control value equals the entry `name`
   - every module `type` is factory-registered (or a known boot-wired singleton)
@@ -135,8 +135,8 @@ def main():
         # --- image resolves on disk + is a local path ---
         img = e.get("image")
         if img is not None:
-            if not isinstance(img, str) or not img.startswith("assets/boards/"):
-                errors.append(f"{where}: image must be a local 'assets/boards/...' path, got {img!r}")
+            if not isinstance(img, str) or not img.startswith("assets/deviceModels/"):
+                errors.append(f"{where}: image must be a local 'assets/deviceModels/...' path, got {img!r}")
             elif not (DOCS / img).exists():
                 errors.append(f"{where}: image '{img}' does not exist on disk")
 

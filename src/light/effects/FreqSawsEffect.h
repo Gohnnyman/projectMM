@@ -38,6 +38,7 @@ namespace mm {
 // EffectBase + the shared draw / palette / beat8 primitives. Reads AudioModule::latestFrame();
 // silence → every band decays → flat → dark, safe on any target and grid size.
 // Author: @TroyHacks (MoonLight / WLED MoonModules) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Audio-reactive effect: sawtooth bands driven by the frequency spectrum.
 class FreqSawsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫📊"; }  // MoonLight origin · audio

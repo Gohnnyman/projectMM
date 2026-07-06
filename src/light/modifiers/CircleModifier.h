@@ -25,6 +25,7 @@ namespace mm {
 // fresh against our ModifierBase fold interface (modifyLogicalSize / modifyLogical)
 // rather than MoonLight's modifySize / modifyPosition Node API.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
+/// Modifier expanding a 1D effect into concentric circular rings.
 class CircleModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; } // MoonLight origin

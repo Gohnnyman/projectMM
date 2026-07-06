@@ -2,7 +2,7 @@
 
 #include <limits>
 #include <cstdint>
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 // Prior art: MoonLight SingleColumnLayout (MoonModules/MoonLight, layout nodes).
@@ -15,6 +15,7 @@
 namespace mm {
 
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of one vertical LED column (1D).
 class SingleColumnLayout : public LayoutBase {
 public:
     // Geometry controls mirror MoonLight's defaults and ranges 1:1.

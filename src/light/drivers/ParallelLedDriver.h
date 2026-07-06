@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Drivers.h"        // DriverBase, Correction
+#include "light/drivers/DriverBase.h"        // DriverBase, Correction
 #include "light/drivers/LcdSlots.h"        // encodeWs2812LcdSlots (shared encoder)
 #include "light/drivers/LedDriverConfig.h"
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared)
@@ -12,60 +12,69 @@
 
 namespace mm {
 
-// Shared body for the parallel WS2812 LED drivers: the S3's LCD_CAM i80 bus
-// (LcdLedDriver) and the P4's Parlio peripheral (ParlioLedDriver). Both drive up
-// to 8 strands that clock out simultaneously, one GPIO lane each, fed consecutive
-// slices of the source buffer; both pre-encode the whole frame (a per-ROW fused
-// correct+transpose, the SAME LcdSlots.h encoder — a Parlio bus byte and an i80
-// bus byte are identical) plus a zeroed >=300 µs latch pad into a platform-owned
-// DMA buffer, then ship it as one autonomous transfer. The two were ~250 of ~370
-// lines byte-for-byte identical; this is the one copy (the No-duplication rule).
-//
-// Binding is CRTP (static polymorphism), NOT a virtual second hierarchy: the base
-// calls back into the derived through `static_cast<Derived*>(this)->busX()` with
-// no vtable and no runtime indirection, so it stays inside the hot-path / data-
-// over-objects rules and the "one deliberate class hierarchy is the module tree"
-// rule (the only virtual boundary remains MoonModule -> DriverBase). The derived
-// supplies just the handful of peripheral-specific pieces:
-//   - bus* methods: thin wrappers over its platform::{lcd,parlio}Ws2812* calls
-//     (they own the handle, so the base never names the handle type);
-//   - static lanesAvailable()  -> the platform::{lcd,parlio}Lanes constant the
-//     `if constexpr (... == 0)` inert-on-wrong-chip guards key off;
-//   - static kExactLaneCount   -> true for i80 (its layer rejects a partial bus,
-//     so the pin list must name exactly 8); false for Parlio (1..8 lanes);
-//   - static kInitFailMsg, kClockHz (the slot rate), recordBusPins/extraBusPins-
-//     Current() for any extra pins the i80 driver tracks (WR/DC) that Parlio
-//     doesn't.
-// configErr_/failBuf_ and their clear/ensure helpers come from DriverBase (shared
-// with RmtLedDriver too).
 template <class Derived>
+/// Base for the parallel WS2812B LED-output drivers — the S3's LCD_CAM i80 bus (LcdLedDriver) and
+/// the P4's Parlio peripheral (ParlioLedDriver). Both drive up to 8 strands that clock out
+/// SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of the source buffer.
+///
+/// **Single-shot autonomous DMA:** both pre-encode the whole frame (a per-ROW fused
+/// correct+transpose, the SAME LcdSlots.h encoder — a Parlio bus byte and an i80 bus byte are
+/// identical: one word per slot, bit L = data line L) plus a zeroed ≥300 µs latch pad into a
+/// platform-owned DMA buffer, then ship it as one autonomous transfer. So there's NO CPU deadline
+/// during transmission — the WiFi-induced bit-slip of refill-based drivers cannot occur by
+/// construction. (The i80 bus owns the DMA buffer and its max transfer size is fixed at creation, so
+/// re-creating the bus IS the buffer resize.) The two drivers were ~250 of ~370 lines byte-for-byte
+/// identical; this is the one copy (the No-duplication rule).
+///
+/// **Buffer slicing across pins:** consecutive slices in `pins` order, sizes from `ledsPerPin`,
+/// even-split remainder — identical semantics to RmtLedDriver, parsers shared (PinList.h).
+///
+/// **CRTP, not a virtual hierarchy:** the base calls back into the derived through
+/// `static_cast<Derived*>(this)->busX()` — no vtable, no runtime indirection — so it stays inside
+/// the hot-path / data-over-objects rules and keeps the module tree as the one deliberate class
+/// hierarchy (the only virtual boundary remains MoonModule → DriverBase). The derived supplies just
+/// the peripheral-specific pieces: the bus* platform wrappers, `lanesAvailable()` (the inert-on-
+/// wrong-chip `if constexpr` guard), `kExactLaneCount` (i80 needs exactly 8; Parlio runs 1..8), the
+/// slot rate `kClockHz`, and any extra pins the i80 driver tracks (WR/DC) that Parlio doesn't.
+/// configErr_/failBuf_ come from DriverBase (shared with RmtLedDriver too).
 class ParallelLedDriver : public DriverBase {
 public:
-    // Bus width this increment: 8 of the peripheral's 16 lanes (matches the
-    // platform's lane constant; widening to 16 is a later constant change).
+    /// Bus width this increment: 8 of the peripheral's 16 lanes (matches the platform's lane
+    /// constant; widening to 16 is a later constant change).
     static constexpr uint8_t kMaxLanes = 8;
 
-    // Comma-separated controls — shared shape with RmtLedDriver (parsers in
-    // PinList.h). Defaults live on the derived (chip-specific safe pins), so the
-    // derived sets them after construction; the base just declares them.
+    /// Comma-separated GPIO list, one parallel lane per pin — up to kMaxLanes strands clocked out
+    /// SIMULTANEOUSLY, fed consecutive slices of this driver's window. Shared control shape with
+    /// RmtLedDriver (parsers in PinList.h). Defaults live on the derived (chip-specific safe pins),
+    /// so the derived sets them after construction; the base just declares them. i80 needs exactly
+    /// kMaxLanes pins (a partial bus is rejected); Parlio runs on 1..8.
     char pins[24] = "";
+    /// Comma-separated lights-per-lane, matched to `pins` by position; the unassigned remainder
+    /// splits evenly over the remaining lanes. Each lane is clamped to the WS2812 per-pin ceiling
+    /// (`kMaxWs2812LedsPerPin`) with a Warning status — it drives that many rather than choking a
+    /// whole grid onto one line. Empty default splits this driver's window evenly.
     char ledsPerPin[48] = "";
 
+    /// On-device loopback self-test — jumper a lane's TX to `loopbackRxPin`, tick to transmit a
+    /// known WS2812 pattern and bit-verify the capture, proving the peripheral emits correct bytes
+    /// on real silicon. A persistent on/off mode (see onUpdate): while on it re-runs on every
+    /// relevant change; off clears the verdict. The verdict lands in the status slot.
     bool     loopbackTest = false;
-    int8_t   loopbackTxPin = -1;  // optional TX override for the self-test: when
-                                  // set (>= 0), the loopback transmits on THIS
-                                  // pin in place of lane 0 (laneList_[0]); other
-                                  // lanes are unchanged. Lets the bench loopback run
-                                  // on a dedicated jumper pin without re-typing the
-                                  // operational `pins`. Falls back to laneList_[0]
-                                  // when unset (-1). The loopback only drives lane 0
-                                  // with the test pattern, so a single override pin is
-                                  // all it needs. Test-only — normal output always uses
-                                  // the real `pins`. int8_t + addPin (not uint16): the
-                                  // standard single-GPIO control, and -1 = unset keeps
-                                  // GPIO 0 usable as a loopback pin.
+    /// Optional TX override for the self-test: when set (>= 0), the loopback transmits on THIS pin
+    /// in place of lane 0 (laneList_[0]); other lanes are unchanged. Lets the bench loopback run on
+    /// a dedicated jumper pin without re-typing the operational `pins`. Falls back to laneList_[0]
+    /// when unset (-1). The loopback only drives lane 0 with the test pattern, so a single override
+    /// pin is all it needs. Test-only — normal output always uses the real `pins`. int8_t + addPin
+    /// (not uint16): the standard single-GPIO control, and -1 = unset keeps GPIO 0 usable as a
+    /// loopback pin.
+    int8_t   loopbackTxPin = -1;
+    /// Jumper this to the TX lane for the self-test (unset = -1 by default).
     int8_t   loopbackRxPin = -1;
 
+    /// Bind the driver's controls: the window (start/count), the `pins` and
+    /// `ledsPerPin` text lists, any derived-supplied bus controls (i80 adds
+    /// clockPin/dcPin, Parlio none), and the loopback self-test controls (TX/RX pin
+    /// overrides always bound but shown only in test mode).
     void onBuildControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
@@ -79,12 +88,19 @@ public:
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
+    /// A change to the pins, per-lane counts, the window, or a derived bus control
+    /// (clockPin/dcPin on i80) re-parses and re-inits the bus live via the
+    /// onBuildState sweep.
     bool controlChangeTriggersBuildState(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || isWindowControl(name)
             || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80
     }
 
+    /// React to a control change off the render loop. loopbackTest is a persistent
+    /// on/off mode: while ON, the self-test re-runs on every relevant change (with a
+    /// lane-config refresh first, since onUpdate precedes the onBuildState sweep);
+    /// turning it OFF clears the verdict and re-derives the real driver status.
     void onUpdate(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
         const bool isPinControl  = std::strcmp(name, "pins") == 0
@@ -108,24 +124,36 @@ public:
         }
     }
 
+    /// Parse the config and (re)init the bus.
     void setup() override { parseConfig(); reinit(); }
+    /// Deinit the bus, then clear the shared fail/config-error state
+    /// (DriverBase::teardown()).
     void teardown() override {
         deinit();
         DriverBase::teardown();   // clears failBuf_ + configErr_
     }
 
+    /// Topology or the pins/ledsPerPin controls changed — re-parse the lanes and
+    /// (re)init the bus off the hot path.
     void onBuildState() override {
         parseConfig();
         reinit();
         MoonModule::onBuildState();
     }
 
-    // RGB<->RGBW changes the bytes-per-light and therefore the frame size.
+    /// RGB<->RGBW changes the bytes-per-light and therefore the frame size, so
+    /// re-parse and re-init the bus.
     void onCorrectionChanged() override { parseConfig(); reinit(); }
 
+    /// Point the driver at the source frame buffer and re-parse the lane config.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; parseConfig(); }
+    /// Point the driver at the shared correction and re-parse the lane config.
     void setCorrection(const Correction* c) override { correction_ = c; parseConfig(); }
 
+    /// Per-tick output: a fused per-ROW pass corrects the same light index of every
+    /// active lane and transposes it into 3-slot bus bytes in the platform-owned DMA
+    /// buffer, then ships the frame as one autonomous transfer. Inert off this chip
+    /// and idle until inited with a source buffer + correction.
     void loop() override {
         if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
         if (!inited_ || !dmaBuf_ || !sourceBuffer_ || !sourceBuffer_->data()
@@ -162,12 +190,16 @@ public:
             derived()->busWait(1000 /* ms */);
     }
 
-    // Test-only accessors — pin the lane slicing and frame-size arithmetic on the
-    // host (unit_{Lcd,Parlio}LedDriver.cpp); the hardware half is proven on device.
+    /// Test-only accessors — pin the lane slicing and frame-size arithmetic on the
+    /// host (unit_{Lcd,Parlio}LedDriver.cpp); the hardware half is proven on device.
     uint8_t laneCount() const { return laneCount_; }
+    /// Lights on lane `i` (0 if out of range). Test-only.
     nrOfLightsType laneLightCount(uint8_t i) const { return i < laneCount_ ? laneCounts_[i] : 0; }
+    /// First light index of lane `i`'s slice (0 if out of range). Test-only.
     nrOfLightsType laneStart(uint8_t i) const { return i < laneCount_ ? laneStart_[i] : 0; }
+    /// Length of the longest lane — the frame's row count. Test-only.
     nrOfLightsType maxLaneLights() const { return maxLaneLights_; }
+    /// Total DMA frame size in bytes (rows + latch pad). Test-only.
     size_t frameBytes() const { return frameBytes_; }
 
 protected:

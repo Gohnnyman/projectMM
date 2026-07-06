@@ -14,6 +14,7 @@ namespace mm {
 /// **No buffer of its own:** each Layer owns its buffer and the `Drivers` container owns the composited output. Layers wires the shared `Layouts` into every child so each can size its buffer. Two queries serve the Drivers compositor: `activeLayer` (the first enabled child, or a disabled one as fallback) answers physical dimensions and feeds the single-layer fast path, and `forEachEnabledLayer` walks the enabled children in container order (bottom→top) marking the bottom layer that clears the buffer. `enabledLayerCount` lets Drivers pick the fast path (one enabled layer → hand its buffer straight to the driver) versus the composite path (≥2 → blend into the output buffer).
 ///
 /// **Prior art:** MoonLight's `PhysicalLayer` runs N `VirtualLayer`s and composites their buffers into the display channel — same idea, different shape: Drivers (not Layers) does the compositing here (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight).
+/// @card Layers.png
 class Layers : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "layer"; }

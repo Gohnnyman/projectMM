@@ -147,9 +147,11 @@ def _module_block(source_path, spec):
     lines = spec.splitlines()
     # Find the line tying this module to its block. Two link shapes across catalog
     # pages: a direct `source [<stem>.h]` (effects/modifiers/layouts) or a detail-page
-    # reference `[<base>.md]` / `alt="<base> controls"` (drivers link to detail pages).
+    # reference `[<base>.md]` / `alt="<base> controls"` (drivers link to detail pages),
+    # or a `Detail: [technical](../moxygen/<base>.md)` line (the consistent card link).
     def _match(ln):
         return (f"[{stem}]" in ln or f"[{base}.md]" in ln
+                or f"moxygen/{base}.md" in ln
                 or f'alt="{base} ' in ln or f'alt="A {base} ' in ln)
     link_i = next((i for i, ln in enumerate(lines) if _match(ln)), None)
     if link_i is None:
@@ -262,6 +264,10 @@ def check_source_links():
             # not the tail of a word like "resource [".
             src_links = re.findall(r'\bsource \[[^\]]+\]\(([^)]+)\)', text)
             if not src_links:
+                # Consolidated catalog pages now link each block to its generated
+                # technical page: `Detail: [technical](../moxygen/<Stem>.md)`.
+                src_links = re.findall(r'\]\(([^)]*moxygen/[^)]+\.md)\)', text)
+            if not src_links:
                 # index page: the per-entry links to detail pages (…Driver.md),
                 # same-dir (no ../) — e.g. `](RmtLedDriver.md)`.
                 src_links = re.findall(r'\]\(([^)]*Driver\.md[^)]*)\)', text)
@@ -319,6 +325,55 @@ def check_source_links():
                 issues.append((spec_rel, issue))
     return issues
 
+# --- registerType docPath resolution (guards the in-UI help links) --------------
+# main.cpp registers each module type with a `docPath` (relative to docs/moonmodules/)
+# that the web UI turns into a per-card help link (see ModuleFactory.h). A docs rename
+# that moves/deletes a page silently breaks those links — the UI 404s, and nothing else
+# catches it. This check parses every registerType<T>("Name", "docPath") and asserts the
+# docPath's file AND #anchor resolve, the same ground-truth the docs build would.
+_REGISTER_RE = re.compile(
+    r'registerType<[^>]+>\(\s*"[^"]+"\s*,\s*"(?P<doc>[^"]+)"\s*\)')
+# A markdown heading's anchor (the standard python-markdown `toc` slugify: lowercase,
+# strip non-word/space/hyphen, spaces→hyphens, collapse repeats) — matches how MkDocs
+# generates `id=` from a `##`/`###` heading. Explicit `<a id="x">` anchors are exact.
+_HEADING_RE = re.compile(r'^#{1,6}\s+(?P<text>.+?)\s*$', re.MULTILINE)
+_ANCHOR_ID_RE = re.compile(r'<a\s+id="(?P<id>[^"]+)"')
+
+
+def _slugify(text: str) -> str:
+    s = text.strip().lower()
+    s = re.sub(r'[^\w\s-]', '', s)      # drop punctuation/emoji (·, 💫, (), …)
+    s = re.sub(r'[\s]+', '-', s)        # spaces → hyphens
+    s = re.sub(r'-+', '-', s).strip('-')
+    return s
+
+
+def _page_anchors(md_path: Path) -> set:
+    """Every anchor a page exposes: explicit `<a id>` (catalog cards) + heading slugs."""
+    text = md_path.read_text(encoding="utf-8", errors="replace")
+    anchors = set(_ANCHOR_ID_RE.findall(text))
+    anchors.update(_slugify(m.group("text")) for m in _HEADING_RE.finditer(text))
+    return anchors
+
+
+def check_registertype_docpaths():
+    """Each registerType docPath in main.cpp must resolve to a real page + anchor."""
+    issues = []
+    main_cpp = SRC / "main.cpp"
+    if not main_cpp.exists():
+        return issues
+    for m in _REGISTER_RE.finditer(main_cpp.read_text(encoding="utf-8")):
+        doc = m.group("doc")
+        rel, _, frag = doc.partition("#")
+        page = SPECS / rel
+        if not page.exists():
+            issues.append(f'registerType docPath "{doc}" — file not found: docs/moonmodules/{rel}')
+            continue
+        if frag and frag not in _page_anchors(page):
+            issues.append(f'registerType docPath "{doc}" — no anchor #{frag} in {rel}')
+    return issues
+
+
 def main():
     modules = find_moonmodules()
     missing = []
@@ -344,10 +399,12 @@ def main():
                 ok.append(rel)
 
     source_link_issues = check_source_links()
+    docpath_issues = check_registertype_docpaths()
 
     # Report
     print(f"Spec check: {len(modules)} modules, {len(ok)} ok, {len(missing)} missing, "
-          f"{len(outdated)} outdated, {len(source_link_issues)} source-link issues")
+          f"{len(outdated)} outdated, {len(source_link_issues)} source-link issues, "
+          f"{len(docpath_issues)} docPath issues")
 
     if missing:
         print("\nMissing specs:")
@@ -366,7 +423,12 @@ def main():
         for spec, issue in source_link_issues:
             print(f"  {spec} — {issue}")
 
-    if missing or outdated or source_link_issues:
+    if docpath_issues:
+        print("\ndocPath issues (main.cpp registerType → broken UI help link):")
+        for issue in docpath_issues:
+            print(f"  {issue}")
+
+    if missing or outdated or source_link_issues or docpath_issues:
         print()
         sys.exit(1)
     else:

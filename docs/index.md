@@ -29,7 +29,7 @@ It runs on ESP32 (the primary target), and also on Teensy, macOS, Windows, Linux
 
     Browse the effects, layouts, modifiers, and drivers you compose into a show.
 
-    [Effects](moonmodules/light/effects/effects.md) · [Layouts](moonmodules/light/layouts/layouts.md) · [Modifiers](moonmodules/light/modifiers/modifiers.md)
+    [Effects](moonmodules/light/effects.md) · [Layouts](moonmodules/light/layouts.md) · [Modifiers](moonmodules/light/modifiers.md)
 
 -   :material-check-decagram: **See what's verified**
 
@@ -41,7 +41,7 @@ It runs on ESP32 (the primary target), and also on Teensy, macOS, Windows, Linux
 
     System design, the module model, and the per-module reference.
 
-    [Architecture](architecture.md) · [Core modules](moonmodules/core/supporting/supporting.md) · [Light pipeline](moonmodules/light/supporting/supporting.md)
+    [Architecture](architecture.md) · [Core modules](moonmodules/core/supporting.md) · [Light pipeline](moonmodules/light/supporting.md)
 
 </div>
 

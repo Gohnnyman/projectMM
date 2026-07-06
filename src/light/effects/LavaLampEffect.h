@@ -11,6 +11,8 @@ namespace mm {
 // through a black → red → orange → yellow → white palette.
 // Distinct from MetaballsEffect (which is fast, HSV-coloured).
 // Author: projectMM original (metaball lava lamp)
+/// Lava-lamp effect: slow rising/merging palette blobs.
+/// @card LavaLampEffect.gif
 class LavaLampEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step

@@ -1,6 +1,7 @@
 // @module RainbowEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/layouts/GridLayout.h"
 

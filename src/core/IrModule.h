@@ -47,6 +47,7 @@ namespace mm {
 /// **Prior art:** consumer IR remotes use the NEC protocol (a 32-bit address+command frame,
 /// LSB-first, ~9 ms lead burst); the ESP-IDF RMT peripheral decodes it (the espressif
 /// `ir_nec_transceiver` example). The decode itself lives behind `platform::irRead`.
+/// @card IrModule.png
 class IrModule : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Peripheral; }

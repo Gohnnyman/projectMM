@@ -1,6 +1,7 @@
 // @module FixedRectangleEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/FixedRectangleEffect.h"
 #include "light/layouts/GridLayout.h"
 

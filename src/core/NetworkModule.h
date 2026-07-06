@@ -42,7 +42,18 @@ namespace mm {
 /// config — the `ethType` + pin controls, set per board in the device-model catalog and
 /// seeded from the per-chip default in `platform_config.h`. A W5500 change applies live
 /// (the SPI driver tears down and re-inits, no reboot); an RMII change saves and applies
-/// on the next boot (the EMAC/clock teardown is fiddlier).
+/// on the next boot (the EMAC/clock teardown is fiddlier). The eth controls, bound only on
+/// an Ethernet-capable build (`platform::hasEthernet`) and shown per PHY type:
+///  - `ethType` — PHY dropdown; the stored index maps 0=None, 1=LAN8720 (RMII),
+///    2=IP101 (RMII), 3=W5500 (SPI), 4=YT8531 (RGMII, the S31's on-chip 1 Gb EMAC),
+///    matching the `EthPhyType` enum order. 0 shows no pin rows; a type reveals only its set.
+///  - `ethPhyAddr` — SMI/PHY MDIO address (0..31, typically 0 or 1).
+///  - `ethRstGpio` — PHY reset GPIO (−1 = none / module self-resets).
+///  - `ethMdcGpio` / `ethMdioGpio` — RMII SMI clock / data GPIOs (−1 = IDF default). RMII only.
+///  - `ethClockGpio` — RMII 50 MHz reference-clock GPIO; `ethClockExtIn` = clock direction
+///    (on = fed IN by the board, off = chip drives it OUT). RMII only.
+///  - `ethSpiMiso` / `ethSpiMosi` / `ethSpiSck` / `ethSpiCs` / `ethSpiIrq` — W5500 SPI pins
+///    (`ethSpiIrq` −1 = polling). W5500 only.
 ///
 /// **mDNS:** included here (not a separate module). Registers the deviceName on whichever
 /// interface is active and re-registers when the active interface changes or the name is
@@ -55,10 +66,12 @@ namespace mm {
 ///
 /// **`MM_IP=` boot token:** `currentIp()` writes the device's current LAN IP as octets;
 /// main.cpp formats it and appends a machine-parseable `MM_IP=<ip>` token to its
-/// once-per-second tick line whenever there is an IP. The web installer reads this from
-/// the boot serial log right after flashing to auto-add the device to "Your devices" —
-/// timing-independent because the token rides the already-periodic tick line. Deliberately
-/// IP-only; once the installer has the IP it reads everything else from the live REST API.
+/// once-per-second tick line — gated to the first 60 s of uptime (the installer reads at
+/// ~3–15 s after boot; afterwards the IP comes from the REST API, so a permanent token would
+/// just be noise on the perf line). The web installer reads this from the boot serial log
+/// right after flashing to auto-add the device to "Your devices" — timing-independent because
+/// the token rides the already-periodic tick line. Deliberately IP-only; once the installer
+/// has the IP it reads everything else from the live REST API.
 ///
 /// **Memory:** the network stack cost varies by mode (Ethernet ~20 KB, STA ~40 KB, AP
 /// ~30 KB, STA+AP during the shutdown delay ~60 KB, fully reclaimed after teardown). This
@@ -84,6 +97,7 @@ namespace mm {
 /// **Prior art:** MoonLight — mDNS hostname advertising, REST API for network config,
 /// credentials persisted to SPIFFS. ESP-IDF — `esp_wifi.h`, `mdns.h`, `esp_netif.h`,
 /// `esp_event.h`.
+/// @card NetworkModule.png
 class NetworkModule : public MoonModule {
 public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
@@ -747,10 +761,10 @@ public:
     /// would just waste RAM. Callers that need text format with formatDottedQuad at
     /// their boundary. Read by main.cpp's per-second tick line, which appends it as a
     /// stable `MM_IP=<ip>` token for the web installer's post-flash serial read —
-    /// riding the already-periodic tick line means the IP re-emits every second
-    /// (timing-independent: DHCP can take several seconds — measured ~7s on the
-    /// P4-NANO — and the installer reopens the port at its own pace, so a one-shot
-    /// connect-time line is easy to miss).
+    /// riding the already-periodic tick line means the IP re-emits every second for the
+    /// first 60 s of uptime (timing-independent: DHCP can take several seconds — measured
+    /// ~7s on the P4-NANO — and the installer reopens the port at its own pace, so a
+    /// one-shot connect-time line is easy to miss; the 60 s cap lives in main.cpp).
     void currentIp(uint8_t out[4]) const {
         out[0] = out[1] = out[2] = out[3] = 0;
         if (state_ == State::ConnectedEth) platform::ethGetIPv4(out);

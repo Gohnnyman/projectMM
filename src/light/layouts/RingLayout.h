@@ -3,7 +3,7 @@
 #include <cmath>    // sinf, cosf, fmodf
 #include <cstdint>
 #include <numbers>  // std::numbers::pi_v — portable pi (M_PI is a non-standard <cmath> extension)
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {
@@ -24,6 +24,7 @@ namespace mm {
 // Float trig runs on the cold build path (forEachCoord / lightCount, called from a
 // rebuild), never the hot render loop, so it's allowed here.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of a single ring of evenly-spaced LEDs.
 class RingLayout : public LayoutBase {
 public:
     // MoonLight defaults and ranges, preserved verbatim.

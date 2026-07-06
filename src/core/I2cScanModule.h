@@ -42,6 +42,7 @@ namespace mm {
 /// **Prior art:** the bus-scan-as-a-feature mirrors MoonLight's I2C scan diagnostic; the seam
 /// name and probe range follow the Linux `i2c-tools` `i2cdetect` convention
 /// (https://manpages.debian.org/i2c-tools/i2cdetect.8.en.html).
+/// @card I2cScanModule.png
 class I2cScanModule : public MoonModule {
 public:
     /// A diagnostic, like FirmwareUpdateModule / DevicesModule — keeps its

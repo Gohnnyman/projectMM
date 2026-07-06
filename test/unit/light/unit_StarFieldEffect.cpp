@@ -1,6 +1,7 @@
 // @module StarFieldEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/StarFieldEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"  // setTestNowMs — drive the throttle past its interval deterministically

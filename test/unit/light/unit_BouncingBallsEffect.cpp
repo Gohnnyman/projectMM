@@ -1,6 +1,7 @@
 // @module BouncingBallsEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/BouncingBallsEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"  // setTestNowMs — freeze millis() for a deterministic first frame

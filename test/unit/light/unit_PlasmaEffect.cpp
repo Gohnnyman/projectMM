@@ -2,6 +2,7 @@
 // @also NoiseEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/PlasmaEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/layouts/GridLayout.h"

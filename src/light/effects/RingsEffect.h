@@ -13,6 +13,8 @@ namespace mm {
 // (Renamed from RipplesEffect: the Ripples name now holds the MoonLight
 // sine-wave water-surface port; this concentric-rings effect is Rings.)
 // Author: projectMM original (concentric rings)
+/// Effect of expanding concentric rings from random centres.
+/// @card RingsEffect.gif
 class RingsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step

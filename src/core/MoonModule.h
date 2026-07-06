@@ -59,6 +59,12 @@ inline const char* roleName(ModuleRole role) {
 /// module). Parents own their children's lifecycle and propagate every hook down — only
 /// top-level modules register with the Scheduler.
 ///
+/// **Runtime add/remove lifecycle contract.** When a child is added or removed *after* the
+/// parent's own setup has run, the caller drives the child's lifecycle: adding at runtime →
+/// call `setup()` → `onBuildControls()` → `onBuildState()` on the new child; removing at runtime
+/// → call `teardown()` on the child before removing it. A child added *before* the parent's
+/// setup needs none of this — the parent's `setup()` propagates down to it.
+///
 /// **Enabled.** Every module has an `enabled` flag (default true), toggled from the UI card
 /// header and via `POST /api/control`. The Scheduler always calls the three loop hooks regardless
 /// of `enabled`; each module decides what "disabled" means — a rendering module early-returns
@@ -341,6 +347,8 @@ public:
 
     /// Replace child at position i with fresh. Caller owns lifecycle of the removed
     /// (returned) child — teardown + delete. Returns nullptr if i is out of range.
+    /// Used by FilesystemModule at load time to swap a child whose type differs from
+    /// the persisted JSON; the caller tears down + Scheduler::deleteTree's the old child.
     MoonModule* replaceChildAt(uint8_t i, MoonModule* fresh) {
         if (i >= childCount_ || !fresh) return nullptr;
         MoonModule* old = children_[i];
@@ -352,7 +360,8 @@ public:
 
     /// Move child to absolute position newIndex (0..childCount-1). Intermediate siblings
     /// shift toward the vacated slot. Returns false if child isn't found, newIndex is out
-    /// of range, or the move is a no-op (already at newIndex).
+    /// of range, or the move is a no-op (already at newIndex). Used by the UI reorder path;
+    /// the caller's follow-up Scheduler::buildState() rebuilds any order-dependent LUT.
     bool moveChildTo(MoonModule* child, uint8_t newIndex) {
         if (newIndex >= childCount_) return false;
         for (uint8_t i = 0; i < childCount_; i++) {

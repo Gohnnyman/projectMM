@@ -25,6 +25,7 @@ namespace mm {
 // our fold interface: modifySize() -> modifyLogicalSize (stashing the incoming box),
 // modifyPosition() -> the const modifyLogical fold that reads the stash.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
+/// Modifier expanding a 1D effect into concentric square rings.
 class BlockModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

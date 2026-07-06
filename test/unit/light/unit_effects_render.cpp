@@ -2,6 +2,7 @@
 // @also RingsEffect, RipplesEffect, LavaLampEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"

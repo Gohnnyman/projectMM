@@ -86,3 +86,41 @@
 .md-typeset .mm-catalog-wrap .mm-links {
   color: var(--md-default-fg-color--light);
 }
+
+/* ---------------------------------------------------------------------------
+   Coloured headings (whole site). The slate theme renders every heading in the
+   same near-white, so an h1/h2/h3 doesn't stand out from body text — the page
+   reads as one grey wall. Give headings the theme's primary/accent colour so
+   the document structure is scannable at a glance (the standard Material-site
+   look: coloured headings over neutral body). h4+ stay default — colouring
+   every level would just re-flatten the hierarchy. */
+.md-typeset h1,
+.md-typeset h2 {
+  color: var(--md-primary-fg-color);
+  font-weight: 700;
+}
+.md-typeset h3 {
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   Signature standout on the generated moxygen technical pages. Each attribute /
+   method renders as a paragraph leading with its declaration
+   (`uint8_t protocol = 0`, `virtual void onBuildControls() override`) followed
+   by a `: summary`. gen_api.py rewrites each into
+   `<code class="mm-sig">…<span class="mm-sig-name">name</span>…</code>` so the
+   chip can highlight ONLY the declared member name while the type and arguments
+   stay muted — the eye lands on the name it's scanning for, and the signature
+   still reads as one code chip. (A flat `<code>` can't do this in CSS alone —
+   there's no way to select 'the name' inside an undelimited string.) */
+.md-typeset code.mm-sig {
+  background: color-mix(in srgb, var(--md-accent-fg-color) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-accent-fg-color) 22%, transparent);
+  color: var(--md-default-fg-color--light);   /* type + args: muted */
+  padding: 0.15em 0.5em;
+}
+.md-typeset code.mm-sig .mm-sig-name {
+  color: var(--md-accent-fg-color);           /* the declared name: accent + bold */
+  font-weight: 700;
+}

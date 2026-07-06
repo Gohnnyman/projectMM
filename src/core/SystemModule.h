@@ -23,9 +23,16 @@ namespace mm {
 ///   (largest contiguous allocatable block).
 /// - *Configurable:* `deviceName` (default `MM-XXXX`, XXXX = last 4 hex of the MAC) and
 ///   `deviceModel` (display-only in the UI, pushed by tooling).
-/// - *Static (set at boot):* `chip`, `sdk`, `flash`, `bootReason`, and `wifiCoproc`
-///   (only on boards whose radio is a separate chip). On desktop the hardware-specific
-///   fields read "desktop" / "N/A".
+/// - *Static (set at boot):* `chip`, `sdk`, `flash`, `bootReason`, and `wifiCoproc`.
+///   On desktop the hardware-specific fields read "desktop" / "N/A".
+///
+/// **`wifiCoproc`:** shown only on boards whose radio is a separate chip (the ESP32-P4
+/// with its on-board ESP32-C6 over esp_hosted); absent on native-radio targets (the
+/// platform returns an empty string and the control is not added). Reports the detected
+/// slave firmware version (`C6 fw 2.12.9`) when the link is up, or `not detected` when
+/// the C6 never completes its handshake / reports 0.0.0 — the signature of absent or
+/// incompatible C6 slave firmware. `loop1s()` re-queries it, so the state stays current
+/// if the link comes up after boot or the C6 is reflashed without a host reboot.
 ///
 /// **Device name:** `deviceName` is the single network identity across the system —
 /// NetworkModule uses it as the mDNS hostname (`<name>.local`), the SoftAP SSID, and the
@@ -60,6 +67,7 @@ namespace mm {
 ///
 /// **Prior art:** MoonLight — system diagnostics via REST API; device name used for
 /// mDNS.
+/// @card SystemModule.png
 class SystemModule : public MoonModule {
 public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }

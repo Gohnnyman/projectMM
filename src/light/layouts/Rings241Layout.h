@@ -2,7 +2,7 @@
 
 #include <cstdint>
 #include <cmath>  // std::sin, std::cos on float — cold build-path ring trig
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {
@@ -30,6 +30,7 @@ namespace mm {
 // MoonLight by one unit. The faithful path is MoonLight's own: form the angle in
 // double → narrow to float → float trig → float radius.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of the 241-LED concentric-rings disc.
 class Rings241Layout : public LayoutBase {
 public:
     // Spacing multiplier — scales both the ring radii and the shared centre.

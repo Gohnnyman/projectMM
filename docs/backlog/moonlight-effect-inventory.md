@@ -1,10 +1,10 @@
 # MoonLight effect inventory (migration reference)
 
-The full set of MoonLight effects to migrate, grouped by **origin library** (the doc-page split: `effects_<library>.md`), with audio/3D markers. Source: [MoonLight effects.md](https://github.com/MoonModules/MoonLight/blob/main/docs/moonlight/effects.md) + the `E_*.h` source files — studied for *behaviour*, reimplemented fresh per the migration plan's *Industry standards, our own code* rule. This reference feeds the [migration plan's](../history/plans/Plan-20260630%20-%20MoonLight%20migration%20(multi-stage).md) Stage-3 batches; it is *what to build*, not a copy of how.
+The full set of MoonLight effects to migrate, grouped by **origin library** (a *section* within the shipped `effects.md` catalog page; a per-library page `effects_<library>.md` only when a section outgrows it — see the [folder-structure decision](folder-structure-proposal.md)), with audio/3D markers. Source: [MoonLight effects.md](https://github.com/MoonModules/MoonLight/blob/main/docs/moonlight/effects.md) + the `E_*.h` source files — studied for *behaviour*, reimplemented fresh per the migration plan's *Industry standards, our own code* rule. This reference feeds the [migration plan's](../history/plans/Plan-20260630%20-%20MoonLight%20migration%20(multi-stage).md) Stage-3 batches; it is *what to build*, not a copy of how.
 
 **Markers:** ♫ / ♪ audio-reactive · 🧊 native 3D. **Status:** ✅ already in projectMM · ⬜ to migrate.
 
-## MoonLight library → `effects_moonlight.md`
+## MoonLight library
 
 | Effect | Markers | Status | Notes |
 |---|---|---|---|
@@ -26,7 +26,7 @@ The full set of MoonLight effects to migrate, grouped by **origin library** (the
 | Fixed Rectangle | | ⬜ | |
 | Star Sky | | ⬜ | |
 
-## MoonModules library → `effects_moonmodules.md`
+## MoonModules library
 
 | Effect | Markers | Status | Notes |
 |---|---|---|---|
@@ -34,7 +34,7 @@ The full set of MoonLight effects to migrate, grouped by **origin library** (the
 | PaintBrush | ♫ 🧊 | ⬜ | audio + 3D |
 | Game Of Life | 🧊 | ✅⚠️ | **re-port** — current version flagged not faithful (migration Stage 1 proof) |
 
-## WLED library → `effects_wled.md`
+## WLED library
 
 | Effect | Markers | Status | Notes |
 |---|---|---|---|
@@ -50,14 +50,14 @@ The full set of MoonLight effects to migrate, grouped by **origin library** (the
 | PopCorn | ♪ | ⬜ | physics + audio |
 | Waverly | ♪ | ⬜ | audio |
 
-## Moving-head library → `effects_movingheads.md` (Stage 5, DMX fixtures)
+## Moving-head library (Stage 5, DMX fixtures)
 
 | Effect | Markers | Status |
 |---|---|---|
 | Troy1 Color / Troy1 Move / Troy2 Color / Troy2 Move | ♫ | ⬜ |
 | FreqColors · Wowi Move · Ambient Move | ♫ | ⬜ |
 
-## projectMM-native (no external origin) → `effects_projectmm.md`
+## projectMM-native (no external origin)
 
 Already in projectMM, our own (not from a MoonLight library — kept here so the inventory is complete):
 AudioSpectrumEffect ♫, AudioVolumeEffect ♫, FireEffect, GlowParticlesEffect, LavaLampEffect, MetaballsEffect, NetworkReceiveEffect, PlasmaEffect, PlasmaPaletteEffect, RingsEffect, SpiralEffect, CheckerboardEffect.

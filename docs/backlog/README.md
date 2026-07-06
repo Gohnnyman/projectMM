@@ -23,7 +23,7 @@ A map of everything in the three files, by theme.
 - **Distribution** — remaining platforms (Linux, Teensy, RPi), code-signing (macOS/Windows), live RMII Ethernet reconfigure, installer UX polish, P4 DHCP-hostname recheck, S31 web-flash (waiting on esptool-js); DevicesModule interop growth (more plugins, the command half, live peer state).
 - **ESP32 performance & memory** — E1.31 multicast (IGMP), WiFi ArtNet perf matrix, async ArtNet send (PSRAM-only), network round-trip drop/reorder test, slow eth bring-up, non-PSRAM memory ceiling + boot-time buffer degradation, task core-pinning; ops: static IP on STA, MoonDeck doc-asset hardening, CI SHA-pinning.
 - **Architecture** — disable-releases-resources, cross-module pin-uniqueness check, Improv-child-of-NetworkModule, `std::span` platform API, Improv-as-REST follow-ups, **live scripting** (on-device authored effects/layouts/modifiers/drivers/sensor logic — design phase, see the bottom-up survey); composition/config: runtime board presets, per-layout coordinate offset.
-- **HTTP & OTA** — direct binary-upload OTA, HTTP file serving off the render tick.
+- **HTTP & OTA** — HTTP file serving off the render tick; generic control + state topics over MQTT (the automation escape hatch beside the semantic HomeKit surface).
 - **Testing** — additional coverage (UI load time, teardown memory, JS harness), live full-suite state leak.
 - **Housekeeping** — WS-send socket-pair fixture, ESP-IDF version pinning, three-level device model, persistence-overlay audit, **ESP32-P4 rounds 3-4 (in progress)**, WiFi runtime disable.
 - **UI** — deferred-to-1.x items, open design questions (multi-layer UI, modifier-chain viz, presets, node-graph), and the v1 gap analysis.
@@ -42,7 +42,7 @@ A map of everything in the three files, by theme.
 
 ## In-flight draft specs
 
-A spec for a not-yet-built module can live here as a plain draft `.md` (alongside the design studies below) until the module ships — at which point its final spec is written under `../moonmodules/` (e.g. [drivers](../moonmodules/light/drivers/drivers.md)) and the draft is deleted. None are in flight right now.
+A spec for a not-yet-built module can live here as a plain draft `.md` (alongside the design studies below) until the module ships — at which point its final spec is written under `../moonmodules/` (e.g. [drivers](../moonmodules/light/drivers.md)) and the draft is deleted. None are in flight right now.
 
 ## Design studies
 

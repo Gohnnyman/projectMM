@@ -74,6 +74,7 @@ struct ControlDescriptor;
 /// member-initialised values; after the first UI change the debounce creates the file.
 /// A missing key keeps the default, an unknown key is silently ignored (no schema
 /// migration).
+/// @card FilesystemModule.png
 class FilesystemModule : public MoonModule {
 public:
     static constexpr const char* CONFIG_DIR = "/.config";

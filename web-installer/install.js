@@ -1157,7 +1157,7 @@ document.addEventListener('DOMContentLoaded', () => {
         thumb.className = "bg-thumb" + (b.image ? "" : " noimg");
         // the deploy stages a copy of deviceModels.json
         // + the referenced board images alongside this page, so an "image" path of
-        // "assets/boards/<slug>.jpg" resolves same-origin from this page.
+        // "assets/deviceModels/<slug>.jpg" resolves same-origin from this page.
         if (b.image) thumb.style.backgroundImage = `url("${b.image}")`;
         el.appendChild(thumb);
         const body = document.createElement("div"); body.className = "bg-body";

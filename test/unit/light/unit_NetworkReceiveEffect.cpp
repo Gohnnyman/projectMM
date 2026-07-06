@@ -2,6 +2,7 @@
 // @also NetworkSendDriver
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/ArtNetPacket.h"
 #include "light/effects/NetworkReceiveEffect.h"
 #include "light/layouts/GridLayout.h"

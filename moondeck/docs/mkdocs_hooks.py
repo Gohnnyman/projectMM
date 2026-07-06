@@ -72,7 +72,7 @@ _ROOT_REL_PREFIXES = _OUT_OF_DOCS + ("docs/",)
 def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
     """Rewrite links that climb out of docs/ into repo files → absolute GitHub blob
     URLs, resolved against the page's own location so any `../` depth is handled.
-    src_uri is the page's path under docs/ (e.g. 'moonmodules/light/effects/effects.md')."""
+    src_uri is the page's path under docs/ (e.g. 'moonmodules/light/effects.md')."""
     # The page's directory within docs/ — the anchor `../` hops resolve against.
     page_dir = Path("docs") / src_uri
     page_dir = page_dir.parent
@@ -122,16 +122,16 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
 # The consolidated catalog pages whose ### effect/modifier/layout blocks are rendered
 # as a table (source stays authored as readable prose blocks; the table is build-time).
 _CATALOG_PAGES = {
-    "moonmodules/light/effects/effects.md",
-    "moonmodules/light/modifiers/modifiers.md",
-    "moonmodules/light/layouts/layouts.md",
-    "moonmodules/light/drivers/drivers.md",
+    "moonmodules/light/effects.md",
+    "moonmodules/light/modifiers.md",
+    "moonmodules/light/layouts.md",
+    "moonmodules/light/drivers.md",
     # Summary pages for the non-catalog module groups use the same ### -block → table
     # transform, one common authoring process for every summary page (supporting rows
     # just leave the preview/controls columns blank).
-    "moonmodules/core/supporting/supporting.md",
-    "moonmodules/core/ui/ui.md",
-    "moonmodules/light/supporting/supporting.md",
+    "moonmodules/core/supporting.md",
+    "moonmodules/core/services.md",
+    "moonmodules/light/supporting.md",
 }
 
 _H3_RE = re.compile(r'^###\s+(?P<title>.+?)\s*$')
@@ -184,9 +184,9 @@ def _emit_row(b: dict, details_names: set) -> str:
         # awaiting a gif and a supporting module that has no visual by nature.
         col2 = "—"
 
-    # Col 3: parameters, one per line. Split each at the em-dash into the name part
+    # Col 3: controls, one per line. Split each at the em-dash into the name part
     # (before — keeps its `code` chips, styled accent) and the description (after —
-    # greyed via .mm-pdesc, matching the muted module description). Params without a
+    # greyed via .mm-pdesc, matching the muted module description). Controls without a
     # dash render whole in the name part.
     col3_parts = []
     for p in b["params"]:
@@ -200,12 +200,18 @@ def _emit_row(b: dict, details_names: set) -> str:
     col3 = "".join(col3_parts) if col3_parts else "—"
 
     # Col 4: everything a reader clicks OUT to — so the description column is pure
-    # prose. Tests + detail-page link(s) + source/attribution + a ⌄ details anchor.
+    # prose. Tests + technical page + source/attribution + a ⌄ details anchor. Each
+    # link is prefixed with a Material icon (rendered as SVG by pymdownx.emoji, same as
+    # the tag emoji in the Name column) so the link TYPE is scannable, not a wall of
+    # small text — the recognizable docs-site convention. Labels are Title Case.
     links = []
     if b["tests"]:
-        links.append(f"[Tests]({b['tests']})")
+        links.append(f":material-test-tube: [Tests]({b['tests']})")
     if b["detail"]:
-        links.append(b["detail"])            # the `Detail: [Foo.md](..) · …` line
+        # Title-case a lone `[technical]` label so it reads "Technical"; leave a named
+        # multi-link group (e.g. the LED-output `[RMT] · [LCD] · [Parlio]`) as authored.
+        detail = re.sub(r'^\[technical\]', '[Technical]', b["detail"])
+        links.append(f":material-file-document-outline: {detail}")
     if b["origin"]:
         links.append(b["origin"])            # carries `source [Foo.h](...)` + attribution
     # The module's display name without the trailing ` 💫 · dim` decoration, e.g.
@@ -247,7 +253,7 @@ def _render_catalog_table(markdown: str) -> str:
         if rows:
             out.append('<div class="mm-catalog-wrap" markdown="1">')
             out.append("")
-            out.append("| Name | Preview | Parameters | Links |")
+            out.append("| Name | Preview | Controls | Links |")
             out.append("|------|---------|------------|-------|")
             out.extend(rows)
             out.append("")

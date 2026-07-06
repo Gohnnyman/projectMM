@@ -2,6 +2,7 @@
 // @also Layouts
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 
 #include <vector>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Drivers.h"
+#include "light/drivers/DriverBase.h"
 #include "core/JsonUtil.h"          // parse the bridge's JSON responses
 #include "core/FilesystemModule.h"  // noteDirty — persist the app key after pairing
 #include "core/DevicesModule.h"     // DevicesModule::active() — list the bridge as a device
@@ -12,40 +12,40 @@
 
 namespace mm {
 
-// Philips Hue lights as a projectMM OUTPUT — a driver, not a listed device. The bulbs are
-// pixels of an effect: make a small grid (e.g. 4×1×1), run any effect, and this driver reads
-// its window of the shared buffer and pushes each light's colour to the bridge. Same shape as
-// NetworkSendDriver (read a window, send it out), but over the Hue v1 HTTP API instead of UDP.
-//
-// What makes Hue different from a strip and shapes the design:
-//  - It's HTTP, not a wire protocol: GET /api/<key>/lights, PUT .../lights/<id>/state.
-//  - Connection churn, not just Hue's ~10/s command budget, bounds the rate: each PUT opens a
-//    fresh TCP connection (the bridge speaks Connection: close), so loop() does AT MOST ONE PUT
-//    every kPutIntervalMs — a millis() gate, never work-every-tick — so a synchronous round-trip
-//    can't stall the single-thread render loop AND the TIME_WAIT sockets don't pile up. Smooth
-//    ambient colour, not real-time (that's the Entertainment API, a separate future).
-//  - Only colour-capable, reachable lights are driven (parseLights filters them); each PUT sends
-//    hue/sat/bri from a textbook RGB→HSV plus a cadence-matched transitiontime so the bulb glides.
-//  - It needs an app key: press the bridge's link button once, then POST /api to claim a key.
-//    Pairing is a short bounded poll across a few loop1s ticks (never blocking the loop).
-//
-// Room / light selection. Two dropdowns ("room", "light") let the user aim the effect at a
-// subset of the bridge's colour bulbs without touching the window controls. fetchGroups reads
-// GET /api/<key>/groups and keeps the bridge's Rooms (name + member light ids); fetchLights keeps
-// each colour light's name. Option index 0 is "All" in BOTH dropdowns, so the common "drive
-// everything" case never shifts index and persists as 0 for free (the Select stores its uint8
-// index). Picking a room narrows the light dropdown to that room's colour lights AND filters the
-// driven set to that room; picking a specific light drives just that one. The filter builds
-// drivenIdx_[] — the colour-light subset pushOneChangedLight actually walks — so room=All &
-// light=All leaves the original behaviour (drive every colour bulb) untouched.
-//
-// Plain HTTP, no TLS — the Hue v1 API allows it (bench-confirmed on a BSB002 bridge). Prior
-// art: the Hue v1 CLIP API (public docs); the effect-as-output mapping is projectMM's own.
+/// Output driver: sends the buffer to Philips Hue bulbs as pixels — a driver, not a listed device.
+/// The bulbs are pixels of an effect: make a small grid (e.g. 4×1×1), run any effect, and this
+/// driver reads its window of the shared buffer and pushes each light's colour to the bridge. Same
+/// shape as NetworkSendDriver (read a window, send it out), but over the Hue v1 HTTP API not UDP.
+///
+/// It's HTTP, not a wire protocol (`GET /api/<key>/lights`, `PUT .../lights/<id>/state`), so the
+/// rate is bounded by connection churn — each PUT opens a fresh TCP connection (the bridge speaks
+/// `Connection: close`), and loop() does at most one PUT every `kPutIntervalMs` (see there) — giving
+/// smooth ambient colour, not real-time. The shared output Correction applies as on the LED/network
+/// drivers, so the brightness slider and colour-order preset reach the Hue lights too (brightness
+/// 0 → light off). Only colour-capable, reachable lights are driven (see `parseLights`); the `room`
+/// and `light` dropdowns aim the effect at a subset (see `rebuildDriven`).
+///
+/// **Wire contract (Hue v1 API, plain HTTP, no TLS — bench-confirmed on a BSB002 bridge, API 1.77):**
+///  - Pair — `POST http://<bridgeIp>/api` `{"devicetype":"projectMM#device"}`; before the link
+///    button, the bridge returns `link button not pressed`; after, `[{"success":{"username":"<key>"}}]`.
+///  - List lights — `GET http://<bridgeIp>/api/<appKey>/lights` → `{"1":{…},"2":{…}}` (window index → light id).
+///  - List rooms — `GET http://<bridgeIp>/api/<appKey>/groups` → `{"1":{"name":…,"lights":["1","2"],"type":"Room"},…}`.
+///  - Set a light — `PUT http://<bridgeIp>/api/<appKey>/lights/<id>/state`
+///    `{"on":true,"bri":0-254,"hue":0-65535,"sat":0-254,"transitiontime":N}` (or `{"on":false}` for a black pixel).
+///
+/// Prior art: the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/) (public docs);
+/// the effect-as-output mapping is projectMM's own.
+/// @card HueDriver.png
 class HueDriver : public DriverBase {
 public:
-    uint8_t  bridgeIp[4] = {};           // the bridge's LAN IP (from the UI)
-    char     appKey[48] = {};            // the Hue username/app key (filled by Pair, persisted)
+    /// The bridge's LAN IP, entered in the UI (4 octets).
+    uint8_t  bridgeIp[4] = {};
+    /// The Hue username/app key — filled by the Pair button, then persisted.
+    char     appKey[48] = {};
 
+    /// Register the controls: bridge IP, the persisted app key, the Pair link-button, the room +
+    /// light filter dropdowns (both default to index 0 = "All", rebuilt in place from the parsed
+    /// bridge data on every control change), the shared window, then refresh the status line.
     void onBuildControls() override {
         controls_.addIPv4("bridgeIp", bridgeIp);
         controls_.addText("appKey", appKey, sizeof(appKey));   // persisted credential
@@ -63,17 +63,18 @@ public:
         refreshStatus();
     }
 
+    /// Take the shared source buffer this driver reads its window from.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; }
 
-    // The shared output Correction (global brightness LUT + channel order), same as the physical
-    // LED / network drivers — so the brightness slider and a swapped colour order reach the Hue
-    // lights too. Applied per pixel before RGB→HSV; the RGBW/white part is irrelevant here (Hue
-    // takes hue/sat), we use the RGB result.
+    /// Take the shared output Correction (global brightness LUT + channel order), same as the
+    /// physical LED / network drivers — so the brightness slider and a swapped colour order reach
+    /// the Hue lights too. Applied per pixel before RGB→HSV; the RGBW/white part is irrelevant here
+    /// (Hue takes hue/sat), we use the RGB result.
     void setCorrection(const Correction* c) override { correction_ = c; }
 
-    // A control click. "pair" starts the link-button pairing poll. Changing the bridge IP or app
-    // key points the driver at a (possibly) different bridge, so the learned light list + push
-    // cache are stale — drop them and let loop1s re-fetch against the new config.
+    /// A control click. "pair" starts the link-button pairing poll; changing the bridge IP or app
+    /// key points the driver at a (possibly) different bridge, so the learned light list + push
+    /// cache are dropped and re-fetched; a room/light change re-derives the driven subset.
     void onUpdate(const char* controlName) override {
         if (controlName && std::strcmp(controlName, "pair") == 0) {
             pairTicksLeft_ = kPairWindowTicks;   // begin: poll the bridge for ~30 s on loop1s
@@ -98,11 +99,11 @@ public:
         DriverBase::onUpdate(controlName);
     }
 
-    // loop() runs every render tick. It must NEVER do more than ONE bounded bridge call, and
-    // only when the rate-limit interval has elapsed (a millis() gate, NOT work-every-tick) —
-    // otherwise a synchronous HTTP round-trip stalls the whole single-thread render loop (the
-    // "never block the loop" rule, decisions.md). So: at most one PUT every kPutIntervalMs,
-    // round-robined across the lights. Pairing + the bridge announce ride the slow 1 Hz tick.
+    /// Runs every render tick, but does at most ONE bounded PUT and only when the rate-limit
+    /// interval has elapsed (a millis() gate, NOT work-every-tick) — otherwise a synchronous HTTP
+    /// round-trip would stall the single-thread render loop (the "never block the loop" rule,
+    /// decisions.md). One PUT every kPutIntervalMs, round-robined across the lights; pairing + the
+    /// bridge announce ride the slow 1 Hz tick.
     void loop() override {
         if (pairTicksLeft_ > 0) return;            // pairing owns the bridge during its window
         if (!appKey[0] || !haveBridge() || lightCount_ == 0) return;
@@ -112,9 +113,9 @@ public:
         pushOneChangedLight();                     // exactly one bounded PUT this tick
     }
 
-    // The 1 Hz tick handles the non-render-critical, slower bridge work: pairing poll, the
-    // one-shot light fetch, and the periodic DevicesModule announce. Each is at most one bridge
-    // call per second — acceptable on a 1 Hz tick, and never in the per-frame loop().
+    /// The 1 Hz tick handles the non-render-critical, slower bridge work: the pairing poll, the
+    /// one-shot light + group fetch, and the periodic DevicesModule announce. Each is at most one
+    /// bridge call per second — acceptable on a 1 Hz tick, and never in the per-frame loop().
     void loop1s() override {
         if (pairTicksLeft_ > 0) { pollPairing(); DriverBase::loop1s(); return; }
         if (!appKey[0] || !haveBridge()) { DriverBase::loop1s(); return; }
@@ -124,6 +125,8 @@ public:
         DriverBase::loop1s();
     }
 
+    /// Stop any in-flight pairing and release the dropdown-name heap (a re-add re-fetches and
+    /// re-allocs), then chain to DriverBase::teardown to clear status.
     void teardown() override {
         pairTicksLeft_ = 0;
         freeNameBuffers();   // release the dropdown-name heap; a re-add re-fetches and re-allocs

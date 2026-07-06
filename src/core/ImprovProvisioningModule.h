@@ -49,7 +49,8 @@ namespace mm {
 /// `http://ip/` or `ERROR_UNABLE_TO_CONNECT`). Vendor `SET_TX_POWER` (`0xFD`) persists + applies
 /// a pre-association TX-power cap *before* any association attempt — the escape hatch for boards
 /// whose LDO browns out at full TX power, since the cap must land before the first association or
-/// the board fails auth at 20 dBm before it is ever online. Vendor `APPLY_OP` (`0xFC`) carries
+/// the board fails auth at 20 dBm before it is ever online. Payload `[1][dBm]` (0–21; 0 lifts the
+/// cap); an out-of-range value replies with `error 0x81`. Vendor `APPLY_OP` (`0xFC`) carries
 /// ONE REST op as JSON, routed to HttpServerModule's apply-core — the exact same code the HTTP
 /// handlers call — so a REST call over the network and an `APPLY_OP` over serial execute
 /// identically. The web installer pushes a device-model's whole catalog config this way during
@@ -57,8 +58,23 @@ namespace mm {
 /// defaults apply over the serial port the installer already owns during the flash — which is
 /// what lets the HTTPS installer page configure an `http://` device a browser fetch can't reach
 /// (mixed-content). Ops are idempotent; a long value chunks across frames into a reassembly
-/// buffer, applied on the device's main loop when `last=1`; single-buffered (a new op errors
-/// while the previous is unconsumed).
+/// buffer, applied on the device's main loop when `last=1`; single-buffered (a new op errors with
+/// `0x82` while the previous is unconsumed).
+///
+/// **Frame payload shape.** `[0xFC][seq][last][chunk]`. The installer paces ops open-loop (a
+/// fixed delay sized to the worst-case consume window) rather than reading the ack back, so a lost
+/// op is improbable rather than impossible; each op is idempotent, so a re-flash re-applies
+/// cleanly.
+///
+/// **Parent-key caveat.** The serial `add` op names the parent `parent`, while HTTP
+/// `POST /api/modules` names it `parent_id`; both feed `applyAddModule()` but parse different
+/// keys, so an HTTP payload is NOT a drop-in APPLY_OP — rename `parent_id` → `parent`. The serial
+/// key stays terse because every byte counts against the frame.
+///
+/// **clearChildren pre-pass.** The installer does a `clearChildren` pre-pass for every add-parent
+/// (not only replaceChildren containers) so "apply device defaults" lands the same with or without
+/// an erase: the device-side `add` is idempotent on module id, so a persisted same-name child
+/// would otherwise survive and the re-add be skipped.
 ///
 /// **Eth-only builds.** The serial listener runs on every ESP32 target, including Ethernet-only
 /// builds: they compile in the vendor RPCs plus `GET_CURRENT_STATE` / `GET_DEVICE_INFO`, so the
@@ -75,6 +91,7 @@ namespace mm {
 /// `deploy/flashfs.py --wifi` covered the same rack-provisioning use case by baking credentials
 /// into a LittleFS partition image and re-flashing; Improv replaces that with live serial
 /// provisioning (devices stay running, no flash mode required).
+/// @card ImprovProvisioningModule.png
 class ImprovProvisioningModule : public MoonModule {
 public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }

@@ -27,6 +27,7 @@ namespace mm {
 // selected waveform to a y in [0, height); that pixel is lit, and for the discontinuous shapes
 // (sawtooth, square) a vertical segment connects to the previous column so the line stays joined.
 // Author: Ewoud Wijma (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Effect of a travelling wave across the layer.
 class WaveEffect : public EffectBase {
 public:
     const char* tags() const override { return "🌊"; }

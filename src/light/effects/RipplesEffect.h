@@ -23,6 +23,8 @@ namespace mm {
 // the hot-path integer-math preference is for per-light colour work, not the
 // handful of transcendental ops a wave front needs.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Water-ripple effect: distance-from-centre drives a wave phase.
+/// @card RipplesEffect.gif
 class RipplesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🟦🦅"; }  // MoonLight origin · water-ripple

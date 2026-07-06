@@ -6,7 +6,7 @@
       "esp32",
       "esp32-eth"
     ],
-    "image": "assets/boards/olimex-esp32-gateway-rev-g.jpg",
+    "image": "assets/deviceModels/olimex-esp32-gateway-rev-g.jpg",
     "url": "https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware",
     "supported": [
       "LEDs",
@@ -50,7 +50,7 @@
       "esp32"
     ],
     "flashBaud": 460800,
-    "image": "assets/boards/lolin-d32.jpg",
+    "image": "assets/deviceModels/lolin-d32.jpg",
     "url": "https://www.wemos.cc/en/latest/d32/d32.html",
     "supported": [
       "LEDs",
@@ -80,7 +80,7 @@
     "firmwares": [
       "esp32"
     ],
-    "image": "assets/boards/generic-esp32-dev.jpg",
+    "image": "assets/deviceModels/generic-esp32-dev.jpg",
     "supported": [
       "LEDs",
       "WiFi"
@@ -107,7 +107,7 @@
     "firmwares": [
       "esp32"
     ],
-    "image": "assets/boards/quinled-dig-2-go.jpg",
+    "image": "assets/deviceModels/quinled-dig-2-go.jpg",
     "url": "https://quinled.info/quinled-dig2go/",
     "supported": [
       "LEDs",
@@ -143,7 +143,7 @@
     "firmwares": [
       "esp32"
     ],
-    "image": "assets/boards/quinled-dig-next-2.jpg",
+    "image": "assets/deviceModels/quinled-dig-next-2.jpg",
     "url": "https://quinled.info/dig-next-2/",
     "supported": [
       "LEDs",
@@ -178,7 +178,7 @@
     "firmwares": [
       "esp32"
     ],
-    "image": "assets/boards/quinled-dig-uno-v3.jpg",
+    "image": "assets/deviceModels/quinled-dig-uno-v3.jpg",
     "url": "https://quinled.info/pre-assembled-quinled-dig-uno/",
     "supported": [
       "LEDs",
@@ -212,7 +212,7 @@
     "firmwares": [
       "esp32"
     ],
-    "image": "assets/boards/quinled-dig-quad-v3.jpg",
+    "image": "assets/deviceModels/quinled-dig-quad-v3.jpg",
     "url": "https://quinled.info/pre-assembled-quinled-dig-quad/",
     "supported": [
       "LEDs",
@@ -247,7 +247,7 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "image": "assets/boards/quinled-dig-octa-32-8l.jpg",
+    "image": "assets/deviceModels/quinled-dig-octa-32-8l.jpg",
     "url": "https://quinled.info/quinled-dig-octa-brainboard-32-8l/",
     "supported": [
       "LEDs",
@@ -297,7 +297,7 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "image": "assets/boards/serg-unishield-v5.jpg",
+    "image": "assets/deviceModels/serg-unishield-v5.jpg",
     "url": "https://www.tindie.com/stores/serg74/",
     "supported": [
       "LEDs",
@@ -333,7 +333,7 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "image": "assets/boards/serg-minishield.jpg",
+    "image": "assets/deviceModels/serg-minishield.jpg",
     "url": "https://www.tindie.com/stores/serg74/",
     "supported": [
       "LEDs",
@@ -397,7 +397,7 @@
     "firmwares": [
       "esp32"
     ],
-    "image": "assets/boards/mhc-v57-pro.jpg",
+    "image": "assets/deviceModels/mhc-v57-pro.jpg",
     "url": "https://shop.myhome-control.de/en/ABC-WLED-controller-PRO-V57-with-iMOSFET/HW10030",
     "supported": [
       "LEDs",
@@ -488,7 +488,7 @@
     "firmwares": [
       "esp32s3-n16r8"
     ],
-    "image": "assets/boards/esp32-s3-n16r8-dev.jpg",
+    "image": "assets/deviceModels/esp32-s3-n16r8-dev.jpg",
     "supported": [
       "LEDs",
       "WiFi"
@@ -524,7 +524,7 @@
     "firmwares": [
       "esp32s3-n16r8"
     ],
-    "image": "assets/boards/esp32-s3-n16r8-dev.jpg",
+    "image": "assets/deviceModels/esp32-s3-n16r8-dev.jpg",
     "supported": [
       "LEDs",
       "WiFi",
@@ -616,7 +616,7 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "image": "assets/boards/esp32-d0-16mb.jpg",
+    "image": "assets/deviceModels/esp32-d0-16mb.jpg",
     "supported": [
       "LEDs",
       "WiFi"
@@ -649,7 +649,7 @@
     "firmwares": [
       "esp32p4-eth"
     ],
-    "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
+    "image": "assets/deviceModels/waveshare-esp32-p4-nano.jpg",
     "supported": [
       "LEDs",
       "Ethernet"
@@ -725,7 +725,7 @@
     "firmwares": [
       "esp32s3-n8r8"
     ],
-    "image": "assets/boards/lightcrafter-16.jpg",
+    "image": "assets/deviceModels/lightcrafter-16.jpg",
     "url": "https://www.limpkin.fr/",
     "supported": [
       "LEDs",
@@ -779,7 +779,7 @@
     "firmwares": [
       "esp32s3-n8r8"
     ],
-    "image": "assets/boards/esp32-s3-stephanelec-16p.jpg",
+    "image": "assets/deviceModels/esp32-s3-stephanelec-16p.jpg",
     "url": "https://www.limpkin.fr/",
     "supported": [
       "LEDs",
@@ -833,7 +833,7 @@
       "esp32p4-eth",
       "esp32p4-eth-wifi"
     ],
-    "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
+    "image": "assets/deviceModels/waveshare-esp32-p4-nano.jpg",
     "url": "https://www.waveshare.com/esp32-p4-nano.htm",
     "supported": [
       "LEDs",
@@ -891,7 +891,7 @@
     "firmwares": [
       "esp32p4-eth"
     ],
-    "image": "assets/boards/mhc-wled-esp32-p4-shield.jpg",
+    "image": "assets/deviceModels/mhc-wled-esp32-p4-shield.jpg",
     "url": "https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027",
     "supported": [
       "LEDs",
@@ -962,7 +962,7 @@
     "firmwares": [
       "esp32s31"
     ],
-    "image": "assets/boards/esp32-s31-function-coreboard-1.jpg",
+    "image": "assets/deviceModels/esp32-s31-function-coreboard-1.jpg",
     "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp32-s31-function-coreboard-1/user_guide.html",
     "supported": [
       "LEDs",
@@ -1033,7 +1033,7 @@
       "esp32"
     ],
     "flashBaud": 460800,
-    "image": "assets/boards/shelly.jpg",
+    "image": "assets/deviceModels/shelly.jpg",
     "supported": [
       "LEDs",
       "WiFi",
@@ -1064,8 +1064,8 @@
         "parent_id": "Layers"
       },
       {
-        "type": "SolidEffect",
-        "id": "Solid",
+        "type": "RainbowEffect",
+        "id": "Rainbow",
         "parent_id": "Layer"
       },
       {

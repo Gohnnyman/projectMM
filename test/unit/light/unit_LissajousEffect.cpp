@@ -1,6 +1,7 @@
 // @module LissajousEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/LissajousEffect.h"
 #include "light/layouts/GridLayout.h"
 

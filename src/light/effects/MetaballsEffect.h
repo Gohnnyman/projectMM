@@ -8,6 +8,8 @@
 namespace mm {
 
 // Author: projectMM original (metaballs)
+/// Metaballs effect: smooth merging blobs via a scalar field.
+/// @card MetaballsEffect.png
 class MetaballsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step

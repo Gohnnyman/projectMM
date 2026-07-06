@@ -1,6 +1,7 @@
 // @module ParticlesEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/ParticlesEffect.h"
 #include "light/layouts/GridLayout.h"
 

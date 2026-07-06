@@ -3,7 +3,7 @@
 #include <cmath>    // sinf, cosf, fmodf
 #include <cstdint>
 #include <numbers>  // std::numbers::pi_v — portable pi
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {
@@ -35,6 +35,8 @@ namespace mm {
 // pin/wiring plumbing (nextPin / doNextPin) is dropped — a projectMM layout
 // emits coordinates only; the driver owns pins.
 // Author: projectMM / custom fixture
+/// Layout mapping automotive light-strip coordinates.
+/// @card CarLightsLayout.gif
 class CarLightsLayout : public LayoutBase {
 public:
     // Verbatim MoonLight default and range (the commented-out nrOfSpokes /

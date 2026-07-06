@@ -40,6 +40,7 @@ namespace mm {
 /// **Prior art:** the lazy-loaded folder tree is the standard file-explorer shape (a node loads its
 /// children when expanded); the `/api/dir` + `/api/file` split mirrors the listing-vs-contents split
 /// every file API draws (WebDAV PROPFIND vs GET).
+/// @card FileManagerModule.png
 class FileManagerModule : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Peripheral; }

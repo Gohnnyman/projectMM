@@ -122,16 +122,20 @@ nav:
       # site-relative /projectMM/install/) so MkDocs treats it as the external
       # resource it is, rather than warning about an unresolvable absolute path.
       - Web installer: https://moonmodules.org/projectMM/install/
+  - Use cases:
+      - Home automation: usecases/home-automation.md
+      - LED signal integrity: usecases/led-signal-integrity.md
   - Effects & building shows:
-      - Effects: moonmodules/light/effects/effects.md
-      - Layouts: moonmodules/light/layouts/layouts.md
-      - Modifiers: moonmodules/light/modifiers/modifiers.md
-      - Drivers: moonmodules/light/drivers/drivers.md
-      - Live scripting: moonmodules/light/moonlive/MoonLiveEffect.md
-      - Supporting: moonmodules/light/supporting/supporting.md
+      - Effects: moonmodules/light/effects.md
+      - Layouts: moonmodules/light/layouts.md
+      - Modifiers: moonmodules/light/modifiers.md
+      - Drivers: moonmodules/light/drivers.md
+      - Live scripting: moonmodules/light/MoonLiveEffect.md
+      - Supporting: moonmodules/light/supporting.md
   - Core:
-      - UI: moonmodules/core/ui/ui.md
-      - Supporting: moonmodules/core/supporting/supporting.md
+      - Services: moonmodules/core/services.md
+      - Supporting: moonmodules/core/supporting.md
+      - Web UI: moonmodules/core/ui.md
   - Tests (what we verify):
       - Unit tests: tests/unit-tests.md
       - Scenario tests: tests/scenario-tests.md

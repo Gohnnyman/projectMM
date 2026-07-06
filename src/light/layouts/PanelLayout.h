@@ -2,7 +2,7 @@
 
 #include <limits>
 #include <cstdint>
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {
@@ -24,6 +24,7 @@ namespace mm {
 // the control labels/defaults; the reconstructed logic is marked // RECONSTRUCTED
 // and cross-checks against GridLayout's serpentine on the defaults.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+/// Layout of a single 2D LED panel.
 class PanelLayout : public LayoutBase {
 public:
     // Geometry (verbatim MoonLight defaults): a 16×16 panel.

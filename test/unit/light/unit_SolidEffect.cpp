@@ -1,6 +1,7 @@
 // @module SolidEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/SolidEffect.h"
 #include "light/layouts/GridLayout.h"
 
