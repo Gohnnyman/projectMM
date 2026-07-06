@@ -525,14 +525,14 @@ jobs:
           cp src/ui/install-picker-boards.js pages/install/
           # library.json — install page reads the project version from it.
           cp library.json pages/install/
-          # Board picker images live in docs/assets/boards/ (the project's asset
+          # Board picker images live in docs/assets/deviceModels/ (the project's asset
           # home, also a library for boards not yet in the catalog). Stage ONLY the
           # images a deviceModels.json entry actually references, under install/assets/,
-          # so an "image": "assets/boards/<slug>.jpg" resolves same-origin from
+          # so an "image": "assets/deviceModels/<slug>.jpg" resolves same-origin from
           # /install/ without shipping the unused library to Pages.
-          mkdir -p pages/install/assets/boards
-          # rel is "assets/boards/<slug>.<ext>" (the path served from /install/);
-          # the source file lives in docs/<rel> (i.e. docs/assets/boards/...).
+          mkdir -p pages/install/assets/deviceModels
+          # rel is "assets/deviceModels/<slug>.<ext>" (the path served from /install/);
+          # the source file lives in docs/<rel> (i.e. docs/assets/deviceModels/...).
           jq -r '.[].image // empty' web-installer/deviceModels.json | while read -r rel; do
             src="docs/$rel"
             [ -f "$src" ] && cp "$src" "pages/install/$rel" \

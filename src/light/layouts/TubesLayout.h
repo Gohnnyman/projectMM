@@ -2,7 +2,7 @@
 
 #include <cstdint>
 #include <limits>
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {

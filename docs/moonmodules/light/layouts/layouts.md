@@ -14,7 +14,9 @@ A pair of concentric-ring "headlight" clusters (nested rings of 1/8/12/16/24 LED
 
 - `scale` — overall size scale (1–10).
 
-Origin: projectMM / custom fixture · source [CarLightsLayout.h](../../../../src/light/layouts/CarLightsLayout.h)
+Origin: projectMM / custom fixture
+
+Detail: [technical](../moxygen/CarLightsLayout.md)
 
 <a id="cube"></a>
 
@@ -27,7 +29,9 @@ A 3D cube volume, `width`×`height`×`depth`, wired in a configurable axis order
 - `X++` / `Y++` / `Z++` — count up (vs down) along that axis.
 - `snakeX` / `snakeY` / `snakeZ` — serpentine (alternate rows/columns reverse) on that axis.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [CubeLayout.h](../../../../src/light/layouts/CubeLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/CubeLayout.md)
 
 <a id="humansizedcube"></a>
 
@@ -37,7 +41,9 @@ A hollow walk-in cube built from five LED-curtain faces (front, back, top, left,
 
 - `width` / `height` / `depth` — cube extent per axis (1–20).
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [HumanSizedCubeLayout.h](../../../../src/light/layouts/HumanSizedCubeLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/HumanSizedCubeLayout.md)
 
 <a id="panel"></a>
 
@@ -50,7 +56,9 @@ A 2D matrix panel with full wiring control: choose the axis order, per-axis dire
 - `X++` / `Y++` — count up vs down along that axis.
 - `snake` — serpentine wiring (alternate lines reverse).
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [PanelLayout.h](../../../../src/light/layouts/PanelLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/PanelLayout.md)
 
 <a id="panels"></a>
 
@@ -63,7 +71,9 @@ Tiles an M×N grid of full matrix panels into one large display: an outer walk o
 - `panelWidth` / `panelHeight` — each panel's size (1–512).
 - `wiringOrder` / `X++` / `Y++` / `snake` — the per-panel light wiring.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [PanelsLayout.h](../../../../src/light/layouts/PanelsLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/PanelsLayout.md)
 
 <a id="ring"></a>
 
@@ -77,7 +87,9 @@ A single ring of LEDs evenly spaced around a circle — `nrOfLEDs` points, start
 - `clockwise` — direction of travel.
 - `scale` — spacing/radius scale.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [RingLayout.h](../../../../src/light/layouts/RingLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/RingLayout.md)
 
 <a id="rings241"></a>
 
@@ -87,7 +99,9 @@ The classic 241-LED concentric-ring disc: nested rings of 1, 8, 12, 16, 24, 32, 
 
 - `scale` — overall radius scale (1–10).
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [Rings241Layout.h](../../../../src/light/layouts/Rings241Layout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/Rings241Layout.md)
 
 <a id="singlecolumn"></a>
 
@@ -100,7 +114,9 @@ A vertical line of LEDs at a fixed X — the 1D column primitive.
 - `X position` — the column's x.
 - `reversed order` — wire top-to-bottom instead of bottom-to-top.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [SingleColumnLayout.h](../../../../src/light/layouts/SingleColumnLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/SingleColumnLayout.md)
 
 <a id="singlerow"></a>
 
@@ -113,7 +129,9 @@ A horizontal line of LEDs at a fixed Y — the 1D row primitive.
 - `Y position` — the row's y.
 - `reversed order` — wire right-to-left instead of left-to-right.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [SingleRowLayout.h](../../../../src/light/layouts/SingleRowLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/SingleRowLayout.md)
 
 <a id="spiral"></a>
 
@@ -125,7 +143,9 @@ A conical spiral: `ledCount` LEDs winding up a cone from `bottomRadius` to a poi
 - `bottomRadius` — radius at the base.
 - `height` — spiral height.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [SpiralLayout.h](../../../../src/light/layouts/SpiralLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/SpiralLayout.md)
 
 <a id="torontobargourds"></a>
 
@@ -138,7 +158,9 @@ Maps a set of decorative "gourd" objects (a specific bar installation), each ren
 - `granularity` — `One Gourd One Light`, `One Side One Light`, or `One LED One Light`.
 - `nrOfLightsPerGourd` — LEDs per gourd in the coarsest mode (1–128).
 
-Origin: projectMM / custom fixture · source [TorontoBarGourdsLayout.h](../../../../src/light/layouts/TorontoBarGourdsLayout.h)
+Origin: projectMM / custom fixture
+
+Detail: [technical](../moxygen/TorontoBarGourdsLayout.md)
 
 <a id="tubes"></a>
 
@@ -151,7 +173,9 @@ Parallel vertical tubes: `nrOfTubes` columns of `ledsPerTube` LEDs, spaced `tube
 - `tubeDistance` — spacing between tubes.
 - `reversed` — reverse the wiring order.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [TubesLayout.h](../../../../src/light/layouts/TubesLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/TubesLayout.md)
 
 ## projectMM-native layouts
 
@@ -164,7 +188,9 @@ A dense 3D grid, row-major (x fastest, then y, then z); every position maps to a
 - `width` / `height` / `depth` — grid extent on each axis in lights (1–512).
 - `serpentine` — boustrophedon-wire alternate rows (every other row runs in reverse, matching a snaked strip).
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [GridLayout.h](../../../../src/light/layouts/GridLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/GridLayout.md)
 
 [Tests](../../../tests/unit-tests.md#gridlayout)
 
@@ -176,7 +202,9 @@ Lights on the surface of a hollow sphere — a one-light-thick shell inside a `(
 
 - `radius` — surface radius in light-units (1–64); the shell is every cell whose distance from the centre rounds to `radius`.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [SphereLayout.h](../../../../src/light/layouts/SphereLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/SphereLayout.md)
 
 [Tests](../../../tests/unit-tests.md#spherelayout)
 
@@ -189,7 +217,9 @@ A bicycle-wheel: `spokes` straight rows radiate from a centre hub, each carrying
 - `spokes` — number of spokes radiating from the hub (2–64).
 - `ledsPerSpoke` — LEDs along each spoke, spaced one unit apart from the centre outward.
 
-Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h) · source [WheelLayout.h](../../../../src/light/layouts/WheelLayout.h)
+Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
+
+Detail: [technical](../moxygen/WheelLayout.md)
 
 [Tests](../../../tests/unit-tests.md#wheellayout)
 

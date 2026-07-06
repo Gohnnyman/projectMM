@@ -22,7 +22,8 @@ namespace mm {
 // propagation is dropped here (the geometry — the axis collapse — is preserved
 // exactly). Defaults match MoonLight: shrink=true, towardsX=true, towardsZ=false.
 // Author: @Troy (WLEDMM Art-Net) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
-/// Modifier collapsing an axis so an effect ripples along the rest.
+/// Modifier that collapses one axis of the box to a single plane, folding every coordinate on that
+/// axis to 0 (the static geometry of MoonLight's RippleXZ; its buffer-shift ripple wave is omitted).
 class RippleXZModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

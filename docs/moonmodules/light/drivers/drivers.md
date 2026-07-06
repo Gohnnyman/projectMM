@@ -1,6 +1,6 @@
 # Drivers
 
-A driver reads its window of the [Drivers](../moxygen/Drivers.md) container's shared buffer, applies the shared [output correction](../archive/Drivers.md#output-correction) per light, and sends the result out — a wire protocol (WS2812), the network (Art-Net / E1.31 / DDP), a smart-light hub (Hue), or the web UI (Preview). Drivers are added per board through the catalog ([`deviceModels.json`](../../../../web-installer/deviceModels.json)); `PreviewDriver` is the one boot-wired driver. Every driver shares the `start` / `count` [source-window](../archive/Drivers.md#per-driver-source-window-start-count) controls (the slice `[start, start+count)` it sends). Each card links to a detail page and, where it doesn't fit the table, a **⌄ details** section below.
+A driver reads its window of the [Drivers](../moxygen/Drivers.md) container's shared buffer, applies the shared [output correction](../moxygen/Drivers.md) per light, and sends the result out — a wire protocol (WS2812), the network (Art-Net / E1.31 / DDP), a smart-light hub (Hue), or the web UI (Preview). Drivers are added per board through the catalog ([`deviceModels.json`](../../../../web-installer/deviceModels.json)); `PreviewDriver` is the one boot-wired driver. Every driver shares the `start` / `count` [source-window](../moxygen/Drivers.md) controls (the slice `[start, start+count)` it sends). Each card links to a detail page and, where it doesn't fit the table, a **⌄ details** section below.
 
 **Jump to:** [LED output](#led-output-drivers) · [Network](#network-drivers) · [Smart light](#smart-light-drivers) · [Preview](#preview-drivers)
 
@@ -25,7 +25,7 @@ Origin: WS2812B on FastLED / hpwit / WLED prior art ([analysis](../../../backlog
 
 [Tests](../../../tests/unit-tests.md#rmtleddriver)
 
-Detail: RMT [.h](../../../../src/light/drivers/RmtLedDriver.h) · [md](RmtLedDriver.md) — LCD [.h](../../../../src/light/drivers/LcdLedDriver.h) · [md](LcdLedDriver.md) — Parlio [.h](../../../../src/light/drivers/ParlioLedDriver.h) · [md](ParlioLedDriver.md)
+Detail: [RMT](../moxygen/RmtLedDriver.md) · [LCD](../moxygen/LcdLedDriver.md) · [Parlio](../moxygen/ParlioLedDriver.md)
 
 ## Network drivers
 
@@ -44,7 +44,9 @@ Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one
 
 Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 
-[Tests](../../../tests/unit-tests.md#networksenddriver) · [.h](../../../../src/light/drivers/NetworkSendDriver.h) · [detail](NetworkSendDriver.md)
+[Tests](../../../tests/unit-tests.md#networksenddriver)
+
+Detail: [technical](../moxygen/NetworkSendDriver.md)
 
 ## Smart light drivers
 
@@ -63,7 +65,9 @@ Drives **Philips Hue bulbs as pixels**: each colour bulb in the driver's window 
 
 Origin: projectMM, on the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/)
 
-[Tests](../../../tests/unit-tests.md#huedriver) · [.h](../../../../src/light/drivers/HueDriver.h) · [detail](HueDriver.md)
+[Tests](../../../tests/unit-tests.md#huedriver)
+
+Detail: [technical](../moxygen/HueDriver.md)
 
 ## Preview drivers
 
@@ -79,7 +83,9 @@ Streams a true-shape 3D preview to the web UI over WebSocket as a **point list**
 
 Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h)'s PhysicalLayer model
 
-[Tests](../../../tests/unit-tests.md#previewdriver) · [.h](../../../../src/light/drivers/PreviewDriver.h) · [detail](PreviewDriver.md)
+[Tests](../../../tests/unit-tests.md#previewdriver)
+
+Detail: [technical](../moxygen/PreviewDriver.md)
 
 ## LED output — details
 
@@ -87,8 +93,8 @@ The three LED-output peripherals, compared. All drive WS2812B-class strips with 
 
 | Peripheral | Chip | Strands | Notes |
 |------------|------|---------|-------|
-| **RMT** ([RmtLedDriver.md](RmtLedDriver.md)) | any ESP32 (classic 8 ch, S3 4, P4 4 DMA) | one per RMT TX channel | the general single-/few-strand output; default for classic + S3 board entries. Adds `loopbackFrame` — a whole-frame variant of the self-test (bit-verifies a full frame, catching frame-rate / RF corruption a 24-bit burst misses). |
-| **LCD_CAM** ([LcdLedDriver.md](LcdLedDriver.md)) | ESP32-S3 | **exactly 8** parallel (one DMA transfer) | the S3's scale path where RMT tops out at 4. Adds `clockPin` (10) / `dcPin` (11) — i80 bus lines the LEDs ignore. Give unused lanes `0`. |
-| **Parlio** ([ParlioLedDriver.md](ParlioLedDriver.md)) | ESP32-P4 | **1–8** parallel (one DMA transfer) | the P4's parallel path (Parlio generates its own pixel clock — no clock/dc pins). On P4-NANO a known-good set is `20,21,22,23,24,25,26,27`. |
+| **RMT** ([RmtLedDriver.md](../moxygen/RmtLedDriver.md)) | any ESP32 (classic 8 ch, S3 4, P4 4 DMA) | one per RMT TX channel | the general single-/few-strand output; default for classic + S3 board entries. Adds `loopbackFrame` — a whole-frame variant of the self-test (bit-verifies a full frame, catching frame-rate / RF corruption a 24-bit burst misses). |
+| **LCD_CAM** ([LcdLedDriver.md](../moxygen/LcdLedDriver.md)) | ESP32-S3 | **exactly 8** parallel (one DMA transfer) | the S3's scale path where RMT tops out at 4. Adds `clockPin` (10) / `dcPin` (11) — i80 bus lines the LEDs ignore. Give unused lanes `0`. |
+| **Parlio** ([ParlioLedDriver.md](../moxygen/ParlioLedDriver.md)) | ESP32-P4 | **1–8** parallel (one DMA transfer) | the P4's parallel path (Parlio generates its own pixel clock — no clock/dc pins). On P4-NANO a known-good set is `20,21,22,23,24,25,26,27`. |
 
 The detail pages carry each peripheral's wire contract, buffer slicing, memory sizing, and the loopback self-test.

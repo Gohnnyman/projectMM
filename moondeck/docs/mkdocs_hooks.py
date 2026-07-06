@@ -200,12 +200,18 @@ def _emit_row(b: dict, details_names: set) -> str:
     col3 = "".join(col3_parts) if col3_parts else "—"
 
     # Col 4: everything a reader clicks OUT to — so the description column is pure
-    # prose. Tests + detail-page link(s) + source/attribution + a ⌄ details anchor.
+    # prose. Tests + technical page + source/attribution + a ⌄ details anchor. Each
+    # link is prefixed with a Material icon (rendered as SVG by pymdownx.emoji, same as
+    # the tag emoji in the Name column) so the link TYPE is scannable, not a wall of
+    # small text — the recognizable docs-site convention. Labels are Title Case.
     links = []
     if b["tests"]:
-        links.append(f"[Tests]({b['tests']})")
+        links.append(f":material-test-tube: [Tests]({b['tests']})")
     if b["detail"]:
-        links.append(b["detail"])            # the `Detail: [Foo.md](..) · …` line
+        # Title-case a lone `[technical]` label so it reads "Technical"; leave a named
+        # multi-link group (e.g. the LED-output `[RMT] · [LCD] · [Parlio]`) as authored.
+        detail = re.sub(r'^\[technical\]', '[Technical]', b["detail"])
+        links.append(f":material-file-document-outline: {detail}")
     if b["origin"]:
         links.append(b["origin"])            # carries `source [Foo.h](...)` + attribution
     # The module's display name without the trailing ` 💫 · dim` decoration, e.g.

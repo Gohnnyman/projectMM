@@ -2,6 +2,7 @@
 // @also AudioModule
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/PaintBrushEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "core/AudioModule.h"

@@ -1,6 +1,7 @@
 // @module PraxisEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/PraxisEffect.h"
 #include "light/layouts/GridLayout.h"
 

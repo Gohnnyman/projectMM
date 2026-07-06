@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Drivers.h"        // DriverBase, Correction
+#include "light/drivers/DriverBase.h"        // DriverBase, Correction
 #include "light/drivers/LedDriverConfig.h"
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with LcdLedDriver)
 #include "light/drivers/RmtSymbol.h"       // encodeWs2812Symbols (host-testable)
@@ -12,80 +12,84 @@
 
 namespace mm {
 
-// WS2812B output over the ESP32 RMT peripheral. One or more strands — one GPIO
-// and one RMT TX channel per strand — fed consecutive slices of the source
-// buffer, 8-bit, GRB.
-//
-// This is the readable EXAMPLE future LED drivers copy. It reads as a sibling of
-// NetworkSendDriver: same DriverBase hooks, same per-light `correction_->apply()`
-// guard pattern, same once-allocated owned buffer sized off the hot path. The
-// only thing that differs is the emit — ArtNet packs corrected bytes into UDP
-// universes; this fuses the correction and the WS2812 symbol-encode into one
-// pass over the lights, then hands per-pin slices of the symbols to the
-// platform. All channels are started before any is waited on, so a multi-pin
-// frame costs the longest strand, not the sum.
-//
-// Domain code only: the symbol encode lives in RmtSymbol.h; the platform owns
-// just the peripheral (platform::rmtWs2812*). On targets without RMT every
-// platform call is an inert stub and the driver does nothing — guarded by
-// `if constexpr (platform::rmtTxChannels == 0)` so it compiles everywhere.
-// The pin/count parsing and buffer slicing run on every platform, which is what
-// lets the host unit tests (unit_RmtLedDriver_pins.cpp) pin them.
-/// Output driver: WS2812 LEDs over the RMT peripheral.
+/// Output driver: WS2812B-class addressable LEDs over the ESP32 [RMT (Remote Control
+/// Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)
+/// peripheral — one GPIO and one RMT TX channel per strand, fed consecutive slices of the source
+/// buffer (8-bit, GRB). The default LED driver for classic-ESP32 and S3 board entries, and the
+/// readable EXAMPLE future LED drivers copy: a sibling of NetworkSendDriver (same DriverBase hooks,
+/// same per-light `correction_->apply()` guard, same once-allocated owned buffer sized off the hot
+/// path); only the emit differs — this fuses the correction + WS2812 symbol-encode into one pass
+/// (the encode is `RmtSymbol.h`, host-tested) then hands per-pin slices to the platform.
+///
+/// **Wire contract — [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf):** 1-wire NRZ
+/// at 800 kHz, no clock line. Each bit is a 1.25 µs cell that starts HIGH then drops LOW; the HIGH
+/// duration encodes the bit (`0` = 350 ns high, `1` = 700 ns high), MSB-first per byte. Channel
+/// order (GRB, GRBW, …) is applied by `Correction` before the encode, so the encoder is
+/// order-agnostic. Frames latch on ≥300 µs idle-LOW. Timings live in `LedDriverConfig`, converted to
+/// RMT ticks from the granted resolution (~40 MHz), never hard-coded to one clock. The platform owns
+/// only the peripheral (`platform::rmtWs2812*`); on a chip without RMT TX channels those calls are
+/// inert stubs, so it compiles everywhere. The peripheral half uses the modern RMT driver (ESP-IDF
+/// 5.x "RMT v2": `rmt_new_tx_channel` / a copy encoder / `rmt_transmit`), not the legacy
+/// channel-numbered API — not a preference: the legacy driver was removed entirely in ESP-IDF v6
+/// (the build IDF), so v2 is the only API that exists. On chips whose RMT has a DMA backend
+/// (`SOC_RMT_SUPPORT_DMA` — the P4; the classic ESP32 has none) the whole-frame loopback capture
+/// uses it.
+///
+/// **Flicker on LEDs that should be off** is almost always a data-line signal-integrity problem
+/// (3.3 V drive into a 5 V strip), not firmware — the "LED signal integrity" use-case guide has the
+/// confirm-firmware-innocent playbook (`loopbackFrame`, the TX-power sweep) and the electrical fixes.
 /// @card RmtLedDriver.png
 class RmtLedDriver : public DriverBase {
 public:
-    // Hard cap on the pin arrays: the largest RMT TX group of any supported
-    // chip (8 on classic ESP32; the S3 has 4 — enforced per target via
-    // maxPinsForTarget()). A fixed array bounded by a hardware constant, not a
-    // dynamic list: the bound can't grow at runtime.
+    /// Hard cap on the pin arrays: the largest RMT TX group of any supported chip (8 on
+    /// classic ESP32; the S3 has 4 — enforced per target via maxPinsForTarget()). A fixed
+    /// array bounded by a hardware constant, not a dynamic list: the bound can't grow at runtime.
     static constexpr uint8_t kMaxPins = 8;
 
-    // Comma-separated GPIO list, one RMT TX channel per pin ("18,17,16"). Text
-    // control so one field holds N pins — per-output (pin, count) rows are the
-    // WLED LED-settings pattern. The peripheral validates each pin at init; a
-    // parse error or failing pin lands in the status field and the driver idles.
-    // 24 bytes fit kMaxPins 2-digit GPIOs plus separators. The loopback
-    // self-test transmits on the FIRST pin, so it validates the actual output.
-    // Defaults to UNSET: the strand is user-soldered to whatever GPIO the user
-    // wired, so a hard-coded pin would be a guess that could drive a pin committed
-    // elsewhere — empty until set, idle meanwhile (the "default only when it cannot
-    // do harm" rule; see decisions.md). Bench wiring was pin "18".
+    /// Comma-separated GPIO list, one RMT TX channel per pin ("18,17,16"). Text control so one
+    /// field holds N pins — per-output (pin, count) rows are the WLED LED-settings pattern. The
+    /// peripheral validates each pin at init; a parse error or failing pin lands in the status
+    /// field and the driver idles. 24 bytes fit kMaxPins 2-digit GPIOs plus separators. Defaults
+    /// to UNSET: the strand is user-soldered to whatever GPIO the user wired, so a hard-coded pin
+    /// would be a guess that could drive a pin committed elsewhere — empty until set, idle
+    /// meanwhile (the "default only when it cannot do harm" rule; see decisions.md). Bench pin "18".
     char pins[24] = "";
 
-    // Comma-separated lights-per-pin ("100,100,50"), matched to `pins` by
-    // position — each pin takes the next consecutive slice of the source
-    // buffer. May be empty or shorter than `pins`: the unassigned remainder
-    // splits evenly over the remaining pins (last pin takes the rounding
-    // remainder), so the empty default just splits the whole buffer evenly.
+    /// Comma-separated lights-per-pin ("100,100,50"), matched to `pins` by position — each pin
+    /// takes the next consecutive slice of the source buffer, in list order (pin 1 = `[0,n₁)`,
+    /// pin 2 = `[n₁,n₁+n₂)`, …). May be empty or shorter than `pins`: the unassigned remainder
+    /// splits evenly over the remaining pins (last takes the rounding remainder), so the empty
+    /// default splits the whole buffer evenly. Each pin is capped at a WS2812 per-pin ceiling
+    /// (2048 lights — a 1-wire line clocks ~30 µs/light, so 2048 is already ~16 FPS): a pin over
+    /// the ceiling is clamped (output stays lit) with a Warning status, guarding the common
+    /// misconfig of a whole grid on one pin. Use the start/count window to drive fewer lights,
+    /// not this safety cap.
     char ledsPerPin[48] = "";
 
-    // Loopback self-test (replaces the old standalone test firmware): tick the
-    // checkbox to run a one-shot RMT TX→RX round-trip — jumper the FIRST pin in
-    // `pins` to `loopbackRxPin`, the test transmits a known WS2812 pattern and
-    // captures it back, proving the GPIO emits correct bytes on real silicon.
-    // The outcome goes to the MoonModule status slot (setStatus) with the right
-    // severity. loopbackTest is a persistent on/off mode (see onUpdate): while on,
-    // the test re-runs on every relevant change; turning it off clears the verdict.
+    /// On-device loopback self-test — RMT is a transceiver, so the driver verifies its own output
+    /// on real silicon (replaces the old standalone test firmware). Tick to run a one-shot RMT
+    /// TX→RX round-trip: jumper the first pin (TX) to `loopbackRxPin`, it transmits a known WS2812
+    /// pattern, captures it back, decodes, compares → `loopback PASS` / `FAIL: …` / `jumper not
+    /// detected` in the status field. A persistent on/off mode (see onUpdate): while on the test
+    /// re-runs on every relevant change; turning it off clears the verdict. Hardware lives in
+    /// `platform::rmtWs2812Loopback*`.
     bool     loopbackTest = false;  // checkbox: on = run + keep re-running on change
-    int8_t   loopbackTxPin = -1;    // optional TX override for the test: when set
-                                    // (>= 0), the loopback transmits on THIS pin in
-                                    // place of pins[0], so the test can run on a
-                                    // dedicated jumper without re-typing the
-                                    // operational `pins`. Falls back to pins[0] when
-                                    // unset (-1). Test-only — normal output uses `pins`.
-                                    // int8_t + addPin (not uint16): single-GPIO controls
-                                    // use the standard Pin control, and -1 = unset lets
-                                    // GPIO 0 be a valid loopback pin (0-as-unset wouldn't).
-    int8_t   loopbackRxPin = -1;    // jumper this to the TX pin for the test
-                                    // (unset = -1 by default; bench used pin 5)
+    /// Optional TX override for the test: when set (>= 0), the loopback transmits on THIS pin in
+    /// place of pins[0], so the test can run on a dedicated jumper without re-typing the
+    /// operational `pins`. Falls back to pins[0] when unset (-1). Test-only — normal output uses
+    /// `pins`. int8_t + addPin (not uint16): single-GPIO controls use the standard Pin control,
+    /// and -1 = unset lets GPIO 0 be a valid loopback pin (0-as-unset wouldn't).
+    int8_t   loopbackTxPin = -1;
+    /// Jumper this to the TX pin for the test (unset = -1 by default; bench used pin 5).
+    int8_t   loopbackRxPin = -1;
 
-    // Whole-frame stress variant: instead of a 24-bit burst, transmit a real
-    // frame the size of the first pin's slice, back to back, and bit-verify the
-    // WHOLE capture. This is the one that catches frame-rate corruption and RF
-    // interference on the data line (the flicker class of bug) — a 24-bit burst
-    // passes through a wire that mangles a sustained frame. Shown only in test
-    // mode; the status names the first corrupted light on failure.
+    /// Whole-frame stress variant: instead of a 24-bit burst, transmit a real frame the size of
+    /// the first pin's slice, back to back, and bit-verify the WHOLE capture. This is the one that
+    /// catches frame-rate corruption and RF interference on the data line (the flicker class of
+    /// bug) — a 24-bit burst passes through a wire that mangles a sustained frame. Shown only in
+    /// test mode; the status names the first corrupted light on failure. On the classic ESP32,
+    /// which has no RMT DMA, the capture is capped to one channel's worth of symbols (~2 RGB lights)
+    /// and still clocked back to back; the S3/P4 capture the full frame via DMA.
     bool     loopbackFrame = false;
 
     // 40 MHz RMT tick clock = 25 ns/tick: t0h 350ns→14, t1h 700ns→28, period
@@ -97,6 +101,9 @@ public:
     // PinList.h, shared with LcdLedDriver — both drivers slice the source
     // buffer from the same two text controls.
 
+    /// Bind the driver's controls: the window (start/count), the `pins` and
+    /// `ledsPerPin` text lists, and the loopback self-test controls (the TX/RX pin
+    /// overrides and frame-stress flag are always bound but shown only in test mode).
     void onBuildControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
@@ -116,20 +123,20 @@ public:
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
-    // Changing the pin list or the per-pin counts re-parses and re-inits the RMT
-    // channels (live, not reboot-to-apply), so the pipeline-wide onBuildState
-    // sweep runs and parseConfig()/reinit() pick up the new lists.
+    /// Changing the pin list or the per-pin counts re-parses and re-inits the RMT
+    /// channels (live, not reboot-to-apply), so the pipeline-wide onBuildState
+    /// sweep runs and parseConfig()/reinit() pick up the new lists.
     bool controlChangeTriggersBuildState(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || isWindowControl(name);
     }
 
-    // React to a control change (runs off the render loop, in the HTTP/API
-    // handler context — a blocking self-test here is fine). loopbackTest is a
-    // persistent on/off mode. While it's ON, the test (re-)runs on every relevant
-    // change — turning it on, OR editing pins / loopbackRxPin — so the pins can be
-    // set in any order and the result always reflects the current pins. Turning it
-    // OFF clears the result.
+    /// React to a control change (runs off the render loop, in the HTTP/API
+    /// handler context — a blocking self-test here is fine). loopbackTest is a
+    /// persistent on/off mode. While it's ON, the test (re-)runs on every relevant
+    /// change — turning it on, OR editing pins / loopbackRxPin — so the pins can be
+    /// set in any order and the result always reflects the current pins. Turning it
+    /// OFF clears the result.
     void onUpdate(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
         const bool isPinControl  = std::strcmp(name, "pins") == 0
@@ -155,26 +162,29 @@ public:
         }
     }
 
-    // Lifecycle has two deliberately-separate concerns, so the buffer half stays
-    // host-testable and a hardware-only guard can never strand it:
-    //   - SYMBOL BUFFER (plain heap): resizeSymbols() / freeSymbols(), run on
-    //     every platform.
-    //   - RMT CHANNELS (hardware): reinit() / deinitAll(), RMT-targets-only
-    //     (if constexpr).
-    // The original bug put the buffer free inside the hardware deinit(), which
-    // reinit() (a rebuild) calls — so a rebuild freed the buffer loop() needs.
-    // Keeping the two apart makes that mistake impossible here and lets the host
-    // unit test (unit_RmtLedDriver_lifecycle.cpp) pin it.
+    /// Parse the config and (re)init the RMT channels. Lifecycle has two
+    /// deliberately-separate concerns, so the buffer half stays host-testable and a
+    /// hardware-only guard can never strand it:
+    ///   - SYMBOL BUFFER (plain heap): resizeSymbols() / freeSymbols(), run on
+    ///     every platform.
+    ///   - RMT CHANNELS (hardware): reinit() / deinitAll(), RMT-targets-only
+    ///     (if constexpr).
+    /// The original bug put the buffer free inside the hardware deinit(), which
+    /// reinit() (a rebuild) calls — so a rebuild freed the buffer loop() needs.
+    /// Keeping the two apart makes that mistake impossible here and lets the host
+    /// unit test (unit_RmtLedDriver_lifecycle.cpp) pin it.
     void setup() override { parseConfig(); reinit(); }
+    /// Release the RMT channels and free the symbol buffer, then clear the shared
+    /// fail/config-error state (DriverBase::teardown()).
     void teardown() override {
         deinitAll();
         freeSymbols();
         DriverBase::teardown();   // clears failBuf_ + configErr_
     }
 
-    // Topology (light count / channels) or the pins/ledsPerPin controls changed —
-    // re-parse the lists, resize the symbol buffer, and (re)init the channels off
-    // the hot path. loop() never allocates.
+    /// Topology (light count / channels) or the pins/ledsPerPin controls changed —
+    /// re-parse the lists, resize the symbol buffer, and (re)init the channels off
+    /// the hot path. loop() never allocates.
     void onBuildState() override {
         parseConfig();
         resizeSymbols();
@@ -182,21 +192,29 @@ public:
         MoonModule::onBuildState();
     }
 
-    // Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild —
-    // the per-pin symbol offsets scale with outChannels, so re-derive them too.
+    /// Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild —
+    /// the per-pin symbol offsets scale with outChannels, so re-derive them too.
     void onCorrectionChanged() override { parseConfig(); resizeSymbols(); }
 
+    /// Point the driver at the source frame buffer; re-parse (counts derive from
+    /// its light count) and resize the symbol buffer to match.
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
         parseConfig();      // counts derive from the buffer's light count
         resizeSymbols();
     }
+    /// Point the driver at the shared correction; re-parse (per-pin symbol offsets
+    /// derive from outChannels) and resize the symbol buffer to match.
     void setCorrection(const Correction* c) override {
         correction_ = c;
         parseConfig();      // offsets derive from outChannels
         resizeSymbols();
     }
 
+    /// Per-tick output: fuse the correction and WS2812 symbol-encode in one pass
+    /// over this driver's window, then start every pin's transmit before waiting on
+    /// any, so the tick costs the longest strand rather than the sum. Inert off RMT
+    /// chips and idle until inited with a source buffer + correction.
     void loop() override {
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data() || !correction_) return;
@@ -260,15 +278,19 @@ public:
         if (cfg_.reset_us) platform::delayUs(cfg_.reset_us);
     }
 
-    // Test-only accessors. symbolBuffer/symbolCapacity mirror ArtNet's
-    // correctedBuffer() and let unit tests pin the buffer-lifecycle invariants a
-    // hardware bug already taught us; pinCount/pinLightCount/pinSymbolOffsetWords
-    // pin the multi-pin slice arithmetic (unit_RmtLedDriver_pins.cpp). Not part
-    // of any runtime API.
+    /// Test-only accessors. symbolBuffer/symbolCapacity mirror ArtNet's
+    /// correctedBuffer() and let unit tests pin the buffer-lifecycle invariants a
+    /// hardware bug already taught us; pinCount/pinLightCount/pinSymbolOffsetWords
+    /// pin the multi-pin slice arithmetic (unit_RmtLedDriver_pins.cpp). Not part
+    /// of any runtime API.
     const uint32_t* symbolBuffer() const { return symbols_; }
+    /// Words allocated in the symbol buffer. Test-only.
     size_t symbolCapacity() const { return symbolCap_; }
+    /// Number of parsed output pins (0 = idle). Test-only.
     uint8_t pinCount() const { return pinCount_; }
+    /// Lights on pin `i` (0 if out of range). Test-only.
     nrOfLightsType pinLightCount(uint8_t i) const { return i < pinCount_ ? pinCounts_[i] : 0; }
+    /// Word offset of pin `i`'s slice in the symbol buffer (0 if out of range). Test-only.
     size_t pinSymbolOffsetWords(uint8_t i) const { return i < pinCount_ ? pinOffsets_[i] : 0; }
 
 private:

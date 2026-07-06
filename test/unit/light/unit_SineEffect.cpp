@@ -1,6 +1,7 @@
 // @module SineEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/SineEffect.h"
 #include "light/layouts/GridLayout.h"
 

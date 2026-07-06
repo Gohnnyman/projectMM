@@ -3,7 +3,7 @@
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format
 #include "light/E131Packet.h"     // shared E1.31/sACN wire format
-#include "light/drivers/Drivers.h"
+#include "light/drivers/DriverBase.h"
 #include "platform/platform.h"
 
 #include <algorithm>  // std::min in the chunk loop
@@ -12,39 +12,52 @@
 
 namespace mm {
 
-// Lights-over-UDP output: one driver, three industry protocols selected by a
-// control — ArtNet (510-channel universes), E1.31/sACN (the same universe
-// split, ACN framing), and DDP (1440-byte byte-offset packets — the fast path:
-// 480 RGB lights per packet vs 170, and per-packet cost is what dominates the
-// wire time). The single-node-multiple-protocols shape follows MoonLight's
-// D_NetworkOut (architecture studied, not copied).
-/// Output driver: streams the buffer over Art-Net/E1.31/DDP.
+/// Output driver: streams the buffer over UDP — one driver, three industry protocols selected by a
+/// control. The single-node-multiple-protocols shape follows MoonLight's D_NetworkOut (architecture
+/// studied, not copied). Byte layouts live in ArtNetPacket.h / E131Packet.h / DdpPacket.h, shared
+/// with the receiver so the two sides cannot drift.
+///
+/// **Interop:** unicast or limited-broadcast `255.255.255.255` (default, `SO_BROADCAST`) — NOT
+/// multicast (no IGMP join; MoonLight ships without it too). E1.31 framing: CID stable per device
+/// (from the MAC), source name `projectMM`, priority 100, one frame-level sequence per frame.
+///
+/// **Synchronous send:** the whole frame goes out inline in loop() (~35 ms Ethernet / ~90 ms WiFi at
+/// 128×128 ArtNet; DDP less). A decoupling send task is a PSRAM-gated backlog item. Added per board
+/// via the catalog like the LED drivers; applies the same shared Correction, so network and wired
+/// outputs show identical colours.
 /// @card NetworkSendDriver.png
 class NetworkSendDriver : public DriverBase {
 public:
-    // Index-aligned with the protocol constants used in loop()'s switch:
-    // 0 = ArtNet, 1 = E1.31, 2 = DDP. The destination port follows the
-    // protocol (6454 / 5568 / 4048) — see connectIfDestChanged().
+    /// Protocol names, index-aligned with the constants used in loop()'s switch (0 = ArtNet,
+    /// 1 = E1.31, 2 = DDP). The destination port follows the protocol (6454 / 5568 / 4048) — see
+    /// connectIfDestChanged().
     static constexpr const char* kProtocolOptions[] = {"ArtNet", "E1.31", "DDP"};
     static constexpr uint8_t kProtocolCount = 3;
 
-    // Destination address as 4 octets (not a dotted-quad string) — 4 bytes
-    // vs char[16], per docs/coding-standards.md § Prefer integers, store
-    // values in their native shape. The platform UdpSocket::connect() takes
-    // a string, so connectIfDestChanged() formats on a stack buffer at the
-    // boundary — the long-lived storage stays integer.
-    // Default to the limited-broadcast address so a fresh sender reaches every
-    // receiver on the LAN with no IP to type — set a unicast IP in the UI to target
-    // one device. Broadcast needs SO_BROADCAST, which platform UdpSocket::open sets.
+    /// Destination address as 4 octets — defaults to limited-broadcast so a fresh sender reaches
+    /// every receiver on the LAN with no IP to type; set a unicast IP in the UI to target one
+    /// device. Broadcast needs SO_BROADCAST, which platform UdpSocket::open sets. Stored as 4 bytes
+    /// (not a dotted-quad string), per docs/coding-standards.md § store values in their native
+    /// shape; UdpSocket::connect() takes a string, so connectIfDestChanged() formats on a stack
+    /// buffer at the boundary.
     uint8_t ip[4] = {255, 255, 255, 255};
-    uint8_t protocol = 0;        // index into kProtocolOptions
-    uint16_t universeStart = 0;  // first universe (ArtNet/E1.31; DDP is byte-addressed)
+    /// Wire protocol (index into kProtocolOptions). Selects both the packet layout and the chunking:
+    /// ArtNet / E1.31 split at 510 channels per universe (whole RGB lights, the xLights/Falcon
+    /// convention; 170 lights/packet), consecutive universes from `universeStart`; DDP uses
+    /// 1440-byte byte-offset chunks (480 lights/packet) and is the fast path — per-packet cost
+    /// dominates wire time, so a 128×128 WiFi frame drops from ~110 ms (ArtNet) to ~40 ms.
+    uint8_t protocol = 0;
+    /// First universe the slice maps onto (ArtNet / E1.31; DDP is byte-addressed). Emitted verbatim,
+    /// no hidden 1-based adjust: buffer offset = `(universe − universeStart) × 510`. Strict sACN
+    /// reserves universe 0, so set ≥ 1 on BOTH ends for it; our own receiver defaults to 0 so
+    /// device↔device pairs align out of the box. Orthogonal to the DriverBase window (start/count),
+    /// which picks WHICH buffer slice is sent — this picks which universe it lands on.
+    uint16_t universeStart = 0;
+    /// Send-rate ceiling (Hz); loop() rate-limits to this so a fast render tick doesn't flood the LAN.
     uint8_t fps = 50;
-    // The buffer slice this sink sends is the shared DriverBase window: start_ +
-    // count_ ("count" 0 = the whole buffer from start). `universe_start` is the
-    // separate *protocol* offset (which DMX universe the slice maps onto), not a
-    // buffer offset — the two are orthogonal.
 
+    /// Register the controls in UI order: protocol, destination IP, universe offset, the shared
+    /// window (start/count), then the rate cap.
     void onBuildControls() override {
         controls_.addSelect("protocol", protocol, kProtocolOptions, kProtocolCount);
         controls_.addIPv4("ip", ip);
@@ -53,58 +66,59 @@ public:
         controls_.addUint8("fps", fps, 1, 120);
     }
 
-    // A start/count change resizes the window this sink sends; route it through the
-    // onBuildState sweep so resizeCorrected() re-sizes corrected_ for the new slice —
-    // otherwise growing the window past the old corrected_ silently drops to passthrough.
+    /// A start/count change resizes the window this sink sends; route it through the onBuildState
+    /// sweep so resizeCorrected() re-sizes corrected_ for the new slice — otherwise growing the
+    /// window past the old corrected_ silently drops to passthrough.
     bool controlChangeTriggersBuildState(const char* name) const override {
         return isWindowControl(name);
     }
 
+    /// Open the socket and derive the stable E1.31 component id (CID) from the MAC once — no UUID
+    /// machinery needed for a deterministic, unique-enough id — then bind the destination so each
+    /// per-packet send skips the address parse + route lookup (re-bound in loop() on an ip/protocol
+    /// change; see connectIfDestChanged).
     void setup() override {
         socket_.open();
-        // E1.31 wants a stable per-device component id; derive it from the MAC
-        // once — no UUID machinery needed for a deterministic, unique-enough CID.
         std::memcpy(cid_, "projectMM\0", 10);
         platform::getMacAddress(cid_ + 10);
-        // Bind the destination so each per-packet send skips the per-packet
-        // address parse + route lookup. Re-bound in loop() if the ip or
-        // protocol control changes (see connectIfDestChanged).
         connectIfDestChanged();
     }
 
+    /// Close the socket on teardown; DriverBase::teardown (via the base) clears any status.
     void teardown() override {
         socket_.close();
     }
 
+    /// Take the shared source buffer and (re)size the corrected_ buffer for it. Called from
+    /// Drivers::passBufferToDrivers inside onBuildState (and once at setup); resizeCorrected() is a
+    /// no-op while correction_ is still null on the first call, and the second call (after
+    /// setCorrection) lands the actual allocation. All off the hot path.
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
-        // setSourceBuffer / setCorrection / setLayer are all called from
-        // Drivers::passBufferToDrivers, which runs inside Drivers::onBuildState
-        // (and once at setup). resizeCorrected() is a no-op while correction_
-        // is still null on the first call; the second call (after setCorrection)
-        // lands the actual allocation. All off the hot path.
         resizeCorrected();
     }
 
+    /// Take the shared output correction and re-size corrected_ to its channel count.
     void setCorrection(const Correction* c) override {
         correction_ = c;
         resizeCorrected();
     }
 
-    // Topology change (light count, channels per light, or LUT path swap) — the
-    // framework calls onBuildState after Layer/Drivers reshape. Resize off the
-    // hot path so loop() never allocates.
+    /// Topology change (light count, channels per light, or LUT path swap) — the framework calls
+    /// this after Layer/Drivers reshape. Resize off the hot path so loop() never allocates.
     void onBuildState() override {
         resizeCorrected();
         MoonModule::onBuildState();
     }
 
-    // Preset toggle (RGB↔RGBW) changes correction_->outChannels without
-    // triggering a structural rebuild. Drivers::onUpdate forwards this hook.
+    /// Preset toggle (RGB↔RGBW) changes correction_->outChannels without a structural rebuild;
+    /// Drivers::onUpdate forwards this hook so corrected_ tracks the new channel count.
     void onCorrectionChanged() override {
         resizeCorrected();
     }
 
+    /// Rate-limit to `fps`, apply the shared correction into corrected_ (passthrough if unwired),
+    /// then chunk the window slice into protocol packets and send the whole frame inline.
     void loop() override {
         if (!sourceBuffer_ || !sourceBuffer_->data()) return;
 

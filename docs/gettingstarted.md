@@ -166,7 +166,7 @@ the device; it never slows the lights down, and it gracefully eases off (fewer
 updates, then fewer points) on a slow connection rather than stalling.
 
 > More on how the preview streams from the device:
-> [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md).
+> [PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md).
 
 ## The system modules
 
@@ -242,7 +242,7 @@ then add an output: real LED strips on a pin, or send the frame over the network
 ![The Drivers module](assets/gettingstarted/02-10-UI-Drivers.png)
 
 > [Drivers](moonmodules/light/supporting/supporting.md) ·
-> [NetworkSendDriver](moonmodules/light/drivers/NetworkSendDriver.md)
+> [NetworkSendDriver](moonmodules/light/moxygen/NetworkSendDriver.md)
 
 That's the whole picture: **layout → layers → drivers**, previewed in 3D, all
 tuned live in your browser. Pick an effect, drag a slider, watch the lights — then

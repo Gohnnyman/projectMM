@@ -3,7 +3,7 @@
 #include <cmath>    // sinf, cosf
 #include <cstdint>
 #include <limits>   // std::numeric_limits (lightCount clamp, matches GridLayout)
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {

@@ -2,6 +2,7 @@
 // @also NetworkSendDriver
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/ArtNetPacket.h"
 #include "light/DdpPacket.h"
 #include "light/E131Packet.h"

@@ -3,7 +3,7 @@
 #include <cmath>    // sinf, cosf, fmodf
 #include <cstdint>
 #include <numbers>  // std::numbers::pi_v — portable pi
-#include "light/layouts/Layouts.h"
+#include "light/layouts/LayoutBase.h"
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {

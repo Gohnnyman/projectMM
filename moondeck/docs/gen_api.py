@@ -206,6 +206,49 @@ def _render_card_directives(md: str, domain: str, stem: str) -> str:
     return _CARD_RE.sub(repl, md)
 
 
+# A member signature line moxygen emits as its own paragraph: a backtick-delimited
+# code span alone on a line — an attribute (`uint8_t protocol = 0`) or a method
+# (`virtual inline void onBuildControls() override`). The template wraps each in
+# backticks; nothing else on the site opens a line with a bare code span, so this
+# anchors the match to member signatures only.
+_SIG_LINE_RE = re.compile(r'^`(?P<sig>[^`\n]+)`[ \t]*$', re.MULTILINE)
+# A METHOD name is the identifier immediately before the FIRST argument-list `(`
+# (`… onBuildControls(…) override` → `onBuildControls`) — trailing `const`/`override`
+# come after and must NOT win. An ATTRIBUTE name is the identifier before ` =` or at
+# the end of the declarator (`uint8_t protocol = 0` → `protocol`; `char pins[24] = ""`
+# → `pins`, skipping the `[N]` array bound). Two anchored patterns, method tried first.
+_SIG_METHOD_NAME_RE = re.compile(r'(?P<name>[A-Za-z_]\w*)\s*\(')
+_SIG_ATTR_NAME_RE = re.compile(r'(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*(?:=|$)')
+
+
+def _highlight_signature_names(md: str) -> str:
+    """Wrap the declared member NAME in each generated signature so the theme can
+    highlight it while the type/args stay muted (CSS: `.mm-sig-name`). moxygen emits
+    a flat `<code>` string with no internal markup, so 'colour only the name' can't
+    be done in CSS alone — we split the code span here into
+    `<code>…<span class="mm-sig-name">name</span>…</code>` (raw HTML the markdown
+    passes through). The signature reads as one code chip; only the identifier pops."""
+    def repl(m: re.Match) -> str:
+        sig = m.group("sig")
+        # Method (has an arg list) → the id before the FIRST `(`; else attribute →
+        # the id before `=` / end. Falls through to the whole span if neither matches.
+        h = _SIG_METHOD_NAME_RE.search(sig) if "(" in sig else _SIG_ATTR_NAME_RE.search(sig)
+        if not h:
+            return m.group(0)
+        start, end = h.start("name"), h.end("name")
+        wrapped = (_html_escape(sig[:start])
+                   + f'<span class="mm-sig-name">{_html_escape(sig[start:end])}</span>'
+                   + _html_escape(sig[end:]))
+        return f'<code class="mm-sig">{wrapped}</code>'
+    return _SIG_LINE_RE.sub(repl, md)
+
+
+def _html_escape(s: str) -> str:
+    # Signatures carry `<`, `>`, `&` (templates, refs) — escape so the raw-HTML
+    # <code> we emit renders them as text, not markup.
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _class_to_header(xml_dir: Path) -> dict[str, str]:
     """Map each moxygen class-file key → its source header (repo-relative), read from
     the Doxygen XML `<location file=...>` of every class/struct compound. The key is
@@ -305,6 +348,7 @@ def generate() -> dict[str, str]:
             body = _rewrite_cls_links("".join(blocks), domain, cls_to_page)
             body = _strip_bad_anchor_links(body)
             body = _render_card_directives(body, domain, stem)
+            body = _highlight_signature_names(body)
             md = _migration_crosscheck_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"
             dst = DOCS_MOONMODULES / domain / "moxygen" / f"{stem}.md"

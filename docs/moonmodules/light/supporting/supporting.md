@@ -76,3 +76,21 @@ Detail: [technical](../moxygen/EffectBase.md)
 The `ModifierBase` class every modifier derives from — transforms the coordinate mapping (mirror, rotate, multiply, …) a layer applies before rendering.
 
 Detail: [technical](../moxygen/ModifierBase.md)
+
+### Driver base
+
+The `DriverBase` class every driver derives from — the shared surface (the driver window, the source buffer, the output correction) a driver reads before sending its slice. It plays the same zero-state role for drivers that Effect base does for effects.
+
+Detail: [technical](../moxygen/DriverBase.md)
+
+### Layout base
+
+The `LayoutBase` class every layout derives from — the shared surface a layout implements to walk its coordinates into the physical light set the mapping consumes.
+
+Detail: [technical](../moxygen/LayoutBase.md)
+
+### Parallel LED driver base
+
+The `ParallelLedDriver` CRTP base shared by the two parallel WS2812 drivers (the S3's LCD_CAM and the P4's Parlio) — the one copy of the common body they were ~250 lines of byte-for-byte identical over: pin slicing, the fused correct+encode, the latch pad, and the single-shot autonomous-DMA transfer. Each derived driver supplies only its peripheral-specific pieces.
+
+Detail: [technical](../moxygen/ParallelLedDriver.md)

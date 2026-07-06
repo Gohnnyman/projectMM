@@ -1,6 +1,7 @@
 // @module StarSkyEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/StarSkyEffect.h"
 #include "light/layouts/GridLayout.h"
 

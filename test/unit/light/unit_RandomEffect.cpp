@@ -1,6 +1,7 @@
 // @module RandomEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/RandomEffect.h"
 #include "light/layouts/GridLayout.h"
 

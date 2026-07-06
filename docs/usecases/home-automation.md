@@ -67,7 +67,7 @@ Mosquitto 2.x binds only to `localhost` by default, so open the LAN listener wit
 ```bash
 brew install mosquitto
 printf 'listener 1883 0.0.0.0\nallow_anonymous true\n' > test.conf
-/opt/homebrew/sbin/mosquitto -v -c test.conf
+"$(brew --prefix)/sbin/mosquitto" -v -c test.conf
 ```
 
 Now the device reaches the broker at your Mac's LAN IP while Homebridge reaches it on loopback. (Allow `mosquitto` through the macOS firewall on `1883` if prompted.)

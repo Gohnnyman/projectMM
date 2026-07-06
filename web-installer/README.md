@@ -54,7 +54,7 @@ its `supported`/`planned` capability chips. It reuses the installer's flash mach
 shared [`install-picker.js`](../../src/ui/install-picker.js) through a hidden board
 `<select>`, so the firmware-narrowing and flash flow are identical to a plain
 dropdown pick. Board images are a Pages-only asset (staged from
-`docs/assets/boards/`), never flashed.
+`docs/assets/deviceModels/`), never flashed.
 
 The picker is a collapsed row consistent with the other fields; clicking it
 expands the searchable card grid, and picking a board collapses it back to a
@@ -136,7 +136,7 @@ declares only what is actually on that board.
 | `name` | yes | identifier **and** display label (no key/label split) |
 | `chip` | yes | the MCU family, for the picker's chip filter |
 | `firmwares` | yes | the firmware variants flashable on this hardware; **the first entry is the default** the picker pre-selects (reorder the array to change the default) |
-| `image` | no | board photo for the picker — a local path under `assets/boards/`, named for the board's slug (e.g. `assets/boards/quinled-dig-2-go.jpg`). Host our own copy, never a vendor hotlink — see [§ Board images & links](#board-images--links) below |
+| `image` | no | board photo for the picker — a local path under `assets/deviceModels/`, named for the board's slug (e.g. `assets/deviceModels/quinled-dig-2-go.jpg`). Host our own copy, never a vendor hotlink — see [§ Board images & links](#board-images--links) below |
 | `url` | no | product-page link the picker shows next to the board (the vendor's own page, e.g. `https://quinled.info/quinled-dig2go/`). A remote URL is fine here — it's a click-through link, not an asset the installer fetches |
 | `supported` | no | short capability labels the firmware drives on this board *today* (e.g. `["LEDs", "WiFi", "Ethernet"]`), grounded in the modules the entry actually adds. Rendered as solid chips on the picker card |
 | `planned` | no | short labels for peripherals the board physically has but no module drives *yet* (e.g. `["IR receiver", "Onboard button"]`) — the backlog seed for future spec + test work. Rendered as dashed "(soon)" chips on the picker card |
@@ -209,13 +209,13 @@ the picker's visual layer **and** the inputs to the per-board capability loop ab
   *derived* image, not the raw shot; (3) third-party product photos are the vendor's
   copyright — redistributing them needs permission. So: use the `url` to *find* the
   reference photo, then either shoot/redraw our own **or** check a local copy into
-  [`docs/assets/boards/`](../assets/boards/) **with permission**, named for the
+  [`docs/assets/deviceModels/`](../assets/deviceModels/) **with permission**, named for the
   board's slug. The catalog stores a local path, never a remote image URL.
 - **`url` — a remote link is fine.** It's a click-through to the vendor's own page,
   not an asset the installer fetches.
-- **Deploy** stages only the *referenced* images (not the whole `docs/assets/boards/`
+- **Deploy** stages only the *referenced* images (not the whole `docs/assets/deviceModels/`
   library, which also holds photos for boards not yet in the catalog) into
-  `install/assets/boards/`, so an `image: "assets/boards/<slug>.jpg"` resolves
+  `install/assets/deviceModels/`, so an `image: "assets/deviceModels/<slug>.jpg"` resolves
   same-origin from `/install/deviceModels.json`.
 
 **One entry type, no Board/Device split.** A "Device" (a finished rig like the

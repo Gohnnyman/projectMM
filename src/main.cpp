@@ -66,6 +66,7 @@
 #include "light/modifiers/BlockModifier.h"
 #include "light/modifiers/PinwheelModifier.h"
 #include "light/modifiers/RippleXZModifier.h"
+#include "light/drivers/Drivers.h"   // the Drivers container (registered + wired below); each driver header now pulls only DriverBase
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"

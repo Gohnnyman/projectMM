@@ -1,6 +1,7 @@
 // @module Noise2DEffect
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/Noise2DEffect.h"
 #include "light/layouts/GridLayout.h"
 

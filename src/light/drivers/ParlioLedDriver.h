@@ -7,24 +7,17 @@
 
 namespace mm {
 
-// WS2812B output over the ESP32-P4 Parlio (Parallel IO) TX peripheral: up to 8
-// strands clock out SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of
-// the source buffer. The P4's scale path, sibling of LcdLedDriver.
-//
-// The whole body lives in ParallelLedDriver (shared with the i80 driver) — same
-// pins/ledsPerPin controls, the SAME per-ROW encoder (a Parlio bus byte and an
-// i80 bus byte are identical: one word per slot, bit L = data line L), the same
-// fused lifecycle, latch pad, and single-shot autonomous-DMA transfer. This class
-// supplies only the Parlio-specific pieces, and Parlio is the SIMPLER peripheral,
-// so it supplies less than the i80 driver:
-//   - NO clockPin/dcPin: Parlio generates the pixel clock itself (kClockHz),
-//     so there are no sacrificial WR/DC lines (addBusControls is empty, the extra-
-//     pin tracking is a no-op).
-//   - kExactLaneCount = false: i80 rejects a partial bus, Parlio runs on 1..8
-//     lanes — whatever `pins` names.
-// Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812
-// lineage — architecture studied, never copied (see ParlioLedDriver.md).
-/// Output driver: parallel WS2812 LEDs over the P4 Parlio engine.
+/// Output driver: parallel WS2812B over the ESP32-P4 Parlio (Parallel IO) TX peripheral — the P4's
+/// scale path, sibling of LcdLedDriver. The shared body (slicing, encode, single-shot DMA, loopback)
+/// lives in ParallelLedDriver; Parlio is the SIMPLER peripheral, so this class adds LESS than the
+/// i80 driver:
+///  - NO clockPin/dcPin: Parlio generates the pixel clock itself (kClockHz), so there are no
+///    sacrificial WR/DC lines (addBusControls is empty).
+///  - kExactLaneCount = false: i80 rejects a partial bus; Parlio runs on 1..8 lanes — whatever
+///    `pins` names.
+///
+/// Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812 lineage —
+/// architecture studied, never copied.
 class ParlioLedDriver : public ParallelLedDriver<ParlioLedDriver> {
 public:
     // All controls default to UNSET — pins="", ledsPerPin="" (= all lights on the
@@ -38,6 +31,8 @@ public:
 
     // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
 
+    /// The number of Parlio lanes this chip provides (0 = not this chip); the base's
+    /// inert-on-wrong-chip guards key off it.
     static constexpr uint8_t lanesAvailable() { return platform::parlioLanes; }
     static constexpr bool kExactLaneCount = false;   // 1..8 lanes all valid
     static constexpr const char* kInitFailMsg = "Parlio init failed — check pins / memory";
@@ -46,25 +41,37 @@ public:
     // the P4 Parlio's 160 MHz PLL clock divides to it exactly (/60).
     static constexpr uint32_t kClockHz = 2'666'666;
 
-    // Parlio has no sacrificial clock/DC pins, so no extra controls and no extra
-    // pin tracking (the bus rebuilds on a data-pin change alone).
+    /// No bus controls: Parlio has no sacrificial clock/DC pins (the bus rebuilds on
+    /// a data-pin change alone).
     void addBusControls() {}
+    /// No extra bus controls, so none can trigger a rebuild.
     bool busControlTriggersBuild(const char*) const { return false; }
+    /// No extra pins to record (Parlio has no WR/DC).
     void recordBusPins() {}
+    /// No extra pins to track, so they are always current.
     bool extraBusPinsCurrent() const { return true; }
 
+    /// Create the Parlio bus + its DMA buffer sized for `frameBytes` on the current
+    /// lanes, driving the pixel clock at kClockHz; returns whether init succeeded.
     bool busInit(size_t frameBytes) {
         return platform::parlioWs2812Init(parlio_, laneList_, laneCount_,
                                           kClockHz, frameBytes);
     }
+    /// The bus's DMA buffer the base encodes into.
     uint8_t* busBuffer()                 { return platform::parlioWs2812Buffer(parlio_); }
+    /// The DMA buffer's byte capacity (fixed at bus creation).
     size_t   busCapacity() const         { return platform::parlioWs2812BufferCapacity(parlio_); }
+    /// Kick off the autonomous transfer of the first `bytes` of the DMA buffer;
+    /// returns whether it started.
     bool     busTransmit(size_t bytes)   { return platform::parlioWs2812Transmit(parlio_, bytes); }
+    /// Block up to `ms` for the in-flight transfer to complete.
     void     busWait(uint32_t ms)        { platform::parlioWs2812Wait(parlio_, ms); }
+    /// Tear down the Parlio bus and its DMA buffer.
     void     busDeinit()                 { platform::parlioWs2812Deinit(parlio_); }
 
-    // Parlio runs on a single lane, so the loopback builds its own private 1-lane
-    // unit on lane 0 (no i80 full-bus workaround needed; no WR/DC to pass).
+    /// Run the loopback self-test. Parlio runs on a single lane, so the loopback
+    /// builds its own private 1-lane unit on lane 0 (no i80 full-bus workaround
+    /// needed; no WR/DC to pass).
     platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
                                             size_t dataBytes, uint8_t rowBits) {
         return platform::parlioWs2812Loopback(laneList_, laneCount_,

@@ -124,6 +124,7 @@ nav:
       - Web installer: https://moonmodules.org/projectMM/install/
   - Use cases:
       - Home automation: usecases/home-automation.md
+      - LED signal integrity: usecases/led-signal-integrity.md
   - Effects & building shows:
       - Effects: moonmodules/light/effects/effects.md
       - Layouts: moonmodules/light/layouts/layouts.md

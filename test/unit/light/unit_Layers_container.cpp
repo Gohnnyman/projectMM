@@ -2,6 +2,7 @@
 // @also Layer
 
 #include "doctest.h"
+#include "light/layouts/Layouts.h"
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"

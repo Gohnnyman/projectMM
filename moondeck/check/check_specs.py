@@ -147,9 +147,11 @@ def _module_block(source_path, spec):
     lines = spec.splitlines()
     # Find the line tying this module to its block. Two link shapes across catalog
     # pages: a direct `source [<stem>.h]` (effects/modifiers/layouts) or a detail-page
-    # reference `[<base>.md]` / `alt="<base> controls"` (drivers link to detail pages).
+    # reference `[<base>.md]` / `alt="<base> controls"` (drivers link to detail pages),
+    # or a `Detail: [technical](../moxygen/<base>.md)` line (the consistent card link).
     def _match(ln):
         return (f"[{stem}]" in ln or f"[{base}.md]" in ln
+                or f"moxygen/{base}.md" in ln
                 or f'alt="{base} ' in ln or f'alt="A {base} ' in ln)
     link_i = next((i for i, ln in enumerate(lines) if _match(ln)), None)
     if link_i is None:
@@ -261,6 +263,10 @@ def check_source_links():
             # \b before `source` so it matches the `source [Foo.h](…)` link marker,
             # not the tail of a word like "resource [".
             src_links = re.findall(r'\bsource \[[^\]]+\]\(([^)]+)\)', text)
+            if not src_links:
+                # Consolidated catalog pages now link each block to its generated
+                # technical page: `Detail: [technical](../moxygen/<Stem>.md)`.
+                src_links = re.findall(r'\]\(([^)]*moxygen/[^)]+\.md)\)', text)
             if not src_links:
                 # index page: the per-entry links to detail pages (…Driver.md),
                 # same-dir (no ../) — e.g. `](RmtLedDriver.md)`.
