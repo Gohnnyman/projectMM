@@ -14,9 +14,9 @@ The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftA
 - `deviceModel` — the board model (drives the installer catalog entry).
 - read-only vitals — `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
 
-Detail: [technical](../moxygen/SystemModule.md)
+Detail: [technical](moxygen/SystemModule.md)
 
-[Tests](../../../tests/unit-tests.md#systemmodule)
+[Tests](../../tests/unit-tests.md#systemmodule)
 
 <a id="network"></a>
 
@@ -33,9 +33,9 @@ WiFi / Ethernet connectivity, static-IP configuration, RSSI and TX-power reporti
 - `ethType` / `ethPhyAddr` / `ethRstGpio` / … — Ethernet PHY configuration.
 - read-only — `rssi` (dBm), `txPower` (dBm).
 
-Detail: [technical](../moxygen/NetworkModule.md)
+Detail: [technical](moxygen/NetworkModule.md)
 
-[Tests](../../../tests/unit-tests.md#networkmodule)
+[Tests](../../tests/unit-tests.md#networkmodule)
 
 <a id="improv-provisioning"></a>
 
@@ -47,7 +47,7 @@ Serial/BLE Improv Wi-Fi provisioning — the web installer hands credentials to 
 
 - `provision_status` — read-only provisioning state.
 
-Detail: [technical](../moxygen/ImprovProvisioningModule.md)
+Detail: [technical](moxygen/ImprovProvisioningModule.md)
 
 <a id="devices"></a>
 
@@ -59,9 +59,9 @@ Discovers and lists other projectMM devices on the LAN (the `devices` List contr
 
 - `devices` — a List control of discovered devices; each row expands to a detail panel. Persistable.
 
-Detail: [technical](../moxygen/DevicesModule.md)
+Detail: [technical](moxygen/DevicesModule.md)
 
-[Tests](../../../tests/unit-tests.md#devicesmodule)
+[Tests](../../tests/unit-tests.md#devicesmodule)
 
 <a id="mqtt"></a>
 
@@ -76,9 +76,9 @@ Bridges the light to an MQTT broker so a home-automation hub (Homebridge) can co
 - `username` / `password` — broker credentials (optional; the password is stored obfuscated like the WiFi password).
 - read-only — `mqtt_status` (`disabled` / `idle` / `connecting` / `connected` / `disconnected` / an error).
 
-Detail: [technical](../moxygen/MqttModule.md)
+Detail: [technical](moxygen/MqttModule.md)
 
-[Tests](../../../tests/unit-tests.md#mqttmodule)
+[Tests](../../tests/unit-tests.md#mqttmodule)
 
 <a id="firmware-update"></a>
 
@@ -91,9 +91,9 @@ Over-the-air firmware flashing — the one operation that swaps the binary and n
 - `firmware` — the OTA image to flash.
 - read-only — `version`, `build`, `firmwarePartition`, `update_pct` (progress).
 
-Detail: [technical](../moxygen/FirmwareUpdateModule.md)
+Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
-[Tests](../../../tests/unit-tests.md#firmwareupdatemodule)
+[Tests](../../tests/unit-tests.md#firmwareupdatemodule)
 
 <a id="file-manager"></a>
 
@@ -108,7 +108,7 @@ A boot-wired system tool (distinct from Filesystem, the persistence *engine*): b
 - `filesystem` — read-only usage bar (used / total bytes, from the platform).
 - `lastSaved` — read-only; how long ago config was persisted (read from the Filesystem engine).
 
-Detail: [technical](../moxygen/FileManagerModule.md)
+Detail: [technical](moxygen/FileManagerModule.md)
 
 <a id="audio"></a>
 
@@ -126,9 +126,9 @@ A System peripheral (added by the user, not auto-wired): an I²S microphone (or 
 - `sync` — Off / Send / Receive: broadcast or receive WLED audio-sync packets. `syncPort` sets the UDP port (default 11988, the WLED standard); Receive auto-blends back to the local mic ~1 s after a peer goes quiet.
 - read-only — `level` (RMS), `peakHz`, `sync status`.
 
-Detail: [technical](../moxygen/AudioModule.md)
+Detail: [technical](moxygen/AudioModule.md)
 
-[Tests](../../../tests/unit-tests.md#audiomodule)
+[Tests](../../tests/unit-tests.md#audiomodule)
 
 <a id="i2c-scan"></a>
 
@@ -142,7 +142,7 @@ A System peripheral that probes the I²C bus (default GPIO21/22) on a button pre
 - `scan` — a button; press to probe the bus now.
 - read-only — `result` (addresses found).
 
-Detail: [technical](../moxygen/I2cScanModule.md)
+Detail: [technical](moxygen/I2cScanModule.md)
 
 <a id="ir"></a>
 
@@ -156,7 +156,7 @@ A System peripheral (added per board): an IR remote receiver that drives other m
 - `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
 - `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
 
-Detail: [technical](../moxygen/IrModule.md)
+Detail: [technical](moxygen/IrModule.md)
 
 ## MQTT — details
 
@@ -211,7 +211,7 @@ The panel is a lazy folder **tree** (each folder loads its children on first exp
 - The editor loads a file's text, pretty-prints JSON on open, and saves atomically; a binary file (contains a NUL) loads read-only (use ⤓ to fetch it intact). Upload and download both stream, so neither truncates.
 - Create / delete are HTTP calls (`POST` / `DELETE /api/dir?path=`), not controls — the path rides the request, so nothing is stored on the device per op.
 
-Last-modified dates (needs an NTP time source + LittleFS mtime), binary/large + folder upload, folder-as-zip download, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../../backlog/backlog-core.md#file-manager-follow-ups)).
+Last-modified dates (needs an NTP time source + LittleFS mtime), binary/large + folder upload, folder-as-zip download, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../backlog/backlog-core.md#file-manager-follow-ups)).
 
 ## IR — details
 

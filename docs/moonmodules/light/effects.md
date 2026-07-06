@@ -1,10 +1,10 @@
 # Effects
 
-Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel colour into its [Layer](../moxygen/Layer.md)'s buffer each tick; [modifiers](../modifiers/modifiers.md) reshape the result and a [driver](../moxygen/PreviewDriver.md) sends it out. Effects that name an index colour read the global palette (the `palette` control on [Drivers](../moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](../moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
+Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel colour into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index colour read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../backlog/folder-structure-proposal.md).)
 
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
-**Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, colour mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
+**Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, colour mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
 
 > Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../../assets/…` gif show our own output.
 
@@ -21,9 +21,9 @@ Two interfering sine waves beat against each other into a moiré colour field.
 
 Origin: WLED · by ldirko & blazoncek (WLED port) · [gallery](https://editor.soulmatelights.com/gallery/1089-distorsion-waves) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/DistortionWavesEffect.md)
+Detail: [technical](moxygen/DistortionWavesEffect.md)
 
-[Tests](../../../tests/unit-tests.md#distortionwaveseffect)
+[Tests](../../tests/unit-tests.md#distortionwaveseffect)
 
 <a id="fixedrectangle"></a>
 
@@ -38,9 +38,9 @@ A solid colour filling a positioned box within the grid, with an optional altern
 
 Origin: MoonLight · by [limpkin](https://github.com/limpkin) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/FixedRectangleEffect.md)
+Detail: [technical](moxygen/FixedRectangleEffect.md)
 
-[Tests](../../../tests/unit-tests.md#fixedrectangleeffect)
+[Tests](../../tests/unit-tests.md#fixedrectangleeffect)
 
 <a id="freqsaws"></a>
 
@@ -58,9 +58,9 @@ Audio-reactive sawtooth waves: each column maps to a frequency band whose magnit
 
 Origin: MoonLight (audio) · by [@TroyHacks](https://github.com/troyhacks) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/FreqSawsEffect.md)
+Detail: [technical](moxygen/FreqSawsEffect.md)
 
-[Tests](../../../tests/unit-tests.md#freqsawseffect)
+[Tests](../../tests/unit-tests.md#freqsawseffect)
 
 <a id="lavalamp"></a>
 
@@ -76,9 +76,9 @@ Three slow blobs through a black→red→orange→yellow→white ramp — atmosp
 
 Origin: projectMM original (metaball lava lamp)
 
-Detail: [technical](../moxygen/LavaLampEffect.md)
+Detail: [technical](moxygen/LavaLampEffect.md)
 
-[Tests](../../../tests/unit-tests.md#spiraleffect)
+[Tests](../../tests/unit-tests.md#spiraleffect)
 
 <a id="lines"></a>
 
@@ -93,7 +93,7 @@ Sweeps axis-aligned planes in sync; red/green/blue name the X/Y/Z axis — a pre
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/LinesEffect.md)
+Detail: [technical](moxygen/LinesEffect.md)
 
 <a id="metaballs"></a>
 
@@ -110,9 +110,9 @@ Detail: [technical](../moxygen/LinesEffect.md)
 
 Origin: projectMM original (metaballs)
 
-Detail: [technical](../moxygen/MetaballsEffect.md)
+Detail: [technical](moxygen/MetaballsEffect.md)
 
-[Tests](../../../tests/unit-tests.md#metaballseffect)
+[Tests](../../tests/unit-tests.md#metaballseffect)
 
 <a id="particles"></a>
 
@@ -129,9 +129,9 @@ A swarm of drifting particles with persistent fading trails.
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/ParticlesEffect.md)
+Detail: [technical](moxygen/ParticlesEffect.md)
 
-[Tests](../../../tests/unit-tests.md#particleseffect)
+[Tests](../../tests/unit-tests.md#particleseffect)
 
 <a id="plasma"></a>
 
@@ -147,9 +147,9 @@ Summed sine waves on orthogonal + diagonal axes; large rolling blobs (3D on volu
 
 Origin: FastLED / WLED lineage (classic plasma)
 
-Detail: [technical](../moxygen/PlasmaEffect.md)
+Detail: [technical](moxygen/PlasmaEffect.md)
 
-[Tests](../../../tests/unit-tests.md#plasmaeffect)
+[Tests](../../tests/unit-tests.md#plasmaeffect)
 
 <a id="praxis"></a>
 
@@ -162,9 +162,9 @@ An algorithmic palette pattern driven by two beat oscillators (a macro and a mic
 
 Origin: MoonLight · by MONSOONO / @Flavourdynamics · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/PraxisEffect.md)
+Detail: [technical](moxygen/PraxisEffect.md)
 
-[Tests](../../../tests/unit-tests.md#praxiseffect)
+[Tests](../../tests/unit-tests.md#praxiseffect)
 
 <a id="rainbow"></a>
 
@@ -178,9 +178,9 @@ Diagonal animated rainbow — always-visible default/test effect.
 
 Origin: FastLED · Mark Kriegsman (rainbow) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_FastLED.h)
 
-Detail: [technical](../moxygen/RainbowEffect.md)
+Detail: [technical](moxygen/RainbowEffect.md)
 
-[Tests](../../../tests/unit-tests.md#rainboweffect)
+[Tests](../../tests/unit-tests.md#rainboweffect)
 
 <a id="random"></a>
 
@@ -192,9 +192,9 @@ Lights one random light per frame in a random palette colour over a fading backg
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/RandomEffect.md)
+Detail: [technical](moxygen/RandomEffect.md)
 
-[Tests](../../../tests/unit-tests.md#randomeffect)
+[Tests](../../tests/unit-tests.md#randomeffect)
 
 <a id="rings"></a>
 
@@ -211,9 +211,9 @@ Expanding concentric rings from random centres, additive overlap (calm defaults)
 
 Origin: projectMM original (concentric rings)
 
-Detail: [technical](../moxygen/RingsEffect.md)
+Detail: [technical](moxygen/RingsEffect.md)
 
-[Tests](../../../tests/unit-tests.md#spiraleffect)
+[Tests](../../tests/unit-tests.md#spiraleffect)
 
 <a id="ripples"></a>
 
@@ -228,9 +228,9 @@ Distance-from-centre sets a per-column wave phase; the lit surface ripples like 
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/RipplesEffect.md)
+Detail: [technical](moxygen/RipplesEffect.md)
 
-[Tests](../../../tests/unit-tests.md#spiraleffect)
+[Tests](../../tests/unit-tests.md#spiraleffect)
 
 <a id="rubikscube"></a>
 
@@ -245,9 +245,9 @@ A 3D Rubik's Cube projected onto the volume: it scrambles, then plays its soluti
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/RubiksCubeEffect.md)
+Detail: [technical](moxygen/RubiksCubeEffect.md)
 
-[Tests](../../../tests/unit-tests.md#rubikscubeeffect)
+[Tests](../../tests/unit-tests.md#rubikscubeeffect)
 
 <a id="solid"></a>
 
@@ -263,9 +263,9 @@ A flat fill with five colour modes: a plain RGB(W) colour, the active palette sp
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/SolidEffect.md)
+Detail: [technical](moxygen/SolidEffect.md)
 
-[Tests](../../../tests/unit-tests.md#solideffect)
+[Tests](../../tests/unit-tests.md#solideffect)
 
 <a id="spheremove"></a>
 
@@ -277,9 +277,9 @@ A hollow spherical shell that bounces through the 3D volume, its surface coloure
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/SphereMoveEffect.md)
+Detail: [technical](moxygen/SphereMoveEffect.md)
 
-[Tests](../../../tests/unit-tests.md#spheremoveeffect)
+[Tests](../../tests/unit-tests.md#spheremoveeffect)
 
 <a id="spiral"></a>
 
@@ -295,9 +295,9 @@ Rotating spiral from angle + distance (`atan2_8`/`dist8`).
 
 Origin: projectMM original (rotating spiral)
 
-Detail: [technical](../moxygen/SpiralEffect.md)
+Detail: [technical](moxygen/SpiralEffect.md)
 
-[Tests](../../../tests/unit-tests.md#spiraleffect)
+[Tests](../../tests/unit-tests.md#spiraleffect)
 
 <a id="starfield"></a>
 
@@ -312,9 +312,9 @@ A perspective starfield: stars approach the viewer from a vanishing point, brigh
 
 Origin: MoonLight · by [@Brandon502](https://github.com/Brandon502), inspired by Daniel Shiffman / [Coding Train](https://www.youtube.com/watch?v=17WoOqgXsRM) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/StarFieldEffect.md)
+Detail: [technical](moxygen/StarFieldEffect.md)
 
-[Tests](../../../tests/unit-tests.md#starfieldeffect)
+[Tests](../../tests/unit-tests.md#starfieldeffect)
 
 <a id="starsky"></a>
 
@@ -330,9 +330,9 @@ Twinkling stars at random light positions, each fading in and out independently 
 
 Origin: MoonLight · by [limpkin](https://github.com/limpkin) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/StarSkyEffect.md)
+Detail: [technical](moxygen/StarSkyEffect.md)
 
-[Tests](../../../tests/unit-tests.md#starskyeffect)
+[Tests](../../tests/unit-tests.md#starskyeffect)
 
 <a id="text"></a>
 
@@ -348,9 +348,9 @@ Renders a multi-line string in a bitmap font. Static by default (laid out top-le
 
 Origin: projectMM original, on MoonLight's Scrolling Text · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/TextEffect.md)
+Detail: [technical](moxygen/TextEffect.md)
 
-[Tests](../../../tests/unit-tests.md#texteffect)
+[Tests](../../tests/unit-tests.md#texteffect)
 
 ## MoonModules effects
 
@@ -374,9 +374,9 @@ Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom 
 
 Origin: MoonModules · by Ewoud Wijma (2022), mods by Brandon Butler / [@Brandon502](https://github.com/Brandon502) · [natureofcode](https://natureofcode.com/book/chapter-7-cellular-automata/) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h)
 
-Detail: [technical](../moxygen/GameOfLifeEffect.md)
+Detail: [technical](moxygen/GameOfLifeEffect.md)
 
-[Tests](../../../tests/unit-tests.md#gameoflifeeffect)
+[Tests](../../tests/unit-tests.md#gameoflifeeffect)
 
 <a id="geq"></a>
 
@@ -393,9 +393,9 @@ A flat graphic equaliser: the 16 audio bands rise as vertical bars from the bott
 
 Origin: WLED (audio) · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/GEQEffect.md)
+Detail: [technical](moxygen/GEQEffect.md)
 
-[Tests](../../../tests/unit-tests.md#geqeffect)
+[Tests](../../tests/unit-tests.md#geqeffect)
 
 <a id="geq3d"></a>
 
@@ -412,9 +412,9 @@ A 3D-perspective graphic equaliser: audio bands rise as bars with faked depth, t
 
 Origin: MoonModules (audio) · by [@TroyHacks](https://github.com/troyhacks) (GPLv3) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h)
 
-Detail: [technical](../moxygen/GEQ3DEffect.md)
+Detail: [technical](moxygen/GEQ3DEffect.md)
 
-[Tests](../../../tests/unit-tests.md#geq3deffect)
+[Tests](../../tests/unit-tests.md#geq3deffect)
 
 <a id="noise2d"></a>
 
@@ -427,9 +427,9 @@ A smoothly drifting value-noise field: each pixel samples 3D noise (grid positio
 
 Origin: WLED · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/Noise2DEffect.md)
+Detail: [technical](moxygen/Noise2DEffect.md)
 
-[Tests](../../../tests/unit-tests.md#noise2deffect)
+[Tests](../../tests/unit-tests.md#noise2deffect)
 
 <a id="paintbrush"></a>
 
@@ -446,9 +446,9 @@ Audio-reactive brush strokes: lines whose 3D endpoints oscillate on the beat (`b
 
 Origin: MoonModules (audio) · by [@TroyHacks](https://github.com/troyhacks) (GPLv3) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h)
 
-Detail: [technical](../moxygen/PaintBrushEffect.md)
+Detail: [technical](moxygen/PaintBrushEffect.md)
 
-[Tests](../../../tests/unit-tests.md#paintbrusheffect)
+[Tests](../../tests/unit-tests.md#paintbrusheffect)
 
 <a id="tetrix"></a>
 
@@ -462,9 +462,9 @@ Falling Tetris-style blocks: each column drops a brick that lands on the growing
 
 Origin: WLED · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/TetrixEffect.md)
+Detail: [technical](moxygen/TetrixEffect.md)
 
-[Tests](../../../tests/unit-tests.md#tetrixeffect)
+[Tests](../../tests/unit-tests.md#tetrixeffect)
 
 ## WLED effects
 
@@ -483,9 +483,9 @@ Audio-reactive blurred dots: one frequency band per frame lights a dot whose pos
 
 Origin: WLED (audio) · by Andrew Tuline (WLED-SR), enhancements by [@softhack007](https://github.com/softhack007) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/BlurzEffect.md)
+Detail: [technical](moxygen/BlurzEffect.md)
 
-[Tests](../../../tests/unit-tests.md#blurzeffect)
+[Tests](../../tests/unit-tests.md#blurzeffect)
 
 <a id="bouncingballs"></a>
 
@@ -500,9 +500,9 @@ A row of balls per column bounce under gravity, each losing energy on impact and
 
 Origin: WLED · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/BouncingBallsEffect.md)
+Detail: [technical](moxygen/BouncingBallsEffect.md)
 
-[Tests](../../../tests/unit-tests.md#bouncingballseffect)
+[Tests](../../tests/unit-tests.md#bouncingballseffect)
 
 <a id="freqmatrix"></a>
 
@@ -520,9 +520,9 @@ A 1D scrolling frequency display: each frame shifts the strip and injects a new 
 
 Origin: WLED (audio) · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/FreqMatrixEffect.md)
+Detail: [technical](moxygen/FreqMatrixEffect.md)
 
-[Tests](../../../tests/unit-tests.md#freqmatrixeffect)
+[Tests](../../tests/unit-tests.md#freqmatrixeffect)
 
 <a id="lissajous"></a>
 
@@ -538,9 +538,9 @@ A Lissajous curve traced across the grid from two phase-shifted `sin8`/`cos8` sw
 
 Origin: WLED · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/LissajousEffect.md)
+Detail: [technical](moxygen/LissajousEffect.md)
 
-[Tests](../../../tests/unit-tests.md#lissajouseffect)
+[Tests](../../tests/unit-tests.md#lissajouseffect)
 
 <a id="noisemeter"></a>
 
@@ -555,9 +555,9 @@ An audio VU meter rendered as a noise bar: the volume sets how many rows light f
 
 Origin: WLED (audio) · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/NoiseMeterEffect.md)
+Detail: [technical](moxygen/NoiseMeterEffect.md)
 
-[Tests](../../../tests/unit-tests.md#noisemetereffect)
+[Tests](../../tests/unit-tests.md#noisemetereffect)
 
 <a id="wave"></a>
 
@@ -571,9 +571,9 @@ An oscilloscope waveform scrolls across the grid with a fading trail; six select
 
 Origin: MoonLight · by Ewoud Wijma · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/WaveEffect.md)
+Detail: [technical](moxygen/WaveEffect.md)
 
-[Tests](../../../tests/unit-tests.md#waveeffect)
+[Tests](../../tests/unit-tests.md#waveeffect)
 
 ## FastLED effects
 
@@ -592,9 +592,9 @@ The flame colour comes from the **active palette**. For the classic fire look pi
 
 Origin: FastLED / MoonLight · Mark Kriegsman's Fire2012; MoonLight adapts [MatrixFireFast](https://github.com/toggledbits/MatrixFireFast) (toggledbits)
 
-Detail: [technical](../moxygen/FireEffect.md)
+Detail: [technical](moxygen/FireEffect.md)
 
-[Tests](../../../tests/unit-tests.md#fireeffect)
+[Tests](../../tests/unit-tests.md#fireeffect)
 
 <a id="noise"></a>
 
@@ -609,9 +609,9 @@ Smooth animated value noise; true 3D field on volumetric layouts.
 
 Origin: FastLED · inoise field (Mark Kriegsman)
 
-Detail: [technical](../moxygen/NoiseEffect.md)
+Detail: [technical](moxygen/NoiseEffect.md)
 
-[Tests](../../../tests/unit-tests.md#noiseeffect)
+[Tests](../../tests/unit-tests.md#noiseeffect)
 
 ## projectMM-native effects
 
@@ -625,9 +625,9 @@ The 16 mic frequency bands spread across X, each column lit bottom-up by its mag
 
 Origin: projectMM original, on the WLED-SR GEQ / spectrum concept (Andrew Tuline) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
-Detail: [technical](../moxygen/AudioSpectrumEffect.md)
+Detail: [technical](moxygen/AudioSpectrumEffect.md)
 
-[Tests](../../../tests/unit-tests.md#audiomodule)
+[Tests](../../tests/unit-tests.md#audiomodule)
 
 <a id="audiovolume"></a>
 
@@ -639,15 +639,15 @@ A whole-grid VU meter: every light pulses with the mic level, colour indexing th
 
 Origin: projectMM original (VU meter)
 
-Detail: [technical](../moxygen/AudioVolumeEffect.md)
+Detail: [technical](moxygen/AudioVolumeEffect.md)
 
-[Tests](../../../tests/unit-tests.md#audiomodule)
+[Tests](../../tests/unit-tests.md#audiomodule)
 
 <a id="demoreel"></a>
 
 ### DemoReel 🎬 · 3D
 
-A demo reel: plays every other registered effect in turn, auto-advancing on a timer, so one Layer cycles the whole library hands-free — the showcase/test tool for everything. It hosts a single live effect at a time (created from the effect registry, rendered into this Layer) and swaps to the next when the interval elapses — new effects are picked up automatically. It can also pick a fresh palette each cycle and overlay the playing effect's name. The `status` line shows which effect is playing (e.g. `playing: Plasma (3/20)`). It never hosts itself, and it plays effects in sequence rather than compositing them (layering is the [Layer](../moxygen/Layer.md) stack's job).
+A demo reel: plays every other registered effect in turn, auto-advancing on a timer, so one Layer cycles the whole library hands-free — the showcase/test tool for everything. It hosts a single live effect at a time (created from the effect registry, rendered into this Layer) and swaps to the next when the interval elapses — new effects are picked up automatically. It can also pick a fresh palette each cycle and overlay the playing effect's name. The `status` line shows which effect is playing (e.g. `playing: Plasma (3/20)`). It never hosts itself, and it plays effects in sequence rather than compositing them (layering is the [Layer](moxygen/Layer.md) stack's job).
 
 - `interval` — seconds each effect plays before advancing (1–120).
 - `shuffle` — jump to a random next effect instead of registry order.
@@ -656,9 +656,9 @@ A demo reel: plays every other registered effect in turn, auto-advancing on a ti
 
 Origin: FastLED · Mark Kriegsman's [DemoReel100](https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino); projectMM reel
 
-Detail: [technical](../moxygen/DemoReelEffect.md)
+Detail: [technical](moxygen/DemoReelEffect.md)
 
-[Tests](../../../tests/unit-tests.md#demoreeleffect)
+[Tests](../../tests/unit-tests.md#demoreeleffect)
 
 <a id="networkreceive"></a>
 
@@ -671,11 +671,11 @@ Receives lights-over-UDP (Art-Net, E1.31/sACN, DDP) and writes it into the layer
 
 Origin: projectMM original (E1.31 / Art-Net receive)
 
-Detail: [technical](../moxygen/NetworkReceiveEffect.md)
+Detail: [technical](moxygen/NetworkReceiveEffect.md)
 
-[Tests](../../../tests/unit-tests.md#networkreceiveeffect)
+[Tests](../../tests/unit-tests.md#networkreceiveeffect)
 
-**Wire contract:** listens for [Art-Net](https://art-net.org.uk/downloads/art-net.pdf), [E1.31 / sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/) simultaneously; `universe_start` + `channels_per_universe` map incoming universes onto the layer buffer. The end-to-end pair with [NetworkSendDriver](../moxygen/NetworkSendDriver.md).
+**Wire contract:** listens for [Art-Net](https://art-net.org.uk/downloads/art-net.pdf), [E1.31 / sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/) simultaneously; `universe_start` + `channels_per_universe` map incoming universes onto the layer buffer. The end-to-end pair with [NetworkSendDriver](moxygen/NetworkSendDriver.md).
 
 <a id="sine"></a>
 
@@ -689,7 +689,7 @@ R/G/B each follow a sine along one axis at 120° phase offset — a glowing, scr
 
 Origin: MoonLight (Sinus, AI-generated) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
-Detail: [technical](../moxygen/SineEffect.md)
+Detail: [technical](moxygen/SineEffect.md)
 
-[Tests](../../../tests/unit-tests.md#sineeffect)
+[Tests](../../tests/unit-tests.md#sineeffect)
 

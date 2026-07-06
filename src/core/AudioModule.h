@@ -71,14 +71,15 @@ namespace mm {
 /// first few reads and self-corrects); a bad init leaves the module idle (zeroed
 /// frame), never crashing.
 ///
-/// **Prior art:** audio-reactive lighting is a long-standing idea in the
-/// LED-controller world (WLED-MM and MoonLight are the closest lineage). This is
-/// projectMM's own implementation, designed from the INMP441 datasheet
-/// (https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf) and standard
-/// DSP rather than traced from any one project. See
-/// docs/moonmodules/core/moxygen/AudioModule.md for the full DSP rationale, the source-seam
-/// backlog (line-in / PDM / analog / I2C codecs), and the forward-looking adaptive
-/// noise-gate analysis.
+/// **Prior art:** audio-reactive lighting is a long-standing idea in the LED-controller world
+/// (WLED-MM and MoonLight are the closest lineage). This is projectMM's own implementation, designed
+/// from the INMP441 datasheet (https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf) and
+/// standard DSP rather than traced from any one project — studying, with credit, the thinking of
+/// Frank (softhack007, WLED-MM audioreactive), Troy (troyhacks, the esp-dsp FFT + biquad pre-filters
+/// path we share), and Damian Schneider (DedeHai, the fixed-point FFT for FPU-less chips). The
+/// forward-looking analysis (source-seam extensions — line-in / PDM / analog / I²C codecs — and the
+/// adaptive-noise-gate design that would retire the borrowed `floor` squelch) is a design study in
+/// docs/backlog/audio-dsp-roadmap.md.
 /// @card AudioModule.png
 class AudioModule : public MoonModule {
 public:

@@ -66,11 +66,24 @@ namespace mm {
 /// transport: must-arrive config rides REST; latency-critical lossy-OK traffic
 /// (time sync, live pixels) rides its own UDP stream.
 ///
+/// **WLED interop.** Because the presence broadcast and the mDNS advertise are
+/// WLED-shaped, a projectMM device appears in the WLED ecosystem with no projectMM
+/// software on the other side: it shows in a real WLED's own instances list (heard on
+/// UDP 65506), and in the native WLED iOS/Android app (discovered via the `_wled._tcp`
+/// mDNS advertise, validated via a `/json/info` shim — see HttpServerModule's
+/// WLED-compatibility shim).
+///
+/// **Wire shape.** The `devices` List serializes each row's `value` as
+/// `{"name","ip","type",["self"]}`, with a parallel `detail` object carrying `url` and
+/// `ageSec` (seconds since last heard, `now − lastSeenMs`; omitted on the self row,
+/// always current). A row restored from persistence but not yet re-heard live this
+/// session carries `cached:true` instead of `ageSec`; the UI shows "last seen: cached"
+/// until an announcement re-confirms it (clearing `cached` and emitting a real `ageSec`,
+/// rendered as "last seen 2m ago").
+///
 /// **Prior art:** the industry-standard mDNS-SD / DNS-SD (Bonjour, Avahi)
 /// announce-and-browse pattern, plus MoonLight's UDP presence broadcast carried
-/// forward as the 44-byte WLED-compatible packet on UDP 65506. See
-/// docs/moonmodules/core/moxygen/DevicesModule.md for the WLED-interop screenshots + the
-/// wire shape.
+/// forward as the 44-byte WLED-compatible packet on UDP 65506.
 /// @card DevicesModule.png
 class DevicesModule : public MoonModule, public ListSource {
 public:

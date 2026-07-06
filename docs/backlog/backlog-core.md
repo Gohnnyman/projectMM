@@ -302,7 +302,7 @@ Explicitly **out** (no practical MQTT case, and wrong for the transport):
 
 **If the actual goal is deeper HA (not scripting), the better path is HA MQTT Discovery** — the device announces its controls as HA entities via retained `homeassistant/…/config` topics (the industry-standard pattern, *Common patterns first*), giving HA typed entities instead of a raw JSON pipe. Bigger than the generic pair, and the right lift if HA depth — not power-user scripting — is the target. Related integration threads to keep this coherent with: the [DevicesModule command half](#devicesmodule-interop-plugins-the-command-half-discovery-shipped) (Tasmota-MQTT / zigbee2mqtt as *outbound* control of foreign devices — the mirror of this *inbound* surface), and the [LightsControl integration point](backlog-mixed.md) (the eventual single owner of "device ↔ outside world", MQTT/HA included).
 
-**Open question — Homebridge example maps both `setBrightness` and `setHSV`.** In `homebridge-mqttthing`'s `lightbulb`, HSV's *value* (V) already carries HomeKit's Brightness characteristic, so mapping both topic pairs may double-drive brightness (mqttthing's docs lean toward using one or the other). The [MQTT § Homebridge example](../moonmodules/core/services/services.md#mqtt) currently lists both, to show the device's full topic surface. Resolve on hardware: flash a board, run Homebridge + mqttthing with that config, and check whether the Home-app brightness slider misbehaves — if it does, drop the two `brightness` topics from the example; if not, it's a non-issue. (Flagged by CodeRabbit; parked here rather than changing the doc on an untested hunch.)
+**Open question — Homebridge example maps both `setBrightness` and `setHSV`.** In `homebridge-mqttthing`'s `lightbulb`, HSV's *value* (V) already carries HomeKit's Brightness characteristic, so mapping both topic pairs may double-drive brightness (mqttthing's docs lean toward using one or the other). The [MQTT § Homebridge example](../moonmodules/core/services.md#mqtt) currently lists both, to show the device's full topic surface. Resolve on hardware: flash a board, run Homebridge + mqttthing with that config, and check whether the Home-app brightness slider misbehaves — if it does, drop the two `brightness` topics from the example; if not, it's a non-issue. (Flagged by CodeRabbit; parked here rather than changing the doc on an untested hunch.)
 
 ## Testing
 
@@ -379,7 +379,7 @@ Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stac
 
 ## UI
 
-Forward-looking companion to the shipped UI spec, [moonmodules/core/services/services.md](../moonmodules/core/services/services.md). The live spec describes the UI as shipped; this file holds what is **not** in it yet: deferred items, open design questions for 1.0, and the gap analysis against projectMM v1. The backward-looking half (how v1/v2 actually worked, patterns consciously rejected, recorded quirks) lives in [history/v1-inventory.md](../history/v1-inventory.md).
+Forward-looking companion to the shipped UI spec, [moonmodules/core/services.md](../moonmodules/core/services.md). The live spec describes the UI as shipped; this file holds what is **not** in it yet: deferred items, open design questions for 1.0, and the gap analysis against projectMM v1. The backward-looking half (how v1/v2 actually worked, patterns consciously rejected, recorded quirks) lives in [history/v1-inventory.md](../history/v1-inventory.md).
 
 ### Deferred to 1.x
 
@@ -391,7 +391,7 @@ Forward-looking companion to the shipped UI spec, [moonmodules/core/services/ser
 
 ### File Manager follow-ups
 
-The shipped File Manager (see [services.md](../moonmodules/core/services/services.md#file-manager)) is a lazy expand/collapse tree over `/api/dir` + a size-capped text editor over `/api/file`, with drag-drop upload (tier 1) + per-file download + a filesystem-usage bar. Deferred capabilities, each self-contained:
+The shipped File Manager (see [services.md](../moonmodules/core/services.md#file-manager)) is a lazy expand/collapse tree over `/api/dir` + a size-capped text editor over `/api/file`, with drag-drop upload (tier 1) + per-file download + a filesystem-usage bar. Deferred capabilities, each self-contained:
 
 - **Upload — recursive folder tier.** Single-file upload of **any size** streams to the file (`fsWriteStream`, binary-safe, `kUploadMax` + free-space guarded) and downloads stream back (`fsReadAt`), so text/config/binary all work. Remaining: **multi-file / recursive folder drops** — client-side `mkdir` + walk via `dataTransfer.items` `webkitGetAsEntry()`.
 - **Download — folder as `.zip`.** Per-file download streams (`<a download>` on `/api/file`). A folder download needs the browser to walk `/api/dir` recursively, fetch each file, and build a `.zip` client-side — which means bundling a zip library into `app.js`. That's a permanent app.js size bump, and app.js is embedded in firmware, so it weighs on the flash budget (see the flash-budget item above). Gate on real demand; symmetric with the folder-upload tier.

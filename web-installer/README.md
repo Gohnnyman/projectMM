@@ -115,7 +115,7 @@ can't supply); every other driver — `RmtLedDriver`, `LcdLedDriver`,
 block (to the `Drivers` container), so a device only carries the outputs its board
 actually has instead of every driver the chip is capable of. The default LED
 driver per chip: **classic ESP32 → `RmtLedDriver`**, **S3 → `RmtLedDriver`** (LCD
-needs the full 8-lane bus — see the [LcdLedDriver spec](../moonmodules/light/drivers/LcdLedDriver.md);
+needs the full 8-lane bus — see the [LcdLedDriver spec](../moonmodules/light/moxygen/LcdLedDriver.md);
 1..8-pin LCD is a future extension), **P4 → `ParlioLedDriver`** (runs 1–8 lanes).
 
 The `RmtLed` `controls` block presets the loopback self-test pins so a bench

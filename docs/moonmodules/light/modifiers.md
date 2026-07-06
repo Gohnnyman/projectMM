@@ -1,6 +1,6 @@
 # Modifiers
 
-Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](../effects/effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](../moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](../moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
+Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../backlog/folder-structure-proposal.md).)
 
 ## MoonLight modifiers
 
@@ -12,9 +12,9 @@ Expands a 1D effect into concentric **square rings** (Chebyshev distance from th
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/BlockModifier.md)
+Detail: [technical](moxygen/BlockModifier.md)
 
-[Tests](../../../tests/unit-tests.md#blockmodifier)
+[Tests](../../tests/unit-tests.md#blockmodifier)
 
 <a id="checkerboard"></a>
 
@@ -29,9 +29,9 @@ Masks the layer in a checkerboard: "off" squares are dropped, "on" squares pass 
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/CheckerboardModifier.md)
+Detail: [technical](moxygen/CheckerboardModifier.md)
 
-[Tests](../../../tests/unit-tests.md#checkerboardmodifier)
+[Tests](../../tests/unit-tests.md#checkerboardmodifier)
 
 <a id="circle"></a>
 
@@ -41,9 +41,9 @@ Expands a 1D effect into concentric **circular rings** (Euclidean distance from 
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/CircleModifier.md)
+Detail: [technical](moxygen/CircleModifier.md)
 
-[Tests](../../../tests/unit-tests.md#circlemodifier)
+[Tests](../../tests/unit-tests.md#circlemodifier)
 
 <a id="mirror"></a>
 
@@ -55,9 +55,9 @@ Folds the far half of the box back onto the near half per axis, mirroring the im
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/MirrorModifier.md)
+Detail: [technical](moxygen/MirrorModifier.md)
 
-[Tests](../../../tests/unit-tests.md#mirrormodifier)
+[Tests](../../tests/unit-tests.md#mirrormodifier)
 
 <a id="multiply"></a>
 
@@ -72,9 +72,9 @@ Tiles the logical image across the box `multiply` times per axis, optionally mir
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/MultiplyModifier.md)
+Detail: [technical](moxygen/MultiplyModifier.md)
 
-[Tests](../../../tests/unit-tests.md#multiplymodifier)
+[Tests](../../tests/unit-tests.md#multiplymodifier)
 
 <a id="pinwheel"></a>
 
@@ -90,9 +90,9 @@ Remaps the grid into radial **petals** around the centre — the angle to each p
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/PinwheelModifier.md)
+Detail: [technical](moxygen/PinwheelModifier.md)
 
-[Tests](../../../tests/unit-tests.md#pinwheelmodifier)
+[Tests](../../tests/unit-tests.md#pinwheelmodifier)
 
 <a id="ripplexz"></a>
 
@@ -105,9 +105,9 @@ Collapses an axis to a single plane so a higher-dimensional effect ripples along
 
 Origin: MoonLight · by @Troy (WLEDMM Art-Net) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/RippleXZModifier.md)
+Detail: [technical](moxygen/RippleXZModifier.md)
 
-[Tests](../../../tests/unit-tests.md#ripplexzmodifier)
+[Tests](../../tests/unit-tests.md#ripplexzmodifier)
 
 <a id="transpose"></a>
 
@@ -120,9 +120,9 @@ Swaps a pair of box axes (and every coordinate through them), then optionally in
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/TransposeModifier.md)
+Detail: [technical](moxygen/TransposeModifier.md)
 
-[Tests](../../../tests/unit-tests.md#transposemodifier)
+[Tests](../../tests/unit-tests.md#transposemodifier)
 
 ## projectMM-native modifiers
 
@@ -136,9 +136,9 @@ Remaps every light to another via a true 1:1 permutation, reshuffling to a fresh
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/RandomMapModifier.md)
+Detail: [technical](moxygen/RandomMapModifier.md)
 
-[Tests](../../../tests/unit-tests.md#randommapmodifier)
+[Tests](../../tests/unit-tests.md#randommapmodifier)
 
 <a id="region"></a>
 
@@ -150,9 +150,9 @@ Carves the layer to a sub-rectangle given as percentages of the physical extent 
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/RegionModifier.md)
+Detail: [technical](moxygen/RegionModifier.md)
 
-[Tests](../../../tests/unit-tests.md#regionmodifier)
+[Tests](../../tests/unit-tests.md#regionmodifier)
 
 <a id="rotate"></a>
 
@@ -164,7 +164,7 @@ Rotates the 2D image around its centre, turning continuously over time (the code
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
-Detail: [technical](../moxygen/RotateModifier.md)
+Detail: [technical](moxygen/RotateModifier.md)
 
-[Tests](../../../tests/unit-tests.md#rotatemodifier)
+[Tests](../../tests/unit-tests.md#rotatemodifier)
 

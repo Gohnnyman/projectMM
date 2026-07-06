@@ -1,6 +1,6 @@
 # Home automation
 
-Bring a projectMM device into your smart home — controlled alongside your lights, scenes, and automations — using the [MQTT module](../moonmodules/core/services/services.md#mqtt) (or, for some hubs, the built-in WLED compatibility). The device exposes on/off, brightness, and colour; a home-automation platform adopts it and drives those from its own app, voice assistant, and automations.
+Bring a projectMM device into your smart home — controlled alongside your lights, scenes, and automations — using the [MQTT module](../moonmodules/core/services.md#mqtt) (or, for some hubs, the built-in WLED compatibility). The device exposes on/off, brightness, and colour; a home-automation platform adopts it and drives those from its own app, voice assistant, and automations.
 
 Integration goes **both directions**, and this page covers both:
 
@@ -13,11 +13,11 @@ The recipes below are each self-contained:
 - **[Drive Hue lights](#drive-hue-lights)** — point an effect at your Hue bulbs.
 - **[Other platforms](#other-platforms)** — how Home Assistant and other MQTT hubs reach the same device.
 
-The control surface these integrations drive — the MQTT controls, topics, and accessory config — is documented once in [Core › Services › MQTT](../moonmodules/core/services/services.md#mqtt); this page is the setup, and links there for the reference.
+The control surface these integrations drive — the MQTT controls, topics, and accessory config — is documented once in [Core › Services › MQTT](../moonmodules/core/services.md#mqtt); this page is the setup, and links there for the reference.
 
 ## Prerequisites
 
-- A projectMM device on your WiFi/Ethernet with the [MQTT module](../moonmodules/core/services/services.md#mqtt) present (it ships on boards whose catalog entry includes it; the Shelly model does).
+- A projectMM device on your WiFi/Ethernet with the [MQTT module](../moonmodules/core/services.md#mqtt) present (it ships on boards whose catalog entry includes it; the Shelly model does).
 - The device's **MAC suffix** — the last 6 hex of its MAC, which is its stable topic id (`projectMM/<suffix>`). Read it from the MQTT module's `mqtt_status`, or once the device is talking to the broker, `mosquitto_sub -t 'projectMM/#'`. The examples below use `563cfe`; substitute yours.
 
 ## Homebridge (Apple Home / HomeKit)
@@ -107,7 +107,7 @@ With a broker and Homebridge running — anywhere — the rest is host-independe
 
    `mqtt_status` turns to `connected` once it reaches the broker, and `mosquitto_sub -t 'projectMM/#' -v` shows the device's `.../on/get`, `.../brightness/get`, `.../hsv/get`, and retained `.../name`.
 
-2. **Add the accessory to Homebridge.** Install the [`homebridge-mqttthing`](https://github.com/arachnetech/homebridge-mqttthing) plugin (Config UI **Plugins** screen, or `npm i -g homebridge-mqttthing`), then add the `lightbulb` accessory block from [Core › Services › MQTT § Homebridge](../moonmodules/core/services/services.md#mqtt) to your Homebridge config — via the Config UI **Config** editor, or `~/.homebridge/config.json` for a CLI install. Set:
+2. **Add the accessory to Homebridge.** Install the [`homebridge-mqttthing`](https://github.com/arachnetech/homebridge-mqttthing) plugin (Config UI **Plugins** screen, or `npm i -g homebridge-mqttthing`), then add the `lightbulb` accessory block from [Core › Services › MQTT § Homebridge](../moonmodules/core/services.md#mqtt) to your Homebridge config — via the Config UI **Config** editor, or `~/.homebridge/config.json` for a CLI install. Set:
    - `url` — `mqtt://<broker>:1883`. When Homebridge and the broker share a host (the usual case), `mqtt://127.0.0.1:1883` works, since here loopback *is* the broker.
    - `563cfe` — replaced by your device's MAC suffix throughout the `topics`.
    - `username` / `password` — matching the broker, or removed if none.
@@ -122,7 +122,7 @@ Once the broker, device, and Homebridge are all talking (the `mosquitto_sub` win
 
 The other direction: instead of a hub controlling the device, the **device controls your Philips Hue bulbs**, treating each colour bulb as a pixel of an effect. Your existing smart lights join the show — an effect's colours glide across them alongside (or instead of) an LED strip. This is a projectMM **output driver**, not a hub integration, so there's no broker and no Homebridge — the device talks straight to the Hue bridge over its LAN HTTP API.
 
-Because Hue is a rate-limited HTTP hub (~10 commands/s), this is **smooth ambient colour**, not fast strobing — the driver paces itself to the bridge and lets it fade between colours. Full behaviour, controls, and the wire contract are in the driver reference: [Drivers › Hue](../moonmodules/light/drivers/drivers.md#hue).
+Because Hue is a rate-limited HTTP hub (~10 commands/s), this is **smooth ambient colour**, not fast strobing — the driver paces itself to the bridge and lets it fade between colours. Full behaviour, controls, and the wire contract are in the driver reference: [Drivers › Hue](../moonmodules/light/drivers.md#hue).
 
 **Recommended layout:** set up a **one-dimensional grid — width 1, height = the number of Hue lights** you want to control. Each pixel of that column maps to one bulb (the driver assigns window pixels to bulbs in order), so a 1×N grid gives you exactly N discrete lights with no wasted pixels, and 1D effects (rainbow, chase, …) read naturally across the bulbs. Sizing the grid to your bulb count keeps the effect and the driver in step.
 
@@ -137,15 +137,15 @@ To set it up:
 
 ## Other platforms
 
-Homebridge above is the worked example; other home-automation platforms adopt the same device through the same primitives. The building blocks are shared — the [MQTT control surface](../moonmodules/core/services/services.md#mqtt) (broker + the `on`/`brightness`/`hsv` topics) and, for hubs that speak it, the device's WLED compatibility — so a new integration is a new front-end on top, not new device work.
+Homebridge above is the worked example; other home-automation platforms adopt the same device through the same primitives. The building blocks are shared — the [MQTT control surface](../moonmodules/core/services.md#mqtt) (broker + the `on`/`brightness`/`hsv` topics) and, for hubs that speak it, the device's WLED compatibility — so a new integration is a new front-end on top, not new device work.
 
-- **Home Assistant** — HA adopts the device **without MQTT**: its built-in WLED integration discovers it over the WLED `/json` API the device already serves (the same interface the WLED apps use), so on/off + brightness work with no broker in the middle. For the full control surface, HA's MQTT Discovery reaches the same [control topics](../moonmodules/core/services/services.md#mqtt) below.
-- **Others** (Node-RED, openHAB, voice assistants via a hub, …) — anything that speaks MQTT drives the device through the [control topics](../moonmodules/core/services/services.md#mqtt); the broker setup is the same [install step](#install-a-broker-homebridge) as above, only the consumer differs.
+- **Home Assistant** — HA adopts the device **without MQTT**: its built-in WLED integration discovers it over the WLED `/json` API the device already serves (the same interface the WLED apps use), so on/off + brightness work with no broker in the middle. For the full control surface, HA's MQTT Discovery reaches the same [control topics](../moonmodules/core/services.md#mqtt) below.
+- **Others** (Node-RED, openHAB, voice assistants via a hub, …) — anything that speaks MQTT drives the device through the [control topics](../moonmodules/core/services.md#mqtt); the broker setup is the same [install step](#install-a-broker-homebridge) as above, only the consumer differs.
 
-Each integration is a self-contained recipe; the shared MQTT reference lives once in [Core › Services › MQTT](../moonmodules/core/services/services.md#mqtt).
+Each integration is a self-contained recipe; the shared MQTT reference lives once in [Core › Services › MQTT](../moonmodules/core/services.md#mqtt).
 
 ## Troubleshooting
 
 - **`mqtt_status` stuck on `connecting`** — the device can't reach the broker. Check the broker IP is your computer's *LAN* IP (not `127.0.0.1`, which the device can't route to), that the broker is actually listening on all interfaces (on Windows, the `listener 1883 0.0.0.0` line above), and that the firewall isn't blocking `1883`.
 - **Homebridge shows "No Response"** — the accessory's topics don't match the device's MAC suffix, or the `url` points at the wrong broker. Confirm the suffix with `mosquitto_sub -t 'projectMM/#'` and that the same broker appears in both the device's `broker` control and the accessory `url`.
-- **Colour wheel doesn't match a specific colour** — expected: HomeKit sends a full-precision hue, and the device snaps it to the *nearest* built-in palette (there's no arbitrary-colour mode). See the palette note in the [MQTT reference](../moonmodules/core/services/services.md#mqtt).
+- **Colour wheel doesn't match a specific colour** — expected: HomeKit sends a full-precision hue, and the device snaps it to the *nearest* built-in palette (there's no arbitrary-colour mode). See the palette note in the [MQTT reference](../moonmodules/core/services.md#mqtt).

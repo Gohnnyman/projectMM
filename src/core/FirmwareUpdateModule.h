@@ -73,10 +73,28 @@ inline bool otaInFlight() {
 /// desktop (`platform::hasOta == false`) the controls still exist for UI uniformity but the
 /// route returns 501 and status stays "idle" forever.
 ///
-/// **Prior art:** `esp_https_ota` is the standard ESP-IDF OTA-from-HTTP component used by
-/// every ESP32 OTA flow since IDF v4.x; the install-picker UI is the new layer on top. See
-/// docs/moonmodules/core/moxygen/FirmwareUpdateModule.md for the `POST /api/firmware/url` wire
-/// contract, the compatibility rules, and the flash lifecycle + error taxonomy.
+/// **Flash lifecycle.** A `POST /api/firmware/url` (HttpServerModule, body `{"url": …}`) writes
+/// `starting` and spawns the platform OTA task, which walks: `downloading` → `esp_https_ota_begin`
+/// opens the TLS connection and follows redirects (a GitHub release URL 302s to
+/// `release-assets.githubusercontent.com`) → `flashing`, `esp_https_ota_perform` advancing
+/// `update_pct` 0→100 → `esp_https_ota_finish` commits the image to the next OTA partition and flips
+/// the boot pointer → `rebooting`, a ~600 ms delay so the HTTP response reaches the browser first,
+/// then `esp_restart()`. The device boots the new image and the UI re-reads `version` / `firmware`.
+///
+/// **Error taxonomy** (all via the status slot, `error: ` prefix, staying until the next POST):
+/// `error: ota begin <IDF name>` (DNS / TLS / no OTA partition), `error: ota perform <IDF name>`
+/// (network drop mid-download), `error: incomplete download` (size mismatch), `error: ota finish
+/// <IDF name>` (commit / boot-flip), `error: task create failed` (`xTaskCreate` OOM — no retry). A
+/// wrong-firmware binary fails at `esp_https_ota_begin` (chip-family mismatch) or boot (partition
+/// mismatch) — recoverable by a USB re-flash, not a brick.
+///
+/// **Compatibility** is the *caller's* responsibility (the install-picker's `isCompatible()`): strip
+/// `-eth*` from both firmware keys, equal identities are compatible — so `esp32` and `esp32-eth` are
+/// mutually OTA-compatible (same chip, different feature flags), the legacy `esp32-eth-wifi` key
+/// strips to `esp32`, and `esp32s3-n16r8` is only itself.
+///
+/// **Prior art:** `esp_https_ota` is the standard ESP-IDF OTA-from-HTTP component used by every ESP32
+/// OTA flow since IDF v4.x; the install-picker UI is the new layer on top.
 /// @card FirmwareUpdateModule.png
 class FirmwareUpdateModule : public MoonModule {
 public:

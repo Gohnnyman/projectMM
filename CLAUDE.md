@@ -103,7 +103,7 @@ The narrow safety net: "this snapshot is internally consistent."
 
 **Always run (cheap, applies to every commit):**
 
-1. Spec check, `check_specs.py`, fast (<1s), catches `docs/moonmodules/*.md` ↔ control-name drift even on doc-only commits.
+1. Spec check, `check_specs.py`, fast (<1s), catches `docs/moonmodules/*.md` ↔ control-name drift even on doc-only commits, and validates every `main.cpp` `registerType` docPath resolves to a real page + `#anchor` (so a docs rename can't silently 404 the in-UI help links).
 
 **Conditional (run if trigger matches):**
 

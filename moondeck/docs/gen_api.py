@@ -110,26 +110,13 @@ DOCS_MOONMODULES = ROOT / "docs" / "moonmodules"
 _BLOB_BASE = "https://github.com/MoonModules/projectMM/blob/main"
 
 
-def _migration_crosscheck_header(header_rel: str, domain: str, stem: str) -> str:
-    """A TEMPORARY banner prepended to each generated page during the docs-v2
-    migration: a link to the source `.h` (GitHub blob — `src/` isn't published to the
-    site) and, if one still exists, the original hand-written `<stem>.md` as an
-    IN-SITE relative link (that page still builds during the migration, so the link
-    resolves to its rendered `.html`), so a reviewer can cross-check that the `.md`'s
-    content was absorbed into the `.h`'s `///` comments. Removed at Stage 5."""
-    parts = [f"[source `{Path(header_rel).name}`]({_BLOB_BASE}/{header_rel})"]
-    # The old per-module .md now lives under docs/moonmodules/<domain>/archive/. Find
-    # it by name (excluding the generated moxygen/ dirs); SORT so rglob's unspecified
-    # order can't make the chosen match (and thus the emitted relative path) vary build
-    # to build. Link RELATIVE to this generated page so MkDocs resolves it in-site.
-    this_dir = DOCS_MOONMODULES / domain / "moxygen"
-    for md in sorted(DOCS_MOONMODULES.rglob(f"{stem}.md")):
-        if "moxygen" in md.parts:
-            continue
-        rel = os.path.relpath(md, this_dir).replace(os.sep, "/")
-        parts.append(f"[original `{md.name}`]({rel})")
-        break
-    return f"> _Migration cross-check (temporary):_ {' · '.join(parts)}\n\n"
+def _source_header(header_rel: str, domain: str, stem: str) -> str:
+    """A one-line banner linking each generated page to its source `.h` on GitHub —
+    `src/` isn't published to the site, so this is the only way to reach the header the
+    page is generated from. (The docs-v2 migration's temporary "original `<stem>.md`"
+    cross-check link is gone: all per-module archive pages have been absorbed into the
+    `///` comments and deleted, so there is nothing left to cross-check against.)"""
+    return f"> _Source:_ [`{Path(header_rel).name}`]({_BLOB_BASE}/{header_rel})\n\n"
 
 
 # A moxygen inter-class link: `](cls_mm-<Class>.md#<anchor>)`, plus the namespace file
@@ -349,7 +336,7 @@ def generate() -> dict[str, str]:
             body = _strip_bad_anchor_links(body)
             body = _render_card_directives(body, domain, stem)
             body = _highlight_signature_names(body)
-            md = _migration_crosscheck_header(header, domain, stem) + body
+            md = _source_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"
             dst = DOCS_MOONMODULES / domain / "moxygen" / f"{stem}.md"
             dst.parent.mkdir(parents=True, exist_ok=True)

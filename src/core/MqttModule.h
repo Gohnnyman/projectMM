@@ -39,7 +39,7 @@ namespace mm {
 /// reads "No Response"). A dropped socket reconnects with a backoff.
 ///
 /// **Prior art:** the OASIS MQTT 3.1.1 standard + homebridge-mqttthing's topic conventions (see
-/// docs/moonmodules/core/services/services.md#mqtt for the Homebridge accessory config). The MoonLight sibling
+/// docs/moonmodules/core/services.md#mqtt for the Homebridge accessory config). The MoonLight sibling
 /// bridges the same on/off+brightness surface through a full framework MQTT client + HA discovery;
 /// projectMM writes its own lean client over the platform socket primitive instead.
 /// @card MqttModule.png

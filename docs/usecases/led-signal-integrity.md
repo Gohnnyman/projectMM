@@ -5,7 +5,7 @@ Random wrong colours on LEDs the effect leaves black — most often a few stray 
 Confirm the firmware is innocent **before** reaching for the soldering iron. These checks were the actual diagnosis path on the bench (recorded in [decisions.md](../history/decisions.md)):
 
 1. **Is the data clean?** The preview/source buffer is the logical RGB the effect produced — if it shows no stray colour, the effect is innocent (the corruption is downstream of the buffer).
-2. **Is the firmware/peripheral clean?** Run the [`loopbackFrame` self-test](../moonmodules/light/drivers/drivers.md#led-output-drivers) through a short jumper on the data pin. A `PASS` means the RMT encode + transmit emit bit-perfect WS2812 — the GPIO is fine.
+2. **Is the firmware/peripheral clean?** Run the [`loopbackFrame` self-test](../moonmodules/light/drivers.md#led-output-drivers) through a short jumper on the data pin. A `PASS` means the RMT encode + transmit emit bit-perfect WS2812 — the GPIO is fine.
 3. **Is it WiFi RF?** Lower `Network.txPowerSetting` from 20 dBm down toward 2 and watch. If the flicker shrinks with TX power, it's radio coupling into the data wire (mitigate with the level shifter below). If it's **unchanged across the whole sweep, it is not the radio** — it's the physical data path.
 
 When 1–3 all come back clean, the fix is electrical, in rough order of effectiveness:

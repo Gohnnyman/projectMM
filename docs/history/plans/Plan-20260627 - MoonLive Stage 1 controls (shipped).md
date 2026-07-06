@@ -113,7 +113,7 @@ struct DeclaredControl { const char* name; uint8_t type; int32_t min, max, def; 
   scratch shift + `l8ui`. **`…_riscv` pair** — kArg4→a4 + scratch shift + `lbu` + call() saves a4.
 - **`src/light/moonlive/MoonLiveEffect.h`** — dynamic `onBuildControls` + arena-bound `addUint8` +
   arena alloc/seed in `onBuildState`.
-- **Docs**: `docs/moonmodules/light/moonlive/MoonLiveEffect.md` (the `@control` contract),
+- **Docs**: `docs/moonmodules/light/MoonLiveEffect.md` (the `@control` contract),
   `docs/backlog/livescripts-analysis-top-down.md` (mark Stage 1 done in the §9 ladder),
   `docs/history/decisions.md` (the live-control-via-arena lesson).
 

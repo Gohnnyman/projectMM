@@ -72,7 +72,7 @@ _ROOT_REL_PREFIXES = _OUT_OF_DOCS + ("docs/",)
 def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
     """Rewrite links that climb out of docs/ into repo files → absolute GitHub blob
     URLs, resolved against the page's own location so any `../` depth is handled.
-    src_uri is the page's path under docs/ (e.g. 'moonmodules/light/effects/effects.md')."""
+    src_uri is the page's path under docs/ (e.g. 'moonmodules/light/effects.md')."""
     # The page's directory within docs/ — the anchor `../` hops resolve against.
     page_dir = Path("docs") / src_uri
     page_dir = page_dir.parent
@@ -122,16 +122,16 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
 # The consolidated catalog pages whose ### effect/modifier/layout blocks are rendered
 # as a table (source stays authored as readable prose blocks; the table is build-time).
 _CATALOG_PAGES = {
-    "moonmodules/light/effects/effects.md",
-    "moonmodules/light/modifiers/modifiers.md",
-    "moonmodules/light/layouts/layouts.md",
-    "moonmodules/light/drivers/drivers.md",
+    "moonmodules/light/effects.md",
+    "moonmodules/light/modifiers.md",
+    "moonmodules/light/layouts.md",
+    "moonmodules/light/drivers.md",
     # Summary pages for the non-catalog module groups use the same ### -block → table
     # transform, one common authoring process for every summary page (supporting rows
     # just leave the preview/controls columns blank).
-    "moonmodules/core/supporting/supporting.md",
-    "moonmodules/core/services/services.md",
-    "moonmodules/light/supporting/supporting.md",
+    "moonmodules/core/supporting.md",
+    "moonmodules/core/services.md",
+    "moonmodules/light/supporting.md",
 }
 
 _H3_RE = re.compile(r'^###\s+(?P<title>.+?)\s*$')

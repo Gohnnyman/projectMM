@@ -24,7 +24,7 @@ namespace mm {
 //     108   priority (default 100)    109-110 sync address (0 = none)
 //     111   sequence                  112     options (0)
 //     113-114 universe (1-based per spec; we transmit whatever the caller says
-//             — see the universe rule in NetworkSendDriver.md)
+//             — see the universe rule on NetworkSendDriver's `universeStart` control)
 //   DMP layer 115–125:
 //     115-116 flags+length 0x7000 | (totalLen − 115)
 //     117   vector 0x02              118     address & data type 0xA1

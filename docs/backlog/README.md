@@ -42,7 +42,7 @@ A map of everything in the three files, by theme.
 
 ## In-flight draft specs
 
-A spec for a not-yet-built module can live here as a plain draft `.md` (alongside the design studies below) until the module ships — at which point its final spec is written under `../moonmodules/` (e.g. [drivers](../moonmodules/light/drivers/drivers.md)) and the draft is deleted. None are in flight right now.
+A spec for a not-yet-built module can live here as a plain draft `.md` (alongside the design studies below) until the module ships — at which point its final spec is written under `../moonmodules/` (e.g. [drivers](../moonmodules/light/drivers.md)) and the draft is deleted. None are in flight right now.
 
 ## Design studies
 
