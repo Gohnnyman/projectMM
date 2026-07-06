@@ -300,7 +300,14 @@ Explicitly **out** (no practical MQTT case, and wrong for the transport):
 
 **Shape:** ~15 lines routing into the existing `applySetControl` + a state publish; gate behind a `generic API` bool defaulting **off**, so a home user's broker isn't a remote-config backdoor and the curated HomeKit surface stays the clean default. **Don't** auto-generate a semantic topic per control — HomeKit/HA need stable typed topics; a generic `palette/set` whose meaning shifts per firmware breaks their discovery. Keep semantic topics hand-curated; let the generic pair be the escape hatch.
 
-**If the actual goal is deeper HA (not scripting), the better path is HA MQTT Discovery** — the device announces its controls as HA entities via retained `homeassistant/…/config` topics (the industry-standard pattern, *Common patterns first*), giving HA typed entities instead of a raw JSON pipe. Bigger than the generic pair, and the right lift if HA depth — not power-user scripting — is the target. Related integration threads to keep this coherent with: the [DevicesModule command half](#devicesmodule-interop-plugins-the-command-half-discovery-shipped) (Tasmota-MQTT / zigbee2mqtt as *outbound* control of foreign devices — the mirror of this *inbound* surface), and the [LightsControl integration point](backlog-mixed.md) (the eventual single owner of "device ↔ outside world", MQTT/HA included).
+**HA MQTT Discovery — SHIPPED.** The device announces a retained JSON-schema light config to
+`homeassistant/light/<id>/config` (the Tasmota/ESPHome/Zigbee2MQTT pattern), so HA auto-creates a
+wired entity — gated on the `haDiscovery` control, with a Last-Will availability topic. This covered
+the "HA can't reach the device over MQTT" incidents. The *generic-topics escape hatch* above (the
+whole REST API over MQTT, for power-user scripting) is the remaining unbuilt piece; keep it coherent
+with the [DevicesModule command half](#devicesmodule-interop-plugins-the-command-half-discovery-shipped)
+(Tasmota-MQTT / zigbee2mqtt as *outbound* control — the mirror of this *inbound* surface) and the
+[LightsControl integration point](backlog-mixed.md).
 
 **Open question — Homebridge example maps both `setBrightness` and `setHSV`.** In `homebridge-mqttthing`'s `lightbulb`, HSV's *value* (V) already carries HomeKit's Brightness characteristic, so mapping both topic pairs may double-drive brightness (mqttthing's docs lean toward using one or the other). The [MQTT § Homebridge example](../moonmodules/core/services.md#mqtt) currently lists both, to show the device's full topic surface. Resolve on hardware: flash a board, run Homebridge + mqttthing with that config, and check whether the Home-app brightness slider misbehaves — if it does, drop the two `brightness` topics from the example; if not, it's a non-issue. (Flagged by CodeRabbit; parked here rather than changing the doc on an untested hunch.)
 

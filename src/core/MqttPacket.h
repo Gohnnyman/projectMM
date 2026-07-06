@@ -41,8 +41,11 @@ inline constexpr uint8_t kMqttProtocolLevel   = 0x04;   // 4 == MQTT 3.1.1
 
 // CONNECT flag bits (§3.1.2.3). We use clean-session + optionally username/password.
 inline constexpr uint8_t kMqttConnectCleanSession = 0x02;
+inline constexpr uint8_t kMqttConnectWillFlag     = 0x04;  // §3.1.2.5 — a Will is present in the payload
+inline constexpr uint8_t kMqttConnectWillRetain   = 0x20;  // §3.1.2.7 — the broker publishes the Will retained
 inline constexpr uint8_t kMqttConnectPasswordFlag = 0x40;
 inline constexpr uint8_t kMqttConnectUsernameFlag = 0x80;
+// Will QoS (§3.1.2.6) is bits 3-4; QoS 0 = 0x00, so no constant needed.
 // --8<-- [end:mqtt-constants]
 
 // --- Remaining-length varint (§2.2.3) ---
@@ -119,30 +122,43 @@ inline size_t mqttWriteFixedHeader(uint8_t* out, size_t outLen,
     return 1 + rl;   // total fixed-header size
 }
 
-// CONNECT (§3.1). clientId is required; username/password optional (nullptr → omitted). keepalive is
+// CONNECT (§3.1). clientId is required; username/password optional (nullptr → omitted). An optional
+// **Last Will** (willTopic + willPayload) makes the broker publish willPayload to willTopic when this
+// client drops ungracefully (power cut, WiFi loss) — the availability seam HA greys the entity out on.
+// willRetain keeps the Will retained so a late-joining subscriber still sees "offline". keepalive is
 // in seconds. Clean session always set (we don't resume state). Returns total bytes, 0 on overflow.
 inline size_t buildMqttConnect(const char* clientId,
                                const char* username, const char* password,
-                               uint16_t keepaliveSec, uint8_t* out, size_t outLen) {
+                               uint16_t keepaliveSec, uint8_t* out, size_t outLen,
+                               const char* willTopic = nullptr, const char* willPayload = nullptr,
+                               bool willRetain = false) {
     if (!clientId) return 0;
     // Treat an empty-string username as "no username" (a UI text control left blank is "", not null),
     // and — MQTT-3.1.2-22 — the password flag MUST NOT be set without the username flag, so a password
     // with no username is dropped (a compliant broker would reject the whole CONNECT otherwise).
     if (username && !username[0]) username = nullptr;
     if (!username) password = nullptr;
+    // The Will needs both a topic and a payload; a partial one is dropped (§3.1.2.5 — the Will flag
+    // gates both length-prefixed fields, so a topic with no message is malformed).
+    if (willTopic && !willTopic[0]) willTopic = nullptr;
+    if (!willTopic || !willPayload) { willTopic = nullptr; willPayload = nullptr; }
     const size_t idLen   = std::strlen(clientId);
     const size_t userLen = username ? std::strlen(username) : 0;
     const size_t passLen = password ? std::strlen(password) : 0;
+    const size_t wtLen   = willTopic ? std::strlen(willTopic) : 0;
+    const size_t wpLen   = willPayload ? std::strlen(willPayload) : 0;
 
     // Variable header: protocol name (6) + level (1) + connect flags (1) + keepalive (2) = 10.
-    // Payload: clientId, then username, then password — each length-prefixed.
+    // Payload order (§3.1.3): clientId, Will Topic, Will Message, username, password — each len-prefixed.
     uint8_t connectFlags = kMqttConnectCleanSession;
+    if (willTopic) { connectFlags |= kMqttConnectWillFlag; if (willRetain) connectFlags |= kMqttConnectWillRetain; }
     if (username) connectFlags |= kMqttConnectUsernameFlag;
     if (password) connectFlags |= kMqttConnectPasswordFlag;
 
     const uint32_t bodyLen = static_cast<uint32_t>(
         2 + 4 + 1 + 1 + 2 +                       // proto name(len+"MQTT") + level + flags + keepalive
         2 + idLen +
+        (willTopic ? 2 + wtLen + 2 + wpLen : 0) +
         (username ? 2 + userLen : 0) +
         (password ? 2 + passLen : 0));
 
@@ -158,9 +174,13 @@ inline size_t buildMqttConnect(const char* clientId,
     out[pos++] = static_cast<uint8_t>((keepaliveSec >> 8) & 0xFF);
     out[pos++] = static_cast<uint8_t>(keepaliveSec & 0xFF);
 
-    // Payload
+    // Payload — clientId, [Will Topic, Will Message], [username], [password], in §3.1.3 order.
     pos = mqttAppendString(out, outLen, pos, clientId, idLen);
     if (pos == 0) return 0;
+    if (willTopic) {
+        pos = mqttAppendString(out, outLen, pos, willTopic, wtLen);   if (pos == 0) return 0;
+        pos = mqttAppendString(out, outLen, pos, willPayload, wpLen); if (pos == 0) return 0;
+    }
     if (username) { pos = mqttAppendString(out, outLen, pos, username, userLen); if (pos == 0) return 0; }
     if (password) { pos = mqttAppendString(out, outLen, pos, password, passLen); if (pos == 0) return 0; }
     return pos;

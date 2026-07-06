@@ -476,6 +476,16 @@ Network-based drivers (ArtNet, E1.31, DDP) pace their output with a **non-blocki
 
 All buffers are allocated as single contiguous blocks outside the hot path, at startup or when configuration changes (LED count, layout size, layer count). They are then reused every frame with zero allocations in steady state. Measured per-module timing and memory for each platform: [performance.md](performance.md).
 
+### Pay for what you use
+
+A module holds heap **only for capabilities it is actually exercising**, the same zero-overhead principle C++ applies to abstractions ("you don't pay for what you don't use"). Concretely, for every module:
+
+- **A module not in the tree costs nothing.** Modules are heap-allocated through `MoonModule::operator new` when added (via the factory or boot wiring), so a deviceModel that omits a module pays zero — not even its `classSize()`. This is the base case the rest of the rule extends inward.
+- **A feature's buffer allocates on first use, not at `setup()`.** When a module *is* present but a given capability is dormant (a driver with no output attached, an MQTT client with HA discovery toggled off), that capability's buffer is `nullptr` until the code path that needs it runs. Allocating eagerly at `setup()` for a path that may never execute is the anti-pattern this rule forbids — it charges every instance for the worst case.
+- **The allocation frees in `teardown()`** (and on the transition that makes the capability dormant again — a disable, a toggle-off), and is reported through `dynamicBytes()` so `/api/system` and the memory scenarios see the real ladder. `MoonModule::teardown()` reverse-recurses into children, so a subtree's memory unwinds bottom-up with no leak.
+
+The result is a memory ladder that tracks configuration exactly: module-absent → 0; module-present-but-feature-off → just the class instance; feature-active → `+dynamicBytes()`. The LED driver's output buffer (allocated when a physical output exists, per [§ Adaptive allocation](#adaptive-allocation) below) and the MQTT module's discovery-config scratch (allocated when a connected client announces itself to Home Assistant) are the two worked examples; the rule governs every module, not those two. Rationale: on a no-PSRAM ESP32 the internal-heap reserve (`HEAP_RESERVE`) is the tightest constraint in the system, so a module that grabs a buffer it isn't using is spending the reserve that keeps the render loop, WiFi, and HTTP alive.
+
 ### Buffer types
 
 - **Layer buffers**: one per active layer, holds the logical light data for one effect chain. Allocated in PSRAM when available. On memory-constrained devices, consumers may read from the layer buffer directly (no mapping, no blending, no physical buffer needed).

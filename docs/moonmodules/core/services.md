@@ -74,6 +74,7 @@ Bridges the light to an MQTT broker so a home-automation hub (Homebridge) can co
 - `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
 - `port` — broker port (default 1883).
 - `username` / `password` — broker credentials (optional; the password is stored obfuscated like the WiFi password).
+- `haDiscovery` — announce a Home Assistant MQTT-discovery light (default on). HA auto-creates a wired entity; toggling it off removes the entity. See the [home-automation guide](../../usecases/home-automation.md).
 - read-only — `mqtt_status` (`disabled` / `idle` / `connecting` / `connected` / `disconnected` / an error).
 
 Detail: [technical](moxygen/MqttModule.md)
