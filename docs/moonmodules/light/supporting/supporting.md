@@ -6,6 +6,8 @@ The light-domain machinery the catalog modules (effects, modifiers, layouts, dri
 
 One rendering layer — an effect writes into its buffer, modifiers transform the coordinate mapping, and the layer composites onto the shared output. The unit the render loop iterates.
 
+<img src="../../../assets/light/Layer.png" width="300" alt="Layer container with a child effect">
+
 - `blendMode` — how this layer composites onto the ones below (overwrite / alpha / additive).
 
 Detail: [technical](../moxygen/Layer.md)
@@ -16,6 +18,8 @@ Detail: [technical](../moxygen/Layer.md)
 
 The container of layers — composites them (blend mode + opacity per layer) into the final light buffer.
 
+<img src="../../../assets/light/Layers.png" width="300" alt="Layers container">
+
 Detail: [technical](../moxygen/Layers.md)
 
 [Tests](../../../tests/unit-tests.md#layers)
@@ -23,6 +27,8 @@ Detail: [technical](../moxygen/Layers.md)
 ### Layouts
 
 The container of layout modules — walks each layout's coordinates to build the physical light set the mapping consumes.
+
+<img src="../../../assets/light/Layouts.png" width="300" alt="Layouts container">
 
 Detail: [technical](../moxygen/Layouts.md)
 
@@ -32,6 +38,10 @@ Detail: [technical](../moxygen/Layouts.md)
 
 The container of driver modules — owns the shared driver buffer and the per-light output correction every driver applies before sending.
 
+<img src="../../../assets/light/Drivers.png" width="300" alt="Drivers container with the on/off + brightness controls">
+
+- `on` — master power (default on). Turning it off scales the whole output to black while preserving `brightness`, so on restores the exact level. The single power control every consumer drives (the UI toggle, IR's on/off, the WLED app / Home Assistant, MQTT/Homebridge) through `Scheduler::setControl`.
+- `brightness` — global output brightness (0–255).
 - `lightPreset` — the output-correction preset (colour order, gamma, brightness) every driver applies.
 - `palette` — the active palette effects sample from.
 

@@ -183,8 +183,8 @@ network — lives here as its own module, and we're adding more all the time.
 
 ![The System module](assets/gettingstarted/02-05-UI-System.png)
 
-> [SystemModule](moonmodules/core/ui/ui.md) ·
-> [AudioModule](moonmodules/core/ui/ui.md)
+> [SystemModule](moonmodules/core/services/services.md) ·
+> [AudioModule](moonmodules/core/services/services.md)
 
 **Firmware** — which build you're running, and where you update it. The
 **Install** button here does an over-the-air update straight from the device — no
@@ -192,7 +192,7 @@ USB cable needed once it's on your network.
 
 ![The Firmware module](assets/gettingstarted/02-06-UI-Firmware.png)
 
-> [FirmwareUpdateModule](moonmodules/core/ui/ui.md)
+> [FirmwareUpdateModule](moonmodules/core/services/services.md)
 
 **Network** — your connection: WiFi or Ethernet, signal strength, and the
 address others reach it at. The **Devices** section underneath finds other
@@ -201,8 +201,8 @@ other.
 
 ![The Network module](assets/gettingstarted/02-07-UI-Network.png)
 
-> [NetworkModule](moonmodules/core/ui/ui.md) ·
-> [DevicesModule](moonmodules/core/ui/ui.md)
+> [NetworkModule](moonmodules/core/services/services.md) ·
+> [DevicesModule](moonmodules/core/services/services.md)
 
 > **Lights are just one use.** Everything above — the modules, the live controls, the
 > 3D view, the web UI, the networking — is a general-purpose engine that knows nothing

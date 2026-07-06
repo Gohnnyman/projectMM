@@ -209,18 +209,18 @@ static void registerModuleTypes() {
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers/ParlioLedDriver.md");
 #endif
-    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/ui/ui.md");
-    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/ui/ui.md#system");
-    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/ui/ui.md#audio");
-    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/ui/ui.md#i2c-scan");
-    mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/ui/ui.md#ir");
-    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/ui/ui.md#file-manager");
-    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/ui/ui.md#firmware-update");
-    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ui/ui.md#improv-provisioning");
-    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/ui/ui.md#mqtt");
-    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/ui/ui.md#devices");
-    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/ui/ui.md#network");
-    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/ui/ui.md#filesystem");
+    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/services/services.md");
+    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/services/services.md#system");
+    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/services/services.md#audio");
+    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/services/services.md#i2c-scan");
+    mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/services/services.md#ir");
+    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/services/services.md#file-manager");
+    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/services/services.md#firmware-update");
+    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/services/services.md#improv-provisioning");
+    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/services/services.md#mqtt");
+    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/services/services.md#devices");
+    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/services/services.md#network");
+    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/supporting/supporting.md#filesystem");
 }
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {

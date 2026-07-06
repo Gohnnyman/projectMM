@@ -130,7 +130,7 @@ _CATALOG_PAGES = {
     # transform, one common authoring process for every summary page (supporting rows
     # just leave the preview/controls columns blank).
     "moonmodules/core/supporting/supporting.md",
-    "moonmodules/core/ui/ui.md",
+    "moonmodules/core/services/services.md",
     "moonmodules/light/supporting/supporting.md",
 }
 
@@ -184,9 +184,9 @@ def _emit_row(b: dict, details_names: set) -> str:
         # awaiting a gif and a supporting module that has no visual by nature.
         col2 = "—"
 
-    # Col 3: parameters, one per line. Split each at the em-dash into the name part
+    # Col 3: controls, one per line. Split each at the em-dash into the name part
     # (before — keeps its `code` chips, styled accent) and the description (after —
-    # greyed via .mm-pdesc, matching the muted module description). Params without a
+    # greyed via .mm-pdesc, matching the muted module description). Controls without a
     # dash render whole in the name part.
     col3_parts = []
     for p in b["params"]:
@@ -247,7 +247,7 @@ def _render_catalog_table(markdown: str) -> str:
         if rows:
             out.append('<div class="mm-catalog-wrap" markdown="1">')
             out.append("")
-            out.append("| Name | Preview | Parameters | Links |")
+            out.append("| Name | Preview | Controls | Links |")
             out.append("|------|---------|------------|-------|")
             out.extend(rows)
             out.append("")

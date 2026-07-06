@@ -134,8 +134,33 @@ CORE_MODULES = [
     "FirmwareUpdateModule",
     "NetworkModule",
     "HttpServerModule",
-    "ImprovProvisioningModule",  # ESP32-only — skipped if not in state
+    "MqttModule",
+    "FileManagerModule",
+    "DevicesModule",
+    # Present only in an ESP32 tree (peripherals / provisioning) — skipped on desktop
+    # (not in state); capture these against a board when needed.
+    "ImprovProvisioningModule",
+    "AudioModule",
+    "I2cScanModule",
+    "IrModule",
 ]
+
+# Core modules that are CHILDREN of another module (so they have no top-level nav entry
+# of their own): {child type → parent type}. The capture navs to the parent's nav root,
+# then screenshots the child's own card. Everything not listed here is a top-level card.
+CORE_NAV_ROOT = {
+    "MqttModule": "NetworkModule",
+    "DevicesModule": "NetworkModule",
+    "ImprovProvisioningModule": "NetworkModule",
+    # The System peripherals (Audio / IR / I2C scan) are children of SystemModule when present,
+    # but they're added per-board and never exist in the desktop tree — so they're captured
+    # against an ESP32, where these entries route the shot to the System nav root.
+    "AudioModule": "SystemModule",
+    "I2cScanModule": "SystemModule",
+    "IrModule": "SystemModule",
+}
+# FileManagerModule, FirmwareUpdateModule, SystemModule, NetworkModule are top-level
+# (scheduler.addModule in main.cpp) — NOT listed here, so they capture as standalone cards.
 
 # ---------------------------------------------------------------------------
 # Extra shots: MoonDeck tabs + web installer
@@ -435,15 +460,22 @@ def find_container_nav_names(host: str) -> dict[str, str]:
 
 
 def find_core_module_names(host: str) -> dict[str, str]:
-    """Return a map of type → live module name for core (always-present) modules."""
+    """Return a map of type → live module name for core (always-present) modules.
+    Recurses the tree: some core modules (Mqtt, Devices, Improv) are children of
+    NetworkModule, not top-level, so a flat scan would miss them."""
     r = _get(f"http://{host}/api/state", timeout=5)
     if not r.ok:
         return {}
     result: dict[str, str] = {}
-    for m in r.json().get("modules", []):
-        t = m.get("type", "")
-        if t in CORE_MODULES:
-            result[t] = m.get("name", "")
+
+    def walk(mods):
+        for m in mods:
+            t = m.get("type", "")
+            if t in CORE_MODULES and t not in result:
+                result[t] = m.get("name", "")
+            walk(m.get("children", []))
+
+    walk(r.json().get("modules", []))
     return result
 
 
@@ -813,7 +845,15 @@ def main() -> int:
                     skipped.append((type_name, "already exists"))
                     continue
                 print(f"  {type_name} …", end=" ", flush=True)
-                ok = screenshot_container(page, args.host, cname, out_path)
+                # A top-level module is its own nav root (screenshot_container navs + cards by the
+                # same name). A CHILD module (Mqtt/Devices/Improv under Network) has no nav entry of
+                # its own — nav to its parent root, then screenshot the child's own card by name.
+                parent_type = CORE_NAV_ROOT.get(type_name)
+                if parent_type:
+                    nav_name = core_names.get(parent_type, "")   # live name of the nav root (e.g. "Network")
+                    ok = screenshot_module(page, args.host, cname, nav_name, out_path)
+                else:
+                    ok = screenshot_container(page, args.host, cname, out_path)
                 print(f"saved → {out_path.relative_to(ROOT)}" if ok else "failed")
                 if ok:
                     captured.append(type_name)

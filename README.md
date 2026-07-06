@@ -32,9 +32,9 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🎵 **Audio-reactive**: an I²S microphone drives a 16-band FFT spectrum + sound level, consumed by audio-reactive effects — all built fresh from the mic datasheet and textbook DSP.
 
-🏠 **Home-automation control**: a device joins Homebridge (and any MQTT hub) over a dependency-free MQTT 3.1.1 client — on/off, brightness, and a HomeKit colour wheel that picks the nearest palette. See [the MQTT module docs](docs/moonmodules/core/ui/ui.md#mqtt).
+🏠 **Home-automation control**: a device joins Homebridge (and any MQTT hub) over a dependency-free MQTT 3.1.1 client — on/off, brightness, and a HomeKit colour wheel that picks the nearest palette. See [the MQTT module docs](docs/moonmodules/core/services/services.md#mqtt).
 
-📁 **On-device File Manager**: browse and edit the device filesystem from the browser — a lazy folder tree with an inline editor, drag-drop upload, and create/delete, plus [firmware upload OTA](docs/moonmodules/core/ui/ui.md#firmware-update) (flash a `.bin` over the LAN, no USB). See [the File Manager docs](docs/moonmodules/core/ui/ui.md#file-manager).
+📁 **On-device File Manager**: browse and edit the device filesystem from the browser — a lazy folder tree with an inline editor, drag-drop upload, and create/delete, plus [firmware upload OTA](docs/moonmodules/core/services/services.md#firmware-update) (flash a `.bin` over the LAN, no USB). See [the File Manager docs](docs/moonmodules/core/services/services.md#file-manager).
 
 🛡️ **Robust to any input**: add, delete, replace, or reconfigure any module in any order, at any grid size, and the device keeps running — degraded or idle, never crashed. Every crash that's ever found becomes a regression test, so it stays fixed.
 

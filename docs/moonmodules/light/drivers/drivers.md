@@ -14,6 +14,8 @@ A driver reads its window of the [Drivers](../moxygen/Drivers.md) container's sh
 
 Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three peripherals do this — pick by chip: **RMT** (single/few strands, any ESP32), **LCD_CAM** (8 parallel strands, S3), **Parlio** (1–8 parallel strands, P4). Same controls, same wire contract; they differ only in how many strands clock out at once and on which chip.
 
+<img src="../../../assets/light/drivers/RmtLedDriver.png" width="300" alt="LED output driver controls">
+
 - `pins` — data GPIO list, e.g. `18,17,16` (one strand each). Empty idles until set; changing it re-inits live.
 - `ledsPerPin` — lights per pin, matched by position; empty or short = even split of the remainder.
 - `loopbackTest` — on/off TX→RX loopback self-test (jumper the first pin to `loopbackRxPin`); verdict in the status field.

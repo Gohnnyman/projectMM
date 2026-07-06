@@ -281,6 +281,27 @@ What to build (~4 h):
 
 `HttpServerModule::handleConnection()` serves large embedded files (`app.js`, `style.css`) with the blocking `TcpConnection::write` — a page load can briefly stall `loop20ms`. One-shot per load (lower priority than the per-tick preview issue, which is fixed). Fix: serve large HTTP responses with `writeChunks` (the same non-blocking path used for preview frames).
 
+### Generic control + state topics over MQTT — the automation escape hatch (backlog)
+
+The MQTT bridge ships a **semantic** topic surface (`<prefix>/on/set`, `brightness/set`, `hsv/set` → the `Drivers` controls) sized for Homebridge/HomeKit, which need fixed, typed topics per accessory. That leaves everything else the web UI can reach — effect choice, layout, modifier params, palette-by-index — unreachable from a home hub. The ask that surfaced this: *"expose the whole REST API over MQTT."*
+
+**It's compatible with Homebridge/HA, because it's a second topic namespace, not a replacement.** Homebridge only ever subscribes to the semantic topics it's configured for; a generic topic family sits beside them and a broker carries both. The two surfaces already share one apply-core — `Scheduler::setControl(module, control, json)`, the same seam `/api/control` and IR funnel through — so a generic MQTT surface is that core under a different topic shape, honouring the module's own "MQTT is a transport, not new control logic" contract.
+
+But "the whole REST API" over-scopes: of the routes (`/api/control`, `/api/state`, `/api/system`, `/api/modules[/…]`, `/api/dir`, `/api/file`, `/api/firmware/*`, `/api/reboot`, `/api/types`, the `/json/*` shim, `/ws`), only two are genuinely pub/sub-shaped. The rest are request/response or bulk transfer and belong on REST:
+
+- **`<prefix>/api/control/set`** ← `{"module","control","value"}` (the exact JSON `/api/control` takes) → `applySetControl`. The real win: any control on any module — the effect/layout/modifier/palette reach HomeKit can't express. The apply-core already validates (range / read-only / module-not-found via `SetControlResult`), so safety is free.
+- **`<prefix>/api/state/get`** → publishes the `/api/state` JSON (retained). For dashboards (fps / heap / tick / current effect across a fleet), offline detection, and alerting — the monitoring half.
+
+Explicitly **out** (no practical MQTT case, and wrong for the transport):
+- **`/api/file`, `/api/dir`, `/api/firmware/upload`** — kilobytes-to-megabytes of binary; MQTT is a small-message bus, REST already streams these correctly.
+- **`/api/modules` add/delete/move/replace** — stateful, order-sensitive pipeline surgery a human does once in the UI; an automation reshaping the pipeline is an anti-pattern (the *Robust to any input* guarantee makes it *safe*, not *advisable*).
+- **`/api/reboot`** — one narrow action; a single fleet-reboot topic is a mild nice-to-have, not "the API."
+- **`/api/types`, `/json/*`, `/`, `/ws`, `/api/firmware/url`** — discovery metadata, the WLED shim, the UI itself, the socket: static, already-served-elsewhere, or a different protocol.
+
+**Shape:** ~15 lines routing into the existing `applySetControl` + a state publish; gate behind a `generic API` bool defaulting **off**, so a home user's broker isn't a remote-config backdoor and the curated HomeKit surface stays the clean default. **Don't** auto-generate a semantic topic per control — HomeKit/HA need stable typed topics; a generic `palette/set` whose meaning shifts per firmware breaks their discovery. Keep semantic topics hand-curated; let the generic pair be the escape hatch.
+
+**If the actual goal is deeper HA (not scripting), the better path is HA MQTT Discovery** — the device announces its controls as HA entities via retained `homeassistant/…/config` topics (the industry-standard pattern, *Common patterns first*), giving HA typed entities instead of a raw JSON pipe. Bigger than the generic pair, and the right lift if HA depth — not power-user scripting — is the target. Related integration threads to keep this coherent with: the [DevicesModule command half](#devicesmodule-interop-plugins-the-command-half-discovery-shipped) (Tasmota-MQTT / zigbee2mqtt as *outbound* control of foreign devices — the mirror of this *inbound* surface), and the [LightsControl integration point](backlog-mixed.md) (the eventual single owner of "device ↔ outside world", MQTT/HA included).
+
 ## Testing
 
 ### Additional test coverage (pending)
@@ -356,7 +377,7 @@ Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stac
 
 ## UI
 
-Forward-looking companion to the shipped UI spec, [moonmodules/core/ui/ui.md](../moonmodules/core/ui/ui.md). The live spec describes the UI as shipped; this file holds what is **not** in it yet: deferred items, open design questions for 1.0, and the gap analysis against projectMM v1. The backward-looking half (how v1/v2 actually worked, patterns consciously rejected, recorded quirks) lives in [history/v1-inventory.md](../history/v1-inventory.md).
+Forward-looking companion to the shipped UI spec, [moonmodules/core/services/services.md](../moonmodules/core/services/services.md). The live spec describes the UI as shipped; this file holds what is **not** in it yet: deferred items, open design questions for 1.0, and the gap analysis against projectMM v1. The backward-looking half (how v1/v2 actually worked, patterns consciously rejected, recorded quirks) lives in [history/v1-inventory.md](../history/v1-inventory.md).
 
 ### Deferred to 1.x
 
@@ -368,7 +389,7 @@ Forward-looking companion to the shipped UI spec, [moonmodules/core/ui/ui.md](..
 
 ### File Manager follow-ups
 
-The shipped File Manager (see [ui.md](../moonmodules/core/ui/ui.md)) is a lazy expand/collapse tree over `/api/dir` + a size-capped text editor over `/api/file`, with drag-drop upload (tier 1) + per-file download + a filesystem-usage bar. Deferred capabilities, each self-contained:
+The shipped File Manager (see [ui.md](../moonmodules/core/services/services.md)) is a lazy expand/collapse tree over `/api/dir` + a size-capped text editor over `/api/file`, with drag-drop upload (tier 1) + per-file download + a filesystem-usage bar. Deferred capabilities, each self-contained:
 
 - **Upload — recursive folder tier.** Single-file upload of **any size** streams to the file (`fsWriteStream`, binary-safe, `kUploadMax` + free-space guarded) and downloads stream back (`fsReadAt`), so text/config/binary all work. Remaining: **multi-file / recursive folder drops** — client-side `mkdir` + walk via `dataTransfer.items` `webkitGetAsEntry()`.
 - **Download — folder as `.zip`.** Per-file download streams (`<a download>` on `/api/file`). A folder download needs the browser to walk `/api/dir` recursively, fetch each file, and build a `.zip` client-side — which means bundling a zip library into `app.js`. That's a permanent app.js size bump, and app.js is embedded in firmware, so it weighs on the flash budget (see the flash-budget item above). Gate on real demand; symmetric with the folder-upload tier.

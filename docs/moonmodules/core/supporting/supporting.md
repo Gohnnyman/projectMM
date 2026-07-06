@@ -26,6 +26,16 @@ Detail: [technical](../moxygen/MoonModule.md)
 
 [Tests](../../../tests/unit-tests.md#moonmodule)
 
+<a id="filesystem"></a>
+
+### Filesystem
+
+The persistence **engine**: writes control values to `/.config/*.json` and restores them on boot, overlaying loaded values through each control's pointer during `onBuildControls()`. A non-UI module (renders no card); its "last saved" status is surfaced by the File Manager. The home of the no-reboot live-reconfiguration behaviour (see below).
+
+Detail: [technical](../moxygen/FilesystemModule.md)
+
+[Tests](../../../tests/unit-tests.md#filesystemmodule)
+
 ## Persistence and dynamic rebuild
 
 Control values persist via [FilesystemModule](../moxygen/FilesystemModule.md), which overlays loaded values through each control's variable pointer during `onBuildControls()`. Calling `onBuildControls()` again at runtime (e.g. when a Select changes mode) clears and rebuilds the set, so only the controls relevant to the current mode show — this is how a control's conditional `hidden` flag re-evaluates. The rebuild sweep is also how a config change applies live, with no reboot.

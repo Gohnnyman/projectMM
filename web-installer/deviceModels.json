@@ -1064,8 +1064,8 @@
         "parent_id": "Layers"
       },
       {
-        "type": "SolidEffect",
-        "id": "Solid",
+        "type": "RainbowEffect",
+        "id": "Rainbow",
         "parent_id": "Layer"
       },
       {

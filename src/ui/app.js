@@ -520,7 +520,7 @@ function createCard(mod, depth) {
 
     // Help link → the module's spec page on the rendered docs site, far right of
     // the row. docPath comes from /api/types (relative to docs/moonmodules/, e.g.
-    // "core/ui/ui.md#audio" or "light/effects/effects.md#fire"); omitted if none.
+    // "core/services/services.md#audio" or "light/effects/effects.md#fire"); omitted if none.
     // The site is Material for MkDocs at moonmodules.org/projectMM/ (flat URLs, so
     // foo.md → foo.html; the MkDocs heading slugs match these #anchors), reached
     // via the same /projectMM/ subpath the installer uses. Convert only the `.md`
