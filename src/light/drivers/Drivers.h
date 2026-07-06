@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/DriverBase.h"  // DriverBase (split out; a driver subclass includes this header for both)
+#include "light/drivers/DriverBase.h"  // DriverBase — the Drivers container casts its children to it
 #include "core/MoonModule.h"
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"

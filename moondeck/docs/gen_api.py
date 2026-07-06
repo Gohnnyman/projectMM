@@ -113,9 +113,7 @@ _BLOB_BASE = "https://github.com/MoonModules/projectMM/blob/main"
 def _source_header(header_rel: str, domain: str, stem: str) -> str:
     """A one-line banner linking each generated page to its source `.h` on GitHub —
     `src/` isn't published to the site, so this is the only way to reach the header the
-    page is generated from. (The docs-v2 migration's temporary "original `<stem>.md`"
-    cross-check link is gone: all per-module archive pages have been absorbed into the
-    `///` comments and deleted, so there is nothing left to cross-check against.)"""
+    page is generated from."""
     return f"> _Source:_ [`{Path(header_rel).name}`]({_BLOB_BASE}/{header_rel})\n\n"
 
 

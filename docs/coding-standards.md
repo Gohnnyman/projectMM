@@ -116,9 +116,9 @@ Where each kind of fact lives. The guiding rule: **document a thing once, in the
 
 ### The two surfaces
 
-1. **Summary page (hand-written, end-user).** One `.md` per module *group*, a 4-column table — **name + description · gif/image · controls · links**. One row per module, authored as `###` prose blocks that a build-time hook ([`moondeck/docs/mkdocs_hooks.py`](../moondeck/docs/mkdocs_hooks.py)) renders as the table. Catalog controls live here because a catalog module's user surface is its runtime `controls_.add(...)` calls, which no static tool sees. Each group is nested in its own subfolder:
-   - `light/{effects,modifiers,layouts,drivers}/<name>.md` — the four light-catalog pages (may later split, e.g. `effects_wled.md` / `effects_moonmodules.md`).
-   - `core/services/`, `core/supporting/`, `light/supporting/` — the core-services (user-facing modules), core-supporting, and light-supporting summary pages.
+1. **Summary page (hand-written, end-user).** One `.md` per module *group*, a 4-column table — **name + description · gif/image · controls · links**. One row per module, authored as `###` prose blocks that a build-time hook ([`moondeck/docs/mkdocs_hooks.py`](../moondeck/docs/mkdocs_hooks.py)) renders as the table. Catalog controls live here because a catalog module's user surface is its runtime `controls_.add(...)` calls, which no static tool sees. Each group is one flat page under its domain (a group's `type` rides in the *page name*, not a subfolder — the [folder-structure decision](backlog/folder-structure-proposal.md)):
+   - `light/{effects,modifiers,layouts,drivers,supporting}.md` — the light-catalog + light-supporting pages (a type may later split by library into `effects_wled.md` / `effects_moonmodules.md`, still flat).
+   - `core/{services,supporting,ui}.md` — the core-services (user-facing modules), core-supporting, and web-UI summary pages.
 
    **The Links column** is assembled by the hook in a fixed order — **🧪 Tests · 📄 Technical · attribution · ⌄ details** — each with a Material icon (`:material-…:`, rendered as inline SVG by `pymdownx.emoji`, the same mechanism as the tag emoji in the Name column) so a link's *type* is scannable. A card carries these lines: a `[Tests](../../../tests/unit-tests.md#<anchor>)` line (omitted when the module has no unit test — a missing Tests link truthfully means "untested"), a **`Detail: [technical](../moxygen/<Stem>.md)`** line pointing at the generated technical page, and an `Origin:` attribution line. `check_specs` matches each block to its `.h` via that `moxygen/<Stem>.md` link, so keep the link's target on it.
 
@@ -143,7 +143,7 @@ A module's per-entity detail — the module description, each variable, each mem
 
 A module's story therefore lives in exactly two places: its `.h` (technical, generated) and its group summary row (end-user), which links to the technical page. Prior-art credit points at *other* projects learned from (FastLED, WLED, MoonLight, datasheets); superseded internal prototypes are not linked.
 
-**Migrating a catalog module's detail page → `.h`.** Historically some modules also had a hand-written `docs/moonmodules/<domain>/<Module>.md` detail page. These are being retired: their content moves into the `.h`'s `///` comment (so it generates onto the technical page) and the old `.md` is moved to `<domain>/archive/`, kept only until the generated page is validated against it, then deleted. Live docs never link an `archive/` file (the generated moxygen page is the one exception — it may link the archive during that validation window). When a common rationale repeats across sibling modules (e.g. the shared parallel-LED-driver body), it lives once on the shared base's `///` and the siblings reference it — the same *No duplication* rule, applied to the generated pages.
+**No per-module detail `.md`.** A module's technical detail lives in its `.h` `///` (→ the generated page), never a separate hand-written detail page. When a common rationale repeats across sibling modules (e.g. the shared parallel-LED-driver body), it lives once on the shared base class's `///` and the siblings reference it — the same *No duplication* rule, applied to the generated pages.
 
 ### Test inventories: their own generator, not moxygen
 

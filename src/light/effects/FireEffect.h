@@ -10,13 +10,12 @@
 
 namespace mm {
 
+// Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits — https://github.com/toggledbits/MatrixFireFast
 /// Fire2012-style heat field: sparks at the base rise and cool through the active
 /// palette (heat = palette index, cold at the low end, hottest at the high end);
 /// spark count scales with width. The flame colour comes from the active palette —
 /// the Lava palette (black->red->orange->yellow->white) gives the classic look; any
 /// palette works (Ocean/Forest turn the flame blue/green).
-// Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits — https://github.com/toggledbits/MatrixFireFast
-/// Fire2012-style heat-field effect coloured through the active palette.
 /// @card FireEffect.png
 class FireEffect : public EffectBase {
 public:

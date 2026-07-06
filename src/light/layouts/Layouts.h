@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/LayoutBase.h"  // LayoutBase + CoordCallback (split out; reachable via this header)
+#include "light/layouts/LayoutBase.h"  // LayoutBase + CoordCallback — the Layouts container casts its children to it
 #include "core/MoonModule.h"
 #include "light/light_types.h" // lengthType, nrOfLightsType
 

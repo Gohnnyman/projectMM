@@ -1,6 +1,6 @@
 # Drivers
 
-A driver reads its window of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies the shared [output correction](moxygen/Drivers.md) per light, and sends the result out — a wire protocol (WS2812), the network (Art-Net / E1.31 / DDP), a smart-light hub (Hue), or the web UI (Preview). Drivers are added per board through the catalog ([`deviceModels.json`](../../../web-installer/deviceModels.json)); `PreviewDriver` is the one boot-wired driver. Every driver shares the `start` / `count` [source-window](moxygen/Drivers.md) controls (the slice `[start, start+count)` it sends). Each card links to a detail page and, where it doesn't fit the table, a **⌄ details** section below.
+A driver reads its window of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies the shared [output correction](moxygen/Drivers.md) per light, and sends the result out — a wire protocol (WS2812), the network (Art-Net / E1.31 / DDP), a smart-light hub (Hue), or the web UI (Preview). Drivers are added per board through the catalog ([`deviceModels.json`](../../../web-installer/deviceModels.json)); `PreviewDriver` is the one boot-wired driver. Every driver shares the `start` / `count` [source-window](moxygen/DriverBase.md) controls (the slice `[start, start+count)` it sends). Each card links to a detail page and, where it doesn't fit the table, a **⌄ details** section below.
 
 **Jump to:** [LED output](#led-output-drivers) · [Network](#network-drivers) · [Smart light](#smart-light-drivers) · [Preview](#preview-drivers)
 
