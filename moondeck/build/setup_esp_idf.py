@@ -17,8 +17,8 @@ from build_esp32 import find_idf, IDF_SEARCH_PATHS
 INSTALL_SCRIPT_NAME = "install.bat" if sys.platform == "win32" else "install.sh"
 
 # The ESP-IDF commit every target (classic ESP32, S3, P4, S31) has been
-# validated against — a commit on the `release/v6.1` branch, the earliest IDF
-# line that carries the esp32s31 preview target. The script can't *clone* the
+# validated against — the `v6.1-beta1` tag, on the earliest IDF line that
+# carries the esp32s31 preview target. The script can't *clone* the
 # IDF for you (the dev does the initial clone per docs/building.md), but when the
 # installed checkout drifts from this pin it offers to move it (git checkout +
 # submodule sync) so a fresh shallow clone landing on a newer dev-branch commit
@@ -26,8 +26,8 @@ INSTALL_SCRIPT_NAME = "install.bat" if sys.platform == "win32" else "install.sh"
 # the validated commit. Pass --no-checkout to keep the warn-only behaviour (a
 # dev deliberately migrating off this snapshot to a newer release re-tests, not
 # auto-reverts).
-PINNED_IDF_COMMIT = "0d9287800812c95662921c2c5e812023939e3d58"
-PINNED_IDF_VERSION = "v6.1-dev-5215-g0d928780081"
+PINNED_IDF_COMMIT = "b1d13e9fe441c4f75e240c98a26fd631b7b3232f"
+PINNED_IDF_VERSION = "v6.1-beta1"
 
 
 def _installed_idf_commit(idf_path: Path) -> str:
@@ -49,7 +49,7 @@ def _checkout_pinned(idf_path: Path) -> bool:
     co = subprocess.run(["git", "checkout", PINNED_IDF_COMMIT], cwd=str(idf_path))
     if co.returncode != 0:
         print(f"   Checkout failed — the pinned commit may not be fetched yet. "
-              f"In {idf_path}: git fetch origin release/v6.1, then re-run.")
+              f"In {idf_path}: git fetch origin tag v6.1-beta1, then re-run.")
         return False
     # The new commit points its submodules at different SHAs; sync them so the
     # build sees the matching component sources.
