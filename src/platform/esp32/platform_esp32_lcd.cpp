@@ -15,8 +15,8 @@
 // SOC_LCDCAM_I80_LCD_SUPPORTED with inert stubs otherwise (classic ESP32 builds
 // it too; the driver never calls in thanks to platform::lcdLanes == 0). Gate on
 // SOC_LCDCAM_I80_LCD_SUPPORTED, NOT SOC_LCD_I80_SUPPORTED: the classic ESP32 sets
-// the latter for its unrelated I2S-LCD peripheral, which wired this driver onto a
-// chip with no LCD_CAM and hung its boot (see platform_config.h + lessons.md).
+// the latter for its unrelated I2S-LCD peripheral, so keying on it wires this driver
+// onto a chip with no LCD_CAM and hangs its boot (see platform_config.h + lessons.md).
 
 #include "platform/platform.h"
 

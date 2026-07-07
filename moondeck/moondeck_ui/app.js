@@ -713,6 +713,15 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
     // Client-side merging used to live here; moving it server-side keeps the
     // network-membership rule in one place.
     state = await resp.json();
+    // Report which subnet was actually scanned + how many answered, so a
+    // wrong/unset-network scan (finds nothing on a subnet with no devices)
+    // reads differently from "no devices online". The scan uses the machine's
+    // auto-detected /24 — see the server's _scanned_subnet.
+    const scanned = state._scanned_subnet;
+    const found = state._found_count ?? 0;
+    if (scanned) appendLog(`Scanned ${scanned}.1-254 — ${found} device(s) answered\n`);
+    if (scanned && found === 0)
+        appendLog(`  (nothing on ${scanned}.x — check this machine is on the devices' subnet, no VPN)\n`);
     renderNetworkBar();
     renderDevices();
     refreshPorts();
