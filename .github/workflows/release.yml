@@ -123,7 +123,7 @@ jobs:
             ~/.espressif
             ~/esp/esp-idf
           # Bump the suffix when changing the IDF version to invalidate.
-          key: esp-idf-release-v6.1-${{ runner.os }}-v1
+          key: esp-idf-v6.1-beta1-${{ runner.os }}-v1
 
       # The release-channel tag burned into the binary as MM_RELEASE (shown by
       # SystemModule alongside the semver). Same resolution as the release
@@ -166,15 +166,16 @@ jobs:
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
-          # Match the local development IDF (release/v6.1, v6.1-dev-5215-g0d928780081).
+          # Match the local development IDF (v6.1-beta1, commit b1d13e9f).
           # The project uses v6-era APIs — `esp_eth_phy_new_generic`, the new
           # mDNS component manager, `int clock_gpio` in the EMAC config (v5.x
           # had a strongly-typed enum). v5.4 fails to compile platform_esp32.cpp.
-          # `release-v6.1` is the espressif/idf Docker tag built from the same
-          # `release/v6.1` branch the local pin lives on — the earliest IDF line
-          # that carries the esp32s31 preview target, and more stable than the
-          # rolling `v6.1-dev` tag.
-          esp_idf_version: release-v6.1
+          # `v6.1-beta1` is the espressif/idf Docker tag pinned to the same
+          # tagged beta the local pin uses — a fixed, signed pre-release (not the
+          # rolling `release-v6.1` branch tag), so CI and local build the exact
+          # same tree. This tracks the v6.1 line toward GA; re-pin to the `v6.1`
+          # tag once it ships (a deliberate re-test pass, see docs/building.md).
+          esp_idf_version: v6.1-beta1
           # The IDF target follows the firmware-key prefix: esp32s31* → esp32s31
           # (checked BEFORE esp32s3 — esp32s31 also startsWith 'esp32s3'),
           # esp32s3* → esp32s3, esp32p4* → esp32p4 (the only target that pulls
