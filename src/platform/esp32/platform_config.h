@@ -6,11 +6,14 @@
 
 #include <cstdint>
 
-// The RMT TX-channel count moved into the RMT HAL's low-level header when the RMT
-// HAL graduated into its own `esp_hal_rmt` component on the v6.1 line (it replaced
-// the public `SOC_RMT_TX_CANDIDATES_PER_GROUP` soc-cap). Included at file scope
-// (not inside the namespace) so the standard headers it pulls land in `::`, and
-// only on RMT-bearing builds.
+// The RMT TX-channel count moved into the RMT HAL's low-level header when the
+// RMT HAL graduated into its own `esp_hal_rmt` component on the v6.1 line (the
+// header re-appears at `hal/rmt_ll.h`, now shipped by `esp_hal_rmt` instead of
+// the monolithic `hal` component). Espressif also removed the public
+// `SOC_RMT_TX_CANDIDATES_PER_GROUP` soc-cap from `soc/soc_caps.h` in the same
+// pass, so the LL symbol is the only per-target definition of the count on
+// beta1. Included at file scope (not inside the namespace) so the standard
+// headers it pulls land in `::`, and only on RMT-bearing builds.
 #ifdef CONFIG_SOC_RMT_SUPPORTED
 #include "hal/rmt_ll.h"
 #endif
@@ -56,7 +59,7 @@ constexpr bool isEsp32S31 = false;
 #endif
 
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 / P4 / S31,
-// straight from the IDF RMT HAL — `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
+// straight from the RMT HAL — `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
 // Doubles as the RMT capability flag: the RMT LED driver and its main.cpp
 // registration guard on `rmtTxChannels > 0` instead of a chip-family flag, so a
 // new RMT-bearing target works untouched.

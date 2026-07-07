@@ -128,6 +128,47 @@ The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → 
 
 ![MoonDeck ESP32 tab](assets/ui/moondeck_esp32.png)
 
+### Windows: USB-serial drivers
+
+Windows ships no drivers for the two USB-serial chips almost every ESP32 dev board uses (WCH CH340/CH341, Silicon Labs CP2102/CP2102N). macOS and Linux do — so a board that Just Works on your Mac may show up on Windows as an `Unknown` device with no `COM*` port allocated at all, in which case both MoonDeck's port dropdown and the web installer's Chrome Web Serial picker come up **empty**. This isn't a projectMM bug; it's the OS.
+
+**How to tell what you're dealing with:**
+
+- **MoonDeck ESP32 tab** — click Refresh; no `COM*` in the dropdown after plugging in a board.
+- **Chrome web installer** — the "Select a serial port" browser dialog says *No serial ports available*.
+- **Device Manager** — the board shows under *Other devices* (yellow triangle) with the chip name (e.g. *CP2102N USB to UART Bridge Controller*) and status *Error*.
+- **PowerShell** — `Get-PnpDevice | Where-Object InstanceId -match "VID_10C4|VID_1A86"` shows the device with `Status: Error` and empty `SERIALCOMM` registry (`Get-ItemProperty "HKLM:\HARDWARE\DEVICEMAP\SERIALCOMM"`).
+
+**Which driver you need**, by the vendor ID (VID) in the InstanceId:
+
+| VID | Chip | Common boards | Driver |
+|---|---|---|---|
+| `1A86` | WCH CH340 / CH341 | LOLIN D32, cheap NodeMCU-ESP32 clones, some Olimex | wch.cn official CH341SER (Windows Update usually pulls it — if not, try `pnputil /scan-devices` from an elevated PowerShell first). |
+| `10C4` | Silicon Labs CP2102 / CP2102N | ESP32-S3 DevKitC, ESP32-S31 CoreBoard, many newer dev kits | Silicon Labs Universal driver — [zip download](https://www.silabs.com/documents/public/software/CP210x_Universal_Windows_Driver.zip). Windows Update rarely has this one, so grab it directly. |
+| `0403` | FTDI FT2232 / FT230X | Some Olimex Gateways, older ESP32-WROVER-KIT | Windows Update usually installs FTDI VCP automatically. |
+
+**Fastest headless install** (works for both CH340 and CP210x — Silicon Labs' zip contains an `.inf` `pnputil` can install directly):
+
+```powershell
+# 1) Download + extract the Silicon Labs Universal driver (CP210x).
+$dst = "$env:TEMP\cp210x_driver"
+Invoke-WebRequest "https://www.silabs.com/documents/public/software/CP210x_Universal_Windows_Driver.zip" `
+                  -OutFile "$dst.zip"
+Expand-Archive -Path "$dst.zip" -DestinationPath $dst -Force
+
+# 2) Install (elevated — accept the UAC prompt).
+Start-Process powershell -Verb RunAs -ArgumentList `
+    "pnputil /add-driver $dst\silabser.inf /install"
+```
+
+After the driver installs and Windows finishes binding (a few seconds), the boards appear as `Silicon Labs CP210x USB to UART Bridge (COM*)` with `Status: OK`. Both MoonDeck's port list (stateless registry read, no need to restart the server) and the web installer's Chrome picker populate immediately.
+
+**Related Windows serial gotchas — same class of issue, same page:**
+
+- **Stale "ghost" COM ports** from previous plug attempts (visible in Device Manager under *Show hidden devices*) reserve entries in the `ComDB` registry and can block fresh COM allocations even after replug. Clean them with `pnputil /remove-device "USB\VID_…"` (also elevated) — then replug.
+- **Wedged CH340 driver from an earlier install** (`Status: Unknown` even though the driver is installed) — same pattern: `pnputil /delete-driver oem*.inf /uninstall /force` for the wch.cn driver, replug, let Windows Update supply a fresh one.
+- **Cable / port** — some phone-charging cables carry only VBUS + GND (no data lines) and enumerate as briefly-then-vanish. Try a known-good cable and a rear USB-2 port before spending more time on drivers.
+
 ### ESP-IDF version
 
 **Pinned to `v6.1-beta1`** (commit `b1d13e9f`, a signed pre-release tag). `setup_esp_idf.py` holds the exact commit in `PINNED_IDF_VERSION`, warns loudly when the installed tree differs, and by default offers to check the pin out so a stray `git pull` or a fresh shallow clone landing on a newer commit converges back rather than silently building against the wrong tree (`--no-checkout` keeps it warn-only). Minimum is ESP-IDF v5.1 (C++20 needs GCC 12+); the project uses v6.x APIs (`esp_eth_phy_new_generic`, the component manager for mDNS, the modern RMT/parlio/LCD drivers) so v5.x would need adjustments.

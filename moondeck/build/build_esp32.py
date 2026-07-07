@@ -24,6 +24,62 @@ IDF_SEARCH_PATHS = [
     Path("/opt/esp-idf"),
 ]
 
+# The ESP-IDF commit every target (classic ESP32, S3, P4, S31) has been
+# validated against — the `v6.1-beta1` tag, on the earliest IDF line that
+# carries the esp32s31 preview target. Kept here (not in setup_esp_idf.py) so
+# the pre-build drift check below can share the constant — a stale local IDF is
+# the single most common source of an "it built for me last week" ESP32 build
+# failure, so the check runs on every build_esp32 invocation, not just when the
+# user remembers to re-run setup_esp_idf.py. setup_esp_idf.py imports these
+# two constants.
+PINNED_IDF_COMMIT = "b1d13e9fe441c4f75e240c98a26fd631b7b3232f"
+PINNED_IDF_VERSION = "v6.1-beta1"
+
+
+def installed_idf_commit(idf_path: Path) -> str:
+    """Return the git HEAD SHA of the installed IDF, or '' if unavailable."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(idf_path),
+                           capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except OSError:
+        return ""
+
+
+def check_idf_pin(idf_path: Path) -> None:
+    """Abort the build if the installed IDF isn't at PINNED_IDF_COMMIT.
+
+    Reason: silently building against a drifted IDF produces the classic
+    "missing symbol" / "renamed cap macro" errors that look like *our* bug but
+    are actually Espressif renaming an API between snapshots. Failing fast with
+    the exact fix command turns 30-minute debugging into a 30-second
+    re-checkout. Skip if HEAD can't be determined (not a git checkout, missing
+    git, etc.) — no false positives.
+
+    Deliberate escape hatch: a dev testing an upcoming IDF release (beta1 → RC,
+    RC → GA) needs to build against a drifted IDF on purpose. Symmetric with
+    setup_esp_idf.py's --no-checkout, that path is `--skip-idf-pin-check`
+    threaded from main(); passed here as `bypass=True`.
+    """
+    installed = installed_idf_commit(idf_path)
+    if not installed or installed == PINNED_IDF_COMMIT:
+        return
+    print(f"\nESP-IDF commit drift: installed {installed[:12]} != "
+          f"pinned {PINNED_IDF_COMMIT[:12]} ({PINNED_IDF_VERSION}).", file=sys.stderr)
+    print("The build was validated against the pinned commit; a drifted IDF is "
+          "the most common source of ESP32 build failures that look like "
+          "projectMM bugs but are actually Espressif renaming a symbol.",
+          file=sys.stderr)
+    print("Fix: re-run `uv run moondeck/build/setup_esp_idf.py` (it will offer "
+          "to check out the pinned commit + resync submodules + reinstall "
+          "toolchains). See docs/building.md § ESP-IDF version for the "
+          "manual command if you'd rather do it by hand.", file=sys.stderr)
+    print("Or pass --skip-idf-pin-check to build anyway (deliberate migration "
+          "to a newer IDF release; re-tests then update PINNED_IDF_COMMIT).",
+          file=sys.stderr)
+    sys.exit(2)
+
+
 # Components to drop from an Ethernet-only build. ESP-IDF v6.x has no
 # CONFIG_ESP_WIFI_ENABLED switch (the symbol is non-settable, forced y on
 # WiFi-capable SoCs), so WiFi is removed via EXCLUDE_COMPONENTS instead.
@@ -415,7 +471,7 @@ def resolve_firmware(args: argparse.Namespace) -> str:
     return "esp32"
 
 
-def stale_feature_cache(build_dir: Path, extra: list[str]) -> str | None:
+def stale_feature_cache(build_dir: Path, extra: list[str], chip: str) -> str | None:
     """Detect a build dir whose cached feature flags disagree with this firmware.
 
     CMake `-D` flags are written into CMakeCache.txt; *omitting* a flag on a
@@ -426,6 +482,15 @@ def stale_feature_cache(build_dir: Path, extra: list[str]) -> str | None:
     WiFi-only dir kept MM_NO_ETH=1 and stubbed Ethernet out (no link, no LED).
     Erasing flash doesn't help: it's a compile-time define, not device state.
 
+    Also catches a mismatched IDF_TARGET: an earlier `set-target` for this
+    firmware may have partially succeeded (interrupted, or ran when the
+    RISC-V toolchain was missing and only got as far as writing sdkconfig for
+    the default `esp32` target), leaving the build dir with the wrong chip.
+    The wrapper's "dir exists → skip set-target" fast-path then trusts that
+    stale state and silently builds for the wrong chip — the P4 case that
+    bit us in the beta1 bring-up. `chip` is the firmware's expected target
+    (per FIRMWARES[firmware]["chip"]).
+
     Returns a human-readable reason string when the cache is stale (caller
     should clean + reconfigure), or None when it matches.
     """
@@ -433,6 +498,16 @@ def stale_feature_cache(build_dir: Path, extra: list[str]) -> str | None:
     if not cache.exists():
         return None
     text = cache.read_text(encoding="utf-8", errors="replace")
+    # Chip / target mismatch — cheap check, do it first (a mismatch here means
+    # every other cached flag is also for the wrong target, so no point
+    # checking those). CMake writes `IDF_TARGET:STRING=esp32p4`; a fresh
+    # cache without an IDF_TARGET line (partial set-target failure before
+    # configure) also counts as stale.
+    m = re.search(r"^IDF_TARGET:[^=]*=(.*)$", text, re.MULTILINE)
+    cached_target = m.group(1).strip() if m else None
+    if cached_target != chip:
+        return (f"IDF_TARGET cached as {cached_target!r} but this firmware "
+                f"wants {chip!r}")
     # The feature toggles whose presence/absence changes which code compiles.
     # For each, "wanted" = does this firmware pass the -D, "cached" = is it set
     # in the existing cache. A disagreement means a stale dir.
@@ -489,6 +564,13 @@ def main():
                              "(see compute_version.py): core for a stable tag, "
                              "'<core>-dev.<N>' for latest. Omit for local builds "
                              "(library.json applies).")
+    parser.add_argument("--skip-idf-pin-check", action="store_true",
+                        help="Build against the currently-checked-out IDF even if "
+                             "it differs from PINNED_IDF_COMMIT (for a dev "
+                             "deliberately testing a newer IDF release before "
+                             "the pin bumps). Symmetric with setup_esp_idf.py "
+                             "--no-checkout. Use with care: a drifted IDF is the "
+                             "most common source of ESP32 build failures.")
     args = parser.parse_args()
 
     firmware = resolve_firmware(args)
@@ -510,6 +592,13 @@ def main():
         sys.exit(1)
 
     print(f"Using ESP-IDF at {idf_path}")
+    # Fail-fast on a drifted local IDF before we sink a few minutes into a
+    # build that would end in "SOC_FOO was renamed to SOC_BAR" or similar. See
+    # check_idf_pin above for why this belongs in the build script, not just
+    # setup_esp_idf.py. --skip-idf-pin-check bypasses the check entirely for a
+    # dev deliberately testing an upcoming IDF release.
+    if not args.skip_idf_pin_check:
+        check_idf_pin(idf_path)
     env = idf_env(idf_path)
     cmd = idf_cmd(idf_path)
 
@@ -549,7 +638,7 @@ def main():
     # Guard against a build dir configured for a different feature set (a stale
     # MM_NO_ETH / MM_ETH_ONLY in CMakeCache that a plain reconfigure won't clear).
     # Wiping the dir forces the set-target path below, which seeds a clean cache.
-    stale = stale_feature_cache(build_dir, extra)
+    stale = stale_feature_cache(build_dir, extra, chip)
     if stale:
         print(f"Build dir {build_dir.relative_to(ROOT)} has a stale feature "
               f"cache ({stale}); removing it for a clean reconfigure.")

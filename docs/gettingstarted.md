@@ -36,6 +36,13 @@ which? Unplug, look at the list, plug back in — the new entry is your device.)
 
 ![Selecting the USB port](assets/gettingstarted/01-02-select-port.png)
 
+**Windows users — dialog says "No serial ports available"?** Windows doesn't
+ship drivers for the USB-serial chips most ESP32 boards use (WCH CH340, Silicon
+Labs CP2102). One-time install fixes it for every future flash — full
+step-by-step + the download link is in
+[building.md § Windows: USB-serial drivers](building.md#windows-usb-serial-drivers).
+macOS and Linux ship these drivers built in, so it's a Windows-only step.
+
 Once a port is chosen, the installer recognises the chip and tells you how many
 devices match it, so you know you're on the right track before you pick one.
 
