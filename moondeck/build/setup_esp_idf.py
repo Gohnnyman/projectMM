@@ -6,6 +6,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Force stdout/stderr to UTF-8 on Windows: the drift warning below (and any
+# future non-ASCII output — file paths with accents, log lines from install.bat)
+# fails with UnicodeEncodeError on cp1252 when the caller pipes / redirects
+# stdout, which is the exact case CI and Tee-Object hit. reconfigure() is a
+# no-op on POSIX where stdio is already UTF-8.
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr is not None:
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 # PINNED_IDF_COMMIT / PINNED_IDF_VERSION / installed_idf_commit live in
 # build_esp32.py so the pre-build drift check (check_idf_pin, called on every
