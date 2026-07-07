@@ -6,18 +6,16 @@
 
 #include <cstdint>
 
-// The RMT TX-channel count comes from `soc/soc_caps.h`.
-// `SOC_RMT_TX_CANDIDATES_PER_GROUP` is the public HAL-layer capability macro
-// Espressif defines per chip family (8 on classic ESP32, 4 on S3 / P4 / S31, 2
-// on the C-series). Prefer this over the private `RMT_LL_TX_CANDIDATES_PER_INST`
-// from `hal/rmt_ll.h` — LL_ symbols are implementation details that change
-// across IDF releases (v6.1-dev renamed this one), whereas the SOC_ cap is
-// stable across v5.x and v6.x. sdkconfig.h alone defines the Kconfig-generated
-// `CONFIG_SOC_*` variant but not the un-prefixed `SOC_*` macro, so include the
-// header explicitly, guarded by CONFIG_SOC_RMT_SUPPORTED so non-RMT targets
-// (currently none, but the guard matches the constant below) don't pull it.
+// The RMT TX-channel count moved into the RMT HAL's low-level header when the
+// RMT HAL graduated into its own `esp_hal_rmt` component on the v6.1 line (the
+// header re-appears at `hal/rmt_ll.h`, now shipped by `esp_hal_rmt` instead of
+// the monolithic `hal` component). Espressif also removed the public
+// `SOC_RMT_TX_CANDIDATES_PER_GROUP` soc-cap from `soc/soc_caps.h` in the same
+// pass, so the LL symbol is the only per-target definition of the count on
+// beta1. Included at file scope (not inside the namespace) so the standard
+// headers it pulls land in `::`, and only on RMT-bearing builds.
 #ifdef CONFIG_SOC_RMT_SUPPORTED
-#include "soc/soc_caps.h"
+#include "hal/rmt_ll.h"
 #endif
 
 namespace mm::platform {
@@ -61,12 +59,12 @@ constexpr bool isEsp32S31 = false;
 #endif
 
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 / P4 / S31,
-// straight from the SOC HAL caps — see the SOC_RMT_TX_CANDIDATES_PER_GROUP note
-// at the top of this file). Doubles as the RMT capability flag: the RMT LED
-// driver and its main.cpp registration guard on `rmtTxChannels > 0` instead of a
-// chip-family flag, so a new RMT-bearing target works untouched.
+// straight from the RMT HAL — `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
+// Doubles as the RMT capability flag: the RMT LED driver and its main.cpp
+// registration guard on `rmtTxChannels > 0` instead of a chip-family flag, so a
+// new RMT-bearing target works untouched.
 #ifdef CONFIG_SOC_RMT_SUPPORTED
-constexpr uint8_t rmtTxChannels = SOC_RMT_TX_CANDIDATES_PER_GROUP;
+constexpr uint8_t rmtTxChannels = RMT_LL_TX_CANDIDATES_PER_INST;
 #else
 constexpr uint8_t rmtTxChannels = 0;
 #endif
