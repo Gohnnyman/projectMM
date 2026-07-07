@@ -107,8 +107,13 @@ void MqttModule::publishDiscovery(bool announce) {
     char topic[96];
     buildDiscoveryTopic(topic, sizeof(topic));
 
-    // Identity + display name. uniq_id/object_id derive from the stable MAC; name is the friendly
-    // deviceName (a rename updates the label, never the id — see the topic-identity decision).
+    // Identity + display name. uniq_id/object_id derive from the stable MAC; the friendly deviceName
+    // rides only on `dev.name`. The entity's own `name` is null — HA's documented convention "this
+    // entity IS the device, no sub-label" — so the auto-created entity slug is `light.<device>` rather
+    // than the doubled `light.<device>_<device>` HA produces when the light and the device carry the
+    // same name string. Rename the device → `dev.name` follows on the next discovery publish, uniq_id
+    // stays MAC-pinned, the slug (locked at creation) is unchanged. Documented at
+    // https://www.home-assistant.io/integrations/mqtt/#name — `name: null` is the recommended way.
     uint8_t mac[6] = {};
     platform::getMacAddress(mac);
     char id[24];
@@ -116,7 +121,7 @@ void MqttModule::publishDiscovery(bool announce) {
     const char* dn = systemModule_ ? systemModule_->deviceName() : nullptr;
     if (!dn || !dn[0]) dn = id;
     // The deviceName is user-editable: a quote/backslash in it would produce invalid JSON. Escape it
-    // once (both name fields use it) with the shared jsonEscape — worst case doubles the 32-char name.
+    // (used for dev.name only now) with the shared jsonEscape — worst case doubles the 32-char name.
     char dnEsc[72];
     jsonEscape(dn, dnEsc, sizeof(dnEsc));
 
@@ -127,11 +132,12 @@ void MqttModule::publishDiscovery(bool announce) {
 
     // JSON-schema MQTT light. Abbreviated keys (HA's documented short forms). brightness at the
     // default 0-255 scale (no scale key needed). dev{} groups the entity under a device card in HA.
+    // `name:null` (see comment above) collapses the entity slug so `light.<device>` isn't doubled.
     const int pn = std::snprintf(discoveryPayload_, kDiscoveryPayloadLen,
-        "{\"schema\":\"json\",\"name\":\"%s\",\"uniq_id\":\"%s\",\"cmd_t\":\"%s\","
+        "{\"schema\":\"json\",\"name\":null,\"uniq_id\":\"%s\",\"cmd_t\":\"%s\","
         "\"stat_t\":\"%s\",\"avty_t\":\"%s\",\"brightness\":true,"
         "\"dev\":{\"ids\":[\"%s\"],\"name\":\"%s\",\"mf\":\"MoonModules\",\"mdl\":\"projectMM\"}}",
-        dnEsc, id, cmd, stat, avty, id, dnEsc);
+        id, cmd, stat, avty, id, dnEsc);
     if (pn <= 0 || static_cast<size_t>(pn) >= kDiscoveryPayloadLen) return;   // truncated → don't send a broken config
 
     const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(discoveryPayload_),

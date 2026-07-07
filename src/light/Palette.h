@@ -250,6 +250,34 @@ public:
         return hue;
     }
 
+    // Representative RGB colour of built-in `index` — the palette's identity colour, useful anywhere
+    // an external surface (HA WLED /json seg[0].col, an MQTT hsv/get with an RGB-shaped payload,
+    // a future HomeKit RGB accessory) needs one RGB triple to name "the colour of this palette".
+    // Full V=255 in HSV, so the reported hue survives external dimming applied on top (HA's slider
+    // multiplies segment.bri × state.bri, so baking in brightness here would double-dim).
+    // Rainbow / grey palettes (sat=0) intentionally resolve to white (255,255,255) — the honest
+    // representation of a multi-hue gradient's identity. A degenerate index or a future palette that
+    // averages to true zero would fall out as (0,0,0); no fallback here — callers decide policy.
+    static RGB representativeRgb(uint8_t index) {
+        uint16_t hue = 0, sat = 0;
+        representativeHueSat(index, hue, sat);
+        // hue 0..359 → h 0..255 for hsvToRgb's 6-sector integer map (Palette.h convention: hue units
+        // are 0..359 externally; core/color.h uses 0..255 internally).
+        return hsvToRgb(static_cast<uint8_t>((hue * 256u) / 360u),
+                        static_cast<uint8_t>(sat), 255);
+    }
+
+    // RGB → nearest palette, the one call every RGB-input consumer (HA's WLED colour picker via
+    // /json/state, an ESP-NOW / REST colour message, a future BLE-mesh command …) should reach for
+    // instead of open-coding the RGB→HSV conversion. Converts to (hue, sat) with the same maths
+    // representativeHueSat uses on the palette side — so the input and the palette centroids are
+    // measured on the same axes — then delegates to nearestForHue for the 2D distance sweep.
+    static uint8_t nearestForRgb(uint8_t r, uint8_t g, uint8_t b) {
+        uint16_t hue = 0, sat = 0;
+        rgbToHueSat(r, g, b, hue, sat);
+        return nearestForHue(hue, static_cast<uint8_t>(sat));
+    }
+
     // The palette whose representative (hue, sat) is closest to the target, by 2D distance in
     // (circular-hue, saturation) space. `hue` 0..359, `sat` 0..255. Low target saturation snaps to a
     // desaturated palette (e.g. Rainbow); a vivid hue snaps to the matching single-hue palette.
