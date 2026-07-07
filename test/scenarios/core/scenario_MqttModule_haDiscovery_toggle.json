@@ -1,0 +1,69 @@
+{
+  "name": "scenario_MqttModule_haDiscovery_toggle",
+  "module": "MqttModule",
+  "mode": "mutate",
+  "live_only": true,
+  "description": "Toggle the Home-Assistant MQTT-discovery announce on and off and confirm the render loop survives every change. Pins the robustness + No-reboot-to-apply guarantees for the new haDiscovery control: turning it on publishes a retained homeassistant/light/<id>/config (and subscribes ha/set); turning it off retracts the config (empty retained payload) — both live over the already-connected socket on loop1s(), never a reconnect and never on the render task. No toggle, in any order, may crash, wedge the tick, or leak heap. Runs live only — discovery needs a real broker to publish to and MqttModule only exists on a board whose catalog entry includes it (the Shelly model does), so the in-process desktop runner SKIPs it; on a device it flips the control over HTTP. The bound checks FPS + heap stay within range across the on/off/on cycle (a discovery publish is a transient cost, not a permanent degradation), proving the toggle never leaves the network task or render loop degraded. (Background: the announce/retract are on the 1 Hz tick, off the hot path — see the MqttModule /// § Home Assistant MQTT Discovery.)",
+  "reset": [
+    {
+      "name": "reset-haDiscovery",
+      "op": "set_control",
+      "id": "Mqtt",
+      "key": "haDiscovery",
+      "value": true
+    }
+  ],
+  "steps": [
+    {
+      "name": "baseline-discovery-on",
+      "description": "haDiscovery on (default) — captures the baseline FPS/heap for the next two steps.",
+      "op": "set_control",
+      "id": "Mqtt",
+      "key": "haDiscovery",
+      "value": true,
+      "measure": true,
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 90000,
+          "set_by": "2026-07-06",
+          "reason": "initial contract — pending first hardware capture"
+        }
+      }
+    },
+    {
+      "name": "discovery-off",
+      "description": "haDiscovery off — the retract publish (empty retained config) goes out; FPS/heap must match or exceed the baseline.",
+      "op": "set_control",
+      "id": "Mqtt",
+      "key": "haDiscovery",
+      "value": false,
+      "measure": true,
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 90000,
+          "set_by": "2026-07-06",
+          "reason": "initial contract — pending first hardware capture"
+        }
+      }
+    },
+    {
+      "name": "discovery-on-again",
+      "description": "haDiscovery on again — re-announce + re-subscribe live. Bound: FPS must stay within 20% of the baseline (proves toggling doesn't leave the network task in a degraded state).",
+      "op": "set_control",
+      "id": "Mqtt",
+      "key": "haDiscovery",
+      "value": true,
+      "measure": true,
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 90000,
+          "set_by": "2026-07-06",
+          "reason": "initial contract — pending first hardware capture"
+        }
+      }
+    }
+  ]
+}

@@ -147,7 +147,7 @@ On `esp32-eth-wifi`, default 128×128 grid, free heap at boot is ~28 KB — not 
 
 Fix options in increasing scope:
 - **Cap the default grid** — drop to 64×64 on `esp32-eth-wifi` (Layer ~32 KB + LUT ~16 KB = 48 KB, comfortably under). Simplest.
-- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [decisions.md](../history/decisions.md) "Adaptive memory allocation design" for the allocation rules.
+- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [lessons.md](../history/lessons.md) "Adaptive memory allocation design" for the allocation rules.
 - **Lazy WiFi init** — skip `esp_wifi_init` when `ssid_` is empty and no AP-fallback is pending. Helps only when credentials exist but the network is unreachable — niche.
 
 ### Boot-time buffer degradation on non-PSRAM at 128×128 (investigation)
@@ -169,6 +169,10 @@ Related: this is the render/output-buffer face of the same non-PSRAM fragmentati
 No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tick; if OTA download or Improv scan causes tick-variance spikes, pin render → core 1, OTA/Improv → core 0 (where WiFi already lives via `CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y`). Defer until contention is observed — neither OTA nor Improv runs during normal operation.
 
 ## Architecture
+
+### WiFi runtime disable — open design question (undesigned)
+
+Today the eth-only build profile compiles WiFi out (`MM_NO_WIFI`). Turning WiFi off *at runtime* instead is undesigned: whether the gate should key off detected hardware presence, an explicit control, or a deviceModel-catalog field isn't decided. The eth-only build covers the need until a concrete case forces the choice. (Moved from architecture.md § What we leave undesigned; it's a deferred design decision, not a settled 🚧 one.)
 
 ### Consolidate the two module-by-name tree-walkers (backlog)
 
@@ -239,7 +243,7 @@ When picked up: add `offsetX/Y/Z` (lengthType) controls to `LayoutBase`; `Layout
 
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
 
-Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [decisions.md](../history/decisions.md) "Trying to add a child module to NetworkModule".
+Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [lessons.md](../history/lessons.md) "Trying to add a child module to NetworkModule".
 
 Minimum-scope fix before the move:
 1. `MoonModule::loop20ms`/`loop1s` propagate to children (or Scheduler walks them) — pick whichever costs less at runtime.
@@ -300,7 +304,14 @@ Explicitly **out** (no practical MQTT case, and wrong for the transport):
 
 **Shape:** ~15 lines routing into the existing `applySetControl` + a state publish; gate behind a `generic API` bool defaulting **off**, so a home user's broker isn't a remote-config backdoor and the curated HomeKit surface stays the clean default. **Don't** auto-generate a semantic topic per control — HomeKit/HA need stable typed topics; a generic `palette/set` whose meaning shifts per firmware breaks their discovery. Keep semantic topics hand-curated; let the generic pair be the escape hatch.
 
-**If the actual goal is deeper HA (not scripting), the better path is HA MQTT Discovery** — the device announces its controls as HA entities via retained `homeassistant/…/config` topics (the industry-standard pattern, *Common patterns first*), giving HA typed entities instead of a raw JSON pipe. Bigger than the generic pair, and the right lift if HA depth — not power-user scripting — is the target. Related integration threads to keep this coherent with: the [DevicesModule command half](#devicesmodule-interop-plugins-the-command-half-discovery-shipped) (Tasmota-MQTT / zigbee2mqtt as *outbound* control of foreign devices — the mirror of this *inbound* surface), and the [LightsControl integration point](backlog-mixed.md) (the eventual single owner of "device ↔ outside world", MQTT/HA included).
+**HA MQTT Discovery — SHIPPED.** The device announces a retained JSON-schema light config to
+`homeassistant/light/<id>/config` (the Tasmota/ESPHome/Zigbee2MQTT pattern), so HA auto-creates a
+wired entity — gated on the `haDiscovery` control, with a Last-Will availability topic. This covered
+the "HA can't reach the device over MQTT" incidents. The *generic-topics escape hatch* above (the
+whole REST API over MQTT, for power-user scripting) is the remaining unbuilt piece; keep it coherent
+with the [DevicesModule command half](#devicesmodule-interop-plugins-the-command-half-discovery-shipped)
+(Tasmota-MQTT / zigbee2mqtt as *outbound* control — the mirror of this *inbound* surface) and the
+[LightsControl integration point](backlog-mixed.md).
 
 **Open question — Homebridge example maps both `setBrightness` and `setHSV`.** In `homebridge-mqttthing`'s `lightbulb`, HSV's *value* (V) already carries HomeKit's Brightness characteristic, so mapping both topic pairs may double-drive brightness (mqttthing's docs lean toward using one or the other). The [MQTT § Homebridge example](../moonmodules/core/services.md#mqtt) currently lists both, to show the device's full topic surface. Resolve on hardware: flash a board, run Homebridge + mqttthing with that config, and check whether the Home-app brightness slider misbehaves — if it does, drop the two `brightness` topics from the example; if not, it's a non-issue. (Flagged by CodeRabbit; parked here rather than changing the doc on an untested hunch.)
 

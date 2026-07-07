@@ -6,7 +6,7 @@ Every effect, one block each: its preview, what it does, and what each control m
 
 **Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, colour mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
 
-> Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../../assets/…` gif show our own output.
+> Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../assets/…` gif show our own output.
 
 ## MoonLight effects
 
@@ -66,7 +66,7 @@ Detail: [technical](moxygen/FreqSawsEffect.md)
 
 ### LavaLamp 💫🦅 · 2D
 
-<img src="../../../assets/light/effects/LavaLampEffect.gif" width="300" alt="LavaLamp effect preview">
+<img src="../../assets/light/effects/LavaLampEffect.gif" width="300" alt="LavaLamp effect preview">
 
 Three slow blobs through a black→red→orange→yellow→white ramp — atmospheric lava look.
 
@@ -84,7 +84,7 @@ Detail: [technical](moxygen/LavaLampEffect.md)
 
 ### Lines 💫 · —
 
-<img src="../../../assets/light/effects/LinesEffect.gif" width="300" alt="Lines effect preview">
+<img src="../../assets/light/effects/LinesEffect.gif" width="300" alt="Lines effect preview">
 
 Sweeps axis-aligned planes in sync; red/green/blue name the X/Y/Z axis — a preview-orientation test pattern.
 
@@ -99,7 +99,7 @@ Detail: [technical](moxygen/LinesEffect.md)
 
 ### Metaballs 💫🦅 · 2D
 
-<img src="../../../assets/light/effects/MetaballsEffect.gif" width="300" alt="Metaballs effect preview">
+<img src="../../assets/light/effects/MetaballsEffect.gif" width="300" alt="Metaballs effect preview">
 
 `count` blobs orbit via integer sin/cos; metaball field per pixel — bright HSV merge/split.
 
@@ -118,7 +118,7 @@ Detail: [technical](moxygen/MetaballsEffect.md)
 
 ### Particles 💫🦅 · 2D
 
-<img src="../../../assets/light/effects/ParticlesEffect.gif" width="300" alt="Particles effect preview">
+<img src="../../assets/light/effects/ParticlesEffect.gif" width="300" alt="Particles effect preview">
 
 A swarm of drifting particles with persistent fading trails.
 
@@ -137,7 +137,7 @@ Detail: [technical](moxygen/ParticlesEffect.md)
 
 ### Plasma 💫🦅 · 2D/3D
 
-<img src="../../../assets/light/effects/PlasmaEffect.gif" width="300" alt="Plasma effect preview">
+<img src="../../assets/light/effects/PlasmaEffect.gif" width="300" alt="Plasma effect preview">
 
 Summed sine waves on orthogonal + diagonal axes; large rolling blobs (3D on volumetric layouts).
 
@@ -170,7 +170,7 @@ Detail: [technical](moxygen/PraxisEffect.md)
 
 ### Rainbow 💫 · 2D
 
-<img src="../../../assets/light/effects/RainbowEffect.gif" width="300" alt="Rainbow effect preview">
+<img src="../../assets/light/effects/RainbowEffect.gif" width="300" alt="Rainbow effect preview">
 
 Diagonal animated rainbow — always-visible default/test effect.
 
@@ -200,7 +200,7 @@ Detail: [technical](moxygen/RandomEffect.md)
 
 ### Rings 💫🦅 · 2D
 
-<img src="../../../assets/light/effects/RingsEffect.gif" width="300" alt="Rings effect preview">
+<img src="../../assets/light/effects/RingsEffect.gif" width="300" alt="Rings effect preview">
 
 Expanding concentric rings from random centres, additive overlap (calm defaults).
 
@@ -219,7 +219,7 @@ Detail: [technical](moxygen/RingsEffect.md)
 
 ### Ripples 💫🟦🦅 · 3D
 
-<img src="../../../assets/light/effects/RipplesEffect.gif" width="300" alt="Ripples effect preview">
+<img src="../../assets/light/effects/RipplesEffect.gif" width="300" alt="Ripples effect preview">
 
 Distance-from-centre sets a per-column wave phase; the lit surface ripples like water.
 
@@ -285,7 +285,7 @@ Detail: [technical](moxygen/SphereMoveEffect.md)
 
 ### Spiral 💫🦅 · 2D
 
-<img src="../../../assets/light/effects/SpiralEffect.gif" width="300" alt="Spiral effect preview">
+<img src="../../assets/light/effects/SpiralEffect.gif" width="300" alt="Spiral effect preview">
 
 Rotating spiral from angle + distance (`atan2_8`/`dist8`).
 
@@ -320,7 +320,7 @@ Detail: [technical](moxygen/StarFieldEffect.md)
 
 ### StarSky 💫 · 3D
 
-<img src="../../../assets/light/effects/StarSkyEffect.gif" width="300" alt="StarSky effect preview">
+<img src="../../assets/light/effects/StarSkyEffect.gif" width="300" alt="StarSky effect preview">
 
 Twinkling stars at random light positions, each fading in and out independently over a dark background.
 
@@ -581,7 +581,7 @@ Detail: [technical](moxygen/WaveEffect.md)
 
 ### Fire ⚡️🦅 · 2D
 
-<img src="../../../assets/light/effects/FireEffect.gif" width="300" alt="Fire effect preview">
+<img src="../../assets/light/effects/FireEffect.gif" width="300" alt="Fire effect preview">
 
 Fire2012-style heat field — sparks at the base rise and cool through the active palette (heat = palette index, cold at the low end, hottest at the high end); spark count scales with width.
 
@@ -600,7 +600,7 @@ Detail: [technical](moxygen/FireEffect.md)
 
 ### Noise ⚡️ · 2D/3D
 
-<img src="../../../assets/light/effects/NoiseEffect.gif" width="300" alt="Noise effect preview">
+<img src="../../assets/light/effects/NoiseEffect.gif" width="300" alt="Noise effect preview">
 
 Smooth animated value noise; true 3D field on volumetric layouts.
 

@@ -20,7 +20,7 @@ Detail: [technical](moxygen/BlockModifier.md)
 
 ### Checkerboard 💫 · static
 
-<img src="../../../assets/light/modifiers/CheckerboardModifier.gif" width="300" alt="Checkerboard modifier preview">
+<img src="../../assets/light/modifiers/CheckerboardModifier.gif" width="300" alt="Checkerboard modifier preview">
 
 Masks the layer in a checkerboard: "off" squares are dropped, "on" squares pass through unchanged.
 
@@ -63,7 +63,7 @@ Detail: [technical](moxygen/MirrorModifier.md)
 
 ### Multiply 💫 · static
 
-<img src="../../../assets/light/modifiers/MultiplyModifier.gif" width="300" alt="Multiply modifier preview">
+<img src="../../assets/light/modifiers/MultiplyModifier.gif" width="300" alt="Multiply modifier preview">
 
 Tiles the logical image across the box `multiply` times per axis, optionally mirroring alternate tiles (a pure mirror is `multiply = 2, mirror = true`).
 

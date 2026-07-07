@@ -139,7 +139,10 @@ To set it up:
 
 Homebridge above is the worked example; other home-automation platforms adopt the same device through the same primitives. The building blocks are shared — the [MQTT control surface](../moonmodules/core/services.md#mqtt) (broker + the `on`/`brightness`/`hsv` topics) and, for hubs that speak it, the device's WLED compatibility — so a new integration is a new front-end on top, not new device work.
 
-- **Home Assistant** — HA adopts the device **without MQTT**: its built-in WLED integration discovers it over the WLED `/json` API the device already serves (the same interface the WLED apps use), so on/off + brightness work with no broker in the middle. For the full control surface, HA's MQTT Discovery reaches the same [control topics](../moonmodules/core/services.md#mqtt) below.
+- **Home Assistant** — two ways, both zero-config:
+  - **MQTT auto-discovery (recommended when you run a broker).** With the MQTT module's `haDiscovery` control on (the default) and a broker set, the device announces itself and HA **auto-creates a light entity** — no manual topic-matching, no YAML. Just add the MQTT integration in HA pointed at the same broker; the light appears (named after the device) with on/off + brightness, and greys out when the device drops offline. This is the Tasmota/ESPHome-style discovery.
+  - **WLED integration (no broker needed).** HA's built-in WLED integration discovers the device over the WLED `/json` API it already serves (the same interface the WLED apps use), so on/off + brightness work with no MQTT at all.
+  - *Note:* don't hand-configure HA's generic "MQTT light" against `homeassistant/light/…` — that's HA's own topic schema, which the device answers only via the auto-discovery above. If you ever configure MQTT by hand, point it at the device's own `projectMM/<mac6>/…` topics (see the [MQTT reference](../moonmodules/core/services.md#mqtt)).
 - **Others** (Node-RED, openHAB, voice assistants via a hub, …) — anything that speaks MQTT drives the device through the [control topics](../moonmodules/core/services.md#mqtt); the broker setup is the same [install step](#install-a-broker-homebridge) as above, only the consumer differs.
 
 Each integration is a self-contained recipe; the shared MQTT reference lives once in [Core › Services › MQTT](../moonmodules/core/services.md#mqtt).

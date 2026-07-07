@@ -761,6 +761,44 @@ def _kill_process_by_name(name: str):
         subprocess.run(["pkill", "-f", name], capture_output=True)
 
 
+def _free_port(port: int):
+    """SIGTERM whatever already holds `port`, so a re-run of MoonDeck replaces the
+    prior instance instead of failing to bind ("Address already in use"). Targets
+    the port's owner (not a name match), so it can only hit a stale server, never
+    the current process (we haven't bound yet). Cross-platform: `lsof` on
+    macOS/Linux, `netstat` on Windows; a no-op if the port is free or the lookup
+    tool is absent."""
+    pids: set[int] = set()
+    try:
+        if _IS_WIN:
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, text=True).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[1].endswith(f":{port}") and "LISTEN" in line:
+                    with suppress(ValueError):
+                        pids.add(int(parts[-1]))
+        else:
+            # -t: pids only, -sTCP:LISTEN: only the listener (not clients connected to it).
+            out = subprocess.run(["lsof", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                                 capture_output=True, text=True).stdout
+            for tok in out.split():
+                with suppress(ValueError):
+                    pids.add(int(tok))
+    except (OSError, FileNotFoundError):
+        return  # no lookup tool → let the bind fail with its normal error
+    for pid in pids:
+        if pid == os.getpid():
+            continue  # never ourselves
+        with suppress(OSError, ProcessLookupError):
+            if _IS_WIN:
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            else:
+                os.kill(pid, signal.SIGTERM)
+    if pids:
+        print(f"Freed port {port} from a prior instance (pid {', '.join(map(str, pids))}).")
+
+
 def kill_script(script_id: str):
     with _lock:
         proc = _running.pop(script_id, None)
@@ -1173,6 +1211,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # Fire pushes outside the lock — the state write has already
             # landed; pushes are best-effort device-side mirroring.
             _push_devices_in_parallel(pushes)
+            # Report WHICH subnet was scanned + how many answered, so a "found
+            # nothing" is distinguishable from "scanned the wrong network" (the
+            # scan uses the machine's auto-detected /24, not the active network's
+            # subnet). Transient, not persisted (the save already happened above).
+            result = {**result, "_scanned_subnet": scanned_subnet,
+                      "_found_count": len(devices)}
             self._send_json(result)
 
         elif self.path == "/api/refresh":
@@ -2140,6 +2184,13 @@ document.addEventListener("click", function(e) {{
 # ---------------------------------------------------------------------------
 
 def main():
+    # A prior MoonDeck already bound to PORT would make the fresh bind fail
+    # ("Address already in use"); replace it so a re-run just works. Also picks up
+    # any deviceModels.json / firmwares.json edits, since the catalog is loaded at
+    # module import (see _load_device_models). Set MOONDECK_NO_KILL=1 to opt out and
+    # run a second instance on a different PORT instead.
+    if not os.environ.get("MOONDECK_NO_KILL"):
+        _free_port(PORT)
     # ThreadingHTTPServer binds to "" → all interfaces, so MoonDeck is reachable
     # from other devices on the LAN, not just this machine.
     server = http.server.ThreadingHTTPServer(("", PORT), MoonDeckHandler)

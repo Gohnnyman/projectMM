@@ -123,7 +123,7 @@ class _Ws:
 
 def measure(host, seconds, grid):
     # --grid resizes the device's Grid for the run; snapshot the original so we restore it afterwards
-    # (the probe stays non-destructive, like the live scenarios — decisions.md). The restore is in the
+    # (the probe stays non-destructive, like the live scenarios — lessons.md). The restore is in the
     # finally at the end of the function.
     saved_grid = _read_grid(host) if grid else {}
     if grid:

@@ -46,3 +46,41 @@ def test_slug_resolves_to_the_real_rendered_heading_id():
     for heading in ["LED output — details", "GEQ · 3D — details"]:
         html = markdown.markdown(f"## {heading}", extensions=["toc"])
         assert f'id="{_slug(heading)}"' in html, heading
+
+
+# --- Catalog-page card images resolve on disk ---
+# The catalog pages hand-author each card's preview as a raw `<img src="../../assets/…">`.
+# MkDocs' --strict validates markdown `![]()` links but NOT raw-HTML `<img src>`, and the
+# catalog hook moves the tag into a table cell without touching its src — so a wrong `../`
+# depth ships a SILENT 404 on the live site (the exact bug this test pins: the pages sit one
+# level shallower than the generated moxygen pages, so they need `../../assets`, not the
+# moxygen pages' `../../../assets`). This test resolves every catalog `<img src>` against its
+# page's own directory and fails on any that doesn't exist on disk.
+import re  # noqa: E402
+
+_DOCS = ROOT / "docs"
+_IMG_SRC_RE = re.compile(r'<img[^>]+src="([^"]+)"')
+
+
+def _catalog_pages():
+    return sorted(
+        (_DOCS / "moonmodules" / domain / f"{group}.md")
+        for domain, groups in {
+            "core": ("services", "supporting", "ui"),
+            "light": ("effects", "modifiers", "layouts", "drivers", "supporting"),
+        }.items()
+        for group in groups
+        if (_DOCS / "moonmodules" / domain / f"{group}.md").exists()
+    )
+
+
+def test_catalog_card_images_resolve_on_disk():
+    missing = []
+    for page in _catalog_pages():
+        for src in _IMG_SRC_RE.findall(page.read_text(encoding="utf-8")):
+            if src.startswith(("http://", "https://", "data:", "/")):
+                continue
+            target = (page.parent / src.split("#")[0]).resolve()
+            if not target.exists():
+                missing.append(f"{page.relative_to(ROOT)} -> {src}")
+    assert not missing, "catalog card image(s) 404 on the site:\n  " + "\n  ".join(missing)

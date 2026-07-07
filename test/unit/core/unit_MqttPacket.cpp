@@ -117,6 +117,27 @@ TEST_CASE("MqttPacket: CONNECT drops a password when there is no username") {
     CHECK(out[9] == kMqttConnectCleanSession);
 }
 
+// A Last Will (§3.1.2.5-.7 + §3.1.3) makes the broker publish the will payload if the client drops —
+// the availability seam HA greys the entity out on. Will Topic + Will Message go in the payload AFTER
+// the clientId and BEFORE username/password; the flags byte carries the Will + Will-Retain bits.
+TEST_CASE("MqttPacket: CONNECT with a retained Last Will is byte-exact") {
+    uint8_t out[96] = {};
+    const size_t n = buildMqttConnect("c", nullptr, nullptr, 15, out, sizeof(out),
+                                      "s", "offline", /*willRetain=*/true);
+    REQUIRE(n > 0);
+    // Flags: clean-session | will | will-retain (no username/password).
+    CHECK(out[9] == (kMqttConnectCleanSession | kMqttConnectWillFlag | kMqttConnectWillRetain));
+    // Payload tail: 00 01 'c'  (clientId)  00 01 's'  (will topic)  00 07 'offline' (will message).
+    const uint8_t tail[] = {0x00, 0x01, 'c',
+                            0x00, 0x01, 's',
+                            0x00, 0x07, 'o', 'f', 'f', 'l', 'i', 'n', 'e'};
+    CHECK(std::memcmp(out + n - sizeof(tail), tail, sizeof(tail)) == 0);
+    // A partial will (topic but no message) is dropped: no will flag, no will fields.
+    const size_t n2 = buildMqttConnect("c", nullptr, nullptr, 15, out, sizeof(out), "s", nullptr, true);
+    REQUIRE(n2 > 0);
+    CHECK(out[9] == kMqttConnectCleanSession);
+}
+
 // --- PUBLISH golden vector (§3.3), QoS0 ---
 TEST_CASE("MqttPacket: PUBLISH is byte-exact (QoS0)") {
     uint8_t out[64] = {};

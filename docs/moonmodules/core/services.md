@@ -8,7 +8,7 @@ The user-facing core services — the machinery that runs a show, each configura
 
 The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftAP SSID, the DHCP hostname), uptime, heap, and per-module footprint reporting. Hosts the Audio and I2C-scan peripherals.
 
-<img src="../../../assets/core/SystemModule.png" width="300" alt="System module controls">
+<img src="../../assets/core/SystemModule.png" width="300" alt="System module controls">
 
 - `deviceName` — the device identity behind mDNS `<name>.local`, the SoftAP SSID, and the DHCP hostname.
 - `deviceModel` — the board model (drives the installer catalog entry).
@@ -24,7 +24,7 @@ Detail: [technical](moxygen/SystemModule.md)
 
 WiFi / Ethernet connectivity, static-IP configuration, RSSI and TX-power reporting. Brings the device onto the LAN before the HTTP and WebSocket servers start.
 
-<img src="../../../assets/core/NetworkModule.png" width="300" alt="Network module controls">
+<img src="../../assets/core/NetworkModule.png" width="300" alt="Network module controls">
 
 - `mode` — WiFi / Ethernet / off.
 - `ssid` / `password` — WiFi credentials.
@@ -43,7 +43,7 @@ Detail: [technical](moxygen/NetworkModule.md)
 
 Serial/BLE Improv Wi-Fi provisioning — the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow.
 
-<img src="../../../assets/core/ImprovProvisioningModule.png" width="300" alt="Improv provisioning module controls">
+<img src="../../assets/core/ImprovProvisioningModule.png" width="300" alt="Improv provisioning module controls">
 
 - `provision_status` — read-only provisioning state.
 
@@ -55,7 +55,7 @@ Detail: [technical](moxygen/ImprovProvisioningModule.md)
 
 Discovers and lists other projectMM devices on the LAN (the `devices` List control), each row expanding to a detail panel; persists the last-known list across reboot.
 
-<img src="../../../assets/core/DevicesModule.png" width="300" alt="Devices module — discovered LAN devices">
+<img src="../../assets/core/DevicesModule.png" width="300" alt="Devices module — discovered LAN devices">
 
 - `devices` — a List control of discovered devices; each row expands to a detail panel. Persistable.
 
@@ -69,11 +69,12 @@ Detail: [technical](moxygen/DevicesModule.md)
 
 Bridges the light to an MQTT broker so a home-automation hub (Homebridge) can control it — a transport over the shared `Scheduler::setControl` apply-core, not new control logic. Our own dependency-free MQTT 3.1.1 client; disabled until a broker is set. Topics, colour-wheel mapping, and the Homebridge config: ⌄ details.
 
-<img src="../../../assets/core/MqttModule.png" width="300" alt="MQTT module controls">
+<img src="../../assets/core/MqttModule.png" width="300" alt="MQTT module controls">
 
 - `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
 - `port` — broker port (default 1883).
 - `username` / `password` — broker credentials (optional; the password is stored obfuscated like the WiFi password).
+- `haDiscovery` — announce a Home Assistant MQTT-discovery light (default on). HA auto-creates a wired entity; toggling it off removes the entity. See the [home-automation guide](../../usecases/home-automation.md).
 - read-only — `mqtt_status` (`disabled` / `idle` / `connecting` / `connected` / `disconnected` / an error).
 
 Detail: [technical](moxygen/MqttModule.md)
@@ -86,7 +87,7 @@ Detail: [technical](moxygen/MqttModule.md)
 
 Over-the-air firmware flashing — the one operation that swaps the binary and needs a power cycle (every *config* change applies live; a firmware OTA does not).
 
-<img src="../../../assets/core/FirmwareUpdateModule.png" width="300" alt="Firmware update module controls">
+<img src="../../assets/core/FirmwareUpdateModule.png" width="300" alt="Firmware update module controls">
 
 - `firmware` — the OTA image to flash.
 - read-only — `version`, `build`, `firmwarePartition`, `update_pct` (progress).
@@ -101,7 +102,7 @@ Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
 A boot-wired system tool (distinct from Filesystem, the persistence *engine*): browse and manage the device filesystem from a dedicated panel — a lazy expand/collapse folder tree (VS Code / Explorer shape) plus an inline text editor. Browsing is UI-side over `/api/dir` + `/api/file`, so the module itself stays minimal. Tree/toolbar/editor behaviour: ⌄ details.
 
-<img src="../../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
+<img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
 
 - `file browser` — the panel itself: an expand/collapse folder tree with a toolbar (＋folder / ＋file / delete / refresh / upload) and an inline text editor. The module's main surface (⌄ details for the interactions).
 - `show hidden` — reveal dot-prefixed files/folders (e.g. `.config`); forwarded to `/api/dir` as its `hidden` filter.
@@ -116,7 +117,7 @@ Detail: [technical](moxygen/FileManagerModule.md)
 
 A System peripheral (added by the user, not auto-wired): an I²S microphone (or line-in ADC) feeding the FFT that audio-reactive effects consume via `AudioModule::latestFrame()`. It also syncs audio over UDP, WLED-compatible: broadcast the local analysis for the WLED ecosystem, or receive a peer's audio to drive effects with no local mic. Idle until real GPIOs are entered.
 
-<img src="../../../assets/core/AudioModule.png" width="300" alt="Audio module controls">
+<img src="../../assets/core/AudioModule.png" width="300" alt="Audio module controls">
 
 - `wsPin` / `sdPin` / `sckPin` — the I²S GPIOs (unset until entered).
 - `mclkPin` — master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
@@ -136,7 +137,7 @@ Detail: [technical](moxygen/AudioModule.md)
 
 A System peripheral that probes the I²C bus (default GPIO21/22) on a button press and reports the addresses found.
 
-<img src="../../../assets/core/I2cScanModule.png" width="300" alt="I2C scan module controls">
+<img src="../../assets/core/I2cScanModule.png" width="300" alt="I2C scan module controls">
 
 - `sda` / `scl` — the bus GPIOs (default GPIO21/22).
 - `scan` — a button; press to probe the bus now.
@@ -150,7 +151,7 @@ Detail: [technical](moxygen/I2cScanModule.md)
 
 A System peripheral (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
 
-<img src="../../../assets/core/IrModule.png" width="300" alt="IR module controls">
+<img src="../../assets/core/IrModule.png" width="300" alt="IR module controls">
 
 - `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
 - `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.

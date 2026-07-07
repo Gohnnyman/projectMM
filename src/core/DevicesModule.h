@@ -37,7 +37,7 @@ namespace mm {
 /// 65506 lists it too (discovery-only: a receiving WLED shows us in its instances
 /// list, it does not sync to it). This replaces the former mDNS *query* path, which
 /// destabilised our own mDNS advertise (a PTR query for a service we also host
-/// exhausts the IDF mDNS pool — see docs/history/decisions.md). mDNS is
+/// exhausts the IDF mDNS pool — see docs/adr/0006-device-discovery-udp-mdns-advertise-only.md). mDNS is
 /// advertise-ONLY (announcing `_http._tcp`+`mm=1` and `_wled._tcp`+`mac=` so the
 /// WLED native app + Home Assistant, which only browse mDNS, discover us); discovery
 /// never queries.

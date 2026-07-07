@@ -52,7 +52,7 @@ public:
     /// field and the driver idles. 24 bytes fit kMaxPins 2-digit GPIOs plus separators. Defaults
     /// to UNSET: the strand is user-soldered to whatever GPIO the user wired, so a hard-coded pin
     /// would be a guess that could drive a pin committed elsewhere — empty until set, idle
-    /// meanwhile (the "default only when it cannot do harm" rule; see decisions.md). Bench pin "18".
+    /// meanwhile (the "default only when it cannot do harm" rule; see lessons.md). Bench pin "18".
     char pins[24] = "";
 
     /// Comma-separated lights-per-pin ("100,100,50"), matched to `pins` by position — each pin

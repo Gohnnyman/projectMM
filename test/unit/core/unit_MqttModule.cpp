@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 using namespace mm;
@@ -76,6 +77,35 @@ struct Rig {
     }
 };
 
+// Walk the concatenated MQTT packet stream the capture holds and return the fixed-header first byte
+// (type nibble + flags) of the first PUBLISH whose topic equals `wantTopic`, or -1 if none. Lets a
+// test assert the RETAIN bit (bit 0, §3.3.1.3) rather than only string-matching the payload — a
+// regression dropping retain=true flips this bit but leaves every substring intact.
+int publishFlagsForTopic(const uint8_t* buf, size_t len, const char* wantTopic) {
+    size_t i = 0;
+    while (i < len) {
+        const uint8_t first = buf[i];
+        // Remaining Length: a 1–4 byte varint (§2.2.3).
+        size_t j = i + 1, mult = 1, remLen = 0;
+        for (int b = 0; b < 4 && j < len; b++, j++) {
+            remLen += (buf[j] & 0x7F) * mult;
+            if (!(buf[j] & 0x80)) { j++; break; }
+            mult *= 128;
+        }
+        const size_t body = j;                 // first byte after the fixed header
+        if ((first & 0xF0) == 0x30 && body + 2 <= len) {   // PUBLISH
+            const size_t topicLen = (size_t(buf[body]) << 8) | buf[body + 1];
+            if (body + 2 + topicLen <= len &&
+                std::strncmp(reinterpret_cast<const char*>(buf + body + 2), wantTopic, topicLen) == 0 &&
+                std::strlen(wantTopic) == topicLen) {
+                return first;
+            }
+        }
+        i = body + remLen;
+    }
+    return -1;
+}
+
 }  // namespace
 
 TEST_CASE("MqttModule: on/set drives Drivers.on") {
@@ -113,6 +143,101 @@ TEST_CASE("MqttModule: hsv/set maps a hue to the nearest palette + value to brig
     r.publish("hsv/set", "210,100,40");      // blue, sat 100%, value 40%
     CHECK(r.drivers->palette != 0);               // snapped to some blue-family palette
     CHECK(r.drivers->brightness == (40 * 255) / 100);   // value → brightness
+}
+
+// --- Home Assistant MQTT Discovery: the HA-native ha/set command topic ---
+// HA drives the JSON-schema light with {"state":"ON"|"OFF"[,"brightness":0-255]} on <prefix>/ha/set.
+// Unlike the mqttthing brightness/set (0-100), HA brightness is already 0-255 — no rescale.
+
+TEST_CASE("MqttModule: ha/set {state} drives Drivers.on") {
+    Rig r;
+    r.drivers->on = true;
+    r.publish("ha/set", "{\"state\":\"OFF\"}");
+    CHECK(r.drivers->on == false);
+    r.publish("ha/set", "{\"state\":\"ON\"}");
+    CHECK(r.drivers->on == true);
+}
+
+TEST_CASE("MqttModule: ha/set {brightness} maps 0-255 with no rescale") {
+    Rig r;
+    r.publish("ha/set", "{\"state\":\"ON\",\"brightness\":128}");
+    CHECK(r.drivers->on == true);
+    CHECK(r.drivers->brightness == 128);          // HA is already 0-255 — no *255/100
+    r.publish("ha/set", "{\"brightness\":255}");
+    CHECK(r.drivers->brightness == 255);
+    // Out-of-range clamps.
+    r.publish("ha/set", "{\"brightness\":999}");
+    CHECK(r.drivers->brightness == 255);
+}
+
+TEST_CASE("MqttModule: ha/set is key-order-independent") {
+    Rig r;
+    r.drivers->on = false;
+    // brightness before state — mm::json's strstr lookup is order-independent (HA emits compact JSON;
+    // the flat helpers match `"key":` / `"key": `, so we feed the same no-inner-space shape HA sends).
+    r.publish("ha/set", "{\"brightness\":64,\"state\":\"ON\"}");
+    CHECK(r.drivers->on == true);
+    CHECK(r.drivers->brightness == 64);
+}
+
+TEST_CASE("MqttModule: ha/set with only state leaves brightness untouched") {
+    Rig r;
+    r.drivers->brightness = 200;
+    r.publish("ha/set", "{\"state\":\"OFF\"}");   // no brightness key
+    CHECK(r.drivers->on == false);
+    CHECK(r.drivers->brightness == 200);          // unchanged (hasKey guard)
+}
+
+// The discovery announce: on CONNACK the module publishes a RETAINED config to
+// homeassistant/light/projectMM_<mac6>/config. Assert via the outbound-capture seam (no live socket).
+TEST_CASE("MqttModule: CONNACK publishes a retained HA discovery config") {
+    Rig r;
+    uint8_t cap[1024];
+    r.mqtt->enableSendCaptureForTest(cap, sizeof(cap));
+    // A CONNACK-accept: fixed header 0x20, len 2, session-present 0, return-code 0 (accepted).
+    const uint8_t connack[] = {0x20, 0x02, 0x00, 0x00};
+    r.mqtt->feedForTest(connack, sizeof(connack));
+    const size_t len = r.mqtt->sentCaptureLenForTest();
+    REQUIRE(len > 0);
+    // The captured stream must contain the discovery topic + the key config fields.
+    std::string sent(reinterpret_cast<const char*>(cap), len);
+    CHECK(sent.find("homeassistant/light/projectMM_efcafe/config") != std::string::npos);
+    CHECK(sent.find("\"schema\":\"json\"") != std::string::npos);
+    CHECK(sent.find("\"uniq_id\":\"projectMM_efcafe\"") != std::string::npos);
+    CHECK(sent.find("projectMM/efcafe/ha/set") != std::string::npos);    // cmd_t
+    CHECK(sent.find("projectMM/efcafe/ha/state") != std::string::npos);  // stat_t
+    CHECK(sent.find("projectMM/efcafe/status") != std::string::npos);    // avty_t
+    CHECK(sent.find("online") != std::string::npos);                     // the retained availability publish
+    // The discovery config AND the availability publish must carry the RETAIN bit (bit 0 of the PUBLISH
+    // fixed header) — a late-joining HA reads the retained config/state, so dropping retain breaks it.
+    const int cfgFlags = publishFlagsForTopic(cap, len, "homeassistant/light/projectMM_efcafe/config");
+    REQUIRE(cfgFlags >= 0);
+    CHECK((cfgFlags & 0x01) == 0x01);                                    // discovery config retained
+    const int avtyFlags = publishFlagsForTopic(cap, len, "projectMM/efcafe/status");
+    REQUIRE(avtyFlags >= 0);
+    CHECK((avtyFlags & 0x01) == 0x01);                                   // availability "online" retained
+}
+
+// Regression (found live on P4/S31 hardware): turning haDiscovery OFF must free the discovery buffers
+// EVEN when the socket is not currently Connected (mid-reconnect). The original guard bailed on
+// `state_ != Connected` before reaching the free, so a discovery-off toggle during a reconnect stranded
+// the 768 B until teardown — breaking "no memory when discovery is off". Freeing local memory needs no
+// socket, so the retract path frees unconditionally; only the empty-retained PUBLISH needs a live link.
+TEST_CASE("MqttModule: retract frees the discovery buffers even while disconnected") {
+    Rig r;
+    uint8_t cap[1024];
+    r.mqtt->enableSendCaptureForTest(cap, sizeof(cap));
+    // CONNACK-accept → Connected → announce allocates the discovery buffers (448 + 320 = 768).
+    const uint8_t connack[] = {0x20, 0x02, 0x00, 0x00};
+    r.mqtt->feedForTest(connack, sizeof(connack));
+    CHECK(r.mqtt->dynamicBytes() == MqttModule::kDiscoveryDynamicBytes);
+    // A broker change re-homes the socket → resetConnection drops state to Idle, buffers still held
+    // (a reconnect must not churn the heap). Now we're "allocated but not Connected".
+    Scheduler::instance()->setControl("Mqtt", "broker", "{\"value\":\"10.0.0.9\"}");
+    CHECK(r.mqtt->dynamicBytes() == MqttModule::kDiscoveryDynamicBytes);          // reset kept the buffers (correct)
+    // Toggle discovery OFF while disconnected — must free despite no live socket.
+    Scheduler::instance()->setControl("Mqtt", "haDiscovery", "{\"value\":false}");
+    CHECK(r.mqtt->dynamicBytes() == 0);            // the fix: retract freed even while not Connected
 }
 
 TEST_CASE("MqttModule: a PUBLISH on an unrelated topic is ignored, not a crash") {

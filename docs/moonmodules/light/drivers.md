@@ -14,7 +14,7 @@ A driver reads its window of the [Drivers](moxygen/Drivers.md) container's share
 
 Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three peripherals do this — pick by chip: **RMT** (single/few strands, any ESP32), **LCD_CAM** (8 parallel strands, S3), **Parlio** (1–8 parallel strands, P4). Same controls, same wire contract; they differ only in how many strands clock out at once and on which chip.
 
-<img src="../../../assets/light/drivers/RmtLedDriver.png" width="300" alt="LED output driver controls">
+<img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="LED output driver controls">
 
 - `pins` — data GPIO list, e.g. `18,17,16` (one strand each). Empty idles until set; changing it re-inits live.
 - `ledsPerPin` — lights per pin, matched by position; empty or short = even split of the remainder.
@@ -33,7 +33,7 @@ Detail: [RMT](moxygen/RmtLedDriver.md) · [LCD](moxygen/LcdLedDriver.md) · [Par
 
 ### Network Send 💫 · UDP
 
-<img src="../../../assets/light/drivers/NetworkSendDriver.png" width="300" alt="NetworkSend controls">
+<img src="../../assets/light/drivers/NetworkSendDriver.png" width="300" alt="NetworkSend controls">
 
 Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one burst per frame, compatible with Falcon/Advatek controllers, xLights, and LedFx.
 
@@ -54,7 +54,7 @@ Detail: [technical](moxygen/NetworkSendDriver.md)
 
 ### Hue 💫 · bridge
 
-<img src="../../../assets/light/drivers/HueDriver.png" width="300" alt="A HueDriver in the UI">
+<img src="../../assets/light/drivers/HueDriver.png" width="300" alt="A HueDriver in the UI">
 
 Drives **Philips Hue bulbs as pixels**: each colour bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit — smooth ambient colour, not strobing.
 
@@ -75,7 +75,7 @@ Detail: [technical](moxygen/HueDriver.md)
 
 ### Preview 💫 · web UI
 
-<img src="../../../assets/light/drivers/PreviewDriver.png" width="300" alt="PreviewDriver controls">
+<img src="../../assets/light/drivers/PreviewDriver.png" width="300" alt="PreviewDriver controls">
 
 Streams a true-shape 3D preview to the web UI over WebSocket as a **point list** — only the real lights at their real positions, so a sphere/ring/arbitrary map shows in its true shape. The one boot-wired driver.
 

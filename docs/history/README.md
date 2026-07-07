@@ -31,7 +31,7 @@ One-time surveys of earlier projects, used to decide what to harvest into projec
 
 ### Our own lessons
 
-- [decisions.md](decisions.md) — hard-won lessons, proven patterns, and non-obvious decisions, recorded with the code that proved them (the PR-merge carry-forward gate writes here).
+- [lessons.md](lessons.md) — hard-won debugging lessons and gotchas (a bug, its cause, the fix), recorded with the code that proved them and pruned as they are absorbed (the PR-merge carry-forward gate writes here). Genuine architectural *decisions* live in [`../adr/`](../adr/README.md) instead; a lesson that hardened into a *rule* lives in CLAUDE.md / coding-standards.md.
 
 ## Cross-repo trends
 
