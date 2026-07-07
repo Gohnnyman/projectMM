@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_esp32 import find_idf, IDF_SEARCH_PATHS
+# PINNED_IDF_COMMIT / PINNED_IDF_VERSION / installed_idf_commit live in
+# build_esp32.py so the pre-build drift check (check_idf_pin, called on every
+# ESP32 build) shares them with this setup script. Single source of truth.
+from build_esp32 import (find_idf, IDF_SEARCH_PATHS,
+                         PINNED_IDF_COMMIT, PINNED_IDF_VERSION,
+                         installed_idf_commit)
 
 # Espressif ships install.sh for POSIX hosts and install.bat / install.ps1 for
 # Windows. Both create the same `~/.espressif/python_env/...` venv and download
@@ -15,28 +20,6 @@ from build_esp32 import find_idf, IDF_SEARCH_PATHS
 # entry point on Windows (works in cmd.exe and PowerShell); .ps1 needs the
 # execution policy unlocked, which we'd rather not assume.
 INSTALL_SCRIPT_NAME = "install.bat" if sys.platform == "win32" else "install.sh"
-
-# The ESP-IDF commit every target (classic ESP32, S3, P4, S31) has been
-# validated against — the `v6.1-beta1` tag, on the earliest IDF line that
-# carries the esp32s31 preview target. The script can't *clone* the
-# IDF for you (the dev does the initial clone per docs/building.md), but when the
-# installed checkout drifts from this pin it offers to move it (git checkout +
-# submodule sync) so a fresh shallow clone landing on a newer dev-branch commit
-# — exactly what turns a green build red with no code change — converges back to
-# the validated commit. Pass --no-checkout to keep the warn-only behaviour (a
-# dev deliberately migrating off this snapshot to a newer release re-tests, not
-# auto-reverts).
-PINNED_IDF_COMMIT = "b1d13e9fe441c4f75e240c98a26fd631b7b3232f"
-PINNED_IDF_VERSION = "v6.1-beta1"
-
-
-def _installed_idf_commit(idf_path: Path) -> str:
-    try:
-        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(idf_path),
-                           capture_output=True, text=True)
-        return r.stdout.strip() if r.returncode == 0 else ""
-    except OSError:
-        return ""
 
 
 def _checkout_pinned(idf_path: Path) -> bool:
@@ -85,7 +68,7 @@ def main():
     # fatal (you may be deliberately migrating), but it must be visible — and by
     # default we offer to move the checkout onto the pin so a new dev converges on
     # the validated commit. --no-checkout keeps it warn-only.
-    installed = _installed_idf_commit(idf_path)
+    installed = installed_idf_commit(idf_path)
     if installed and installed != PINNED_IDF_COMMIT:
         print(f"\n⚠  IDF commit drift: installed {installed[:12]} != "
               f"pinned {PINNED_IDF_COMMIT[:12]} ({PINNED_IDF_VERSION}).")
@@ -118,16 +101,23 @@ def main():
         print(f"{INSTALL_SCRIPT_NAME} not found at {install_script}")
         sys.exit(1)
 
-    print(f"Running ESP-IDF {INSTALL_SCRIPT_NAME} (creates Python venv)...")
+    print(f"Running ESP-IDF {INSTALL_SCRIPT_NAME} (downloads toolchains + creates Python venv)...")
+    # Pass `all` (not `esp32`) so both toolchain families install: the Xtensa
+    # `xtensa-esp-elf` for classic ESP32 / S2 / S3, and the RISC-V
+    # `riscv32-esp-elf` for P4 and the C-series. Without RISC-V, a P4 configure
+    # fails with `CMAKE_ASM_COMPILER: riscv32-esp-elf-gcc … not found in PATH`.
+    # `all` is the same size increment on Windows as `esp32,esp32p4` (~50 MB
+    # for the RISC-V toolchain) and covers any future chip target the codebase
+    # gains without another setup pass.
     # shell=True on Windows so cmd.exe interprets the .bat correctly.
-    r = subprocess.run([str(install_script), "esp32"],
+    r = subprocess.run([str(install_script), "all"],
                        cwd=str(idf_path),
                        shell=(sys.platform == "win32"))
     if r.returncode != 0:
         print("Install failed.")
         sys.exit(r.returncode)
 
-    print("\nESP-IDF setup complete. You can now build for ESP32.")
+    print("\nESP-IDF setup complete. You can now build for any supported target.")
 
 if __name__ == "__main__":
     main()

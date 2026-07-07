@@ -24,6 +24,53 @@ IDF_SEARCH_PATHS = [
     Path("/opt/esp-idf"),
 ]
 
+# The ESP-IDF commit every target (classic ESP32, S3, P4, S31) has been
+# validated against — the `v6.1-beta1` tag, on the earliest IDF line that
+# carries the esp32s31 preview target. Kept here (not in setup_esp_idf.py) so
+# the pre-build drift check below can share the constant — a stale local IDF is
+# the single most common source of an "it built for me last week" ESP32 build
+# failure, so the check runs on every build_esp32 invocation, not just when the
+# user remembers to re-run setup_esp_idf.py. setup_esp_idf.py imports these
+# two constants.
+PINNED_IDF_COMMIT = "b1d13e9fe441c4f75e240c98a26fd631b7b3232f"
+PINNED_IDF_VERSION = "v6.1-beta1"
+
+
+def installed_idf_commit(idf_path: Path) -> str:
+    """Return the git HEAD SHA of the installed IDF, or '' if unavailable."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(idf_path),
+                           capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except OSError:
+        return ""
+
+
+def check_idf_pin(idf_path: Path) -> None:
+    """Abort the build if the installed IDF isn't at PINNED_IDF_COMMIT.
+
+    Reason: silently building against a drifted IDF produces the classic
+    "missing symbol" / "renamed cap macro" errors that look like *our* bug but
+    are actually Espressif renaming an API between snapshots. Failing fast with
+    the exact fix command turns 30-minute debugging into a 30-second
+    re-checkout. Skip if HEAD can't be determined (not a git checkout, missing
+    git, etc.) — no false positives.
+    """
+    installed = installed_idf_commit(idf_path)
+    if not installed or installed == PINNED_IDF_COMMIT:
+        return
+    print(f"\nESP-IDF commit drift: installed {installed[:12]} != "
+          f"pinned {PINNED_IDF_COMMIT[:12]} ({PINNED_IDF_VERSION}).", file=sys.stderr)
+    print("The build was validated against the pinned commit; a drifted IDF is "
+          "the most common source of ESP32 build failures that look like "
+          "projectMM bugs but are actually Espressif renaming a symbol.",
+          file=sys.stderr)
+    print("Fix: re-run `uv run moondeck/build/setup_esp_idf.py` (it will offer "
+          "to check out the pinned commit + resync submodules + reinstall "
+          "toolchains). See docs/building.md § ESP-IDF version for the "
+          "manual command if you'd rather do it by hand.", file=sys.stderr)
+    sys.exit(2)
+
 # Components to drop from an Ethernet-only build. ESP-IDF v6.x has no
 # CONFIG_ESP_WIFI_ENABLED switch (the symbol is non-settable, forced y on
 # WiFi-capable SoCs), so WiFi is removed via EXCLUDE_COMPONENTS instead.
@@ -510,6 +557,11 @@ def main():
         sys.exit(1)
 
     print(f"Using ESP-IDF at {idf_path}")
+    # Fail-fast on a drifted local IDF before we sink a few minutes into a
+    # build that would end in "SOC_FOO was renamed to SOC_BAR" or similar. See
+    # check_idf_pin above for why this belongs in the build script, not just
+    # setup_esp_idf.py.
+    check_idf_pin(idf_path)
     env = idf_env(idf_path)
     cmd = idf_cmd(idf_path)
 
