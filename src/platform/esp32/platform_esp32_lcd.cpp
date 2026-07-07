@@ -16,7 +16,7 @@
 // it too; the driver never calls in thanks to platform::lcdLanes == 0). Gate on
 // SOC_LCDCAM_I80_LCD_SUPPORTED, NOT SOC_LCD_I80_SUPPORTED: the classic ESP32 sets
 // the latter for its unrelated I2S-LCD peripheral, which wired this driver onto a
-// chip with no LCD_CAM and hung its boot (see platform_config.h + decisions.md).
+// chip with no LCD_CAM and hung its boot (see platform_config.h + lessons.md).
 
 #include "platform/platform.h"
 

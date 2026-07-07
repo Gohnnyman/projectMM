@@ -42,9 +42,9 @@ namespace mm {
 ///   `<prefix>/status`         → retained "online"; the CONNECT **Last-Will** publishes "offline" here
 ///                               on an ungraceful drop, so HA greys the entity out (`avty_t`)
 /// Toggling `haDiscovery` re-announces / retracts live (an empty retained config removes the entity),
-/// no reconnect. `uniq_id` is the MAC-stable `projectMM_<mac6>`, never the editable name. JSON schema
-/// (not the default schema) so future controls add a key — HA's native `effect`/`effect_list` maps a
-/// preset/effect picker with no new topic.
+/// no reconnect. `uniq_id` is the MAC-stable `projectMM_<mac6>`, never the editable name. The schema is
+/// JSON (not the default schema): a control maps to a config key rather than a topic, so HA's native
+/// `effect`/`effect_list` renders a picker on the one command topic — the reason JSON is chosen here.
 ///
 /// **Lifecycle** (all on loop1s(), off the render hot path — MQTT is slow control): connect lazily
 /// once `networkReady() && enabled`, CONNECT → CONNACK → SUBSCRIBE to the `set` topics, PINGREQ every
@@ -79,6 +79,10 @@ public:
     /// capture buffer is null).
     void enableSendCaptureForTest(uint8_t* buf, size_t cap);
     size_t sentCaptureLenForTest() const { return sendCaptureLen_; }
+
+    /// The heap footprint dynamicBytes() reports while HA discovery is announcing — the sum of the two
+    /// discovery scratch regions. Exposed so a test asserts against this instead of a magic literal.
+    static constexpr size_t kDiscoveryDynamicBytes = 320 + 448;
 
 private:
     // Connection state machine — advanced by loop1s(). ConnectingTcp = a non-blocking TCP connect is
@@ -152,6 +156,8 @@ private:
     // the framed packet into discoveryBuf_.
     static constexpr size_t kDiscoveryPayloadLen = 320;
     static constexpr size_t kDiscoveryBufLen     = 448;
+    static_assert(kDiscoveryDynamicBytes == kDiscoveryPayloadLen + kDiscoveryBufLen,
+                  "public test constant must track the actual buffer sizes");
     char*    discoveryPayload_ = nullptr;
     uint8_t* discoveryBuf_     = nullptr;
     bool ensureDiscoveryBuffers();   // lazily alloc both; false on OOM. Sets dynamicBytes.

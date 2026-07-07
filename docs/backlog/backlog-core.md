@@ -147,7 +147,7 @@ On `esp32-eth-wifi`, default 128×128 grid, free heap at boot is ~28 KB — not 
 
 Fix options in increasing scope:
 - **Cap the default grid** — drop to 64×64 on `esp32-eth-wifi` (Layer ~32 KB + LUT ~16 KB = 48 KB, comfortably under). Simplest.
-- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [decisions.md](../history/decisions.md) "Adaptive memory allocation design" for the allocation rules.
+- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [lessons.md](../history/lessons.md) "Adaptive memory allocation design" for the allocation rules.
 - **Lazy WiFi init** — skip `esp_wifi_init` when `ssid_` is empty and no AP-fallback is pending. Helps only when credentials exist but the network is unreachable — niche.
 
 ### Boot-time buffer degradation on non-PSRAM at 128×128 (investigation)
@@ -169,6 +169,10 @@ Related: this is the render/output-buffer face of the same non-PSRAM fragmentati
 No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tick; if OTA download or Improv scan causes tick-variance spikes, pin render → core 1, OTA/Improv → core 0 (where WiFi already lives via `CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y`). Defer until contention is observed — neither OTA nor Improv runs during normal operation.
 
 ## Architecture
+
+### WiFi runtime disable — open design question (undesigned)
+
+Today the eth-only build profile compiles WiFi out (`MM_NO_WIFI`). Turning WiFi off *at runtime* instead is undesigned: whether the gate should key off detected hardware presence, an explicit control, or a deviceModel-catalog field isn't decided. The eth-only build covers the need until a concrete case forces the choice. (Moved from architecture.md § What we leave undesigned; it's a deferred design decision, not a settled 🚧 one.)
 
 ### Consolidate the two module-by-name tree-walkers (backlog)
 
@@ -239,7 +243,7 @@ When picked up: add `offsetX/Y/Z` (lengthType) controls to `LayoutBase`; `Layout
 
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
 
-Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [decisions.md](../history/decisions.md) "Trying to add a child module to NetworkModule".
+Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [lessons.md](../history/lessons.md) "Trying to add a child module to NetworkModule".
 
 Minimum-scope fix before the move:
 1. `MoonModule::loop20ms`/`loop1s` propagate to children (or Scheduler walks them) — pick whichever costs less at runtime.

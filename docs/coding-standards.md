@@ -34,6 +34,12 @@ Guidelines:
 
 Counter-example to avoid: storing `char rssiStr_[12]` and re-`snprintf`'ing `"-58 dBm"` into it every tick. The right shape is `int8_t rssi_` (1 byte) plus a control type that knows the unit. Saves 11 bytes per metric, scales linearly across the codebase.
 
+**Width the intermediate, not just the result.** Any `a * b` where both operands are `nrOfLightsType` (or a count times a multiplier) can overflow `uint16_t` even when each operand is individually small (`256 * 256 = 65536` wraps to 0 on a no-PSRAM device); do the arithmetic in a wider type (`uint64_t`), clamp to the ceiling, then narrow. Likewise a counter derived from a cell count (a delta, a stagnation check) must be the domain typedef (`nrOfLightsType`), not a fixed `uint16_t`. A width-sensitive path is invisible on the uint32 desktop build, so pin it with a `uint16`-typed unit test or hardware confirmation.
+
+**When a validation field's storage is narrower than what it claims to validate, the validation is wrong, not the field.** A `uint8_t` min/max slot can't bound an `Int16` control (it clamps to `[0..0]`); the fix is a wider bound (or per-type bound slots), and until then the constraint is documented at the field's declaration.
+
+**When one control type does two jobs with different UX, that's the smell for a new type, not a range hack.** An `int16` control the UI renders as a slider can't also mean "GPIO pin number"; a dedicated `Pin` type (smallest storage that fits the domain, `int8_t` for a GPIO) is the fix, not overloading the range.
+
 ## Per-type behaviour lives with the type
 
 When a struct or enum is the semantic owner of some data — a control descriptor, a packet, a module role — the functions that interpret, serialise, validate, or otherwise operate on it should live next to the type, not at the call sites that use it. Free functions in the same `.cpp` count; member methods on the owning class are stronger; virtual methods on a base class are strongest. The wrong shape is the same `switch (type)` repeated in every consumer — adding a variant means hunting across N files for switches to extend, and the compiler can't tell you when one gets missed.
@@ -47,6 +53,10 @@ Three concrete patterns, all already common in this codebase:
 Counter-example to avoid: a `switch (c.type)` on `ControlType` duplicated in HttpServerModule, FilesystemModule, and scenario_runner. That shape forces a new ControlType to be added in four places, and the compiler can't catch a missed switch on a non-exhaustive enum. The per-type dispatch instead lives next to `ControlType` in [Control.cpp](../src/core/Control.cpp); consumers call `writeControlValue(sink, c)` and don't need to know the enum's shape.
 
 When a `switch (type)` outside the type's home file is legitimate: the caller has a genuinely different concern (HttpServerModule mapping `ApplyResult` to HTTP status codes is a transport policy, not per-type behaviour; scenario_runner's `switch (JsonVal::type)` dispatches on *its own* discriminator, not `ControlType`). The rule is "per-type dispatch lives with the type", not "switches are banned".
+
+**A flat parser that returns a zero sentinel for a missing key must be paired with a presence check before the value is applied as authoritative.** `json::parseInt(json, key)` returns 0 for an absent key, indistinguishable from a real 0; on a persistence-overlay load path that clobbers a non-zero default when an older/partial file omits the key. Guard with `json::hasKey()` first: an absent key leaves the control untouched (its default stands); a present key (even value 0) applies. Any "control resets to its default/0 after reboot" symptom is this overlay smell, not a control-init bug.
+
+**A reader that decodes only a subset of the escapes its writer emits is a latent asymmetry bug.** If the writer emits `\n` / `\t` escapes, the reader must decode them (not only `\"` / `\\`); make the escape set symmetric so multi-line text round-trips.
 
 ## File shape: header-only vs `.h` + `.cpp`
 
@@ -96,7 +106,7 @@ All targets build warnings-as-errors: `-Wall -Wextra -Werror` on Clang/GCC (macO
 ## Static checks
 
 - **Platform boundary** (`moondeck/check/check_platform_boundary.py`) — scans all files outside `src/platform/` for `#ifdef` / `#if defined` with platform macros and `#include` of platform-specific headers (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, `wiringPi.h`, …). Fails if any are found. The platform boundary rule itself: [architecture.md § Platform abstraction](architecture.md#platform-abstraction).
-- **Hot path lint** — flags allocation calls (`new`, `malloc`, `make_unique`, `make_shared`, `push_back`, `std::string` constructors) inside functions identified as hot path (render loop and callees). A code-review convention, enforced by hand. The hot path rule itself: [architecture.md § Hot path discipline](architecture.md#hot-path-discipline).
+- **Hot path lint** — flags allocation calls (`new`, `malloc`, `make_unique`, `make_shared`, `push_back`, `std::string` constructors) inside functions identified as hot path (render loop and callees). A code-review convention, enforced by hand. The hot path rule itself: [architecture.md § Hot path discipline](architecture.md#hot-path-discipline). A "no blocking in the hot path" audit must sweep *every* syscall the path can reach (connect, DNS, read, *and* write), not just the loudest one: a single-threaded loop that services I/O must make no blocking call at all (a socket timeout is not a fix, it is the size of the freeze; non-blocking + poll is the only safe shape). Fixing one blocker while an equally-blocking sibling survives is a partial fix that reads as complete.
 - **Code formatting** — `clang-format` with a project `.clang-format` file. Applied in CI; code that doesn't match fails the check. Run locally via editor integration or `clang-format -i`.
 
 ## When checks run
@@ -148,3 +158,25 @@ A module's story therefore lives in exactly two places: its `.h` (technical, gen
 ### Test inventories: their own generator, not moxygen
 
 `docs/tests/*.md` is generated by [`moondeck/docs/generate_test_docs.py`](../moondeck/docs/generate_test_docs.py), not moxygen. Unit tests are `TEST_CASE("…")` macros tagged with `// @module` and per-case `//` descriptions — a convention Doxygen documents nothing of (it parses C++ *entities*, not macro string literals) — and scenario tests are JSON, which moxygen cannot read. moxygen is for the `.h` module pages; the test generator owns the test pages.
+
+## Defaults
+
+**Assign a default only where the hardware, not the user's soldering iron, fixes the value.** The test is *who fixes the pin/setting*:
+
+- **Chip-/board-fixed → default it, and you must.** The RMII Ethernet pin map, the on-board status LED, a country code per region: silicon-/PCB-wired, so a default cannot do harm, and *omitting* it does (a no-WiFi board with un-defaulted Ethernet pins can never connect to be configured, a chicken-and-egg lockout).
+- **User-soldered → leave it unset.** A MEMS mic, an LED strand, an LED-driver pin goes wherever the user ran the wire, so any default is a guess that can drive a pin the user committed elsewhere. Empty until set; idle with a "set pins" status meanwhile (degraded is fine, crashed is not).
+
+A "default" that is really one specific board's values is bespoke masquerading as standard (a § Principles violation): make the capability opt-in and require each consumer to state its own values, so a missing declaration fails loudly instead of inheriting a stranger's wiring. Never auto-run a peripheral whose init can block on absent hardware. The design rationale (the MCU → deviceModel provenance model) lives in [architecture.md § Config provenance](architecture.md#config-provenance-mcu-devicemodel).
+
+## Debugging and verification
+
+Hard-won discipline for diagnosing hardware and infrastructure failures, distilled from the war stories in [lessons.md](history/lessons.md).
+
+- **Prove the failure is *about* the change before editing code.** When something fails right after a change, re-run it isolated, probe the actual end state (ping/curl the device, read the real CI error line, check machine load), and confirm the artifact under test is the one you built (process uptime, `build` timestamp, what is bound to the port). A stale process, a loaded machine, or an async-confirmation timeout reads as a regression it isn't.
+- **A status/dimension assertion does not prove the pipeline renders.** A correctness test for a mapping or effect asserts the buffer or LUT is non-empty with the expected coverage (e.g. LUT destinations == physical light count), not just that the declared dimensions look right.
+- **For a hardware bring-up, "it compiles" tells you almost nothing.** The truth is in the boot log on the actual board; a min-revision trap, a wrong PHY pin, a filename-keyed capability gate, or a Kconfig *choice* that an incremental build silently keeps all build clean and fail only on hardware (`rm -rf` the build dir when a sdkconfig choice changes).
+- **When test and reality disagree, enumerate what the test abstracts away and make the test transmit the genuine article.** Each closed gap either finds the bug or eliminates a theory with proof (a whole-frame loopback that sends the driver's real frame, not a synthetic pattern). Prove the firmware is *not* the cause with a measurement at each layer before editing code or buying parts.
+- **A measurement tool must be faithful to the real client, or it invents and hides bugs.** A one-shot WebSocket probe that gives up on close reports stalls a reconnecting browser never sees and misses blips it does; match the client's real behaviour (keepalive ping, auto-reconnect).
+- **Stop at the first failed fix on a working path.** Revert to the known-good state at attempt two rather than re-engineering a seam that already worked (§ *Anti-stalling* in CLAUDE.md).
+- **A generated artifact's ground truth is the rendered output, not a re-derivation.** Verify a doc anchor against the built HTML (`grep id=` the `.html`), not a reimplementation of the slug algorithm; verify an emitted machine instruction against the real toolchain's disassembler before flashing.
+- **A cross-boundary fact duplicated in code drifts silently; gate it.** A `docPath` in `main.cpp` that points at a docs page, a firmware projection that mirrors a build dict: the moment a check can resolve it against ground truth, that check is cheaper than the drift.

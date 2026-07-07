@@ -77,6 +77,35 @@ struct Rig {
     }
 };
 
+// Walk the concatenated MQTT packet stream the capture holds and return the fixed-header first byte
+// (type nibble + flags) of the first PUBLISH whose topic equals `wantTopic`, or -1 if none. Lets a
+// test assert the RETAIN bit (bit 0, §3.3.1.3) rather than only string-matching the payload — a
+// regression dropping retain=true flips this bit but leaves every substring intact.
+int publishFlagsForTopic(const uint8_t* buf, size_t len, const char* wantTopic) {
+    size_t i = 0;
+    while (i < len) {
+        const uint8_t first = buf[i];
+        // Remaining Length: a 1–4 byte varint (§2.2.3).
+        size_t j = i + 1, mult = 1, remLen = 0;
+        for (int b = 0; b < 4 && j < len; b++, j++) {
+            remLen += (buf[j] & 0x7F) * mult;
+            if (!(buf[j] & 0x80)) { j++; break; }
+            mult *= 128;
+        }
+        const size_t body = j;                 // first byte after the fixed header
+        if ((first & 0xF0) == 0x30 && body + 2 <= len) {   // PUBLISH
+            const size_t topicLen = (size_t(buf[body]) << 8) | buf[body + 1];
+            if (body + 2 + topicLen <= len &&
+                std::strncmp(reinterpret_cast<const char*>(buf + body + 2), wantTopic, topicLen) == 0 &&
+                std::strlen(wantTopic) == topicLen) {
+                return first;
+            }
+        }
+        i = body + remLen;
+    }
+    return -1;
+}
+
 }  // namespace
 
 TEST_CASE("MqttModule: on/set drives Drivers.on") {
@@ -170,7 +199,7 @@ TEST_CASE("MqttModule: CONNACK publishes a retained HA discovery config") {
     r.mqtt->feedForTest(connack, sizeof(connack));
     const size_t len = r.mqtt->sentCaptureLenForTest();
     REQUIRE(len > 0);
-    // The captured stream must contain the discovery topic, the retain bit, and the key config fields.
+    // The captured stream must contain the discovery topic + the key config fields.
     std::string sent(reinterpret_cast<const char*>(cap), len);
     CHECK(sent.find("homeassistant/light/projectMM_efcafe/config") != std::string::npos);
     CHECK(sent.find("\"schema\":\"json\"") != std::string::npos);
@@ -179,6 +208,14 @@ TEST_CASE("MqttModule: CONNACK publishes a retained HA discovery config") {
     CHECK(sent.find("projectMM/efcafe/ha/state") != std::string::npos);  // stat_t
     CHECK(sent.find("projectMM/efcafe/status") != std::string::npos);    // avty_t
     CHECK(sent.find("online") != std::string::npos);                     // the retained availability publish
+    // The discovery config AND the availability publish must carry the RETAIN bit (bit 0 of the PUBLISH
+    // fixed header) — a late-joining HA reads the retained config/state, so dropping retain breaks it.
+    const int cfgFlags = publishFlagsForTopic(cap, len, "homeassistant/light/projectMM_efcafe/config");
+    REQUIRE(cfgFlags >= 0);
+    CHECK((cfgFlags & 0x01) == 0x01);                                    // discovery config retained
+    const int avtyFlags = publishFlagsForTopic(cap, len, "projectMM/efcafe/status");
+    REQUIRE(avtyFlags >= 0);
+    CHECK((avtyFlags & 0x01) == 0x01);                                   // availability "online" retained
 }
 
 // Regression (found live on P4/S31 hardware): turning haDiscovery OFF must free the discovery buffers
@@ -193,11 +230,11 @@ TEST_CASE("MqttModule: retract frees the discovery buffers even while disconnect
     // CONNACK-accept → Connected → announce allocates the discovery buffers (448 + 320 = 768).
     const uint8_t connack[] = {0x20, 0x02, 0x00, 0x00};
     r.mqtt->feedForTest(connack, sizeof(connack));
-    CHECK(r.mqtt->dynamicBytes() == 768);
+    CHECK(r.mqtt->dynamicBytes() == MqttModule::kDiscoveryDynamicBytes);
     // A broker change re-homes the socket → resetConnection drops state to Idle, buffers still held
     // (a reconnect must not churn the heap). Now we're "allocated but not Connected".
     Scheduler::instance()->setControl("Mqtt", "broker", "{\"value\":\"10.0.0.9\"}");
-    CHECK(r.mqtt->dynamicBytes() == 768);          // reset kept the buffers (correct)
+    CHECK(r.mqtt->dynamicBytes() == MqttModule::kDiscoveryDynamicBytes);          // reset kept the buffers (correct)
     // Toggle discovery OFF while disconnected — must free despite no live socket.
     Scheduler::instance()->setControl("Mqtt", "haDiscovery", "{\"value\":false}");
     CHECK(r.mqtt->dynamicBytes() == 0);            // the fix: retract freed even while not Connected

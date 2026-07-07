@@ -25,7 +25,7 @@ public:
     // needed (the base default-initialises them). Pins/loopback are unset because the
     // strand is user-soldered: a hard-coded pin would guess the user's wiring and
     // could drive a pin committed elsewhere ("default only when it cannot do harm",
-    // see decisions.md). The P4-NANO bench used pins "20,21,22,23,24,25,26,27",
+    // see lessons.md). The P4-NANO bench used pins "20,21,22,23,24,25,26,27",
     // loopbackRxPin 33 (clear of the NANO's strapping 34-38, Ethernet RMII
     // 28-31/49-52, C6 SDIO 14-19/54, I2C 7-8 — clear GPIOs are 20-27, 32-33, 39-48).
 

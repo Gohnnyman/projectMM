@@ -10,7 +10,7 @@ Every layout, one block each: what it does and what each control means — toget
 
 A pair of concentric-ring "headlight" clusters (nested rings of 1/8/12/16/24 LEDs) positioned to mimic a car's front lights — a fixed arrangement composed from [Ring](#ring) geometry.
 
-<img src="../../../assets/light/layouts/CarLightsLayout.gif" width="300" alt="Car Lights layout preview">
+<img src="../../assets/light/layouts/CarLightsLayout.gif" width="300" alt="Car Lights layout preview">
 
 - `scale` — overall size scale (1–10).
 
@@ -153,7 +153,7 @@ Detail: [technical](moxygen/SpiralLayout.md)
 
 Maps a set of decorative "gourd" objects (a specific bar installation), each rendered at one of three granularities — one light per gourd, per side, or per LED.
 
-<img src="../../../assets/light/layouts/TorontoBarGourdsLayout.gif" width="300" alt="Toronto Bar Gourds layout preview">
+<img src="../../assets/light/layouts/TorontoBarGourdsLayout.gif" width="300" alt="Toronto Bar Gourds layout preview">
 
 - `granularity` — `One Gourd One Light`, `One Side One Light`, or `One LED One Light`.
 - `nrOfLightsPerGourd` — LEDs per gourd in the coarsest mode (1–128).

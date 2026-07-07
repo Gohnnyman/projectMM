@@ -2,6 +2,7 @@
 
 #include "core/Scheduler.h"     // setControl — the shared apply-core
 #include "core/JsonUtil.h"      // json::hasKey/parseBool/parseInt/parseString — the inbound ha/set parse
+#include "core/JsonSink.h"      // jsonEscape — escape the editable deviceName into the discovery JSON
                                 // (same flat helpers HttpServerModule::applyWledState uses; no arena)
 #include "light/Palette.h"      // Palettes::nearestForHue — a pure hue/sat→index CONVERSION with no
                                 // light state or objects, the one narrow reach this core module makes
@@ -80,18 +81,20 @@ void MqttModule::freeDiscoveryBuffers() {
 }
 
 void MqttModule::publishDiscovery(bool announce) {
-    // Retract (OFF): free the buffers unconditionally — freeing local memory needs no socket, so this
-    // runs even while disconnected/reconnecting (else a discovery-off toggle mid-reconnect would strand
-    // the buffers until teardown, breaking "no memory when discovery is off"). When we happen to be
-    // connected we ALSO send the empty retained payload so HA removes the entity; when not, the buffers
-    // still free and the entity clears on the broker's own retained-message expiry / next connect.
+    // Retract (OFF): send an empty retained payload to the config topic so HA removes the entity, then
+    // free the buffers. The retract frames into a small LOCAL buffer (a tombstone is topic + empty
+    // payload, well under kSendBufLen) — NOT the on-use discoveryBuf_, which may already be freed, and
+    // which we must not allocate on the OFF path (the "no memory when discovery is off" rule). When
+    // connected the tombstone goes out immediately; when disconnected we can't send, so it is deferred
+    // to the next CONNACK (which retracts when haDiscovery_ is false) — the broker keeps the last
+    // retained config until then. Freeing always runs, connected or not.
     if (!announce) {
-        if (state_ == Conn::Connected && discoveryBuf_) {
+        if (state_ == Conn::Connected) {
             char topic[96];
             buildDiscoveryTopic(topic, sizeof(topic));
-            const size_t n = buildMqttPublish(topic, nullptr, 0, discoveryBuf_, kDiscoveryBufLen,
-                                              /*retain=*/true);
-            if (n != 0) sendPacket(discoveryBuf_, n);
+            uint8_t buf[kSendBufLen];
+            const size_t n = buildMqttPublish(topic, nullptr, 0, buf, sizeof(buf), /*retain=*/true);
+            if (n == 0 || !sendPacket(buf, n)) resetConnection("error: discovery retract failed");
         }
         freeDiscoveryBuffers();
         return;
@@ -112,6 +115,10 @@ void MqttModule::publishDiscovery(bool announce) {
     std::snprintf(id, sizeof(id), "%s_%02x%02x%02x", prefixRoot_, mac[3], mac[4], mac[5]);
     const char* dn = systemModule_ ? systemModule_->deviceName() : nullptr;
     if (!dn || !dn[0]) dn = id;
+    // The deviceName is user-editable: a quote/backslash in it would produce invalid JSON. Escape it
+    // once (both name fields use it) with the shared jsonEscape — worst case doubles the 32-char name.
+    char dnEsc[72];
+    jsonEscape(dn, dnEsc, sizeof(dnEsc));
 
     char cmd[80], stat[80], avty[80];
     buildTopic(cmd,  sizeof(cmd),  "ha/set");
@@ -124,14 +131,16 @@ void MqttModule::publishDiscovery(bool announce) {
         "{\"schema\":\"json\",\"name\":\"%s\",\"uniq_id\":\"%s\",\"cmd_t\":\"%s\","
         "\"stat_t\":\"%s\",\"avty_t\":\"%s\",\"brightness\":true,"
         "\"dev\":{\"ids\":[\"%s\"],\"name\":\"%s\",\"mf\":\"MoonModules\",\"mdl\":\"projectMM\"}}",
-        dn, id, cmd, stat, avty, id, dn);
+        dnEsc, id, cmd, stat, avty, id, dnEsc);
     if (pn <= 0 || static_cast<size_t>(pn) >= kDiscoveryPayloadLen) return;   // truncated → don't send a broken config
 
     const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(discoveryPayload_),
                                       static_cast<size_t>(pn), discoveryBuf_, kDiscoveryBufLen,
                                       /*retain=*/true);
     if (n == 0) { setStatusLine("error: discovery config too large"); return; }
-    sendPacket(discoveryBuf_, n);
+    // Same "reset on a failed send" contract as the ping / subscribe / state paths: a partial write
+    // means a wedged socket, so drop the connection rather than leave a truncated frame on the stream.
+    if (!sendPacket(discoveryBuf_, n)) resetConnection("error: discovery publish failed");
 }
 
 // SUBSCRIBE to <prefix>/ha/set — the HA-native JSON command topic. Called at CONNACK (with the
@@ -143,7 +152,7 @@ void MqttModule::subscribeHaSet() {
     buildTopic(topic, sizeof(topic), "ha/set");
     uint8_t buf[kSendBufLen];
     const size_t n = buildMqttSubscribe(nextPacketId_++, topic, buf, sizeof(buf));
-    if (n != 0) sendPacket(buf, n);
+    if (n == 0 || !sendPacket(buf, n)) resetConnection("error: ha subscribe failed");
 }
 
 void MqttModule::setup() {
@@ -399,9 +408,13 @@ void MqttModule::handleInboundByte(uint8_t byte) {
             uint8_t sb[kSendBufLen];
             const size_t sn = buildMqttPublish(st, reinterpret_cast<const uint8_t*>("online"), 6,
                                                sb, sizeof(sb), /*retain=*/true);
-            if (sn != 0) sendPacket(sb, sn);
+            if (sn == 0 || !sendPacket(sb, sn)) { resetConnection("error: availability publish failed"); return; }
         }
+        // On connect: announce + subscribe when discovery is on; when it's OFF, retract instead — a
+        // config retained from a previous session (discovery was on, then turned off while offline)
+        // would otherwise keep HA's entity alive across this reconnect.
         if (haDiscovery_) { publishDiscovery(true); subscribeHaSet(); }
+        else              { publishDiscovery(false); }
         publishState(true);                  // publish initial state so mqttthing + HA show it
     } else if (type == static_cast<uint8_t>(MqttPacketType::Publish)) {
         const char* topic = nullptr; const uint8_t* payload = nullptr; size_t plLen = 0;
@@ -431,8 +444,10 @@ void MqttModule::routePublish(const char* topic, const uint8_t* payload, size_t 
         if (json::hasKey(body, "state")) {
             char st[8] = "";
             json::parseString(body, "state", st, sizeof(st));
-            const bool on = (std::strcmp(st, "ON") == 0);
-            setControlValue("on", on ? "{\"value\":true}" : "{\"value\":false}");
+            // HA sends exactly "ON"/"OFF"; act only on those. A malformed or truncated value is
+            // ignored (not silently treated as OFF), so a bad payload never turns the light off.
+            if (std::strcmp(st, "ON") == 0)       setControlValue("on", "{\"value\":true}");
+            else if (std::strcmp(st, "OFF") == 0) setControlValue("on", "{\"value\":false}");
         }
         if (json::hasKey(body, "brightness")) {
             int bri = json::parseInt(body, "brightness");
@@ -442,7 +457,8 @@ void MqttModule::routePublish(const char* topic, const uint8_t* payload, size_t 
             std::snprintf(json, sizeof(json), "{\"value\":%d}", bri);
             setControlValue("brightness", json);
         }
-        // Future: an "effect" key → setControlValue("palette"/"effect", …) with effect_list in the config.
+        // The JSON schema carries every field in one message, so a new control is another key here
+        // (e.g. an "effect" key routing to setControlValue) rather than another topic.
         return;
     }
 

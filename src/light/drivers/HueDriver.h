@@ -102,7 +102,7 @@ public:
     /// Runs every render tick, but does at most ONE bounded PUT and only when the rate-limit
     /// interval has elapsed (a millis() gate, NOT work-every-tick) — otherwise a synchronous HTTP
     /// round-trip would stall the single-thread render loop (the "never block the loop" rule,
-    /// decisions.md). One PUT every kPutIntervalMs, round-robined across the lights; pairing + the
+    /// lessons.md). One PUT every kPutIntervalMs, round-robined across the lights; pairing + the
     /// bridge announce ride the slow 1 Hz tick.
     void loop() override {
         if (pairTicksLeft_ > 0) return;            // pairing owns the bridge during its window

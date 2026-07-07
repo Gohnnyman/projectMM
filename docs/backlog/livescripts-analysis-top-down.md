@@ -378,7 +378,7 @@ The first sequencing question is **depth-first** (build the whole engine on Xten
 
 The [MoonLight effects tutorial](https://moonmodules.org/MoonLight/moonlight/effects-tutorial/) is a ready-made *start-small-grow* curriculum (random pixel → control → trails → oscillators → 2D → 3D → audio → Cosmic Noise). Each rung is **one engine-capability spike** with a concrete acceptance bar. **RipplesEffect.h is the graduation test** (the hard real effect, after the 3D rung). Each step is a normal small commit; the multi-target part is sequenced per §9.1 — the *seam* is proven on a second ISA at Stage 0.5, but the *full* second backend (all stages) comes later, opportunistically.
 
-**Next up: Stage 2 (buffer read-modify-write / trails).** Stages 0, 0.5 and 1 (Controls) are done — what landed and why is recorded in the git history and [decisions.md](../history/decisions.md); this ladder tracks the remaining rungs.
+**Next up: Stage 2 (buffer read-modify-write / trails).** Stages 0, 0.5 and 1 (Controls) are done — what landed and why is recorded in the git history and [lessons.md](../history/lessons.md); this ladder tracks the remaining rungs.
 
 | Stage | Capability proven | Acceptance bar (the spike) |
 |---|---|---|
