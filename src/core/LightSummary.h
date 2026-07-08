@@ -19,7 +19,7 @@ namespace mm {
 /// producer fills it in one place; every consumer that wants it reads it, no new seam. Keep it a
 /// flat POD of small integers.
 struct LightSummary {
-    uint32_t lightCount = 0;              ///< total physical lights driven (Layouts::totalLightCount()).
+    uint32_t lightCount = 0;              ///< total physical lights driven (Layer::physicalLightCount()).
     uint8_t  channelsPerLight = 3;        ///< 3 = RGB, 4 = RGBW, more = multi-channel DMX fixtures.
 };
 
