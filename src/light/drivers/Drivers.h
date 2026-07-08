@@ -8,6 +8,7 @@
 #include "light/layers/BlendMap.h"
 #include "light/drivers/Correction.h"
 #include "light/Palette.h"   // the global active palette + its select control
+#include "core/LightSummary.h"   // the POD published for the domain-neutral WLED/MQTT consumers
 #include "platform/platform.h"
 
 #include <cstring>  // std::strcmp in onUpdate
@@ -69,6 +70,24 @@ namespace mm {
 class Drivers : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "driver"; }
+
+    /// The live light-pipeline summary (light count, channels), for the domain-neutral core
+    /// consumers (WLED /json shim, MQTT). Static so a factory-created consumer reaches it without
+    /// a wiring inject — the same shape as `AudioModule::latestFrame()`. Points at the active
+    /// Drivers' summary (set in onBuildState, vacated in teardown); a default all-zero summary
+    /// when no Drivers is in the tree, so a consumer always reads a valid POD, never null.
+    static const LightSummary* latestSummary() {
+        static const LightSummary kNone{};
+        return active_ ? &active_->summary_ : &kNone;
+    }
+
+    // Vacate the summary seat when this Drivers is removed, so latestSummary() falls back to the
+    // all-zero default rather than a dangling pointer (the robustness rule). MoonModule::teardown
+    // recurses to children.
+    void teardown() override {
+        if (active_ == this) active_ = nullptr;
+        MoonModule::teardown();
+    }
 
     /// Global brightness (0–255). Scales every channel through a 256-entry LUT
     /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
@@ -198,6 +217,12 @@ public:
             outputBuffer_.free();
         }
         setDynamicBytes(outputBuffer_.bytes());
+        // Publish the light-pipeline summary for the domain-neutral core consumers (the WLED
+        // /json shim, MQTT) via the static latestSummary() pull. `out` is the composite extent;
+        // no enabled layer → zero lights. One POD, overwritten in place on each rebuild.
+        summary_.lightCount = out ? static_cast<uint32_t>(out->physicalLightCount()) : 0;
+        summary_.channelsPerLight = out ? out->channelsPerLight() : 3;
+        active_ = this;
         passBufferToDrivers();
         MoonModule::onBuildState();
     }
@@ -260,6 +285,12 @@ private:
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
     Correction correction_;
+
+    // Published to core via latestSummary(). active_ points at the Drivers whose summary is live
+    // (mirrors AudioModule::active_): set in onBuildState, cleared in teardown so a removed Drivers
+    // stops being read; only one Drivers exists in the pinned tree, so no re-election dance is needed.
+    LightSummary summary_;
+    inline static Drivers* active_ = nullptr;
 
     void passBufferToDrivers() {
         // No active Layer (e.g. the last Layer was just deleted): clear every

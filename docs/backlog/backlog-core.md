@@ -315,6 +315,18 @@ with the [DevicesModule command half](#devicesmodule-interop-plugins-the-command
 
 **Open question — Homebridge example maps both `setBrightness` and `setHSV`.** In `homebridge-mqttthing`'s `lightbulb`, HSV's *value* (V) already carries HomeKit's Brightness characteristic, so mapping both topic pairs may double-drive brightness (mqttthing's docs lean toward using one or the other). The [MQTT § Homebridge example](../moonmodules/core/services.md#mqtt) currently lists both, to show the device's full topic surface. Resolve on hardware: flash a board, run Homebridge + mqttthing with that config, and check whether the Home-app brightness slider misbehaves — if it does, drop the two `brightness` topics from the example; if not, it's a non-issue. (Flagged by CodeRabbit; parked here rather than changing the doc on an untested hunch.)
 
+### HA update entity via MQTT discovery — release check (open follow-up)
+
+**Discovery config + install command wiring — shipped.** [`MqttModule`](../../src/core/MqttModule.cpp) now publishes a second HA-discovery component at `homeassistant/update/projectMM_<mac6>/config` (same haDiscovery gate, same MAC-stable id, same device card as the light), state on `<prefix>/update/state`, and subscribes to `<prefix>/update/set`. HA renders a *"Firmware: <version>"* card in the diagnostic section of the device panel. An install command routes to `platform::http_fetch_to_ota` with the release-artifact URL built from the payload version + `kFirmwareName` (`https://github.com/MoonModules/projectMM/releases/download/v<version>/firmware-<key>-v<version>.bin`), reusing the same OTA task the `/api/firmware/url` route drives.
+
+**Still to build — device-side release check.** `installed_version` and `latest_version` are equal today (both `MM_VERSION`), so HA renders the entity as up-to-date and the Install button is disabled. What's missing is a periodic poll of `https://api.github.com/repos/MoonModules/projectMM/releases/latest`: at boot (~30 s post-network-up) and every 24 h thereafter, fetch the release JSON, extract `tag_name`, and if newer than `MM_VERSION` call `MqttModule::publishUpdateState()` with the updated `latest_version` (the publish path is already there — only the caller is missing). ~2 KB per check.
+
+Two blockers, both platform-layer:
+- **`platform::http_fetch_to_ota` is OTA-shaped** — it writes bytes into the next OTA partition; there's no general "HTTPS GET into a buffer" seam. A small `platform::http_fetch_to_buffer(url, buf, cap, statusBuf, size_out)` next to it — ~30 lines wrapping `esp_http_client` on ESP32, a libcurl / URLSession stub on desktop — is the right home for this.
+- **JSON parsing on-device** — the existing `mm::json` scalar helpers are flat and key-order-independent; a `releases/latest` payload uses a nested `assets[]` array which the current helpers don't walk. Either extend them (~30 lines to walk one level of array), or scan for the `tag_name` string directly with `strstr` for this one caller.
+
+Once both land, add a `ReleaseCheckModule` (or a small extension inside NetworkModule / FirmwareUpdateModule — decide when building) that owns the poll timer + last-seen version cache and calls into `MqttModule::publishUpdateState()`. ~50 additional lines.
+
 ## Testing
 
 ### Additional test coverage (pending)

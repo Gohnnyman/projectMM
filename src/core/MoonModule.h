@@ -278,9 +278,15 @@ public:
     uint8_t readUint8(const char* name, uint8_t dflt) const {
         for (uint8_t i = 0; i < controls_.count(); i++) {
             const ControlDescriptor& c = controls_[i];
-            // Uint8 covers both a plain uint8 (brightness) and a Select stored as uint8 (palette).
+            // All three types back onto a `uint8_t*`: Uint8 (brightness), Select (a dropdown stored as
+            // an option index), and Palette (a palette-picker stored as a builtins-array index). The
+            // Palette omission here silently failed driversPalette()/similar callers to dflt=0,
+            // which then made HttpServerModule's WLED shim report seg[0].col as Rainbow's
+            // representative colour (white) regardless of the actually-picked palette — the "the HA
+            // wheel snaps back to the centre and the card renders white" bug pinned on the bench.
             if (c.ptr && std::strcmp(c.name, name) == 0 &&
-                (c.type == ControlType::Uint8 || c.type == ControlType::Select))
+                (c.type == ControlType::Uint8 || c.type == ControlType::Select ||
+                 c.type == ControlType::Palette))
                 return *static_cast<const uint8_t*>(c.ptr);
         }
         return dflt;

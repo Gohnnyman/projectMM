@@ -3,6 +3,12 @@
 #include <cstdint>
 #include <cstddef>
 
+// MM_MOONLIVE_HAS_HOST_JIT is defined in platform_config.h (per-platform), so the
+// arch check stays behind the platform boundary and this header stays neutral. The macro
+// (not a constexpr) is required because #include-side test files gate whole TEST_CASEs
+// on `#if MM_MOONLIVE_HAS_HOST_JIT`.
+#include "platform/platform.h"
+
 // MoonLive — per-ISA code emitter (the backend seam, §3.2 of livescripts-analysis-top-down.md).
 //
 // This header is the NEUTRAL declaration the engine calls; the implementation is per-ISA and

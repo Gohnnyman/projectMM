@@ -78,6 +78,22 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
 
     Symmetric with the live runner's behaviour — observations persist always,
     contracts only when renegotiated."""
+    # Honour a scenario-level `skip_on` allowlist of host targets that lack a
+    # capability the scenario exercises (today: MoonLive scenarios opt out on
+    # pc-windows / pc-linux — the desktop JIT backend is arm64-only, so an
+    # x86_64 host renders dark and the "buffer non-zero" check would fail for
+    # a platform-capability reason the scenario isn't the right vehicle to
+    # assert. The C++ ctest suite gates the same tests on MM_MOONLIVE_HAS_HOST_JIT.
+    # An absent or empty `skip_on` runs everywhere, the existing default.
+    try:
+        with open(path, encoding="utf-8") as f:
+            scenario_meta = json.load(f)
+    except Exception:
+        scenario_meta = {}
+    target = _host_target()
+    if target in scenario_meta.get("skip_on", []):
+        print(f"  SKIP  {path.name} (skip_on {target})")
+        return 0
     # Capture + tee: stream to stdout while collecting MEASURE lines.
     proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

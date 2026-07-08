@@ -512,6 +512,8 @@ void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 void setHostname(const char* /*name*/) {}   // no DHCP client on desktop
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
+void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
+int wifiStaChannel() { return 0; }
 
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
@@ -744,9 +746,19 @@ bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
 
 bool UdpSocket::bind(uint16_t port) {
     if (fd_ < 0) return false;
+    // SO_REUSEADDR semantic split: on POSIX it lets a fresh socket claim a port left in
+    // TIME_WAIT (never allows two live binds to overlap). On Winsock its meaning is the
+    // opposite of POSIX — two live sockets can bind the same port, so a second bind()
+    // returns success instead of the EADDRINUSE the audio-sync retry-backoff logic reads
+    // as "port owned by someone else" (unit_AudioModule_sync's hog-then-module scenario
+    // exercises exactly that). Windows' equivalent-to-POSIX behaviour is the *default*,
+    // so on Windows we skip the setsockopt and let a second bind fail naturally. Same
+    // observable outcome on both platforms: overlapping binds are refused.
+#ifndef _WIN32
     int reuse = 1;
     ::setsockopt(sock(fd_), SOL_SOCKET, SO_REUSEADDR,
                  reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+#endif
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);

@@ -2,6 +2,7 @@
   "name": "scenario_MoonLiveEffect_controls",
   "module": "MoonLiveEffect",
   "mode": "mutate",
+  "skip_on": ["pc-windows", "pc-linux"],
   "also": [
     "Layouts",
     "GridLayout",

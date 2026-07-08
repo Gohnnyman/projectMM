@@ -13,9 +13,15 @@ class JsonSink;
 class Scheduler;
 
 /// Embedded HTTP server plus WebSocket — serves the web UI and the REST API that backs it.
-/// Core infrastructure with NO light-domain dependencies (no `PreviewFrame`, no light types,
-/// no light includes). Implementation lives in HttpServerModule.cpp; this header is the
-/// interface only. The `port` control defaults to 8080 on desktop, 80 on ESP32.
+/// Core infrastructure held to a **light-include-free** contract with one PO-accepted
+/// exception: the WLED-compatibility shim's colour path uses `light/Palette.h`'s pure
+/// hue/RGB↔palette-index conversions (`Palettes::nearestForRgb`, `Palettes::representativeRgb`),
+/// the same sanctioned exception `MqttModule` documents at its top-of-file — routing a HomeKit /
+/// HA WLED colour to a projectMM palette needs the palette set, which is inherently light-domain,
+/// and a format conversion is the least-coupling way to bridge it (this module still drives the
+/// palette through `Scheduler::setControl`, not a light object). No other light-domain include
+/// is permitted here. Implementation lives in HttpServerModule.cpp; this header is the interface
+/// only. The `port` control defaults to 8080 on desktop, 80 on ESP32.
 ///
 /// **REST API:** `GET /` serves index.html and the UI assets (`/app.js`, `/style.css`,
 /// `/moonlight-logo.png`). `GET /api/state` returns the full module-tree JSON (each entry
@@ -272,10 +278,20 @@ private:
     void serveWledInfo(platform::TcpConnection& conn);
     void serveWledState(platform::TcpConnection& conn);
     void serveWledStateInfo(platform::TcpConnection& conn);
+    void serveWledDeviceJson(platform::TcpConnection& conn);   ///< /json — HA WLED integration surface
     void handleWledState(platform::TcpConnection& conn, const char* body);
     void pollWledStateFromWebSockets();             ///< read app's slider/toggle sent over /ws
     void writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]);
+    void writeWledName(JsonSink& sink, const char* name);   // 💫-prefixed WLED name (HA marker)
     void writeWledStateBody(JsonSink& sink);
+    /// Resolve device identity for the WLED shim: `deviceName` (from SystemModule) → `name`,
+    /// live IPv4 (Ethernet first, WiFi fallback) → `ip`, MAC → `mac`. Extracted so the
+    /// /json/info, /json/si and /json handlers share one lookup instead of hand-copying the
+    /// same four platform calls. `nameFallback` defaults to `"projectMM"` (the value the
+    /// handlers used before extraction). Both `ip` and `mac` are written in place; `name`
+    /// points at the SystemModule string when present (which outlives the request).
+    void resolveWledIdentity(const char*& name, uint8_t mac[6], uint8_t ip[4],
+                             const char* nameFallback = "projectMM");
     void writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first);
 
     // -----------------------------------------------------------------------

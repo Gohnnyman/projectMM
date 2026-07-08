@@ -929,6 +929,20 @@ int wifiStaRssi() {
     return info.rssi;
 }
 
+void wifiStaBssid(uint8_t out[6]) {
+    std::memset(out, 0, 6);
+    if (!wifiStaConnected_) return;
+    wifi_ap_record_t info{};
+    if (esp_wifi_sta_get_ap_info(&info) == ESP_OK) std::memcpy(out, info.bssid, 6);
+}
+
+int wifiStaChannel() {
+    if (!wifiStaConnected_) return 0;
+    wifi_ap_record_t info{};
+    if (esp_wifi_sta_get_ap_info(&info) != ESP_OK) return 0;
+    return info.primary;
+}
+
 bool wifiApInit(const char* apName, const char* ip) {
     // Guard against repeated init leaking the previous AP netif.
     // Stop before ensureWifiInit() — wifiApStop() deinits the WiFi driver.
@@ -1037,6 +1051,8 @@ bool wifiStaConnected() { return false; }
 void wifiStaGetIPv4(uint8_t out[4])      { out[0] = out[1] = out[2] = out[3] = 0; }
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
+void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
+int wifiStaChannel() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
@@ -1082,6 +1098,26 @@ bool mdnsInit(const char* deviceName) {
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "mDNS hostname set failed: %s", esp_err_to_name(err));
         return false;
+    }
+
+    // Explicitly register + enable the Ethernet netif with mDNS. The component "runs by
+    // default on preconfigured interfaces (STA, AP, ETH)", but on the ESP32-P4 that
+    // auto-attach does NOT catch the eth netif, so the SRV/A record ships with no address
+    // and the device advertises a _wled._tcp / _http._tcp service HA can see but not
+    // resolve (blank IP in HA's Zeroconf browser, so no auto-discovery). Registering the
+    // netif by pointer + MDNS_EVENT_ENABLE_IP4 forces the probe→announce onto the real
+    // interface. Idempotent on the targets where the predef ETH already covers it:
+    // mdns_register_netif returns ESP_ERR_INVALID_STATE ("already registered"), which we
+    // treat as success, so this one path fixes the P4 without regressing S31/classic/S3.
+    if (ethNetif_ && ethConnected()) {
+        esp_err_t regErr = mdns_register_netif(ethNetif_);
+        if (regErr == ESP_OK || regErr == ESP_ERR_INVALID_STATE) {
+            esp_err_t actErr = mdns_netif_action(ethNetif_, MDNS_EVENT_ENABLE_IP4);
+            ESP_LOGI(NET_TAG, "mDNS eth netif register:%s enable:%s",
+                     regErr == ESP_OK ? "new" : "already", esp_err_to_name(actErr));
+        } else {
+            ESP_LOGW(NET_TAG, "mDNS eth netif register failed: %s", esp_err_to_name(regErr));
+        }
     }
 
     // FORCE A FRESH RE-ADVERTISE: remove any existing service record, then add it back.

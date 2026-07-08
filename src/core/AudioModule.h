@@ -53,8 +53,8 @@ namespace mm {
 /// **Hardware: INMP441-class digital mic.** A self-clocked I2S MEMS microphone:
 /// standard/Philips framing, 24-bit data left-justified in a 32-bit slot, mono. The
 /// part is self-clocked from the bit clock; there is no master-clock (MCLK) pin.
-/// The bench wiring is WS=4 (word-select/LRCLK), SD=5 (serial data out), SCK=6 (bit
-/// clock). It drives the one slot its L/R select pin chooses (tie L/R to GND for the
+/// The bench wiring is SCK=6 (bit clock), WS=4 (word-select/LRCLK), SD=5 (serial data
+/// out). It drives the one slot its L/R select pin chooses (tie L/R to GND for the
 /// left slot); if `level` stays at the floor with sound present, the mic is filling
 /// the other slot — one wire, not firmware.
 ///
@@ -104,10 +104,11 @@ public:
     // control sentinel — so GPIO 0 stays a usable mic pin): the module is user-added
     // when a board has a mic, and stays idle (no I2S init) until the user enters the
     // real GPIOs, so adding it can't grab arbitrary pins or wedge a board with no
-    // mic. The bench INMP441 wiring is WS=4 / SD=5 / SCK=6. ---
-    int8_t wsPin = -1;           ///< word-select / LRCLK (-1 = unset). Changing it re-creates the I2S channel live (no reboot).
-    int8_t sdPin = -1;           ///< serial data in (-1 = unset). Changing it re-creates the I2S channel live.
-    int8_t sckPin = -1;          ///< bit clock (-1 = unset). Changing it re-creates the I2S channel live.
+    // mic. The bench INMP441 wiring is SCK=6 / WS=4 / SD=5. Order follows the I2S
+    // datasheet convention: clocks (SCK, WS) then data (SD) then the optional MCLK. ---
+    int8_t sckPin = -1;          ///< bit clock / BCLK (-1 = unset). Changing it re-creates the I2S channel live (no reboot).
+    int8_t wsPin = -1;           ///< word-select / LRCLK (-1 = unset). Changing it re-creates the I2S channel live.
+    int8_t sdPin = -1;           ///< serial data in / DOUT (-1 = unset). Changing it re-creates the I2S channel live.
     int8_t mclkPin = -1;         ///< master clock out (-1 = none). Self-clocked MEMS mics (INMP441) leave this
                                  ///< -1; an ADC/codec that needs a master clock (e.g. the MHC-WLED P4 shield's
                                  ///< line-in ADC on GPIO3) sets it so the I2S peripheral drives MCLK. On a codec
@@ -153,9 +154,9 @@ public:
                                                        ? sampleRateSel : 2]; }
 
     void onBuildControls() override {
+        controls_.addPin("sckPin", sckPin);
         controls_.addPin("wsPin", wsPin);
         controls_.addPin("sdPin", sdPin);
-        controls_.addPin("sckPin", sckPin);
         controls_.addPin("mclkPin", mclkPin);
         static constexpr const char* kRateOptions[] = {"8000", "16000", "22050", "44100"};
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
@@ -290,6 +291,13 @@ public:
         // than one render tick), so each tick contributes a partial; we analyse
         // once the accumulator is full, then reset it.
         const size_t n = platform::audioMicRead(mic_, samples_ + filled_, kBlock - filled_);
+        // Mic-health tallies (read here, before the DC-blocker rewrites samples_): the samples the I2S
+        // read delivered, and whether any were non-zero, accumulated over the 1 s window and diagnosed
+        // in loop1s(). The two together isolate the two clean failure modes of a mic bring-up: samples
+        // arriving proves the clocks (BCLK/WS) + DMA; a non-zero among them proves the data line (SD).
+        // All-zero samples = clocks fine, SD dead — otherwise a silent "RMS 0" with no clue which wire.
+        micSamples1s_ += n;
+        for (size_t i = 0; i < n; i++) if (samples_[filled_ + i] != 0) { micNonzero1s_++; break; }
         if (n == 0) return;                            // nothing ready this tick
         filled_ += n;
         if (filled_ < kBlock) return;                  // wait for a whole block
@@ -389,6 +397,26 @@ public:
         std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(levelPeak_));
         std::snprintf(peakStr_, sizeof(peakStr_), "%u Hz", static_cast<unsigned>(frame_.peakHz));
         levelPeak_ = 0;   // reset for the next window
+
+        // Mic-health diagnosis from the 1 s tallies (see the read path). Only for a live *direct* mic
+        // (inited, not a sync receiver, no codec) — a codec/sync/unset-pin path has its own status. The
+        // split turns a silent mic into a wire-specific verdict:
+        //   no samples at all  → the I2S clocks aren't running — check sckPin / wsPin.
+        //   samples, all zero  → clocks fine, data line dead — check sdPin (SD/DOUT) + power.
+        //   samples, non-zero  → data is flowing; clear any prior diagnosis.
+        const bool directMicLive = inited_ && sync != 2
+                                   && platform::audioCodecType == platform::CodecType::None;
+        if (directMicLive) {
+            if (micSamples1s_ == 0)
+                setStatus("mic: no samples — check sckPin / wsPin (I2S clocks)", Severity::Warning);
+            else if (micNonzero1s_ == 0)
+                setStatus("mic: data line silent — check sdPin (SD/DOUT) + mic power", Severity::Warning);
+            else if (micStatusStale_)
+                setStatus("", Severity::Status);   // data flowing again — clear a prior diagnosis
+            micStatusStale_ = (micSamples1s_ == 0 || micNonzero1s_ == 0);
+        }
+        micSamples1s_ = 0;
+        micNonzero1s_ = 0;
         // Live sync status: "sending" / "receiving" (peer audio fresh) / "listening"
         // (bound, no peer) / "off". While the socket isn't open yet, leave the baseline
         // syncReinit/syncEnsureSocket set ("waiting for network" / "…failed"); only once
@@ -428,6 +456,14 @@ private:
     char peakStr_[12] = {};
     uint8_t levelPeak_ = 0;   // peak frame_.level across the current 1 s display window (UI only)
 
+    // Mic-health tallies over the 1 s window (see the read path + loop1s diagnosis). micSamples1s_ =
+    // raw samples the I2S read delivered (proves clocks/DMA); micNonzero1s_ = reads that carried a
+    // non-zero sample (proves the SD data line). micStatusStale_ = a diagnosis is currently posted, so
+    // loop1s clears it once the mic recovers rather than clearing every second.
+    uint32_t micSamples1s_ = 0;
+    uint32_t micNonzero1s_ = 0;
+    bool     micStatusStale_ = false;
+
     // Auto fill-in (simulate 1/2): treat the mic as "live" for a grace window after any block above
     // the threshold, so brief gaps between beats don't flip to the sim. ~2 s of blocks (≈86/block·23ms).
     static constexpr uint16_t kSimRealThreshold  = 4;    // a block level above this counts as real sound
@@ -463,8 +499,8 @@ private:
         // don't attempt an I2S init — initialising I2S on unset pins is what hung a
         // mic-less board's boot. GPIO 0 IS a valid mic pin now (the sentinel is -1,
         // not 0), so the guard tests < 0, not == 0.
-        if (wsPin < 0 || sdPin < 0 || sckPin < 0) {
-            setStatus("mic: set wsPin / sdPin / sckPin", Severity::Status);
+        if (sckPin < 0 || wsPin < 0 || sdPin < 0) {
+            setStatus("mic: set sckPin / wsPin / sdPin", Severity::Status);
             return;
         }
         // Bring up the I2S channel FIRST. Where MCLK comes from depends on the board:

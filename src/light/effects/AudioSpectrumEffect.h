@@ -30,7 +30,9 @@ public:
 
     // 0 = height gradient (green base → red top, the VU look); 1 = per-band hue
     // (each column its own colour across the spectrum, the rainbow analyser look).
-    uint8_t colorMode = 0;
+    // Default per-band: the rainbow analyser reads as a spectrum at a glance, which is
+    // what a "spectrum" effect is expected to look like.
+    uint8_t colorMode = 1;
 
     void onBuildControls() override {
         static constexpr const char* kColorOptions[] = {"height", "per-band"};

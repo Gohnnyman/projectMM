@@ -15,6 +15,11 @@
 #include "core/FilesystemModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/SystemModule.h"      // deviceName() for the WLED /json/info shim
+#include "light/Palette.h"          // Palettes::nearestForHue — maps HA's RGB colour picker onto our
+                                    // hue→palette convention (same core→light bridge MqttModule uses
+                                    // for hsv/set; see the note in MqttModule.cpp:7-14).
+#include "light/drivers/Drivers.h"  // Drivers::latestSummary() — the real light count/channels for
+                                    // the WLED /json shim (same one-narrow-reach as Palette above).
 #include "platform/platform.h"
 #include "ui/ui_embedded.h"
 
@@ -217,6 +222,21 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         // as the card tint). serveWledState reads live brightness from the Drivers module.
         else if (std::strcmp(path, "/json/state") == 0) serveWledState(conn);
         else if (std::strcmp(path, "/json/si") == 0) serveWledStateInfo(conn);
+        // Home Assistant's WLED integration fetches `/json` (the full combined blob, not `/json/si`),
+        // and its Python `wled` library rejects a response missing any of Info.fs, State.nl,
+        // State.udpn, State.lor — so the `/json/info` + `/json/state` shim (tuned to the WLED Android
+        // app's minimal Moshi model) can't answer this endpoint. serveWledDeviceJson writes the
+        // fuller shape python-wled parses; /json/info and /json/state stay minimal (Android-app path).
+        else if (std::strcmp(path, "/json") == 0) serveWledDeviceJson(conn);
+        // /presets.json — the second endpoint HA's WLED lib fetches after /json (on every state
+        // update where info.uptime/info.fs.pmt are zero — see python-wled's _check_presets_changed).
+        // If it 404s, python-wled raises WLEDEmptyResponseError and HA's config flow aborts with
+        // HTTP 500. We don't implement WLED presets, so return a TRUTHY-but-empty presets object
+        // (`{"0":{}}`): python-wled's __pre_deserialize__ maps it into `{0: Preset(0)}` then discards
+        // 0 per its "Nobody cares about 0" rule — result is HA seeing zero presets. `{}` alone would
+        // fail the `not presets` guard in wled.py; we need a non-empty dict.
+        else if (std::strcmp(path, "/presets.json") == 0)
+            sendResponse(conn, 200, "application/json", "{\"0\":{}}");
         else sendResponse(conn, 404, "text/plain", "Not found");
     } else if (std::strcmp(method, "POST") == 0) {
         // POST /api/modules/<name>/move with body {"to":N}.
@@ -971,16 +991,9 @@ void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
     conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
 
     // Identity: the deviceName (from SystemModule), the live IP, the MAC.
-    const char* name = "projectMM";
-    if (MoonModule* sys = findModuleByName("System")) {
-        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
-        if (dn && dn[0]) name = dn;
-    }
-    uint8_t ip[4] = {};
-    platform::ethGetIPv4(ip);
-    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) platform::wifiStaGetIPv4(ip);
-    uint8_t mac[6] = {};
-    platform::getMacAddress(mac);
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
+    (void)ip;  // serveWledInfo doesn't need the IP; keep the call uniform.
 
     // Field set reverse-engineered from the WLED-Android app's `Info` Moshi model
     // (model/wledapi/Info.kt): the ONLY non-nullable fields it requires are `name`, `leds`
@@ -997,40 +1010,102 @@ void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
     sink.flush();
 }
 
-// The WLED info object, written into an open sink (no HTTP header). Shared by
-// /json/info and the `info` half of /json/si.
-void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]) {
-    sink.appendf("{\"name\":");
-    sink.writeJsonString(name);   // writes its own surrounding quotes + escaping
-    // wifi: rssi/signal are nullable in the model, but sending them makes the app show a
-    // signal icon instead of a crossed-out one (cosmetic — the device lists either way).
-    sink.appendf(",\"mac\":\"%02x%02x%02x%02x%02x%02x\","
-                 "\"leds\":{\"count\":1},\"wifi\":{\"rssi\":-50,\"signal\":100},"
-                 "\"brand\":\"WLED\",\"product\":\"MoonModules\"}",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+// See header. Extracts the deviceName / IP / MAC lookup the WLED shim needs at four
+// call sites (/json/info, /json/state /json/si, /json), so a future change to how identity
+// is discovered updates one place.
+void HttpServerModule::resolveWledIdentity(const char*& name, uint8_t mac[6], uint8_t ip[4],
+                                           const char* nameFallback) {
+    name = nameFallback;
+    if (MoonModule* sys = findModuleByName("System")) {
+        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
+        if (dn && dn[0]) name = dn;
+    }
+    for (int i = 0; i < 6; i++) mac[i] = 0;
+    platform::getMacAddress(mac);
+    for (int i = 0; i < 4; i++) ip[i] = 0;
+    platform::ethGetIPv4(ip);
+    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) platform::wifiStaGetIPv4(ip);
 }
 
-// Current Drivers brightness (0–255), or 0 if Drivers isn't present. This is the global
-// output brightness the WLED app's slider maps to. Read generically through the control
-// list (by name + Uint8 type, via the stored pointer) so this core module needs no
-// light-domain include — the same domain-neutral reach applySetControl uses to write.
-// The WLED state object, written into an open sink. `on` + `bri` mirror Drivers
-// brightness (off = brightness 0). `seg[0].col[0]` is the colour the WLED app tints the
-// device card with: we send the LIVE first-LED RGB from Drivers, so the card mirrors what
-// the device is actually showing — falling back to projectMM purple when the first LED is
-// black/off or there's no output (so a dark device still reads as a distinct projectMM,
-// not an indistinct black card).
+// The WLED info object, written into an open sink (no HTTP header). Shared by
+// /json/info and the `info` half of /json/si.
+// Emit the WLED `name` field with the 💫 projectMM marker prefixed, so a projectMM board stands out
+// among plain WLED devices in Home Assistant's device list (which keys everything off the WLED
+// integration). The marker lives ONLY in the WLED-compat name HA reads — the real deviceName (UI,
+// mDNS hostname, MQTT topics) stays unprefixed, so identity/hostnames carry no emoji. writeJsonString
+// owns the quotes + escaping; the marker is a plain UTF-8 literal that passes through unescaped.
+void HttpServerModule::writeWledName(JsonSink& sink, const char* name) {
+    char prefixed[80];
+    std::snprintf(prefixed, sizeof(prefixed), "\xF0\x9F\x92\xAB %s", name ? name : "");
+    sink.writeJsonString(prefixed);
+}
+
+void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]) {
+    sink.appendf("{\"name\":");
+    writeWledName(sink, name);
+    // Real led count (the light domain's Drivers::latestSummary) + wifi rssi/signal, so the WLED
+    // app card and the WS push show the true device shape. signal maps rssi→0-100 like WLED.
+    const unsigned ledCount = Drivers::latestSummary()->lightCount;
+    const int rssi = platform::wifiStaRssi();
+    int signal = (rssi == 0) ? 0 : (2 * (rssi + 100));
+    if (signal < 0) signal = 0; else if (signal > 100) signal = 100;
+    sink.appendf(",\"mac\":\"%02x%02x%02x%02x%02x%02x\","
+                 "\"leds\":{\"count\":%u},\"wifi\":{\"rssi\":%d,\"signal\":%d},"
+                 "\"brand\":\"WLED\",\"product\":\"MoonModules\"}",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                 ledCount, rssi, signal);
+}
+
+// The WLED state object, written into an open sink. `on` + `bri` mirror Drivers on/brightness.
+// `seg[0].col[0]` reports the ACTIVE PALETTE's identity colour, not the live first-LED — so
+// every WLED consumer (the WLED native app's device card, HA's WLED integration colour picker,
+// Homebridge's HSV via the MQTT pair, the /ws push) sees the same stable palette-representative
+// value and matches the palette-picker → RGB round-trip. Live first-LED was tried first and
+// dropped: it dimmed the picker under low master brightness (near-black) and jittered with the
+// effect animation ("the picked color moves" — user report). `Palettes::representativeRgb`
+// returns V=255, so brightness stays HA's `state.bri × seg.bri` responsibility and doesn't
+// double-dim. Rationale for the seg[0].on / seg[0].bri fields lives inline below.
 void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     const uint8_t bri = driversBrightness(scheduler_);
-    uint8_t rgb[3] = {0, 0, 0};
-    bool haveLed = false;
-    if (MoonModule* d = findModuleByName("Drivers")) haveLed = d->firstOutputRgb(rgb);
-    if (!haveLed || (rgb[0] == 0 && rgb[1] == 0 && rgb[2] == 0)) {
-        rgb[0] = 128; rgb[1] = 0; rgb[2] = 255;   // projectMM purple — the black/off default
-    }
-    sink.appendf("{\"on\":%s,\"bri\":%u,"
-                 "\"seg\":[{\"id\":0,\"col\":[[%u,%u,%u]]}]}",
-                 driversOn(scheduler_) ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
+    const RGB pc = Palettes::representativeRgb(driversPalette(scheduler_));
+    // nl/udpn/lor/transition/ps/pl/mainseg are additive to the Android-app minimum (Moshi ignores
+    // unknown/extra fields), and REQUIRED for HA's WLED integration: `python-wled` parses the POST
+    // /json/state response through State.from_dict too — the same required-fields contract as /json.
+    // Without them, HA `light.turn_on` succeeds on the device but the response parse raises, which HA
+    // wraps as HTTP 500 on `services/light/turn_on`. nl/udpn as empty objects satisfy the parser via
+    // their dataclass defaults; lor=0 is LiveDataOverride.OFF.
+    // seg[0].on MUST be present: HA WLED's is_on for a WLEDSegmentLight reads
+    // state.segments[<seg>].on (light.py:244), NOT top-level state.on. Without it,
+    // python-wled parses segment.on as its dataclass default None, `bool(None)` is
+    // False, and HA's UI shows the light off even when the device is on — the
+    // "brightness/color work but the toggle doesn't" symptom pinned on the bench.
+    const char* onStr = driversOn(scheduler_) ? "true" : "false";
+    // seg[0].pal = the active palette index, so HA's WLED integration highlights the current entry
+    // in its palette dropdown (light.py reads state.segments[<seg>].palette). It shares the Drivers
+    // `palette` control with col[0] above (representativeRgb of the SAME index), so the HA palette
+    // dropdown and colour picker stay two views of one value: selecting a palette repaints the picker
+    // on HA's next poll, and picking a colour snaps to the nearest palette (applyWledState).
+    const uint8_t pal = driversPalette(scheduler_);
+    sink.appendf("{\"on\":%s,\"bri\":%u,\"transition\":7,\"ps\":-1,\"pl\":-1,"
+                 "\"nl\":{},\"udpn\":{},\"lor\":0,\"mainseg\":0,"
+                 // seg[0].bri MUST be present alongside seg[0].on (same reason): HA WLED reads brightness
+                 // from state.segments[<seg>].brightness (light.py's _attr_brightness), NOT top-level
+                 // state.bri. Without it python-wled parses segment.brightness as the dataclass default
+                 // 0, so HA renders the slider at zero even when the device is at full. Same on-the-
+                 // bench root-cause as seg[0].on — HA's SegmentLight class reads *segment* fields.
+                 // seg[0].bri = 255 (segment is 100% of master), state.bri = actual — the real WLED
+                 // convention. HA WLEDSegmentLight with the default has_main_light=False computes
+                 // (segment.bri × state.bri) / 255 (coordinator.py + light.py:220-222), so sending
+                 // 255 in the segment lets HA render the actual master value. Sending `bri` in both
+                 // would show bri²/255 instead — verified against ha-core wled/coordinator.py.
+                 // fx=0 accompanies pal: a real WLED segment always reports BOTH the effect and the
+                 // palette index, and python-wled's Segment model (HA's WLED integration) pairs them —
+                 // sending pal without fx yields a half-populated segment real WLED never produces, and
+                 // HA's light-platform setup then leaves the light entity stuck `restored`/unavailable
+                 // (the sensors still work — only the segment-derived light breaks). fx=0 = "Solid", the
+                 // single effect this shim exposes (fxcount=1), so the pair is consistent.
+                 "\"seg\":[{\"id\":0,\"on\":%s,\"bri\":255,\"fx\":0,\"pal\":%u,\"col\":[[%u,%u,%u]]}]}",
+                 onStr, bri, onStr, pal, pc.r, pc.g, pc.b);
 }
 
 void HttpServerModule::serveWledState(platform::TcpConnection& conn) {
@@ -1043,6 +1118,121 @@ void HttpServerModule::serveWledState(platform::TcpConnection& conn) {
     sink.flush();
 }
 
+// /json — the FULL combined blob Home Assistant's WLED integration fetches (frenck/python-wled). The
+// crucial deltas from /json/si (which targets the WLED Android app's minimal Moshi model): python-wled
+// requires `info.fs` (Filesystem), `state.nl` (Nightlight), `state.udpn` (UDPSync), and `state.lor`
+// (LiveDataOverride) — every other field carries a default in the dataclass and is optional. We also
+// send `ver >= "0.14.0"` because python-wled's __pre_deserialize__ raises WLEDUnsupportedVersionError
+// on anything below (skipped only when `ver` is absent, but sending it makes HA's update-badge behave).
+// `effects` and `palettes` each carry one entry so HA renders a one-option picker rather than none.
+// Independent of /json/info + /json/state so THIS surface can grow to satisfy python-wled without
+// disturbing the Android-app validated minimum. Prior art: WLED's own /json response shape (public
+// docs at https://kno.wled.ge/interfaces/json-api/); we write ours fresh against the model dataclass
+// contract, not by copying WLED's implementation.
+void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
+    const char* header =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
+
+    JsonSink sink(conn);
+    // state — writeWledStateBody emits the {on,bri,seg,...} block reused by /json/state and
+    // /json/si; wrap it under "state":. Keeping one authoritative writer avoids the two paths
+    // drifting on which seg[0] fields HA actually reads.
+    sink.appendf("{\"state\":");
+    writeWledStateBody(sink);
+    // info — `ver` is a sentinel `"99.0.0"`, NOT the projectMM semver. Reason: HA's WLED
+    // integration parses WLED tags as CalVer (`16.0.1` is year-16, not `0.16.1`), so a
+    // projectMM semver like `2.1.0-dev` compares LOWER than WLED's current `16.0.1` (2 < 16)
+    // and HA flags a bogus "update to WLED 16.0.1" whose `.bin` would brick a projectMM
+    // device. `AwesomeVersion("99.0.0") > AwesomeVersion("<any WLED tag>")` in the CalVer
+    // regime, so HA's WLED update-check is always silent for us. First tried `mm::kVersion`
+    // (assuming SemVer parsing) — the bench P4 showed HA still flagging 16.0.1 after the flash
+    // because the CalVer branch was the actual one taken. Real projectMM version lives on the
+    // MQTT `update/state` topic (`installed_version` under the HA update entity), which is where
+    // "did projectMM ship a new release" belongs — the WLED shim is for the LIGHT ENTITY, not
+    // the firmware version. `arch`/`brand`/`product`/`mac`/`ip` populate HA's device card
+    // (mf/mdl/sw_version rendered from these); `leds`/`wifi`/`fs` are the objects python-wled's
+    // Info dataclass requires or expects for the sensor entities (heap, uptime, signal).
+    // Real values for the diagnostic sensors HA renders from the `wifi` + `freeheap` blocks.
+    // signal maps rssi→0-100 the way WLED does (0 at -100 dBm, 100 at -50 dBm); bssid/channel come
+    // from the associated AP. On an ETHERNET device there is no Wi-Fi AP, so these read 0/empty — and
+    // `info.wifi` is Optional in python-wled, so we OMIT the whole `wifi` object rather than send a
+    // zeroed one. HA then creates no Wi-Fi sensors for an eth device (a real WLED-on-eth behaves the
+    // same), instead of the greyed "Wi-Fi RSSI/BSSID/channel/signal" rows an all-zero block produces.
+    const bool onEth = platform::ethConnected();
+    const int rssi = platform::wifiStaRssi();
+    uint8_t bssid[6] = {};
+    platform::wifiStaBssid(bssid);
+    const int channel = platform::wifiStaChannel();
+    int signal = (rssi == 0) ? 0 : (2 * (rssi + 100));
+    if (signal < 0) signal = 0; else if (signal > 100) signal = 100;
+    // Real pipeline shape from the light domain (Drivers::latestSummary) + render rate.
+    const LightSummary* ls = Drivers::latestSummary();
+    const unsigned ledCount = ls->lightCount;
+    const unsigned renderFps = scheduler_ ? scheduler_->fps() : 0;
+    const char* rgbw = (ls->channelsPerLight >= 4) ? "true" : "false";
+    sink.appendf(",\"info\":{\"ver\":\"99.0.0\",\"vid\":2410150,\"name\":");
+    writeWledName(sink, name);
+    sink.appendf(",\"mac\":\"%02x%02x%02x%02x%02x%02x\","
+                 "\"ip\":\"%u.%u.%u.%u\",\"arch\":\"esp32\","
+                 "\"brand\":\"WLED\",\"product\":\"MoonModules\",\"release\":\"MoonModules\","
+                 // lc + seglc = LightCapability.RGB_COLOR (1) so HA WLED's segment light picks
+                 // ColorMode.RGB (via LIGHT_CAPABILITIES_COLOR_MODE_MAPPING in ha-core/wled/const.py),
+                 // which grants a brightness slider AND colour picker. LightCapability.NONE (0)
+                 // maps to ColorMode.ONOFF, which is why the entity was on/off-only initially.
+                 // BOTH are capability CODES, not counts: HA reads seglc[segment_id] as that segment's
+                 // capability bitmask (1 = RGB), then LIGHT_CAPABILITIES_COLOR_MODE_MAPPING[seglc[0]]
+                 // gives the colour mode. Putting the LED count here (e.g. seglc:[24]) has no mapping,
+                 // so WLEDSegmentLight ends up with NO supported colour modes and HA refuses to add the
+                 // light entity ("does not set supported color modes") — it stays `restored`/unavailable
+                 // while the sensors still work. seglc is therefore the constant 1, matching lc; the LED
+                 // count lives only in `count`. fps = the real render rate (scheduler_->fps()).
+                 "\"leds\":{\"count\":%u,\"fps\":%u,\"rgbw\":%s,\"wv\":false,\"cct\":false,"
+                 "\"maxpwr\":0,\"maxseg\":1,\"pwr\":0,\"lc\":1,\"seglc\":[1]},",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                 ip[0], ip[1], ip[2], ip[3],
+                 ledCount, renderFps, rgbw);
+    // wifi — only for a Wi-Fi device (omitted on Ethernet; see the comment above the getters).
+    if (!onEth) {
+        sink.appendf("\"wifi\":{\"bssid\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+                     "\"rssi\":%d,\"channel\":%d,\"signal\":%d},",
+                     bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+                     rssi, channel, signal);
+    }
+    sink.appendf("\"fs\":{\"t\":256,\"u\":32,\"pmt\":1},"
+                 // uptime + pmt drive python-wled's presets change-detect: when both are non-zero and
+                 // stable, HA computes a stable "boot_time" and stops refetching /presets.json every
+                 // state update. pmt=1 (stable-since-boot) + uptime in seconds gives it the anchor.
+                 "\"freeheap\":%u,\"uptime\":%u,\"udpport\":21324,\"live\":false,"
+                 // ws=-1 tells python-wled (HA's WLED integration lib) that WebSocket updates are
+                 // unsupported in this build. Its __post_deserialize__ maps -1 to None, and its
+                 // coordinator falls back to HTTP polling. Sending 0 (the WLED convention for
+                 // "supported, no clients yet") makes HA open a WS to our own /ws endpoint, which
+                 // serves projectMM-native state frames — not the WLED-shaped Info+State updates the
+                 // python-wled parser requires — and floods HA's log with `MissingField: filesystem`
+                 // on every frame. Fix pinned on the bench with `sudo docker logs homeassistant`.
+                 "\"lm\":\"\",\"lip\":\"\",\"ws\":-1,"
+                 // palcount = the real built-in count (matches the palettes[] array below); fxcount
+                 // stays 1 (this shim exposes one effect surface). cpal/umpal = 0 (no custom palettes).
+                 "\"fxcount\":1,\"palcount\":%u,\"cpalcount\":0,\"umpalcount\":0,\"str\":false}",
+                 static_cast<unsigned>(platform::freeHeap()),
+                 static_cast<unsigned>(platform::millis() / 1000u),
+                 static_cast<unsigned>(mm::palettes::kCount));
+    // effects + palettes — python-wled's __pre_deserialize__ turns each array into an indexed dict.
+    // effects stays one real entry ("Solid"): this shim drives a single Layer, so a longer effect list
+    // would be a lie. palettes is the REAL built-in list (Palette.h paletteNames / kBuiltins) so HA's
+    // palette dropdown offers every palette the device has, indexed to match seg[0].pal and the Drivers
+    // `palette` control — the same one-narrow-reach into light/ that the representative colour uses.
+    sink.appendf(",\"effects\":[\"Solid\"],\"palettes\":[");
+    mm::paletteNames(sink);
+    sink.appendf("]}");
+    sink.flush();
+}
+
 // /json/si — the combined {state, info} the WLED app reads in one call for its card.
 void HttpServerModule::serveWledStateInfo(platform::TcpConnection& conn) {
     const char* header =
@@ -1050,13 +1240,9 @@ void HttpServerModule::serveWledStateInfo(platform::TcpConnection& conn) {
         "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
     conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
 
-    const char* name = "projectMM";
-    if (MoonModule* sys = findModuleByName("System")) {
-        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
-        if (dn && dn[0]) name = dn;
-    }
-    uint8_t mac[6] = {};
-    platform::getMacAddress(mac);
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
+    (void)ip;  // /json/si's info body carries no IP field; keep the call uniform.
 
     JsonSink sink(conn);
     sink.appendf("{\"state\":");
@@ -1083,6 +1269,39 @@ void HttpServerModule::applyWledState(const char* body) {
         char valueJson[32];
         std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", bri);
         applySetControl("Drivers", "brightness", valueJson);
+    }
+    // WLED palette: seg[0].pal is the palette index. HA's WLED integration writes here when a user
+    // picks from the palette dropdown (the entries served by paletteNames in /json). It maps straight
+    // to the Drivers `palette` control — the direct-index counterpart to the col[] nearest-match below;
+    // both feed the same control, so the dropdown and the colour picker stay one value. Parsed from the
+    // segment object so a top-level stray "pal" can't hijack it.
+    const char* segStart = std::strstr(body, "\"seg\":");
+    const char* palStart = segStart ? std::strstr(segStart, "\"pal\":") : nullptr;
+    if (palStart) {
+        int pal = std::atoi(palStart + 6);
+        if (pal < 0) pal = 0;
+        if (pal >= mm::palettes::kCount) pal = mm::palettes::kCount - 1;
+        char valueJson[24];
+        std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", pal);
+        applySetControl("Drivers", "palette", valueJson);
+    }
+    // WLED colour: seg[0].col[0] is [r,g,b]. HA's WLED integration writes here when a user picks a
+    // colour in the RGB picker. Palettes::nearestForRgb is the canonical RGB→palette entry (see the
+    // comment at its declaration): it applies the same RGB→(hue,sat) conversion representativeHueSat
+    // uses on the palette side, then runs the 2D-distance sweep. Value channel is ignored — HA's own
+    // brightness slider handles bri via the `bri` field above.
+    const char* colStart = std::strstr(body, "\"col\":[[");
+    if (colStart) {
+        int r = 0, g = 0, b = 0;
+        if (std::sscanf(colStart + 8, "%d,%d,%d", &r, &g, &b) == 3) {
+            const uint8_t rc = static_cast<uint8_t>(r < 0 ? 0 : (r > 255 ? 255 : r));
+            const uint8_t gc = static_cast<uint8_t>(g < 0 ? 0 : (g > 255 ? 255 : g));
+            const uint8_t bc = static_cast<uint8_t>(b < 0 ? 0 : (b > 255 ? 255 : b));
+            const uint8_t idx = mm::Palettes::nearestForRgb(rc, gc, bc);
+            char valueJson[24];
+            std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%u}", static_cast<unsigned>(idx));
+            applySetControl("Drivers", "palette", valueJson);
+        }
     }
 }
 
@@ -1633,13 +1852,9 @@ void HttpServerModule::pushWledStateToWebSockets() {
     for (auto& ws : wsClients_) if (ws.valid()) { hasClients = true; break; }
     if (!hasClients) return;
 
-    const char* name = "projectMM";
-    if (MoonModule* sys = findModuleByName("System")) {
-        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
-        if (dn && dn[0]) name = dn;
-    }
-    uint8_t mac[6] = {};
-    platform::getMacAddress(mac);
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
+    (void)ip;  // the WS-push info body carries no IP field; keep the call uniform.
 
     JsonSink sink;
     sink.appendf("{\"state\":");

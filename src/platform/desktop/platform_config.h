@@ -76,3 +76,17 @@ constexpr bool hasOta = false;
 constexpr bool hasImprov = false;
 
 } // namespace mm::platform
+
+// MM_MOONLIVE_HAS_HOST_JIT — 1 when this desktop host has BOTH the emit blob AND the general
+// assembler (moonlive_asm_host.cpp) available. Both are arm64-only today; x86_64 Windows/Linux/
+// Intel-macOS desktops ship without a backend and MoonLive::compile / compileSource fail
+// cleanly (scripted modules render dark). Tests and scenarios that presuppose a working JIT
+// gate on this macro. Kept in platform_config.h (not core) per the platform-boundary rule:
+// no `#if defined(__aarch64__)` outside src/platform/. A #define (not constexpr) so #include-
+// side test files can use it in `#if` — CLAUDE.md's `if constexpr` preference is for runtime
+// branches inside code, not preprocessor gating around whole TEST_CASEs.
+#if defined(__aarch64__)
+    #define MM_MOONLIVE_HAS_HOST_JIT 1
+#else
+    #define MM_MOONLIVE_HAS_HOST_JIT 0
+#endif

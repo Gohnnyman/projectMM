@@ -21,3 +21,4 @@ Agents do not read this directory automatically, only when a decision's rational
 | [0009](0009-docs-generated-technical-plus-summary.md) | Two doc surfaces: generated technical + hand-written summary | Accepted |
 | [0010](0010-integration-identity-stable-hardware-id.md) | Integration identity is a stable hardware id | Accepted |
 | [0011](0011-data-exchange-pull-and-prepare-pass-not-pubsub.md) | Inter-module data/events: pull + prepare-pass, not pub/sub | Accepted |
+| [0012](0012-ha-discovery-wled-default-mqtt-opt-in.md) | HA discovery: WLED by default, MQTT discovery opt-in | Accepted |

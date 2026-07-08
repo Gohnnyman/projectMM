@@ -74,7 +74,7 @@ Bridges the light to an MQTT broker so a home-automation hub (Homebridge) can co
 - `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
 - `port` — broker port (default 1883).
 - `username` / `password` — broker credentials (optional; the password is stored obfuscated like the WiFi password).
-- `haDiscovery` — announce a Home Assistant MQTT-discovery light (default on). HA auto-creates a wired entity; toggling it off removes the entity. See the [home-automation guide](../../usecases/home-automation.md).
+- `haDiscovery` — announce a Home Assistant MQTT-discovery light (default off, opt-in). HA already auto-discovers the device over the WLED `/json` shim (colour + palette + sensors, no broker), so this stays off to avoid a duplicate entity; turn it on for broker-only / cross-subnet setups where mDNS doesn't reach. When on, HA auto-creates a wired entity; toggling it off removes it. See the [home-automation guide](../../usecases/home-automation.md).
 - read-only — `mqtt_status` (`disabled` / `idle` / `connecting` / `connected` / `disconnected` / an error).
 
 Detail: [technical](moxygen/MqttModule.md)
@@ -119,7 +119,7 @@ A System peripheral (added by the user, not auto-wired): an I²S microphone (or 
 
 <img src="../../assets/core/AudioModule.png" width="300" alt="Audio module controls">
 
-- `wsPin` / `sdPin` / `sckPin` — the I²S GPIOs (unset until entered).
+- `sckPin` / `wsPin` / `sdPin` — the I²S GPIOs (bit clock / word-select / data; unset until entered).
 - `mclkPin` — master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
 - `sampleRate` — mic/ADC sample rate.
 - `floor` / `gain` — noise floor and input gain for the analysis.
@@ -174,6 +174,8 @@ The topic prefix is `projectMM/<mac>` — a **stable** identifier (the last 6 he
 | set → device | `projectMM/563cfe/hsv/set` | `h,s,v` (hue `0`–`359`, sat/val `0`–`100`) |
 | device → get | `projectMM/563cfe/hsv/get` | `h,s,v` |
 | device → get | `projectMM/563cfe/name` | the friendly `deviceName` (retained) |
+| device → get | `projectMM/563cfe/update/state` | `{"installed_version":…,"latest_version":…,"release_url":…,"title":…}` (retained; HA update entity) |
+| set → device | `projectMM/563cfe/update/set` | target version string (empty = install latest); triggers OTA against the matching GitHub release asset |
 
 The HomeKit colour wheel has no "palette" concept, so `hsv/set`'s hue+saturation pick the **nearest palette** (each built-in palette has a representative colour; the closest one is selected) and the value drives brightness — the colour wheel becomes a natural palette selector.
 
@@ -200,7 +202,11 @@ The HomeKit colour wheel has no "palette" concept, so `hsv/set`'s hue+saturation
 }
 ```
 
-Home Assistant does not need MQTT: it adopts the device through its built-in WLED integration over the existing WLED `/json` API.
+Home Assistant adopts the device two ways, both zero-config:
+- **MQTT auto-discovery** — with `haDiscovery` on (opt-in; off by default) and a broker set, the device announces itself on `homeassistant/light/projectMM_<mac6>/config` and HA auto-creates a wired entity with **on/off + brightness** (the config declares `brightness` only; colour isn't in it, so the entity has no colour control). Retained across reboots. Colour/palette stays on the separate `hsv/set` topic above, not this entity. Off by default because the WLED `/json` shim already gives HA a richer light (colour + palette + sensors) over mDNS with no broker — leaving both on lists the device twice; enable this only for broker-only / cross-subnet setups.
+- **WLED integration** — HA's built-in WLED integration discovers the device over the WLED `/json` API projectMM already serves; on/off + brightness work with no broker.
+
+Both can be on at once. Setup walkthrough (including exposing HA to Apple Home via HA's HomeKit Bridge, no Homebridge needed) in the [Home Assistant recipe](../../usecases/home-automation.md#adopt-in-home-assistant).
 
 ## File Manager — details
 

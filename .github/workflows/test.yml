@@ -47,9 +47,11 @@ jobs:
       # them via --with is the explicit, discovery-friendly form (a bare `pytest
       # <dir>` doesn't honour a test file's own inline deps). `markdown` (a MkDocs
       # dep, not in the base env) is needed by test_mkdocs_slug.py, which pins _slug()
-      # against Python-Markdown's real toc slugify.
+      # against Python-Markdown's real toc slugify. `wled` is the frenck/python-wled
+      # library HA's WLED integration uses; test_wled_json_shape.py parses the
+      # device /json vector through its Device.from_dict to pin the wire contract.
       - name: pytest
-        run: uv run --with pytest --with pyserial --with markdown pytest test/python -q
+        run: uv run --with pytest --with pyserial --with markdown --with wled pytest test/python -q
 
   js:
     runs-on: ubuntu-latest

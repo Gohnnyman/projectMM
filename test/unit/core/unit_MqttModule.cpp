@@ -194,6 +194,9 @@ TEST_CASE("MqttModule: CONNACK publishes a retained HA discovery config") {
     Rig r;
     uint8_t cap[1024];
     r.mqtt->enableSendCaptureForTest(cap, sizeof(cap));
+    // haDiscovery defaults OFF (opt-in; the WLED /json shim covers HA), so enable it first — this
+    // test asserts the announce shape when the user opts into MQTT discovery.
+    Scheduler::instance()->setControl("Mqtt", "haDiscovery", "{\"value\":true}");
     // A CONNACK-accept: fixed header 0x20, len 2, session-present 0, return-code 0 (accepted).
     const uint8_t connack[] = {0x20, 0x02, 0x00, 0x00};
     r.mqtt->feedForTest(connack, sizeof(connack));
@@ -227,6 +230,8 @@ TEST_CASE("MqttModule: retract frees the discovery buffers even while disconnect
     Rig r;
     uint8_t cap[1024];
     r.mqtt->enableSendCaptureForTest(cap, sizeof(cap));
+    // haDiscovery defaults OFF; opt in so CONNACK allocates the discovery buffers this test tracks.
+    Scheduler::instance()->setControl("Mqtt", "haDiscovery", "{\"value\":true}");
     // CONNACK-accept → Connected → announce allocates the discovery buffers (448 + 320 = 768).
     const uint8_t connack[] = {0x20, 0x02, 0x00, 0x00};
     r.mqtt->feedForTest(connack, sizeof(connack));

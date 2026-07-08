@@ -33,6 +33,10 @@ FillFn place(const uint8_t* code, size_t n, void*& blkOut, size_t cap = 256) {
 }
 }
 
+// Every compile-through-run test in this file needs a working host JIT. The tiny-buffer
+// degrade test lower down (which asserts !ok) is left unguarded — it passes for the right
+// reason on arm64 (bytes exceed cap) and a compatible reason on x86_64 (no codegen).
+#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("MoonLive compiled fill is BEHAVIORALLY identical to the hand-encoded emitFill (golden)") {
     const uint8_t cases[][3] = {{0, 0, 255}, {10, 20, 200}, {255, 255, 255}, {0, 0, 0}, {1, 2, 3}};
     for (auto& c : cases) {
@@ -78,6 +82,7 @@ TEST_CASE("MoonLive compiled fill is robust: zero lights writes nothing") {
     CHECK(buf[0] == 0xAB);
     platform::freeExec(blk, 256);
 }
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
 
 TEST_CASE("MoonLive compileSource degrades on a too-small code buffer") {
     uint8_t tiny[4];
@@ -85,6 +90,7 @@ TEST_CASE("MoonLive compileSource degrades on a too-small code buffer") {
     CHECK_FALSE(moonlive::compileSource("fill(0,0,255);", kT, nullptr, 0).ok);
 }
 
+#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("MoonLive compiled setRGB writes one pixel; out-of-range is bounds-rejected") {
     uint8_t code[256];
     // in-range
@@ -163,3 +169,4 @@ TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") 
     CHECK(lit == 1);
     platform::freeExec(blk, r.len);
 }
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
