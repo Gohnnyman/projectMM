@@ -49,6 +49,37 @@ size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve ch
 size_t maxAllocBlock();     // largest contiguous block (any memory type — incl PSRAM)
 size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
 
+// --- RTOS task introspection (TasksModule) --------------------------------------------------
+// A fixed-size, allocation-free snapshot of the OS tasks, filled by the platform layer so no
+// FreeRTOS type escapes src/platform/ (the platform-boundary rule). ESP32 fills it from
+// uxTaskGetSystemState (the textbook RTOS-introspection call, needs CONFIG_FREERTOS_USE_TRACE_
+// FACILITY); it uses a fixed static scratch (no heap) but briefly suspends the scheduler while it
+// walks the task list — call it off the per-frame path (loop1s, once a second), not from loop().
+// Desktop returns 0 (no RTOS). cpuPermille is 0..1000, or kTaskCpuUnmeasured when run-time-stats are
+// compiled out (the cheap default) — the caller shows a CPU% column only when it's a real number.
+enum class TaskState : uint8_t { Running, Ready, Blocked, Suspended, Deleted, Invalid, Unknown };
+constexpr uint32_t kTaskCpuUnmeasured = 0xFFFFFFFFu;
+struct TaskInfo {
+    char      name[16] = {};
+    TaskState state = TaskState::Unknown;
+    int8_t    core = -1;               // 0, 1, or -1 (no affinity)
+    uint8_t   priority = 0;
+    uint32_t  stackFreeBytes = 0;      // high-water-mark: min free stack ever seen for this task
+    uint32_t  cpuPermille = kTaskCpuUnmeasured;  // 0..1000, or kTaskCpuUnmeasured (stats off)
+};
+// Fill `out` with up to `maxTasks` task rows; returns the count written. 0 on a target without
+// an RTOS (desktop) or without the trace facility compiled in.
+size_t taskSnapshot(TaskInfo* out, size_t maxTasks);
+// Name of the task currently running on `core` (0 or 1); empty string if unavailable/single-core.
+void currentTaskOnCore(int core, char* out, size_t cap);
+// Name of the RTOS task that runs the render loop (Scheduler::tick) — the task every MoonModule
+// executes inside today. TasksModule nests the module rows under the matching `tasks` entry rather
+// than hardcoding a task name. Empty on a target with no distinct render task (desktop).
+const char* renderTaskName();
+// Test-only (desktop): inject a canned task snapshot + render-task name so TasksModule's row/detail
+// JSON + nesting predicate are testable on the host (no RTOS otherwise). `tasks` must outlive the use.
+void setTestTaskSnapshot(const TaskInfo* tasks, size_t count, const char* renderTask);
+
 // Test-only cap on the value maxAllocBlock() reports; 0 = no cap (real value).
 // Lets a test force MappingLUT's paged-destinations fallback without an actual
 // fragmented heap. Production never calls this; reset to 0 in teardown.

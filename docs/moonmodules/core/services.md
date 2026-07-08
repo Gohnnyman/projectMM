@@ -145,6 +145,17 @@ A System peripheral that probes the I²C bus (default GPIO21/22) on a button pre
 
 Detail: [technical](moxygen/I2cScanModule.md)
 
+<a id="tasks"></a>
+
+### Tasks
+
+A read-only diagnostic that shows **what runs where** — the observability foundation for core-affinity / task-assignment work (you can't optimise which module runs on which core until you can see it). Inspired by MoonLight's task table; projectMM nests the MoonModules that run in each task beneath it, and the per-module cost comes from projectMM's own self-report (`loopTimeUs`/`classSize`/`dynamicBytes`) at zero extra cost. The raw FreeRTOS task view sits behind the platform boundary.
+
+- read-only — `tasks` (a row per FreeRTOS task: `name`, `state`, `core`, `prio`, `stack` = min free stack ever seen; `cpu`% only in a build with `MM_TASK_CPU_STATS` — a `--task-cpu-stats` profiling build, off by default because the FreeRTOS run-time counter costs ~5% tick). Expand a row to see the MoonModules running in that task, each `Name · Nus · NB · Nheap` (`us` = average loop time, `class` bytes, `heap` bytes), plus a closing `∑ modules Xus / tick Yus · Zus outside modules` cross-check — the top-level module loop times should account for nearly all the tick, the small remainder being the blend/map/output that isn't a module. Today every module runs in the one render task, so that task's detail is the whole module list. Empty on desktop / a chip without the trace facility.
+- read-only — `core0` / `core1` (the task currently executing on each core; empty on a single-core chip).
+
+Detail: [technical](moxygen/TasksModule.md)
+
 <a id="ir"></a>
 
 ### IR

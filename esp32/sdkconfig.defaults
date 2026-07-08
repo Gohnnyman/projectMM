@@ -31,3 +31,10 @@ CONFIG_ESP_WIFI_ENABLED=y
 # sdkconfig.defaults.<board> for boards that have it. The base file is
 # board-neutral so a WiFi-only ESP32 build doesn't reserve RMII GPIOs or
 # allocate Ethernet DMA buffers it can't use.
+
+# FreeRTOS task introspection for TasksModule (uxTaskGetSystemState): the trace facility is
+# cheap — a bit of RAM/flash, no per-context-switch cost. The per-task CPU% counter
+# (GENERATE_RUN_TIME_STATS) is NOT enabled here: it costs ~5% tick (measured) and is gated
+# behind the MM_TASK_CPU_STATS build flag for profiling builds only.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y

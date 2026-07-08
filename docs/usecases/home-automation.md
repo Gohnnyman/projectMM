@@ -27,7 +27,9 @@ The control surface these integrations drive — the MQTT controls, topics, and 
 
 ## Adopt in Home Assistant
 
-Assuming HA is running with the Mosquitto broker add-on installed (if not, [Set up the infrastructure](#set-up-home-assistant-mosquitto) below), two steps: **point the device at the broker**, then **let HA auto-create the entity**. A third optional step brings it into Apple Home via HA's own HomeKit Bridge — no Homebridge needed.
+<img src="../assets/core/ha-integration.png" width="600" alt="projectMM devices as 💫-marked lights in a Home Assistant dashboard">
+
+HA discovers a projectMM device automatically over the WLED path — no broker, nothing to configure — and lists it as a light with colour, palette, and brightness. The 💫 in each name marks it as projectMM among any plain WLED devices. An optional step brings that entity into Apple Home via HA's own HomeKit Bridge — no Homebridge needed. Turn the `haDiscovery` control on only for the MQTT path (broker-only or cross-subnet setups); see [Let HA auto-create the entity](#2-let-ha-auto-create-the-entity) below.
 
 The chain:
 
@@ -36,14 +38,14 @@ Apple Home ──HAP──▶ HA (HomeKit Bridge) ──MQTT──▶ Mosquitto 
                              └── HA app / voice / automations
 ```
 
-### 1. Point the device at the broker
+### 1. (MQTT path only) Point the device at the broker
 
-In the device's web UI, open the **MQTT** module and set:
+The default WLED path needs none of this — skip to step 2. Do step 1 **only if you're using the opt-in MQTT path** (a broker-only / cross-subnet setup). In the device's web UI, open the **MQTT** module and set:
 
 - `broker` — the **HA VM's LAN IP** (not `127.0.0.1`; not `homeassistant.local` unless the device does mDNS — safer to use the IP the HAOS console prints).
 - `port` — `1883`.
 - `username` / `password` — the HA user you created for MQTT (a plain HA user with local-network access; see the [broker add-on setup](#install-the-mosquitto-broker-add-on) if you haven't).
-- `haDiscovery` — leave **on** (the default). This is what makes HA auto-create the entity in the next step.
+- `haDiscovery` — turn **on** (it's off by default). This is what makes HA auto-create the MQTT entity in the next step; leave it off if you're on the WLED path.
 
 `mqtt_status` turns to `connected` when it reaches the broker. Confirm from HA with the built-in **MQTT integration → Configure → Listen to topic → `projectMM/#`** — the device's `.../on/get`, `.../brightness/get`, `.../hsv/get`, and retained `.../name` appear.
 

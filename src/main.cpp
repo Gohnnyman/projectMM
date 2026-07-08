@@ -98,6 +98,7 @@
 #include "core/SystemModule.h"
 #include "core/AudioModule.h"
 #include "core/I2cScanModule.h"
+#include "core/TasksModule.h"
 #include "core/IrModule.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
@@ -214,6 +215,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/services.md#system");
     mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/services.md#audio");
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/services.md#i2c-scan");
+    mm::ModuleFactory::registerType<mm::TasksModule>("TasksModule", "core/services.md#tasks");
     mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/services.md#ir");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/services.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/services.md#firmware-update");

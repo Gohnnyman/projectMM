@@ -391,7 +391,8 @@ def idf_cmd(idf_path: Path) -> list[str]:
     return [python_exe, str(idf_path / "tools" / "idf.py")]
 
 
-def firmware_cmake_args(firmware: str, release: str = "", version: str = "") -> list[str]:
+def firmware_cmake_args(firmware: str, release: str = "", version: str = "",
+                        task_cpu_stats: bool = False) -> list[str]:
     """Extra -D cache args for the requested firmware.
 
     `release` is the release-channel tag (e.g. "latest", "v1.0.0") to burn
@@ -404,8 +405,16 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "") -> 
     default (library.json) applies.
     """
     spec = FIRMWARES[firmware]
-    fragments = ";".join(spec["fragments"])
+    frags = list(spec["fragments"])
+    if task_cpu_stats:
+        # Opt-in per-task CPU% in TasksModule: append the run-time-stats fragment (enables the
+        # FreeRTOS counter, ~5% tick) and set the compile def that fills + shows the column. Off
+        # unless --task-cpu-stats is passed — a profiling build, never the default.
+        frags.append("sdkconfig.defaults.task-cpu-stats")
+    fragments = ";".join(frags)
     args = [f"-DSDKCONFIG_DEFAULTS={fragments}"]
+    if task_cpu_stats:
+        args.append("-DMM_TASK_CPU_STATS=1")
     # Burn the firmware key into the binary so SystemModule can report it and
     # the OTA path can pick the matching release asset (every release ships
     # one .bin per firmware key — see release.yml).
@@ -511,7 +520,10 @@ def stale_feature_cache(build_dir: Path, extra: list[str], chip: str) -> str | N
     # The feature toggles whose presence/absence changes which code compiles.
     # For each, "wanted" = does this firmware pass the -D, "cached" = is it set
     # in the existing cache. A disagreement means a stale dir.
-    for flag in ("MM_NO_ETH", "MM_ETH_ONLY", "MM_NO_WIFI"):
+    # MM_TASK_CPU_STATS is here too: toggling --task-cpu-stats on an existing dir must wipe, or the
+    # sdkconfig fragment (GENERATE_RUN_TIME_STATS) never re-seeds — CPU% would read all-0 with the flag
+    # on, or leave a hidden ~5% tick tax with it off. Same stale-cache trap as MM_NO_ETH.
+    for flag in ("MM_NO_ETH", "MM_ETH_ONLY", "MM_NO_WIFI", "MM_TASK_CPU_STATS"):
         wanted = any(a.startswith(f"-D{flag}") for a in extra)
         cached = f"{flag}:" in text  # CMake writes `MM_NO_ETH:UNINITIALIZED=1`
         if wanted != cached:
@@ -564,6 +576,9 @@ def main():
                              "(see compute_version.py): core for a stable tag, "
                              "'<core>-dev.<N>' for latest. Omit for local builds "
                              "(library.json applies).")
+    parser.add_argument("--task-cpu-stats", action="store_true",
+                        help="Enable per-task CPU%% in TasksModule (FreeRTOS run-time stats). "
+                             "A profiling build only — costs ~5%% tick; off by default.")
     parser.add_argument("--skip-idf-pin-check", action="store_true",
                         help="Build against the currently-checked-out IDF even if "
                              "it differs from PINNED_IDF_COMMIT (for a dev "
@@ -633,7 +648,8 @@ def main():
     # but this wrapper does not yet reproduce it reliably — tracked in
     # docs/backlog/ (ESP32-P4 round 3). Until fixed, build this variant
     # with the manual sequence above.
-    extra = firmware_cmake_args(firmware, args.release, args.version)
+    extra = firmware_cmake_args(firmware, args.release, args.version,
+                                task_cpu_stats=args.task_cpu_stats)
 
     # Guard against a build dir configured for a different feature set (a stale
     # MM_NO_ETH / MM_ETH_ONLY in CMakeCache that a plain reconfigure won't clear).

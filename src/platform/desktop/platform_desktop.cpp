@@ -214,6 +214,25 @@ size_t maxInternalAllocBlock() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
+// No RTOS on desktop — the TasksModule shows only its MoonModule cost table here.
+// Test seam: a unit test can inject a canned task snapshot + render-task name so TasksModule's
+// row/detail JSON + the nesting predicate are exercised on the host (no RTOS here otherwise). Empty
+// by default → the real "desktop shows no tasks" behaviour. Declared in platform.h under a test guard.
+static const TaskInfo* g_testTasks = nullptr;
+static size_t g_testTaskCount = 0;
+static const char* g_testRenderTask = "";
+void setTestTaskSnapshot(const TaskInfo* tasks, size_t count, const char* renderTask) {
+    g_testTasks = tasks; g_testTaskCount = count; g_testRenderTask = renderTask ? renderTask : "";
+}
+size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
+    if (!g_testTasks || !out) return 0;
+    const size_t n = g_testTaskCount < maxTasks ? g_testTaskCount : maxTasks;
+    for (size_t i = 0; i < n; i++) out[i] = g_testTasks[i];
+    return n;
+}
+void currentTaskOnCore(int, char* out, size_t cap) { if (out && cap) out[0] = '\0'; }
+const char* renderTaskName() { return g_testRenderTask; }
+
 size_t totalHeap() {
     return 0; // Not meaningful on desktop
 }
