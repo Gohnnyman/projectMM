@@ -17,12 +17,14 @@
 
 using namespace mm;
 
+#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("MoonLive emitFill produces a non-empty routine") {
     uint8_t code[256];
     size_t n = moonlive::emitFill(code, sizeof(code), 1, 2, 3);
     CHECK(n > 0);
     CHECK(n <= sizeof(code));
 }
+#endif
 
 TEST_CASE("MoonLive emitFill rejects a too-small buffer (degrades, no overrun)") {
     uint8_t tiny[2];
@@ -34,6 +36,11 @@ TEST_CASE("MoonLive emitFill/emitAnimatedFill reject a null output buffer (no cr
     CHECK(moonlive::emitAnimatedFill(nullptr, 256) == 0);
 }
 
+// The compile-through-call tests below need a working host JIT (emit blob + assembler); on
+// x86_64 desktops (Windows, Linux/macOS Intel) MoonLive::compile fails cleanly and the tests
+// would fail on the REQUIRE. Guarded on the emit-header capability macro so they compile
+// out where the backend is unimplemented — the same "runs dark" degradation on-device.
+#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("MoonLive compiles and fills a buffer with the chosen colour") {
     moonlive::MoonLive engine;
     REQUIRE(engine.compile(/*r*/ 10, /*g*/ 20, /*b*/ 200));
@@ -127,6 +134,10 @@ TEST_CASE("platform allocExec returns usable executable memory, freeExec release
     CHECK(buf[0] == 7);
     platform::freeExec(blk, 64);
 }
+#endif  // MM_MOONLIVE_HAS_HOST_JIT — the JIT-dependent block ends here; the STAGE 1 CONTROLS below
+        // exercise the parser/arena, which also depend on compile() succeeding, so they gate too.
+
+#if MM_MOONLIVE_HAS_HOST_JIT
 
 // STAGE 1 CONTROLS — engine-level arena behaviour. These pin the load-bearing decision: the
 // control-values arena is owned by the engine, has a STABLE address across a recompile (grows
@@ -180,3 +191,4 @@ TEST_CASE("MoonLive controls: free() releases the arena (no stale slot after tea
     REQUIRE(eng.controlSlot(0) != nullptr);
     CHECK(*eng.controlSlot(0) == 5);                     // re-seeded from default
 }
+#endif  // MM_MOONLIVE_HAS_HOST_JIT

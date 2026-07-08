@@ -397,6 +397,24 @@ static int runScenario(const char* path) {
     std::printf("%s\n", scenario["description"].c_str());
     std::printf("Target: %s\n\n", hostTarget());
 
+    // Honour a scenario-level `skip_on` allowlist of host targets that lack
+    // a capability the scenario exercises (today: MoonLive scenarios opt out
+    // on pc-windows / pc-linux — the desktop JIT is arm64-only, so an x86_64
+    // host renders dark and the scenario's "buffer non-zero" check would fail
+    // for a platform-capability reason it isn't the right vehicle to assert).
+    // Absent / empty `skip_on` runs everywhere (the existing default). Same
+    // field the Python run_scenario.py honours; keeping the C++ runner in
+    // step so KPI collection (which calls mm_scenarios directly) doesn't
+    // count skipped scenarios as failures.
+    if (scenario.has("skip_on")) {
+        for (auto& t : scenario["skip_on"].arr) {
+            if (t.str == hostTarget()) {
+                std::printf("  SKIP (skip_on %s)\n---\nPASSED (skipped)\n", hostTarget());
+                return 0;
+            }
+        }
+    }
+
     // Mode field (construct/mutate) determines what shape the scenario expects
     // the world to be in. See docs/testing.md § Scenario modes.
     //   construct → scenario builds the pipeline from an empty scheduler; runs

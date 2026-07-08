@@ -3,6 +3,7 @@
 #include "doctest.h"
 #include "core/moonlive/MoonLiveCompiler.h"
 #include "core/moonlive/MoonLive.h"
+#include "core/moonlive/moonlive_emit.h"   // MM_MOONLIVE_HAS_HOST_JIT — the assembler+emit gate
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 
 #include <cstdint>
@@ -21,6 +22,9 @@ using namespace mm;
 static moonlive::BuiltinTable kTable = moonlive::lightBuiltins();
 
 // Compile + run a source on a w-light, 3-channel buffer; returns the rendered buffer.
+// Only used by the JIT-gated tests below; guard the definition too so a non-JIT build
+// doesn't fire /W4's "unreferenced static function" (which -Werror escalates).
+#if MM_MOONLIVE_HAS_HOST_JIT
 static std::vector<uint8_t> render(const char* src, int nLights, uint32_t t = 0) {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile(src, kTable));
@@ -29,7 +33,15 @@ static std::vector<uint8_t> render(const char* src, int nLights, uint32_t t = 0)
     eng.run(buf.data(), nLights, 3, t);
     return buf;
 }
+#endif
 
+// The compile-through-run tests need a working host JIT — the assembler (moonlive_asm_host.cpp)
+// is arm64-only today, so on x86_64 desktops compileSource returns !ok ("codegen failed") and
+// every "should compile" assertion fails. Guarded on the emit-header capability macro so they
+// compile out where the backend is unimplemented — the same "runs dark" degradation on-device.
+// The malformed-input tests further down don't gate: they assert failure, which succeeds for
+// the right reason (parse rejects) on arm64 and for a compatible reason (no codegen) on x86_64.
+#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("compileSource: fill(r,g,b) fills every light") {
     auto buf = render("fill(10, 20, 200);", 8);
     for (int i = 0; i < 8; i++) { CHECK(buf[i*3]==10); CHECK(buf[i*3+1]==20); CHECK(buf[i*3+2]==200); }
@@ -94,6 +106,7 @@ TEST_CASE("compileSource rejects malformed programs with a diagnostic, never cra
     // A value-returning function used as a void statement IS valid (result discarded).
     CHECK(moonlive::compileSource("random16(8);", kTable, out, sizeof(out)).ok);
 }
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
 
 TEST_CASE("MoonLive.compile(source) on a bad script leaves the engine !ok with an error") {
     moonlive::MoonLive eng;
@@ -108,6 +121,7 @@ TEST_CASE("MoonLive.compile(source) on a bad script leaves the engine !ok with a
 // VREG REUSE: a chain of calls must fit the small device register file. Each argument temp dies
 // once its call consumes it and is recycled, so peak register pressure stays low no matter how
 // many calls a statement nests — setRGB with all four arguments a random16 still compiles.
+#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("a multi-call statement reuses dead vregs and stays within the register budget") {
     moonlive::BuiltinTable t = moonlive::lightBuiltins();
     uint8_t out[768];
@@ -155,6 +169,7 @@ TEST_CASE("MoonLive recompiling swaps the program live (fill <-> setRGB)") {
 
 // STAGE 1 CONTROLS — parse layer: a `uint8_t name = def; // @control min..max` declaration
 // surfaces a DeclaredControl, and a declared name used in a statement resolves to it.
+// The DeclaredControl tests also need lowerToBytes to return non-zero — r.ok gates on it.
 TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
     uint8_t out[768];
     auto r = moonlive::compileSource(
@@ -184,6 +199,7 @@ TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
     REQUIRE(r3.controlCount == 1);
     CHECK(r3.controls[0].min == 0); CHECK(r3.controls[0].max == 255); CHECK(r3.controls[0].def == 9);
 }
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
 
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {
     uint8_t out[768];

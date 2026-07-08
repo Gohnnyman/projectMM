@@ -200,7 +200,11 @@ The HomeKit colour wheel has no "palette" concept, so `hsv/set`'s hue+saturation
 }
 ```
 
-Home Assistant does not need MQTT: it adopts the device through its built-in WLED integration over the existing WLED `/json` API.
+Home Assistant adopts the device two ways, both zero-config:
+- **MQTT auto-discovery** — with `haDiscovery` on (the default) and a broker set, the device announces itself on `homeassistant/light/projectMM_<mac6>/config` and HA auto-creates a wired entity (on/off + brightness + HSV). Richer state, retained across reboots.
+- **WLED integration** — HA's built-in WLED integration discovers the device over the WLED `/json` API projectMM already serves; on/off + brightness work with no broker.
+
+Both can be on at once. Setup walkthrough (including exposing HA to Apple Home via HA's HomeKit Bridge, no Homebridge needed) in the [Home Assistant recipe](../../usecases/home-automation.md#home-assistant).
 
 ## File Manager — details
 

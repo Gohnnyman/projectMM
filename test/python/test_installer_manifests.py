@@ -52,7 +52,12 @@ VERSION = "9.9.9"  # arbitrary; the test asserts the version flows into the file
 
 
 def _shipping_firmwares():
-    data = json.loads(FIRMWARES_JSON.read_text())
+    # encoding='utf-8' — the JSON carries a fs/documentation-note character
+    # (byte 0x8f is part of a UTF-8 multi-byte sequence for a non-ASCII glyph
+    # in one of the comment fields) and Windows Python 3.14 defaults read_text
+    # to cp1252, which fails with UnicodeDecodeError. Same class of Windows-
+    # only encoding bug as verify_version's stdout crash.
+    data = json.loads(FIRMWARES_JSON.read_text(encoding="utf-8"))
     return [f["name"] for f in data["firmwares"] if f.get("ships")]
 
 
@@ -72,7 +77,7 @@ def _generate(firmware, tmp_path):
     )
     assert res.returncode == 0, f"generate_manifest failed for {firmware}: {res.stdout}{res.stderr}"
     assert out.exists(), f"no manifest written for {firmware}"
-    return json.loads(out.read_text())
+    return json.loads(out.read_text(encoding="utf-8"))
 
 
 def test_every_shipping_firmware_has_a_manifest_with_parts(tmp_path):

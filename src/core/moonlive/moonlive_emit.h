@@ -15,6 +15,20 @@
 // buf[i*cpl+0..2] = r,g,b for i in [0,nLights) — then return. The engine copies the bytes
 // into an executable block (platform::allocExec + writeExec) and calls them through FillFn.
 
+// MM_MOONLIVE_HAS_HOST_JIT — non-zero when the desktop backend has BOTH a machine-code emit
+// blob (moonlive_emit.cpp) AND the general assembler (moonlive_asm_host.cpp) for the host ISA.
+// Only arm64 desktop hosts have both today (Apple Silicon macOS + Linux arm64); x86_64 desktops
+// (Windows x64, Linux/macOS Intel) ship without a backend, so MoonLive::compile / compileSource
+// / compileAnimated fail cleanly there and the scripted module renders dark — the same graceful
+// degradation an emit overflow takes on-device. Tests and scenarios that presuppose a working
+// JIT gate on this macro; the platform-independent parts (parser, IR, engine bookkeeping) run
+// everywhere.
+#if defined(__aarch64__)
+    #define MM_MOONLIVE_HAS_HOST_JIT 1
+#else
+    #define MM_MOONLIVE_HAS_HOST_JIT 0
+#endif
+
 namespace mm::moonlive {
 
 using FillFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl);
