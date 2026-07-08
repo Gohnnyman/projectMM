@@ -174,6 +174,8 @@ The topic prefix is `projectMM/<mac>` — a **stable** identifier (the last 6 he
 | set → device | `projectMM/563cfe/hsv/set` | `h,s,v` (hue `0`–`359`, sat/val `0`–`100`) |
 | device → get | `projectMM/563cfe/hsv/get` | `h,s,v` |
 | device → get | `projectMM/563cfe/name` | the friendly `deviceName` (retained) |
+| device → get | `projectMM/563cfe/update/state` | `{"installed_version":…,"latest_version":…,"release_url":…,"title":…}` (retained; HA update entity) |
+| set → device | `projectMM/563cfe/update/set` | target version string (empty = install latest); triggers OTA against the matching GitHub release asset |
 
 The HomeKit colour wheel has no "palette" concept, so `hsv/set`'s hue+saturation pick the **nearest palette** (each built-in palette has a representative colour; the closest one is selected) and the value drives brightness — the colour wheel becomes a natural palette selector.
 

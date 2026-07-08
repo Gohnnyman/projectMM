@@ -270,3 +270,9 @@ constexpr bool hasOta = true;
 constexpr bool hasImprov = true;
 
 } // namespace mm::platform
+
+// MM_MOONLIVE_HAS_HOST_JIT — always 0 on ESP32. The unit tests that consume this macro run on
+// the *desktop* host binary; on-device MoonLive uses its own per-ISA backends (Xtensa / RISC-V
+// in src/platform/esp32/moonlive_emit.cpp), validated by the live hardware run, not host tests.
+// Kept in platform_config.h so the core header stays free of architecture #ifs.
+#define MM_MOONLIVE_HAS_HOST_JIT 0

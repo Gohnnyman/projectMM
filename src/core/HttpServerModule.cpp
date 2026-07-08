@@ -989,16 +989,9 @@ void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
     conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
 
     // Identity: the deviceName (from SystemModule), the live IP, the MAC.
-    const char* name = "projectMM";
-    if (MoonModule* sys = findModuleByName("System")) {
-        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
-        if (dn && dn[0]) name = dn;
-    }
-    uint8_t ip[4] = {};
-    platform::ethGetIPv4(ip);
-    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) platform::wifiStaGetIPv4(ip);
-    uint8_t mac[6] = {};
-    platform::getMacAddress(mac);
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
+    (void)ip;  // serveWledInfo doesn't need the IP; keep the call uniform.
 
     // Field set reverse-engineered from the WLED-Android app's `Info` Moshi model
     // (model/wledapi/Info.kt): the ONLY non-nullable fields it requires are `name`, `leds`
@@ -1015,6 +1008,23 @@ void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
     sink.flush();
 }
 
+// See header. Extracts the deviceName / IP / MAC lookup the WLED shim needs at four
+// call sites (/json/info, /json/state /json/si, /json), so a future change to how identity
+// is discovered updates one place.
+void HttpServerModule::resolveWledIdentity(const char*& name, uint8_t mac[6], uint8_t ip[4],
+                                           const char* nameFallback) {
+    name = nameFallback;
+    if (MoonModule* sys = findModuleByName("System")) {
+        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
+        if (dn && dn[0]) name = dn;
+    }
+    for (int i = 0; i < 6; i++) mac[i] = 0;
+    platform::getMacAddress(mac);
+    for (int i = 0; i < 4; i++) ip[i] = 0;
+    platform::ethGetIPv4(ip);
+    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) platform::wifiStaGetIPv4(ip);
+}
+
 // The WLED info object, written into an open sink (no HTTP header). Shared by
 // /json/info and the `info` half of /json/si.
 void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]) {
@@ -1028,24 +1038,17 @@ void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-// Current Drivers brightness (0–255), or 0 if Drivers isn't present. This is the global
-// output brightness the WLED app's slider maps to. Read generically through the control
-// list (by name + Uint8 type, via the stored pointer) so this core module needs no
-// light-domain include — the same domain-neutral reach applySetControl uses to write.
-// The WLED state object, written into an open sink. `on` + `bri` mirror Drivers
-// brightness (off = brightness 0). `seg[0].col[0]` is the colour the WLED app tints the
-// device card with: we send the LIVE first-LED RGB from Drivers, so the card mirrors what
-// the device is actually showing — falling back to projectMM purple when the first LED is
-// black/off or there's no output (so a dark device still reads as a distinct projectMM,
-// not an indistinct black card).
+// The WLED state object, written into an open sink. `on` + `bri` mirror Drivers on/brightness.
+// `seg[0].col[0]` reports the ACTIVE PALETTE's identity colour, not the live first-LED — so
+// every WLED consumer (the WLED native app's device card, HA's WLED integration colour picker,
+// Homebridge's HSV via the MQTT pair, the /ws push) sees the same stable palette-representative
+// value and matches the palette-picker → RGB round-trip. Live first-LED was tried first and
+// dropped: it dimmed the picker under low master brightness (near-black) and jittered with the
+// effect animation ("the picked color moves" — user report). `Palettes::representativeRgb`
+// returns V=255, so brightness stays HA's `state.bri × seg.bri` responsibility and doesn't
+// double-dim. Rationale for the seg[0].on / seg[0].bri fields lives inline below.
 void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     const uint8_t bri = driversBrightness(scheduler_);
-    // seg[0].col reports the ACTIVE PALETTE's identity colour — stable across effect animation,
-    // matches the palette the user picked (either directly or via the HA colour picker →
-    // nearestForRgb round-trip). Using the live first-LED here made HA's colour wheel jitter as the
-    // effect animated (bench: user report "the picked color moves"), and at low master brightness
-    // rendered near-black. Palettes::representativeRgb returns V=255, so brightness stays HA's
-    // state.bri (× seg.bri) responsibility and doesn't double-dim.
     const RGB pc = Palettes::representativeRgb(driversPalette(scheduler_));
     // nl/udpn/lor/transition/ps/pl/mainseg are additive to the Android-app minimum (Moshi ignores
     // unknown/extra fields), and REQUIRED for HA's WLED integration: `python-wled` parses the POST
@@ -1102,37 +1105,29 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
         "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
     conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
 
-    const char* name = "projectMM";
-    if (MoonModule* sys = findModuleByName("System")) {
-        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
-        if (dn && dn[0]) name = dn;
-    }
-    uint8_t mac[6] = {};
-    platform::getMacAddress(mac);
-    uint8_t ip[4] = {};
-    platform::ethGetIPv4(ip);
-    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) platform::wifiStaGetIPv4(ip);
-
-    const uint8_t bri = driversBrightness(scheduler_);
-    // Palette-representative colour — see writeWledStateBody's note (stable, matches picker).
-    const RGB pc = Palettes::representativeRgb(driversPalette(scheduler_));
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
 
     JsonSink sink(conn);
-    // state — the base on/bri/seg mirrors /json/state (the mqttthing + Android-app surface); nl/udpn
-    // as empty objects fill from Nightlight and UDPSync dataclass defaults; lor:0 = LiveDataOverride.OFF.
-    // seg[0].on repeats top-level `on` per writeWledStateBody's note (HA WLED reads segment.on, not
-    // state.on, for is_on).
-    const char* onStr = driversOn(scheduler_) ? "true" : "false";
-    sink.appendf("{\"state\":{\"on\":%s,\"bri\":%u,\"transition\":7,\"ps\":-1,\"pl\":-1,"
-                 "\"nl\":{},\"udpn\":{},\"lor\":0,\"mainseg\":0,"
-                 // seg[0].bri = 255 (segment 100% of master); state.bri = actual (see writeWled-
-                 // StateBody note for the coordinator.py/light.py verification).
-                 "\"seg\":[{\"id\":0,\"on\":%s,\"bri\":255,\"col\":[[%u,%u,%u]]}]}",
-                 onStr, bri, onStr, pc.r, pc.g, pc.b);
-    // info — `ver`/`vid` clear the version gate; `arch`/`brand`/`product`/`mac`/`ip` populate HA's
-    // device card (mf/mdl/sw_version rendered from these); `leds`/`wifi`/`fs` are the objects
-    // python-wled's Info dataclass required or expects for the sensor entities (heap, uptime, signal).
-    sink.appendf(",\"info\":{\"ver\":\"0.15.0\",\"vid\":2410150,\"name\":");
+    // state — writeWledStateBody emits the {on,bri,seg,...} block reused by /json/state and
+    // /json/si; wrap it under "state":. Keeping one authoritative writer avoids the two paths
+    // drifting on which seg[0] fields HA actually reads.
+    sink.appendf("{\"state\":");
+    writeWledStateBody(sink);
+    // info — `ver` is a sentinel `"99.0.0"`, NOT the projectMM semver. Reason: HA's WLED
+    // integration parses WLED tags as CalVer (`16.0.1` is year-16, not `0.16.1`), so a
+    // projectMM semver like `2.1.0-dev` compares LOWER than WLED's current `16.0.1` (2 < 16)
+    // and HA flags a bogus "update to WLED 16.0.1" whose `.bin` would brick a projectMM
+    // device. `AwesomeVersion("99.0.0") > AwesomeVersion("<any WLED tag>")` in the CalVer
+    // regime, so HA's WLED update-check is always silent for us. First tried `mm::kVersion`
+    // (assuming SemVer parsing) — the bench P4 showed HA still flagging 16.0.1 after the flash
+    // because the CalVer branch was the actual one taken. Real projectMM version lives on the
+    // MQTT `update/state` topic (`installed_version` under the HA update entity), which is where
+    // "did projectMM ship a new release" belongs — the WLED shim is for the LIGHT ENTITY, not
+    // the firmware version. `arch`/`brand`/`product`/`mac`/`ip` populate HA's device card
+    // (mf/mdl/sw_version rendered from these); `leds`/`wifi`/`fs` are the objects python-wled's
+    // Info dataclass requires or expects for the sensor entities (heap, uptime, signal).
+    sink.appendf(",\"info\":{\"ver\":\"99.0.0\",\"vid\":2410150,\"name\":");
     sink.writeJsonString(name);
     sink.appendf(",\"mac\":\"%02x%02x%02x%02x%02x%02x\","
                  "\"ip\":\"%u.%u.%u.%u\",\"arch\":\"esp32\","
@@ -1175,13 +1170,9 @@ void HttpServerModule::serveWledStateInfo(platform::TcpConnection& conn) {
         "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
     conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
 
-    const char* name = "projectMM";
-    if (MoonModule* sys = findModuleByName("System")) {
-        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
-        if (dn && dn[0]) name = dn;
-    }
-    uint8_t mac[6] = {};
-    platform::getMacAddress(mac);
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
+    (void)ip;  // /json/si's info body carries no IP field; keep the call uniform.
 
     JsonSink sink(conn);
     sink.appendf("{\"state\":");
@@ -1776,13 +1767,9 @@ void HttpServerModule::pushWledStateToWebSockets() {
     for (auto& ws : wsClients_) if (ws.valid()) { hasClients = true; break; }
     if (!hasClients) return;
 
-    const char* name = "projectMM";
-    if (MoonModule* sys = findModuleByName("System")) {
-        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
-        if (dn && dn[0]) name = dn;
-    }
-    uint8_t mac[6] = {};
-    platform::getMacAddress(mac);
+    const char* name; uint8_t mac[6]; uint8_t ip[4];
+    resolveWledIdentity(name, mac, ip);
+    (void)ip;  // the WS-push info body carries no IP field; keep the call uniform.
 
     JsonSink sink;
     sink.appendf("{\"state\":");

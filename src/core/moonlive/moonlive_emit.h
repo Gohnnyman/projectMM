@@ -3,6 +3,12 @@
 #include <cstdint>
 #include <cstddef>
 
+// MM_MOONLIVE_HAS_HOST_JIT is defined in platform_config.h (per-platform), so the
+// arch check stays behind the platform boundary and this header stays neutral. The macro
+// (not a constexpr) is required because #include-side test files gate whole TEST_CASEs
+// on `#if MM_MOONLIVE_HAS_HOST_JIT`.
+#include "platform/platform.h"
+
 // MoonLive — per-ISA code emitter (the backend seam, §3.2 of livescripts-analysis-top-down.md).
 //
 // This header is the NEUTRAL declaration the engine calls; the implementation is per-ISA and
@@ -14,20 +20,6 @@
 // The emitted routine's C signature is FillFn: write a fixed (r,g,b) to every light —
 // buf[i*cpl+0..2] = r,g,b for i in [0,nLights) — then return. The engine copies the bytes
 // into an executable block (platform::allocExec + writeExec) and calls them through FillFn.
-
-// MM_MOONLIVE_HAS_HOST_JIT — non-zero when the desktop backend has BOTH a machine-code emit
-// blob (moonlive_emit.cpp) AND the general assembler (moonlive_asm_host.cpp) for the host ISA.
-// Only arm64 desktop hosts have both today (Apple Silicon macOS + Linux arm64); x86_64 desktops
-// (Windows x64, Linux/macOS Intel) ship without a backend, so MoonLive::compile / compileSource
-// / compileAnimated fail cleanly there and the scripted module renders dark — the same graceful
-// degradation an emit overflow takes on-device. Tests and scenarios that presuppose a working
-// JIT gate on this macro; the platform-independent parts (parser, IR, engine bookkeeping) run
-// everywhere.
-#if defined(__aarch64__)
-    #define MM_MOONLIVE_HAS_HOST_JIT 1
-#else
-    #define MM_MOONLIVE_HAS_HOST_JIT 0
-#endif
 
 namespace mm::moonlive {
 

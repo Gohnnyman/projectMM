@@ -590,7 +590,7 @@
         "pc-windows": {
           "tick_us": [
             3,
-            4
+            5
           ],
           "free_heap": [
             0,
@@ -928,7 +928,7 @@
         "pc-windows": {
           "tick_us": [
             3,
-            4
+            5
           ],
           "free_heap": [
             0,
@@ -1045,7 +1045,7 @@
         "pc-windows": {
           "tick_us": [
             3,
-            5
+            12
           ],
           "free_heap": [
             0,
@@ -1172,7 +1172,7 @@
         "pc-windows": {
           "tick_us": [
             3,
-            4
+            5
           ],
           "free_heap": [
             0,
@@ -1283,7 +1283,7 @@
         "pc-windows": {
           "tick_us": [
             12,
-            15
+            127
           ],
           "free_heap": [
             0,
@@ -1394,7 +1394,7 @@
         "pc-windows": {
           "tick_us": [
             49,
-            60
+            87
           ],
           "free_heap": [
             0,
@@ -1505,7 +1505,7 @@
         "pc-windows": {
           "tick_us": [
             196,
-            245
+            276
           ],
           "free_heap": [
             0,
@@ -1735,7 +1735,7 @@
         "pc-windows": {
           "tick_us": [
             36,
-            48
+            52
           ],
           "free_heap": [
             0,
@@ -1846,7 +1846,7 @@
         "pc-windows": {
           "tick_us": [
             145,
-            184
+            260
           ],
           "free_heap": [
             0,
@@ -1957,7 +1957,7 @@
         "pc-windows": {
           "tick_us": [
             592,
-            733
+            851
           ],
           "free_heap": [
             0,
@@ -2409,7 +2409,7 @@
         "pc-windows": {
           "tick_us": [
             145,
-            189
+            1010
           ],
           "free_heap": [
             0,

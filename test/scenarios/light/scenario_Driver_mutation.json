@@ -95,7 +95,7 @@
         "pc-windows": {
           "tick_us": [
             36,
-            43
+            51
           ],
           "free_heap": [
             0,
@@ -151,8 +151,8 @@
         },
         "pc-windows": {
           "tick_us": [
-            38,
-            52
+            35,
+            70
           ],
           "free_heap": [
             0,
@@ -209,7 +209,7 @@
         "pc-windows": {
           "tick_us": [
             43,
-            59
+            84
           ],
           "free_heap": [
             0,
@@ -318,8 +318,8 @@
         },
         "pc-windows": {
           "tick_us": [
-            41,
-            48
+            36,
+            56
           ],
           "free_heap": [
             0,

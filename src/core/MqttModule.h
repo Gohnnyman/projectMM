@@ -46,6 +46,16 @@ namespace mm {
 /// JSON (not the default schema): a control maps to a config key rather than a topic, so HA's native
 /// `effect`/`effect_list` renders a picker on the one command topic — the reason JSON is chosen here.
 ///
+/// The same discovery-gate also publishes a second HA component — an **update entity** — on
+/// `homeassistant/update/projectMM_<mac6>/config`. HA renders it as a *"Firmware: <version>"* card
+/// in the device panel with an Install button; state comes from `<prefix>/update/state`, install
+/// commands from `<prefix>/update/set`. `installed_version` = build-time `MM_VERSION`; `latest_version`
+/// equals it today (no on-device release check yet, so HA shows "up-to-date"), and the install path
+/// routes to `platform::http_fetch_to_ota`. Prevents HA's WLED integration from mis-flagging a WLED
+/// firmware update against a projectMM device — the `/json` `info.ver` reports our semver so WLED's
+/// comparison is always-newer, and this update entity is where a real projectMM update surfaces once
+/// the release-check component lands.
+///
 /// **Lifecycle** (all on loop1s(), off the render hot path — MQTT is slow control): connect lazily
 /// once `networkReady() && enabled`, CONNECT → CONNACK → SUBSCRIBE to the `set` topics, PINGREQ every
 /// keepalive/2, drain inbound bytes through MqttInboundParser and route PUBLISHes to Drivers, and
@@ -109,6 +119,22 @@ private:
     void buildStatusTopic(char* out, size_t cap) const;      // <prefix>/status — the LWT availability topic
     void publishDiscovery(bool announce);   // announce=false publishes an empty retained config (retract)
     void subscribeHaSet();                  // SUBSCRIBE to <prefix>/ha/set (at CONNACK + on live toggle-on)
+
+    // HA update entity — a second HA-discovery component in the same shape as the light above, on
+    // `homeassistant/update/projectMM_<mac6>/config`. Renders as a first-class *"Firmware: <version>"*
+    // card in the device panel with an Install button; state comes from `<prefix>/update/state`,
+    // install commands from `<prefix>/update/set` route to `platform::http_fetch_to_ota`. A companion
+    // to the light discovery: same haDiscovery gate, same announce/retract pair, no per-tick state
+    // (`installed_version` is a compile-time constant). `latest_version` equals `installed_version`
+    // today (no on-device release check yet — see the "HA update entity via MQTT discovery" backlog
+    // item), so HA renders "up-to-date" and the Install button stays disabled until a release-check
+    // component fills in a newer `latest_version`. Wiring the install path now sets the shape for
+    // that follow-up rather than leaving a half-built discovery config in the tree.
+    void buildUpdateDiscoveryTopic(char* out, size_t cap) const;
+    void publishUpdateDiscovery(bool announce);
+    void publishUpdateState();              // retained JSON on <prefix>/update/state
+    void subscribeUpdateSet();              // SUBSCRIBE to <prefix>/update/set (install command)
+    void handleUpdateInstall(const char* payload, size_t payloadLen);
 
     SystemModule* systemModule_ = nullptr;
 

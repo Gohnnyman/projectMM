@@ -4,6 +4,9 @@
 #include "core/JsonUtil.h"      // json::hasKey/parseBool/parseInt/parseString — the inbound ha/set parse
 #include "core/JsonSink.h"      // jsonEscape — escape the editable deviceName into the discovery JSON
                                 // (same flat helpers HttpServerModule::applyWledState uses; no arena)
+#include "core/build_info.h"    // kVersion / kFirmwareName — reported to HA's update entity
+#include "core/FirmwareUpdateModule.h"  // g_otaStatus / g_otaBytesTotal / otaInFlight — shared with
+                                        // the OTA task the update entity's install command triggers
 #include "light/Palette.h"      // Palettes::nearestForHue — a pure hue/sat→index CONVERSION with no
                                 // light state or objects, the one narrow reach this core module makes
                                 // into the light domain. PO-accepted: routing a HomeKit colour to a
@@ -161,6 +164,157 @@ void MqttModule::subscribeHaSet() {
     if (n == 0 || !sendPacket(buf, n)) resetConnection("error: ha subscribe failed");
 }
 
+// ----------------------------------------------------------------------------
+// HA update entity — the second HA-discovery component alongside the light. Same
+// announce/retract shape (both gated on haDiscovery_), same MAC-stable uniq_id,
+// same broker connection. The state block is written once at CONNACK and on
+// haDiscovery-on-mid-session; there is nothing per-tick to refresh yet because
+// installed_version and (for now) latest_version are compile-time constants.
+// ----------------------------------------------------------------------------
+
+// Mirror of buildDiscoveryTopic but for the `update` component type. Same object id
+// (`projectMM_<mac6>`) so the update entity registers under the SAME HA device card
+// as the light — one device, two entities. Diverging the id would produce a second
+// device card in HA, which reads as "two projectMMs" and is the wrong grouping.
+void MqttModule::buildUpdateDiscoveryTopic(char* out, size_t cap) const {
+    uint8_t mac[6] = {};
+    platform::getMacAddress(mac);
+    std::snprintf(out, cap, "homeassistant/update/%s_%02x%02x%02x/config",
+                  prefixRoot_, mac[3], mac[4], mac[5]);
+}
+
+// Announce/retract the update entity. The announcement payload is ~300 bytes (short id +
+// three topic paths + escaped deviceName), so the framed MQTT PUBLISH exceeds the on-stack
+// kSendBufLen (256). Reuses the same lazily-allocated discoveryBuf_/discoveryPayload_ pair
+// the light-discovery uses (448 + 320 bytes): the two announces run serially inside
+// publishDiscovery/publishUpdateDiscovery, never in flight simultaneously, so a shared
+// scratch is safe. Retract fits in the on-stack kSendBufLen because the payload is empty
+// (a tombstone is topic + zero-byte body).
+void MqttModule::publishUpdateDiscovery(bool announce) {
+    if (state_ != Conn::Connected) return;
+
+    char topic[96];
+    buildUpdateDiscoveryTopic(topic, sizeof(topic));
+
+    // Retract path: empty retained payload = HA removes the entity. Fits easily in
+    // kSendBufLen; deferred to the next CONNACK if we're offline (broker keeps the last
+    // retained config until then, same pattern as the light retract).
+    if (!announce) {
+        uint8_t tomb[kSendBufLen];
+        const size_t n = buildMqttPublish(topic, nullptr, 0, tomb, sizeof(tomb), /*retain=*/true);
+        if (n == 0 || !sendPacket(tomb, n)) resetConnection("error: update discovery retract failed");
+        return;
+    }
+
+    if (!ensureDiscoveryBuffers()) { setStatusLine("error: discovery alloc failed"); return; }
+
+    uint8_t mac[6] = {};
+    platform::getMacAddress(mac);
+    char id[24];
+    std::snprintf(id, sizeof(id), "%s_%02x%02x%02x", prefixRoot_, mac[3], mac[4], mac[5]);
+    const char* dn = systemModule_ ? systemModule_->deviceName() : nullptr;
+    if (!dn || !dn[0]) dn = id;
+    char dnEsc[72];
+    jsonEscape(dn, dnEsc, sizeof(dnEsc));
+
+    char stat[80], cmd[80], avty[80];
+    buildTopic(stat, sizeof(stat), "update/state");
+    buildTopic(cmd,  sizeof(cmd),  "update/set");
+    buildStatusTopic(avty, sizeof(avty));
+
+    // device_class:"firmware" is what makes HA render the friendly name as "<device> Firmware"
+    // instead of the bare device name (which collides visually with the light entity in HA's
+    // entity list — the "two MM-P4 rows" bench symptom pinned this). It also picks the correct
+    // icon and the "up-to-date / update available" wording. entity_category:"diagnostic" parks
+    // it in HA's diagnostic section of the device card, matching how ESPHome and Tasmota surface
+    // firmware info. `name:null` still applies — with device_class set, HA composes the label
+    // itself (`<device_name> Firmware`), which is exactly what we want.
+    const int pn = std::snprintf(discoveryPayload_, kDiscoveryPayloadLen,
+        "{\"name\":null,\"uniq_id\":\"%s_update\",\"stat_t\":\"%s\",\"cmd_t\":\"%s\","
+        "\"avty_t\":\"%s\",\"entity_category\":\"diagnostic\",\"device_class\":\"firmware\","
+        "\"dev\":{\"ids\":[\"%s\"],\"name\":\"%s\",\"mf\":\"MoonModules\",\"mdl\":\"projectMM\"}}",
+        id, stat, cmd, avty, id, dnEsc);
+    if (pn <= 0 || static_cast<size_t>(pn) >= kDiscoveryPayloadLen) return;   // truncated → don't send
+
+    const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(discoveryPayload_),
+                                      static_cast<size_t>(pn), discoveryBuf_, kDiscoveryBufLen,
+                                      /*retain=*/true);
+    if (n == 0) { setStatusLine("error: update discovery too large"); return; }
+    if (!sendPacket(discoveryBuf_, n)) resetConnection("error: update discovery publish failed");
+}
+
+// Retained state on <prefix>/update/state. installed_version = compile-time MM_VERSION;
+// latest_version equals it today (no release check on-device yet — see the backlog item
+// under "HA update entity via MQTT discovery"), so HA shows the entity as up-to-date and
+// disables the Install button. When the release-check component lands, it becomes the
+// caller of this method with a fresher latest_version; the wire shape doesn't change.
+// release_url is the GitHub releases page — HA renders it as a "Release notes" link.
+void MqttModule::publishUpdateState() {
+    if (state_ != Conn::Connected) return;
+    char topic[128];
+    buildTopic(topic, sizeof(topic), "update/state");
+    char payload[256];
+    const int pn = std::snprintf(payload, sizeof(payload),
+        "{\"installed_version\":\"%s\",\"latest_version\":\"%s\","
+        "\"release_url\":\"https://github.com/MoonModules/projectMM/releases\","
+        "\"title\":\"projectMM firmware\"}",
+        kVersion, kVersion);
+    if (pn <= 0 || static_cast<size_t>(pn) >= sizeof(payload)) return;
+    uint8_t buf[kSendBufLen];
+    const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(payload),
+                                      static_cast<size_t>(pn), buf, sizeof(buf), /*retain=*/true);
+    if (n == 0 || !sendPacket(buf, n)) resetConnection("error: update state publish failed");
+}
+
+void MqttModule::subscribeUpdateSet() {
+    if (state_ != Conn::Connected) return;
+    char topic[96];
+    buildTopic(topic, sizeof(topic), "update/set");
+    uint8_t buf[kSendBufLen];
+    const size_t n = buildMqttSubscribe(nextPacketId_++, topic, buf, sizeof(buf));
+    if (n == 0 || !sendPacket(buf, n)) resetConnection("error: update subscribe failed");
+}
+
+// HA's install command. The payload is the target version string (via HA's
+// payload_install_template — defaults to `{{ latest_version }}`); an empty payload
+// means "install latest". The device builds the download URL from the projectMM
+// release-artifact convention:
+//   https://github.com/MoonModules/projectMM/releases/download/v<version>/firmware-<kFirmwareName>-v<version>.bin
+// and hands it to platform::http_fetch_to_ota — the same OTA path POST /api/firmware/url
+// takes. Guarded by otaInFlight() so a second install command mid-flash returns silently
+// rather than corrupting the running OTA task. On desktop platform::http_fetch_to_ota is
+// a stub returning false; the install command safely reports failure via g_otaStatus.
+void MqttModule::handleUpdateInstall(const char* payload, size_t payloadLen) {
+    if (otaInFlight()) return;   // matches the /api/firmware/url 409 guard's intent
+
+    // Copy the payload into a bounded local buffer for null-termination + shape checks.
+    // A malformed / oversized payload is refused; no partial URL reaches http_fetch_to_ota.
+    char version[32] = {};
+    const size_t vlen = payloadLen < sizeof(version) - 1 ? payloadLen : sizeof(version) - 1;
+    std::memcpy(version, payload, vlen);
+    version[vlen] = '\0';
+    // Strip an optional leading 'v' — HA's payload_install_template can send either shape.
+    const char* v = (version[0] == 'v') ? version + 1 : version;
+    if (v[0] == '\0') return;   // empty install command with no default: nothing to install
+
+    char url[256];
+    const int un = std::snprintf(url, sizeof(url),
+        "https://github.com/MoonModules/projectMM/releases/download/v%s/firmware-%s-v%s.bin",
+        v, kFirmwareName, v);
+    if (un <= 0 || static_cast<size_t>(un) >= sizeof(url)) return;
+
+    // Seed the shared globals so the first WS push shows "starting" rather than a stale
+    // string from a prior URL-triggered OTA — same seed the HTTP path does.
+    std::snprintf(g_otaStatus, sizeof(g_otaStatus), "starting");
+    g_otaBytesRead = 0;
+    g_otaBytesTotal = 0;
+
+    (void)platform::http_fetch_to_ota(url, g_otaStatus, sizeof(g_otaStatus),
+                                      &g_otaBytesRead, &g_otaBytesTotal);
+    // No response to publish — HA polls the retained update/state (which the OTA success
+    // path implicitly renegotiates on reboot, or a future release-check refreshes).
+}
+
 void MqttModule::setup() {
     setStatusLine(enabled() ? "idle" : "disabled");
     MoonModule::setup();
@@ -196,8 +350,14 @@ void MqttModule::onUpdate(const char* controlName) {
         // Announce or retract live — NO reset (bouncing the socket to change a discovery flag is
         // needless). On a turn-ON mid-session also SUBSCRIBE (subscriptions otherwise only fire at
         // CONNACK); on turn-OFF the retract clears the HA entity. Publishes only when connected.
+        // Same announce/retract shape for the update entity — one gate, two components on the same
+        // device card.
         publishDiscovery(haDiscovery_);
-        if (haDiscovery_) { subscribeHaSet(); publishState(true); }
+        publishUpdateDiscovery(haDiscovery_);
+        if (haDiscovery_) {
+            subscribeHaSet(); publishState(true);
+            subscribeUpdateSet(); publishUpdateState();
+        }
     }
 }
 
@@ -418,9 +578,17 @@ void MqttModule::handleInboundByte(uint8_t byte) {
         }
         // On connect: announce + subscribe when discovery is on; when it's OFF, retract instead — a
         // config retained from a previous session (discovery was on, then turned off while offline)
-        // would otherwise keep HA's entity alive across this reconnect.
-        if (haDiscovery_) { publishDiscovery(true); subscribeHaSet(); }
-        else              { publishDiscovery(false); }
+        // would otherwise keep HA's entity alive across this reconnect. The update entity mirrors
+        // this — one gate, both components announced/retracted together, so HA either sees both or
+        // neither (never a device card with a light but a dangling stale update entity).
+        if (haDiscovery_) {
+            publishDiscovery(true);       subscribeHaSet();
+            publishUpdateDiscovery(true); subscribeUpdateSet();
+            publishUpdateState();
+        } else {
+            publishDiscovery(false);
+            publishUpdateDiscovery(false);
+        }
         publishState(true);                  // publish initial state so mqttthing + HA show it
     } else if (type == static_cast<uint8_t>(MqttPacketType::Publish)) {
         const char* topic = nullptr; const uint8_t* payload = nullptr; size_t plLen = 0;
@@ -437,6 +605,16 @@ void MqttModule::routePublish(const char* topic, const uint8_t* payload, size_t 
     const size_t prefixLen = std::strlen(prefix);
     if (std::strncmp(topic, prefix, prefixLen) != 0 || topic[prefixLen] != '/') return;
     const char* suffix = topic + prefixLen + 1;
+
+    // HA update-entity install command — the payload is the target version string (HA's
+    // payload_install_template default is `{{ latest_version }}`, an empty payload means
+    // "install latest"). Routed to handleUpdateInstall which builds the GitHub-release URL and
+    // hands off to the same platform::http_fetch_to_ota the /api/firmware/url route uses.
+    // Checked BEFORE ha/set so the shared prefix parse fires exactly once.
+    if (std::strcmp(suffix, "update/set") == 0) {
+        handleUpdateInstall(reinterpret_cast<const char*>(payload), payloadLen);
+        return;
+    }
 
     // HA-native JSON command: {"state":"ON"|"OFF"[,"brightness":0-255]}. Parsed with the same flat
     // mm::json helpers HttpServerModule::applyWledState uses (key-order-independent, whitespace-safe);

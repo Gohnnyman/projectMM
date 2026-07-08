@@ -124,7 +124,7 @@
         },
         "pc-windows": {
           "tick_us": [
-            834,
+            549,
             3747
           ],
           "free_heap": [

@@ -99,7 +99,7 @@
         "pc-windows": {
           "tick_us": [
             1,
-            4
+            7
           ],
           "free_heap": [
             0,

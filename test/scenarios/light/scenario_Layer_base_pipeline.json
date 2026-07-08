@@ -102,7 +102,7 @@
         "pc-windows": {
           "tick_us": [
             118,
-            865
+            936
           ],
           "free_heap": [
             0,

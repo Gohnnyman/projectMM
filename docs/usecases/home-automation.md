@@ -18,9 +18,12 @@ The control surface these integrations drive — the MQTT controls, topics, and 
 
 ## Prerequisites
 
-- A projectMM device on your WiFi/Ethernet with the [MQTT module](../moonmodules/core/services.md#mqtt) present (it ships on boards whose catalog entry includes it; the Shelly model does).
-- The device's **MAC suffix** — the last 6 hex of its MAC, which is its stable topic id (`projectMM/<suffix>`). Read it from the MQTT module's `mqtt_status`, or once the device is talking to the broker, `mosquitto_sub -t 'projectMM/#'`. The examples below use `563cfe`; substitute yours.
-- A running hub + broker: either **Home Assistant with the Mosquitto broker add-on** (recommended — HA gives you the app, voice control, automations, *and* an Apple-Home bridge from one install), or **Homebridge + Mosquitto** for an Apple-Home-only setup. [Set up the infrastructure](#set-up-the-infrastructure) below has both.
+- A projectMM device on your WiFi/Ethernet. For the MQTT-based paths (HA MQTT-discovery, Homebridge) the [MQTT module](../moonmodules/core/services.md#mqtt) must be present (it ships on boards whose catalog entry includes it; the Shelly model does); for the WLED-only HA path it isn't needed — HA reaches the device over its always-present `/json` endpoint.
+- The device's **MAC suffix** — the last 6 hex of its MAC, which is its stable topic id on MQTT (`projectMM/<suffix>`) and identifies the device to HA on the WLED path too. Read it from the MQTT module's `mqtt_status`, or once the device is talking to the broker, `mosquitto_sub -t 'projectMM/#'`. The examples below use `563cfe`; substitute yours.
+- A running hub — with per-path infra:
+  - **HA + Mosquitto broker add-on** — for MQTT auto-discovery (richer state + HomeKit Bridge). [Set up HA + Mosquitto](#set-up-home-assistant-mosquitto).
+  - **HA alone (no broker)** — for the WLED-integration path. Same HA install, just skip the Mosquitto add-on.
+  - **Homebridge + a Mosquitto broker** — for the standalone Apple-Home-only path. [Set up standalone Homebridge + Mosquitto](#set-up-standalone-homebridge-mosquitto).
 
 ## Adopt in Home Assistant
 
@@ -142,7 +145,29 @@ Windows 10/11 **Pro** or **Enterprise** ships Hyper-V; the Home editions don't. 
 4. **Create the VM.** **Hyper-V Manager → New → Virtual Machine**. Name it `HomeAssistant`; **Generation 2**; assign at least **2 GB RAM** (2 GB is fine for a home LAN, 4 GB is comfortable); attach the network to the external switch you just made; **Use an existing virtual hard disk** and point at the unzipped `.vhdx`; finish.
 5. **Disable Secure Boot.** Right-click the new VM → **Settings → Security** → untick **Enable Secure Boot** (HAOS's shim isn't in the Microsoft template).
 6. **Start the VM.** It boots to a text console — wait ~2 minutes for the first-run "Preparing Home Assistant" to finish. When the console shows `homeassistant login:`, open a browser on the host at **[http://homeassistant.local:8123](http://homeassistant.local:8123)** (or the LAN IP the console prints) and complete the onboarding wizard.
-7. **Optional cleanup:** if VirtualBox was running a previous HA VM, disable its `VBoxSVC` autostart from **Task Manager → Startup**. VirtualBox's WiFi-bridge driver is the flapping cause noted above, so leaving it off keeps latency low.
+7. **Keep the host awake and the VM auto-managed.** An always-on HA host must not sleep — an S3 or hibernate suspend pauses Hyper-V, and every projectMM device / HA entity flips to "unavailable" until it wakes. In an admin PowerShell:
+
+   ```powershell
+   # what sleep states this host actually supports (tells you what to disable)
+   powercfg /a
+   # never sleep on AC (the common case — S3 is what most desktops/laptops have)
+   powercfg /change standby-timeout-ac 0
+   # hibernate off — also disables Hybrid Sleep + Fast Startup, which chain off it
+   powercfg /hibernate off
+   ```
+
+   Modern-standby (`S0 Low Power Idle`) hosts still respect `standby-timeout-ac 0`, so the same command covers both. If it's a laptop, close-lid also has to stop sending the sleep signal:
+
+   ```powershell
+   powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+   powercfg /setactive SCHEME_CURRENT
+   ```
+
+   Then in **Hyper-V Manager → HomeAssistant → Settings → Management**:
+   - **Automatic Start Action → Always start this virtual machine automatically** (Startup delay 60s so the vSwitch is up first). Windows reboots → HA is back without touching Hyper-V Manager.
+   - **Automatic Stop Action → Save the virtual machine state**. A planned shutdown suspends HA cleanly and resumes it on next boot, avoiding a cold-start with the SQLite in an uncertain state.
+
+8. **Optional cleanup:** if VirtualBox was running a previous HA VM, disable its `VBoxSVC` autostart from **Task Manager → Startup**. VirtualBox's WiFi-bridge driver is the flapping cause noted above, so leaving it off keeps latency low.
 
 #### Install the Mosquitto broker add-on
 
@@ -227,6 +252,13 @@ Now jump back to [Adopt in Homebridge](#adopt-in-homebridge).
 - **`mqtt_status` stuck on `connecting`** — the device can't reach the broker. Check the broker IP is your computer's *LAN* IP (not `127.0.0.1`, which the device can't route to), that the broker is actually listening on all interfaces (on Windows standalone Mosquitto, the `listener 1883 0.0.0.0` line above; the HA Mosquitto add-on already listens on all interfaces), and that the firewall isn't blocking `1883`.
 - **HA entities flap "unavailable" every few minutes** — the VM's network is dropping. Almost always the WiFi-bridge symptom noted in the HA install section: the HA VM is on a WiFi-bridged NIC that re-associates periodically. Move the HA VM to a wired external switch (Hyper-V / ProxMox / ESXi all support this), or run HAOS on a wired Pi. This is also what a battery of Zigbee / Wi-Fi routers with a bad channel plan looks like — worth checking the HA host's own connectivity first.
 - **HA created two light entities with the same slug (`light.<slug>_<slug>`)** — a stale MQTT-discovery config is still retained on the broker. Delete the retained topic (`mosquitto_pub -h <broker> -t 'homeassistant/light/projectMM_<mac6>/config' -r -n`) and let the device republish; HA cleans up the entity within a few seconds.
-- **HA WLED integration fails with "Cannot connect"** — the device's `/json` endpoint must be reachable on port 80. Confirm with `curl http://<device-ip>/json` — the response is a WLED-shaped JSON with `state`, `info`, `effects`, `palettes`. A 404 means an old firmware that predates the WLED-compatibility layer; reflash.
+- **HA WLED integration fails with "Cannot connect", or the entity shows partial state** — HA reads two endpoints, both on the device's HTTP port (default **80** on ESP32, **8080** on desktop builds), so probe both:
+
+  ```bash
+  curl http://<device-ip>/json           # full {state, info, effects, palettes}
+  curl http://<device-ip>/presets.json   # `{"0":{}}` — truthy-empty is correct
+  ```
+
+  A **404 on `/json`** means an old firmware that predates the WLED-compatibility shim → reflash. A **404 on `/presets.json`** with `/json` working means the presets route is missing → HA's coordinator retry-storms trying to fetch presets and the entity ends up stuck on "unavailable" even though the light responds; also a firmware reflash. A `/json` response that parses but is missing `info.fs`, `state.nl`, `state.udpn`, or `state.lor` fails python-wled's dataclass parse and HA reports HTTP-500 on `light.turn_on` — again a firmware version older than the current WLED shim.
 - **Homebridge shows "No Response"** — the accessory's topics don't match the device's MAC suffix, or the `url` points at the wrong broker. Confirm the suffix with `mosquitto_sub -t 'projectMM/#'` and that the same broker appears in both the device's `broker` control and the accessory `url`.
 - **HomeKit colour wheel doesn't match a specific colour** — expected: HomeKit sends a full-precision hue, and the device snaps it to the *nearest* built-in palette (there's no arbitrary-colour mode). Same behaviour whether the bridge is HA's HomeKit Bridge or standalone Homebridge. See the palette note in the [MQTT reference](../moonmodules/core/services.md#mqtt).

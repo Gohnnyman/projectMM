@@ -322,7 +322,7 @@
         },
         "pc-windows": {
           "tick_us": [
-            418,
+            278,
             2500
           ],
           "free_heap": [
