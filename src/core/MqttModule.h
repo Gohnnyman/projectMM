@@ -32,11 +32,14 @@ namespace mm {
 ///   `<prefix>/hsv/set`        ← "h,s,v"               → hue+sat → nearest palette → Drivers.palette
 ///   `<prefix>/hsv/get`        → publish the chosen palette's representative "h,s,v"
 ///
-/// **Home Assistant MQTT Discovery** (the `haDiscovery` control, default on). On connect the device
-/// publishes a RETAINED JSON-schema light config to `homeassistant/light/projectMM_<mac6>/config`, so
-/// HA (and any Discovery-aware hub — the Tasmota/ESPHome/Zigbee2MQTT convention) **auto-creates a
-/// wired light entity** — no hand-matching topics. It then speaks HA's own schema alongside the
-/// mqttthing topics above:
+/// **Home Assistant MQTT Discovery** (the `haDiscovery` control, default off / opt-in). When on, the
+/// device publishes a RETAINED JSON-schema light config to `homeassistant/light/projectMM_<mac6>/config`,
+/// so HA (and any Discovery-aware hub — the Tasmota/ESPHome/Zigbee2MQTT convention) **auto-creates a
+/// wired light entity** — no hand-matching topics. It defaults off because the WLED-compat surface (the
+/// HttpServerModule `/json` shim) already gives HA a richer light — colour, palette, sensors — over
+/// mDNS with no broker, so a device on defaults appears in HA once, not twice; MQTT discovery is the
+/// opt-in for broker-only / cross-subnet setups where mDNS doesn't reach. When on it speaks HA's own
+/// schema alongside the mqttthing topics above:
 ///   `<prefix>/ha/set`         ← `{"state":"ON"|"OFF"[,"brightness":0-255]}` → Drivers.on/brightness
 ///   `<prefix>/ha/state`       → retained `{"state":…,"brightness":0-255}` on change (HA-scale, no rescale)
 ///   `<prefix>/status`         → retained "online"; the CONNECT **Last-Will** publishes "offline" here
@@ -152,7 +155,7 @@ private:
     uint16_t port_         = 1883;
     char     username_[48] = "";
     char     password_[48] = "";
-    bool     haDiscovery_  = true;        // announce a HA MQTT-discovery light (opt-out); see publishDiscovery
+    bool     haDiscovery_  = false;       // announce a HA MQTT-discovery light (opt-in); see publishDiscovery
     char     statusStr_[64] = "disabled";
 
     platform::TcpConnection conn_;

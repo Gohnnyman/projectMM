@@ -282,6 +282,7 @@ private:
     void handleWledState(platform::TcpConnection& conn, const char* body);
     void pollWledStateFromWebSockets();             ///< read app's slider/toggle sent over /ws
     void writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]);
+    void writeWledName(JsonSink& sink, const char* name);   // 💫-prefixed WLED name (HA marker)
     void writeWledStateBody(JsonSink& sink);
     /// Resolve device identity for the WLED shim: `deviceName` (from SystemModule) → `name`,
     /// live IPv4 (Ethernet first, WiFi fallback) → `ip`, MAC → `mac`. Extracted so the

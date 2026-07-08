@@ -146,6 +146,7 @@ nav:
       - Testing strategy: testing.md
       - Performance: performance.md
       - Hardware reference:
+          - GPIO usage per MCU: reference/gpio-usage.md
           - ESP32-S31 coreboard: reference/esp32-s31-coreboard.md
       # The per-module summary pages above (Effects & building shows › Supporting,
       # Core › UI/Supporting) are the docs-v2 surface: each 4-column table row links

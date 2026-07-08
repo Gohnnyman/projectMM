@@ -512,6 +512,8 @@ void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 void setHostname(const char* /*name*/) {}   // no DHCP client on desktop
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
+void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
+int wifiStaChannel() { return 0; }
 
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }

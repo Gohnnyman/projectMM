@@ -488,7 +488,7 @@
     "firmwares": [
       "esp32s3-n16r8"
     ],
-    "image": "assets/deviceModels/esp32-s3-n16r8-dev.jpg",
+    "image": "assets/deviceModels/esp32-s3-n16r8-dev.png",
     "supported": [
       "LEDs",
       "WiFi"
@@ -524,7 +524,7 @@
     "firmwares": [
       "esp32s3-n16r8"
     ],
-    "image": "assets/deviceModels/esp32-s3-n16r8-dev.jpg",
+    "image": "assets/deviceModels/esp32-s3-n16r8-dev.png",
     "supported": [
       "LEDs",
       "WiFi",
@@ -547,9 +547,9 @@
         "id": "Audio",
         "parent_id": "System",
         "controls": {
-          "wsPin": 4,
-          "sdPin": 5,
-          "sckPin": 6
+          "sckPin": 47,
+          "wsPin": 48,
+          "sdPin": 21
         }
       },
       {
@@ -557,7 +557,7 @@
         "id": "OnboardLed",
         "parent_id": "Drivers",
         "controls": {
-          "pins": "48",
+          "pins": "38",
           "start": 0,
           "count": 1
         }
@@ -917,9 +917,9 @@
         "id": "Audio",
         "parent_id": "System",
         "controls": {
+          "sckPin": 32,
           "wsPin": 26,
           "sdPin": 33,
-          "sckPin": 32,
           "mclkPin": 36,
           "gain": 100
         }
@@ -1010,9 +1010,9 @@
         "id": "Audio",
         "parent_id": "System",
         "controls": {
+          "sckPin": 53,
           "wsPin": 55,
-          "sdPin": 54,
-          "sckPin": 53
+          "sdPin": 54
         }
       },
       {

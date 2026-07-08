@@ -159,6 +159,12 @@ void wifiStaStop();
 // while state_ == ConnectedSta so a 0 is effectively unreachable.
 int wifiStaRssi();
 
+// STA-side AP info for the WLED /json `wifi` block: the associated AP's BSSID
+// (6 octets into `out`) and the WiFi channel. Both zeroed (all-zero BSSID /
+// channel 0) when the STA isn't associated or the call fails.
+void wifiStaBssid(uint8_t out[6]);
+int  wifiStaChannel();
+
 bool wifiApInit(const char* apName, const char* ip);
 bool wifiApConnected();
 void wifiApStop();

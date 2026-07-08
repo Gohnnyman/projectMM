@@ -350,4 +350,13 @@ inline void paletteOptions(JsonSink& sink) {
     }
 }
 
+// Emit the built-in palette names as a bare JSON string array (`"Default","Rainbow",…`), the
+// element list WLED's /json `palettes` array carries — HA's WLED integration renders one dropdown
+// entry per name, indexed by position (so seg[0].pal picks into this list). Same source of truth as
+// paletteOptions (kBuiltins), just names without the colour swatches the native UI needs.
+inline void paletteNames(JsonSink& sink) {
+    for (uint8_t i = 0; i < palettes::kCount; i++)
+        sink.appendf("%s\"%s\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);
+}
+
 }  // namespace mm

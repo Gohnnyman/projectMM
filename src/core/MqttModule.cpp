@@ -295,7 +295,11 @@ void MqttModule::handleUpdateInstall(const char* payload, size_t payloadLen) {
     version[vlen] = '\0';
     // Strip an optional leading 'v' — HA's payload_install_template can send either shape.
     const char* v = (version[0] == 'v') ? version + 1 : version;
-    if (v[0] == '\0') return;   // empty install command with no default: nothing to install
+    // Empty payload means "install latest" (HA's default payload_install_template is
+    // `{{ latest_version }}`, which a device with no known newer version renders empty).
+    // Fall back to this build's own version string, so an empty command re-installs the
+    // current release rather than silently doing nothing — as the header contract states.
+    if (v[0] == '\0') v = (kVersion[0] == 'v') ? kVersion + 1 : kVersion;
 
     char url[256];
     const int un = std::snprintf(url, sizeof(url),
@@ -333,7 +337,7 @@ void MqttModule::onBuildControls() {
     controls_.addUint16("port", port_, 1, 65535);
     controls_.addText("username", username_, sizeof(username_));
     controls_.addPassword("password", password_, sizeof(password_));
-    controls_.addBool("haDiscovery", haDiscovery_);   // announce a HA-discovery light (default on)
+    controls_.addBool("haDiscovery", haDiscovery_);   // announce a HA MQTT-discovery light (default off; WLED /json covers HA)
     controls_.addReadOnly("mqtt_status", statusStr_, sizeof(statusStr_));
     MoonModule::onBuildControls();
 }
