@@ -8,14 +8,15 @@
 namespace mm {
 
 /// A module's role for type identification (no RTTI needed) and for the UI's generic rendering.
-/// Peripheral is a module attached to SystemModule that bridges to the outside world — hardware
-/// or network — and is user-add/deletable (the firmware is the same whether or not the device has
-/// the peripheral wired). It covers both readers and writers: gyro/IMU + mic/line-in (in),
-/// relay/GPIO + Home Assistant push (out), and modules that do both. Read-vs-write is NOT a role
-/// distinction — direction is a per-module decision, not a role split — so one role spans the
-/// category, justified by that named roster, not one member (core grows slower than the domain,
-/// see CLAUDE.md).
-enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer, Peripheral };
+/// Service is a user-added capability module in the `Services` container that bridges to the
+/// outside world — hardware or network — and is user-add/deletable (the firmware is the same
+/// whether or not the device has the capability wired). It covers both readers and writers:
+/// gyro/IMU + mic/line-in (in), relay/GPIO + Home Assistant push (out), and modules that do both.
+/// Read-vs-write is NOT a role distinction — direction is a per-module decision, not a role split —
+/// so one role spans the category, justified by that named roster, not one member (core grows
+/// slower than the domain, see CLAUDE.md). Services is the core-domain twin of the light domain's
+/// `Layers`/`Drivers`: a top-level container of user-added children of one role.
+enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer, Service };
 
 /// Lowercase role name for JSON/API output. Single source of truth so the role
 /// string can't drift between /api/state and /api/types.
@@ -26,7 +27,7 @@ inline const char* roleName(ModuleRole role) {
         case ModuleRole::Driver:     return "driver";
         case ModuleRole::Layout:     return "layout";
         case ModuleRole::Layer:      return "layer";
-        case ModuleRole::Peripheral: return "peripheral";
+        case ModuleRole::Service:    return "service";
         default:                     return "generic";
     }
 }

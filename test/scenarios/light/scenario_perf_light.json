@@ -32,9 +32,9 @@
   "steps": [
     {
       "name": "disable-audio",
-      "description": "Quiet I2S sampling so it can't pollute the tick (optional — device only).",
+      "description": "Quiet I2S sampling so it can't pollute the tick (optional — device only). Targets the mic by its runtime name 'Audio' (displayNameFor strips the 'Service' suffix; the catalog adds it with id 'Audio').",
       "op": "set_control",
-      "id": "AudioModule",
+      "id": "Audio",
       "key": "enabled",
       "value": false,
       "optional": true

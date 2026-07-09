@@ -43,8 +43,6 @@ namespace mm {
 /// @card FileManagerModule.png
 class FileManagerModule : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Peripheral; }
-
     void onBuildControls() override;
     void setup() override;
     void loop1s() override;

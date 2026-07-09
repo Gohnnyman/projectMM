@@ -178,9 +178,9 @@
     },
     {
       "name": "disable-audio",
-      "description": "Disable AudioModule (stops I2S sampling in loop()). Diff vs measure-minimal = the audio subsystem's per-tick cost (device only; optional).",
+      "description": "Disable the mic (stops I2S sampling in loop()). Diff vs measure-minimal = the audio subsystem's per-tick cost (device only; optional). Targets it by its runtime name 'Audio' (displayNameFor strips the 'Service' suffix).",
       "op": "set_control",
-      "id": "AudioModule",
+      "id": "Audio",
       "key": "enabled",
       "value": false,
       "optional": true

@@ -4,7 +4,7 @@
 #include "light/Palette.h"        // colorFromPalette, Palettes::active
 #include "light/draw.h"           // draw::line, draw::fade
 #include "core/math8.h"           // beatsin8, map8, Random8
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
+#include "core/AudioService.h"     // AudioService::latestFrame()
 #include "core/AudioFrame.h"      // AudioFrame, bands[]
 
 namespace mm {
@@ -18,7 +18,7 @@ namespace mm {
 // exactly — the same six oscillating endpoints, the per-band Euclidean length fed back through the
 // draw-line shorten parameter (this is what makes the strokes curve), the per-frame fade and the
 // length gate — written fresh on projectMM's EffectBase + the shared primitives (beatsin8, map8,
-// draw::line, draw::fade, the audio frame). Reads AudioModule::latestFrame(); silence → no lines →
+// draw::line, draw::fade, the audio frame). Reads AudioService::latestFrame(); silence → no lines →
 // fades to dark, safe on any target and any grid size. The 'soft' anti-alias control is omitted
 // (the one approved omission — draw::line is crisp, projectMM has no Xiaolin-Wu line yet).
 // Author: @TroyHacks (WLED MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
@@ -59,7 +59,7 @@ public:
         aux1Chaos = phase_chaos ? rng_.next8() : 0;
 
         const Coord3D dims{cols, rows, depth};
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // silence frame is non-null in practice; guard before dereferencing bands[]
         const uint32_t ms = elapsed();
         // bass term added to every oscillator bpm (MoonLight's bands[0]/NUM_GEQ_CHANNELS).

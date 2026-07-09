@@ -1,9 +1,9 @@
 # Audio DSP roadmap — source-seam extensions + adaptive noise gate (design study)
 
-> Forward-looking design study (backlog, present-tense-exempt). Migrated from the retired
-> `AudioModule.md` archive page. The *shipped* audio path is documented present-tense in
-> `src/core/AudioModule.h`'s `///` (and its generated moxygen page); this study holds the
-> **prior-art analysis** and the **not-yet-built** extensions the module's `///` credit points at.
+> Forward-looking design study (backlog, present-tense-exempt). The *shipped* audio path is
+> documented present-tense in `src/core/AudioService.h`'s `///` (and its generated moxygen
+> page); this study holds the **prior-art analysis** and the **not-yet-built** extensions the
+> module's `///` credit points at.
 
 ## Prior art studied (credit by name)
 

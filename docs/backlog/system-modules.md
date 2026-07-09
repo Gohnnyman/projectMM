@@ -12,13 +12,13 @@ They are projectMM's **Task Manager / Activity Monitor / Device Manager** — th
 |---|---|---|
 | Processes / Details (per-process CPU, memory) | **Tasks** — RTOS tasks, modules nested, per-module cost | shipped |
 | Performance → Memory (`free`, `vmstat`: used/free by type, largest block) | **Memory** — internal vs PSRAM, used/free/largest, per-module `dynamicBytes` | proposed |
-| Device Manager (what hardware is present + how it's wired) | **Pins** — the GPIO map, who owns each pin | [backlogged](backlog-core.md#pinsmodule--one-place-that-coordinates-gpio-assignment-backlog) |
+| Device Manager (what hardware is present + how it's wired) | **Pins** — the GPIO map, who owns each pin | [backlogged](backlog-core.md#pinsmodule-one-place-that-coordinates-gpio-assignment-backlog) |
 
 The load-bearing lesson from those tools: **they sample existing OS accounting cheaply and always-on; the heavy per-event tracking (UMDH, `malloc_history`, Valgrind, ESP-IDF `heap_trace`) is a separate opt-in profiler.** projectMM already learned this on TasksModule (CPU% is ~5% tick → build-flag opt-in; the task list is a cheap sample → always-on). The same tier applies to Memory (below).
 
 ## The shared pattern (so the System modules are one shape, not three)
 
-Every member is the **same recognizable shape** — the [TasksModule](../moonmodules/core/services.md#tasks) template, reusing primitives that already exist:
+Every member is the **same recognizable shape** — the [TasksModule](../moonmodules/core/system.md#tasks) template, reusing primitives that already exist:
 
 - a **read-only** module presenting a `ControlType::List` via the `ListSource` adapter (DevicesModule/I2cScan shape);
 - refreshed on `loop1s()` (a periodic *sample*, never the hot path);
@@ -49,7 +49,7 @@ This is a principled boundary — *observe the fixed hardware* vs *add an option
 
 Container = **Services**, and `ModuleRole::Peripheral` is **renamed to `ModuleRole::Service`** so there is one concept, one word (the container name and the role name agree). Chosen on the merits, not on what already exists:
 
-- **"Service" is the more accurate word.** The set is mostly *network/software bridges* (MQTT, Devices, Hue) with some hardware (Audio, IR). "Peripheral" is a hardware term (a thing attached at the periphery) — stretching it to cover a network integration is a flaw the current code already carries, not a reason to keep it. "Service" = an ongoing capability the device provides or consumes, which is exactly what these are, and the word HA / systemd / Android use for the same idea.
+- **"Service" is the more accurate word — and applies ONLY to the `Services` container's user-added children** (today Audio and IR). It is deliberately **not** carried by the always-there network bridges (MQTT, Devices, Hue): those are wired-by-code children of Network and stay **roleless (`Generic`)**, so no container offers to add/delete them and the `Service` role stays unambiguous — one role, one container. "Peripheral" was a hardware term (a thing attached at the periphery), too narrow once the container also holds a non-hardware capability; "Service" = an ongoing capability the device provides or consumes, the word HA / systemd / Android use for the same idea.
 - **The rename cost is not an argument to avoid it.** "We already have `Peripheral`" is a precedent-defense the principles reject ([*don't store derivable, no precedent-defense*](../../CLAUDE.md#principles); best solution over technical-debt-carried-forward). The rename is mechanical (role enum + `roleName` + `acceptsChildRoles` + docs) and one-time.
 - **The "services" overload (WiFi/HTTP are also 'services')** is weaker than it looks: those are *always-there infrastructure the device runs on*, not *user-added capabilities* — they stay in System. The line "user-added optional capability (Services)" vs "always-there infrastructure (System)" is clear.
 

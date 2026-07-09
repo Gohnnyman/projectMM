@@ -68,7 +68,7 @@ namespace mm {
 /// **Prior art:** the OASIS MQTT 3.1.1 standard, homebridge-mqttthing's topic conventions, and Home
 /// Assistant's MQTT-discovery format (the same retained-`homeassistant/…/config` announce Tasmota /
 /// ESPHome / Zigbee2MQTT use). projectMM writes its own lean client over the platform socket
-/// primitive rather than a framework MQTT library. See docs/moonmodules/core/services.md#mqtt for the
+/// primitive rather than a framework MQTT library. See docs/moonmodules/core/system.md#mqtt for the
 /// Homebridge accessory config; docs/usecases/home-automation.md for the HA setup.
 /// @card MqttModule.png
 class MqttModule : public MoonModule {
@@ -83,7 +83,7 @@ public:
     void loop1s() override;
 
     /// Feed inbound bytes as if they arrived from the broker socket — the entry the host unit tests
-    /// drive (there's no live broker in ctest). Mirrors IrModule::injectCodeForTest.
+    /// drive (there's no live broker in ctest). Mirrors IrService::injectCodeForTest.
     void feedForTest(const uint8_t* bytes, size_t len);
 
     /// Test seam: capture every outbound packet sendPacket() writes, so a unit test can assert what

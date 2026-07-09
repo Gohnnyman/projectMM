@@ -40,15 +40,12 @@ namespace mm {
 /// detail is the whole module list and other tasks are leaves; the nesting structure is ready for the
 /// future core-affinity split, when modules spread across tasks. Built agile, in steps.
 ///
-/// **Not auto-wired.** Factory-registered like I2cScanModule/AudioModule; added from the UI or a
-/// board's catalog entry. Read-only: no user-editable controls.
+/// **Fixed System module.** Wired by code as a child of SystemModule in `main.cpp` (like Improv
+/// under Network), not user-added — you don't delete Task Manager. It keeps the base `Generic` role
+/// so no container accepts it as a user-editable child, and `markWiredByCode()` exempts it from the
+/// persistence trim. Read-only: no user-editable controls.
 class TasksModule : public MoonModule {
 public:
-    /// A SystemModule Peripheral (like I2cScanModule/AudioModule) — so the UI shows the standard
-    /// add/delete/replace affordances (SystemModule accepts `peripheral` children). Without this it
-    /// defaults to Generic, which no container accepts, and the card renders without a delete button.
-    ModuleRole role() const override { return ModuleRole::Peripheral; }
-
     void onBuildControls() override {
         MoonModule::onBuildControls();
         // One list: the RTOS tasks, each row expanding to the MoonModules that run in it (the

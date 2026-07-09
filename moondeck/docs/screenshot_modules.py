@@ -131,18 +131,19 @@ CONTAINERS = ["Layouts", "Layers", "Drivers"]
 CORE_MODULES = [
     "FilesystemModule",
     "SystemModule",
+    "Services",
     "FirmwareUpdateModule",
     "NetworkModule",
     "HttpServerModule",
     "MqttModule",
     "FileManagerModule",
     "DevicesModule",
-    # Present only in an ESP32 tree (peripherals / provisioning) — skipped on desktop
+    # Present only in an ESP32 tree (services / provisioning) — skipped on desktop
     # (not in state); capture these against a board when needed.
     "ImprovProvisioningModule",
-    "AudioModule",
+    "AudioService",
     "I2cScanModule",
-    "IrModule",
+    "IrService",
 ]
 
 # Core modules that are CHILDREN of another module (so they have no top-level nav entry
@@ -152,12 +153,13 @@ CORE_NAV_ROOT = {
     "MqttModule": "NetworkModule",
     "DevicesModule": "NetworkModule",
     "ImprovProvisioningModule": "NetworkModule",
-    # The System peripherals (Audio / IR / I2C scan) are children of SystemModule when present,
-    # but they're added per-board and never exist in the desktop tree — so they're captured
-    # against an ESP32, where these entries route the shot to the System nav root.
-    "AudioModule": "SystemModule",
+    # Audio / IR are user-added Services (children of the Services container); I2cScan is a
+    # fixed System child (wired-by-code). They're added/present per-board and never exist in
+    # the desktop tree — so they're captured against an ESP32, where these entries route the
+    # shot to the right nav root.
+    "AudioService": "Services",
+    "IrService": "Services",
     "I2cScanModule": "SystemModule",
-    "IrModule": "SystemModule",
 }
 # FileManagerModule, FirmwareUpdateModule, SystemModule, NetworkModule are top-level
 # (scheduler.addModule in main.cpp) — NOT listed here, so they capture as standalone cards.

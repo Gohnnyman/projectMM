@@ -1,7 +1,7 @@
-// @module IrModule
+// @module IrService
 // @also Scheduler
 
-// Pins IrModule's action path: its buttons adjust another module's control through the shared
+// Pins IrService's action path: its buttons adjust another module's control through the shared
 // Scheduler::setControl primitive, clamped to the control's own bounds. A fake "Drivers" module
 // (a Knob with brightness + palette controls) stands in for the real one, so the test needs no
 // light-domain modules — it proves the generic relative-adjust behaviour in isolation. The IR
@@ -9,7 +9,7 @@
 // path, which is the working, testable part of this cut.
 
 #include "doctest.h"
-#include "core/IrModule.h"
+#include "core/IrService.h"
 #include "core/Scheduler.h"
 #include "core/MoonModule.h"
 
@@ -20,7 +20,7 @@ using namespace mm;
 namespace {
 
 // Stands in for Drivers: an `on` Bool, a brightness Uint8 (0–255) and a palette Select (0–3). Named
-// "Drivers" so IrModule's kActions ("Drivers"/"on", "Drivers"/"brightness", "Drivers"/"palette")
+// "Drivers" so IrService's kActions ("Drivers"/"on", "Drivers"/"brightness", "Drivers"/"palette")
 // resolve to it.
 struct FakeDrivers : public MoonModule {
     bool on = true;
@@ -35,12 +35,12 @@ struct FakeDrivers : public MoonModule {
     }
 };
 
-// Build Scheduler + FakeDrivers + IrModule, run setup so Scheduler::instance() is live and
+// Build Scheduler + FakeDrivers + IrService, run setup so Scheduler::instance() is live and
 // controls are bound. Caller owns teardown via the scheduler (modules are heap-allocated).
 struct Rig {
     Scheduler scheduler;
     FakeDrivers* drivers = new FakeDrivers();
-    IrModule* ir = new IrModule();
+    IrService* ir = new IrService();
     Rig() {
         drivers->setName("Drivers");
         ir->setName("Ir");
@@ -62,7 +62,7 @@ struct Rig {
 
 }  // namespace
 
-TEST_CASE("IrModule: a learned code adjusts Drivers brightness by the step") {
+TEST_CASE("IrService: a learned code adjusts Drivers brightness by the step") {
     Rig r;
     r.drivers->brightness = 100;
     r.learn(2, 0xB1);   // bind code 0xB1 → brightness up
@@ -74,7 +74,7 @@ TEST_CASE("IrModule: a learned code adjusts Drivers brightness by the step") {
     CHECK(r.drivers->brightness == 84);    // 116 - 32
 }
 
-TEST_CASE("IrModule: a learned on/off code toggles the Drivers on control") {
+TEST_CASE("IrService: a learned on/off code toggles the Drivers on control") {
     Rig r;
     r.drivers->on = true;
     r.learn(1, 0xA0);   // bind code 0xA0 → on/off (learn index 1 = first action)
@@ -88,7 +88,7 @@ TEST_CASE("IrModule: a learned on/off code toggles the Drivers on control") {
     CHECK(std::strcmp(r.ir->status(), "Drivers.on → off") == 0);
 }
 
-TEST_CASE("IrModule: firing a learned code reports what it changed via status") {
+TEST_CASE("IrService: firing a learned code reports what it changed via status") {
     Rig r;
     r.drivers->brightness = 100;
     // Before setup drives anything, the pin is unset in the rig → readiness warns to set it.
@@ -99,7 +99,7 @@ TEST_CASE("IrModule: firing a learned code reports what it changed via status") 
     CHECK(std::strcmp(r.ir->status(), "Drivers.brightness → 116") == 0);
 }
 
-TEST_CASE("IrModule: pin state drives readiness status") {
+TEST_CASE("IrService: pin state drives readiness status") {
     Rig r;
     CHECK(std::strstr(r.ir->status(), "set pin") != nullptr);   // unset pin → warns to set it
     // Set a valid pin through the real path; onBuildState() re-reports readiness.
@@ -110,7 +110,7 @@ TEST_CASE("IrModule: pin state drives readiness status") {
     CHECK(std::strstr(r.ir->status(), "set pin") != nullptr);
 }
 
-TEST_CASE("IrModule: a learned brightness code clamps at 0 and 255") {
+TEST_CASE("IrService: a learned brightness code clamps at 0 and 255") {
     Rig r;
     r.learn(2, 0xB1);   // brightness up
     r.learn(3, 0xB2);   // brightness down
@@ -122,7 +122,7 @@ TEST_CASE("IrModule: a learned brightness code clamps at 0 and 255") {
     CHECK(r.drivers->brightness == 0);     // 8-16 clamps to 0, not underflow
 }
 
-TEST_CASE("IrModule: learned palette codes step the Select and clamp at the ends") {
+TEST_CASE("IrService: learned palette codes step the Select and clamp at the ends") {
     Rig r;
     r.learn(4, 0xB3);   // palette next
     r.learn(5, 0xB4);   // palette prev
@@ -139,7 +139,7 @@ TEST_CASE("IrModule: learned palette codes step the Select and clamp at the ends
     CHECK(r.drivers->palette == 3);        // clamps at the high end
 }
 
-TEST_CASE("IrModule: learn binds a code to an action, then that code drives it") {
+TEST_CASE("IrService: learn binds a code to an action, then that code drives it") {
     Rig r;
     r.drivers->brightness = 100;
     // Arm learning for "brightness up" (learn select index 2; index 1 is on/off).
@@ -155,7 +155,7 @@ TEST_CASE("IrModule: learn binds a code to an action, then that code drives it")
     CHECK(r.drivers->brightness == 132);
 }
 
-TEST_CASE("IrModule: an unlearned code is reported as unassigned, drives nothing") {
+TEST_CASE("IrService: an unlearned code is reported as unassigned, drives nothing") {
     Rig r;
     r.drivers->brightness = 100;
     r.ir->injectCodeForTest(0xDEADBEEF);   // never learned
@@ -164,7 +164,7 @@ TEST_CASE("IrModule: an unlearned code is reported as unassigned, drives nothing
     CHECK(r.ir->latestCode() == 0xDEADBEEF);
 }
 
-TEST_CASE("IrModule: two codes bind to two actions independently") {
+TEST_CASE("IrService: two codes bind to two actions independently") {
     Rig r;
     r.drivers->brightness = 100;
     r.drivers->palette = 1;
@@ -179,7 +179,7 @@ TEST_CASE("IrModule: two codes bind to two actions independently") {
     CHECK(r.drivers->brightness == 116);   // unchanged
 }
 
-TEST_CASE("IrModule: an unassigned code is a no-op, not a crash") {
+TEST_CASE("IrService: an unassigned code is a no-op, not a crash") {
     Rig r;
     const uint8_t before = r.drivers->brightness;
     r.fire(0xABCDEF01);                    // no learned binding → nothing happens
@@ -188,7 +188,7 @@ TEST_CASE("IrModule: an unassigned code is a no-op, not a crash") {
     CHECK(r.ir->latestCode() == 0xABCDEF01);
 }
 
-TEST_CASE("IrModule: a learned code whose target module is gone is a no-op, reported") {
+TEST_CASE("IrService: a learned code whose target module is gone is a no-op, reported") {
     Rig r;
     const uint8_t before = r.drivers->brightness;
     r.learn(2, 0xC0DE);                    // bind 0xC0DE → brightness up (targets "Drivers")

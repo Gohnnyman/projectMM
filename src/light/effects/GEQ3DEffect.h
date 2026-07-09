@@ -4,7 +4,7 @@
 #include "light/layers/Layer.h"   // layer()->buffer()
 #include "light/Palette.h"        // colorFromPalette, blend, Palettes::active()
 #include "light/draw.h"           // draw::line (perspective edges + depth shorten), draw::fade
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
+#include "core/AudioService.h"     // AudioService::latestFrame()
 #include "core/AudioFrame.h"      // AudioFrame::bands[16]
 #include "core/math8.h"           // map8
 
@@ -23,7 +23,7 @@ namespace mm {
 // Prior art: MoonLight's GEQ3D (E_MoonModules / MoonModules, TroyHacks), itself descended from the
 // WLED-MM "GEQ 3D" effect. The perspective-bar geometry, the projector split, the per-face
 // darkening, and the `depth` line-shorten are reproduced exactly here, written fresh on EffectBase
-// + the shared draw primitives. Reads AudioModule::latestFrame(); silence → flat → dark, safe on
+// + the shared draw primitives. Reads AudioService::latestFrame(); silence → flat → dark, safe on
 // any target and grid size. (MoonLight's `softHack` anti-alias toggle is dropped — draw::line is a
 // crisp Bresenham; the `soft` arg has no projectMM equivalent.)
 // Author: @TroyHacks (MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
@@ -88,7 +88,7 @@ public:
         const int hzn = horizon < rows ? horizon : rows - 1;
         const int split = imap(projector, 0, cols, 0, NUM_BANDS - 1);
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
 
         // Bar heights: map each band magnitude onto maxHeight (slightly reduced on small panels).
         uint8_t heights[16] = {0};

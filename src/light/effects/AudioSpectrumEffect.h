@@ -3,7 +3,7 @@
 #include "light/layers/Layer.h"
 #include "light/Palette.h"      // colorFromPalette + the global active palette
 #include "core/color.h"        // hsvToRgb, RGB
-#include "core/AudioModule.h"    // AudioModule::latestFrame()
+#include "core/AudioService.h"    // AudioService::latestFrame()
 
 #include <cstring>             // std::memset
 
@@ -18,7 +18,7 @@ namespace mm {
 // (a horizontal VU bar) and the bars sit above it; shorter grids use the full
 // height for the spectrum.
 //
-// Reads the live frame from AudioModule::latestFrame(); no mic / silence → all
+// Reads the live frame from AudioService::latestFrame(); no mic / silence → all
 // bands zero → dark, so it is safe on any target and any grid size (including
 // 0×0). On a 1D strip (height 1) the bars collapse to per-column brightness.
 // Author: projectMM original, on the WLED-SR GEQ / spectrum-analyser concept (Andrew Tuline) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
@@ -49,7 +49,7 @@ public:
 
         std::memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
 
         auto setRGB = [&](lengthType x, lengthType y, lengthType z,
                           uint8_t r, uint8_t g, uint8_t b) {

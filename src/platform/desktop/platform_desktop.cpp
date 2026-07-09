@@ -769,7 +769,7 @@ bool UdpSocket::bind(uint16_t port) {
     // TIME_WAIT (never allows two live binds to overlap). On Winsock its meaning is the
     // opposite of POSIX — two live sockets can bind the same port, so a second bind()
     // returns success instead of the EADDRINUSE the audio-sync retry-backoff logic reads
-    // as "port owned by someone else" (unit_AudioModule_sync's hog-then-module scenario
+    // as "port owned by someone else" (unit_AudioService_sync's hog-then-module scenario
     // exercises exactly that). Windows' equivalent-to-POSIX behaviour is the *default*,
     // so on Windows we skip the setsockopt and let a second bind fail naturally. Same
     // observable outcome on both platforms: overlapping binds are refused.
@@ -1076,7 +1076,7 @@ bool audioCodecInit(CodecType /*type*/, const AudioCodecPins& /*pins*/, uint32_t
 }
 void audioCodecDeinit() {}
 
-// I2S microphone — no capture on desktop (hasI2sMic == false, AudioModule inert),
+// I2S microphone — no capture on desktop (hasI2sMic == false, AudioService inert),
 // so init fails and read returns nothing.
 bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
                   uint16_t /*sckPin*/, int16_t /*mclkPin*/, uint32_t /*sampleRate*/) {
@@ -1112,7 +1112,7 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
     return kI2cBusUnavailable;
 }
 
-// No IR receiver on the host — the seam is a no-op so IrModule runs (its buttons still work
+// No IR receiver on the host — the seam is a no-op so IrService runs (its buttons still work
 // through Scheduler::setControl); reception is ESP32-only.
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 

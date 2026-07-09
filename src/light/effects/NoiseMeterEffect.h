@@ -6,7 +6,7 @@
 #include "light/draw.h"           // draw::pixel, draw::fade
 #include "core/math8.h"           // beatsin8
 #include "core/noise.h"           // inoise8 (2-arg 2D field)
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
+#include "core/AudioService.h"     // AudioService::latestFrame()
 #include "core/AudioFrame.h"      // AudioFrame::level
 
 namespace mm {
@@ -24,7 +24,7 @@ namespace mm {
 // Prior art: WLED's "Noisemeter" sound-reactive effect (Andrew Tuline / WLED-SR). The fadeRate/width
 // knobs, the level→length mapping, the inoise8(row·level + aux0, aux1 + row·level) field sampling, and
 // the bottom-up fill are reproduced here, written fresh on projectMM's EffectBase + the shared draw /
-// palette / noise / beatsin8 primitives. Reads AudioModule::latestFrame(); silence → level 0 →
+// palette / noise / beatsin8 primitives. Reads AudioService::latestFrame(); silence → level 0 →
 // maxLen 0 → the panel fades to dark, safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive effect: a noise field modulated by sound level.
@@ -48,7 +48,7 @@ public:
         const int sizeZ = depthDim();
         if (sizeX <= 0 || sizeY <= 0 || channelsPerLight() < 3) return;
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
         Buffer& buf = layer()->buffer();

@@ -548,9 +548,9 @@ function createCard(mod, depth) {
     // controls expanded — the parent's settings are the main point, the code-wired
     // child is informational. Leaf modules render controls inline (no wrapper).
     // EXCEPTION: a top-level module (depth 0 — the selected root, e.g. System,
-    // Network) never collapses its own controls, even though it accepts children
-    // (System hosts peripherals). It's the card the user is looking at, so its
-    // settings should be visible, not hidden behind a "controls" disclosure.
+    // Network, or a container like Services/Drivers) never collapses its own
+    // controls, even when it accepts children. It's the card the user is looking
+    // at, so its settings should be visible, not hidden behind a "controls" disclosure.
     // Use the SAME predicate the row loop renders by (controlRendersGenerically), not a bare
     // !c.hidden — else the disclosure could open for a module whose only "visible" controls render
     // elsewhere (e.g. FileManager's filesystem/lastSaved render inside its own panel, not generically).
@@ -2060,7 +2060,7 @@ const ROLE_EMOJI = {
     modifier:   "💎",
     layout:     "🚥",
     layer:      "🥞",
-    peripheral: "🛰️",
+    service:    "🛰️",
     generic:    "⚙️",
 };
 

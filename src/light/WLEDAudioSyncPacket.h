@@ -8,7 +8,7 @@
 namespace mm {
 
 // WLED audio-sync wire format — the one place the packet layout lives (the
-// ArtNetPacket.h / DdpPacket.h convention). AudioModule builds it to broadcast
+// ArtNetPacket.h / DdpPacket.h convention). AudioService builds it to broadcast
 // its analysed audio, and parses it to drive effects from a peer's audio; a unit
 // test round-trips build↔parse against a golden byte vector so we can never drift
 // from WLED. The contract is fixed by netmindz/WLED-sync (the header MoonModules'

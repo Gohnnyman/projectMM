@@ -81,7 +81,7 @@ unit needs no client change** (both walk the same entry; only the transport diff
   "modules": [
     { "type": "System", "id": "System",
       "controls": { "deviceModel": "projectMM testbench S3" } },
-    { "type": "AudioModule", "id": "Audio", "parent_id": "System",
+    { "type": "AudioService", "id": "Audio", "parent_id": "Services",
       "controls": { "wsPin": 4, "sdPin": 5, "sckPin": 6 } },
     { "type": "RmtLedDriver", "id": "RmtLed", "parent_id": "Drivers",
       "controls": { "pins": "18", "loopbackTxPin": 13, "loopbackRxPin": 12 } },
@@ -128,7 +128,7 @@ a dedicated pin, which is exactly why the override is stored.) `loopbackTest` is
 off (presetting pins doesn't auto-run the blocking test). The sibling
 `projectMM testbench ESP32-16MB` adds `RmtLedDriver` (`pins`=18, loopback tx=4/rx=5);
 the `…P4` adds `ParlioLedDriver` (`pins`=20–27, `ledsPerPin`=64, loopback tx=33/rx=32).
-Only the S3 bench has a mic wired, so only it carries `AudioModule`. Each entry
+Only the S3 bench has a mic wired, so only it carries `AudioService`. Each entry
 declares only what is actually on that board.
 
 | Field | Required | Meaning |
@@ -147,9 +147,9 @@ Each `modules[]` unit is `{ type, id, parent_id?, controls? }`:
 
 | Module field | Meaning |
 |---|---|
-| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioModule`, `AudioSpectrumEffect`) |
+| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioService`, `AudioSpectrumEffect`) |
 | `id` | the module's name — used both as the `POST /api/modules` id **and** as the `module` in every `POST /api/control`, so the two stay in sync |
-| `parent_id` | the container to add it under (`Drivers`, `System`, `Layer`). **Omitted** for a module that already exists at boot (e.g. `Network`, `System`, `Grid`, `Layer`) — the client then skips the add and only sets controls |
+| `parent_id` | the container to add it under (`Services`, `Drivers`, `Layer`, `Layouts`, `Layers`). **Omitted** for a module that already exists at boot (e.g. `Network`, `System`, `Services`, `Grid`, `Layer`) — the client then skips the add and only sets controls |
 | `controls` | the controls to set on that module after it exists |
 | `replaceChildren` | optional bool on a container unit (`Layer` / `Layouts` / `Drivers`): when `true`, the inject DELETEs the container's current children before adding this entry's, so the entry's effects/modifiers replace the boot defaults rather than stack behind them |
 
@@ -163,7 +163,7 @@ same way a scenario `add_module` op is. The bloat is the honest cost of that.
 
 **Add-then-configure, per module.** For each unit the client adds the module
 (when it has a `parent_id` — a fresh flash has no user-added modules like
-`AudioModule`, so a control write would 404), then sets its `controls`.
+`AudioService`, so a control write would 404), then sets its `controls`.
 `POST /api/modules` is idempotent (an existing `id` returns 200), so re-running an
 inject is safe. The `id` is what the controls address, so it is set explicitly
 (factory display names disambiguate on collision).
@@ -176,9 +176,9 @@ Inject nothing you don't know. (This is the
 MCU/Board/Device provenance rule from
 [architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device):
 default a pin only at the level that fixes it.) The `projectMM testbench S3`
-entry above adds an `AudioModule` with the real, verified INMP441 mic pins
+entry above adds an `AudioService` with the real, verified INMP441 mic pins
 (WS=4/SD=5/SCK=6, matching the bench wiring in
-[`AudioModule.h`](../../src/core/AudioModule.h)) plus an `RmtLedDriver`
+[`AudioService.h`](../../src/core/AudioService.h)) plus an `RmtLedDriver`
 (LEDs on `pins`=18, loopback jumper tx=13→rx=12) — a known-hardware Device on the
 maintainer's desk, so the inject is testable end-to-end. The `ESP32-16MB` sibling
 adds `RmtLedDriver` (LEDs=18, loopback tx=4/rx=5); the `P4` sibling adds
@@ -193,7 +193,7 @@ it — the project's *Specs before code* applied to catalog hardware. So vendor
 entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`System`
 unit (with the `deviceModel` control) plus the default LED driver** until spec'n'tested for more; e.g. whether the
 Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
-entry adds no `AudioModule`. The per-board capability loop that drives this — read
+entry adds no `AudioService`. The per-board capability loop that drives this — read
 capabilities off the image/link, wire what we support, propose+test what we don't —
 is recorded in [decisions.md § catalog-driven installer branch](../history/decisions.md).
 

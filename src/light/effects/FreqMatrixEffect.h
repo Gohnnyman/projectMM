@@ -5,7 +5,7 @@
 #include "light/Palette.h"        // colorFromPalette, Palettes::active()
 #include "light/draw.h"           // draw::pixel, draw::get
 #include "core/color.h"           // RGB
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
+#include "core/AudioService.h"     // AudioService::latestFrame()
 #include "core/AudioFrame.h"      // AudioFrame::level / peakHz
 
 namespace mm {
@@ -30,7 +30,7 @@ namespace mm {
 // pixVal = level·fx·sensitivity/256 brightness, the 80 Hz / quarter-volume gate, the
 // upperLimit = 80 + 42·highBin / lowerLimit = 80 + 3·lowBin frequency window, and the
 // map(peakHz, lower, upper, 0, 255) hue index are reproduced here, written fresh on EffectBase + the
-// shared draw/palette primitives. Reads AudioModule::latestFrame() (null-safe via the static silence
+// shared draw/palette primitives. Reads AudioService::latestFrame() (null-safe via the static silence
 // frame); safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
@@ -74,7 +74,7 @@ public:
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(len), depthDim()};
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // static silence frame is non-null in practice; guard for safety
 
         // --- Scroll throttle (WLED: secondHand = micros()/(256-speed)/500 % 16; act only when it

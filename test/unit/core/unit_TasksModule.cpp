@@ -56,11 +56,12 @@ TEST_CASE("TasksModule: exposes a tasks list + core0/core1, no separate modules 
     CHECK_FALSE(hasControl(tasks, "modules"));
 }
 
-TEST_CASE("TasksModule: a Peripheral, so the UI shows the delete affordance") {
+TEST_CASE("TasksModule: a fixed System module (Generic role, no delete affordance)") {
     TasksModule tasks;
-    // ModuleRole::Peripheral is what SystemModule accepts as a user-managed child, which is how the
-    // UI decides to render delete/replace. Without it the card would default to Generic (no delete).
-    CHECK(tasks.role() == ModuleRole::Peripheral);
+    // Tasks is wired-by-code as a System child (main.cpp), not user-added — so it keeps the base
+    // Generic role, which no container accepts as a user-editable child. That's what makes the UI
+    // render no delete/replace: a fixed inspection module, like Task Manager you don't delete.
+    CHECK(tasks.role() == ModuleRole::Generic);
 }
 
 TEST_CASE("TasksModule: the empty desktop snapshot is safe (no RTOS on host)") {

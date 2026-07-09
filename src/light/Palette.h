@@ -207,7 +207,7 @@ inline constexpr uint8_t kCount = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
 
 }  // namespace palettes
 
-// The global active palette effects read — the AudioModule::latestFrame() static-seam pattern.
+// The global active palette effects read — the AudioService::latestFrame() static-seam pattern.
 // Drivers owns the `palette` select control and calls setActive() on change; effects just call
 // colorFromPalette(*Palettes::active(), idx).
 class Palettes {

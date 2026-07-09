@@ -5,7 +5,7 @@
 #include "light/Palette.h"        // colorFromPalette, Palettes::active()
 #include "light/draw.h"           // draw::pixel, draw::fade
 #include "core/math8.h"           // beat8
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
+#include "core/AudioService.h"     // AudioService::latestFrame()
 #include "core/AudioFrame.h"      // AudioFrame::bands[16]
 
 #include <cstring>                // memset (clear the per-band state on (re)build)
@@ -35,7 +35,7 @@ namespace mm {
 // Prior art: MoonLight's FreqSaws (E_MoonModules / MoonModules), an audio-reactive matrix effect. The
 // per-band rise/decay physics, the three position methods, the bpmMax / increaser / decreaser knobs,
 // and the per-band phase bookkeeping are reproduced exactly here, written fresh on projectMM's
-// EffectBase + the shared draw / palette / beat8 primitives. Reads AudioModule::latestFrame();
+// EffectBase + the shared draw / palette / beat8 primitives. Reads AudioService::latestFrame();
 // silence → every band decays → flat → dark, safe on any target and grid size.
 // Author: @TroyHacks (MoonLight / WLED MoonModules) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Audio-reactive effect: sawtooth bands driven by the frequency spectrum.
@@ -78,7 +78,7 @@ public:
         const int sizeY = height();
         if (sizeX <= 0 || sizeY <= 0 || channelsPerLight() < 3) return;
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
         Buffer& buf = layer()->buffer();

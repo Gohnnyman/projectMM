@@ -2,7 +2,7 @@
 
 ## Context
 
-Today everything a board adds — Audio, MQTT, IR, I2cScan, Devices — parents under **System** (or Network) with `ModuleRole::Peripheral`, mixed in with fixed things that also carry that role incidentally (TasksModule was given `Peripheral`+delete only to render a delete button; FileManager carries it but is always-there). This conflates two categories. The design note [docs/backlog/system-modules.md](../../backlog/system-modules.md) settles the split:
+Today `ModuleRole::Peripheral` conflates two categories that both parent under **System**: the genuinely **user-added capability bridges** (Audio, IR — optional, add/delete), and **fixed things that borrow the role only to render a delete button** (TasksModule was given `Peripheral`+delete for exactly that; I2cScan and FileManager carry it while being always-there). Network's own children (MQTT, Devices) are a third, separate thing — always-there infra, wired-by-code, never user-added. The design note [docs/backlog/system-modules.md](../../backlog/system-modules.md) settles the split:
 
 - **System Modules** — fixed, wired-by-code, no add/delete: System's vitals + the fixed inspection modules (Tasks, I2cScan; later Memory, Pins) + always-there infra (Network, Firmware, Improv).
 - **Service Modules** (a new top-level **Services** container) — user-added, add/delete/replace, `ModuleRole::Service`: Audio, IR. (I2cScan → a fixed System Module — it inspects this-device hardware; MQTT/Improv/Devices stay code-wired — see §3.)
@@ -63,9 +63,9 @@ Drop its `role() → Peripheral` (→ `Generic`, or leave roleless). It stays `s
 
 `check_devices.py` validates the new parentage + that no removed-type entries linger.
 
-### 7. Persistence migration
+### 7. Persistence migration — **NONE (PO decision: new project, best design now)**
 
-A device with a saved config has Service Modules recorded under the old parent (`System`). **DECIDED: auto-reparent in the load path** — the persistence layer re-homes such a child to the `Services` container on load, so an already-provisioned device survives the firmware upgrade unchanged (robustness-to-any-input is a defining principle; requiring a re-inject would break existing devices on update, cf. the [persistence-wins-on-upgrade lesson](../lessons.md)). A small, tolerant migration: a saved child under `System` whose role is the capability role attaches to `Services` instead. **Match the OLD wire value too** — a config persisted *before* the rename stores `role: "peripheral"`, so the migration must match `peripheral` OR `service` (whichever the saved file carries), not only the new `service`. Pin it with a persistence round-trip test that loads a pre-rename (`peripheral`) config.
+A pre-split device could have Audio/IR saved positionally under `System`'s config file, and — because persistence is positional-per-parent (see Execution notes) — on upgrade the load hits the wired-by-code `break` at the Audio slot and the saved module is dropped rather than re-homed. **DECIDED (PO): no migration.** projectMM has effectively no installed base yet, so back-compat machinery isn't worth its weight; a stale config simply loses its Audio/IR and the user re-adds it (a catalog-provisioned device self-heals on the next installer run, which now writes `parent_id: "Services"`). This is the same "choose the best system now, no back-compat alias/migration" call that drove renaming the module *type strings* (`AudioModule`→`AudioService`) without a factory alias — one consistent decision, not a reboot-to-apply or a bespoke migration shim. If an installed base ever justifies it, the migration seam is `FilesystemModule::migrateRenamedConfigs()` and the approach is a boot-time in-memory subtree move keyed by module type.
 
 ### 8. Docs split
 
@@ -91,4 +91,13 @@ Update every `main.cpp` `registerType(..., "core/services.md#x")` docPath to the
 
 This is the *structural* split only. It does NOT build Memory or Pins (separate specs) — it just makes System the right home for them. It does NOT add the core-affinity/relocate features. Keep the Services container thin (a `Layers`-style grouping node, no controls) — if it starts growing logic, that's a smell.
 
-Save as this file. Mark `(shipped)` when it lands. Whether it lands *with* the TasksModule commit or as its own is a PO call at implementation time.
+Save as this file. Mark `(shipped)` when it lands. **Merge order (PO):** fold onto `next-iteration` → grows PR #43 (TasksModule) to cover both.
+
+## Execution notes (code-verified before implementing)
+
+An Explore pass over the shipped code corrected two assumptions this design was written against; the implementation follows these, not the sketch above where they differ:
+
+- **Persistence is positional per-parent — there is NO `parent_id` in saved config.** `FilesystemModule::applyNode` rebuilds each parent's children by index from that parent's own file, so a child always reloads under the same parent. The "old device saved Audio under System" migration is therefore **not** a guard in the API add-path (`applyAddModule` never runs on load); it is a **boot-time in-memory subtree move**, extending the existing `FilesystemModule::migrateRenamedConfigs()` seam (which already does the `LayoutGroup→Layouts` file rename). Match the persisted Audio/IR node by **type** (robust to the pre-rename `role:"peripheral"` wire value), move it from System's subtree to the Services root before subtree load; the next save writes the new shape.
+- **The UI's `isUserEditableChild` assumes a 1:1 role→container mapping** (it tests `mod.role` against the *union* of all accepted roles). The rename **preserves** this: System drops `peripheral`, Services gains `service`, and the three fixed modules (Tasks/I2cScan/FileManager) drop their role to `Generic` — so every container-accepted role still maps to exactly one container. This means **no `app.js` change** is needed, but it is a correctness constraint: no fixed module may keep a container-accepted role.
+- **Five modules return `Peripheral`** (not the two the sketch implies): Audio + IR keep it (→ `Service`); Tasks + I2cScan + **FileManager** drop it (→ `Generic`).
+- `check_devices.py` — **no change needed** for `parent_id:"Services"` to resolve: `Services` is factory-registered under that exact name (`registerType<Services>("Services")`), so it's already in the validator's `factory_types` set. `BOOT_WIRED_TYPES` stays `{System, Network, Drivers}` — it's only for names referenced as `parent_id` that the factory does NOT register under that short name (System→SystemModule, Network→NetworkModule). Adding `Services` there would be redundant, so it isn't added. (Separately: the validator never checks `parent_id` against the valid set at all — a pre-existing gap, not this split's to fix; noted for a future validator hardening.)

@@ -624,11 +624,11 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 // Some boards put an analog mic behind an I2S audio codec (configured over I2C)
 // rather than a direct digital I2S MEMS mic; the codec must be brought up before
 // the I2S read. This is a no-op returning true on a board with a direct mic
-// (CodecType::None) or a target without a codec, so AudioModule always calls it and
+// (CodecType::None) or a target without a codec, so AudioService always calls it and
 // the path stays uniform.
 // Returns true when there's nothing to do (CodecType::None / no codec on this
 // target) or the codec came up; false on an I2C/codec error (the module then
-// idles with a status error, same as a failed mic init). AudioModule calls this
+// idles with a status error, same as a failed mic init). AudioService calls this
 // *after* audioMicInit: the I2S channel must already be driving MCLK before the
 // codec is configured (the ES8311 won't answer I2C without MCLK running). The
 // codec then presents standard I2S the read picks up.
@@ -643,7 +643,7 @@ struct AudioMicHandle { void* impl = nullptr; };
 // (24-bit data in a 32-bit slot, mono). `mclkPin` drives the I2S master clock —
 // −1 for a self-clocked direct MEMS mic (INMP441), or the codec's MCLK pin when a
 // codec needs the clock to run (the ES8311 won't even answer I2C without it, so
-// AudioModule starts I2S *before* audioCodecInit on a codec board). Returns false
+// AudioService starts I2S *before* audioCodecInit on a codec board). Returns false
 // on failure (bad pins, no I2S, out of memory) — the module idles with a status error.
 bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
                   uint16_t sckPin, int16_t mclkPin, uint32_t sampleRate);
@@ -668,7 +668,7 @@ void audioFft(const float* windowed, size_t n, float* outMag);
 // off a device's address. Self-contained: opens a temporary master bus on the
 // given pins, scans, tears it down. The bus is transient, so it only conflicts
 // with a driver that *currently* holds the port (e.g. the ES8311 codec keeps
-// I2C_NUM_0 open while AudioModule is active) — that case is reported as
+// I2C_NUM_0 open while AudioService is active) — that case is reported as
 // kI2cBusUnavailable, not silently as "0 devices". Internal pull-ups enabled.
 // ---------------------------------------------------------------------------
 
@@ -685,7 +685,7 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 // frame into `codeOut` when a fresh code is available since the last call, false otherwise
 // (nothing received, or IR decode unavailable on this target). Self-contained like i2cScan —
 // it owns whatever peripheral it needs (an RMT RX channel on ESP32). Non-blocking: safe to
-// call every tick. IrModule is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
+// call every tick. IrService is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
 // hardware and always returns false.
 bool irRead(uint16_t pin, uint32_t& codeOut);
 

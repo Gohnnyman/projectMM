@@ -21,12 +21,14 @@ namespace mm {
 /// instead of a ListSource. Scan state ("N devices found", "set sda + scl pins first") reports
 /// through the standard `setStatus()` channel.
 ///
-/// **Not auto-wired.** Factory-registered like AudioModule, so a board with an I2C bus adds it
-/// through the installer device catalog (its `sda`/`scl` controls carrying that board's bus
-/// pins) or the user adds it from the UI. The pins default to GPIO21/22, the Arduino-ESP32
-/// core's conventional I2C pair, so the control pre-fills a sensible starting point on a classic
-/// ESP32 (the pins route through the GPIO matrix, so they're a convention, not fixed hardware);
-/// a board with a fixed bus overrides them in its catalog entry (such as the S31's `sda:51,
+/// **Fixed System module.** Wired by code as a child of SystemModule in `main.cpp` — a
+/// hardware-inspection tool that is always available on every board, not user-added (you don't
+/// add a bus scanner, it's part of the device's bring-up toolkit). It stays passive until the
+/// user presses scan: no bus is opened and no pins are driven at boot. The pins default to
+/// GPIO21/22, the Arduino-ESP32 core's conventional I2C pair, so the control pre-fills a sensible
+/// starting point on a classic ESP32 (the pins route through the GPIO matrix, so they're a
+/// convention, not fixed hardware); a board with a fixed bus overrides them as a control-value
+/// default in its catalog entry (such as the S31's `sda:51,
 /// scl:50`).
 ///
 /// **How it works:** the probe is `platform::i2cScan(sda, scl, out, maxOut)` (declared in
@@ -48,8 +50,6 @@ public:
     /// A diagnostic, like FirmwareUpdateModule / DevicesModule — keeps its
     /// controls and the scan action available regardless of the `enabled` toggle.
     bool respectsEnabled() const override { return false; }
-
-    ModuleRole role() const override { return ModuleRole::Peripheral; }
 
     void onBuildControls() override {
         controls_.addPin("sda", sda_);
@@ -86,7 +86,7 @@ private:
                                            found, kMaxAddrs);
         if (n == platform::kI2cBusUnavailable) {
             // The bus is held by another driver (e.g. the ES8311 codec while
-            // AudioModule is active) — say so instead of a misleading "0 found".
+            // AudioService is active) — say so instead of a misleading "0 found".
             resultStr_[0] = '\0';
             setStatus("bus in use — free the I2C driver, then scan", Severity::Warning);
             markDirty();

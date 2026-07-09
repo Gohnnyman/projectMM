@@ -1,7 +1,7 @@
-// @module AudioModule
+// @module AudioService
 
 #include "doctest.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 
 #include <cstring>
 
@@ -20,8 +20,8 @@
 // each case here brackets its own setup() with a teardown() so it never leaks a
 // live mic pointer into another test (the residue the robustness rule forbids).
 
-TEST_CASE("AudioModule: a fresh, unconfigured module is idle (pins default unset)") {
-    mm::AudioModule a;
+TEST_CASE("AudioService: a fresh, unconfigured module is idle (pins default unset)") {
+    mm::AudioService a;
     a.onBuildControls();
     // Pins default to -1 (unset, the standard Pin-control sentinel): the module is
     // user-added when a board has a mic and waits for the real GPIOs. It must never
@@ -36,8 +36,8 @@ TEST_CASE("AudioModule: a fresh, unconfigured module is idle (pins default unset
     CHECK(true);
 }
 
-TEST_CASE("AudioModule: setup/teardown is repeatable with no residual state") {
-    mm::AudioModule a;
+TEST_CASE("AudioService: setup/teardown is repeatable with no residual state") {
+    mm::AudioService a;
     a.onBuildControls();
     const char* afterFirst = nullptr;
     for (int cycle = 0; cycle < 4; cycle++) {
@@ -54,41 +54,41 @@ TEST_CASE("AudioModule: setup/teardown is repeatable with no residual state") {
     }
 }
 
-TEST_CASE("AudioModule: teardown clears the active mic (latestFrame falls back to silence)") {
+TEST_CASE("AudioService: teardown clears the active mic (latestFrame falls back to silence)") {
     {
-        mm::AudioModule a;
+        mm::AudioService a;
         a.onBuildControls();
         a.setup();                                  // registers itself as active_
-        REQUIRE(mm::AudioModule::latestFrame() == a.audioFrame());
+        REQUIRE(mm::AudioService::latestFrame() == a.audioFrame());
         a.teardown();                               // must release the registration
     }
     // After teardown (and destruction) no mic is active: the accessor returns the
     // static silent frame, never a dangling pointer into the destroyed module.
-    const mm::AudioFrame* f = mm::AudioModule::latestFrame();
+    const mm::AudioFrame* f = mm::AudioService::latestFrame();
     REQUIRE(f != nullptr);
     CHECK(f->level == 0);
     CHECK(f->peakHz == 0);
 }
 
-TEST_CASE("AudioModule: two mics — first wins, survivor re-elects, any order stays coherent") {
-    // The robustness rule for a device with TWO AudioModules (two mics). Regression for a real bug:
+TEST_CASE("AudioService: two mics — first wins, survivor re-elects, any order stays coherent") {
+    // The robustness rule for a device with TWO AudioServices (two mics). Regression for a real bug:
     // removing the ACTIVE mic used to leave active_ null while the other mic kept running, so every
     // audio effect went silent (latestFrame() returned the static silence). The fix: first live module
     // wins the seat, teardown() vacates it, and any running module re-claims an empty seat in loop().
-    mm::AudioModule a, b;
+    mm::AudioService a, b;
     a.onBuildControls();
     b.onBuildControls();
 
     a.setup();
-    CHECK(mm::AudioModule::latestFrame() == a.audioFrame());
+    CHECK(mm::AudioService::latestFrame() == a.audioFrame());
     b.setup();                                          // second mic captured, but a keeps the seat
-    CHECK(mm::AudioModule::latestFrame() == a.audioFrame());   // FIRST wins, not last
+    CHECK(mm::AudioService::latestFrame() == a.audioFrame());   // FIRST wins, not last
 
     a.teardown();                                       // tearing down the ACTIVE one vacates the seat
     // Before the survivor's next tick the seat is empty; b re-claims it in loop() (self-election).
     b.loop();                                           // b (still live) takes over
-    CHECK(mm::AudioModule::latestFrame() == b.audioFrame());   // effects keep reading a live frame
+    CHECK(mm::AudioService::latestFrame() == b.audioFrame());   // effects keep reading a live frame
     b.teardown();
     // Both gone: back to the static silence, no dangling pointer.
-    CHECK(mm::AudioModule::latestFrame()->level == 0);
+    CHECK(mm::AudioService::latestFrame()->level == 0);
 }

@@ -133,6 +133,7 @@ nav:
       - Live scripting: moonmodules/light/MoonLiveEffect.md
       - Supporting: moonmodules/light/supporting.md
   - Core:
+      - System: moonmodules/core/system.md
       - Services: moonmodules/core/services.md
       - Supporting: moonmodules/core/supporting.md
       - Web UI: moonmodules/core/ui.md

@@ -1,123 +1,22 @@
 # Core services
 
-The user-facing core services — the machinery that runs a show, each configurable in the web UI. Every row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-cutting rationale that no single `.h` owns lives in the prose sections below the table.
+The user-added **Service** modules — capability bridges the device provides or consumes, added and removed at runtime in the `Services` container (the core-domain twin of the light domain's `Layers`/`Drivers`). Fixed device infrastructure (identity, network, inspection tools) lives under **System** — see [core/system.md](system.md). Every row links to its generated technical page (the full API, from the `.h`) and its tests.
 
-<a id="system"></a>
+<a id="services"></a>
 
-### System
+### Services
 
-The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftAP SSID, the DHCP hostname), uptime, heap, and per-module footprint reporting. Hosts the Audio and I2C-scan peripherals.
+The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Layers`/`Drivers` in the light domain. Adds/removes its children (Audio, IR) at runtime via the generic module machinery.
 
-<img src="../../assets/core/SystemModule.png" width="300" alt="System module controls">
-
-- `deviceName` — the device identity behind mDNS `<name>.local`, the SoftAP SSID, and the DHCP hostname.
-- `deviceModel` — the board model (drives the installer catalog entry).
-- read-only vitals — `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
-
-Detail: [technical](moxygen/SystemModule.md)
-
-[Tests](../../tests/unit-tests.md#systemmodule)
-
-<a id="network"></a>
-
-### Network
-
-WiFi / Ethernet connectivity, static-IP configuration, RSSI and TX-power reporting. Brings the device onto the LAN before the HTTP and WebSocket servers start.
-
-<img src="../../assets/core/NetworkModule.png" width="300" alt="Network module controls">
-
-- `mode` — WiFi / Ethernet / off.
-- `ssid` / `password` — WiFi credentials.
-- `mDNS` — the `<name>.local` hostname.
-- `addressing` — DHCP or static; static exposes IP / gateway / subnet / DNS fields.
-- `ethType` / `ethPhyAddr` / `ethRstGpio` / … — Ethernet PHY configuration.
-- read-only — `rssi` (dBm), `txPower` (dBm).
-
-Detail: [technical](moxygen/NetworkModule.md)
-
-[Tests](../../tests/unit-tests.md#networkmodule)
-
-<a id="improv-provisioning"></a>
-
-### Improv provisioning
-
-Serial/BLE Improv Wi-Fi provisioning — the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow.
-
-<img src="../../assets/core/ImprovProvisioningModule.png" width="300" alt="Improv provisioning module controls">
-
-- `provision_status` — read-only provisioning state.
-
-Detail: [technical](moxygen/ImprovProvisioningModule.md)
-
-<a id="devices"></a>
-
-### Devices
-
-Discovers and lists other projectMM devices on the LAN (the `devices` List control), each row expanding to a detail panel; persists the last-known list across reboot.
-
-<img src="../../assets/core/DevicesModule.png" width="300" alt="Devices module — discovered LAN devices">
-
-- `devices` — a List control of discovered devices; each row expands to a detail panel. Persistable.
-
-Detail: [technical](moxygen/DevicesModule.md)
-
-[Tests](../../tests/unit-tests.md#devicesmodule)
-
-<a id="mqtt"></a>
-
-### MQTT
-
-Bridges the light to an MQTT broker so a home-automation hub (Homebridge) can control it — a transport over the shared `Scheduler::setControl` apply-core, not new control logic. Our own dependency-free MQTT 3.1.1 client; disabled until a broker is set. Topics, colour-wheel mapping, and the Homebridge config: ⌄ details.
-
-<img src="../../assets/core/MqttModule.png" width="300" alt="MQTT module controls">
-
-- `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
-- `port` — broker port (default 1883).
-- `username` / `password` — broker credentials (optional; the password is stored obfuscated like the WiFi password).
-- `haDiscovery` — announce a Home Assistant MQTT-discovery light (default off, opt-in). HA already auto-discovers the device over the WLED `/json` shim (colour + palette + sensors, no broker), so this stays off to avoid a duplicate entity; turn it on for broker-only / cross-subnet setups where mDNS doesn't reach. When on, HA auto-creates a wired entity; toggling it off removes it. See the [home-automation guide](../../usecases/home-automation.md).
-- read-only — `mqtt_status` (`disabled` / `idle` / `connecting` / `connected` / `disconnected` / an error).
-
-Detail: [technical](moxygen/MqttModule.md)
-
-[Tests](../../tests/unit-tests.md#mqttmodule)
-
-<a id="firmware-update"></a>
-
-### Firmware update
-
-Over-the-air firmware flashing — the one operation that swaps the binary and needs a power cycle (every *config* change applies live; a firmware OTA does not).
-
-<img src="../../assets/core/FirmwareUpdateModule.png" width="300" alt="Firmware update module controls">
-
-- `firmware` — the OTA image to flash.
-- read-only — `version`, `build`, `firmwarePartition`, `update_pct` (progress).
-
-Detail: [technical](moxygen/FirmwareUpdateModule.md)
-
-[Tests](../../tests/unit-tests.md#firmwareupdatemodule)
-
-<a id="file-manager"></a>
-
-### File Manager
-
-A boot-wired system tool (distinct from Filesystem, the persistence *engine*): browse and manage the device filesystem from a dedicated panel — a lazy expand/collapse folder tree (VS Code / Explorer shape) plus an inline text editor. Browsing is UI-side over `/api/dir` + `/api/file`, so the module itself stays minimal. Tree/toolbar/editor behaviour: ⌄ details.
-
-<img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
-
-- `file browser` — the panel itself: an expand/collapse folder tree with a toolbar (＋folder / ＋file / delete / refresh / upload) and an inline text editor. The module's main surface (⌄ details for the interactions).
-- `show hidden` — reveal dot-prefixed files/folders (e.g. `.config`); forwarded to `/api/dir` as its `hidden` filter.
-- `filesystem` — read-only usage bar (used / total bytes, from the platform).
-- `lastSaved` — read-only; how long ago config was persisted (read from the Filesystem engine).
-
-Detail: [technical](moxygen/FileManagerModule.md)
+Detail: [technical](moxygen/Services.md)
 
 <a id="audio"></a>
 
 ### Audio
 
-A System peripheral (added by the user, not auto-wired): an I²S microphone (or line-in ADC) feeding the FFT that audio-reactive effects consume via `AudioModule::latestFrame()`. It also syncs audio over UDP, WLED-compatible: broadcast the local analysis for the WLED ecosystem, or receive a peer's audio to drive effects with no local mic. Idle until real GPIOs are entered.
+A Service (added by the user, not auto-wired): an I²S microphone (or line-in ADC) feeding the FFT that audio-reactive effects consume via `AudioService::latestFrame()`. It also syncs audio over UDP, WLED-compatible: broadcast the local analysis for the WLED ecosystem, or receive a peer's audio to drive effects with no local mic. Idle until real GPIOs are entered.
 
-<img src="../../assets/core/AudioModule.png" width="300" alt="Audio module controls">
+<img src="../../assets/core/AudioService.png" width="300" alt="Audio module controls">
 
 - `sckPin` / `wsPin` / `sdPin` — the I²S GPIOs (bit clock / word-select / data; unset until entered).
 - `mclkPin` — master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
@@ -127,109 +26,23 @@ A System peripheral (added by the user, not auto-wired): an I²S microphone (or 
 - `sync` — Off / Send / Receive: broadcast or receive WLED audio-sync packets. `syncPort` sets the UDP port (default 11988, the WLED standard); Receive auto-blends back to the local mic ~1 s after a peer goes quiet.
 - read-only — `level` (RMS), `peakHz`, `sync status`.
 
-Detail: [technical](moxygen/AudioModule.md)
+Detail: [technical](moxygen/AudioService.md)
 
-[Tests](../../tests/unit-tests.md#audiomodule)
-
-<a id="i2c-scan"></a>
-
-### I2C scan
-
-A System peripheral that probes the I²C bus (default GPIO21/22) on a button press and reports the addresses found.
-
-<img src="../../assets/core/I2cScanModule.png" width="300" alt="I2C scan module controls">
-
-- `sda` / `scl` — the bus GPIOs (default GPIO21/22).
-- `scan` — a button; press to probe the bus now.
-- read-only — `result` (addresses found).
-
-Detail: [technical](moxygen/I2cScanModule.md)
-
-<a id="tasks"></a>
-
-### Tasks
-
-A read-only diagnostic that shows **what runs where** — the observability foundation for core-affinity / task-assignment work (you can't optimise which module runs on which core until you can see it). Inspired by MoonLight's task table; projectMM nests the MoonModules that run in each task beneath it, and the per-module cost comes from projectMM's own self-report (`loopTimeUs`/`classSize`/`dynamicBytes`) at zero extra cost. The raw FreeRTOS task view sits behind the platform boundary.
-
-- read-only — `tasks` (a row per FreeRTOS task: `name`, `state`, `core`, `prio`, `stack` = min free stack ever seen; `cpu`% only in a build with `MM_TASK_CPU_STATS` — a `--task-cpu-stats` profiling build, off by default because the FreeRTOS run-time counter costs ~5% tick). Expand a row to see the MoonModules running in that task, each `Name · Nus · NB · Nheap` (`us` = average loop time, `class` bytes, `heap` bytes), plus a closing `∑ modules Xus / tick Yus · Zus outside modules` cross-check — the top-level module loop times should account for nearly all the tick, the small remainder being the blend/map/output that isn't a module. Today every module runs in the one render task, so that task's detail is the whole module list. Empty on desktop / a chip without the trace facility.
-- read-only — `core0` / `core1` (the task currently executing on each core; empty on a single-core chip).
-
-Detail: [technical](moxygen/TasksModule.md)
+[Tests](../../tests/unit-tests.md#audioservice)
 
 <a id="ir"></a>
 
 ### IR
 
-A System peripheral (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
+A Service (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
 
-<img src="../../assets/core/IrModule.png" width="300" alt="IR module controls">
+<img src="../../assets/core/IrService.png" width="300" alt="IR module controls">
 
 - `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
 - `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
 - `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
 
-Detail: [technical](moxygen/IrModule.md)
-
-## MQTT — details
-
-The topic prefix is `projectMM/<mac>` — a **stable** identifier (the last 6 hex of the device's MAC), fixed for the device's life. Renaming the device does **not** change its topics, so a hub's config never breaks on a rename (the WLED/Tasmota/Home-Assistant convention). It's derived, not a stored control.
-
-**Topics** (for a device whose MAC ends `563cfe`): the device SUBSCRIBEs to the `set` topics and PUBLISHes the `get` topics on change (and on connect, so a controller never reads "No Response"). It also publishes its friendly `deviceName` on the retained `name` topic, so a hub can show the human name while the topics stay MAC-stable:
-
-| direction | topic | payload |
-|---|---|---|
-| set → device | `projectMM/563cfe/on/set` | `true` / `false` |
-| device → get | `projectMM/563cfe/on/get` | `true` / `false` |
-| set → device | `projectMM/563cfe/brightness/set` | `0`–`100` |
-| device → get | `projectMM/563cfe/brightness/get` | `0`–`100` |
-| set → device | `projectMM/563cfe/hsv/set` | `h,s,v` (hue `0`–`359`, sat/val `0`–`100`) |
-| device → get | `projectMM/563cfe/hsv/get` | `h,s,v` |
-| device → get | `projectMM/563cfe/name` | the friendly `deviceName` (retained) |
-| device → get | `projectMM/563cfe/update/state` | `{"installed_version":…,"latest_version":…,"release_url":…,"title":…}` (retained; HA update entity) |
-| set → device | `projectMM/563cfe/update/set` | target version string (empty = install latest); triggers OTA against the matching GitHub release asset |
-
-The HomeKit colour wheel has no "palette" concept, so `hsv/set`'s hue+saturation pick the **nearest palette** (each built-in palette has a representative colour; the closest one is selected) and the value drives brightness — the colour wheel becomes a natural palette selector.
-
-**Homebridge** — install [`homebridge-mqttthing`](https://github.com/arachnetech/homebridge-mqttthing) and add a `lightbulb` accessory. Use the device's own MAC suffix (read it from the `mqtt_status`/topics, or `mosquitto_sub -t 'projectMM/#'`) in place of `563cfe`:
-
-```json
-{
-  "accessory": "mqttthing",
-  "type": "lightbulb",
-  "name": "projectMM",
-  "url": "mqtt://<broker>:1883",
-  "username": "<user>",
-  "password": "<pass>",
-  "topics": {
-    "getOn": "projectMM/563cfe/on/get",
-    "setOn": "projectMM/563cfe/on/set",
-    "getBrightness": "projectMM/563cfe/brightness/get",
-    "setBrightness": "projectMM/563cfe/brightness/set",
-    "getHSV": "projectMM/563cfe/hsv/get",
-    "setHSV": "projectMM/563cfe/hsv/set"
-  },
-  "onValue": "true",
-  "offValue": "false"
-}
-```
-
-Home Assistant adopts the device two ways, both zero-config:
-- **MQTT auto-discovery** — with `haDiscovery` on (opt-in; off by default) and a broker set, the device announces itself on `homeassistant/light/projectMM_<mac6>/config` and HA auto-creates a wired entity with **on/off + brightness** (the config declares `brightness` only; colour isn't in it, so the entity has no colour control). Retained across reboots. Colour/palette stays on the separate `hsv/set` topic above, not this entity. Off by default because the WLED `/json` shim already gives HA a richer light (colour + palette + sensors) over mDNS with no broker — leaving both on lists the device twice; enable this only for broker-only / cross-subnet setups.
-- **WLED integration** — HA's built-in WLED integration discovers the device over the WLED `/json` API projectMM already serves; on/off + brightness work with no broker.
-
-Both can be on at once. Setup walkthrough (including exposing HA to Apple Home via HA's HomeKit Bridge, no Homebridge needed) in the [Home Assistant recipe](../../usecases/home-automation.md#adopt-in-home-assistant).
-
-## File Manager — details
-
-The panel is a lazy folder **tree** (each folder loads its children on first expand) plus an inline text editor. Dot-prefixed entries (the `.config` persistence dir) are hidden unless `show hidden` is on.
-
-- Click a folder's row to select it and toggle its expansion (▸/▾); click a selected file to open the editor.
-- The toolbar acts on the selected node: **＋ folder** creates a folder inside it, **＋ file** creates an empty file (click it to edit), **🗑 delete** removes the selected file or empty folder (press-twice to confirm), **⟳** refreshes.
-- **Drag files from the desktop** onto a folder (or the tree) to upload them — the body streams straight to the file (any size, binary-safe; capped only by a sanity limit and the free space, which it reports if short); a per-file **⤓** streams it back to the desktop.
-- The editor loads a file's text, pretty-prints JSON on open, and saves atomically; a binary file (contains a NUL) loads read-only (use ⤓ to fetch it intact). Upload and download both stream, so neither truncates.
-- Create / delete are HTTP calls (`POST` / `DELETE /api/dir?path=`), not controls — the path rides the request, so nothing is stored on the device per op.
-
-Last-modified dates (needs an NTP time source + LittleFS mtime), binary/large + folder upload, folder-as-zip download, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../backlog/backlog-core.md#file-manager-follow-ups)).
+Detail: [technical](moxygen/IrService.md)
 
 ## IR — details
 

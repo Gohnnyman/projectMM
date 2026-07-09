@@ -6,7 +6,7 @@
       "esp32",
       "esp32-eth"
     ],
-    "image": "assets/deviceModels/olimex-esp32-gateway-rev-g.jpg",
+    "image": "assets/deviceModels/olimex-esp32-gateway.png",
     "url": "https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware",
     "supported": [
       "LEDs",
@@ -543,9 +543,9 @@
         }
       },
       {
-        "type": "AudioModule",
+        "type": "AudioService",
         "id": "Audio",
-        "parent_id": "System",
+        "parent_id": "Services",
         "controls": {
           "sckPin": 47,
           "wsPin": 48,
@@ -764,9 +764,9 @@
         }
       },
       {
-        "type": "IrModule",
+        "type": "IrService",
         "id": "Ir",
-        "parent_id": "System",
+        "parent_id": "Services",
         "controls": {
           "pin": 4
         }
@@ -817,9 +817,9 @@
         }
       },
       {
-        "type": "IrModule",
+        "type": "IrService",
         "id": "Ir",
-        "parent_id": "System",
+        "parent_id": "Services",
         "controls": {
           "pin": 5
         }
@@ -877,7 +877,6 @@
       {
         "type": "I2cScanModule",
         "id": "I2cScan",
-        "parent_id": "System",
         "controls": {
           "sda": 7,
           "scl": 8
@@ -913,9 +912,9 @@
         }
       },
       {
-        "type": "AudioModule",
+        "type": "AudioService",
         "id": "Audio",
-        "parent_id": "System",
+        "parent_id": "Services",
         "controls": {
           "sckPin": 32,
           "wsPin": 26,
@@ -948,7 +947,6 @@
       {
         "type": "I2cScanModule",
         "id": "I2cScan",
-        "parent_id": "System",
         "controls": {
           "sda": 7,
           "scl": 8
@@ -1006,9 +1004,9 @@
         }
       },
       {
-        "type": "AudioModule",
+        "type": "AudioService",
         "id": "Audio",
-        "parent_id": "System",
+        "parent_id": "Services",
         "controls": {
           "sckPin": 53,
           "wsPin": 55,
@@ -1018,7 +1016,6 @@
       {
         "type": "I2cScanModule",
         "id": "I2cScan",
-        "parent_id": "System",
         "controls": {
           "sda": 51,
           "scl": 50

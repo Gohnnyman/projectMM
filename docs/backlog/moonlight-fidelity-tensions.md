@@ -48,7 +48,7 @@ renders the same sweep more smoothly, a slow one choppier. Once-per-frame, no pe
   must light ours), but the units differ, so a literal `> 0.25` is wrong against `level`.
 - **Shipped (3d batch):** the ports scale the thresholds proportionally (e.g. `0.25` of full-scale →
   `~64` on the 0..255 `level`) and flag each with a comment. This is a **reconstruction**, not a
-  verbatim match — the exact trigger point depends on how our AudioModule scales `level` vs how
+  verbatim match — the exact trigger point depends on how our AudioService scales `level` vs how
   MoonLight scales `volume`.
 - **Decision needed:** confirm the level-scale mapping on hardware (does our `level` reach ~255 at
   the same loudness MoonLight's `volume` reaches ~1.0?), and whether `volumeRaw` (which we don't
@@ -69,7 +69,7 @@ renders the same sweep more smoothly, a slow one choppier. Once-per-frame, no pe
 The premise was backwards: `AudioFrame::level` was NOT smoothed — `computeLevel` recomputes it raw
 per audio block, so it's already WLED's `volumeRaw` (the instantaneous, transient-snapping value).
 NoiseMeter using it was correct, not a stand-in. The real gap was the *other* direction: no smoothed
-value. Resolved by **adding `AudioFrame::levelSmoothed`** (an EMA of `level` in AudioModule) so
+value. Resolved by **adding `AudioFrame::levelSmoothed`** (an EMA of `level` in AudioService) so
 effects that want WLED's calm `volume`/`volumeSmth` can read it, and doing an **audio-effect sweep**
 to point each effect at the value matching its behaviour: NoiseMeter → raw `level` (unchanged, VU
 snaps to beats); FreqMatrix, AudioSpectrum's VU bar, AudioVolume → `levelSmoothed` (breathing/flowing

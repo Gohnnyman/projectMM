@@ -1,7 +1,7 @@
-// @module AudioModule
+// @module AudioService
 // @also WledAudioSyncPacket
 
-// Drives AudioModule's WLED audio-sync socket lifecycle on the host through the public
+// Drives AudioService's WLED audio-sync socket lifecycle on the host through the public
 // loop() — the same entry the scheduler calls on-device. Covers: lazy open once per mode
 // (syncEnsureSocket latches), the send path reaching "sending", send throttling, and the
 // receive path over a real localhost UDP round-trip (frame replacement + the fresh→stale
@@ -15,7 +15,7 @@
 // projectMM desktop app that would hold the real sync port.
 
 #include "doctest.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 #include "light/WLEDAudioSyncPacket.h"
 #include "platform/platform.h"
 
@@ -29,7 +29,7 @@ constexpr uint16_t kTestSyncPort = 21988;   // a free high port, not the real 11
 
 // The status read-out is published by loop1s(); call it after a loop() so the assertions
 // below see the current state string rather than the setup() baseline.
-const char* status(AudioModule& a) { a.loop1s(); return a.syncStatusForTest(); }
+const char* status(AudioService& a) { a.loop1s(); return a.syncStatusForTest(); }
 
 // A guard that freezes virtual time for a case and restores the real clock on scope exit,
 // so a thrown assertion can't leak frozen time into the next case.
@@ -41,9 +41,9 @@ struct FrozenClock {
 };
 }  // namespace
 
-TEST_CASE("AudioModule sync=Send: lazy-opens once and reports sending") {
+TEST_CASE("AudioService sync=Send: lazy-opens once and reports sending") {
     FrozenClock clk(1);
-    AudioModule a;
+    AudioService a;
     a.sync = 1;
     a.syncPort = kTestSyncPort;
     a.setup();                       // syncReinit() only — socket NOT opened here (boot-safe)
@@ -62,9 +62,9 @@ TEST_CASE("AudioModule sync=Send: lazy-opens once and reports sending") {
     CHECK_FALSE(a.syncOpenForTest());
 }
 
-TEST_CASE("AudioModule sync=Send: broadcasts are throttled to ~kSyncSendIntervalMs") {
+TEST_CASE("AudioService sync=Send: broadcasts are throttled to ~kSyncSendIntervalMs") {
     FrozenClock clk(1);
-    AudioModule a;
+    AudioService a;
     a.sync = 1;
     a.syncPort = kTestSyncPort;
     a.setup();
@@ -79,16 +79,16 @@ TEST_CASE("AudioModule sync=Send: broadcasts are throttled to ~kSyncSendInterval
     CHECK(a.syncFrameCounterForTest() == c0);   // throttled: no send per tick
 
     // After the interval elapses, exactly one more send is allowed.
-    clk.advance(AudioModule::syncSendIntervalMsForTest() + 5);
+    clk.advance(AudioService::syncSendIntervalMsForTest() + 5);
     a.loop();
     CHECK((uint8_t)(a.syncFrameCounterForTest() - c0) == 1);
 
     a.teardown();
 }
 
-TEST_CASE("AudioModule sync=Receive: a localhost WLED packet drives frame_, then auto-blends back") {
+TEST_CASE("AudioService sync=Receive: a localhost WLED packet drives frame_, then auto-blends back") {
     FrozenClock clk(1);
-    AudioModule a;
+    AudioService a;
     a.sync = 2;
     a.syncPort = kTestSyncPort;
     a.setup();
@@ -123,7 +123,7 @@ TEST_CASE("AudioModule sync=Receive: a localhost WLED packet drives frame_, then
     // Auto-blend: advance virtual time past the fallback window with no new packet — the
     // peer goes stale and the status falls back to "listening" (the local mic resumes
     // on-device). Deterministic: no real sleep.
-    clk.advance(AudioModule::syncFallbackMsForTest() + 20);
+    clk.advance(AudioService::syncFallbackMsForTest() + 20);
     a.loop();
     CHECK(std::strcmp(status(a), "listening") == 0);
 
@@ -131,14 +131,14 @@ TEST_CASE("AudioModule sync=Receive: a localhost WLED packet drives frame_, then
     a.teardown();
 }
 
-TEST_CASE("AudioModule sync=Receive: a failed bind backs off instead of retrying every tick") {
+TEST_CASE("AudioService sync=Receive: a failed bind backs off instead of retrying every tick") {
     FrozenClock clk(1);
     // Hold the port with an external socket so the module's bind() fails.
     platform::UdpSocket hog;
     REQUIRE(hog.open());
     REQUIRE(hog.bind(kTestSyncPort));
 
-    AudioModule a;
+    AudioService a;
     a.sync = 2;
     a.syncPort = kTestSyncPort;
     a.setup();
@@ -156,7 +156,7 @@ TEST_CASE("AudioModule sync=Receive: a failed bind backs off instead of retrying
 
     // Release the port and advance past the backoff — the next tick retries and succeeds.
     hog.close();
-    clk.advance(AudioModule::syncOpenRetryMsForTest() + 5);
+    clk.advance(AudioService::syncOpenRetryMsForTest() + 5);
     a.loop();
     CHECK(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "listening") == 0);
@@ -164,9 +164,9 @@ TEST_CASE("AudioModule sync=Receive: a failed bind backs off instead of retrying
     a.teardown();
 }
 
-TEST_CASE("AudioModule sync=Off: no socket, reports off") {
+TEST_CASE("AudioService sync=Off: no socket, reports off") {
     FrozenClock clk(1);
-    AudioModule a;
+    AudioService a;
     a.sync = 0;
     a.setup();
     a.loop();

@@ -420,7 +420,7 @@ private:
     // List the bridge in DevicesModule (so it shows alongside discovered WLED/projectMM peers,
     // carrying its dimmable-light count for layout sizing). The bridge isn't a UDP-presence
     // device, so it's registered explicitly through the static seam — no compile-time core↔light
-    // dependency beyond the same DevicesModule::active() shape AudioModule::latestFrame() uses.
+    // dependency beyond the same DevicesModule::active() shape AudioService::latestFrame() uses.
     void reportBridge() {
         auto* dev = DevicesModule::active();
         if (!dev || !haveBridge()) return;

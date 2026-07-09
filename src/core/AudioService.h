@@ -32,7 +32,7 @@ namespace mm {
 /// read seam as they are added. Most of the module is the analysis (DC-blocker,
 /// RMS level, windowed FFT, band mapping), which is source-independent.
 ///
-/// **User-added Peripheral.** A SystemModule Peripheral child, registered in the
+/// **User-added Service.** A child of the `Services` container, registered in the
 /// factory and added through the UI when wanted, not boot-wired — auto-wiring it
 /// forced an I2S init on every board, which on the classic ESP32 hung `setup()` and
 /// boot-looped a mic-less device. When added, its pins default to unset (−1, the
@@ -80,15 +80,15 @@ namespace mm {
 /// forward-looking analysis (source-seam extensions — line-in / PDM / analog / I²C codecs — and the
 /// adaptive-noise-gate design that would retire the borrowed `floor` squelch) is a design study in
 /// docs/backlog/audio-dsp-roadmap.md.
-/// @card AudioModule.png
-class AudioModule : public MoonModule {
+/// @card AudioService.png
+class AudioService : public MoonModule {
 public:
     /// Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of
     /// audio per frame — fine resolution (~43 Hz/bin) at a modest per-tick cost.
     static constexpr size_t kBlock = 512;
     static constexpr size_t kMag = kBlock / 2;   ///< real-FFT magnitude bins
 
-    ModuleRole role() const override { return ModuleRole::Peripheral; }
+    ModuleRole role() const override { return ModuleRole::Service; }
 
     /// Unlike a zero-cost diagnostic peripheral, this module pays a
     /// real per-tick cost (the FFT) that IS the capability, not an optional extra,
@@ -226,7 +226,7 @@ public:
     const AudioFrame* audioFrame() const { return &frame_; }
 
     // --- Test seams (host unit tests only; mirror DevicesModule::injectPacketForTest) ---
-    // Read-only views of the sync socket lifecycle so unit_AudioModule_sync can assert it
+    // Read-only views of the sync socket lifecycle so unit_AudioService_sync can assert it
     // through the public loop() without befriending the class or exposing internals broadly.
     bool syncOpenForTest() const { return syncOpen_; }
     uint8_t syncFrameCounterForTest() const { return syncFrameCounter_; }
@@ -437,7 +437,7 @@ public:
 private:
     // The mic that latestFrame() hands to effects. One in practice; the last one
     // to setup() wins, teardown() clears it. inline so the header stays standalone.
-    static inline AudioModule* active_ = nullptr;
+    static inline AudioService* active_ = nullptr;
 
     platform::AudioMicHandle mic_;
     bool inited_ = false;
@@ -580,7 +580,7 @@ private:
     /// on a mode change. Returns true when the socket is ready to use this tick. Off is a
     /// no-op (socket stays closed, zero overhead). Send connects to the LAN broadcast;
     /// Receive binds the port. Mirrors NetworkSendDriver/NetworkReceiveEffect, but deferred
-    /// past boot so a boot-present AudioModule can't touch lwip before it exists.
+    /// past boot so a boot-present AudioService can't touch lwip before it exists.
     bool syncEnsureSocket() {
         if constexpr (!platform::hasNetwork) return false;
         if (sync == 0) return false;

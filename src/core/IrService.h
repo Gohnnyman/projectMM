@@ -36,21 +36,21 @@ namespace mm {
 /// control's own `[min, max]` — read generically from the target's `ControlDescriptor`, so the
 /// same code adjusts a 0–255 brightness slider and an N-option palette Select without knowing
 /// either's domain. A future LightsControl hub (docs/backlog) absorbs this as the normalised
-/// interface effects read; `latestCode()` is the seam it consumes (the `AudioModule::latestFrame`
+/// interface effects read; `latestCode()` is the seam it consumes (the `AudioService::latestFrame`
 /// pattern).
 ///
-/// **Not auto-wired.** Factory-registered like AudioModule / I2cScanModule, so a board with an IR
-/// receiver adds it via the installer device catalog (its `pin` carrying that board's IR GPIO) or
-/// the user adds it from the UI. On the SE16 the IR line shares GPIO 5 with the Ethernet MISO
+/// **Not auto-wired.** Factory-registered like AudioService, so a board with an IR
+/// receiver adds it under the `Services` container via the installer device catalog (its `pin`
+/// carrying that board's IR GPIO) or the user adds it from the UI. On the SE16 the IR line shares GPIO 5 with the Ethernet MISO
 /// through the board's hardware switch; the pin is the receiver input.
 ///
 /// **Prior art:** consumer IR remotes use the NEC protocol (a 32-bit address+command frame,
 /// LSB-first, ~9 ms lead burst); the ESP-IDF RMT peripheral decodes it (the espressif
 /// `ir_nec_transceiver` example). The decode itself lives behind `platform::irRead`.
-/// @card IrModule.png
-class IrModule : public MoonModule {
+/// @card IrService.png
+class IrService : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Peripheral; }
+    ModuleRole role() const override { return ModuleRole::Service; }
 
     void onBuildControls() override {
         controls_.addPin("pin", pin_);

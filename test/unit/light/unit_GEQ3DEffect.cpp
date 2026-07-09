@@ -1,25 +1,25 @@
 // @module GEQ3DEffect
-// @also AudioModule
+// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/GEQ3DEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 #include "platform/platform.h"
 
-// GEQ3D is audio-driven: it renders 16 bars from AudioModule::latestFrame()->bands.
+// GEQ3D is audio-driven: it renders 16 bars from AudioService::latestFrame()->bands.
 // These cases pin its behaviour deterministically by freezing the clock
 // (platform::setTestNowMs) and driving a synthesized frame through an active
-// AudioModule in "sweep (always)" simulate mode. Restore the real clock and vacate
+// AudioService in "sweep (always)" simulate mode. Restore the real clock and vacate
 // the process-wide active mic on teardown so cases stay order-independent.
 struct ClockGuard { ~ClockGuard() { platform::setTestNowMs(0); } };
 
 // Vacates the process-wide active-mic seat on scope exit (even if an assertion aborts
-// the case), so a failed REQUIRE can't leak AudioModule::active_ into a later test.
+// the case), so a failed REQUIRE can't leak AudioService::active_ into a later test.
 struct AudioGuard {
-    mm::AudioModule& mic;
-    ~AudioGuard() { mic.teardown(); }  // clears AudioModule::active_ if it is this mic
+    mm::AudioService& mic;
+    ~AudioGuard() { mic.teardown(); }  // clears AudioService::active_ if it is this mic
 };
 
 // Silence (no active mic) leaves the buffer all-black — every band magnitude is 0, so no bar rises.
@@ -39,7 +39,7 @@ TEST_CASE("GEQ3DEffect renders black on silence") {
     layer.addChild(&geq);
 
     layer.onBuildState();
-    // No AudioModule is active, so latestFrame() returns static silence (all bands 0).
+    // No AudioService is active, so latestFrame() returns static silence (all bands 0).
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -55,12 +55,12 @@ TEST_CASE("GEQ3DEffect draws a bar where the audio band is energised") {
     // so only bands[0] is high — the leftmost bar rises, the rest stay flat.
     platform::setTestNowMs(125);
 
-    mm::AudioModule mic;
+    mm::AudioService mic;
     AudioGuard micGuard{mic};  // vacate the active mic on scope exit (even if a REQUIRE aborts)
     mic.simulate = 4;          // "sweep (always)" — deterministic single-band test pattern
     mic.setup();               // claims the process-wide active mic seat
     mic.loop();                // synthesizes the frame at the frozen time
-    REQUIRE(mm::AudioModule::latestFrame()->bands[0] > 1);
+    REQUIRE(mm::AudioService::latestFrame()->bands[0] > 1);
 
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -123,7 +123,7 @@ TEST_CASE("GEQ3DEffect handles a grid narrower than numBands") {
     ClockGuard guard;
     platform::setTestNowMs(125);   // sweep → bands[0] high
 
-    mm::AudioModule mic;
+    mm::AudioService mic;
     AudioGuard micGuard{mic};  // vacate the active mic on scope exit (even if a REQUIRE aborts)
     mic.simulate = 4;
     mic.setup();

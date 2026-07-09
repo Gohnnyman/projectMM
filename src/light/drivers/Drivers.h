@@ -73,7 +73,7 @@ public:
 
     /// The live light-pipeline summary (light count, channels), for the domain-neutral core
     /// consumers (WLED /json shim, MQTT). Static so a factory-created consumer reaches it without
-    /// a wiring inject — the same shape as `AudioModule::latestFrame()`. Points at the active
+    /// a wiring inject — the same shape as `AudioService::latestFrame()`. Points at the active
     /// Drivers' summary (set in onBuildState, vacated in teardown); a default all-zero summary
     /// when no Drivers is in the tree, so a consumer always reads a valid POD, never null.
     static const LightSummary* latestSummary() {
@@ -287,7 +287,7 @@ private:
     Correction correction_;
 
     // Published to core via latestSummary(). active_ points at the Drivers whose summary is live
-    // (mirrors AudioModule::active_): set in onBuildState, cleared in teardown so a removed Drivers
+    // (mirrors AudioService::active_): set in onBuildState, cleared in teardown so a removed Drivers
     // stops being read; only one Drivers exists in the pinned tree, so no re-election dance is needed.
     LightSummary summary_;
     inline static Drivers* active_ = nullptr;

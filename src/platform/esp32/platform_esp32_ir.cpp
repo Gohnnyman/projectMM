@@ -3,7 +3,7 @@
 // only records how many symbols arrived and signals a queue (ISR-minimal: no decode, no driver
 // call in interrupt context — the same discipline as rmtWs2812RxCapture). irRead(), on the render
 // task, drains that signal non-blocking, decodes the captured symbols, and re-arms the channel.
-// IrModule is the sole caller.
+// IrService is the sole caller.
 //
 // NEC protocol: a 9 ms lead mark + 4.5 ms space, then 32 bits LSB-first (address, ~address,
 // command, ~command), each a 560 µs mark followed by a 560 µs space (0) or a 1690 µs space (1),

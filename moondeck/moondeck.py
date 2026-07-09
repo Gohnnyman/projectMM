@@ -268,7 +268,7 @@ def _apply_modules_to_device(ip: str, modules: list) -> bool:
     Each unit is `{type, id, parent_id?, controls?}` — the SAME shape deviceModels.json
     catalog entries use, so the deviceModel push (_push_device) drives it. Per
     module: add it first when it has a parent_id (a fresh flash has no user-added
-    modules like AudioModule, so a control write would 404), then set its controls.
+    modules like AudioService, so a control write would 404), then set its controls.
     A module without parent_id is boot-wired/top-level (Board under System,
     Network) that already exists — skip the add, just set controls. The add is
     idempotent (an existing id returns 200). Returns True iff EVERY POST returned

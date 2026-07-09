@@ -251,7 +251,7 @@ Absolute tick at each step (the diff vs the prior row is that subsystem's cost):
 | Step | classic | S3 | P4 | Reading |
 |---|--:|--:|--:|---|
 | Render floor (Grid+Layer+Checkerboard) | 129 | 133 | 67 | the baseline; P4 ~2× faster |
-| − AudioModule disabled | 116 | 111 | n/a | **audio ≈ +13–22µs/tick** (fixed I2S block-read; no mic on the P4) |
+| − Audio disabled | 116 | 111 | n/a | **audio ≈ +13–22µs/tick** (fixed I2S block-read; no mic on the P4) |
 | − Devices discovery disabled | 116 | 112 | 56 | idle discovery is free (boot sweep is one-shot) |
 | + MultiplyModifier (2×2) | 315 | 292 | 96 | **+180–200µs** — the per-frame blend+map over the LUT |
 | + PreviewDriver | 115 | 118 | 56 | apparatus; free |

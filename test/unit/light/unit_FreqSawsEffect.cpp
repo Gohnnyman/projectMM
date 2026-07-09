@@ -1,11 +1,11 @@
 // @module FreqSawsEffect
-// @also AudioModule
+// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/FreqSawsEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 
 // Helper: any non-zero byte in the layer buffer (a lit pixel somewhere).
 static bool anyLit(mm::Layer& layer) {
@@ -68,7 +68,7 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     // Claim the active-mic seat with a module synthesizing loud "music" every tick (desktop has no
     // I2S mic, so simulate is the only source; music-always fills every band). latestFrame() then
     // hands this module's frame to the effect.
-    mm::AudioModule mic;
+    mm::AudioService mic;
     mic.onBuildControls();
     mic.simulate = 3;             // 3 = music (always): synthesize regardless of a real mic
     mic.setup();                  // registers as the active mic

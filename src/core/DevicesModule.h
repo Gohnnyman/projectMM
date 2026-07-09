@@ -184,7 +184,7 @@ public:
 
     /// The boot DevicesModule (exactly one exists). A foreign-bridge driver in the light domain
     /// (a Hue driver) registers a discovered bridge through this without a compile-time dependency
-    /// on DevicesModule's address — the same static-seam shape as `AudioModule::latestFrame()`.
+    /// on DevicesModule's address — the same static-seam shape as `AudioService::latestFrame()`.
     static DevicesModule* active() { return active_; }
 
     /// Register a Hue bridge a light-domain driver has connected to. Unlike upsertDevice (driven by a UDP
@@ -291,7 +291,7 @@ private:
                                     ///< (the figure for sizing a layout). 0 for non-bridge rows.
     };
 
-    // The boot instance, for active() — the foreign-bridge static seam (mirrors AudioModule).
+    // The boot instance, for active() — the foreign-bridge static seam (mirrors AudioService).
     static inline DevicesModule* active_ = nullptr;
 
     static constexpr uint8_t  kMaxDevices = 32;   ///< a LAN's worth; bounded, no heap

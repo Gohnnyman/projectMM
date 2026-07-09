@@ -4,7 +4,7 @@
 
 projectMM's architecture already commits (🚧, not yet built) to per-module core affinity: "each MoonModule can declare a core affinity; the scheduler respects this when pinning tasks" ([architecture.md § Parallelism](../../architecture.md#parallelism)), and the backlog holds *Task core-pinning* and a *core-1 driver task*. None of the *optimization* exists yet — and you can't optimize what you can't see. This module is the **observability foundation**: show every FreeRTOS task and the projectMM modules that run inside each, with cost. Inspired by MoonLight's [`ModuleTasks`](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Modules/ModuleTasks.h) (a flat task table); projectMM's version nests modules under their task and leans on projectMM's *already-free* per-module self-report.
 
-Critical framing + the System-Modules taxonomy this fits into: [docs/backlog/system-modules.md](../../backlog/system-modules.md). (The original pre-implementation spec draft was deleted once the module shipped — its final spec is [core/services.md § Tasks](../../moonmodules/core/services.md#tasks) + the `TasksModule.h` `///`.)
+Critical framing + the System-Modules taxonomy this fits into: [docs/backlog/system-modules.md](../../backlog/system-modules.md). (The original pre-implementation spec draft was deleted once the module shipped — its final spec is [core/services.md § Tasks](../../moonmodules/core/system.md#tasks) + the `TasksModule.h` `///`.)
 
 ## Decisions locked (PO)
 
@@ -16,7 +16,7 @@ Critical framing + the System-Modules taxonomy this fits into: [docs/backlog/sys
 
 ## Design
 
-`TasksModule : public MoonModule, public ListSource` — the exact shape of `DevicesModule` / `I2cScanModule` (read-only discovery via `ControlType::List` + the `ListSource` adapter, the UITableView/`QAbstractItemModel` data-source pattern architecture.md blesses). `.h` + `.cpp` per the core-module convention. Registered in `main.cpp` with docPath `core/services.md#tasks`. Refreshes on `loop1s()` (not hot-path).
+`TasksModule : public MoonModule, public ListSource` — the exact shape of `DevicesModule` / `I2cScanModule` (read-only discovery via `ControlType::List` + the `ListSource` adapter, the UITableView/`QAbstractItemModel` data-source pattern architecture.md blesses). `.h` + `.cpp` per the core-module convention. Registered in `main.cpp` with docPath `core/system.md#tasks`. Refreshes on `loop1s()` (not hot-path).
 
 ### Step 1 — MoonModule cost table (zero cost, no FreeRTOS, cross-platform)
 
@@ -57,7 +57,7 @@ Critical framing + the System-Modules taxonomy this fits into: [docs/backlog/sys
 
 ## Verification
 
-1. `cmake --build build` clean (zero warnings); `ctest` (the new unit test) green; `check_specs.py` green (the `services.md#tasks` docPath + control names match the `.h`).
+1. `cmake --build build` clean (zero warnings); `ctest` (the new unit test) green; `check_specs.py` green (the `system.md#tasks` docPath + control names match the `.h`).
 2. Desktop: the module lists every MoonModule with real `loopTimeUs`/size/heap; the RTOS half shows the empty-stub note.
 3. ESP32 (bench): the task list shows all RTOS tasks with core/prio/stack; the render task's detail nests every MoonModule; `core0`/`core1` name the live tasks. KPI tick delta from `USE_TRACE_FACILITY` is within noise (no per-tick cost).
 4. Platform boundary check passes (no FreeRTOS symbol outside `src/platform/`).

@@ -61,9 +61,11 @@ namespace mm {
 /// `totalHeap > totalInternal` is the "PSRAM present" signal. Boards without PSRAM skip
 /// the `psram` control naturally, with no per-platform code path.
 ///
-/// **Children:** accepts user-added Peripheral children (sensors, actuators) through the
-/// generic MoonModule add/replace/delete + persistence path — the same firmware runs
-/// with or without them.
+/// **Children:** accepts no user-added children — System is fixed infrastructure. Its child
+/// modules (Tasks, I2cScan, …) are wired by code in main.cpp and marked wired-by-code;
+/// user-added capability modules live under the `Services` container instead. (The deviceModel
+/// identity is a SystemModule control above, not a child module — SystemModule owns the
+/// device's identity, name + model, directly.)
 ///
 /// **Prior art:** MoonLight — system diagnostics via REST API; device name used for
 /// mDNS.
@@ -76,13 +78,12 @@ public:
     /// from the UI for no good reason, and the user can't easily re-enable.
     bool respectsEnabled() const override { return false; }
 
-    /// Accepts user-added Peripheral children (sensors, actuators — bridges to
-    /// hardware/network the user solders on or off). The same firmware runs with
-    /// or without them, so the user adds/deletes them at runtime; the add/replace/
-    /// delete + persistence machinery is the generic MoonModule path. (The deviceModel
-    /// identity is a SystemModule control above, not a child module — SystemModule owns
-    /// the device's identity, name + model, directly.)
-    const char* acceptsChildRoles() const override { return "peripheral"; }
+    /// Accepts no user-added children — System is fixed infrastructure. Its child
+    /// modules (Tasks, I2cScan, …) are wired by code in main.cpp and marked
+    /// wired-by-code; user-added capability modules live under the `Services`
+    /// container instead. (The deviceModel identity is a SystemModule control above,
+    /// not a child module — SystemModule owns the device's identity, name + model,
+    /// directly.)
 
     void setup() override {
         // Compute default deviceName from MAC: MM-XXXX. Skip if a persisted value was
@@ -111,8 +112,8 @@ public:
                           static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
         }
 
-        // Chain to base so children (user-added Peripherals) get
-        // their setup() — a peripheral initialises its hardware here. Overriding
+        // Chain to base so children (the wired-by-code System modules — Tasks, I2cScan)
+        // get their setup() — a child initialises its state here. Overriding
         // setup() shadows the base default that would otherwise propagate.
         MoonModule::setup();
     }
@@ -184,7 +185,7 @@ public:
             controls_.addReadOnly("wifiCoproc", const_cast<char*>(platform::coprocessorWifi()));
         }
 
-        // Chain into children (user-added Peripherals). Per the override-and-chain
+        // Chain into children (the wired-by-code System modules). Per the override-and-chain
         // convention in architecture.md § Lifecycle propagation to children:
         // `onBuildControls` cascades to children via MoonModule's base default;
         // overriding the method shadows that default, so we must call it
@@ -244,8 +245,8 @@ public:
             (void)platform::coprocessorWifi();
         }
 
-        // Chain to base so children get their loop1s() — a Peripheral formats
-        // its read-only display values here. Overriding loop1s() shadows the
+        // Chain to base so children get their loop1s() — a System child (e.g. Tasks)
+        // refreshes its read-only display values here. Overriding loop1s() shadows the
         // base default that would otherwise propagate. (setup/loop20ms/loop/
         // teardown propagate too: setup is chained above, loop20ms/loop/teardown
         // aren't overridden so the base default carries them.)

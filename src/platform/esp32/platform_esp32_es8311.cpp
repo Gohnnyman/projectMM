@@ -3,7 +3,7 @@
 // Function-CoreBoard), rather than a direct digital I2S MEMS mic. The I2S *read*
 // stays in platform_esp32_i2s.cpp (audioMic*); this file only brings the codec up
 // over I2C so it streams its ADC (mic) onto the I2S bus the read then drains. So
-// the audio domain code (AudioModule) is unchanged — it calls audioCodecInit (a
+// the audio domain code (AudioService) is unchanged — it calls audioCodecInit (a
 // no-op on direct-mic boards) before audioMicInit, and reads samples as always.
 //
 // Uses Espressif's esp_codec_dev managed component (the recognised ES8311 driver),
@@ -12,7 +12,7 @@
 //
 // Compiles on every ESP32 chip: the codec path is under SOC_I2S_SUPPORTED and the
 // esp_codec_dev availability gate; everything else gets an inert stub (audioCodecInit
-// returns true — nothing to bring up — so the uniform AudioModule call works).
+// returns true — nothing to bring up — so the uniform AudioService call works).
 
 #include "platform/platform.h"
 

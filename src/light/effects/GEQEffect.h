@@ -5,7 +5,7 @@
 #include "light/Palette.h"        // colorFromPalette, Palettes::active()
 #include "light/draw.h"           // draw::pixel, draw::fade
 #include "core/math8.h"           // (no beat/trig here; included for parity with the effect family)
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
+#include "core/AudioService.h"     // AudioService::latestFrame()
 #include "core/AudioFrame.h"      // AudioFrame::bands[16]
 #include "platform/platform.h"    // platform::alloc / platform::free (per-column peak-fall state)
 
@@ -27,7 +27,7 @@ namespace mm {
 // MoonLight as the GEQ effect. The band→column mapping, the 7·band + 3·prev + 3·next smoothing weights,
 // the bottom-up bar fill, the colorBars / smoothBars toggles, and the falling-peak dot are reproduced
 // here, written fresh on projectMM's EffectBase + the shared draw / palette primitives. Reads
-// AudioModule::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
+// AudioService::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
 // size. The per-column peak-fall state lives on the heap (sized to width()), allocated in onBuildState
 // and freed in teardown — never a large inline member.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
@@ -88,7 +88,7 @@ public:
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;
         if (!peaks_) return;   // build hasn't allocated yet (e.g. disabled) — nothing to draw
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
         Buffer& buf = layer()->buffer();

@@ -8,8 +8,8 @@ add_executable(mm_tests
     unit/core/unit_math8.cpp
     unit/core/unit_noise.cpp
     unit/core/unit_crc.cpp
-    unit/core/unit_AudioModule_sync.cpp
-    unit/core/unit_IrModule.cpp
+    unit/core/unit_AudioService_sync.cpp
+    unit/core/unit_IrService.cpp
     unit/core/unit_TcpConnect.cpp
     unit/core/unit_MqttPacket.cpp
     unit/core/unit_MqttModule.cpp
@@ -45,9 +45,10 @@ add_executable(mm_tests
     unit/core/unit_platform_clock.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp
+    unit/core/unit_Services.cpp
 
     # light/
-    unit/light/unit_AudioModule.cpp
+    unit/light/unit_AudioService.cpp
     unit/light/unit_AudioLevel.cpp
     unit/light/unit_AudioBands.cpp
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp

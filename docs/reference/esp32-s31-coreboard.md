@@ -39,7 +39,7 @@ The onboard electret mic (J6) and speaker connect through an **ES8311 mono codec
 - **ES8311 I2C address: `0x18`** (the default; set by the `CE` pin tie).
 - Driven by Espressif's **`esp_codec_dev`** managed component (the ES8311 driver). The codec
   needs **MCLK running before it answers I2C**, and `es8311_codec_cfg.mclk_div` must be set
-  (256, the standard ratio) or `open` fails "unable to configure sample rate". So AudioModule
+  (256, the standard ratio) or `open` fails "unable to configure sample rate". So AudioService
   brings up the I2S channel (which drives MCLK on GPIO52) **before** the codec I2C config.
 - **Mic-only path** (audio-reactive input) needs MCLK/SCLK/LRCK + ASDOUT (record) + the I2C bus.
   The speaker path (DSDIN + PA_CTRL) is output, a separate capability.
@@ -97,8 +97,8 @@ TWAI (CAN) · RMT · Parlio · LCD_CAM i80 · on-chip EMAC · PSRAM. RISC-V dual
 
 The S31 catalog entry drives **LEDs** (RMT on GPIO60) and **Wi-Fi 6**, and wires an
 **[I2cScanModule](../moonmodules/core/moxygen/I2cScanModule.md)** on the codec bus (SDA 51 / SCL 50) for
-I2C bring-up. The **[AudioModule](../moonmodules/core/moxygen/AudioModule.md)** ES8311 path is implemented
-— the codec seam configures the ES8311 over I2C (codec reachable, ACK at 0x18) and AudioModule
+I2C bring-up. The **[AudioService](../moonmodules/core/moxygen/AudioService.md)** ES8311 path is implemented
+— the codec seam configures the ES8311 over I2C (codec reachable, ACK at 0x18) and AudioService
 reads the I2S mic. End-to-end mic validation depends on confirming MCLK at GPIO52; the S31 entry
 keeps **Audio** under `planned` until that bench check passes, so the installer advertises only
 what's confirmed working. The other board capabilities (Ethernet, Bluetooth, SD, USB host, …)

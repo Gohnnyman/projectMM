@@ -5,7 +5,7 @@
 #include "light/Palette.h"        // colorFromPalette, Palettes::active()
 #include "light/draw.h"           // draw::pixel, draw::fade, draw::fill, draw::blur
 #include "core/math8.h"           // Random8
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
+#include "core/AudioService.h"     // AudioService::latestFrame()
 #include "core/AudioFrame.h"      // AudioFrame::bands[16], peakHz
 
 #include <cmath>                  // log10f, roundf (once-per-frame freqMap, not per-light)
@@ -25,7 +25,7 @@ namespace mm {
 //
 // Prior art: WLED's "Blurz" audio effect, carried into MoonLight. The per-band colour cursor, the
 // frequency→position map, and the fade-then-blur pipeline are reproduced here, written fresh on
-// EffectBase + the shared draw primitives. Reads AudioModule::latestFrame(); with simulation off or no
+// EffectBase + the shared draw primitives. Reads AudioService::latestFrame(); with simulation off or no
 // publisher the bands read 0 → the strip fades to black, safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR), with enhancements by @softhack007 — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
@@ -80,7 +80,7 @@ public:
         // Per-frame fade gives the blurred dot its decaying trail (WLED fadeToBlackBy(fadeRate)).
         layer()->fadeToBlackBy(fadeRate);
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;
 
         // Advance the band cursor: one band per frame, wrapping 0..15 (NUM_GEQ_CHANNELS).
