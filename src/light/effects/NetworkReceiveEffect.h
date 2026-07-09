@@ -79,6 +79,10 @@ public:
         clearStatus();
     }
 
+    /// Disable closes the three receive sockets (freeing their ports for another module) and drops the
+    /// staging buffer; enable reopens + rebinds them. setup()/teardown() ARE the acquire/release.
+    void onEnabled(bool on) override { if (on) setup(); else teardown(); }
+
     ~NetworkReceiveEffect() override { releaseStaging(); }
 
     // Size staging to the layer buffer (one byte per channel byte), off the

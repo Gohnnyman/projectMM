@@ -1156,5 +1156,6 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
 // No IR receiver on the host — the seam is a no-op so IrService runs (its buttons still work
 // through Scheduler::setControl); reception is ESP32-only.
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
+void irStop() {}   // no IR hardware on desktop
 
 } // namespace mm::platform

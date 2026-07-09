@@ -77,17 +77,24 @@ public:
     /// machinery needed for a deterministic, unique-enough id — then bind the destination so each
     /// per-packet send skips the address parse + route lookup (re-bound in loop() on an ip/protocol
     /// change; see connectIfDestChanged).
+    /// Skips opening the socket while DISABLED: the boot Scheduler calls setup() on every module
+    /// ungated by enabled(), so a disabled sender would otherwise hold an open UDP socket at boot.
+    /// Stays released until enabled. Same enabled()-gate as the pin-holding drivers.
     void setup() override {
+        if (!enabled()) return;
         socket_.open();
         std::memcpy(cid_, "projectMM\0", 10);
         platform::getMacAddress(cid_ + 10);
         connectIfDestChanged();
     }
 
-    /// Close the socket on teardown; DriverBase::teardown (via the base) clears any status.
+    /// Close the socket on teardown, then chain to the base to clear any status this driver set.
     void teardown() override {
         socket_.close();
+        DriverBase::teardown();
     }
+    /// Disable closes the UDP socket (freeing it); enable reopens it + re-resolves the destination.
+    void onEnabled(bool on) override { releaseOnDisable(on); }
 
     /// Take the shared source buffer and (re)size the corrected_ buffer for it. Called from
     /// Drivers::passBufferToDrivers inside onBuildState (and once at setup); resizeCorrected() is a

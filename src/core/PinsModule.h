@@ -215,9 +215,9 @@ private:
             // concerned — skip its claims (the same gate the Scheduler applies to skip its loop:
             // !respectsEnabled() || enabled()). So switching a module off frees its GPIOs in the map,
             // and switching it back on re-claims them, with no reboot. (A System module like Tasks/Pins
-            // ignores the flag via respectsEnabled()==false, so it's never skipped.) Note: this is the
-            // DISPLAY half — the module still physically holds the peripheral until onEnabledChanged()
-            // deinits it (the "disabling releases resources" follow-up); here the map reflects intent.
+            // ignores the flag via respectsEnabled()==false, so it's never skipped.) The map's "freed"
+            // is truthful: a resource-holding module's onEnabled(false) actually deinits its peripheral
+            // (RMT/Parlio/LCD/I²S/socket/IR), so the freed GPIO is genuinely reusable, not just hidden.
             const bool active = !m->respectsEnabled() || m->enabled();
             const ControlList& cl = m->controls();
             for (uint8_t i = 0; active && i < cl.count(); i++) {

@@ -50,7 +50,7 @@ Everything else is free for user I/O. Since the ESP32 I²S / RMT / LED periphera
 | Role-conflict | **37, 38** | UART0 console on the P4-NANO (`CONFIG_ESP_CONSOLE_UART_DEFAULT`) — the runtime `ESP_LOGI` lines come out here, not over USB. |
 | Board-wired (P4-NANO) | **Ethernet RMII** 28-31 / 49-52, **C6 SDIO** 14-19 / 54, **I2C** 7-8 | Consumed by the NANO's on-board Ethernet PHY, the C6 WiFi co-processor, and the I2C bus. |
 
-**Clear on the P4-NANO:** 20-27, 32-33, 39-48 (the LED-driver default is `pins="20,21,22,23,24,25,26,27"`). Exact free set is board-specific; the NANO's is the reference.
+**Clear on the P4-NANO:** 20-27, 32-33, 39-48 (the LED-driver default is `pins="20,21,22,23,24,25,26,27"`). Exact free set is board-specific; the NANO's is the reference. A carrier board changes what's exposed and how — the [MHC-WLED ESP32-P4 shield](mhc-wled-esp32-p4-shield.md) routes every terminal through level shifters / RS-485 transceivers / protected inputs (no bare GPIO), which is why a direct loopback jumper fails on it; its full terminal map is on that page.
 
 ## ESP32-S31
 

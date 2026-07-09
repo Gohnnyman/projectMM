@@ -135,26 +135,38 @@ public:
         }
     }
 
-    /// Parse the config and (re)init the bus.
-    void setup() override { parseConfig(); reinit(); }
+    /// Parse the config and (re)init the bus. Skips the bus init while DISABLED: the boot
+    /// Scheduler calls setup() on every module ungated by enabled(), so a disabled driver
+    /// would otherwise grab its peripheral/pins at boot (e.g. a disabled RMT driver claiming
+    /// a GPIO an enabled Parlio driver needs, leaving Parlio's output dead until a rebuild).
+    /// parseConfig() is safe to run (it only fills members); the acquire waits for enable.
+    /// Same enabled()-gate as onBuildState().
+    void setup() override { parseConfig(); if (enabled()) reinit(); }
     /// Deinit the bus, then clear the shared fail/config-error state
     /// (DriverBase::teardown()).
     void teardown() override {
         deinit();
         DriverBase::teardown();   // clears failBuf_ + configErr_
     }
+    /// Disable frees the Parlio/LCD bus + DMA buffer (its pins show released in the map); enable re-acquires.
+    void onEnabled(bool on) override { this->releaseOnDisable(on); }
 
     /// Topology or the pins/ledsPerPin controls changed — re-parse the lanes and
-    /// (re)init the bus off the hot path.
+    /// (re)init the bus off the hot path. Skips the re-acquire while DISABLED: the
+    /// whole-tree buildState() sweep visits every module (including one just disabled,
+    /// on the same toggle), so re-initing here would re-grab the bus/pins onEnabled
+    /// just released — e.g. a disabled RMT driver could re-claim a GPIO an enabled
+    /// Parlio driver now owns. Stays released until re-enabled. Same gate as RmtLedDriver.
     void onBuildState() override {
+        if (!enabled()) { MoonModule::onBuildState(); return; }
         parseConfig();
         reinit();
         MoonModule::onBuildState();
     }
 
     /// RGB<->RGBW changes the bytes-per-light and therefore the frame size, so
-    /// re-parse and re-init the bus.
-    void onCorrectionChanged() override { parseConfig(); reinit(); }
+    /// re-parse and re-init the bus. Skipped while disabled (would re-grab the released bus).
+    void onCorrectionChanged() override { if (!enabled()) return; parseConfig(); reinit(); }
 
     /// Point the driver at the source frame buffer and re-parse the lane config.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; parseConfig(); }

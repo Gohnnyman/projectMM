@@ -95,6 +95,10 @@ public:
         if (platform::irRead(static_cast<uint16_t>(pin_), code)) processCode(code);
     }
 
+    /// Disable releases the IR RX channel so its pin is free for another module (and shows freed in
+    /// the pin map); re-enable needs nothing — loop() reopens the channel lazily on the next irRead.
+    void onEnabled(bool on) override { if (!on) platform::irStop(); }
+
     /// The last decoded IR code (0 = none yet). The seam a future LightsControl consumes.
     uint32_t latestCode() const { return lastCode_; }
 

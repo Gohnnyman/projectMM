@@ -730,4 +730,10 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 // hardware and always returns false.
 bool irRead(uint16_t pin, uint32_t& codeOut);
 
+// Release the IR RX channel so the pin it held is free for another module. irRead lazily reopens
+// it on the next call, so this is safe to call any time; IrService calls it on disable (the pin
+// then shows as freed in the pin map, and is genuinely reusable). No-op if no channel is open, and
+// on desktop (no IR hardware).
+void irStop();
+
 } // namespace mm::platform

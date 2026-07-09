@@ -90,6 +90,12 @@ public:
 
     ModuleRole role() const override { return ModuleRole::Service; }
 
+    /// Vacate the mic seat if this instance holds it, so a destroyed module never leaves active_
+    /// dangling (latestFrame() would then dereference freed memory). Production tears down before
+    /// delete, but a bare destruction — a stack instance in a test, an aborted construction — must
+    /// not leave a dangling static. Mirrors teardown()'s vacate; belt-and-suspenders on the static.
+    ~AudioService() override { if (active_ == this) active_ = nullptr; }
+
     /// Unlike a zero-cost diagnostic peripheral, this module pays a
     /// real per-tick cost (the FFT) that IS the capability, not an optional extra,
     /// so it must not run when the user turns it off. We therefore respect `enabled`
@@ -208,8 +214,21 @@ public:
             || std::strcmp(name, "syncPort") == 0;
     }
 
-    void onBuildState() override { reinit(); syncReinit(); MoonModule::onBuildState(); }
+    /// Re-acquire the mic + sync socket on a config change — but NOT while disabled: the whole-tree
+    /// buildState() sweep visits every module (including one just disabled, on the same toggle), so
+    /// re-initing here would re-grab the I²S mic + pins onEnabled(false) just released (and leave a
+    /// disabled service holding the peripheral without even being the elected mic). Stays released
+    /// until re-enabled. Same self-gate as the LED drivers / NetworkReceiveEffect.
+    void onBuildState() override {
+        if (!enabled()) { MoonModule::onBuildState(); return; }
+        reinit(); syncReinit(); MoonModule::onBuildState();
+    }
+    /// Skips the acquire + mic election while DISABLED: the boot Scheduler calls setup() on every
+    /// module ungated by enabled(), so a disabled service would otherwise grab the I²S mic + pins
+    /// and win the `active_` election at boot. Stays released until enabled. Same self-gate as
+    /// onBuildState() / the LED drivers.
     void setup() override {
+        if (!enabled()) return;
         if (active_ == nullptr) active_ = this;   // first live mic wins; a 2nd mic is captured but not read
         reinit();
         syncReinit();
@@ -219,6 +238,12 @@ public:
         if constexpr (platform::hasNetwork) { syncSock_.close(); syncOpen_ = false; }
         if (active_ == this) active_ = nullptr;   // vacate; a surviving module re-elects itself in loop()
     }
+
+    /// Disable releases the I²S mic + codec (+ its I²C bus) and the sync socket, and vacates the mic
+    /// election — so its pins show freed in the map and another module can claim them. Enable
+    /// re-acquires + re-elects. setup()/teardown() ARE the acquire/release (incl. the `active_`
+    /// bookkeeping), so route to them — no duplication, and the one-live-mic invariant stays correct.
+    void onEnabled(bool on) override { if (on) setup(); else teardown(); }
 
     /// The latest analysed frame — what effects read. Always valid (zeroed until
     /// the first successful read), so a consumer never dereferences null and a

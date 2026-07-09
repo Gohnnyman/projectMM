@@ -107,6 +107,64 @@ TEST_CASE("RmtLedDriver releases the symbol buffer on teardown") {
     CHECK(d.symbolCapacity() == 0);
 }
 
+TEST_CASE("RmtLedDriver: disabling releases the resource, re-enabling re-acquires (onEnabled)") {
+    // Part B: setEnabled(false) must actually free the peripheral + buffer (so the pins it held are
+    // reusable), not just stop the loop. onEnabled routes to teardown()/setup(), observable via the
+    // symbol buffer: present when enabled, gone when disabled, rebuilt on re-enable.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 64);
+    REQUIRE(d.symbolBuffer() != nullptr);   // enabled by default → resource held
+
+    d.setEnabled(false);                    // → onEnabled(false) → teardown()
+    CHECK(d.symbolBuffer() == nullptr);     // buffer freed (RAM back; pins released)
+    CHECK(d.symbolCapacity() == 0);
+
+    // CRITICAL: the Scheduler runs a whole-tree buildState() AFTER the enabled-toggle
+    // (Scheduler::setControl), which calls onBuildState() on EVERY module including this
+    // just-disabled one. It must NOT re-acquire — a disabled module must stay released
+    // (else a disabled RMT driver re-grabs a GPIO an enabled Parlio driver now owns).
+    d.onBuildState();
+    CHECK(d.symbolBuffer() == nullptr);     // STILL freed after the sweep (the finding-1 fix)
+    CHECK(d.symbolCapacity() == 0);
+
+    d.setEnabled(true);                     // → onEnabled(true) → setup()
+    d.onBuildState();                       // the sweep the Scheduler runs post-toggle — now enabled,
+                                            // re-acquires (setup() alone doesn't resizeSymbols())
+    CHECK(d.symbolBuffer() != nullptr);     // resource re-acquired on re-enable
+
+    // A no-op transition (already enabled) must NOT tear down — setEnabled early-outs when unchanged.
+    d.setEnabled(true);
+    CHECK(d.symbolBuffer() != nullptr);
+}
+
+TEST_CASE("RmtLedDriver: a DISABLED driver does not acquire in setup() at boot") {
+    // The boot Scheduler calls setup() on EVERY module ungated by enabled() (Scheduler::setup
+    // Phase 3), then onBuildState() in Phase 4. A driver persisted DISABLED but sharing a GPIO
+    // with an enabled sibling must not grab the peripheral/pins at boot — else it steals the pin
+    // and the enabled sibling's output stays dead until a later rebuild. This reproduces the
+    // hardware symptom: a disabled RmtLed on GPIO 20 blanking an enabled ParlioLed on the same pin.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    REQUIRE(src.allocate(64, 3));
+    corr.rebuild(255, mm::LightPreset::GRB);
+    d.onBuildControls();
+    d.setEnabled(false);          // persisted-disabled at boot
+    d.setSourceBuffer(&src);
+    d.setCorrection(&corr);
+
+    d.setup();                    // Phase 3: must be a no-op acquire while disabled
+    CHECK(d.symbolBuffer() == nullptr);
+    d.onBuildState();             // Phase 4: still gated
+    CHECK(d.symbolBuffer() == nullptr);
+
+    d.setEnabled(true);           // now enable → acquire on the next sizing sweep
+    d.onBuildState();
+    CHECK(d.symbolBuffer() != nullptr);
+}
+
 // MoonModule contract: teardown reverses setup, so setup→teardown→setup→teardown
 // cycles leave no residue — no leaked heap (ASAN in the test runner catches that),
 // no stuck state. After each teardown the driver must look untouched: no symbol

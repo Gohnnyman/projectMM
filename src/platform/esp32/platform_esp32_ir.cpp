@@ -134,4 +134,6 @@ bool irRead(uint16_t pin, uint32_t& codeOut) {
     return ok;
 }
 
+void irStop() { closeChannel(); }   // release the RX channel + its pin; irRead reopens it lazily
+
 }  // namespace mm::platform

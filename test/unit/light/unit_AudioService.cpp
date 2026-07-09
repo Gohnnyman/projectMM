@@ -92,3 +92,33 @@ TEST_CASE("AudioService: two mics — first wins, survivor re-elects, any order 
     // Both gone: back to the static silence, no dangling pointer.
     CHECK(mm::AudioService::latestFrame()->level == 0);
 }
+
+TEST_CASE("AudioService: a DISABLED module does not win the mic election at boot") {
+    // The boot Scheduler calls setup() on EVERY module ungated by enabled() (Phase 3). A persisted
+    // DISABLED AudioService must NOT grab the I²S mic or win the active_ seat at boot — else a
+    // disabled mic silences an enabled sibling's audio (same class of bug as a disabled RMT driver
+    // stealing a GPIO from an enabled Parlio driver). The acquire must wait for enable.
+    mm::AudioService dis, live;
+    dis.onBuildControls();
+    live.onBuildControls();
+    // The seat starts empty: any module a prior case left holding it has since destructed, and
+    // ~AudioService vacates on destruction (no dangling static — see the destructor).
+    REQUIRE(mm::AudioService::latestFrame()->level == 0);
+
+    dis.setEnabled(false);        // persisted-disabled at boot
+    dis.setup();                  // Phase 3: must be a no-op — no election
+    // Still empty: the disabled module did NOT take the seat.
+    CHECK(mm::AudioService::latestFrame() != dis.audioFrame());
+    CHECK(mm::AudioService::latestFrame()->level == 0);
+
+    live.setup();                 // an enabled sibling boots and wins the seat
+    CHECK(mm::AudioService::latestFrame() == live.audioFrame());
+
+    // Now enable the previously-disabled one: it must NOT steal the live seat (first live wins).
+    dis.setEnabled(true);         // → onEnabled(true) → setup(), now enabled
+    CHECK(mm::AudioService::latestFrame() == live.audioFrame());   // live keeps the seat
+
+    live.teardown();
+    dis.teardown();
+    CHECK(mm::AudioService::latestFrame()->level == 0);
+}

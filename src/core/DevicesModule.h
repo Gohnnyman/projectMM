@@ -187,6 +187,11 @@ public:
     /// on DevicesModule's address — the same static-seam shape as `AudioService::latestFrame()`.
     static DevicesModule* active() { return active_; }
 
+    /// Vacate the boot-instance seat if this holds it, so a destroyed module never leaves active_
+    /// dangling (a Hue driver routing through active() would then hit freed memory). Production
+    /// tears down before delete; this guards a bare destruction. Mirrors teardown()'s vacate.
+    ~DevicesModule() override { if (active_ == this) active_ = nullptr; }
+
     /// Register a Hue bridge a light-domain driver has connected to. Unlike upsertDevice (driven by a UDP
     /// presence packet), a bridge is discovered out-of-band — the driver already holds its IP +
     /// app key — so this is the explicit entry point for that. Idempotent: updates the name +
@@ -219,6 +224,7 @@ public:
 
     void setup() override {
         MoonModule::setup();
+        if (!enabled()) return;   // a disabled instance must not win the active_ election at boot
         active_ = this;
         // The last-known device list is restored automatically before setup() by the
         // persistence overlay (the `devices` List control round-trips as JSON). So the
@@ -228,6 +234,22 @@ public:
                           deviceCount_, deviceCount_ == 1 ? "" : "s");
         }
         setStatus(statusBuf_);
+    }
+
+    /// Close the presence socket so its port is released (the module holds it via the lazy
+    /// ensureListener bind). Also runs on module removal so the fd doesn't leak.
+    void teardown() override {
+        if (active_ == this) active_ = nullptr;
+        listener_.close();
+        listenerBound_ = false;
+        MoonModule::teardown();
+    }
+
+    /// Disable releases the presence socket (its port frees for another consumer); enable re-binds
+    /// lazily on the next loop1s via ensureListener — same pattern as IrService's lazy reopen.
+    void onEnabled(bool on) override {
+        if (on) { active_ = this; }
+        else    { listener_.close(); listenerBound_ = false; if (active_ == this) active_ = nullptr; }
     }
 
     /// Every tick: ensure we're online, drain inbound presence packets through the plugins,
