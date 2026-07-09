@@ -2,15 +2,17 @@
 
 // Pins PinsModule's one job: walk the live module tree, collect every claimed GPIO (a
 // ControlType::Pin control set >= 0, plus the LED-driver "pins" CSV), and expose them as a
-// GPIO-keyed read-only list — owner + name-derived role. A `-1` pin is unused and skipped;
-// a GPIO claimed twice stays visible (both owners in the row detail), which is the read-only
-// surfacing phase-1 does instead of enforcing. No platform reach — it reads the tree, so the
-// host test covers the whole module, not just an empty path.
+// GPIO-keyed read-only list — owner + name-derived role + a severity flag when the claim lands
+// on an unsafe pin. A `-1` pin is unused and skipped; a GPIO claimed twice stays visible (both
+// owners in the row detail), which is the read-only surfacing this phase does instead of enforcing.
+// Severity reads platform::gpioCapability, which desktop stubs to "all safe" — so the severity
+// cases inject a fake capability via setTestGpioCapability (as unit_TasksModule injects a snapshot).
 
 #include "doctest.h"
 #include "core/PinsModule.h"
 #include "core/Scheduler.h"
 #include "core/JsonSink.h"
+#include "platform/platform.h"   // setTestGpioCapability — inject an unsafe pin for the severity cases
 
 #include <cstring>
 #include <string>
@@ -152,6 +154,65 @@ TEST_CASE("PinsModule: rows are GPIO-ordered and a double-claim stays visible in
     const std::string det(detail.data());
     CHECK(det.find("Alpha \xC2\xB7 BCLK") != std::string::npos);
     CHECK(det.find("Beta \xC2\xB7 data") != std::string::npos);
+
+    // #3 conflict soft-flag: BOTH GPIO-21 rows are flagged severity error (the summary goes red, not
+    // just the detail); the lone GPIO-9 row is not.
+    JsonSink r1; src->writeListRow(r1, 1);
+    JsonSink r2; src->writeListRow(r2, 2);
+    CHECK(std::string(r1.data()).find("\"severity\":\"error\"") != std::string::npos);
+    CHECK(std::string(r2.data()).find("\"severity\":\"error\"") != std::string::npos);
+    CHECK(std::string(r0.data()).find("\"severity\"") == std::string::npos);   // GPIO 9, single owner
+}
+
+TEST_CASE("PinsModule: a conflict promotes a strap warn to error (severity is the max)") {
+    platform::clearTestGpioCapability();
+    platform::GpioCapability strap;
+    strap.strap = true;
+    platform::setTestGpioCapability(45, strap);   // GPIO 45 is a strap → an LED lane there would be warn
+
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.withPinsCsv = true;
+    std::strcpy(drv.pins, "45");
+    FakePinModule other("Other");
+    other.sck = 45;                                // a SECOND claim on the strap pin → conflict
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&other);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    // Both GPIO-45 rows: the conflict (error) wins over the strap (warn) — severity is the max.
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"severity\":\"error\"") != std::string::npos);
+    CHECK(rows.find("\"severity\":\"warn\"") == std::string::npos);   // promoted, not left at warn
+    platform::clearTestGpioCapability();
+}
+
+TEST_CASE("PinsModule: a disabled module's pins are released from the map, re-claimed on enable") {
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.sck = 17;
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+
+    // Enabled: the claim shows.
+    pins.loop1s();
+    CHECK(allRows(*pinsSource(pins)).find("\"gpio\":17") != std::string::npos);
+
+    // Disabled: the pin is freed from the map (switching a module off releases its GPIOs, no reboot).
+    drv.setEnabled(false);
+    pins.loop1s();
+    CHECK(allRows(*pinsSource(pins)).find("\"gpio\":17") == std::string::npos);
+    CHECK(pinsSource(pins)->listRowCount() == 0);
+
+    // Re-enabled: the claim comes back.
+    drv.setEnabled(true);
+    pins.loop1s();
+    CHECK(allRows(*pinsSource(pins)).find("\"gpio\":17") != std::string::npos);
 }
 
 TEST_CASE("PinsModule: a child module's pins are walked (depth-first), not just the roots") {
@@ -221,4 +282,210 @@ TEST_CASE("PinsModule: an out-of-range CSV pin is skipped, not wrapped to a fals
     CHECK(rows.find("\"gpio\":19") != std::string::npos);
     CHECK(rows.find("\"gpio\":44") == std::string::npos);   // 300 & 0xFF = 44 — must NOT appear
     CHECK(src->listRowCount() == 2);                        // only the two valid pins
+}
+
+// --- severity flagging (increment #2) ---------------------------------------------------------
+// gpioCapability is stubbed "all safe" on desktop, so inject an unsafe capability for one gpio and
+// assert PinsModule grades the claim: reserved→error, driven-role-on-strap/input-only→warn, else none.
+
+TEST_CASE("PinsModule: a claim on a reserved pin is flagged severity error") {
+    platform::clearTestGpioCapability();
+    platform::GpioCapability reserved;   // reserved flash/PSRAM pin
+    reserved.reserved = true;
+    platform::setTestGpioCapability(30, reserved);
+
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.sck = 30;                         // any role on a reserved pin is an error
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"gpio\":30") != std::string::npos);
+    CHECK(rows.find("\"severity\":\"error\"") != std::string::npos);
+    platform::clearTestGpioCapability();
+}
+
+TEST_CASE("PinsModule: a driven role on a strap pin is flagged severity warn") {
+    platform::clearTestGpioCapability();
+    platform::GpioCapability strap;       // a valid, output-capable, but strapping pin
+    strap.strap = true;
+    platform::setTestGpioCapability(45, strap);
+
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.withPinsCsv = true;
+    std::strcpy(drv.pins, "45");           // an LED lane drives the pin → warn on a strap
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"gpio\":45") != std::string::npos);
+    CHECK(rows.find("\"severity\":\"warn\"") != std::string::npos);
+    platform::clearTestGpioCapability();
+}
+
+TEST_CASE("PinsModule: an input role on an input-only pin is NOT flagged") {
+    platform::clearTestGpioCapability();
+    platform::GpioCapability inputOnly;   // valid but no output driver (classic ESP32 34-39)
+    inputOnly.outputCapable = false;
+    platform::setTestGpioCapability(34, inputOnly);
+
+    Scheduler scheduler;
+    FakePinModule mic("Audio");
+    mic.sd = 34;                           // a mic data line READS the pin — input-only is fine
+    PinsModule pins;
+    scheduler.addModule(&mic);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"gpio\":34") != std::string::npos);
+    CHECK(rows.find("\"severity\"") == std::string::npos);   // input role on input-only = safe
+    platform::clearTestGpioCapability();
+}
+
+TEST_CASE("PinsModule: a driven role on an input-only pin IS flagged warn") {
+    platform::clearTestGpioCapability();
+    platform::GpioCapability inputOnly;
+    inputOnly.outputCapable = false;
+    platform::setTestGpioCapability(34, inputOnly);
+
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.withPinsCsv = true;
+    std::strcpy(drv.pins, "34");           // an LED lane can't drive an input-only pin → warn
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"severity\":\"warn\"") != std::string::npos);
+    platform::clearTestGpioCapability();
+}
+
+TEST_CASE("PinsModule: a safe pin carries no severity field") {
+    platform::clearTestGpioCapability();   // no override → desktop reports all safe
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.sck = 18;
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"gpio\":18") != std::string::npos);
+    CHECK(rows.find("\"severity\"") == std::string::npos);   // safe → no field, no colour
+}
+
+// --- live state (increment #4) ----------------------------------------------------------------
+// gpioLiveState is stubbed valid=false on desktop (no real pins), so inject a live state and assert
+// PinsModule emits the level/drive columns; a pin with no live state omits them.
+
+TEST_CASE("PinsModule: a claimed pin with live state emits level + drive columns") {
+    platform::clearTestGpioLiveState();
+    platform::GpioLiveState live;
+    live.valid = true; live.level = true; live.driveCap = 2;   // HIGH, STRONG
+    platform::setTestGpioLiveState(18, live);
+
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.sck = 18;
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"level\":\"HIGH\"") != std::string::npos);
+    CHECK(rows.find("\"drive\":\"STRONG\"") != std::string::npos);
+    platform::clearTestGpioLiveState();
+}
+
+TEST_CASE("PinsModule: a pin with no live state (valid=false) omits the live columns") {
+    platform::clearTestGpioLiveState();   // no override → desktop stub returns valid=false
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.sck = 18;
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"gpio\":18") != std::string::npos);
+    CHECK(rows.find("\"level\"") == std::string::npos);   // no live state → no columns
+    CHECK(rows.find("\"drive\"") == std::string::npos);
+}
+
+// --- live direction (dir column) --------------------------------------------------------------
+// gpioLiveState carries the pad's live output/input enable. The map shows a `dir` column
+// (out/in/both/off) as INFORMATION — it does not auto-warn (see the "dir is shown as info" case).
+
+TEST_CASE("PinsModule: dir column reflects the live pad direction (out/in/both/off)") {
+    platform::clearTestGpioLiveState();
+    auto live = [](bool o, bool i) {
+        platform::GpioLiveState s; s.valid = true; s.output = o; s.input = i; return s;
+    };
+    platform::setTestGpioLiveState(10, live(true, false));    // out
+    platform::setTestGpioLiveState(11, live(false, true));    // in
+    platform::setTestGpioLiveState(12, live(true, true));     // both (e.g. open-drain I²C)
+    platform::setTestGpioLiveState(13, live(false, false));   // off
+
+    Scheduler scheduler;
+    FakePinModule m("Drv");
+    m.sck = 10; m.ws = 11; m.sd = 12; m.tx = 13;   // sck/ws/sd/tx map to controls; values are the gpios
+    PinsModule pins;
+    scheduler.addModule(&m);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"gpio\":10") != std::string::npos);
+    CHECK(rows.find("\"dir\":\"out\"") != std::string::npos);
+    CHECK(rows.find("\"dir\":\"in\"") != std::string::npos);
+    CHECK(rows.find("\"dir\":\"both\"") != std::string::npos);
+    CHECK(rows.find("\"dir\":\"off\"") != std::string::npos);
+    platform::clearTestGpioLiveState();
+}
+
+TEST_CASE("PinsModule: dir is shown as info, NOT a warning — a driven role with output off is unflagged") {
+    // The live direction is informational only: too many pins are legitimately not-driving-when-idle
+    // (I²C is bidirectional, a loopback Tx is off until the self-test runs, an RMII clock can be an
+    // input), so `dir` reading in/off must NOT auto-warn — that would be noise. Only the static
+    // capability flags (reserved / strap / input-only) drive severity.
+    platform::clearTestGpioLiveState();
+    platform::GpioLiveState notDriving;   // a driven role's pin reads output-off — but this is NOT flagged
+    notDriving.valid = true; notDriving.output = false; notDriving.input = true;
+    platform::setTestGpioLiveState(14, notDriving);
+
+    Scheduler scheduler;
+    FakePinModule drv("RmtLed");
+    drv.withPinsCsv = true;
+    std::strcpy(drv.pins, "14");
+    PinsModule pins;
+    scheduler.addModule(&drv);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.loop1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    CHECK(rows.find("\"gpio\":14") != std::string::npos);
+    CHECK(rows.find("\"dir\":\"in\"") != std::string::npos);   // direction is shown...
+    CHECK(rows.find("\"severity\"") == std::string::npos);     // ...but NOT flagged (no false positive)
+    platform::clearTestGpioLiveState();
 }

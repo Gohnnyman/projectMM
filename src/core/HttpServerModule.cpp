@@ -566,14 +566,19 @@ namespace {
 // synchronous drain is the accepted interim.
 constexpr uint32_t kUploadIdleMs = 5000;    // max gap between successful reads before abort
 constexpr uint32_t kUploadHardMs = 60000;   // absolute whole-request ceiling (anti-slowloris)
-// A firmware image is MB-scale (1.5+ MB), not the KB-scale of a config file, and pushing it over
-// weak WiFi can legitimately take minutes — well past kUploadHardMs, which sized the whole-request
-// cap for a 256 KB file. So the firmware-upload path uses its own far larger ceiling: the idle guard
-// (kUploadIdleMs, reset on every read) is the real anti-stall, and the whole-request cap only has to
-// bound a wedged transfer. 5 min covers any firmware over any LAN link with wide margin. The
-// render-freeze the file path's tight cap also bounds is a non-issue here — a firmware upload reboots
-// the device the moment it finishes, so the freeze is terminal, not a lingering degradation.
-constexpr uint32_t kFirmwareUploadHardMs = 300000;  // 5 min absolute ceiling for a firmware push
+// A firmware image is MB-scale (1.5+ MB), not the KB-scale of a config file, and pushing it over weak
+// WiFi can legitimately take minutes — past kUploadHardMs (60 s), which sized the whole-request cap for
+// a 256 KB file and aborted a real firmware push at ~87%. So the firmware path gets its own larger
+// ceiling. Sizing: 1.5 MB at a poor-but-real 10 KB/s is ~2.5 min, so 3 min covers any firmware over any
+// LAN link with margin — deliberately NOT more, because this cap also bounds the worst-case render
+// freeze: like the file upload, the firmware drain runs SYNCHRONOUSLY (otaWriteStream loops uploadPull
+// to completion inside one loop20ms tick), so a slow-but-steady transfer freezes rendering for its whole
+// duration. kUploadIdleMs (5 s, reset per read) still bounds a *stalled* transfer; this bounds a *slow*
+// one. The proper fix is the same zero-freeze drain-a-chunk-per-tick pattern drainPreviewSend uses
+// (backlogged, see the kUploadHardMs comment above) — until it lands, keep this ceiling as tight as a
+// real upload allows. A firmware push reboots on success, so the freeze is at least terminal, not a
+// lingering degradation.
+constexpr uint32_t kFirmwareUploadHardMs = 180000;  // 3 min absolute ceiling for a firmware push
 struct UploadSource {
     platform::TcpConnection* conn;
     const char* initial;      // body bytes already read into the request buffer

@@ -47,9 +47,11 @@ namespace mm {
 /// @card I2cScanModule.png
 class I2cScanModule : public MoonModule {
 public:
-    /// A diagnostic, like FirmwareUpdateModule / DevicesModule — keeps its
-    /// controls and the scan action available regardless of the `enabled` toggle.
-    bool respectsEnabled() const override { return false; }
+    /// Respects the `enabled` toggle (the default): disabling it releases its bus pins in the pin
+    /// ownership map (and re-claims them on enable), so a user can free GPIO21/22 for another module
+    /// by switching the scanner off. Safe because I2cScan has no loop — it acts only on the `scan`
+    /// button (onUpdate), which still works whether enabled or not; disabling only stops it *claiming*
+    /// its pins, which is exactly what "off" should mean for a pin-holding diagnostic.
 
     void onBuildControls() override {
         controls_.addPin("sda", sda_);
@@ -64,15 +66,20 @@ public:
     }
 
 private:
-    // Default to GPIO21/22 — the Arduino-ESP32 core's default I2C pair, the pins a
-    // contributor expects to try first on a classic ESP32. They're a *convention*,
-    // not fixed hardware (I2C routes through the GPIO matrix to any pins), so they
-    // pre-fill the control as a sensible starting point the user edits. A board
-    // with a FIXED bus (the S31 codec, the P4) overrides them via its catalog entry.
-    int8_t sda_ = 21;
-    int8_t scl_ = 22;
+    // Default to -1 (unused). I2cScan is present on every board as the bring-up tool, but a
+    // board without an I2C device shouldn't claim any GPIO for it — the pin ownership map reads
+    // a Pin value of -1 as "unclaimed" (the standard sentinel), so an idle scanner squats on
+    // nothing. A board WITH a bus sets the real pins via its catalog entry (the S31 codec 51/50,
+    // the P4 boards 7/8); for an ad-hoc scan on a bare board the user types the pins (the classic
+    // Arduino-ESP32 pair is 21/22 — I2C routes through the GPIO matrix to any pins). The `scan`
+    // button reports "set sda + scl pins first" while they're -1.
+    int8_t sda_ = -1;
+    int8_t scl_ = -1;
     char resultStr_[64] = "";    // space-separated hex addresses, e.g. "0x18 0x3c"
-    char statusBuf_[40] = "idle";
+    // Backs the "N devices found" status only (setStatus stores the pointer, so it can't be a
+    // local — it must outlive scan()). Sized for the longest such string: "255 devices found" =
+    // 17 chars + NUL. The other statuses are string literals (static lifetime, no buffer).
+    char statusBuf_[20] = "idle";
 
     void scan() {
         if (sda_ < 0 || scl_ < 0) {
@@ -103,8 +110,11 @@ private:
         }
         if (n == 0) resultStr_[0] = '\0';
 
+        // n is bounded by kMaxAddrs (a 7-bit bus has at most 128 addresses), but the compiler can't
+        // see that through size_t — cast to uint8_t so it knows the count is <= 255 (max 3 digits),
+        // which keeps "N devices found" inside statusBuf_[20] (format-truncation is an error here).
         std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s found",
-                      static_cast<unsigned>(n), n == 1 ? "" : "s");
+                      static_cast<unsigned>(static_cast<uint8_t>(n)), n == 1 ? "" : "s");
         setStatus(statusBuf_);
         markDirty();   // push the updated result + status to the UI
     }

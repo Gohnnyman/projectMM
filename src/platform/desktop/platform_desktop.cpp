@@ -233,6 +233,47 @@ size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
 void currentTaskOnCore(int, char* out, size_t cap) { if (out && cap) out[0] = '\0'; }
 const char* renderTaskName() { return g_testRenderTask; }
 
+// A host build has no real GPIOs to protect — every pin is valid, output-capable, and free of
+// straps/reserved roles. So the pin map on desktop flags nothing (which is correct: there's no
+// silicon to corrupt). The ESP32 build fills the real capability in platform_esp32_gpio.cpp.
+// A test can override one pin's capability (setTestGpioCapability) to exercise PinsModule's severity
+// derivation on the host; a small fixed table (no heap) holds the overrides.
+namespace {
+struct GpioCapOverride { uint8_t gpio; GpioCapability cap; bool set; };
+GpioCapOverride g_gpioCapOverrides[16] = {};
+}  // namespace
+GpioCapability gpioCapability(uint8_t gpio) {
+    for (const auto& o : g_gpioCapOverrides)
+        if (o.set && o.gpio == gpio) return o.cap;
+    return GpioCapability{};
+}
+void setTestGpioCapability(uint8_t gpio, GpioCapability cap) {
+    for (auto& o : g_gpioCapOverrides)
+        if (!o.set || o.gpio == gpio) { o = {gpio, cap, true}; return; }
+}
+void clearTestGpioCapability() {
+    for (auto& o : g_gpioCapOverrides) o.set = false;
+}
+
+// Live state — desktop has no real pins, so valid=false (the map omits the live columns) unless a
+// test injects one. Same small fixed override table as the capability stub.
+namespace {
+struct GpioLiveOverride { uint8_t gpio; GpioLiveState state; bool set; };
+GpioLiveOverride g_gpioLiveOverrides[16] = {};
+}  // namespace
+GpioLiveState gpioLiveState(uint8_t gpio) {
+    for (const auto& o : g_gpioLiveOverrides)
+        if (o.set && o.gpio == gpio) return o.state;
+    return GpioLiveState{};   // valid=false
+}
+void setTestGpioLiveState(uint8_t gpio, GpioLiveState state) {
+    for (auto& o : g_gpioLiveOverrides)
+        if (!o.set || o.gpio == gpio) { o = {gpio, state, true}; return; }
+}
+void clearTestGpioLiveState() {
+    for (auto& o : g_gpioLiveOverrides) o.set = false;
+}
+
 size_t totalHeap() {
     return 0; // Not meaningful on desktop
 }

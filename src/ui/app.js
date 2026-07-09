@@ -1481,7 +1481,11 @@ function buildListEntries(container, rows, details, openSet) {
     }
     rows.forEach((item, i) => {
         const entry = document.createElement("div");
-        entry.className = "list-entry" + (item && item.self ? " list-self" : "");
+        // Row classes: the `self` marker + a generic `severity` marker (rowSeverityClass) — both are
+        // field-name conventions the engine opts into, no per-module UI code.
+        const sevClass = rowSeverityClass(item);
+        entry.className = "list-entry" + (item && item.self ? " list-self" : "") +
+                          (sevClass ? " " + sevClass : "");
         const summary = document.createElement("div");
         summary.className = "list-summary";
         summary.tabIndex = 0;
@@ -1519,12 +1523,13 @@ function buildListEntries(container, rows, details, openSet) {
     });
 }
 
-// Join a list row's scalar fields into a one-line summary (skips the `self` marker
-// flag and any nested objects). Generic: the engine names the fields.
+// Join a list row's scalar fields into a one-line summary (skips marker fields — `self`, `severity`
+// — that render as row styling rather than text, and any nested objects). Generic: the engine names
+// the fields.
 function listSummaryText(item) {
     if (!item || typeof item !== "object") return String(item ?? "");
     return Object.entries(item)
-        .filter(([k, v]) => k !== "self" && typeof v !== "object")
+        .filter(([k, v]) => k !== "self" && k !== "severity" && typeof v !== "object")
         .map(([, v]) => v)
         .join("  ·  ");
 }
@@ -1613,6 +1618,18 @@ function rowAgeClass(item) {
     for (const [k, v] of Object.entries(item)) {
         if (k.endsWith("Sec") && typeof v === "number") return ageBucketClass(v);
     }
+    return "";
+}
+
+// Severity CSS class from a row's `severity` field ("error"/"warn"), or "" if none/absent. Generic
+// over the field name, exactly like rowAgeClass over `*Sec`: any ListSource that emits a `severity`
+// string gets the same visual (a coloured row marker). PinsModule is the first user — it flags a GPIO
+// claim on a reserved/strap/input-only pin — but nothing here is pins-specific; a task in a bad state
+// or a device with an error could emit `severity` and light up the same way.
+function rowSeverityClass(item) {
+    if (!item || typeof item !== "object") return "";
+    if (item.severity === "error") return "list-severity-error";
+    if (item.severity === "warn") return "list-severity-warn";
     return "";
 }
 

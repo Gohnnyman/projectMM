@@ -80,6 +80,47 @@ const char* renderTaskName();
 // JSON + nesting predicate are testable on the host (no RTOS otherwise). `tasks` must outlive the use.
 void setTestTaskSnapshot(const TaskInfo* tasks, size_t count, const char* renderTask);
 
+// --- GPIO capability introspection (PinsModule) ---------------------------------------------
+// Static per-pin capability for one GPIO, so the pin ownership map can flag a claim that lands on
+// an unsafe pin — an output role driven onto an input-only pin or a boot strap, or any role on a
+// reserved (flash/PSRAM/USB) pin. Domain-neutral; no chip API escapes src/platform/. ESP32 fills
+// `validGpio`/`outputCapable`/`rtc` from the IDF's own GPIO_IS_VALID_GPIO / GPIO_IS_VALID_OUTPUT_
+// GPIO / rtc_gpio_is_valid_gpio (the textbook, always-correct SDK queries), and overlays `strap` /
+// `reserved` from a small per-chip table sourced from docs/reference/gpio-usage.md (the SDK has no
+// "is this a strap / flash pin" query — that's board/datasheet knowledge). Desktop returns
+// "all valid, nothing reserved" (a host build has no real GPIOs to protect). Pure lookup, no state.
+struct GpioCapability {
+    bool validGpio = true;      // a real, usable GPIO on this chip (false = out of range / not bonded)
+    bool outputCapable = true;  // has an output driver (false = input-only, e.g. classic ESP32 34-39)
+    bool rtc = false;           // an RTC/low-power-domain pin (usable for deep-sleep wake / RTC I/O)
+    bool strap = false;         // a boot-strapping pin — driving it at reset can change boot mode
+    bool reserved = false;      // wired to flash / PSRAM / native USB — routing I/O here corrupts the device
+};
+GpioCapability gpioCapability(uint8_t gpio);
+// Test-only (desktop): make gpioCapability(gpio) return `cap` for one specific gpio, so PinsModule's
+// severity derivation (reserved→error, driven-role-on-strap/input-only→warn) is testable on the host
+// where every real pin is otherwise "safe". Call per gpio under test; reset in teardown.
+void setTestGpioCapability(uint8_t gpio, GpioCapability cap);
+void clearTestGpioCapability();
+
+// Live electrical state of one GPIO — the pin map's second axis (what a pin is *doing now*, vs.
+// gpioCapability's static "what it *is*"). The see-the-wire HAL check: gpio_get_level reads the pad on
+// ANY pin, even one a peripheral drives, so a driver's output must toggle when it renders and a mic
+// clock must toggle when the mic runs. Sampled on loop1s (off the hot path), not per frame. Desktop
+// returns valid=false (no real pins) so the UI omits the live columns there.
+struct GpioLiveState {
+    bool valid = false;    // pin is readable (false = out of range, or desktop → columns omitted)
+    bool level = false;    // current pad level: true = HIGH, false = LOW (gpio_get_level)
+    bool output = false;   // the pad's output driver is enabled RIGHT NOW (gpio_get_io_config .oe)
+    bool input = false;    // the pad's input buffer is enabled RIGHT NOW (.ie) — a pin can be both
+    uint8_t driveCap = 0;  // output drive strength 0..3 = WEAK / MEDIUM / STRONG / STRONGEST
+};
+GpioLiveState gpioLiveState(uint8_t gpio);
+// Test-only (desktop): inject a live state for one gpio so PinsModule's level/drive columns are
+// host-testable. Same shape as setTestGpioCapability.
+void setTestGpioLiveState(uint8_t gpio, GpioLiveState state);
+void clearTestGpioLiveState();
+
 // Test-only cap on the value maxAllocBlock() reports; 0 = no cap (real value).
 // Lets a test force MappingLUT's paged-destinations fallback without an actual
 // fragmented heap. Production never calls this; reset to 0 in teardown.

@@ -117,11 +117,11 @@ Detail: [technical](moxygen/FileManagerModule.md)
 
 ### I2C scan
 
-A fixed System module (wired-by-code, always present) that probes the I²C bus (default GPIO21/22) on a button press and reports the addresses found — a hardware bring-up tool. Passive until the scan button is pressed.
+A fixed System module (wired-by-code, always present) that probes the I²C bus on a button press and reports the addresses found — a hardware bring-up tool. The bus pins default to unused (−1), so a board without an I²C device claims no GPIO for it; a board with a bus sets its pins via the catalog, or you type them for an ad-hoc scan. Passive until the scan button is pressed.
 
 <img src="../../assets/core/I2cScanModule.png" width="300" alt="I2C scan module controls">
 
-- `sda` / `scl` — the bus GPIOs (default GPIO21/22; a board with a fixed bus injects its own via the catalog).
+- `sda` / `scl` — the bus GPIOs (default −1 = unused; a board with a fixed bus injects its own via the catalog, or type the pins for an ad-hoc scan — the classic Arduino-ESP32 pair is 21/22).
 - `scan` — a button; press to probe the bus now.
 - read-only — `result` (addresses found).
 
@@ -142,9 +142,9 @@ Detail: [technical](moxygen/TasksModule.md)
 
 ### Pins
 
-A read-only diagnostic that shows **which module owns each GPIO, for what role** — the device's pin ownership map, keyed by physical GPIO the way an OS Device Manager, a Tasmota template, or a GPIOViewer diagram is. A fixed System module, wired-by-code, always present. It walks the live module tree and collects every claimed pin — each GPIO control (a mic's `sckPin`/`wsPin`/`sdPin`, an Ethernet PHY's `ethMdcGpio`, a driver's `loopbackTxPin`) and each LED-driver `pins` lane CSV — so it needs no state of its own: unlike a central pin manager, each module owns its pins and this one only observes. A GPIO claimed by two controls stays visible (both owners in the row detail) rather than being merged away — the read-only way to surface a conflict, the class of bug the GPIO-46 loopback corruption was. Refreshes once a second, so a live pin change shows without a reboot.
+A read-only diagnostic that shows **which module owns each GPIO, for what role, and whether that pin is safe for it** — the device's pin ownership map, keyed by physical GPIO the way an OS Device Manager, a Tasmota template, or a GPIOViewer diagram is. A fixed System module, wired-by-code, always present. It walks the live module tree and collects every claimed pin — each GPIO control (a mic's `sckPin`/`wsPin`/`sdPin`, an Ethernet PHY's `ethMdcGpio`, a driver's `loopbackTxPin`) and each LED-driver `pins` lane CSV — so it needs no state of its own: unlike a central pin manager, each module owns its pins and this one only observes. A GPIO claimed by two controls is flagged red at the summary and lists both owners in the row detail — the read-only way to surface a conflict (a mic pin colliding with an LED lane, two lanes on one pin) without wedging the device: the claim still lands, the map just makes it loud. A **disabled** module's pins drop out of the map (switching a module off frees its GPIOs, on re-claims them) — the intent side of releasing resources on disable. Refreshes once a second, so a live pin change shows without a reboot.
 
-- read-only — `pins` (a row per claimed GPIO: `gpio`, `owner` = the owning module, `role` = derived from the control name — `sckPin`→BCLK, `wsPin`→WS, `pins`→LED lane N, `ethMdcGpio`→MDC, …). Expand a row to see every claim on that GPIO (`owner · role`); one claimant repeats the summary, two or more make a double-claim visible. Unused pins (value −1) are skipped.
+- read-only — `pins` (a row per claimed GPIO: `gpio`, `owner` = the owning module, `role` = derived from the control name — `sckPin`→BCLK, `wsPin`→WS, `pins`→LED lane N, `ethMdcGpio`→MDC, …). A row is flagged with a coloured edge when the claim is unsafe: **error** (red) for a claim on a reserved flash/PSRAM/USB pin or a double-claim, **warn** (yellow) for a driven role on a boot strap or input-only pin. The strap/reserved data comes from [gpio-usage.md](../../reference/gpio-usage.md) via the platform layer; PSRAM-conditional pins (classic-ESP32 16/17, S3 33-37) are flagged only when PSRAM is actually present at runtime, so a bare-WROOM board isn't falsely flagged. Each row also shows the pin's **live state** — `dir` (out/in/both/off, the pad's *actual* direction right now — shown as information, not auto-flagged, since a pin reading input/off is often legitimate: an idle I²C line, an unrun loopback pin, an external clock), `level` (HIGH/LOW, read straight off the pad — a driver's output must toggle when it renders, a mic clock must toggle when the mic runs), and `drive` (WEAK…STRONGEST). Expand a row to see every claim on that GPIO (`owner · role`) plus a `warning` line naming *why* it's flagged; a double-claim lists all co-owners. Unused pins (value −1) are skipped.
 
 Detail: [technical](moxygen/PinsModule.md)
 

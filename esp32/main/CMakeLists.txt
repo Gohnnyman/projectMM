@@ -21,6 +21,7 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_improv.cpp"
         "../../src/platform/esp32/platform_esp32_rmt.cpp"
         "../../src/platform/esp32/platform_esp32_tasks.cpp"
+        "../../src/platform/esp32/platform_esp32_gpio.cpp"
         "../../src/platform/esp32/platform_esp32_lcd.cpp"
         "../../src/platform/esp32/platform_esp32_parlio.cpp"
         "../../src/platform/esp32/platform_esp32_i2s.cpp"

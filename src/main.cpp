@@ -448,8 +448,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // engine's "last saved"), firmwareUpdate (status surface, no deps), network (hosts
     // ImprovProvisioning and Mqtt as children — same lifecycle, one less top-level entry
     // each; Improv only exists to feed Network credentials, and Mqtt only bridges once the
-    // network is up), light pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler
-    // walks roots in this order each tick; child propagation happens inside each root.
+    // network is up), services (the user-added-capability container: Audio, IR — placed after
+    // network because a service may use it, e.g. WLED audio sync, and before the light pipeline
+    // so a capability like audio is available to the effects that consume it), light pipeline
+    // (Layouts → Layers → Drivers), then HTTP. The Scheduler walks roots in this order each
+    // tick; child propagation happens inside each root.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
     scheduler.addModule(fileManagerModule);

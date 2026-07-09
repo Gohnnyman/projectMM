@@ -36,6 +36,7 @@ Everything else is free for user I/O. Since the ESP32 I²S / RMT / LED periphera
 | Role-conflict | **19, 20** | Native USB D-/D+ (the USB-C port on DevKitC boards). Usable, but breaks the native-USB console/DFU. |
 | Role-conflict | **43, 44** | UART0 TX/RX — the default serial console. Take them and you lose `printf`-over-serial. |
 | Role-conflict | **0, 45, 46** | Boot straps. Don't drive at reset. |
+| Absent | **22, 23, 24, 25** | These GPIO numbers **do not exist** on the S3 (a numbering gap in the silicon). Setting a pin control to one is invalid — `GPIO_IS_VALID_GPIO` rejects it, and the pin map flags it as an error. |
 
 **Clear for I/O on the N16R8:** 1-18, 21, 47, 48 (mind GPIO 3 is a soft strap; the on-board WS2812 LED sits on **48** on DevKitC-1 rev v1.1 but on **38** on rev v1.0, so avoid whichever your board uses — the bench board is a rev v1.0, LED on 38, leaving 48 free). Example, the bench mic on the N16R8 is **SCK=47 / WS=48 / SD=21** — clear of octal PSRAM, JTAG (39-42 stay free for a future JTAG probe), the boot straps, and (on this rev) the LED, with the mic wires kept away from the Wi-Fi antenna end.
 ## ESP32-P4
