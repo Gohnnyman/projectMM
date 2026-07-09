@@ -34,7 +34,7 @@ namespace mm {
 // a rebuild), never the hot render loop, so it's allowed here. MoonLight's
 // pin/wiring plumbing (nextPin / doNextPin) is dropped — a projectMM layout
 // emits coordinates only; the driver owns pins.
-// Author: projectMM / custom fixture
+// Author: Eric Marciniak (Discord) — custom car-lights fixture, reconstructed for projectMM
 /// Layout mapping automotive light-strip coordinates.
 /// @card CarLightsLayout.gif
 class CarLightsLayout : public LayoutBase {

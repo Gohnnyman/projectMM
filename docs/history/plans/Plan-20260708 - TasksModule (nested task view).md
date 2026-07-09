@@ -4,14 +4,14 @@
 
 projectMM's architecture already commits (🚧, not yet built) to per-module core affinity: "each MoonModule can declare a core affinity; the scheduler respects this when pinning tasks" ([architecture.md § Parallelism](../../architecture.md#parallelism)), and the backlog holds *Task core-pinning* and a *core-1 driver task*. None of the *optimization* exists yet — and you can't optimize what you can't see. This module is the **observability foundation**: show every FreeRTOS task and the projectMM modules that run inside each, with cost. Inspired by MoonLight's [`ModuleTasks`](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Modules/ModuleTasks.h) (a flat task table); projectMM's version nests modules under their task and leans on projectMM's *already-free* per-module self-report.
 
-Critical framing + the System-Modules taxonomy this fits into: [docs/backlog/system-modules.md](../../backlog/system-modules.md). (The original pre-implementation spec draft was deleted once the module shipped — its final spec is [core/services.md § Tasks](../../moonmodules/core/system.md#tasks) + the `TasksModule.h` `///`.)
+Critical framing + the System-Modules taxonomy this fits into: [docs/backlog/system-modules.md](../../backlog/system-modules.md). (The original pre-implementation spec draft was deleted once the module shipped — its final spec is [core/system.md § Tasks](../../moonmodules/core/system.md#tasks) + the `TasksModule.h` `///`.)
 
 ## Decisions locked (PO)
 
 - **Phase 1 = read-only** nested view. Relocate + multi-task scheduler = Phase 2 (separate effort, needs the 🚧 core-affinity mechanism).
 - **Build agile in steps** toward the nested tree (1 → 4 below); commit grouping decided at plan review.
 - **Cost tiering (measured on the bench):** MoonModule cost view = free (already collected); RTOS task list = cheap (`USE_TRACE_FACILITY`, no per-tick cost) → ships on; per-task **CPU%** = ~5 % tick (`GENERATE_RUN_TIME_STATS`) → **build-flag `MM_TASK_CPU_STATS`, off by default**.
-- **Doc home:** a section in `docs/moonmodules/core/services.md` (with other core service modules); technical page auto-generated from `///`.
+- **Doc home:** a section in `docs/moonmodules/core/system.md` (with the other fixed System modules); technical page auto-generated from `///`.
 - **Bespoke acknowledged:** the task→modules nesting is projectMM-specific (a task normally *is* the unit); the reason is stated at the introduction site. "Relocate" is genuinely novel and deferred.
 
 ## Design
@@ -51,7 +51,7 @@ Critical framing + the System-Modules taxonomy this fits into: [docs/backlog/sys
 ## Files
 
 - **New:** `src/core/TasksModule.h` + `.cpp`; `src/platform/esp32/platform_esp32_tasks.cpp`; `TaskInfo` + `taskSnapshot`/`currentTaskOnCore` decls in `src/platform/platform.h`; desktop stub in `platform_desktop.cpp`.
-- **Edit:** `src/main.cpp` (register `TasksModule` + include); `esp32/sdkconfig.defaults` (`USE_TRACE_FACILITY`); `esp32/main/CMakeLists.txt` (the `MM_TASK_CPU_STATS` opt-in def, off by default); `docs/moonmodules/core/services.md` (`## Tasks` section + control table); the module's `///` for the generated page.
+- **Edit:** `src/main.cpp` (register `TasksModule` + include); `esp32/sdkconfig.defaults` (`USE_TRACE_FACILITY`); `esp32/main/CMakeLists.txt` (the `MM_TASK_CPU_STATS` opt-in def, off by default); `docs/moonmodules/core/system.md` (`### Tasks` section + control table); the module's `///` for the generated page.
 - **Tests:** `test/unit/core/unit_TasksModule.cpp` — feed a fake `TaskInfo[]` (via a test seam or the desktop stub returning canned rows) + a small Scheduler with a couple of fake modules; assert the List rows/detail render the expected `{name, us, class, heap}` and task fields. Unit-only — it's a diagnostic, not in the render pipeline, so no scenario.
 - **Catalog:** none required — it's a core module addable to any device (like I2cScan); optionally add to a bench deviceModel for convenience.
 

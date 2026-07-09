@@ -14,7 +14,7 @@ A pair of concentric-ring "headlight" clusters (nested rings of 1/8/12/16/24 LED
 
 - `scale` — overall size scale (1–10).
 
-Origin: projectMM / custom fixture
+Origin: Eric Marciniak (Discord) — custom car-lights fixture
 
 Detail: [technical](moxygen/CarLightsLayout.md)
 
@@ -158,7 +158,7 @@ Maps a set of decorative "gourd" objects (a specific bar installation), each ren
 - `granularity` — `One Gourd One Light`, `One Side One Light`, or `One LED One Light`.
 - `nrOfLightsPerGourd` — LEDs per gourd in the coarsest mode (1–128).
 
-Origin: projectMM / custom fixture
+Origin: [troyhacks](https://github.com/troyhacks/WLED) — custom Toronto bar gourd installation
 
 Detail: [technical](moxygen/TorontoBarGourdsLayout.md)
 

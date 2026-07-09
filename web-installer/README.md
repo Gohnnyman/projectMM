@@ -75,12 +75,12 @@ unit needs no client change** (both walk the same entry; only the transport diff
 
 ```json
 {
-  "name": "projectMM testbench S3",
+  "name": "MM testbench S3",
   "chip": "ESP32-S3",
   "firmwares": ["esp32s3-n16r8"],
   "modules": [
     { "type": "System", "id": "System",
-      "controls": { "deviceModel": "projectMM testbench S3" } },
+      "controls": { "deviceModel": "MM testbench S3" } },
     { "type": "AudioService", "id": "Audio", "parent_id": "Services",
       "controls": { "wsPin": 4, "sdPin": 5, "sckPin": 6 } },
     { "type": "RmtLedDriver", "id": "RmtLed", "parent_id": "Drivers",
@@ -126,7 +126,7 @@ captures on 12. (Without `loopbackTxPin` the test would fall back to transmittin
 `pins[0]` — fine when the jumper is on the LED pin, but the testbench's jumper is on
 a dedicated pin, which is exactly why the override is stored.) `loopbackTest` is left
 off (presetting pins doesn't auto-run the blocking test). The sibling
-`projectMM testbench ESP32-16MB` adds `RmtLedDriver` (`pins`=18, loopback tx=4/rx=5);
+`MM testbench ESP32-16MB` adds `RmtLedDriver` (`pins`=18, loopback tx=4/rx=5);
 the `…P4` adds `ParlioLedDriver` (`pins`=20–27, `ledsPerPin`=64, loopback tx=33/rx=32).
 Only the S3 bench has a mic wired, so only it carries `AudioService`. Each entry
 declares only what is actually on that board.
@@ -175,7 +175,7 @@ wires omits them; the user adds the module and sets the pins manually later.
 Inject nothing you don't know. (This is the
 MCU/Board/Device provenance rule from
 [architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device):
-default a pin only at the level that fixes it.) The `projectMM testbench S3`
+default a pin only at the level that fixes it.) The `MM testbench S3`
 entry above adds an `AudioService` with the real, verified INMP441 mic pins
 (WS=4/SD=5/SCK=6, matching the bench wiring in
 [`AudioService.h`](../../src/core/AudioService.h)) plus an `RmtLedDriver`
@@ -219,7 +219,7 @@ the picker's visual layer **and** the inputs to the per-board capability loop ab
   same-origin from `/install/deviceModels.json`.
 
 **One entry type, no Board/Device split.** A "Device" (a finished rig like the
-`projectMM testbench S3` — board + a wired mic) is just an entry with *more* of
+`MM testbench S3` — board + a wired mic) is just an entry with *more* of
 `modules`/`controls` filled in than a bare "Board". Same schema; there is no
 separate `devices.json`.
 

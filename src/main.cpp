@@ -100,6 +100,7 @@
 #include "core/AudioService.h"
 #include "core/I2cScanModule.h"
 #include "core/TasksModule.h"
+#include "core/PinsModule.h"
 #include "core/IrService.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
@@ -218,6 +219,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService", "core/services.md#audio");
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/system.md#i2c-scan");
     mm::ModuleFactory::registerType<mm::TasksModule>("TasksModule", "core/system.md#tasks");
+    mm::ModuleFactory::registerType<mm::PinsModule>("PinsModule", "core/system.md#pins");
     mm::ModuleFactory::registerType<mm::IrService>("IrService", "core/services.md#ir");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
@@ -293,6 +295,9 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* i2cScanModule = static_cast<mm::I2cScanModule*>(mm::ModuleFactory::create("I2cScanModule"));
     i2cScanModule->markWiredByCode();
     systemModule->addChild(i2cScanModule);
+    auto* pinsModule = static_cast<mm::PinsModule*>(mm::ModuleFactory::create("PinsModule"));
+    pinsModule->markWiredByCode();
+    systemModule->addChild(pinsModule);
 
     // Services — top-level container for user-added capability modules (Audio, IR).
     // The core-domain twin of the light domain's Layers/Drivers: a grouping node

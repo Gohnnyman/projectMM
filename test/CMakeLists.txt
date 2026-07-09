@@ -21,6 +21,7 @@ add_executable(mm_tests
     unit/core/unit_DevicesModule_discovery.cpp
     unit/core/unit_DevicesModule_hue.cpp
     unit/core/unit_TasksModule.cpp
+    unit/core/unit_PinsModule.cpp
     unit/core/unit_WledPacket.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
     unit/core/unit_FirmwareUpdateModule.cpp

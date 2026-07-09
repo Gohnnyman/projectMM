@@ -566,6 +566,14 @@ namespace {
 // synchronous drain is the accepted interim.
 constexpr uint32_t kUploadIdleMs = 5000;    // max gap between successful reads before abort
 constexpr uint32_t kUploadHardMs = 60000;   // absolute whole-request ceiling (anti-slowloris)
+// A firmware image is MB-scale (1.5+ MB), not the KB-scale of a config file, and pushing it over
+// weak WiFi can legitimately take minutes — well past kUploadHardMs, which sized the whole-request
+// cap for a 256 KB file. So the firmware-upload path uses its own far larger ceiling: the idle guard
+// (kUploadIdleMs, reset on every read) is the real anti-stall, and the whole-request cap only has to
+// bound a wedged transfer. 5 min covers any firmware over any LAN link with wide margin. The
+// render-freeze the file path's tight cap also bounds is a non-issue here — a firmware upload reboots
+// the device the moment it finishes, so the freeze is terminal, not a lingering degradation.
+constexpr uint32_t kFirmwareUploadHardMs = 300000;  // 5 min absolute ceiling for a firmware push
 struct UploadSource {
     platform::TcpConnection* conn;
     const char* initial;      // body bytes already read into the request buffer
@@ -660,7 +668,11 @@ void HttpServerModule::handleFirmwareUpload(platform::TcpConnection& conn, const
         return;
     }
     const size_t initial = initialLen < contentLen ? initialLen : contentLen;
-    UploadSource src{&conn, initialBody, initial, contentLen, platform::millis() + kUploadHardMs};
+    // Firmware gets the MB-scale ceiling, not the file path's 60 s — a 1.5 MB push over WiFi
+    // outruns kUploadHardMs and would abort mid-flash (the exact "upload aborted" a real firmware
+    // push hit at ~87%). See kFirmwareUploadHardMs.
+    UploadSource src{&conn, initialBody, initial, contentLen,
+                     platform::millis() + kFirmwareUploadHardMs};
     g_otaBytesTotal = static_cast<uint32_t>(contentLen);   // the UI's "Y KB" (Content-Length up front)
     g_otaBytesRead = 0;                                    // clear any stale count from a prior OTA
     // Stream the body into the OTA partition. otaWriteStream commits the image + flips the boot

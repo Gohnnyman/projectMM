@@ -324,9 +324,11 @@ public:
             const bool isEth   = isRmii || isSpi || isRgmii;
             // GPIO controls use addPin → a plain number input (ControlType::Pin),
             // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
-            // phyAddr is a PHY MDIO address (0..31), not a GPIO, but it's likewise
-            // a small number — a plain number input (addPin) fits it too.
-            controls_.addPin("ethPhyAddr", ethPhyAddr_, 0, 31);
+            // phyAddr is a PHY MDIO address (0..31), NOT a GPIO — it's a plain uint8
+            // number, so it uses addUint8, not addPin. (A Pin here would make the pin
+            // ownership map report it as a false GPIO claim, since that map reads every
+            // ControlType::Pin as a claimed GPIO.)
+            controls_.addUint8("ethPhyAddr", ethPhyAddr_, 0, 31);
             controls_.setHidden(controls_.count() - 1, !isEth);
             controls_.addPin("ethRstGpio", ethRstGpio_);
             controls_.setHidden(controls_.count() - 1, !isEth);
@@ -593,7 +595,7 @@ private:
     // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
     // → number input). ethConfigDefault's fields are plain int; the values are all
     // small (≤52 / -1) so the copy into int8_t is lossless.
-    int8_t  ethPhyAddr_    = static_cast<int8_t>(platform::ethConfigDefault.phyAddr);
+    uint8_t ethPhyAddr_    = static_cast<uint8_t>(platform::ethConfigDefault.phyAddr);  // PHY MDIO addr 0..31, not a GPIO
     int8_t  ethMdcGpio_    = static_cast<int8_t>(platform::ethConfigDefault.mdcGpio);
     int8_t  ethMdioGpio_   = static_cast<int8_t>(platform::ethConfigDefault.mdioGpio);
     int8_t  ethRstGpio_    = static_cast<int8_t>(platform::ethConfigDefault.rstGpio);
@@ -616,11 +618,12 @@ private:
     // the rolling multiply wraps deterministically (signed overflow is UB).
     uint32_t ethSig() const {
         uint32_t h = ethType_;
-        for (int16_t v : {ethPhyAddr_, ethRstGpio_, ethMdcGpio_, ethMdioGpio_,
+        for (int16_t v : {ethRstGpio_, ethMdcGpio_, ethMdioGpio_,
                           ethClockGpio_, ethSpiMiso_, ethSpiMosi_,
                           ethSpiSck_, ethSpiCs_, ethSpiIrq_}) {
             h = h * 131u + static_cast<uint32_t>(v);
         }
+        h = h * 131u + ethPhyAddr_;                  // PHY addr (uint8, not a GPIO), folded in separately
         h = h * 131u + (ethClockExtIn_ ? 1u : 0u);   // bool, folded in separately
         return h;
     }

@@ -2,6 +2,8 @@
 
 The device's fixed infrastructure — identity, network, provisioning, firmware, and the inspection tools. These modules are **always present and wired by code**, not user-added; the user does not add or delete them. User-added capability modules (Audio, IR) live in the `Services` container instead — see [core/services.md](services.md). Every row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-cutting rationale that no single `.h` owns lives in the prose sections below the table.
 
+## System modules
+
 <a id="system"></a>
 
 ### System
@@ -135,6 +137,16 @@ A read-only diagnostic that shows **what runs where** — the observability foun
 - read-only — `core0` / `core1` (the task currently executing on each core; empty on a single-core chip).
 
 Detail: [technical](moxygen/TasksModule.md)
+
+<a id="pins"></a>
+
+### Pins
+
+A read-only diagnostic that shows **which module owns each GPIO, for what role** — the device's pin ownership map, keyed by physical GPIO the way an OS Device Manager, a Tasmota template, or a GPIOViewer diagram is. A fixed System module, wired-by-code, always present. It walks the live module tree and collects every claimed pin — each GPIO control (a mic's `sckPin`/`wsPin`/`sdPin`, an Ethernet PHY's `ethMdcGpio`, a driver's `loopbackTxPin`) and each LED-driver `pins` lane CSV — so it needs no state of its own: unlike a central pin manager, each module owns its pins and this one only observes. A GPIO claimed by two controls stays visible (both owners in the row detail) rather than being merged away — the read-only way to surface a conflict, the class of bug the GPIO-46 loopback corruption was. Refreshes once a second, so a live pin change shows without a reboot.
+
+- read-only — `pins` (a row per claimed GPIO: `gpio`, `owner` = the owning module, `role` = derived from the control name — `sckPin`→BCLK, `wsPin`→WS, `pins`→LED lane N, `ethMdcGpio`→MDC, …). Expand a row to see every claim on that GPIO (`owner · role`); one claimant repeats the summary, two or more make a double-claim visible. Unused pins (value −1) are skipped.
+
+Detail: [technical](moxygen/PinsModule.md)
 
 ## MQTT — details
 

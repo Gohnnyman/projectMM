@@ -519,12 +519,12 @@
     ]
   },
   {
-    "name": "projectMM testbench S3",
+    "name": "MM testbench S3",
     "chip": "ESP32-S3",
     "firmwares": [
       "esp32s3-n16r8"
     ],
-    "image": "assets/deviceModels/esp32-s3-n16r8-dev.png",
+    "image": "assets/deviceModels/esp32-s3-testbench.jpg",
     "supported": [
       "LEDs",
       "WiFi",
@@ -538,8 +538,8 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "projectMM testbench S3",
-          "deviceName": "projectMM-testbench-S3"
+          "deviceModel": "MM testbench S3",
+          "deviceName": "MM-testbench-S3"
         }
       },
       {
@@ -611,7 +611,7 @@
     ]
   },
   {
-    "name": "projectMM testbench ESP32-16MB",
+    "name": "MM testbench ESP32-16MB",
     "chip": "ESP32",
     "firmwares": [
       "esp32-16mb"
@@ -627,8 +627,8 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "projectMM testbench ESP32-16MB",
-          "deviceName": "projectMM-testbench-ESP32-16MB"
+          "deviceModel": "MM testbench ESP32-16MB",
+          "deviceName": "MM-testbench-ESP32-16MB"
         }
       },
       {
@@ -644,18 +644,18 @@
     ]
   },
   {
-    "name": "projectMM testbench P4",
+    "name": "MM testbench P4",
     "chip": "ESP32-P4",
     "firmwares": [
       "esp32p4-eth"
     ],
-    "image": "assets/deviceModels/waveshare-esp32-p4-nano.jpg",
+    "image": "assets/deviceModels/esp32-p4-testbench.jpg",
     "supported": [
       "LEDs",
-      "Ethernet"
+      "Ethernet",
+      "Audio"
     ],
     "planned": [
-      "Microphone",
       "Audio codec",
       "Camera"
     ],
@@ -664,8 +664,20 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "projectMM testbench P4",
-          "deviceName": "projectMM-testbench-P4"
+          "deviceModel": "MM testbench P4",
+          "deviceName": "MM-testbench-P4"
+        }
+      },
+      {
+        "type": "AudioService",
+        "id": "Audio",
+        "parent_id": "Services",
+        "controls": {
+          "sckPin": 32,
+          "wsPin": 26,
+          "sdPin": 33,
+          "mclkPin": 36,
+          "gain": 100
         }
       },
       {
@@ -673,16 +685,16 @@
         "id": "ParlioLed",
         "parent_id": "Drivers",
         "controls": {
-          "pins": "20",
-          "loopbackTxPin": 33,
-          "loopbackRxPin": 32
+          "pins": "21",
+          "loopbackTxPin": 46,
+          "loopbackRxPin": 47
         }
       },
       {
         "type": "Drivers",
         "id": "Drivers",
         "controls": {
-          "brightness": 255
+          "brightness": 10
         }
       },
       {
@@ -700,8 +712,8 @@
         "parent_id": "Layers"
       },
       {
-        "type": "NetworkReceiveEffect",
-        "id": "NetworkReceive",
+        "type": "AudioSpectrumEffect",
+        "id": "AudioSpectrum",
         "parent_id": "Layer"
       },
       {
@@ -718,6 +730,73 @@
         }
       }
     ]
+  },
+  {
+    "name": "MM testbench classic olimex",
+    "chip": "ESP32",
+    "firmwares": [
+      "esp32"
+    ],
+    "image": "assets/deviceModels/esp32-olimex-testbench.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Ethernet"
+    ],
+    "planned": [
+      "Button",
+      "SD card"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "MM testbench classic olimex"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "16",
+          "loopbackTxPin": 33,
+          "loopbackRxPin": 34
+        }
+      },
+      {
+        "type": "GridLayout",
+        "id": "Grid",
+        "parent_id": "Layouts",
+        "controls": {
+          "width": 8,
+          "height": 8
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "ethType": 1,
+          "ethPhyAddr": 0,
+          "ethRstGpio": 5,
+          "ethClockGpio": 17,
+          "ethClockExtIn": false
+        }
+      },
+      {
+        "type": "Layer",
+        "id": "Layer",
+        "parent_id": "Layers"
+      },
+      {
+        "type": "LissajousEffect",
+        "id": "Lissajous",
+        "parent_id": "Layer"
+      }
+    ],
+    "flashBaud": 460800
   },
   {
     "name": "LightCrafter 16",

@@ -77,8 +77,8 @@ test("a module's add precedes its own set ops", () => {
 });
 
 test("S3 testbench entry adds Grid + Layer fresh and clears the pre-existing containers", () => {
-    const s3 = catalog.find(b => b && b.name === "projectMM testbench S3");
-    assert.ok(s3, "projectMM testbench S3 entry missing from deviceModels.json");
+    const s3 = catalog.find(b => b && b.name === "MM testbench S3");
+    assert.ok(s3, "MM testbench S3 entry missing from deviceModels.json");
     const ops = planConfigOps(s3);
     const added = new Set(ops.filter(o => o.op === "add").map(o => o.id));
     const cleared = new Set(ops.filter(o => o.op === "clearChildren").map(o => o.parent));
@@ -101,7 +101,7 @@ test("S3 testbench entry adds Grid + Layer fresh and clears the pre-existing con
 test("a deduped parent is cleared exactly once", () => {
     // Drivers hosts two modules in the S3 entry (RmtLed + NetworkSend); it must be cleared
     // once, not once per child (a second clear would wipe the first child just re-added).
-    const s3 = catalog.find(b => b && b.name === "projectMM testbench S3");
+    const s3 = catalog.find(b => b && b.name === "MM testbench S3");
     const driversClears = planConfigOps(s3).filter(o => o.op === "clearChildren" && o.parent === "Drivers");
     assert.equal(driversClears.length, 1, "Drivers cleared more than once — clears must be deduped");
 });

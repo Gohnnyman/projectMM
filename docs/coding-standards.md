@@ -122,7 +122,7 @@ Where each kind of fact lives. The guiding rule: **document a thing once, in the
 
 ### The tree mirrors `src/`
 
-[Everything is a MoonModule](architecture.md#moonmodules); `docs/moonmodules/` mirrors `src/`, a **`core/`** subtree and a **`light/`** subtree. Within each, a module is either **UI** (user-facing and configurable — the core services like Network/System/FileSystem, and the light **catalog modules**: layouts, effects, modifiers, drivers) or **supporting** (the machinery UI modules lean on — `Control`, `Scheduler`, `Layer`, `Buffer`, the `*Base` classes). [Services](architecture.md#services) are UI modules that bridge to hardware (a sensor, a network integration).
+[Everything is a MoonModule](architecture.md#moonmodules); `docs/moonmodules/` mirrors `src/`, a **`core/`** subtree and a **`light/`** subtree. Within each, a module is either **UI** (user-facing and configurable — the System modules like Network/System/FileSystem, the user-added [Services](architecture.md#services), and the light **catalog modules**: layouts, effects, modifiers, drivers) or **supporting** (the machinery UI modules lean on — `Control`, `Scheduler`, `Layer`, `Buffer`, the `*Base` classes). [Services](architecture.md#services) are UI modules that bridge to hardware (a sensor, a network integration).
 
 ### The two surfaces
 

@@ -43,6 +43,17 @@ public:
     /// constant; widening to 16 is a later constant change).
     static constexpr uint8_t kMaxLanes = 8;
 
+    /// Light count the loopback self-test drives (or `maxLaneLights_` if the strip is smaller).
+    /// Small on purpose: the test verifies the peripheral emits *correct WS2812 bits*, which a few
+    /// hundred lights prove fully (encode, fused correct+transpose, single-shot DMA, latch pad) — it
+    /// does NOT need the operational grid. A big frame hits two hardware limits: the P4 Parlio rejects
+    /// a single non-loop transfer over `PARLIO_LL_TX_MAX_BITS_PER_FRAME` (~0.5 Mbit), and the RMT-RX
+    /// capture can't hold a large symbol count (a 128×128 grid = 16384 lights is ~1.2 Mbit TX / ~400k
+    /// capture symbols → transfer rejected AND capture returns nothing, surfacing as a misleading "bad
+    /// bit 0"). 256 lights = ~18 KB TX / ~6144 capture symbols — comfortably inside both on every
+    /// parallel driver, so the test runs identically at any grid size.
+    static constexpr nrOfLightsType kLoopbackTestLights = 256;
+
     /// Comma-separated GPIO list, one parallel lane per pin — up to kMaxLanes strands clocked out
     /// SIMULTANEOUSLY, fed consecutive slices of this driver's window. Shared control shape with
     /// RmtLedDriver (parsers in PinList.h). Defaults live on the derived (chip-specific safe pins),
@@ -366,26 +377,32 @@ protected:
             setStatus("loopback: no lights to encode", Severity::Warning);
             return;
         }
+        // Cap the test frame to kLoopbackTestLights (see its declaration for why a big frame
+        // overruns the P4 Parlio transfer limit + the RMT-RX capture buffer).
+        const nrOfLightsType lights =
+            maxLaneLights_ < kLoopbackTestLights ? maxLaneLights_ : kLoopbackTestLights;
+        const size_t perLightBytes = static_cast<size_t>(outCh) * 8 * 3;   // 3 slots/bit, 1 bus byte/slot
+        const size_t testFrameBytes = static_cast<size_t>(lights) * perLightBytes;
         // Build the REAL frame with the test pattern in every row on lane 0 only;
         // the platform transmits the genuine transfer (size, DMA chain, latch pad)
         // back to back and verifies every captured bit, so the test covers what
         // the render loop actually sends. Heap alloc is fine: control-driven, off
         // the hot path.
-        auto* frame = static_cast<uint8_t*>(platform::alloc(frameBytes_));
+        auto* frame = static_cast<uint8_t*>(platform::alloc(testFrameBytes));
         if (!frame) {
             clearFailBuf();
             setStatus("loopback: out of memory", Severity::Error);
             return;
         }
-        std::memset(frame, 0, frameBytes_);
+        std::memset(frame, 0, testFrameBytes);
         uint8_t wire[kMaxLanes * 4] = {};
         wire[0] = 0xA5; wire[1] = 0x00; wire[2] = 0xFF;   // wire[3] stays 0 (RGBW)
         uint8_t* out = frame;
-        for (nrOfLightsType row = 0; row < maxLaneLights_; row++) {
+        for (nrOfLightsType row = 0; row < lights; row++) {
             encodeWs2812LcdSlots(wire, 0x01, outCh, out);
-            out += static_cast<size_t>(outCh) * 8 * 3;
+            out += perLightBytes;
         }
-        const size_t dataBytes = static_cast<size_t>(maxLaneLights_) * outCh * 24;
+        const size_t dataBytes = static_cast<size_t>(lights) * outCh * 24;
         deinit();   // free the live bus; the test builds its own on the data pins
         // TX override: the loopback drives lane 0 only, so when loopbackTxPin is
         // set, transmit on it instead of laneList_[0] (the operational LED pin),
@@ -394,7 +411,7 @@ protected:
         // and restore it after, so the following reinit() rebuilds the real bus.
         const uint16_t realLane0 = laneList_[0];
         if (loopbackTxPin >= 0) laneList_[0] = static_cast<uint16_t>(loopbackTxPin);
-        const auto r = derived()->busLoopback(frame, frameBytes_, dataBytes,
+        const auto r = derived()->busLoopback(frame, testFrameBytes, dataBytes,
                                               static_cast<uint8_t>(outCh * 8));
         laneList_[0] = realLane0;
         platform::free(frame);

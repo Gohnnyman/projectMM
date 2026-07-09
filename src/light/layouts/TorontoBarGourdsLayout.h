@@ -30,7 +30,7 @@ namespace mm {
 // runs it with a no-op callback to tally, forEachCoord() runs it to emit, so the
 // count and the emitted set can never disagree (the RingLayout/SphereLayout
 // pattern). Integer math throughout; this is the cold build path.
-// Author: projectMM / custom fixture
+// Author: troyhacks — custom Toronto bar decorative-gourd installation, reconstructed for projectMM — https://github.com/troyhacks/WLED
 /// Layout for the Toronto bar decorative-gourd installation.
 /// @card TorontoBarGourdsLayout.gif
 class TorontoBarGourdsLayout : public LayoutBase {
