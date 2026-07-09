@@ -51,7 +51,7 @@ public:
         // here with a memset to zero.
         const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
         const size_t count = cols * maxNumBalls;
-        if (enabled() && count > 0) {
+        if (count > 0) {
             if (count != ballCount_) {
                 releaseBalls();
                 balls_ = static_cast<Ball*>(platform::alloc(count * sizeof(Ball)));

@@ -56,20 +56,6 @@ public:
         controls_.addUint16("channels_per_universe", channelsPerUniverse);
     }
 
-    void setup() override {
-        // One socket per protocol port, all listening at once. Each bind is
-        // attempted independently so one taken port can't stop the others from
-        // draining; any failure is reported once.
-        const bool artnetOk = artnetSocket_.open() && artnetSocket_.bind(ARTNET_PORT);
-        const bool e131Ok = e131Socket_.open() && e131Socket_.bind(E131_PORT);
-        const bool ddpOk = ddpSocket_.open() && ddpSocket_.bind(DDP_PORT);
-        if (artnetOk && e131Ok && ddpOk) {
-            if (status() == kBindFailMsg) clearStatus();
-        } else {
-            setStatus(kBindFailMsg, Severity::Error);
-        }
-    }
-
     void teardown() override {
         artnetSocket_.close();
         e131Socket_.close();
@@ -79,27 +65,31 @@ public:
         clearStatus();
     }
 
-    /// Disable closes the three receive sockets (freeing their ports for another module) and drops the
-    /// staging buffer; enable reopens + rebinds them. setup()/teardown() ARE the acquire/release.
-    void onEnabled(bool on) override { if (on) setup(); else teardown(); }
-
     ~NetworkReceiveEffect() override { releaseStaging(); }
 
-    // Size staging to the layer buffer (one byte per channel byte), off the
-    // hot path — the GameOfLifeEffect resource shape. Zeroed on (re)alloc so a
-    // fresh grid starts dark, not with stale bytes.
+    /// Pure build (see MoonModule::onBuildState): open + bind the three receive sockets (each bind
+    /// independent so one taken port can't stop the others) and size the staging buffer to the layer
+    /// (one byte per channel byte, zeroed so a fresh grid starts dark). No enabled() check — core's
+    /// applyState() calls this only when effectively-enabled and routes to teardown() (sockets closed,
+    /// staging freed) otherwise, so a disabled effect (or one under a disabled parent) frees the ports.
     void onBuildState() override {
-        const size_t need = static_cast<size_t>(nrOfLights()) * channelsPerLight();
-        if (enabled() && need > 0) {
-            if (need != stagingBytes_) {
-                releaseStaging();
-                staging_ = static_cast<uint8_t*>(platform::alloc(need));
-                if (staging_) {
-                    stagingBytes_ = need;
-                    std::memset(staging_, 0, need);
-                }
-            }
+        const bool artnetOk = artnetSocket_.open() && artnetSocket_.bind(ARTNET_PORT);
+        const bool e131Ok = e131Socket_.open() && e131Socket_.bind(E131_PORT);
+        const bool ddpOk = ddpSocket_.open() && ddpSocket_.bind(DDP_PORT);
+        if (artnetOk && e131Ok && ddpOk) {
+            if (status() == kBindFailMsg) clearStatus();
         } else {
+            setStatus(kBindFailMsg, Severity::Error);
+        }
+        const size_t need = static_cast<size_t>(nrOfLights()) * channelsPerLight();
+        if (need > 0 && need != stagingBytes_) {
+            releaseStaging();
+            staging_ = static_cast<uint8_t*>(platform::alloc(need));
+            if (staging_) {
+                stagingBytes_ = need;
+                std::memset(staging_, 0, need);
+            }
+        } else if (need == 0) {
             releaseStaging();
         }
         setDynamicBytes(stagingBytes_);

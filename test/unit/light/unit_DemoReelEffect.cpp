@@ -43,7 +43,7 @@ TEST_CASE("DemoReelEffect cycles registered effects and renders each") {
     DemoReelEffect reel;
     reel.interval = 1;                 // 1 s per effect (advance is driven explicitly below)
     s.layer.addChild(&reel);
-    s.layer.onBuildState();            // builds the eligible list + stands up the first child
+    s.layer.applyState();            // builds the eligible list + stands up the first child
 
     // At least the two real effects are eligible; the reel must NOT include itself.
     CHECK(reel.eligibleCountForTest() >= 2);

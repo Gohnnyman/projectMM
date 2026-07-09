@@ -37,7 +37,7 @@ void wire(mm::ParlioLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     d.onBuildControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
-    d.onBuildState();
+    d.applyState();
 }
 
 // frameBytes = maxLaneLights × outCh × 24 + 864 latch pad, rounded up to 64.
@@ -140,7 +140,7 @@ TEST_CASE("ParlioLedDriver bad pins → status error → recovery") {
     CHECK(d.status() != nullptr);
 
     std::strcpy(d.pins, "36,37");
-    d.onBuildState();
+    d.applyState();
     CHECK(d.laneCount() == 2);
     CHECK(d.status() == nullptr);
 }
@@ -159,7 +159,7 @@ TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
     d.onBuildControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
-    d.onBuildState();
+    d.applyState();
 
     CHECK(d.laneCount() == 0);            // no lanes claimed
     CHECK(d.frameBytes() == 0);
@@ -221,7 +221,7 @@ TEST_CASE("ParlioLedDriver setup/teardown is repeatable") {
         d.setup();
         d.setSourceBuffer(&src);
         d.setCorrection(&corr);
-        d.onBuildState();
+        d.applyState();
         REQUIRE(d.laneCount() == 8);   // the 8 pins set above
         d.teardown();
         CHECK(d.status() == nullptr);

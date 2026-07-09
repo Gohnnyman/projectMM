@@ -79,7 +79,7 @@ TEST_CASE("FreqMatrixEffect paints a lit source pixel from a live tone") {
     mm::FreqMatrixEffect fx;
     fx.speed = 255;   // period = 256 - 255 = 1 ms → scrolls on the first tick
     g.layer.addChild(&fx);
-    g.layer.onBuildState();
+    g.layer.applyState();
 
     g.layer.loop();   // paints the new pixel at y=0 (elapsed = kToneMs, throttle passes)
 
@@ -99,7 +99,7 @@ TEST_CASE("FreqMatrixEffect scrolls the painted pixel one step along Y") {
     mm::FreqMatrixEffect fx;
     fx.speed = 255;   // period 1 ms → any millis advance re-scrolls
     g.layer.addChild(&fx);
-    g.layer.onBuildState();
+    g.layer.applyState();
 
     g.layer.loop();   // tick 1 at kToneMs: paints the lit colour at y=0
     auto* data = g.layer.buffer().data();
@@ -131,7 +131,7 @@ TEST_CASE("FreqMatrixEffect paints black on silence") {
     mm::FreqMatrixEffect fx;
     fx.speed = 255;
     g.layer.addChild(&fx);
-    g.layer.onBuildState();
+    g.layer.applyState();
 
     REQUIRE(mm::AudioService::latestFrame()->peakHz == 0);   // silence: no tone
     g.layer.loop();
@@ -152,7 +152,7 @@ TEST_CASE("FreqMatrixEffect survives degenerate grid sizes") {
 
         mm::FreqMatrixEffect fx;
         g.layer.addChild(&fx);
-        g.layer.onBuildState();
+        g.layer.applyState();
         g.layer.loop();   // must not crash on 0×0×0 or 1×1×1
     }
     CHECK(true);

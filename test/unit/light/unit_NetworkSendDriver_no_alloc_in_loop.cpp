@@ -29,7 +29,7 @@ TEST_CASE("NetworkSendDriver sizes corrected_ in onBuildState, not in loop") {
     mm::NetworkSendDriver driver;
     driver.setSourceBuffer(&source);
     driver.setCorrection(&correction);
-    driver.onBuildState();
+    driver.applyState();
 
     // After onBuildState the resized buffer is already in place.
     REQUIRE(driver.correctedBuffer().data() != nullptr);
@@ -64,7 +64,7 @@ TEST_CASE("NetworkSendDriver grows corrected_ in onCorrectionChanged on RGB → 
     mm::NetworkSendDriver driver;
     driver.setSourceBuffer(&source);
     driver.setCorrection(&correction);
-    driver.onBuildState();
+    driver.applyState();
 
     REQUIRE(driver.correctedBuffer().channelsPerLight() == 3);
 
@@ -88,7 +88,7 @@ TEST_CASE("NetworkSendDriver onCorrectionChanged is a no-op when outChannels unc
     mm::NetworkSendDriver driver;
     driver.setSourceBuffer(&source);
     driver.setCorrection(&correction);
-    driver.onBuildState();
+    driver.applyState();
 
     const uint8_t* dataBefore = driver.correctedBuffer().data();
     REQUIRE(dataBefore != nullptr);

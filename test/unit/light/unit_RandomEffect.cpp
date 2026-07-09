@@ -22,7 +22,7 @@ TEST_CASE("RandomEffect lights exactly one light per frame") {
     effect.fade = 255;  // fade every remaining light fully black, isolating this frame's single write
     layer.addChild(&effect);
 
-    layer.onBuildState();
+    layer.applyState();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -59,7 +59,7 @@ TEST_CASE("RandomEffect scatters colour across many lights over many frames") {
     effect.fade = 1;  // barely fade, so lit lights linger and the field fills over frames
     layer.addChild(&effect);
 
-    layer.onBuildState();
+    layer.applyState();
 
     // 200 frames each add one sparkle; with almost no fade the field accumulates well past one light.
     for (int f = 0; f < 200; f++) layer.loop();
@@ -91,7 +91,7 @@ TEST_CASE("RandomEffect survives degenerate grids") {
         mm::RandomEffect effect;
         layer.addChild(&effect);
 
-        layer.onBuildState();
+        layer.applyState();
         layer.loop();  // must not crash on 0×0×0 or 1×1×1
 
         CHECK(true);  // reaching here means no crash / hang

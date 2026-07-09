@@ -235,6 +235,38 @@ TEST_CASE("PinsModule: a child module's pins are walked (depth-first), not just 
     CHECK(rows.find("\"owner\":\"NestedDriver\"") != std::string::npos);
 }
 
+TEST_CASE("PinsModule: disabling a PARENT frees its children's pins (effectivelyEnabled cascade)") {
+    // Hardware-found (P4 .133): disabling the Drivers container stopped ParlioLed but the map still
+    // showed it owning GPIO 20 — the map read the child's own enabled() flag, not its effective state.
+    // The applyState() cascade tears a disabled parent's whole subtree down (child peripheral released),
+    // so the map must match: a child of a disabled parent shows its pins FREED, not falsely claimed.
+    Scheduler scheduler;
+    FakePinModule container("Drivers");
+    FakePinModule child("ParlioLed");
+    child.sck = 20;
+    container.addChild(&child);
+    PinsModule pins;
+    scheduler.addModule(&container);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+
+    // Both enabled: the child's claim shows.
+    pins.loop1s();
+    CHECK(allRows(*pinsSource(pins)).find("\"gpio\":20") != std::string::npos);
+
+    // Disable the PARENT (child's own flag stays true) — the child is now effectively-disabled, so its
+    // pin is freed from the map even though child.enabled() is still true.
+    container.setEnabled(false);
+    pins.loop1s();
+    CHECK(child.enabled());   // the child's OWN flag is untouched
+    CHECK(allRows(*pinsSource(pins)).find("\"gpio\":20") == std::string::npos);   // …but its pin is freed
+
+    // Re-enable the parent: the child's claim returns.
+    container.setEnabled(true);
+    pins.loop1s();
+    CHECK(allRows(*pinsSource(pins)).find("\"gpio\":20") != std::string::npos);
+}
+
 TEST_CASE("PinsModule: a claim survives its owning module being destroyed (no use-after-free)") {
     // The map refreshes on loop1s but the UI serializes state right after a delete op — so a claim
     // must NOT borrow a pointer into the (now-freed) module's name storage. Refresh with the module

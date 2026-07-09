@@ -16,7 +16,7 @@ static void buildSphere(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& l
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     layer.addChild(&sphere);
-    layer.onBuildState();
+    layer.applyState();
 }
 
 // The effect fully clears the buffer each frame, so a thin shell leaves the vast majority of a large

@@ -60,12 +60,10 @@ public:
     // The band modes (3/4) need a 256-entry table of valid wheel indices. 256 bytes is small, but
     // the contract keeps per-effect buffers off the inline footprint (the registerType<T> probe
     // lives on an 8 KB stack), so it's a lazily-allocated heap buffer, freed on teardown.
+    // Pure build (see MoonModule::onBuildState): allocate the table. No enabled() check — applyState()
+    // routes a disabled effect to teardown()/release() instead of calling this.
     void onBuildState() override {
-        if (enabled() && !validIndices_) {
-            validIndices_ = static_cast<uint8_t*>(platform::alloc(256));
-        } else if (!enabled() && validIndices_) {
-            release();
-        }
+        if (!validIndices_) validIndices_ = static_cast<uint8_t*>(platform::alloc(256));
         setDynamicBytes(validIndices_ ? 256 : 0);
     }
 

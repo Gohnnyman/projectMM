@@ -42,7 +42,7 @@ TEST_CASE("RubiksCubeEffect paints the cube on the first frame") {
     mm::RubiksCubeEffect cube;
     layer.addChild(&cube);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -75,7 +75,7 @@ TEST_CASE("RubiksCubeEffect only paints the six face colours") {
     mm::RubiksCubeEffect cube;
     layer.addChild(&cube);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -107,7 +107,7 @@ TEST_CASE("RubiksCubeEffect with turnsPerSecond=0 still draws but never turns") 
     cube.turnsPerSecond = 0;
     layer.addChild(&cube);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -146,7 +146,7 @@ TEST_CASE("RubiksCubeEffect survives a 0x0x0 grid") {
     mm::RubiksCubeEffect cube;
     layer.addChild(&cube);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     CHECK(layer.buffer().count() == 0);

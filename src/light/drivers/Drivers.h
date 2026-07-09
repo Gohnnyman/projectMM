@@ -224,7 +224,6 @@ public:
         summary_.channelsPerLight = out ? out->channelsPerLight() : 3;
         active_ = this;
         passBufferToDrivers();
-        MoonModule::onBuildState();
     }
 
     // First output light as RGB — the live colour of pixel 0, read from whichever buffer

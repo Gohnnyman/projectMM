@@ -129,8 +129,8 @@ bool mappingChangesOverMs(uint8_t bpm, int total_ms) {
     mm::RandomMapModifier mod;
     mod.bpm = bpm;
     layer.addChild(&mod);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     const auto before = mapAll(mod, 8, 8, 1);
     uint32_t now = 1000;

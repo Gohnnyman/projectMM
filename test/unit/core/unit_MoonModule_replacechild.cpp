@@ -102,7 +102,7 @@ TEST_CASE("replace lifecycle: fresh module is built, set up, allocated in order"
     mm::MoonModule* old = f.parent.replaceChildAt(1, &fresh);
     fresh.onBuildControls();
     fresh.setup();
-    fresh.onBuildState();
+    fresh.applyState();
     old->teardown();
 
     REQUIRE(trace.calls.size() == 4);

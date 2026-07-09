@@ -26,7 +26,7 @@ TEST_CASE("FixedRectangleEffect lights only cells inside the configured rect") {
     rect.red = 182; rect.green = 15; rect.blue = 98;
     layer.addChild(&rect);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -67,7 +67,7 @@ TEST_CASE("FixedRectangleEffect defaults light the origin corner and fill a smal
     mm::FixedRectangleEffect rect;  // defaults: 15×15×15 box at (0,0,0)
     layer.addChild(&rect);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -104,7 +104,7 @@ TEST_CASE("FixedRectangleEffect honours a non-zero origin") {
     rect.rectW = 1; rect.rectH = 1; rect.rectD = 1;
     layer.addChild(&rect);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -135,7 +135,7 @@ TEST_CASE("FixedRectangleEffect survives a degenerate grid") {
     mm::FixedRectangleEffect rect;
     layer.addChild(&rect);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();  // must return without dereferencing an empty buffer
 
     CHECK(true);

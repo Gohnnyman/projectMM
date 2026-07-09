@@ -43,7 +43,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     mm::RainbowEffect rainbow;
     layer.addChild(&rainbow);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -97,7 +97,7 @@ TEST_CASE("D1 effect on 3D grid: columns and z-slices are identical (Layer::extr
     D1StubEffect d1;
     layer.addChild(&d1);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -147,7 +147,7 @@ static void check_d3_on_2d(const char* tag) {
     EffectT effect;
     layer.addChild(&effect);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -179,7 +179,7 @@ static void check_d3_on_1d(const char* tag) {
     EffectT effect;
     layer.addChild(&effect);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -237,7 +237,7 @@ static void check_d2_on_3d(const char* tag) {
     EffectT effect;
     layer.addChild(&effect);
 
-    layer.onBuildState();
+    layer.applyState();
     // Some effects (Fire, particles with random sparks) need a few frames
     // before they reliably produce visible output; one frame is enough for
     // the deterministic effects we test here.

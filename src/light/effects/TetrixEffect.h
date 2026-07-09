@@ -54,7 +54,7 @@ public:
 
     void onBuildState() override {
         // One drop per X column. Reallocate only when the column count changes.
-        const nrOfLightsType cols = (enabled() && width() > 0)
+        const nrOfLightsType cols = (width() > 0)
                                         ? static_cast<nrOfLightsType>(width()) : 0;
         if (cols != nrOfDrops_) {
             releaseDrops();

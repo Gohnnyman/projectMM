@@ -42,7 +42,7 @@ TEST_CASE("AudioService: setup/teardown is repeatable with no residual state") {
     const char* afterFirst = nullptr;
     for (int cycle = 0; cycle < 4; cycle++) {
         a.setup();
-        a.onBuildState();   // reinit, as the Scheduler does
+        a.applyState();   // reinit, as the Scheduler does
         a.loop();           // a tick: no heap churn, no crash (ASAN across cycles)
         a.teardown();
         // The status settles to a stable value, not a growing/changing string —
@@ -58,7 +58,7 @@ TEST_CASE("AudioService: teardown clears the active mic (latestFrame falls back 
     {
         mm::AudioService a;
         a.onBuildControls();
-        a.setup();                                  // registers itself as active_
+        a.applyState();                             // build (enabled) registers itself as active_
         REQUIRE(mm::AudioService::latestFrame() == a.audioFrame());
         a.teardown();                               // must release the registration
     }
@@ -79,9 +79,9 @@ TEST_CASE("AudioService: two mics — first wins, survivor re-elects, any order 
     a.onBuildControls();
     b.onBuildControls();
 
-    a.setup();
+    a.applyState();                                     // build (enabled) claims the seat
     CHECK(mm::AudioService::latestFrame() == a.audioFrame());
-    b.setup();                                          // second mic captured, but a keeps the seat
+    b.applyState();                                     // second mic captured, but a keeps the seat
     CHECK(mm::AudioService::latestFrame() == a.audioFrame());   // FIRST wins, not last
 
     a.teardown();                                       // tearing down the ACTIVE one vacates the seat
@@ -94,10 +94,10 @@ TEST_CASE("AudioService: two mics — first wins, survivor re-elects, any order 
 }
 
 TEST_CASE("AudioService: a DISABLED module does not win the mic election at boot") {
-    // The boot Scheduler calls setup() on EVERY module ungated by enabled() (Phase 3). A persisted
-    // DISABLED AudioService must NOT grab the I²S mic or win the active_ seat at boot — else a
-    // disabled mic silences an enabled sibling's audio (same class of bug as a disabled RMT driver
-    // stealing a GPIO from an enabled Parlio driver). The acquire must wait for enable.
+    // Core's applyState() calls onBuildState() (the acquire + election) only when effectively-enabled,
+    // and teardown() otherwise. A persisted DISABLED AudioService must NOT grab the I²S mic or win the
+    // active_ seat at boot — else a disabled mic silences an enabled sibling's audio (same class of bug
+    // as a disabled RMT driver stealing a GPIO from an enabled Parlio driver).
     mm::AudioService dis, live;
     dis.onBuildControls();
     live.onBuildControls();
@@ -106,16 +106,20 @@ TEST_CASE("AudioService: a DISABLED module does not win the mic election at boot
     REQUIRE(mm::AudioService::latestFrame()->level == 0);
 
     dis.setEnabled(false);        // persisted-disabled at boot
-    dis.setup();                  // Phase 3: must be a no-op — no election
+    dis.setup();                  // Phase 3: pure wiring, no election
+    dis.applyState();             // Phase 4: disabled → routes to teardown, NOT the election
     // Still empty: the disabled module did NOT take the seat.
     CHECK(mm::AudioService::latestFrame() != dis.audioFrame());
     CHECK(mm::AudioService::latestFrame()->level == 0);
 
-    live.setup();                 // an enabled sibling boots and wins the seat
+    live.setup();
+    live.applyState();            // an enabled sibling boots (build) and wins the seat
     CHECK(mm::AudioService::latestFrame() == live.audioFrame());
 
-    // Now enable the previously-disabled one: it must NOT steal the live seat (first live wins).
-    dis.setEnabled(true);         // → onEnabled(true) → setup(), now enabled
+    // Now enable the previously-disabled one and re-run its applyState (the post-toggle sweep):
+    // it must NOT steal the live seat (first live wins).
+    dis.setEnabled(true);
+    dis.applyState();
     CHECK(mm::AudioService::latestFrame() == live.audioFrame());   // live keeps the seat
 
     live.teardown();

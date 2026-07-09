@@ -21,7 +21,7 @@ TEST_CASE("ParticlesEffect allocates trail buffer when enabled") {
     mm::ParticlesEffect particles;
     layer.addChild(&particles);
 
-    layer.onBuildState();
+    layer.applyState();
     CHECK(particles.dynamicBytes() == 16 * 16 * 3);
 }
 
@@ -41,7 +41,7 @@ TEST_CASE("ParticlesEffect renders non-zero buffer after one frame") {
     mm::ParticlesEffect particles;
     layer.addChild(&particles);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -68,10 +68,10 @@ TEST_CASE("ParticlesEffect frees trail buffer when disabled") {
     mm::ParticlesEffect particles;
     layer.addChild(&particles);
 
-    layer.onBuildState();
+    layer.applyState();
     CHECK(particles.dynamicBytes() > 0);
 
     particles.setEnabled(false);
-    particles.onBuildState();
+    particles.applyState();
     CHECK(particles.dynamicBytes() == 0);
 }

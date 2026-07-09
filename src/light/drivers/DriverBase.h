@@ -65,15 +65,6 @@ public:
     /// `deinit(); DriverBase::teardown();`.
     void teardown() override { clearFailBuf(); clearConfigErr(); setConfigWarn(nullptr); }
 
-    /// Release-on-disable helper for the drivers that hold a scarce resource (a GPIO peripheral or a
-    /// socket): disabling frees it so another module can claim the pins, re-enabling re-acquires. The
-    /// driver's own setup()/teardown() ARE its acquire/release, so this routes to them virtually — no
-    /// duplicated logic; the freed pins then show released in the pin map. NOT wired into onEnabled at
-    /// the base, because a driver whose teardown() has extra lifecycle (HueDriver frees name buffers
-    /// its setup() doesn't re-fetch) would half-tear-down on a disable; each resource-holding driver
-    /// opts in by overriding onEnabled to call this. Preview/Hue (no GPIO/peripheral held) don't.
-    void releaseOnDisable(bool on) { if (on) setup(); else teardown(); }
-
 protected:
     Layer* layer_ = nullptr;
 

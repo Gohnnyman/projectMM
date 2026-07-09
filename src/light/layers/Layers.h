@@ -40,7 +40,6 @@ public:
     /// re-running main.cpp's setLayouts. Then chain to base to build the children.
     void onBuildState() override {
         setLayouts(layouts_);
-        MoonModule::onBuildState();
     }
 
     /// Role-filtered loop propagation: only tick children that are Layers.

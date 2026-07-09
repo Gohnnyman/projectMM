@@ -39,7 +39,7 @@ struct Rig {
         layer.setChannelsPerLight(3);
         layer.addChild(&fx);
         fx.onBuildControls();
-        layer.onBuildState();
+        layer.applyState();
     }
 };
 

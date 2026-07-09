@@ -29,7 +29,7 @@ TEST_CASE("BlurzEffect stays black without an audio frame") {
     mm::BlurzEffect blurz;
     layer.addChild(&blurz);
 
-    layer.onBuildState();
+    layer.applyState();
     // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). loop()
     // does the first-frame clear + fade, then reads silence and returns before drawing any dot.
     for (int i = 0; i < 8; i++) layer.loop();
@@ -65,7 +65,7 @@ TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
     mm::BlurzEffect blurz;
     layer.addChild(&blurz);
 
-    layer.onBuildState();
+    layer.applyState();
 
     // Advance the audio and the effect together a few frames: the band cursor wraps 0..15, so over
     // several ticks the dot lands a non-zero magnitude and paints.
@@ -108,7 +108,7 @@ TEST_CASE("BlurzEffect geqScanner sweeps the dot to a new position each frame") 
     blurz.fadeRate = 255;      // fade the previous frame's trail fully, so the current dot dominates
     layer.addChild(&blurz);
 
-    layer.onBuildState();
+    layer.applyState();
 
     auto brightestIndex = [&]() {
         auto& buf = layer.buffer();
@@ -154,7 +154,7 @@ TEST_CASE("BlurzEffect survives degenerate grid sizes") {
         mm::BlurzEffect blurz;
         layer.addChild(&blurz);
 
-        layer.onBuildState();
+        layer.applyState();
         for (int i = 0; i < 4; i++) { audio.loop(); layer.loop(); }
     }
     CHECK(true);   // no crash at 0×0×0 or 1×1

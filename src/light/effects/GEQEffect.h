@@ -60,7 +60,7 @@ public:
     // rows doesn't truncate the remembered peak height.
     void onBuildState() override {
         const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
-        if (enabled() && cols > 0) {
+        if (cols > 0) {
             if (cols != peakCount_) {
                 releasePeaks();
                 peaks_ = static_cast<lengthType*>(platform::alloc(cols * sizeof(lengthType)));
@@ -72,7 +72,6 @@ public:
         }
         rippleCounter_ = 0;
         setDynamicBytes(peakCount_ * sizeof(lengthType));
-        MoonModule::onBuildState();
     }
 
     void teardown() override {

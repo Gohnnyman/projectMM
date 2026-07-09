@@ -222,18 +222,25 @@ public:
         if (persistChanged || wasCached) refreshStatus();
     }
 
+    /// One-time wiring, enabled-INDEPENDENT: show the cached device list on boot. The last-known
+    /// list is restored before setup() by the persistence overlay (the `devices` List round-trips
+    /// as JSON), so the UI shows it INSTANTLY — even for a disabled instance, which still displays
+    /// what it last saw. The active_ seat + socket (the actual resource) are handled in onBuildState.
     void setup() override {
         MoonModule::setup();
-        if (!enabled()) return;   // a disabled instance must not win the active_ election at boot
-        active_ = this;
-        // The last-known device list is restored automatically before setup() by the
-        // persistence overlay (the `devices` List control round-trips as JSON). So the
-        // UI shows it INSTANTLY on boot — no waiting for an announcement to re-arrive.
         if (deviceCount_) {
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s (cached)",
                           deviceCount_, deviceCount_ == 1 ? "" : "s");
         }
         setStatus(statusBuf_);
+    }
+
+    /// Pure build (see MoonModule::onBuildState): claim the singleton active_ seat (the Hue-bridge
+    /// routing target). No enabled() check — core's applyState() calls this only when effectively-
+    /// enabled and routes to teardown() otherwise, which vacates the seat and closes the presence
+    /// socket, so a disabled instance (or one under a disabled parent) frees the port.
+    void onBuildState() override {
+        active_ = this;
     }
 
     /// Close the presence socket so its port is released (the module holds it via the lazy
@@ -243,13 +250,6 @@ public:
         listener_.close();
         listenerBound_ = false;
         MoonModule::teardown();
-    }
-
-    /// Disable releases the presence socket (its port frees for another consumer); enable re-binds
-    /// lazily on the next loop1s via ensureListener — same pattern as IrService's lazy reopen.
-    void onEnabled(bool on) override {
-        if (on) { active_ = this; }
-        else    { listener_.close(); listenerBound_ = false; if (active_ == this) active_ = nullptr; }
     }
 
     /// Every tick: ensure we're online, drain inbound presence packets through the plugins,

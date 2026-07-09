@@ -38,7 +38,7 @@ public:
         // fills z on 3D layers. Avoids allocating depth× more heap than needed.
         uint8_t cpl = channelsPerLight();
         size_t needed = static_cast<size_t>(width()) * height() * cpl;
-        if (enabled() && needed > 0) {
+        if (needed > 0) {
             if (needed != trailBytes_) {
                 releaseTrail();
                 trail_ = static_cast<uint8_t*>(platform::alloc(needed));

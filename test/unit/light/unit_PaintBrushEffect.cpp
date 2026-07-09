@@ -67,7 +67,7 @@ TEST_CASE("PaintBrushEffect draws lit strokes from a live audio frame") {
     mm::PaintBrushEffect fx;
     fx.minLength = 0;   // no length gate: any stroke with band energy draws
     layer.addChild(&fx);
-    layer.onBuildState();
+    layer.applyState();
 
     layer.loop();   // draws the oscillating lines for the current (frozen) frame
 
@@ -101,7 +101,7 @@ TEST_CASE("PaintBrushEffect stays black on silence") {
 
     mm::PaintBrushEffect fx;
     layer.addChild(&fx);
-    layer.onBuildState();
+    layer.applyState();
 
     // Run several frames: the per-frame fade only decays what's there, and silence never adds a stroke,
     // so the field never lights.
@@ -137,7 +137,7 @@ TEST_CASE("PaintBrushEffect minLength gate suppresses all strokes") {
     mm::PaintBrushEffect fx;
     fx.minLength = 255;   // length is a 0..255 fraction; "> 255" is never true → no line draws
     layer.addChild(&fx);
-    layer.onBuildState();
+    layer.applyState();
 
     layer.loop();
 
@@ -169,7 +169,7 @@ TEST_CASE("PaintBrushEffect survives degenerate grid sizes") {
 
         mm::PaintBrushEffect fx;
         layer.addChild(&fx);
-        layer.onBuildState();
+        layer.applyState();
         for (int i = 0; i < 4; i++) { mic.loop(); layer.loop(); }   // must not crash on 0×0×0 or 1×1×1
     }
     CHECK(true);

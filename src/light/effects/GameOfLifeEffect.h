@@ -93,7 +93,7 @@ public:
     // (an inline array here caused a P4 stack-overflow bootloop with HueDriver).
     void onBuildState() override {
         const nrOfLightsType count = nrOfLights();
-        if (enabled() && count > 0) {
+        if (count > 0) {
             const size_t planeBytes = (static_cast<size_t>(count) + 7) / 8;
             if (count != cellCount_) {
                 release();

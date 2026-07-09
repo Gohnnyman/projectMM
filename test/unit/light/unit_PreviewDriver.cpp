@@ -107,14 +107,14 @@ struct PreviewRig {
         layer.setLayouts(&group);
         layer.setChannelsPerLight(cpl);
         layer.onBuildControls();
-        layer.onBuildState();
+        layer.applyState();
 
         preview = new mm::PreviewDriver();
         preview->setBroadcaster(&cap);
         drivers.addChild(preview);
         drivers.setLayer(&layer);          // passBufferToDrivers wires preview's source + layer
         drivers.onBuildControls();
-        drivers.onBuildState();
+        drivers.applyState();
     }
 
     void produce() {
@@ -283,8 +283,8 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     drivers.setLayers(&layers);          // container-bound: layer_ re-resolved at buildState
     drivers.onBuildControls();
 
-    layers.onBuildState();
-    drivers.onBuildState();
+    layers.applyState();
+    drivers.applyState();
     REQUIRE(preview->layer() == layer);  // wired to the active Layer
 
     // Remove the only Layer, then rebuild — activeLayer() now returns null.
@@ -292,8 +292,8 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     layer->teardown();
     mm::Scheduler::deleteTree(layer);    // free it — a stale pointer would now dangle
 
-    layers.onBuildState();
-    drivers.onBuildState();              // must NOT deref the freed Layer
+    layers.applyState();
+    drivers.applyState();              // must NOT deref the freed Layer
     CHECK(preview->layer() == nullptr);  // cleared, not dangling
 
     // And producing a frame on the empty pipeline is a safe no-op (no crash).
@@ -425,8 +425,8 @@ TEST_CASE("PreviewDriver cancels an in-flight buffered send on rebuild (resize s
     // A resize: rebuild the pipeline. PreviewDriver::onBuildState must cancel the active send
     // BEFORE the buffer is reallocated.
     g.width = 32; g.height = 32;
-    rig.layer.onBuildState();          // reallocs the producer buffer (the body the send pointed at)
-    rig.preview->onBuildState();       // must cancel the in-flight send
+    rig.layer.applyState();          // reallocs the producer buffer (the body the send pointed at)
+    rig.preview->applyState();       // must cancel the in-flight send
 
     CHECK(rig.cap.bufferedCanceled == cancelsBefore + 1);   // the stale send was cancelled
 }

@@ -74,12 +74,20 @@ public:
     // rebuild so setting the pin updates the status live. Also rebuild the fast uint32 lookup from
     // the persisted hex strings — persistence restores the codeStr_ buffers (Text controls), so
     // parse each back into learnedCode_ here (post-load) so a learned binding survives a reboot.
+    /// Pure build (see MoonModule::onBuildState): rebuild the fast uint32 lookup from the persisted
+    /// hex strings (persistence restores the codeStr_ Text controls, so parse each back post-load so a
+    /// learned binding survives a reboot) and report readiness. The IR RX channel is opened lazily in
+    /// loop()/irRead when enabled; the release lives in teardown(), which applyState() routes a
+    /// disabled service to.
     void onBuildState() override {
         for (uint8_t i = 0; i < kActionCount; i++)
             learnedCode_[i] = codeStr_[i][0] ? std::strtoul(codeStr_[i], nullptr, 0) : 0;
         reportReady();
-        MoonModule::onBuildState();
     }
+
+    /// Release the IR RX channel (opened lazily in loop) so its pin is free for another module.
+    /// applyState() calls this when the service, or a parent, is disabled; re-acquire is lazy on enable.
+    void teardown() override { platform::irStop(); MoonModule::teardown(); }
 
     void onUpdate(const char* controlName) override {
         if (std::strcmp(controlName, "pin") == 0) reportReady();
@@ -94,10 +102,6 @@ public:
         uint32_t code = 0;
         if (platform::irRead(static_cast<uint16_t>(pin_), code)) processCode(code);
     }
-
-    /// Disable releases the IR RX channel so its pin is free for another module (and shows freed in
-    /// the pin map); re-enable needs nothing — loop() reopens the channel lazily on the next irRead.
-    void onEnabled(bool on) override { if (!on) platform::irStop(); }
 
     /// The last decoded IR code (0 = none yet). The seam a future LightsControl consumes.
     uint32_t latestCode() const { return lastCode_; }

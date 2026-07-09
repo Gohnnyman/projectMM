@@ -31,8 +31,8 @@ struct ChainRig {
         layer.setChannelsPerLight(3);
         for (auto* m : mods) layer.addChild(m);
         layer.onBuildControls();
-        group.onBuildState();
-        layer.onBuildState();
+        group.applyState();
+        layer.applyState();
     }
 };
 } // namespace
@@ -123,7 +123,7 @@ TEST_CASE("Layer skips a disabled modifier in the chain") {
         rig.layer.lut().forEachDestination(li, [&](mm::nrOfLightsType) { withoutMask++; });
 
     mask.setEnabled(true);
-    rig.layer.onBuildState();
+    rig.layer.applyState();
     std::size_t withMask = 0;
     for (mm::nrOfLightsType li = 0; li < rig.layer.lut().logicalCount(); li++)
         rig.layer.lut().forEachDestination(li, [&](mm::nrOfLightsType) { withMask++; });

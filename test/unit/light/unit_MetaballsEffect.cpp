@@ -21,7 +21,7 @@ TEST_CASE("MetaballsEffect writes non-zero RGB data to buffer") {
     mm::MetaballsEffect metaballs;
     layer.addChild(&metaballs);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -50,7 +50,7 @@ TEST_CASE("MetaballsEffect produces spatial variation") {
     mm::MetaballsEffect metaballs;
     layer.addChild(&metaballs);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();

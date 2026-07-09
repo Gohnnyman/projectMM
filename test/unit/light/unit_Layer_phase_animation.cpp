@@ -44,8 +44,8 @@ bool animates_over_ms(int total_ms) {
     layer.setChannelsPerLight(3);
     Effect e;
     layer.addChild(&e);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     uint32_t virtualNow = 1000;       // arbitrary non-zero start
     mm::platform::setTestNowMs(virtualNow);
@@ -100,17 +100,17 @@ TEST_CASE("Replacing an effect at runtime: new effect still animates") {
     auto* noise = new mm::NoiseEffect();
     layer.addChild(noise);
 
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
     layer.loop();
 
     auto* fresh = new mm::MetaballsEffect();
     mm::MoonModule* old = layer.replaceChildAt(0, fresh);
     fresh->onBuildControls();
     fresh->setup();
-    fresh->onBuildState();
+    fresh->applyState();
     if (old) { old->teardown(); delete old; }
-    layer.onBuildState();
+    layer.applyState();
 
     mm::platform::setTestNowMs(1000);
     layer.loop();

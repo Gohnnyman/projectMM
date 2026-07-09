@@ -212,13 +212,15 @@ private:
         void collect(MoonModule* m) {
             if (!m) return;
             // A DISABLED module has stopped acting, so it no longer holds its pins as far as the map is
-            // concerned — skip its claims (the same gate the Scheduler applies to skip its loop:
-            // !respectsEnabled() || enabled()). So switching a module off frees its GPIOs in the map,
-            // and switching it back on re-claims them, with no reboot. (A System module like Tasks/Pins
-            // ignores the flag via respectsEnabled()==false, so it's never skipped.) The map's "freed"
-            // is truthful: a resource-holding module's onEnabled(false) actually deinits its peripheral
-            // (RMT/Parlio/LCD/I²S/socket/IR), so the freed GPIO is genuinely reusable, not just hidden.
-            const bool active = !m->respectsEnabled() || m->enabled();
+            // concerned — skip its claims. Uses effectivelyEnabled() (not the raw enabled() flag) so a
+            // module under a DISABLED PARENT also shows its pins freed: the applyState() cascade tears
+            // that module's peripheral down (a disabled parent releases its whole subtree), so the map
+            // must match — a child of a disabled Drivers/Layer container frees its GPIOs too. A System
+            // module (Tasks/Pins) ignores the flag via respectsEnabled()==false, so it's never skipped.
+            // The map's "freed" is truthful: applyState() routes a disabled (or effectively-disabled)
+            // module to teardown(), which deinits its peripheral (RMT/Parlio/LCD/I²S/socket/IR), so the
+            // freed GPIO is genuinely reusable, not just hidden — no reboot.
+            const bool active = !m->respectsEnabled() || m->effectivelyEnabled();
             const ControlList& cl = m->controls();
             for (uint8_t i = 0; active && i < cl.count(); i++) {
                 const ControlDescriptor& d = cl[i];

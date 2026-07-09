@@ -29,7 +29,7 @@ TEST_CASE("StarFieldEffect paints greyscale stars once the throttle elapses") {
     stars.numStars = 255;   // many stars so at least one projects on-panel
     stars.usePalette = false;
     layer.addChild(&stars);
-    layer.onBuildState();
+    layer.applyState();
 
     // speed=20 → throttle 1000/20 = 50 ms; step_ starts at 0, so millis()=100 clears the gate.
     mm::platform::setTestNowMs(100);
@@ -72,7 +72,7 @@ TEST_CASE("StarFieldEffect at speed 0 leaves the buffer black") {
     stars.speed = 0;        // paused
     stars.numStars = 255;
     layer.addChild(&stars);
-    layer.onBuildState();
+    layer.applyState();
 
     mm::platform::setTestNowMs(1000);
     layer.loop();
@@ -104,7 +104,7 @@ TEST_CASE("StarFieldEffect with usePalette lights stars from the palette") {
     stars.numStars = 255;
     stars.usePalette = true;
     layer.addChild(&stars);
-    layer.onBuildState();
+    layer.applyState();
 
     // Rainbow palette (0), generated at full saturation/value so entries are colourful, not grey —
     // Palettes::active() is a process-wide static any prior test can mutate, so pin it here.
@@ -147,7 +147,7 @@ TEST_CASE("StarFieldEffect survives a 0x0x0 grid") {
     mm::StarFieldEffect stars;
     layer.addChild(&stars);
 
-    layer.onBuildState();
+    layer.applyState();
     mm::platform::setTestNowMs(100);
     layer.loop();   // must not crash
 

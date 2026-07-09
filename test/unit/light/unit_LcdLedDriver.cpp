@@ -32,7 +32,7 @@ void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     d.onBuildControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
-    d.onBuildState();
+    d.applyState();
 }
 
 // frameBytes = maxLaneLights × outCh × 24 + 800 latch pad + 64 clock-tolerance
@@ -109,7 +109,7 @@ TEST_CASE("LcdLedDriver bad pins → status error → recovery") {
     CHECK(d.status() != nullptr);
 
     std::strcpy(d.pins, "1,2,4,5,6,7,8,9");
-    d.onBuildState();
+    d.applyState();
     CHECK(d.laneCount() == 8);
     CHECK(d.status() == nullptr);
 }
@@ -128,7 +128,7 @@ TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
     d.onBuildControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
-    d.onBuildState();
+    d.applyState();
 
     CHECK(d.laneCount() == 0);            // no lanes claimed
     CHECK(d.frameBytes() == 0);
@@ -178,7 +178,7 @@ TEST_CASE("LcdLedDriver setup/teardown is repeatable") {
         d.setup();
         d.setSourceBuffer(&src);
         d.setCorrection(&corr);
-        d.onBuildState();
+        d.applyState();
         REQUIRE(d.laneCount() == 8);
         d.teardown();
         CHECK(d.status() == nullptr);

@@ -73,28 +73,25 @@ public:
         return isWindowControl(name);
     }
 
-    /// Open the socket and derive the stable E1.31 component id (CID) from the MAC once — no UUID
-    /// machinery needed for a deterministic, unique-enough id — then bind the destination so each
-    /// per-packet send skips the address parse + route lookup (re-bound in loop() on an ip/protocol
-    /// change; see connectIfDestChanged).
-    /// Skips opening the socket while DISABLED: the boot Scheduler calls setup() on every module
-    /// ungated by enabled(), so a disabled sender would otherwise hold an open UDP socket at boot.
-    /// Stays released until enabled. Same enabled()-gate as the pin-holding drivers.
+    /// One-time wiring only: derive the stable E1.31 component id (CID) from the MAC once — no
+    /// UUID machinery needed for a deterministic, unique-enough id. The socket open (the acquire)
+    /// lives in onBuildState(), the sole resource gate; enabled-independent here.
     void setup() override {
-        if (!enabled()) return;
-        socket_.open();
         std::memcpy(cid_, "projectMM\0", 10);
         platform::getMacAddress(cid_ + 10);
-        connectIfDestChanged();
     }
 
     /// Close the socket on teardown, then chain to the base to clear any status this driver set.
     void teardown() override {
         socket_.close();
+        // Reset the cached destination so a re-enable (onBuildState → socket_.open() +
+        // connectIfDestChanged()) forces a fresh connect on the new socket. Without this,
+        // connectIfDestChanged() would see the unchanged ip/protocol and early-out, leaving
+        // the reopened socket unconnected and sends silently failing.
+        std::memset(lastConnectedIp_, 0, 4);
+        lastConnectedProtocol_ = 0xFF;
         DriverBase::teardown();
     }
-    /// Disable closes the UDP socket (freeing it); enable reopens it + re-resolves the destination.
-    void onEnabled(bool on) override { releaseOnDisable(on); }
 
     /// Take the shared source buffer and (re)size the corrected_ buffer for it. Called from
     /// Drivers::passBufferToDrivers inside onBuildState (and once at setup); resizeCorrected() is a
@@ -111,11 +108,14 @@ public:
         resizeCorrected();
     }
 
-    /// Topology change (light count, channels per light, or LUT path swap) — the framework calls
-    /// this after Layer/Drivers reshape. Resize off the hot path so loop() never allocates.
+    /// Pure build (see MoonModule::onBuildState): open the UDP socket (idempotent), re-resolve the
+    /// destination, and resize corrected_ off the hot path (loop() never allocates). No enabled()
+    /// check — core's applyState() calls this only when effectively-enabled and routes to teardown()
+    /// (socket closed, freed) otherwise, so a disabled sender (or one under a disabled parent) frees it.
     void onBuildState() override {
+        socket_.open();          // idempotent: no-op if already open
+        connectIfDestChanged();
         resizeCorrected();
-        MoonModule::onBuildState();
     }
 
     /// Preset toggle (RGB↔RGBW) changes correction_->outChannels without a structural rebuild;

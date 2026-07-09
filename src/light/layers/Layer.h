@@ -98,8 +98,7 @@ public:
             // keeps reporting true even though we just freed the LUT.
             lutSkipped_ = false;
             clearStatus();
-            MoonModule::onBuildState();
-            return;
+            return;   // applyState() recurses to the effects next
         }
 
         // Compute physical dimensions from layout
@@ -137,8 +136,7 @@ public:
             setStatus(statusBuf_);
         }
 
-        // Children allocate after LUT is built (effects need buffer dimensions)
-        MoonModule::onBuildState();
+        // applyState() recurses to the effects next — they allocate against the LUT/buffer just built.
     }
 
     void loop() override {
@@ -183,9 +181,9 @@ public:
             rebuild |= m->consumeNeedsRebuild();
         }
         // One rebuild per frame even if several modifiers asked (no re-entrant rebuild
-        // from inside a modifier's loop()). onBuildState rebuilds the whole pipeline,
-        // which re-runs rebuildLUT() with the modifiers' fresh state.
-        if (rebuild) { onBuildState(); return; }
+        // from inside a modifier's loop()). applyState() rebuilds the whole pipeline —
+        // re-runs rebuildLUT() with the modifiers' fresh state, then recurses to the effects.
+        if (rebuild) { applyState(); return; }
 
         // Live pass: remap the logical buffer per frame for dynamic modifiers (Rotate).
         // Skipped entirely when no modifier is live — a static-only chain pays nothing,

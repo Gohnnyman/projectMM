@@ -13,7 +13,7 @@ static void buildLayer(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& la
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     layer.addChild(&fx);
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 }
 

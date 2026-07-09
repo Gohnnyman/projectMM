@@ -1381,10 +1381,10 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     if (scheduler_) scheduler_->ensureUniqueName(mod);
 
     // Lifecycle in Scheduler::setup() order: onBuildControls() (bind buffers) →
-    // setup() (may read them) → onBuildState().
+    // setup() (may read them) → applyState() (build if effectively-enabled, else release).
     mod->onBuildControls();
     mod->setup();
-    mod->onBuildState();
+    mod->applyState();
     if (scheduler_) scheduler_->buildState();
 
     // Persist the new tree shape (debounced save via noteDirty).
@@ -1599,7 +1599,7 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     // Lifecycle on the fresh module — same phase order as the add path.
     fresh->onBuildControls();
     fresh->setup();
-    fresh->onBuildState();
+    fresh->applyState();
 
     // Tear down the old subtree (teardown + recursive delete) — same pair
     // FilesystemModule::applyNode uses; a bare delete would leak its children.

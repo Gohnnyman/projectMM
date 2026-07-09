@@ -30,7 +30,7 @@ TEST_CASE("BouncingBallsEffect lights the bottom row on the first frame") {
     mm::BouncingBallsEffect balls;
     layer.addChild(&balls);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -76,7 +76,7 @@ TEST_CASE("BouncingBallsEffect with zero balls leaves the buffer black") {
     balls.numBalls = 0;  // nBalls <= 0 → loop() returns before drawing
     layer.addChild(&balls);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto& buf = layer.buffer();
@@ -104,7 +104,7 @@ TEST_CASE("BouncingBallsEffect survives a 0x0x0 grid") {
     layer.addChild(&balls);
 
     // No allocation, no draw, no crash on a zero grid.
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     CHECK(layer.buffer().count() == 0);
@@ -130,7 +130,7 @@ TEST_CASE("BouncingBallsEffect balls rise above the floor as time advances") {
     balls.numBalls = 8;
     layer.addChild(&balls);
 
-    layer.onBuildState();
+    layer.applyState();
 
     // Frame one at t=1 relaunches every ball (impactVelocity kick set from its floor bounce).
     mm::platform::setTestNowMs(1);

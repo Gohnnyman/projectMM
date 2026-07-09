@@ -56,7 +56,7 @@ public:
     void onBuildState() override {
         const lengthType w = width();
         const lengthType h = height();
-        if (enabled() && w > 0 && h > 0) {
+        if (w > 0 && h > 0) {
             if (!stars_) {
                 stars_ = static_cast<Star*>(platform::alloc(sizeof(Star) * kMaxStars));
             }

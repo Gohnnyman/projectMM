@@ -173,12 +173,10 @@ public:
     /// reinit() (a rebuild) calls — so a rebuild freed the buffer loop() needs.
     /// Keeping the two apart makes that mistake impossible here and lets the host
     /// unit test (unit_RmtLedDriver_lifecycle.cpp) pin it.
-    /// Skips the RMT/buffer acquire while DISABLED: the boot Scheduler calls setup() on every
-    /// module ungated by enabled(), so a disabled driver would otherwise grab its RMT channel +
-    /// pins at boot — a disabled RMT driver on a shared GPIO leaves an enabled Parlio driver's
-    /// output dead until a rebuild. parseConfig() is safe (fills members only); the acquire
-    /// waits for enable. Same enabled()-gate as onBuildState().
-    void setup() override { parseConfig(); if (enabled()) reinit(); }
+    /// One-time wiring only (parse the pin lists into members); the RMT/buffer acquire lives
+    /// in onBuildState(), the sole resource-lifecycle gate. Enabled-independent — the acquire
+    /// happens in the buildState sweep that always follows.
+    void setup() override { parseConfig(); }
     /// Release the RMT channels and free the symbol buffer, then clear the shared
     /// fail/config-error state (DriverBase::teardown()).
     void teardown() override {
@@ -186,45 +184,36 @@ public:
         freeSymbols();
         DriverBase::teardown();   // clears failBuf_ + configErr_
     }
-    /// Disable frees the RMT channels + DMA buffer (its pins show released in the map); enable re-acquires.
-    void onEnabled(bool on) override { releaseOnDisable(on); }
 
-    /// Topology (light count / channels) or the pins/ledsPerPin controls changed —
-    /// re-parse the lists, resize the symbol buffer, and (re)init the channels off
-    /// the hot path. loop() never allocates. Skips the re-acquire while DISABLED: the
-    /// whole-tree buildState() sweep visits every module (including a just-disabled one,
-    /// on the very toggle that disabled it), so re-acquiring here would undo onEnabled's
-    /// release — the module must stay released until re-enabled (onEnabled(true)/setup()
-    /// or the next enabled buildState re-acquires). Same self-gate as NetworkReceiveEffect.
+    /// Pure build (see MoonModule::onBuildState): re-parse, resize the symbol buffer, and (re)init the
+    /// RMT channels off the hot path (loop() never allocates). No enabled() check — core's applyState()
+    /// only calls this when effectively-enabled and routes to teardown() (release) otherwise, so the
+    /// channels + buffer free when the driver, or a parent, is disabled.
     void onBuildState() override {
-        if (!enabled()) { MoonModule::onBuildState(); return; }
         parseConfig();
         resizeSymbols();
         reinit();
-        MoonModule::onBuildState();
     }
 
     /// Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild —
     /// the per-pin symbol offsets scale with outChannels, so re-derive them too. Skipped
-    /// while disabled (would re-alloc the symbol buffer a disabled driver just released).
-    void onCorrectionChanged() override { if (!enabled()) return; parseConfig(); resizeSymbols(); }
+    /// while (effectively) disabled (would re-alloc the symbol buffer a disabled driver released).
+    void onCorrectionChanged() override { if (!effectivelyEnabled()) return; parseConfig(); resizeSymbols(); }
 
-    /// Point the driver at the source frame buffer; re-parse (counts derive from
-    /// its light count) and resize the symbol buffer to match. The resize is skipped
-    /// while disabled (a disabled driver holds no buffer, per release-on-disable); the
-    /// enabled onBuildState()/setup() sweep re-sizes it on re-enable.
+    /// Point the driver at the source frame buffer; re-parse (counts derive from its light count)
+    /// and resize the symbol buffer to match. The resize is skipped while (effectively) disabled
+    /// (a disabled driver holds no buffer); the enabled onBuildState() sweep re-sizes it on enable.
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
         parseConfig();      // counts derive from the buffer's light count
-        if (enabled()) resizeSymbols();
+        if (effectivelyEnabled()) resizeSymbols();
     }
-    /// Point the driver at the shared correction; re-parse (per-pin symbol offsets
-    /// derive from outChannels) and resize the symbol buffer to match. Skipped while
-    /// disabled — same release-on-disable gate as setSourceBuffer().
+    /// Point the driver at the shared correction; re-parse (per-pin symbol offsets derive from
+    /// outChannels) and resize the symbol buffer to match. Skipped while (effectively) disabled.
     void setCorrection(const Correction* c) override {
         correction_ = c;
         parseConfig();      // offsets derive from outChannels
-        if (enabled()) resizeSymbols();
+        if (effectivelyEnabled()) resizeSymbols();
     }
 
     /// Per-tick output: fuse the correction and WS2812 symbol-encode in one pass

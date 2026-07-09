@@ -49,7 +49,7 @@ TEST_CASE("TetrixEffect renders black during the start delay") {
     mm::platform::setTestNowMs(1000);   // freeze; onBuildState seeds step = 1000+2000
 
     TetrixRig rig(8, 8);
-    rig.layer.onBuildState();
+    rig.layer.applyState();
 
     // Still inside the 2 s start window (3000 > 1000), so the state machine only waits.
     rig.layer.loop();
@@ -66,7 +66,7 @@ TEST_CASE("TetrixEffect lights up with palette colour after the start delay") {
     mm::platform::setTestNowMs(0);
 
     TetrixRig rig(8, 8);
-    rig.layer.onBuildState();   // step = 2000 for every column
+    rig.layer.applyState();   // step = 2000 for every column
 
     // Advance well past the 2 s start delay, then run many frames so the start-roll (step 1→2) fires
     // and bricks descend into the visible region. Step time forward each frame like a real tick loop.
@@ -100,7 +100,7 @@ TEST_CASE("TetrixEffect survives degenerate and minimal grids") {
         TetrixRig rig(0, 0);
         rig.grid.depth = 0;
         mm::platform::setTestNowMs(0);
-        rig.layer.onBuildState();
+        rig.layer.applyState();
         for (uint32_t t = 0; t <= 6000; t += 500) {
             mm::platform::setTestNowMs(t);
             rig.layer.loop();
@@ -112,7 +112,7 @@ TEST_CASE("TetrixEffect survives degenerate and minimal grids") {
     {
         TetrixRig rig(1, 1);
         mm::platform::setTestNowMs(0);
-        rig.layer.onBuildState();
+        rig.layer.applyState();
         for (uint32_t t = 0; t <= 8000; t += 25) {
             mm::platform::setTestNowMs(t);
             rig.layer.loop();

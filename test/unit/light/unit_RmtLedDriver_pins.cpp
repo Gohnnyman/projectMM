@@ -24,7 +24,7 @@ void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     d.onBuildControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
-    d.onBuildState();
+    d.applyState();
 }
 
 } // namespace
@@ -232,7 +232,7 @@ TEST_CASE("RmtLedDriver idles with a status error on a bad pin list") {
     CHECK(d.status() != nullptr);        // the parse error is surfaced, not silent
     // Recovery: fixing the control and rebuilding clears the error.
     std::strcpy(d.pins, "18");
-    d.onBuildState();
+    d.applyState();
     CHECK(d.pinCount() == 1);
     CHECK(d.status() == nullptr);
 }
@@ -252,7 +252,7 @@ TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assume
     d.loop();                             // must be a no-op, not a crash
     // Setting pins later brings it live (the user-configures-then-runs flow).
     std::strcpy(d.pins, "18");
-    d.onBuildState();
+    d.applyState();
     CHECK(d.pinCount() == 1);
     CHECK(d.status() == nullptr);
 }
@@ -269,7 +269,7 @@ TEST_CASE("RmtLedDriver re-slices when the source buffer changes") {
 
     src.allocate(200, 3);
     d.setSourceBuffer(&src);
-    d.onBuildState();
+    d.applyState();
     CHECK(d.pinLightCount(0) == 100);
     CHECK(d.pinLightCount(1) == 100);
 }
@@ -377,7 +377,7 @@ TEST_CASE("RmtLedDriver loop is crash-safe for every pin configuration") {
         d.onBuildControls();
         d.setSourceBuffer(&src);
         d.setCorrection(&corr);
-        d.onBuildState();
+        d.applyState();
         d.loop();                       // 0×0×0 must be a clean no-op
     }
     SUBCASE("loop before any buffer is wired") {

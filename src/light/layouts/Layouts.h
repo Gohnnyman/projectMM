@@ -91,7 +91,6 @@ public:
                       static_cast<unsigned>(lights),
                       static_cast<unsigned>(w), static_cast<unsigned>(h), static_cast<unsigned>(d));
         setStatus(statusBuf_, lights == 0 ? Severity::Warning : Severity::Status);
-        MoonModule::onBuildState();
     }
 
 private:

@@ -15,7 +15,7 @@ static void wire(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& layer,
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     layer.addChild(&star);
-    layer.onBuildState();
+    layer.applyState();
 }
 
 // A field of stars lights at least some pixels on a populated 3D grid after a frame.

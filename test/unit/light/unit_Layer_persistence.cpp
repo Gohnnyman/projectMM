@@ -59,7 +59,7 @@ TEST_CASE("Layer: buffer persists across frames (no per-frame clear)") {
     Scene s(4, 4);
     WriteOnceEffect once;
     s.layer.addChild(&once);
-    s.layer.onBuildState();
+    s.layer.applyState();
 
     s.layer.loop();                              // frame 0: writes red at (0,0)
     CHECK(s.layer.buffer().data()[0] == 255);
@@ -76,7 +76,7 @@ TEST_CASE("Layer: fadeToBlackBy decays the persisted buffer once per frame") {
     FadeOnlyEffect fade; fade.amt = 128;          // ~half each frame
     s.layer.addChild(&once);
     s.layer.addChild(&fade);
-    s.layer.onBuildState();
+    s.layer.applyState();
 
     s.layer.loop();                              // frame 0: once writes 255; fade collected for next frame
     CHECK(s.layer.buffer().data()[0] == 255);    // not faded yet (consume is at NEXT frame start)
@@ -96,7 +96,7 @@ TEST_CASE("Layer: multiple fade requests combine with MIN (gentlest wins, longes
     s.layer.addChild(&once);
     s.layer.addChild(&gentle);
     s.layer.addChild(&harsh);
-    s.layer.onBuildState();
+    s.layer.applyState();
 
     s.layer.loop();                              // frame 0: 255 written; both fades collected → MIN = 8
     s.layer.loop();                              // frame 1: consume MIN(8,200)=8 → keep = 247/255 of 255
@@ -117,7 +117,7 @@ TEST_CASE("Layer: collected fade resets after it is consumed") {
     } oneFade;
     s.layer.addChild(&once);
     s.layer.addChild(&oneFade);
-    s.layer.onBuildState();
+    s.layer.applyState();
 
     s.layer.loop();                              // frame 0: 255 written, fade(128) collected
     s.layer.loop();                              // frame 1: consume once → ~127, no new fade requested
@@ -130,14 +130,14 @@ TEST_CASE("Layer: onBuildState clears the buffer (a rebuild wipes stale pixels)"
     Scene s(4, 4);
     WriteOnceEffect once;
     s.layer.addChild(&once);
-    s.layer.onBuildState();
+    s.layer.applyState();
 
     s.layer.loop();                              // writes red at (0,0)
     CHECK(s.layer.buffer().data()[0] == 255);
 
     // A rebuild (config change / resize) clears the buffer — persistence holds between frames but NOT
     // across a rebuild, so a stale lit pixel must not survive it (else a reconfigure leaves ghosts).
-    s.layer.onBuildState();
+    s.layer.applyState();
     const mm::Buffer& b = s.layer.buffer();
     bool allBlack = true;
     for (size_t i = 0; i < b.bytes(); i++)

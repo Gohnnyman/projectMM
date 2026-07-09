@@ -70,8 +70,8 @@ TEST_CASE("Layer live pass: Rotate remaps the buffer per frame") {
     GradientEffect fx; layer.addChild(&fx);
     mm::RotateModifier rot; rot.speed = 200;   // fast enough to cross several angle steps
     layer.addChild(&rot);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     auto f0 = frameAt(layer, 1000);
     auto f1 = frameAt(layer, 1000);   // same time → same angle → identical frame
@@ -93,8 +93,8 @@ TEST_CASE("Layer live pass: skipped when no modifier is live") {
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     GradientEffect fx; layer.addChild(&fx);   // no modifiers at all
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     auto f0 = frameAt(layer, 1000);
     auto f1 = frameAt(layer, 5000);   // far later — but nothing animates the buffer
@@ -115,8 +115,8 @@ TEST_CASE("Layer live pass: a disabled live modifier does not run") {
     GradientEffect fx; layer.addChild(&fx);
     mm::RotateModifier rot; rot.speed = 200; rot.setEnabled(false);
     layer.addChild(&rot);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     auto f0 = frameAt(layer, 1000);
     auto f1 = frameAt(layer, 1300);
@@ -140,8 +140,8 @@ TEST_CASE("Layer coalesces rebuilds from two dynamic modifiers") {
     mm::RandomMapModifier b; b.bpm = 60;
     layer.addChild(&a);
     layer.addChild(&b);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     REQUIRE(layer.lut().logicalCount() == 64);
 

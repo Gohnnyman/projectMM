@@ -156,7 +156,7 @@ private:
         mod->setParent(layer());
         mod->onBuildControls();
         mod->setup();
-        mod->onBuildState();
+        mod->applyState();   // build if effectively-enabled (walks to the Layer parent), else release
         current_ = mod;
         // Cache the child's dimensionality from the FACTORY (which probed it at registration via
         // if-constexpr), not by downcasting mod. An Effect-role type is not guaranteed to be an

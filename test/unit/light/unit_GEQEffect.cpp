@@ -34,7 +34,7 @@ TEST_CASE("GEQEffect stays black without an audio frame") {
     geq.ripple = 0;   // no falling peak dot: silence must leave the buffer fully dark
     layer.addChild(&geq);
 
-    layer.onBuildState();
+    layer.applyState();
     // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). Each loop
     // fades then reads silence → every bar height 0 → nothing drawn.
     for (int i = 0; i < 8; i++) layer.loop();
@@ -74,7 +74,7 @@ TEST_CASE("GEQEffect fills columns from the floor upward") {
     geq.fadeOut = 255; // fully clear the previous frame so a lit floor pixel is this frame's bar
     layer.addChild(&geq);
 
-    layer.onBuildState();
+    layer.applyState();
 
     auto floorLit = [&](int x) {
         auto* d = layer.buffer().data();
@@ -130,7 +130,7 @@ TEST_CASE("GEQEffect colorBars colours bars per column") {
     geq.fadeOut = 255;
     layer.addChild(&geq);
 
-    layer.onBuildState();
+    layer.applyState();
     mm::Palettes::setActive(0);   // Rainbow: index maps to a spread of hues, order-independent
 
     // Advance until both an early and a late column have a lit floor, then compare their colours.
@@ -182,7 +182,7 @@ TEST_CASE("GEQEffect survives degenerate grid sizes") {
         mm::GEQEffect geq;
         layer.addChild(&geq);
 
-        layer.onBuildState();
+        layer.applyState();
         for (int i = 0; i < 4; i++) { audio.loop(); layer.loop(); }
     }
     CHECK(true);   // no crash at 0×0×0 or 1×1

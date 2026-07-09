@@ -63,7 +63,7 @@ struct Ctx {
         Ctx ctx(16, 16); \
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
-        ctx.layer.onBuildState(); \
+        ctx.layer.applyState(); \
         ctx.layer.loop(); \
         CHECK(ctx.hasNonZero()); \
     } \
@@ -71,7 +71,7 @@ struct Ctx {
         Ctx ctx(32, 32); \
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
-        ctx.layer.onBuildState(); \
+        ctx.layer.applyState(); \
         ctx.layer.loop(); \
         CHECK(ctx.cornersDiffer()); \
     }
@@ -88,7 +88,7 @@ TEST_CASE("LavaLampEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::LavaLampEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
+    ctx.layer.applyState();
     ctx.layer.loop();
     CHECK(ctx.hasNonZero());
 }
@@ -106,7 +106,7 @@ TEST_CASE("LavaLampEffect spatial variation") {
     mm::LavaLampEffect effect;
     effect.bpm = 60;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
+    ctx.layer.applyState();
     uint32_t virtualNow = 1000;
     bool varied = false;
     for (int i = 0; i < 10 && !varied; i++) {
@@ -126,7 +126,7 @@ TEST_CASE("RingsEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RingsEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
+    ctx.layer.applyState();
     ctx.layer.loop();
     CHECK(ctx.hasNonZero());
 }
@@ -136,7 +136,7 @@ TEST_CASE("RingsEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RingsEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
+    ctx.layer.applyState();
     ctx.layer.loop();
     CHECK(ctx.hasTwoDistinctColors());
 }
@@ -148,7 +148,7 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
+    ctx.layer.applyState();
     ctx.layer.loop();
     CHECK(ctx.hasNonZero());
 }
@@ -158,7 +158,7 @@ TEST_CASE("RipplesEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
+    ctx.layer.applyState();
     ctx.layer.loop();
     CHECK(ctx.hasTwoDistinctColors());
 }

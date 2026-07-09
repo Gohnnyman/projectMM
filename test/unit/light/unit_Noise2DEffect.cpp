@@ -21,7 +21,7 @@ TEST_CASE("Noise2DEffect writes a non-zero palette-mapped noise field") {
     mm::Noise2DEffect noise;
     layer.addChild(&noise);
 
-    layer.onBuildState();
+    layer.applyState();
     // Palettes::active() is a process-wide static any prior test can mutate; pin a colourful palette
     // (Rainbow=0) so the non-black assertion is order-independent.
     mm::Palettes::setActive(0);
@@ -55,7 +55,7 @@ TEST_CASE("Noise2DEffect distant pixels carry different colours") {
     noise.scale = 64;  // default zoom: at (0,0) vs (8,8) the noise coords are (0,0) vs (512,512)
     layer.addChild(&noise);
 
-    layer.onBuildState();
+    layer.applyState();
     mm::Palettes::setActive(0);
     layer.loop();
 
@@ -84,7 +84,7 @@ TEST_CASE("Noise2DEffect survives a degenerate 0x0 grid") {
     mm::Noise2DEffect noise;
     layer.addChild(&noise);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();  // must not crash on an empty grid
 
     CHECK(layer.buffer().count() == 0);

@@ -38,7 +38,7 @@ TEST_CASE("GEQ3DEffect renders black on silence") {
     mm::GEQ3DEffect geq;
     layer.addChild(&geq);
 
-    layer.onBuildState();
+    layer.applyState();
     // No AudioService is active, so latestFrame() returns static silence (all bands 0).
     layer.loop();
 
@@ -76,7 +76,7 @@ TEST_CASE("GEQ3DEffect draws a bar where the audio band is energised") {
     mm::GEQ3DEffect geq;
     layer.addChild(&geq);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -113,7 +113,7 @@ TEST_CASE("GEQ3DEffect survives a zero-size grid") {
     mm::GEQ3DEffect geq;
     layer.addChild(&geq);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();   // must not crash on a 0×0×0 grid
     CHECK(true);
 }
@@ -144,7 +144,7 @@ TEST_CASE("GEQ3DEffect handles a grid narrower than numBands") {
     geq.numBands = 16;
     layer.addChild(&geq);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();       // clamps bands to 4 cols → bar width ≥ 1, no crash
 
     // Band 0 maps to the leftmost column of a 4-wide grid; something is lit there.

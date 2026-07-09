@@ -121,10 +121,34 @@ public:
     virtual void loop1s() { tickChildren(&MoonModule::loop1s); }
     virtual void teardown() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->teardown(); }
 
-    /// Called when enabled flips. Default no-op; override to start/stop sockets, free
-    /// buffers, etc. The scheduler always invokes loop()/loop20ms()/loop1s() regardless
-    /// of `enabled` — modules decide what disabled means by checking enabled() inside
-    /// their loop fns or by stopping/starting their work in onEnabled().
+    /// The single orchestration point for the resource lifecycle — the enabled decision lives HERE,
+    /// in core, so a catalog module's onBuildState() is pure "build my state" with no enabled() check.
+    /// Per node: build it when effectively-enabled (acquire), else tear it down (release). The
+    /// recursion is owned here, not in onBuildState(): the enabled branch builds this node then
+    /// recurses into each child's applyState() (parent-first — a Layer builds its LUT before its
+    /// effects build against it), so each child is routed by ITS OWN effective-enabled — a disabled
+    /// child under an enabled parent is torn down, not built. The disabled branch calls teardown(),
+    /// which already recurses to the whole subtree (reverse order), so applyState() does not recurse
+    /// again there. Reached from Scheduler::buildState() and the boot sweep; the disable toggle runs
+    /// it too, so acquire-on-enable and release-on-disable are this one path.
+    void applyState() {
+        if (effectivelyEnabled()) {
+            onBuildState();
+            for (uint8_t i = 0; i < childCount_; i++) children_[i]->applyState();
+        } else {
+            teardown();   // recurses to children itself (reverse order)
+        }
+    }
+
+    /// Called once when the enabled flag flips (the Scheduler runs a full buildState() right
+    /// after, so onBuildState() re-derives state on the same toggle). Default no-op. Override
+    /// ONLY for a genuine edge-triggered one-shot that is NOT "rebuild derived state" — e.g. a
+    /// clean protocol DISCONNECT (MqttModule sends a courtesy MQTT frame + resets its backoff).
+    /// Resource acquire/release does NOT belong here: buffers and peripherals are (re)built and
+    /// freed in onBuildState(), keyed on effectivelyEnabled(), so a disabled module — or a child
+    /// of a disabled parent — releases everything through the one sweep. The scheduler always
+    /// invokes loop()/loop20ms()/loop1s() only while (effectively) enabled, so a disabled
+    /// module's loop never runs.
     virtual void onEnabled(bool /*newEnabled*/) {}
 
     /// Cheap per-control reaction, tier 1 of the three-tier control-change split (mirrors
@@ -172,6 +196,15 @@ public:
     /// LUT, the Drivers output buffer. Default propagates to children. Reached via
     /// Scheduler::buildState() (whole-tree) when a tier-2 gate returns true.
     ///
+    /// **This is the sole resource-lifecycle gate.** Build derived state (buffers AND
+    /// peripherals) for the current controls and `effectivelyEnabled()`. When
+    /// `!effectivelyEnabled()` — the module is disabled, or a parent is — build the **empty**
+    /// state: release every buffer and peripheral it holds, so a disabled subtree frees
+    /// everything. The Scheduler runs a full buildState() right after any enable/disable toggle,
+    /// so this hook (not onEnabled) is where acquire-on-enable and release-on-disable both
+    /// happen — one path, boot and runtime alike. A module therefore never checks enabled()
+    /// in setup(): setup() is enabled-independent one-time wiring; the acquire lives here.
+    ///
     /// Same role as JUCE's `prepareToPlay` or UIKit's `layoutSubviews` — a framework-driven
     /// "set up your derived state for the current config" hook with a no-op default. The verb
     /// is "build" (not "rebuild") on purpose: the operation is idempotent and history-agnostic
@@ -190,7 +223,14 @@ public:
     /// `onBuildState(const char* changedControl)` — and branch inside. The tier-2 gate
     /// (controlChangeTriggersBuildState) already carries the name, so it's a one-parameter change.
     /// Don't add it pre-emptively; no module needs the distinction today.
-    virtual void onBuildState() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onBuildState(); }
+    ///
+    /// **A leaf operation — builds THIS node only.** The tree recursion + the enabled decision live
+    /// in applyState() (core), not here: applyState() calls this when a node is effectively-enabled,
+    /// then recurses into children. So an override builds its own state and does NOT chain to a base
+    /// recursion (there is none). A container that must prepare something for its children before they
+    /// build (Drivers hands each driver the shared buffer, Layer builds its LUT) does that work in its
+    /// own onBuildState() body — applyState() then visits the children next, so they build against it.
+    virtual void onBuildState() {}
 
     /// Read this module's first output light as RGB into out[3], returning true if it has
     /// one. Domain-neutral seam (core declares it, the output-owning module overrides):
@@ -228,6 +268,19 @@ public:
     /// return false for system modules that must keep running regardless (HttpServer,
     /// Network, Filesystem) so the user can re-enable other modules through them.
     virtual bool respectsEnabled() const { return true; }
+
+    /// True unless this module — or an ancestor that respects the enabled flag — is disabled.
+    /// The single predicate the resource-lifecycle gate keys off: `onBuildState()` acquires
+    /// when this is true and releases the module's buffers/peripherals when it is false, so a
+    /// disabled parent's whole subtree releases (the disable cascade). A `respectsEnabled()==false`
+    /// ancestor is neutral — always-on, it never forces a child on or off. Off the hot path
+    /// (called from the cold onBuildState sweep, not loop()); an inherited/computed property in
+    /// the shape of a scene-graph `worldVisible` or a CSS cascade — walk to the root, cheap.
+    bool effectivelyEnabled() const {
+        for (const MoonModule* m = this; m; m = m->parent())
+            if (m->respectsEnabled() && !m->enabled()) return false;
+        return true;
+    }
 
     /// Whether this module appears in the UI (/api/state → nav card). Default true. A pure engine
     /// with no user-facing controls returns false so it isn't shown as an empty card — e.g.

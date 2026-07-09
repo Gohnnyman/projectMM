@@ -7,6 +7,7 @@
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/SpiralEffect.h"
+#include "light/effects/FireEffect.h"   // heap-holding effect — the cascade-release probe
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/drivers/Drivers.h"
 #include "platform/platform.h"
@@ -53,7 +54,7 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     bareLayer.setChannelsPerLight(3);
     mm::RainbowEffect bareEffect;
     bareLayer.addChild(&bareEffect);
-    bareLayer.onBuildState();
+    bareLayer.applyState();
     bareLayer.loop();
 
     // --- New shape: Layers container wrapping one Layer ---
@@ -72,7 +73,7 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     mm::RainbowEffect childEffect;
     childLayer.addChild(&childEffect);
 
-    layersContainer.onBuildState();
+    layersContainer.applyState();
     // Layers::loop runs each child Layer in order; for the single-child case
     // that's exactly one bareLayer.loop() equivalent.
     layersContainer.loop();
@@ -110,7 +111,7 @@ TEST_CASE("Layers with two Layers: each child Layer's loop runs and writes its b
     layersContainer.addChild(&layerA);
     layersContainer.addChild(&layerB);
     layersContainer.setLayouts(&layouts);
-    layersContainer.onBuildState();
+    layersContainer.applyState();
     layersContainer.loop();
 
     // Both child Layer buffers must be populated — each Layer renders its own
@@ -166,8 +167,8 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     drivers.addChild(&cap);
     drivers.setLayers(&layersContainer);
 
-    layersContainer.onBuildState();
-    drivers.onBuildState();      // sizes + allocates the composite output buffer
+    layersContainer.applyState();
+    drivers.applyState();      // sizes + allocates the composite output buffer
     layersContainer.loop();      // both layers render their own buffers
     drivers.loop();              // composite into outputBuffer_, hand it to cap
 
@@ -216,8 +217,8 @@ TEST_CASE("Drivers composition drops to single layer when one is disabled") {
     drivers.setLayers(&layersContainer);
 
     top.setEnabled(false);             // only the bottom layer remains
-    layersContainer.onBuildState();
-    drivers.onBuildState();
+    layersContainer.applyState();
+    drivers.applyState();
     layersContainer.loop();
     drivers.loop();
 
@@ -247,7 +248,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         layers.setLayouts(&layouts);
         mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
         drivers.setLayers(&layers);
-        layers.onBuildState(); drivers.onBuildState();
+        layers.applyState(); drivers.applyState();
 
         CHECK_FALSE(only.lut().hasLUT());            // dense grid → identity, no LUT
         CHECK(layers.enabledLayerCount() == 1);
@@ -268,7 +269,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         layers.setLayouts(&layouts);
         mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
         drivers.setLayers(&layers);
-        layers.onBuildState(); drivers.onBuildState();
+        layers.applyState(); drivers.applyState();
 
         CHECK(layers.enabledLayerCount() == 2);
         CHECK(drivers.dynamicBytes() == static_cast<size_t>(8 * 8 * 3));  // output buffer allocated
@@ -289,7 +290,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         layers.setLayouts(&layouts);
         mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
         drivers.setLayers(&layers);
-        layers.onBuildState(); drivers.onBuildState();
+        layers.applyState(); drivers.applyState();
 
         CHECK(only.lut().hasLUT());                  // mirror modifier → a real LUT
         CHECK(layers.enabledLayerCount() == 1);
@@ -320,14 +321,14 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         drivers.setLayers(&layers);
 
         // Enabled first: the driver has a valid source buffer (a real frame).
-        layers.onBuildState(); drivers.onBuildState();
+        layers.applyState(); drivers.applyState();
         CHECK(layers.firstEnabledLayer() == &only);
         CHECK(layers.enabledLayerCount() == 1);
         REQUIRE(cap.src_ != nullptr);                // a frame is being published
 
         // Now disable the only layer and rebuild — the driver must drop to idle.
         only.setEnabled(false);
-        layers.onBuildState(); drivers.onBuildState();
+        layers.applyState(); drivers.applyState();
         CHECK(layers.activeLayer() == &only);        // fallback for geometry
         CHECK(layers.firstEnabledLayer() == nullptr);// no enabled source
         CHECK(layers.enabledLayerCount() == 0);
@@ -397,4 +398,59 @@ TEST_CASE("Layers::activeLayer returns nullptr when no child has role Layer") {
     layers.addChild(&stranger);
     CHECK(stranger.role() == mm::ModuleRole::Generic);  // sanity check the stub
     CHECK(layers.activeLayer() == nullptr);             // skipped, not miscast
+}
+
+// The disable cascade: disabling a PARENT releases every descendant's resources, because
+// applyState() routes each node by its own effectivelyEnabled() — which is false for a child
+// whose ancestor is disabled. This is the core guarantee of the unified lifecycle: a disabled
+// subtree holds nothing (memory or hardware). FireEffect is the probe — its heat buffer's
+// dynamicBytes() is host-observable, standing in for any per-module resource.
+TEST_CASE("Disabling a parent Layer cascades release to its effects (effectivelyEnabled)") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    grid.width = 16; grid.height = 16; grid.depth = 1;
+    layouts.addChild(&grid);
+
+    mm::Layers layers;
+    mm::Layer layer;
+    layer.setChannelsPerLight(3);
+    layers.addChild(&layer);
+    layers.setLayouts(&layouts);
+    mm::FireEffect fire;                    // holds a heap heat buffer sized to the grid
+    layer.addChild(&fire);
+
+    layers.applyState();                    // build the whole tree
+    REQUIRE(fire.enabled());                // itself enabled
+    REQUIRE(fire.effectivelyEnabled());     // and no ancestor disabled
+    CHECK(fire.dynamicBytes() > 0);         // heat buffer allocated
+
+    // Disable the PARENT layer (the effect's own flag stays true) and re-sweep, as the Scheduler
+    // does after an enabled-toggle. The effect is now effectively-disabled (ancestor off) → its
+    // applyState routes to teardown → heap freed, even though fire.enabled() is still true.
+    layer.setEnabled(false);
+    layers.applyState();
+    CHECK(fire.enabled());                  // the effect's OWN flag is untouched
+    CHECK_FALSE(fire.effectivelyEnabled()); // but an ancestor is disabled
+    CHECK(fire.dynamicBytes() == 0);        // cascade released the child's memory
+
+    // Re-enable the parent → the effect (still self-enabled) re-acquires on the next sweep.
+    layer.setEnabled(true);
+    layers.applyState();
+    CHECK(fire.effectivelyEnabled());
+    CHECK(fire.dynamicBytes() > 0);         // re-acquired
+
+    // Effects-specific: an effect builds against the LAYER's LUT/buffer, so the router must run the
+    // Layer's onBuildState() (rebuild the LUT) BEFORE recursing into the effect (applyState visits the
+    // parent, then children). Prove the re-enabled effect actually RENDERS — a stale/zero-size buffer
+    // would leave the frame black. A tick after re-enable must write non-zero pixels.
+    layer.loop();                           // ticks the effect through the Layer
+    const uint8_t* buf = layer.buffer().data();
+    bool anyLit = false;
+    for (size_t i = 0; i < layer.buffer().bytes() && !anyLit; i++) anyLit = buf[i] != 0;
+    CHECK(anyLit);                          // Fire renders into the freshly-rebuilt buffer
+
+    // A child individually disabled under an enabled parent also releases.
+    fire.setEnabled(false);
+    layers.applyState();
+    CHECK(fire.dynamicBytes() == 0);
 }

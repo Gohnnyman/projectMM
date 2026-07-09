@@ -52,9 +52,10 @@ void Scheduler::setup() {
         modules_[i]->setup();
     }
 
-    // Phase 4: allocate buffers sized to final control values.
+    // Phase 4: build derived state — buffers/peripherals — via the applyState() router, which
+    // per node builds when effectively-enabled and releases (teardown) when not, recursing the tree.
     for (uint8_t i = 0; i < moduleCount_; i++) {
-        modules_[i]->onBuildState();
+        modules_[i]->applyState();
     }
 
     lastLoop20ms_ = platform::millis();
@@ -139,7 +140,7 @@ uint32_t Scheduler::elapsed() const {
 
 void Scheduler::buildState() {
     for (uint8_t i = 0; i < moduleCount_; i++) {
-        modules_[i]->onBuildState();
+        modules_[i]->applyState();
     }
 }
 

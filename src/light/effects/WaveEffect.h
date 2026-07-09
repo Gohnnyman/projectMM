@@ -55,7 +55,7 @@ public:
         const lengthType w = width(), h = height();
         const uint8_t cpl = channelsPerLight();
         const size_t needed = static_cast<size_t>(w) * h * cpl;
-        if (enabled() && needed > 0) {
+        if (needed > 0) {
             if (needed != trailBytes_) {
                 releaseTrail();
                 trail_ = static_cast<uint8_t*>(platform::alloc(needed));

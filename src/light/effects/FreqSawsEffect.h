@@ -70,7 +70,6 @@ public:
     // bands from rest.
     void onBuildState() override {
         clearState();
-        MoonModule::onBuildState();
     }
 
     void loop() override {

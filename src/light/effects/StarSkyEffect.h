@@ -47,7 +47,7 @@ public:
     // hot path; never an inline member (a large inline array overflows the registerType<T> probe stack).
     void onBuildState() override {
         const nrOfLightsType count = nrOfLights();
-        const size_t wanted = enabled() && count > 0
+        const size_t wanted = count > 0
             ? (static_cast<size_t>(star_fill_ratio) * count) / 10000u + 1u
             : 0u;
         if (wanted != nbStars_ || count != lightCount_) {

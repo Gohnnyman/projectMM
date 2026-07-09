@@ -78,7 +78,6 @@ public:
         // half-sent message and gets the fresh table + frame next tick). Guards a use-after-free.
         if (broadcaster_) broadcaster_->cancelBufferedSend();
         buildAndSendCoordTable();
-        MoonModule::onBuildState();
     }
 
     /// Per-tick: (re)stream the coordinate table when the geometry or client set

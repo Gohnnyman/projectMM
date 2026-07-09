@@ -31,7 +31,7 @@ TEST_CASE("FreqSawsEffect silence with keepOn off leaves the buffer dark") {
     saws.keepOn = false;          // a decayed band draws nothing
     layer.addChild(&saws);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     REQUIRE(layer.buffer().data() != nullptr);
@@ -56,7 +56,7 @@ TEST_CASE("FreqSawsEffect keepOn draws bands even with no audio") {
     saws.fade = 0;                // no fade so a just-drawn pixel survives the frame
     layer.addChild(&saws);
 
-    layer.onBuildState();
+    layer.applyState();
     layer.loop();
 
     CHECK(anyLit(layer));         // keepOn lights the panel with no audio at all
@@ -87,7 +87,7 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     saws.keepOn = false;          // any light MUST come from the audio, not keepOn
     saws.fade = 0;
     layer.addChild(&saws);
-    layer.onBuildState();
+    layer.applyState();
 
     // A few ticks: each refreshes the synthesized loud frame, then the effect renders it. Loud bands
     // rise instantly (max with target), so a lit column appears within these frames.
@@ -119,7 +119,7 @@ TEST_CASE("FreqSawsEffect runs at degenerate grid sizes without crashing") {
         saws.keepOn = true;       // exercise the draw path too, not just the early-out
         layer.addChild(&saws);
 
-        layer.onBuildState();
+        layer.applyState();
         layer.loop();
         CHECK(true);              // reaching here without a crash is the assertion
     }

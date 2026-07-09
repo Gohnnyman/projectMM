@@ -46,7 +46,7 @@ TEST_CASE("AudioService sync=Send: lazy-opens once and reports sending") {
     AudioService a;
     a.sync = 1;
     a.syncPort = kTestSyncPort;
-    a.setup();                       // syncReinit() only — socket NOT opened here (boot-safe)
+    a.applyState();                  // build: syncReinit() — socket NOT opened here (boot-safe)
     CHECK(std::strstr(status(a), "waiting") != nullptr);   // no loop() yet → still waiting
 
     a.loop();                        // networkReady() true on desktop → opens now
@@ -67,7 +67,7 @@ TEST_CASE("AudioService sync=Send: broadcasts are throttled to ~kSyncSendInterva
     AudioService a;
     a.sync = 1;
     a.syncPort = kTestSyncPort;
-    a.setup();
+    a.applyState();
     a.loop();                        // opens + first send (frameCounter bumps once)
     REQUIRE(a.syncOpenForTest());
 
@@ -91,7 +91,7 @@ TEST_CASE("AudioService sync=Receive: a localhost WLED packet drives frame_, the
     AudioService a;
     a.sync = 2;
     a.syncPort = kTestSyncPort;
-    a.setup();
+    a.applyState();
     a.loop();                        // binds kTestSyncPort
     REQUIRE(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "listening") == 0);
@@ -141,7 +141,7 @@ TEST_CASE("AudioService sync=Receive: a failed bind backs off instead of retryin
     AudioService a;
     a.sync = 2;
     a.syncPort = kTestSyncPort;
-    a.setup();
+    a.applyState();
     a.loop();                        // first bring-up attempt → bind fails
     CHECK_FALSE(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "receive: bind failed") == 0);
@@ -168,7 +168,7 @@ TEST_CASE("AudioService sync=Off: no socket, reports off") {
     FrozenClock clk(1);
     AudioService a;
     a.sync = 0;
-    a.setup();
+    a.applyState();
     a.loop();
     CHECK_FALSE(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "off") == 0);

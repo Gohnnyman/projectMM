@@ -59,7 +59,6 @@ public:
         firstFrame_ = true;
         freqBand_   = 0;
         scanPos_    = 0;
-        MoonModule::onBuildState();
     }
 
     void loop() override {

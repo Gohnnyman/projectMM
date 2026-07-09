@@ -39,7 +39,7 @@ TEST_CASE("NoiseMeterEffect fades to dark without an audio frame") {
     mm::NoiseMeterEffect meter;
     layer.addChild(&meter);
 
-    layer.onBuildState();
+    layer.applyState();
     // No AudioService is active → latestFrame() is the static all-silence frame (level 0). Each loop fades
     // then reads silence → maxLen 0 → nothing drawn, so the buffer decays to fully dark.
     for (int i = 0; i < 16; i++) layer.loop();
@@ -79,7 +79,7 @@ TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     meter.fadeRate = 254;   // fastest fade so a lit row this frame is this frame's fill, not a stale trail
     layer.addChild(&meter);
 
-    layer.onBuildState();
+    layer.applyState();
 
     // Run frames until the meter rises, then assert the bottom-up invariant on the tallest lit column.
     bool sawFill = false;
@@ -131,7 +131,7 @@ TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
     meter.width = 0;   // gain 0 → maxLen 0 → no row drawn, regardless of level
     layer.addChild(&meter);
 
-    layer.onBuildState();
+    layer.applyState();
     for (int i = 0; i < 16; i++) { audio.loop(); layer.loop(); }
 
     bool anyLit = false;
@@ -166,7 +166,7 @@ TEST_CASE("NoiseMeterEffect survives degenerate grid sizes") {
         mm::NoiseMeterEffect meter;
         layer.addChild(&meter);
 
-        layer.onBuildState();
+        layer.applyState();
         for (int i = 0; i < 4; i++) { audio.loop(); layer.loop(); }
     }
     CHECK(true);   // no crash at 0×0×0 or 1×1

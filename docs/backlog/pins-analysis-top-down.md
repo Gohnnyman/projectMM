@@ -74,7 +74,7 @@ Unclaimed GPIOs need not be listed (or a compact "free: …" summary), the way T
 
 ### What phase 1 is NOT
 
-No arbitration, no reassignment, no writing. It *shows* the picture the pin-uniqueness check computes; it does not own or enforce it. That authority is phase 2. Keeping phase 1 read-only is what makes it a small, safe first increment (the same staging the [PinsModule backlog entry](backlog-core.md#pinsmodule--one-place-that-coordinates-gpio-assignment-backlog) already draws).
+No arbitration, no reassignment, no writing. It *shows* the picture the pin-uniqueness check computes; it does not own or enforce it. That authority is phase 2. Keeping phase 1 read-only is what makes it a small, safe first increment (the same staging the [PinsModule backlog entry](backlog-core.md#pinsmodule--strict-reject-on-add-mode-the-one-remaining-increment) already draws).
 
 ## 4. The conflict authority (phase 2)
 
