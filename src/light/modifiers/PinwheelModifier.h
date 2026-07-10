@@ -1,9 +1,6 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
-#include <cstdlib>
-#include "light/modifiers/ModifierBase.h"
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 

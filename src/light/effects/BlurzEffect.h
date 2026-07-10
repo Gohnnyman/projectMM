@@ -1,14 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade, draw::fill, draw::blur
-#include "core/math8.h"           // Random8
-#include "core/AudioService.h"     // AudioService::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::bands[16], peakHz
-
-#include <cmath>                  // log10f, roundf (once-per-frame freqMap, not per-light)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 

@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // (no beat/trig here; included for parity with the effect family)
-#include "core/AudioService.h"     // AudioService::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::bands[16]
-#include "platform/platform.h"    // platform::alloc / platform::free (per-column peak-fall state)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -59,27 +52,14 @@ public:
     // every peak at the floor. Entries are lengthType (the row-count type) so a panel taller than 255
     // rows doesn't truncate the remembered peak height.
     void prepare() override {
-        const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
-        if (cols > 0) {
-            if (cols != peakCount_) {
-                releasePeaks();
-                peaks_ = static_cast<lengthType*>(platform::alloc(cols * sizeof(lengthType)));
-                if (peaks_) peakCount_ = cols;
-            }
-            if (peaks_) for (size_t i = 0; i < peakCount_; i++) peaks_[i] = 0;  // zero-init, like WLED
-        } else {
-            releasePeaks();
-        }
+        // One peak entry per column. resize() reallocs only when the column count changes (frees on
+        // 0, keeps dynamicBytes current). Zero every peak on EVERY (re)build so a grid/control change
+        // starts each peak at the floor (matching WLED's zero-init) — resize() only zero-fills on a
+        // size change, so a same-width rebuild (e.g. a height-only edit) needs the explicit clear.
+        peaks_.resize(static_cast<size_t>(width() > 0 ? width() : 0));
+        if (peaks_) std::memset(peaks_.data(), 0, peaks_.bytes());
         rippleCounter_ = 0;
-        setDynamicBytes(peakCount_ * sizeof(lengthType));
     }
-
-    void release() override {
-        releasePeaks();
-        setDynamicBytes(0);
-    }
-
-    ~GEQEffect() override { releasePeaks(); }
 
     void tick() override {
         const int cols = width();
@@ -176,16 +156,9 @@ private:
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
-    void releasePeaks() {
-        if (peaks_) {
-            platform::free(peaks_);
-            peaks_ = nullptr;
-        }
-        peakCount_ = 0;
-    }
-
-    lengthType* peaks_ = nullptr;  // previousBarHeight[width]: per-column peak-dot row (0..rows from floor)
-    size_t   peakCount_ = 0;       // number of peak entries allocated (== width)
+    // previousBarHeight[width]: per-column peak-dot row (0..rows from floor). The buffer sizes
+    // itself in prepare(), frees itself on disable/teardown, and reports its own bytes.
+    ScratchBuffer<lengthType> peaks_{*this};
     uint8_t  rippleCounter_ = 0;   // counts frames toward the next peak-fall step (gated by `ripple`)
 };
 

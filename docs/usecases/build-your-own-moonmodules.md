@@ -43,9 +43,9 @@ Your module is a class with a handful of **hook functions**. You override the on
 | Hook | When the core calls it | What you put here |
 |---|---|---|
 | `defineControls()` | At startup, and whenever the control set changes | Declare your sliders/toggles (e.g. a `speed` control) |
-| `prepare()` | At boot, and whenever the grid size / config changes | *(only if you need memory)* build a scratch buffer sized to the grid |
+| `prepare()` | At boot, and whenever the grid size / config changes | *(only if you need memory)* size a `ScratchBuffer` to the grid — one line |
 | `tick()` | **Every render tick** | Draw your colours. This is the heart of an effect. |
-| `release()` | When your module is removed or **switched off** | *(only if you allocated memory)* free what `prepare()` built |
+| `release()` | When your module is removed or **switched off** | *(usually nothing)* the core frees your `ScratchBuffer`s for you; override only to release a non-buffer resource like a GPIO |
 
 **The core calls these — you only fill them in.** It decides when to build, when to run, and when to release. A single traffic-cop method — `applyState()` — visits every module in the tree and either **builds it** (calls `prepare()`) when it's enabled or **releases it** (calls `release()`) when it's disabled, then runs `tick()` on the enabled ones each render tick.
 
@@ -168,59 +168,53 @@ public:
 
 Rule of thumb: if a future *user* of your module should read it, use `///`; if only a future *editor* of the code needs it, use `//`.
 
-## When you need memory: `prepare()` and `release()`
+## When you need memory: `prepare()` and a `ScratchBuffer`
 
 The rainbow only wrote into the buffer the framework already gave it. Some effects need their **own** scratch memory — for example a fire effect keeps a "heat" value per pixel between frames, or a game-of-life keeps the cell grid.
 
-This is where two more hooks come in, and where the core-orchestrates model pays off. You allocate in `prepare()` and free in `release()` — and you **do not** worry about *when* those run. The core calls `prepare()` when the grid is (re)sized and `release()` when your effect is switched off or removed. You just make the two match.
+Declare a `ScratchBuffer<T>` member, size it in `prepare()`, and use it. That's the whole job:
 
 ```cpp
 class SparkleEffect : public EffectBase {
 public:
     void prepare() override {
-        // Called at boot and whenever the grid size changes.
-        // Size our scratch buffer to the current grid, reallocating only if the count changed.
-        nrOfLightsType n = nrOfLights();
-        if (n != heatCount_) {
-            release();                                       // free the old one first
-            heat_ = static_cast<uint8_t*>(platform::alloc(n));   // one byte of "heat" per light
-            heatCount_ = heat_ ? n : 0;
-        }
-        setDynamicBytes(heatCount_);   // tell the UI how much heap we use (for the card readout)
-    }
-
-    void release() override {
-        platform::free(heat_);         // give the memory back
-        heat_ = nullptr;
-        heatCount_ = 0;
-        setDynamicBytes(0);
+        // Called at boot and whenever the grid size changes. resize() reallocates only when the
+        // count changes, zero-fills the new memory, and frees on 0 — nothing else to do.
+        heat_.resize(nrOfLights());   // one byte of "heat" per light
     }
 
     void tick() override {
-        if (!heat_) return;            // buffer not there (e.g. the grid is 0×0, or memory was tight) — skip
-        // …use heat_[] to render sparkles…
+        if (!heat_) return;           // buffer not there (0×0 grid, or memory was tight) — skip
+        for (size_t i = 0; i < heat_.count(); i++) {
+            // …use heat_[i] to render sparkles…
+        }
     }
 
 private:
-    uint8_t*       heat_ = nullptr;
-    nrOfLightsType heatCount_ = 0;
+    ScratchBuffer<uint8_t> heat_{*this};   // *this ties it to this module (see below)
 };
 ```
 
-(`platform::alloc` returns a raw `void*`, so the one `static_cast<uint8_t*>` names the type you want — the same line every memory-holding effect writes. The planned scratch-buffer helper below removes even this: `heat_.resize(n)`, no cast.)
+That's the *entire* memory story — one member, one line in `prepare()`, and the `if (!heat_)` guard in `tick()`. There is **no** `release()`, no destructor, no `setDynamicBytes` call, and no `static_cast`. The `ScratchBuffer` is the core primitive that absorbs all of that:
 
-Read the hooks together and the pattern is clear:
+- **It sizes and frees itself.** `heat_.resize(n)` allocates `n` elements (of the buffer's type — `uint8_t` here), reallocating only when the count actually changes and zero-filling the new block. `resize(0)` frees it.
+- **The core frees it on disable, for you.** The `{*this}` in the declaration ties the buffer to its module. When the effect is switched off (or a *parent* is disabled), the core's `release()` frees every `ScratchBuffer` the module holds — so a disabled effect holds *zero* memory, with no `release()` in your code. That's the same `applyState()` orchestration from earlier, reaching your buffer automatically.
+- **It reports its own memory.** The buffer tells the module how many bytes it holds, so the UI card's memory readout stays correct — no `setDynamicBytes` line.
+- **No raw pointers, no cast.** `heat_[i]` reads/writes an element; `heat_.count()` is the element count; `if (!heat_)` asks *"am I allocated?"*. The one `static_cast` the raw allocator needs lives *inside* the primitive, never in your effect.
 
-- `prepare()` — **acquire**: build your memory for the current grid. The core calls this only while you're enabled, so it just allocates. (It calls `release()` first to free any previous buffer — `release()` is safe to call when there's nothing allocated.)
-- `release()` — **release**: give it all back. The core calls this the moment you're switched off, so a disabled effect holds *zero* memory.
+The one line that reads like housekeeping — `if (!heat_) return;` at the top of `tick()` — checks the buffer exists before using it. It covers the rare cases where it might be absent: a 0×0 grid, or an allocation that ran short on a low-memory board. It asks *"is my buffer here?"* — the core already answers *"is my effect enabled?"* by choosing when to call `tick()`, so those two concerns stay separate.
 
-> **The golden rule:** whatever you allocate in `prepare()`, free in `release()`. Match the two halves and the memory balances. The core guarantees `release()` runs on disable (and cascades it to the whole subtree if a *parent* is disabled), so implementing those two halves is the whole job — the core handles the release timing.
+> **Why one member does all this.** `ScratchBuffer` is a *[Complexity lives in core](../../CLAUDE.md#principles)* primitive: the allocate / free / free-on-disable / report-memory lifecycle is written once, in core, so every memory-holding effect drops to "declare a buffer and use it" instead of hand-rolling the same six lines (and getting one of them subtly wrong). You get the portable allocator (same on desktop, ESP32, Raspberry Pi), the disable-frees-memory guarantee, and the UI readout for free.
 
-The one line that reads like housekeeping — `if (!heat_) return;` at the top of `tick()` — checks that the buffer exists before using it. It covers the rare cases where it might be absent: a 0×0 grid, or an allocation that ran short on a low-memory board. It asks *"is my buffer here?"* — the core already answers *"is my effect enabled?"* by choosing when to call `tick()`, so those two concerns stay separate. It's cheap insurance so a degenerate grid renders safely.
+For **more than one** buffer — a game-of-life keeps three planes, a starfield keeps four parallel arrays — just declare several members, each `{*this}`. Each sizes, frees, and reports independently; the module's total memory is their sum, still with no bookkeeping line:
 
-`platform::alloc` / `platform::free` are the portable allocator — they work the same on a desktop, an ESP32, or a Raspberry Pi. Use them (not raw `new`) so your effect compiles and runs on every target.
+```cpp
+ScratchBuffer<uint8_t> cells_{*this};    // current generation
+ScratchBuffer<uint8_t> future_{*this};   // next generation
+ScratchBuffer<uint8_t> colors_{*this};   // one colour per cell
+```
 
-> **Heads-up — this boilerplate is on its way out.** The allocate / free / `setDynamicBytes` / null-guard pattern repeats across many memory-holding effects, so a small core helper — a scratch buffer that sizes itself, frees itself, reports its own memory, and needs no cast — is planned. With it, the whole example above collapses to *declare a buffer and use it*: `ScratchBuffer<uint8_t> heat_;` plus `heat_.resize(nrOfLights())` in `prepare()`, and nothing else — no `release()`, no `setDynamicBytes`, no `static_cast`. For now, the explicit version above is the idiom.
+The element type can be anything — a `uint8_t` heat value, a packed cell plane, or a small struct (`ScratchBuffer<Ball>`); the buffer multiplies by `sizeof(T)` for you.
 
 ## Test your module
 

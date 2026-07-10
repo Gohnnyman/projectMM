@@ -1,11 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "core/color.h"
-#include "core/math8.h"           // mm::Random8 — the shared per-effect PRNG (particle spawn)
-#include "platform/platform.h"
-
-#include <cstring>
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -34,33 +29,11 @@ public:
     }
 
     void prepare() override {
-        // D2 effect: trail buffer covers only the z=0 plane (w*h*cpl). Extrude
-        // fills z on 3D layers. Avoids allocating depth× more heap than needed.
-        uint8_t cpl = channelsPerLight();
-        size_t needed = static_cast<size_t>(width()) * height() * cpl;
-        if (needed > 0) {
-            if (needed != trailBytes_) {
-                releaseTrail();
-                trail_ = static_cast<uint8_t*>(platform::alloc(needed));
-                if (trail_) {
-                    std::memset(trail_, 0, needed);
-                    trailBytes_ = needed;
-                }
-            }
-            initParticles();
-        } else {
-            releaseTrail();
-        }
-        setDynamicBytes(trailBytes_);
-    }
-
-    void release() override {
-        releaseTrail();
-        setDynamicBytes(0);
-    }
-
-    ~ParticlesEffect() override {
-        releaseTrail();
+        // D2 effect: trail buffer covers only the z=0 plane (w*h*cpl). Extrude fills z on 3D
+        // layers — avoids allocating depth× more heap than needed. resize() reallocs (zero-filled)
+        // only when the byte count changes, frees on 0, and keeps dynamicBytes current.
+        trail_.resize(static_cast<size_t>(width()) * height() * channelsPerLight());
+        if (trail_) initParticles();
     }
 
     void tick() override {
@@ -72,7 +45,7 @@ public:
         uint8_t* buf = buffer();
 
         // 1. Fade the persistent trail buffer
-        for (size_t i = 0; i < trailBytes_; i++) {
+        for (size_t i = 0; i < trail_.bytes(); i++) {
             trail_[i] = scale8(trail_[i], fade);
         }
 
@@ -104,7 +77,7 @@ public:
         }
 
         // 3. Copy persistent trail buffer to layer buffer (layer cleared it)
-        std::memcpy(buf, trail_, trailBytes_);
+        std::memcpy(buf, trail_.data(), trail_.bytes());
     }
 
 private:
@@ -119,8 +92,8 @@ private:
 
     Particle particles_[MAX_PARTICLES] = {};
     bool initialized_ = false;
-    uint8_t* trail_ = nullptr;
-    size_t trailBytes_ = 0;
+    // Persistent z=0-plane trail (w·h·cpl). Self-sizing, self-freeing, self-reporting.
+    ScratchBuffer<uint8_t> trail_{*this};
     Random8 rng_{0xBADF00Du};   // the shared PRNG; rand8() adapts it to the call shape below
     uint8_t rand8() { return rng_.next8(); }
 
@@ -140,14 +113,6 @@ private:
             particles_[i].pad = 0;
         }
         initialized_ = true;
-    }
-
-    void releaseTrail() {
-        if (trail_) {
-            platform::free(trail_);
-            trail_ = nullptr;
-        }
-        trailBytes_ = 0;
     }
 };
 

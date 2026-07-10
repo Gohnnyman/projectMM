@@ -1,14 +1,13 @@
 #pragma once
 
+#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio
+
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format
 #include "light/E131Packet.h"     // shared E1.31/sACN wire format
-#include "light/drivers/DriverBase.h"
 #include "platform/platform.h"
 
 #include <algorithm>  // std::min in the chunk loop
-#include <cstdint>
-#include <cstring>
 
 namespace mm {
 

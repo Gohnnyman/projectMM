@@ -1,13 +1,8 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"      // layer()->buffer()
-#include "light/Palette.h"           // colorFromPalette, Palettes::active()
-#include "light/draw.h"              // draw::text / draw::glyph / draw::fill
-#include "light/fonts.h"             // fonts::kAll — the selectable bitmap fonts
-#include "core/math8.h"              // beat8-style time (elapsed())
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
-#include <cstring>                   // strlen, strchr
+#include "light/fonts.h"             // fonts::kAll — the selectable bitmap fonts
 
 namespace mm {
 

@@ -1,14 +1,9 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/draw.h"           // draw::pixel
-#include "light/Palette.h"        // colorFromPalette + the active palette (usePalette)
-#include "core/math8.h"           // Random8
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 #include <array>
 #include <cstdint>
-#include <cstring>                // std::strcmp
 
 namespace mm {
 

@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/draw.h"           // draw::pixel/blendPixel/get — setRGB/blendColor/getRGB
-#include "light/Palette.h"        // colorFromPalette, Palettes::active
-#include "core/math8.h"           // Random8
-#include "core/crc.h"             // crc16 — grid fingerprint for stasis detection
-#include "platform/platform.h"    // alloc — the heap grid state
-
-#include <cstring>
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -96,26 +89,28 @@ public:
         if (count > 0) {
             const size_t planeBytes = (static_cast<size_t>(count) + 7) / 8;
             if (count != cellCount_) {
-                freeBuffers();
-                cells_  = static_cast<uint8_t*>(platform::alloc(planeBytes));
-                future_ = static_cast<uint8_t*>(platform::alloc(planeBytes));
-                colors_ = static_cast<uint8_t*>(platform::alloc(count));
-                if (cells_ && future_ && colors_) {
+                // Resize all three FIRST (each self-sizing/zero-filling), then AND the results — so
+                // every buffer is sized even if an earlier one fails, matching the old
+                // alloc-all-then-check. Each reports its own bytes, so dynamicBytes = planeBytes*2 +
+                // count with no setDynamicBytes call.
+                const bool a = cells_.resize(planeBytes);
+                const bool b = future_.resize(planeBytes);
+                const bool c = colors_.resize(count);
+                const bool ok = a && b && c;
+                if (ok) {
                     cellCount_ = count;
                     planeBytes_ = planeBytes;
                     generation_ = 0;   // force a fresh fill on the next loop
                 } else {
-                    freeBuffers();
+                    cells_.resize(0); future_.resize(0); colors_.resize(0);
+                    cellCount_ = 0; planeBytes_ = 0;
                 }
             }
         } else {
-            freeBuffers();
+            cells_.resize(0); future_.resize(0); colors_.resize(0);
+            cellCount_ = 0; planeBytes_ = 0;
         }
-        setDynamicBytes(cellCount_ ? planeBytes_ * 2 + cellCount_ : 0);
     }
-
-    void release() override { freeBuffers(); setDynamicBytes(0); }
-    ~GameOfLifeEffect() override { freeBuffers(); }
 
     void onControlChanged(const char* name) override {
         if (std::strcmp(name, "ruleset") == 0 || std::strcmp(name, "customRuleString") == 0)
@@ -129,21 +124,25 @@ public:
         testW_ = w; testH_ = h; testD_ = d;
         const nrOfLightsType count = static_cast<nrOfLightsType>(w) * h * d;
         const size_t planeBytes = (static_cast<size_t>(count) + 7) / 8;
-        freeBuffers();
-        cells_  = static_cast<uint8_t*>(platform::alloc(planeBytes));
-        future_ = static_cast<uint8_t*>(platform::alloc(planeBytes));
-        colors_ = static_cast<uint8_t*>(platform::alloc(count));
-        if (!cells_ || !future_ || !colors_) { freeBuffers(); return false; }
+        // Resize all three FIRST, then AND — so every buffer is sized even if an earlier one fails.
+        const bool a = cells_.resize(planeBytes);
+        const bool b = future_.resize(planeBytes);
+        const bool c = colors_.resize(count);
+        if (!(a && b && c)) { cells_.resize(0); future_.resize(0); colors_.resize(0); cellCount_ = 0; planeBytes_ = 0; return false; }
         cellCount_ = count; planeBytes_ = planeBytes;
-        std::memset(cells_, 0, planeBytes); std::memset(future_, 0, planeBytes); std::memset(colors_, 0, count);
+        // Clear unconditionally: resize() only zero-fills on a size change, so a re-call with the SAME
+        // dims (a test re-seeding one instance) would otherwise inherit stale cells.
+        std::memset(cells_.data(), 0, planeBytes);
+        std::memset(future_.data(), 0, planeBytes);
+        std::memset(colors_.data(), 0, count);
         generation_ = 1;   // skip the random-fill path
         return true;
     }
     void setCellForTest(lengthType x, lengthType y, lengthType z, bool on) {
-        setBit(cells_, idx(x, y, z, testW_, testH_), on);
+        setBit(cells_.data(), idx(x, y, z, testW_, testH_), on);
     }
     bool isAliveForTest(lengthType x, lengthType y, lengthType z) const {
-        return getBit(cells_, idx(x, y, z, testW_, testH_));
+        return getBit(cells_.data(), idx(x, y, z, testW_, testH_));
     }
     void stepForTest() { parseRuleset(); evolveAutomaton(testW_, testH_, testD_, true); }
     void parseRulesetForTest() { parseRuleset(); }
@@ -188,7 +187,7 @@ public:
                     for (lengthType x = 0; x < w; x++) {
                         const nrOfLightsType i = idx(x, y, z, w, h);
                         const Coord3D p{x, y, z};
-                        const bool alive = getBit(cells_, i);
+                        const bool alive = getBit(cells_.data(), i);
                         const bool recolor = alive && generation_ == 1 && colors_[i] == 0 && !rng_.below(16);
                         if (alive && recolor) {
                             colors_[i] = rng_.below(1, 255);
@@ -212,9 +211,13 @@ public:
     }
 
 private:
-    uint8_t* cells_  = nullptr;   // bit-packed alive/dead, current generation
-    uint8_t* future_ = nullptr;   // bit-packed, next generation (swapped in)
-    uint8_t* colors_ = nullptr;   // palette index (or 0 = dead) per cell
+    // Three self-sizing/self-freeing/self-reporting buffers; access the bit-planes via .data() at
+    // the getBit/setBit/memcpy/crc16 boundaries. cellCount_/planeBytes_ are kept as automaton
+    // semantics (cell total / logical plane length), not pointer mirrors — the buffers know their
+    // own byte size, but the loops need these logical dimensions.
+    ScratchBuffer<uint8_t> cells_{*this};    // bit-packed alive/dead, current generation
+    ScratchBuffer<uint8_t> future_{*this};   // bit-packed, next generation (swapped in)
+    ScratchBuffer<uint8_t> colors_{*this};   // palette index (or 0 = dead) per cell
     nrOfLightsType cellCount_ = 0;
     size_t   planeBytes_ = 0;
 
@@ -233,13 +236,6 @@ private:
     lengthType testW_ = 0, testH_ = 0, testD_ = 0;  // test-seam grid dims (see allocateForTest)
 
     uint32_t now() const { return elapsed(); }
-
-    void freeBuffers() {
-        if (cells_)  { platform::free(cells_);  cells_  = nullptr; }
-        if (future_) { platform::free(future_); future_ = nullptr; }
-        if (colors_) { platform::free(colors_); colors_ = nullptr; }
-        cellCount_ = 0; planeBytes_ = 0;
-    }
 
     // --- bit-packed cell access ---
     static bool getBit(const uint8_t* plane, nrOfLightsType i) { return (plane[i >> 3] >> (i & 7)) & 1; }
@@ -286,8 +282,8 @@ private:
         generation_ = 1;
         step_ = disablePause ? now() : now() + 1500;
 
-        std::memset(cells_, 0, planeBytes_);
-        std::memset(colors_, 0, cellCount_);
+        std::memset(cells_.data(), 0, planeBytes_);
+        std::memset(colors_.data(), 0, cellCount_);
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{w, h, d};
@@ -296,15 +292,15 @@ private:
                 for (lengthType x = 0; x < w; x++) {
                     if (rng_.below(100) < lifeChance) {
                         const nrOfLightsType i = idx(x, y, z, w, h);
-                        setBit(cells_, i, true);
+                        setBit(cells_.data(), i, true);
                         colors_[i] = rng_.below(1, 255);  // never 0 (0 = dead marker)
                         draw::pixel(buf, dims, {x, y, z}, liveColor(colors_[i]));
                     }
                 }
-        std::memcpy(future_, cells_, planeBytes_);
+        std::memcpy(future_.data(), cells_.data(), planeBytes_);
 
         soloGlider_ = false;
-        const uint16_t crc = crc16(cells_, planeBytes_);
+        const uint16_t crc = crc16(cells_.data(), planeBytes_);
         oscillatorCRC_ = spaceshipCRC_ = cubeGliderCRC_ = crc;
         gliderLength_ = static_cast<uint16_t>(lcm(static_cast<uint32_t>(h), static_cast<uint32_t>(w)) * 4);
         cubeGliderLength_ = static_cast<uint16_t>(gliderLength_ * 6);  // rectangular-cuboid case left as-is
@@ -320,7 +316,7 @@ private:
             for (lengthType y = 0; y < h; y++)
                 for (lengthType x = 0; x < w; x++) {
                     const nrOfLightsType i = idx(x, y, z, w, h);
-                    if (getBit(cells_, i) && colors_[i] != 0)
+                    if (getBit(cells_.data(), i) && colors_[i] != 0)
                         draw::pixel(buf, dims, {x, y, z}, liveColor(colors_[i]));
                 }
     }
@@ -347,7 +343,7 @@ private:
                 const lengthType nx = static_cast<lengthType>(x + pattern[i][0]);
                 const lengthType ny = static_cast<lengthType>(y + pattern[i][1]);
                 if (nx >= w || ny >= h) continue;
-                if (getBit(future_, idx(nx, ny, z, w, h))) { canPlace = false; break; }
+                if (getBit(future_.data(), idx(nx, ny, z, w, h))) { canPlace = false; break; }
             }
             if (canPlace || attempts == 99) {
                 for (int i = 0; i < 5; i++) {
@@ -355,7 +351,7 @@ private:
                     const lengthType ny = static_cast<lengthType>(y + pattern[i][1]);
                     if (nx >= w || ny >= h) continue;
                     const nrOfLightsType i2 = idx(nx, ny, z, w, h);
-                    setBit(future_, i2, true);
+                    setBit(future_.data(), i2, true);
                     // Record the cell's colour index so later neighbour-colour inheritance sees a
                     // live (non-zero marker) colour for these injected cells, not 0 (dead). Drawn
                     // green under colorByAge, but colors_ still carries the palette index it ages from.
@@ -382,7 +378,7 @@ private:
             for (lengthType y = 0; y < h; y++)
                 for (lengthType z = 0; z < d; z++) {
                     const nrOfLightsType cIndex = idx(x, y, z, w, h);
-                    const bool cellValue = getBit(cells_, cIndex);
+                    const bool cellValue = getBit(cells_.data(), cIndex);
                     if (cellValue) aliveCount++; else deadCount++;
 
                     uint8_t neighbors = 0, colorCount = 0;
@@ -401,7 +397,7 @@ private:
                                     nz = static_cast<lengthType>((nz + d) % d);
                                 }
                                 const nrOfLightsType nIndex = idx(nx, ny, nz, w, h);
-                                if (getBit(cells_, nIndex)) {
+                                if (getBit(cells_.data(), nIndex)) {
                                     neighbors++;
                                     if (cellValue || colorByAge) continue;  // colour not needed
                                     if (colors_[nIndex] == 0) continue;      // dead-marker colour
@@ -422,13 +418,13 @@ private:
                     const bool born     = neighbors < 9 && birthNumbers_[neighbors];
                     if (cellValue && !survives) {
                         // Loneliness / overpopulation: dies, blur toward background.
-                        setBit(future_, cIndex, false);
+                        setBit(future_.data(), cIndex, false);
                         if (!testMode && buf) draw::blendPixel(*buf, dims, p, bg, frameBlur);
                     } else if (!cellValue && born) {
                         // Reproduction: inherit a living neighbour's colour, mutate sometimes. Both
                         // fallbacks use rng_.below(1, 255) (1..254) so a live cell never gets 0, the
                         // dead-cell marker (matches startNewGame's fill colour).
-                        setBit(future_, cIndex, true);
+                        setBit(future_.data(), cIndex, true);
                         uint8_t colorIndex = (colorCount > 0) ? nColors[rng_.below(colorCount)] : rng_.below(1, 255);
                         if (rng_.below(100) < mutation) colorIndex = rng_.below(1, 255);
                         colors_[cIndex] = colorIndex;
@@ -437,7 +433,7 @@ private:
                         // Unchanged cell: dead → blur (honour the faded-background floor); live →
                         // age toward red, or repaint its palette colour.
                         if (!cellValue) {
-                            setBit(future_, cIndex, false);
+                            setBit(future_.data(), cIndex, false);
                             if (!testMode && buf) {
                                 if (fadedBackground) {
                                     const RGB val = draw::get(*buf, dims, p);
@@ -448,7 +444,7 @@ private:
                                 }
                             }
                         } else {
-                            setBit(future_, cIndex, true);
+                            setBit(future_.data(), cIndex, true);
                             if (!testMode && buf) {
                                 if (colorByAge) draw::blendPixel(*buf, dims, p, RGB{255, 0, 0}, 248);
                                 else            draw::pixel(*buf, dims, p, liveColor(colors_[cIndex]));
@@ -458,13 +454,13 @@ private:
                 }
 
         soloGlider_ = (aliveCount == 5);
-        std::memcpy(cells_, future_, planeBytes_);
+        std::memcpy(cells_.data(), future_.data(), planeBytes_);
 
         // Test seam runs the pure automaton only: a deterministic block/blinker must not be perturbed
         // by the stasis/respawn machinery (which would fire on its low density and fixed RNG).
         if (testMode) return;
 
-        const uint16_t crc = crc16(cells_, planeBytes_);
+        const uint16_t crc = crc16(cells_.data(), planeBytes_);
 
         bool repetition = false;
         if (!aliveCount || crc == oscillatorCRC_ || crc == spaceshipCRC_ || crc == cubeGliderCRC_)
@@ -476,7 +472,7 @@ private:
         const bool densityFloor = total > 0 && aliveCount * 20 < total;
         if ((repetition && infinite) || (infinite && !rng_.below(50)) || (infinite && densityFloor)) {
             placePentomino(w, h, d, testMode ? nullptr : buf, dims);
-            std::memcpy(cells_, future_, planeBytes_);
+            std::memcpy(cells_.data(), future_.data(), planeBytes_);
             repetition = false;
         }
         if (repetition) {

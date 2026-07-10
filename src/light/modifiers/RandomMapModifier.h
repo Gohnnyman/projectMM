@@ -1,9 +1,8 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
-#include "platform/platform.h"     // alloc / free / millis
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
-#include <cstdint>
+#include "platform/platform.h"     // alloc / free / millis
 
 namespace mm {
 

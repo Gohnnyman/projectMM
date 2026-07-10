@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fill
-#include "core/math8.h"           // (scale8 lives in color.h, pulled in via draw.h)
-#include "platform/platform.h"    // alloc/free — heap validIndices table
-
-#include <cmath>                  // sqrtf — RMS palette average (cold, once per frame)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -63,12 +56,10 @@ public:
     // Pure build (see MoonModule::prepare): allocate the table. No enabled() check — applyState()
     // routes a disabled effect to release()/freeBuffers() instead of calling this.
     void prepare() override {
-        if (!validIndices_) validIndices_ = static_cast<uint8_t*>(platform::alloc(256));
-        setDynamicBytes(validIndices_ ? 256 : 0);
+        // Fixed 256-entry table (small, but kept off the inline footprint per the registerType<T>
+        // probe contract). resize() is a no-op once allocated, frees on disable via release().
+        validIndices_.resize(256);
     }
-
-    void release() override { freeBuffers(); setDynamicBytes(0); }
-    ~SolidEffect() override { freeBuffers(); }
 
     void tick() override {
         const int w = width();
@@ -182,11 +173,8 @@ public:
     }
 
 private:
-    uint8_t* validIndices_ = nullptr;
-
-    void freeBuffers() {
-        if (validIndices_) { platform::free(validIndices_); validIndices_ = nullptr; }
-    }
+    // 256-entry wheel-index table for the band modes. Self-sizing, self-freeing, self-reporting.
+    ScratchBuffer<uint8_t> validIndices_{*this};
 
     // Write the white channel (4th) on every light. RGB stays as already filled. `w` may be 0 to
     // clear a stale white the palette modes never overwrite (draw::pixel/draw::fill touch RGB only).

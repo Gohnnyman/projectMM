@@ -1,11 +1,8 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::blendPixel
-#include "core/math8.h"           // Random8
-#include "platform/platform.h"    // platform::alloc/free, platform::millis
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
+
+#include "platform/platform.h"      // platform::millis (the per-drop start-delay clock)
 
 namespace mm {
 
@@ -53,36 +50,21 @@ public:
     };
 
     void prepare() override {
-        // One drop per X column. Reallocate only when the column count changes.
-        const nrOfLightsType cols = (width() > 0)
-                                        ? static_cast<nrOfLightsType>(width()) : 0;
-        if (cols != nrOfDrops_) {
-            releaseDrops();
-            if (cols > 0) {
-                drops_ = static_cast<Tetris*>(platform::alloc(cols * sizeof(Tetris)));
-                if (drops_) nrOfDrops_ = cols;
-            }
-        }
+        // One drop per X column. resize() reallocs only when the column count changes (frees on 0);
+        // the disable path frees it through MoonModule::release().
+        const size_t cols = (width() > 0) ? static_cast<size_t>(width()) : 0;
+        drops_.resize(cols);
         if (drops_) {
             // MoonLight's onSizeChanged init: every column starts idle (stack=0), with a 2 s start
-            // delay (step = millis()+2000), and oneColor columns seeded to palette index 0.
+            // delay (step = millis()+2000), and oneColor columns seeded to palette index 0. resize()
+            // already zeroed the block, so only the non-zero fields need setting.
             const uint32_t now = platform::millis();
-            for (nrOfLightsType i = 0; i < nrOfDrops_; i++) {
-                drops_[i] = Tetris{};
-                drops_[i].stack = 0;
-                drops_[i].step  = now + 2000;
+            for (size_t i = 0; i < drops_.count(); i++) {
+                drops_[i].step = now + 2000;
                 if (oneColor) drops_[i].col = 0;
             }
         }
-        setDynamicBytes(static_cast<size_t>(nrOfDrops_) * sizeof(Tetris));
     }
-
-    void release() override {
-        releaseDrops();
-        setDynamicBytes(0);
-    }
-
-    ~TetrixEffect() override { releaseDrops(); }
 
     void tick() override {
         if (!drops_) return;
@@ -99,8 +81,9 @@ public:
 
         // Process exactly the live column count (never the allocated max — robust to a shrink
         // before prepare reruns).
-        const nrOfLightsType nrOfDrops = (static_cast<nrOfLightsType>(w) < nrOfDrops_)
-                                             ? static_cast<nrOfLightsType>(w) : nrOfDrops_;
+        const nrOfLightsType dropCount = static_cast<nrOfLightsType>(drops_.count());
+        const nrOfLightsType nrOfDrops = (static_cast<nrOfLightsType>(w) < dropCount)
+                                             ? static_cast<nrOfLightsType>(w) : dropCount;
 
         for (nrOfLightsType x = 0; x < nrOfDrops; x++) {
             Tetris& d = drops_[x];
@@ -179,13 +162,8 @@ private:
     // members are named *Control so they don't shadow the inherited width()/depth() accessors.
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
-    void releaseDrops() {
-        if (drops_) { platform::free(drops_); drops_ = nullptr; }
-        nrOfDrops_ = 0;
-    }
-
-    Tetris*        drops_     = nullptr;
-    nrOfLightsType nrOfDrops_ = 0;
+    // One drop per X column. Self-sizing, self-freeing, self-reporting.
+    ScratchBuffer<Tetris> drops_{*this};
     Random8        rng_;
 };
 

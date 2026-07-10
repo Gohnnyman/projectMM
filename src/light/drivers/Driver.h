@@ -12,8 +12,13 @@
 //
 // DriverBase already bundles Layer, Buffer, Correction, and the platform layer
 // (a driver reads the source buffer and applies the output correction), so this
-// umbrella is mostly DriverBase itself. A hardware driver adds its peripheral
-// seam (platform::rmt* / platform::parlio* / a socket); a network driver adds
-// its packet header — those stay per-driver, since they differ by transport.
+// umbrella is DriverBase plus the small standard headers every driver's status /
+// control-name / buffer handling uses. A hardware driver adds its peripheral seam
+// (platform::rmt* / platform::parlio* / a socket); a network driver adds its packet
+// header — those stay per-driver, since they differ by transport.
 
 #include "light/drivers/DriverBase.h"   // DriverBase + Layer + Buffer + Correction + platform
+
+#include <cstring>                      // std::strcmp (onControlChanged) / memset (buffer clears)
+#include <cstdint>                      // fixed-width ints
+#include <cstdio>                       // std::snprintf for status strings

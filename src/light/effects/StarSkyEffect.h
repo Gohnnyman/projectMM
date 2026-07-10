@@ -1,11 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // Random8
-#include "platform/platform.h"    // alloc/free — the per-star heap state
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -21,7 +16,7 @@ namespace mm {
 // Prior art: MoonLight's StarSky (E_MoonModules / MoonModules) — the star-pool model (fill-ratio
 // sizing, fade-up/fade-down/respawn, the random early-reverse, the optional palette colour) is
 // reproduced here, written fresh on projectMM's EffectBase + shared primitives (Random8,
-// colorFromPalette, draw::). The per-star arrays live on the heap (platform::alloc), never as inline
+// colorFromPalette, draw::). The per-star arrays live on the heap (ScratchBuffers), never as inline
 // members, so sizeof(StarSkyEffect) stays tiny.
 // Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Night-sky effect: twinkling stars over a dark field.
@@ -51,26 +46,23 @@ public:
             ? (static_cast<size_t>(star_fill_ratio) * count) / 10000u + 1u
             : 0u;
         if (wanted != nbStars_ || count != lightCount_) {
-            freeBuffers();
-            if (wanted > 0) {
-                indexes_    = static_cast<nrOfLightsType*>(platform::alloc(wanted * sizeof(nrOfLightsType)));
-                fadeDir_    = static_cast<uint8_t*>(platform::alloc(wanted));
-                brightness_ = static_cast<uint8_t*>(platform::alloc(wanted));
-                colors_     = static_cast<uint8_t*>(platform::alloc(wanted));
-                if (indexes_ && fadeDir_ && brightness_ && colors_) {
-                    nbStars_    = wanted;
-                    lightCount_ = count;
-                    initStars(count);
-                } else {
-                    freeBuffers();
-                }
+            // Four parallel buffers, each self-sizing/zero-filling and self-reporting (their deltas
+            // sum to nbStars*(sizeof(nrOfLightsType)+3), the old setDynamicBytes value). Resize all
+            // four FIRST, then AND — so all resize even if an earlier one fails (alloc-all-then-check).
+            const bool a = indexes_.resize(wanted);
+            const bool b = fadeDir_.resize(wanted);
+            const bool c = brightness_.resize(wanted);
+            const bool d = colors_.resize(wanted);
+            if (wanted > 0 && a && b && c && d) {
+                nbStars_    = wanted;
+                lightCount_ = count;
+                initStars(count);
+            } else {
+                indexes_.resize(0); fadeDir_.resize(0); brightness_.resize(0); colors_.resize(0);
+                nbStars_ = 0; lightCount_ = 0;
             }
         }
-        setDynamicBytes(nbStars_ ? nbStars_ * (sizeof(nrOfLightsType) + 3) : 0);
     }
-
-    void release() override { freeBuffers(); setDynamicBytes(0); }
-    ~StarSkyEffect() override { freeBuffers(); }
 
     void tick() override {
         if (!indexes_ || !fadeDir_ || !brightness_ || !colors_ || nbStars_ == 0) return;
@@ -122,10 +114,12 @@ public:
     }
 
 private:
-    nrOfLightsType* indexes_    = nullptr;  // linear cell index per star (< nrOfLights)
-    uint8_t*  fadeDir_    = nullptr;  // 0 = fading down, 1 = fading up
-    uint8_t*  brightness_ = nullptr;  // current 0..255 brightness per star
-    uint8_t*  colors_     = nullptr;  // per-star palette index (used only when usePalette)
+    // Four parallel per-star arrays (SoA). Each self-sizes/frees/reports; access via [i]. nbStars_ /
+    // lightCount_ are kept as semantics (star total / the grid they were sized for), not mirrors.
+    ScratchBuffer<nrOfLightsType> indexes_{*this};     // linear cell index per star (< nrOfLights)
+    ScratchBuffer<uint8_t>        fadeDir_{*this};      // 0 = fading down, 1 = fading up
+    ScratchBuffer<uint8_t>        brightness_{*this};   // current 0..255 brightness per star
+    ScratchBuffer<uint8_t>        colors_{*this};       // per-star palette index (used only when usePalette)
     size_t         nbStars_    = 0;
     nrOfLightsType lightCount_ = 0;
     Random8   rng_{0x57A55C1Eu};
@@ -144,14 +138,6 @@ private:
         } else {
             return static_cast<nrOfLightsType>(rng_.next16() % count);
         }
-    }
-
-    void freeBuffers() {
-        if (indexes_)    { platform::free(indexes_);    indexes_    = nullptr; }
-        if (fadeDir_)    { platform::free(fadeDir_);    fadeDir_    = nullptr; }
-        if (brightness_) { platform::free(brightness_); brightness_ = nullptr; }
-        if (colors_)     { platform::free(colors_);     colors_     = nullptr; }
-        nbStars_ = 0; lightCount_ = 0;
     }
 
     // Seed every star: random cell, random fade direction, random mid brightness, random colour.

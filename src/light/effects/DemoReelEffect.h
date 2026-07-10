@@ -1,14 +1,9 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"      // layer() — the child renders into the same Layer buffer
-#include "core/ModuleFactory.h"      // enumerate + create the effects to cycle through
-#include "core/math8.h"              // Random8 — the shuffle pick
-#include "light/Palette.h"           // Palettes::setActive — random palette per cycle
-#include "light/draw.h"              // draw::text — the effect-name overlay
-#include "light/fonts.h"             // fonts::kFont4x6 — the overlay font
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
-#include <cstring>                   // strcmp
+#include "core/ModuleFactory.h"      // enumerate + create the effects to cycle through
+#include "light/fonts.h"             // fonts::kFont4x6 — the overlay font
 
 namespace mm {
 

@@ -1,14 +1,11 @@
 #pragma once
 
-#include "light/drivers/DriverBase.h"        // DriverBase, Correction
+#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio
+
 #include "light/drivers/LedDriverConfig.h"
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with LcdLedDriver)
 #include "light/drivers/RmtSymbol.h"       // encodeWs2812Symbols (host-testable)
 #include "platform/platform.h"
-
-#include <cstdint>
-#include <cstdio>   // snprintf for the loopback status string
-#include <cstring>  // std::strcmp in onControlChanged / controlChangeTriggersPrepare
 
 namespace mm {
 

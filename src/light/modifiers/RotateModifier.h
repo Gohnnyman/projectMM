@@ -1,9 +1,6 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
-#include "core/math8.h"           // sin8, cos8 — integer trig
-
-#include <cstdint>
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 

@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cmath>    // sinf, cosf
-#include <cstdint>
-#include <limits>   // std::numeric_limits (lightCount clamp, matches GridLayout)
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 

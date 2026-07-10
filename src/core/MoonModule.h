@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/Control.h"
+#include "core/ScratchBuffer.h"
 #include "platform/platform.h"
 
+#include <cstddef>
 #include <cstring>
 
 namespace mm {
@@ -119,7 +121,25 @@ public:
     virtual void tick() { tickChildren(&MoonModule::tick); }
     virtual void tick20ms() { tickChildren(&MoonModule::tick20ms); }
     virtual void tick1s() { tickChildren(&MoonModule::tick1s); }
-    virtual void release() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->release(); }
+    virtual void release() {
+        // release() frees ALL of a module's held resources on disable, not only buffers: a driver's
+        // GPIO/RMT/Parlio pins, a service's I²S mic, an effect's sockets are freed by that module's
+        // OWN release() override (its hardware teardown). This base additionally frees every
+        // ScratchBuffer the module registered — resizeBytes(0) returns the heap and subtracts its
+        // bytes from dynamicBytes_. The buffer's destructor also frees on teardown; this is the
+        // disable-without-destroy path applyState() takes when a module (or an ancestor) is disabled.
+        // Idempotent (resizeBytes(0) on an empty buffer is a no-op), so repeated release, or
+        // release-then-destruct, never double-frees.
+        for (ScratchBufferBase* b = scratchBuffers_; b; b = b->next_) b->resizeBytes(0);
+        // Then recurse to children (reverse order — the override-and-chain convention: a module
+        // shuts down its own state before its children's). A module that overrides release() to free
+        // hardware AND holds a ScratchBuffer MUST chain to this base (MoonModule::release()) or its
+        // buffers leak on disable — pin/socket freeing stays in the override, buffer freeing is here
+        // (see coding-standards § Override-and-chain). A pin-only driver with no buffer need not
+        // chain for buffers, but chaining is harmless (the buffer loop is empty) and keeps the
+        // child-recursion correct if it ever has children.
+        for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->release();
+    }
 
     /// The single orchestration point for the resource lifecycle — the enabled decision lives HERE,
     /// in core, so a catalog module's prepare() is pure "build my state" with no enabled() check.
@@ -452,6 +472,36 @@ public:
     size_t dynamicBytes() const { return dynamicBytes_; }
     void setDynamicBytes(size_t b) { dynamicBytes_ = b; }
 
+    // ScratchBuffer's owner tie: these three are the buffer's private hooks into its module — the
+    // delta accounting + the intrusive free-list register/deregister. They are NOT part of the
+    // module's public surface (a module never calls them; the buffer does), so they are private and
+    // reached only through the friendship below. This enforces the "don't mix addDynamicBytes with
+    // setDynamicBytes" contract structurally, not just by comment.
+    friend class ScratchBufferBase;
+private:
+    /// Adjust the dynamic-bytes total by a signed delta. `ScratchBuffer` calls this on every resize
+    /// (delta = newBytes − oldBytes) so the per-module memory readout stays correct with zero
+    /// bookkeeping in the effect. The total never goes negative — a buffer only subtracts what it
+    /// earlier added.
+    void addDynamicBytes(std::ptrdiff_t delta) {
+        dynamicBytes_ = static_cast<size_t>(static_cast<std::ptrdiff_t>(dynamicBytes_) + delta);
+    }
+
+    /// ScratchBuffer registration (called only by ScratchBufferBase's ctor/dtor). The module holds
+    /// an intrusive singly-linked list of its buffers so release() can free them on disable — one
+    /// head pointer here, one next-pointer per buffer (on the buffer, not the module), so a module
+    /// with no buffers pays only the 8-byte head. See ScratchBuffer.h.
+    void registerScratchBuffer(ScratchBufferBase* b) {
+        b->next_ = scratchBuffers_;   // push-front, O(1)
+        scratchBuffers_ = b;
+    }
+    void deregisterScratchBuffer(ScratchBufferBase* b) {
+        for (ScratchBufferBase** p = &scratchBuffers_; *p; p = &(*p)->next_) {
+            if (*p == b) { *p = b->next_; return; }   // unlink
+        }
+    }
+public:
+
     /// Per-module status slot. A short user-facing message the module wants the
     /// user to see right now — NetworkModule writes "Eth: 192.168.1.210", Layer
     /// writes "buffer reduced — not enough memory". The pointer is owned by the
@@ -526,6 +576,7 @@ private:
     uint8_t childCapacity_ = 0;
     size_t classSize_ = 0;
     size_t dynamicBytes_ = 0;
+    ScratchBufferBase* scratchBuffers_ = nullptr;  // head of the intrusive free-on-disable list
     const char* status_ = nullptr;  // see status() / setStatus()
     Severity severity_ = Severity::Status;
     uint32_t tickTimeUs_ = 0;

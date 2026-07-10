@@ -4,6 +4,7 @@
 add_executable(mm_tests
     # core/
     unit/core/unit_Buffer.cpp
+    unit/core/unit_ScratchBuffer.cpp
     unit/core/unit_Color.cpp
     unit/core/unit_math8.cpp
     unit/core/unit_noise.cpp

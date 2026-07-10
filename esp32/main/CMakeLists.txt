@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "../../src/main.cpp"
         "../../src/core/Control.cpp"
+        "../../src/core/ScratchBuffer.cpp"
         "../../src/core/HttpServerModule.cpp"
         "../../src/core/FilesystemModule.cpp"
         "../../src/core/FileManagerModule.cpp"

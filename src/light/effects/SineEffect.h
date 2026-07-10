@@ -1,7 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "core/math8.h"   // sin8 — integer sine LUT
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 

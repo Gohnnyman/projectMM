@@ -1,10 +1,8 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/draw.h"           // draw::pixel, draw::fade, draw::offsetOf
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
+
 #include "light/light_types.h"    // Coord3D, lengthType
-#include "core/color.h"           // RGB
 
 namespace mm {
 

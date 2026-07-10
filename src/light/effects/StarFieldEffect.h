@@ -1,11 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // Random8
-#include "platform/platform.h"    // platform::alloc / platform::free (heap star table)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -28,7 +23,7 @@ namespace mm {
 // (x,y,z + colorIndex), the z-=1 advance, the pinhole re-projection, the depth→brightness map, the
 // respawn rule (random depth at first seed, far-plane z=width on respawn), and the
 // speed/blur/numStars/usePalette controls are reproduced exactly here, written fresh on EffectBase
-// + the shared draw/palette primitives. The star table lives on the heap (platform::alloc), sized
+// + the shared draw/palette primitives. The star table lives on the heap (a ScratchBuffer), sized
 // to the control maximum, rather than as a large inline member.
 // Author: @Brandon502 (MoonLight), inspired by Daniel Shiffman / Coding Train — https://www.youtube.com/watch?v=17WoOqgXsRM , https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Star-field effect: drifting points like flying through stars.
@@ -57,26 +52,19 @@ public:
         const lengthType w = width();
         const lengthType h = height();
         if (w > 0 && h > 0) {
-            if (!stars_) {
-                stars_ = static_cast<Star*>(platform::alloc(sizeof(Star) * kMaxStars));
-            }
+            // Fixed-size star table. resize() is a no-op once allocated; frees on disable via release().
+            stars_.resize(kMaxStars);
             if (stars_ && (w != seedW_ || h != seedH_)) {
                 for (uint16_t i = 0; i < kMaxStars; i++) spawn(stars_[i], w, h, /*far=*/false);
                 seedW_ = w;
                 seedH_ = h;
             }
         } else {
-            freeBuffers();
+            stars_.resize(0);
+            seedW_ = 0;
+            seedH_ = 0;
         }
-        setDynamicBytes(stars_ ? sizeof(Star) * kMaxStars : 0);
     }
-
-    void release() override {
-        freeBuffers();
-        setDynamicBytes(0);
-    }
-
-    ~StarFieldEffect() override { freeBuffers(); }
 
     void tick() override {
         if (!stars_) return;
@@ -179,16 +167,9 @@ private:
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
-    void freeBuffers() {
-        if (stars_) {
-            platform::free(stars_);
-            stars_ = nullptr;
-        }
-        seedW_ = 0;
-        seedH_ = 0;
-    }
-
-    Star* stars_ = nullptr;
+    // Fixed kMaxStars table. Self-sizing, self-freeing, self-reporting. seedW_/seedH_ track the
+    // geometry the stars were spawned for, so prepare() re-spawns only on a grid change.
+    ScratchBuffer<Star> stars_{*this};
     lengthType seedW_ = 0;
     lengthType seedH_ = 0;
     uint32_t step_ = 0;

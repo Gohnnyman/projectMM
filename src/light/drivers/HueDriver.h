@@ -1,14 +1,11 @@
 #pragma once
 
-#include "light/drivers/DriverBase.h"
+#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio
+
 #include "core/JsonUtil.h"          // parse the bridge's JSON responses
 #include "core/FilesystemModule.h"  // noteDirty — persist the app key after pairing
 #include "core/DevicesModule.h"     // DevicesModule::active() — list the bridge as a device
 #include "platform/platform.h"
-
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
 
 namespace mm {
 

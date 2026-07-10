@@ -1,14 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, blend, Palettes::active()
-#include "light/draw.h"           // draw::line (perspective edges + depth shorten), draw::fade
-#include "core/AudioService.h"     // AudioService::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::bands[16]
-#include "core/math8.h"           // map8
-
-#include <cmath>                  // lroundf (once-per-frame maxHeight, not per-light)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 

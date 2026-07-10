@@ -1,11 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"        // colorFromPalette, Palettes::active
-#include "light/draw.h"           // draw::line, draw::fade
-#include "core/math8.h"           // beatsin8, map8, Random8
-#include "core/AudioService.h"     // AudioService::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame, bands[]
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 

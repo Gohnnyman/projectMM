@@ -1,9 +1,6 @@
 #pragma once
 
-#include <cstdint>
-#include <cmath>  // std::sin, std::cos on float — cold build-path ring trig
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
