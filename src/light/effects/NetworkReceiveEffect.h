@@ -51,12 +51,12 @@ public:
     // source can't bleed its 2 padding bytes into the next universe's data.
     uint16_t channelsPerUniverse = static_cast<uint16_t>(MAX_CHANNELS_PER_UNIVERSE);
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint16("universe_start", universeStart);
         controls_.addUint16("channels_per_universe", channelsPerUniverse);
     }
 
-    void teardown() override {
+    void release() override {
         artnetSocket_.close();
         e131Socket_.close();
         ddpSocket_.close();
@@ -67,12 +67,12 @@ public:
 
     ~NetworkReceiveEffect() override { releaseStaging(); }
 
-    /// Pure build (see MoonModule::onBuildState): open + bind the three receive sockets (each bind
+    /// Pure build (see MoonModule::prepare): open + bind the three receive sockets (each bind
     /// independent so one taken port can't stop the others) and size the staging buffer to the layer
     /// (one byte per channel byte, zeroed so a fresh grid starts dark). No enabled() check — core's
-    /// applyState() calls this only when effectively-enabled and routes to teardown() (sockets closed,
+    /// applyState() calls this only when effectively-enabled and routes to release() (sockets closed,
     /// staging freed) otherwise, so a disabled effect (or one under a disabled parent) frees the ports.
-    void onBuildState() override {
+    void prepare() override {
         const bool artnetOk = artnetSocket_.open() && artnetSocket_.bind(ARTNET_PORT);
         const bool e131Ok = e131Socket_.open() && e131Socket_.bind(E131_PORT);
         const bool ddpOk = ddpSocket_.open() && ddpSocket_.bind(DDP_PORT);
@@ -95,7 +95,7 @@ public:
         setDynamicBytes(stagingBytes_);
     }
 
-    void loop() override {
+    void tick() override {
         if (!staging_) return;
         // Bounded non-blocking drain per socket: 128 packets ≈ one full ArtNet
         // frame for ~21k RGB lights; a flood costs at most 3×128 recvfrom calls
@@ -161,7 +161,7 @@ public:
     }
 
     // Test-only accessors — let the unit tests pin the staging lifecycle
-    // (sized off the hot path, never reallocated by loop, freed on teardown).
+    // (sized off the hot path, never reallocated by loop, freed on release).
     const uint8_t* stagingData() const { return staging_; }
     size_t stagingBytes() const { return stagingBytes_; }
 

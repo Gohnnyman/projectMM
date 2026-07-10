@@ -1068,7 +1068,9 @@
         "id": "RmtLed",
         "parent_id": "Drivers",
         "controls": {
-          "pins": "60"
+          "pins": "60",
+          "loopbackTxPin": 48,
+          "loopbackRxPin": 47
         }
       },
       {

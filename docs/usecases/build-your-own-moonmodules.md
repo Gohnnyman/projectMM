@@ -42,18 +42,18 @@ Your module is a class with a handful of **hook functions**. You override the on
 
 | Hook | When the core calls it | What you put here |
 |---|---|---|
-| `onBuildControls()` | At startup, and whenever the control set changes | Declare your sliders/toggles (e.g. a `speed` control) |
-| `onBuildState()` | At boot, and whenever the grid size / config changes | *(only if you need memory)* build a scratch buffer sized to the grid |
-| `loop()` | **Every render tick** | Draw your colours. This is the heart of an effect. |
-| `teardown()` | When your module is removed or **switched off** | *(only if you allocated memory)* free what `onBuildState()` built |
+| `defineControls()` | At startup, and whenever the control set changes | Declare your sliders/toggles (e.g. a `speed` control) |
+| `prepare()` | At boot, and whenever the grid size / config changes | *(only if you need memory)* build a scratch buffer sized to the grid |
+| `tick()` | **Every render tick** | Draw your colours. This is the heart of an effect. |
+| `release()` | When your module is removed or **switched off** | *(only if you allocated memory)* free what `prepare()` built |
 
-**The core calls these — you only fill them in.** It decides when to build, when to run, and when to release. A single traffic-cop method — `applyState()` — visits every module in the tree and either **builds it** (calls `onBuildState()`) when it's enabled or **releases it** (calls `teardown()`) when it's disabled, then runs `loop()` on the enabled ones each render tick.
+**The core calls these — you only fill them in.** It decides when to build, when to run, and when to release. A single traffic-cop method — `applyState()` — visits every module in the tree and either **builds it** (calls `prepare()`) when it's enabled or **releases it** (calls `release()`) when it's disabled, then runs `tick()` on the enabled ones each render tick.
 
-> **A word on speed.** `loop()` runs on the **render tick** — as fast as the hardware can go: a few hundred frames per second on an ESP32, thousands on a desktop. This is the **hot path**, the one place where speed and memory really matter. The rule of thumb: keep `loop()` to the pixel maths, and put anything expensive-but-occasional — allocating a buffer, opening a file, parsing a config — in `onBuildState()`, which runs only when something changes. A lean `loop()` flies on the smallest chip.
+> **A word on speed.** `tick()` runs on the **render tick** — as fast as the hardware can go: a few hundred frames per second on an ESP32, thousands on a desktop. This is the **hot path**, the one place where speed and memory really matter. The rule of thumb: keep `tick()` to the pixel maths, and put anything expensive-but-occasional — allocating a buffer, opening a file, parsing a config — in `prepare()`, which runs only when something changes. A lean `tick()` flies on the smallest chip.
 
 Two consequences that make your life easy:
 
-- **Your code assumes it's always live.** When the user switches your effect off, the core stops calling `loop()` and calls `teardown()` for you — so your `loop()` runs only when it should, and just draws. The "am I on?" question is the core's job, so it stays out of your code.
+- **Your code assumes it's always live.** When the user switches your effect off, the core stops calling `tick()` and calls `release()` for you — so your `tick()` runs only when it should, and just draws. The "am I on?" question is the core's job, so it stays out of your code.
 - **Switching a parent off switches the children off too.** Turn off the whole Layer and every effect inside it releases automatically — the core cascades it down the tree for you.
 
 > **Why it's built this way.** Keeping the "am I on?" decision in *one* core place makes each module short and honest: it does its job and trusts the core to call it at the right time. That's the difference between a codebase you can learn in an afternoon and one that grows a thousand special cases.
@@ -76,12 +76,12 @@ public:
     uint8_t speed = 20;   // in BPM — one hue cycle every 3 seconds
 
     // Declare the control so it shows up in the UI. Runs at startup.
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 255);   // name, variable, min, max
     }
 
     // Called every render tick. Draw the picture for "now".
-    void loop() override {
+    void tick() override {
         Buffer&   buf  = layer()->buffer();   // the pixel buffer, already sized for you
         Coord3D   dims = {width(), height(), depth()};   // read the grid size every frame
         uint8_t   w    = width(), h = height();
@@ -105,7 +105,7 @@ public:
 } // namespace mm
 ```
 
-That's the *entire* effect — just `onBuildControls()` and `loop()`. A simple effect that reads the shared buffer needs only those two hooks. Let's unpack the important bits.
+That's the *entire* effect — just `defineControls()` and `tick()`. A simple effect that reads the shared buffer needs only those two hooks. Let's unpack the important bits.
 
 ### One include gets you everything
 
@@ -113,7 +113,7 @@ That's the *entire* effect — just `onBuildControls()` and `loop()`. A simple e
 
 ### Reading the grid every frame
 
-Notice we call `width()` and `height()` **inside** `loop()`, and loop exactly `0..w` and `0..h`. **Read the real size every frame** — the same effect runs on an 8×8 grid, a 300-pixel strip, or a 64×64×64 cube, and the user can resize the grid live. Iterate exactly the dimensions the framework reports, and your effect "just works" everywhere.
+Notice we call `width()` and `height()` **inside** `tick()`, and loop exactly `0..w` and `0..h`. **Read the real size every frame** — the same effect runs on an 8×8 grid, a 300-pixel strip, or a 64×64×64 cube, and the user can resize the grid live. Iterate exactly the dimensions the framework reports, and your effect "just works" everywhere.
 
 > **Rule of thumb:** read `width()`/`height()`/`depth()` each frame and iterate exactly those bounds. The buffer is sized to exactly `width × height × depth × channels`, so staying within the reported dimensions keeps every write in range.
 
@@ -127,7 +127,7 @@ We build the moving `phase` from `elapsed()` (milliseconds since the show starte
 
 ### Controls are just member variables
 
-`speed` is an ordinary `uint8_t`. In `onBuildControls()` you tell the UI about it with one line, and from then on the framework keeps `speed` in sync with the on-screen slider. You read it in `loop()` like any variable. There are helpers for every common control:
+`speed` is an ordinary `uint8_t`. In `defineControls()` you tell the UI about it with one line, and from then on the framework keeps `speed` in sync with the on-screen slider. You read it in `tick()` like any variable. There are helpers for every common control:
 
 ```cpp
 controls_.addUint8("brightness", brightness, 0, 255);   // a 0–255 slider
@@ -159,7 +159,7 @@ class RainbowEffect : public EffectBase {
 public:
     uint8_t speed = 20;   /// One hue cycle per `speed` beats.   ← documents the control
 
-    void loop() override {
+    void tick() override {
         // 64-bit widen so the phase can't overflow.   ← a note for the code reader only
         …
     }
@@ -168,16 +168,16 @@ public:
 
 Rule of thumb: if a future *user* of your module should read it, use `///`; if only a future *editor* of the code needs it, use `//`.
 
-## When you need memory: `onBuildState()` and `teardown()`
+## When you need memory: `prepare()` and `release()`
 
 The rainbow only wrote into the buffer the framework already gave it. Some effects need their **own** scratch memory — for example a fire effect keeps a "heat" value per pixel between frames, or a game-of-life keeps the cell grid.
 
-This is where two more hooks come in, and where the core-orchestrates model pays off. You allocate in `onBuildState()` and free in `teardown()` — and you **do not** worry about *when* those run. The core calls `onBuildState()` when the grid is (re)sized and `teardown()` when your effect is switched off or removed. You just make the two match.
+This is where two more hooks come in, and where the core-orchestrates model pays off. You allocate in `prepare()` and free in `release()` — and you **do not** worry about *when* those run. The core calls `prepare()` when the grid is (re)sized and `release()` when your effect is switched off or removed. You just make the two match.
 
 ```cpp
 class SparkleEffect : public EffectBase {
 public:
-    void onBuildState() override {
+    void prepare() override {
         // Called at boot and whenever the grid size changes.
         // Size our scratch buffer to the current grid, reallocating only if the count changed.
         nrOfLightsType n = nrOfLights();
@@ -189,21 +189,19 @@ public:
         setDynamicBytes(heatCount_);   // tell the UI how much heap we use (for the card readout)
     }
 
-    void teardown() override {
-        release();                     // give the memory back
+    void release() override {
+        platform::free(heat_);         // give the memory back
+        heat_ = nullptr;
+        heatCount_ = 0;
         setDynamicBytes(0);
     }
 
-    ~SparkleEffect() override { release(); }   // and free on destruction, just in case
-
-    void loop() override {
+    void tick() override {
         if (!heat_) return;            // buffer not there (e.g. the grid is 0×0, or memory was tight) — skip
         // …use heat_[] to render sparkles…
     }
 
 private:
-    void release() { platform::free(heat_); heat_ = nullptr; heatCount_ = 0; }
-
     uint8_t*       heat_ = nullptr;
     nrOfLightsType heatCount_ = 0;
 };
@@ -213,17 +211,16 @@ private:
 
 Read the hooks together and the pattern is clear:
 
-- `onBuildState()` — **acquire**: build your memory for the current grid. The core calls this only while you're enabled, so it just allocates.
-- `teardown()` — **release**: give it all back. The core calls this the moment you're switched off, so a disabled effect holds *zero* memory.
-- destructor — a final safety net for a bare delete.
+- `prepare()` — **acquire**: build your memory for the current grid. The core calls this only while you're enabled, so it just allocates. (It calls `release()` first to free any previous buffer — `release()` is safe to call when there's nothing allocated.)
+- `release()` — **release**: give it all back. The core calls this the moment you're switched off, so a disabled effect holds *zero* memory.
 
-> **The golden rule:** whatever you allocate in `onBuildState()`, free in `teardown()`. Match the two halves and the memory balances. The core guarantees `teardown()` runs on disable (and cascades it to the whole subtree if a *parent* is disabled), so implementing those two halves is the whole job — the core handles the release timing.
+> **The golden rule:** whatever you allocate in `prepare()`, free in `release()`. Match the two halves and the memory balances. The core guarantees `release()` runs on disable (and cascades it to the whole subtree if a *parent* is disabled), so implementing those two halves is the whole job — the core handles the release timing.
 
-The one line that reads like housekeeping — `if (!heat_) return;` at the top of `loop()` — checks that the buffer exists before using it. It covers the rare cases where it might be absent: a 0×0 grid, or an allocation that ran short on a low-memory board. It asks *"is my buffer here?"* — the core already answers *"is my effect enabled?"* by choosing when to call `loop()`, so those two concerns stay separate. It's cheap insurance so a degenerate grid renders safely.
+The one line that reads like housekeeping — `if (!heat_) return;` at the top of `tick()` — checks that the buffer exists before using it. It covers the rare cases where it might be absent: a 0×0 grid, or an allocation that ran short on a low-memory board. It asks *"is my buffer here?"* — the core already answers *"is my effect enabled?"* by choosing when to call `tick()`, so those two concerns stay separate. It's cheap insurance so a degenerate grid renders safely.
 
 `platform::alloc` / `platform::free` are the portable allocator — they work the same on a desktop, an ESP32, or a Raspberry Pi. Use them (not raw `new`) so your effect compiles and runs on every target.
 
-> **Heads-up — this boilerplate is on its way out.** The allocate / free / destructor / `setDynamicBytes` / null-guard pattern repeats across many memory-holding effects, so a small core helper — a scratch buffer that sizes itself, frees itself, reports its own memory, and needs no cast — is planned. With it, the whole example above collapses to *declare a buffer and use it*: `ScratchBuffer<uint8_t> heat_;` plus `heat_.resize(nrOfLights())` in `onBuildState()`, and nothing else — no `release()`, no `teardown()`, no destructor, no `setDynamicBytes`, no `static_cast`. For now, the explicit version above is the idiom.
+> **Heads-up — this boilerplate is on its way out.** The allocate / free / `setDynamicBytes` / null-guard pattern repeats across many memory-holding effects, so a small core helper — a scratch buffer that sizes itself, frees itself, reports its own memory, and needs no cast — is planned. With it, the whole example above collapses to *declare a buffer and use it*: `ScratchBuffer<uint8_t> heat_;` plus `heat_.resize(nrOfLights())` in `prepare()`, and nothing else — no `release()`, no `setDynamicBytes`, no `static_cast`. For now, the explicit version above is the idiom.
 
 ## Test your module
 
@@ -233,13 +230,13 @@ Every module ships with a **unit test** — a short file that pins what it does,
 TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
     // …wire a 4×4 Layer with the effect (a few lines of setup)…
     layer.applyState();
-    layer.loop();                       // render one frame
+    layer.tick();                       // render one frame
     bool lit = /* any byte in the buffer non-zero */;
     CHECK(lit);                         // the rainbow painted something
 }
 ```
 
-That's the whole shape: **set up a small grid, run `loop()`, assert the output is what you expect.** Good things to pin for a new effect: it paints *something* on a normal grid, it survives a 1×1 and 0×0 grid without crashing (the robustness rule), and — if it holds memory — its `dynamicBytes` drops to zero when it's disabled. When you find a bug, the fix isn't done until a test reproduces it: that's how a crash becomes a test that stops it ever coming back.
+That's the whole shape: **set up a small grid, run `tick()`, assert the output is what you expect.** Good things to pin for a new effect: it paints *something* on a normal grid, it survives a 1×1 and 0×0 grid without crashing (the robustness rule), and — if it holds memory — its `dynamicBytes` drops to zero when it's disabled. When you find a bug, the fix isn't done until a test reproduces it: that's how a crash becomes a test that stops it ever coming back.
 
 Tests live in `test/unit/light/unit_<YourEffect>.cpp` and run with `ctest`. The full strategy — the unit vs. scenario tiers, how to pick one, the live-device tier — is a topic of its own: see [docs/testing.md](../testing.md). For your first effect, one small "it paints and it doesn't crash" test is plenty.
 
@@ -257,7 +254,7 @@ public:
     lengthType width  = 16;
     lengthType height = 16;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("width",  width,  1, 512);
         controls_.addInt16("height", height, 1, 512);
     }
@@ -285,26 +282,26 @@ Modifiers are the most abstract of the four, so treat them as a step up from eff
 
 A **driver** takes the finished image and pushes it out to physical LEDs — over a wire (WS2812 on a GPIO pin) or over the network (Art-Net, DDP). Drivers are the **advanced topic**: they touch real hardware, timing, and DMA, and they hold a scarce resource (a GPIO peripheral or a socket). That's exactly where the lifecycle model matters most:
 
-- `onBuildState()` **acquires** the peripheral / opens the socket for the current pin config.
-- `teardown()` **releases** it — so when you switch a driver off, its GPIO is genuinely freed and another driver can use that pin. No reboot.
+- `prepare()` **acquires** the peripheral / opens the socket for the current pin config.
+- `release()` **releases** it — so when you switch a driver off, its GPIO is genuinely freed and another driver can use that pin. No reboot.
 
 You get all of that "release the pin on disable" behaviour by implementing the same two hooks you already know from the memory example. The core's traffic cop does the rest. Writing a driver means learning the specific hardware peripheral (the RMT unit, the Parlio bus, a UDP socket), but the *module shape* is identical to your rainbow — which is the whole point.
 
 ## A suggested classroom path
 
-1. **Copy the rainbow.** Change the maths in `loop()` — make it pulse, or swap the palette lookup for a fixed colour. Rebuild and add it in the UI. See it move.
+1. **Copy the rainbow.** Change the maths in `tick()` — make it pulse, or swap the palette lookup for a fixed colour. Rebuild and add it in the UI. See it move.
 2. **Add a control.** Give it a `brightness` slider (`addUint8`) and multiply your colours by it. Watch the UI wire itself up.
-3. **Add memory.** Write an effect that keeps a per-pixel value between frames (a fading trail, a bouncing dot). Now you need `onBuildState()` + `teardown()` — practice matching them.
+3. **Add memory.** Write an effect that keeps a per-pixel value between frames (a fading trail, a bouncing dot). Now you need `prepare()` + `release()` — practice matching them.
 4. **Make it robust.** Resize the grid live to 1×1, then 0×0. Your effect must not crash. (Reading `width()`/`height()` each frame is what saves you.)
 5. **Write a test.** Add `test/unit/light/unit_MyEffect.cpp` with one case: build a small grid, run a frame, `CHECK` the buffer got painted (and doesn't crash on 0×0). Run `ctest`. That's the habit — a module and its test travel together.
 6. **Write a layout.** Arrange the pixels in a circle instead of a grid, and watch your existing effects render on the new shape.
-7. **(Advanced) Read a driver.** Open `RmtLedDriver` and find its `onBuildState()` (acquire) and `teardown()` (release). You'll recognise the exact pattern from step 3 — just holding a GPIO instead of a heap buffer.
+7. **(Advanced) Read a driver.** Open `RmtLedDriver` and find its `prepare()` (acquire) and `release()` (release). You'll recognise the exact pattern from step 3 — just holding a GPIO instead of a heap buffer.
 
 ## What to read next
 
 - **The effects catalog:** [docs/moonmodules/light/effects.md](../moonmodules/light/effects.md) — every shipped effect, with screenshots and controls. The best source of copy-and-tweak starting points.
-- **The architecture doc:** [docs/architecture.md](../architecture.md) — the render pipeline (Layouts → Layers → Effects/Modifiers → Drivers) and the hot-path rules (why we avoid heap and floats inside `loop()`).
+- **The architecture doc:** [docs/architecture.md](../architecture.md) — the render pipeline (Layouts → Layers → Effects/Modifiers → Drivers) and the hot-path rules (why we avoid heap and floats inside `tick()`).
 - **Coding standards:** [docs/coding-standards.md](../coding-standards.md) — the house style (header-only light modules, `constexpr`, naming) so your module reads like the rest.
 - **The real modules:** the smallest ones make the best teachers — `RainbowEffect` (a clean loop), `GameOfLifeEffect` (the memory lifecycle), `GridLayout` (`forEachCoord`).
 
-The recurring lesson across all of them: **keep your module about what it does.** Declare your controls, draw or transform in the hook, allocate-in-`onBuildState`/free-in-`teardown` if you hold memory — and let the core decide when any of it runs. That discipline is what keeps a large, multi-platform light engine understandable one small module at a time.
+The recurring lesson across all of them: **keep your module about what it does.** Declare your controls, draw or transform in the hook, allocate-in-`prepare`/free-in-`release` if you hold memory — and let the core decide when any of it runs. That discipline is what keeps a large, multi-platform light engine understandable one small module at a time.

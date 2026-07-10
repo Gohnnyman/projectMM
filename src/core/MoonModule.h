@@ -40,13 +40,13 @@ inline const char* roleName(ModuleRole role) {
 /// name lives in flash, not per instance), because on an ESP32 without PSRAM dozens of modules
 /// load at once and every byte counts. Field order is grouped 8/4/2/1-byte to minimise padding.
 ///
-/// **Lifecycle.** `setup()` / `teardown()` bracket the module's life; `loop()` / `loop20ms()` /
-/// `loop1s()` are the three tick rates the Scheduler paces. Two build hooks sit apart from
-/// `setup()`: `onBuildControls()` holds every `addX()` call and is idempotent + re-runnable (so a
-/// Select changing the visible control set rebuilds cleanly), and `onBuildState()` is the single
+/// **Lifecycle.** `setup()` / `release()` bracket the module's life; `tick()` / `tick20ms()` /
+/// `tick1s()` are the three tick rates the Scheduler paces. Two build hooks sit apart from
+/// `setup()`: `defineControls()` holds every `addX()` call and is idempotent + re-runnable (so a
+/// Select changing the visible control set rebuilds cleanly), and `prepare()` is the single
 /// derived-state hook (buffers, LUTs, the module's heap-byte report), reached at setup and via
-/// `Scheduler::buildState()` whenever a control that changes physical dimensions fires
-/// `controlChangeTriggersBuildState()`. This build sweep is what makes every config change apply
+/// `Scheduler::prepareTree()` whenever a control that changes physical dimensions fires
+/// `controlChangeTriggersPrepare()`. This build sweep is what makes every config change apply
 /// live, with no reboot. Controls bind by reference, so persisted values overlay the bound
 /// variables before any `setup()` runs.
 ///
@@ -62,12 +62,12 @@ inline const char* roleName(ModuleRole role) {
 ///
 /// **Runtime add/remove lifecycle contract.** When a child is added or removed *after* the
 /// parent's own setup has run, the caller drives the child's lifecycle: adding at runtime →
-/// call `setup()` → `onBuildControls()` → `onBuildState()` on the new child; removing at runtime
-/// → call `teardown()` on the child before removing it. A child added *before* the parent's
+/// call `setup()` → `defineControls()` → `prepare()` on the new child; removing at runtime
+/// → call `release()` on the child before removing it. A child added *before* the parent's
 /// setup needs none of this — the parent's `setup()` propagates down to it.
 ///
 /// **Enabled.** Every module has an `enabled` flag (default true), toggled from the UI card
-/// header and via `POST /api/control`. The Scheduler always calls the three loop hooks regardless
+/// header and via `POST /api/control`. The Scheduler always calls the three tick hooks regardless
 /// of `enabled`; each module decides what "disabled" means — a rendering module early-returns
 /// (its buffer freezes) while a system module ignores the flag (`respectsEnabled()` false) so the
 /// user can't lock themselves out. `onEnabled(bool)` fires once per transition for one-shot
@@ -75,7 +75,7 @@ inline const char* roleName(ModuleRole role) {
 ///
 /// **Self-reporting.** Each module reports its own footprint and cost so the UI shows per-module
 /// visibility at any depth: `classSize()` (set once at registration via `register_type<T>()`, no
-/// per-class boilerplate), `dynamicBytes()` (heap set by `onBuildState()`), and `loopTimeUs()`
+/// per-class boilerplate), `dynamicBytes()` (heap set by `prepare()`), and `tickTimeUs()`
 /// (average microseconds per tick over a 1-second window; `publishTiming()` recurses the tree
 /// every second — parents time their children, the Scheduler times top-level modules). tickTimeUs
 /// is the primary performance metric; FPS is derived as `1000000 / tickTimeUs`. `setStatus(msg,
@@ -103,117 +103,117 @@ public:
 
     /// Default lifecycle propagates to children. Override to add container-specific logic.
     ///
-    /// For loop / loop20ms / loop1s, the default ticks every child that passes the same
+    /// For tick / tick20ms / tick1s, the default ticks every child that passes the same
     /// enabled gate the Scheduler applies to top-level modules (!respectsEnabled() ||
     /// enabled() — tick when the module opted out of the gate, otherwise honour
     /// enabled()), and accumulates per-child timing the same way Scheduler does. Leaf
     /// modules (childCount_ == 0) pay one predicted-not-taken branch — sub-nanosecond.
     ///
-    /// Override + chain convention for loop callbacks: parent work runs first, then
+    /// Override + chain convention for tick callbacks: parent work runs first, then
     /// chain to base to tick children (option A — parent prepares, children consume).
     /// Override + chain for setup runs the other way (chain to base first so children
-    /// are initialised before the parent depends on them). teardown's base default
+    /// are initialised before the parent depends on them). release's base default
     /// reverse-iterates children; override and chain late so the parent shuts down its
     /// own state first.
     virtual void setup() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->setup(); }
-    virtual void loop() { tickChildren(&MoonModule::loop); }
-    virtual void loop20ms() { tickChildren(&MoonModule::loop20ms); }
-    virtual void loop1s() { tickChildren(&MoonModule::loop1s); }
-    virtual void teardown() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->teardown(); }
+    virtual void tick() { tickChildren(&MoonModule::tick); }
+    virtual void tick20ms() { tickChildren(&MoonModule::tick20ms); }
+    virtual void tick1s() { tickChildren(&MoonModule::tick1s); }
+    virtual void release() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->release(); }
 
     /// The single orchestration point for the resource lifecycle — the enabled decision lives HERE,
-    /// in core, so a catalog module's onBuildState() is pure "build my state" with no enabled() check.
+    /// in core, so a catalog module's prepare() is pure "build my state" with no enabled() check.
     /// Per node: build it when effectively-enabled (acquire), else tear it down (release). The
-    /// recursion is owned here, not in onBuildState(): the enabled branch builds this node then
+    /// recursion is owned here, not in prepare(): the enabled branch builds this node then
     /// recurses into each child's applyState() (parent-first — a Layer builds its LUT before its
     /// effects build against it), so each child is routed by ITS OWN effective-enabled — a disabled
-    /// child under an enabled parent is torn down, not built. The disabled branch calls teardown(),
+    /// child under an enabled parent is torn down, not built. The disabled branch calls release(),
     /// which already recurses to the whole subtree (reverse order), so applyState() does not recurse
-    /// again there. Reached from Scheduler::buildState() and the boot sweep; the disable toggle runs
+    /// again there. Reached from Scheduler::prepareTree() and the boot sweep; the disable toggle runs
     /// it too, so acquire-on-enable and release-on-disable are this one path.
     void applyState() {
         if (effectivelyEnabled()) {
-            onBuildState();
+            prepare();
             for (uint8_t i = 0; i < childCount_; i++) children_[i]->applyState();
         } else {
-            teardown();   // recurses to children itself (reverse order)
+            release();   // recurses to children itself (reverse order)
         }
     }
 
-    /// Called once when the enabled flag flips (the Scheduler runs a full buildState() right
+    /// Called once when the enabled flag flips (the Scheduler runs a full prepareTree() right
     /// after, which routes through applyState() to re-derive state on the same toggle). Default
     /// no-op. Override ONLY for a genuine edge-triggered one-shot that is NOT "rebuild derived
     /// state" — e.g. a clean protocol DISCONNECT (MqttModule sends a courtesy MQTT frame + resets
     /// its backoff). Resource acquire/release does NOT belong here: buffers and peripherals are
-    /// built in onBuildState() and released in teardown(), and applyState() picks which to call
+    /// built in prepare() and released in release(), and applyState() picks which to call
     /// per node from effectivelyEnabled() — so a disabled module, or a child of a disabled parent,
-    /// releases everything via teardown() through the one sweep. The scheduler always invokes
-    /// loop()/loop20ms()/loop1s() only while (effectively) enabled, so a disabled module's loop
-    /// never runs.
+    /// releases everything via release() through the one sweep. The scheduler always invokes
+    /// tick()/tick20ms()/tick1s() only while (effectively) enabled, so a disabled module
+    /// never ticks.
     virtual void onEnabled(bool /*newEnabled*/) {}
 
     /// Cheap per-control reaction, tier 1 of the three-tier control-change split (mirrors
     /// MoonLight's onUpdate / requestMappings / onSizeChanged; see architecture.md § Rebuild
     /// propagation). Runs on EVERY change — recompute a small LUT, re-bind a socket, etc.
-    /// The other tiers are `controlChangeTriggersBuildState()` (tier 2, the gate for the
+    /// The other tiers are `controlChangeTriggersPrepare()` (tier 2, the gate for the
     /// pipeline-wide sweep, true only for controls that change physical dimensions / mapping
-    /// shape) and `onBuildState()` (tier 3, build derived state, reached via
-    /// `Scheduler::buildState()` when tier 2 returns true).
+    /// shape) and `prepare()` (tier 3, build derived state, reached via
+    /// `Scheduler::prepareTree()` when tier 2 returns true).
     ///
     /// Called after a control's value is written from the UI/API. `controlName` is the
     /// changed control's name (stable; points into the descriptor). Default no-op.
-    virtual void onUpdate(const char* /*controlName*/) {}
+    virtual void onControlChanged(const char* /*controlName*/) {}
 
     /// Whether a value change to one of this module's controls triggers the pipeline-wide
-    /// onBuildState() sweep. Default false — most controls are values read in the hot
+    /// prepare() sweep. Default false — most controls are values read in the hot
     /// path that need no realloc. Layout and Modifier override to return true (their
     /// controls change physical dimensions / LUT shape). Most overriders ignore the name
     /// and return true for every control they expose.
-    virtual bool controlChangeTriggersBuildState(const char* /*controlName*/) const { return false; }
+    virtual bool controlChangeTriggersPrepare(const char* /*controlName*/) const { return false; }
 
-    /// onBuildControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
+    /// defineControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
     /// No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
     /// Select control changes the visible control set, so a second invocation must produce
     /// exactly the same result for unchanged inputs. Conditional branches may depend on any
     /// member variable.
-    virtual void onBuildControls() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onBuildControls(); }
+    virtual void defineControls() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->defineControls(); }
 
     /// Non-virtual helper: clear-and-rebuild for this module AND its descendants. The default
-    /// onBuildControls cascades into children, so we must also clear their control lists first;
+    /// defineControls cascades into children, so we must also clear their control lists first;
     /// otherwise the recursive append would duplicate every child's controls. Used after Select
     /// changes (in HttpServerModule) and anywhere else the conditional control set needs
     /// re-evaluation.
     void rebuildControls() {
         clearControlsRecursive();
-        onBuildControls();
+        defineControls();
     }
     void clearControlsRecursive() {
         controls_.clear();
         for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
     }
 
-    /// Tier-3 of the control-change split (see onUpdate above): the module (re)allocates
+    /// Tier-3 of the control-change split (see onControlChanged above): the module (re)allocates
     /// / recomputes whatever derived state it owns — an effect's heap, a Layer's mapping
     /// LUT, the Drivers output buffer. Default propagates to children. Reached via
-    /// Scheduler::buildState() (whole-tree) when a tier-2 gate returns true.
+    /// Scheduler::prepareTree() (whole-tree) when a tier-2 gate returns true.
     ///
     /// **A pure build — the acquire half of the resource lifecycle.** Build derived state
     /// (buffers AND peripherals) for the current controls; no `enabled()` check. `applyState()`
     /// (the core router) calls this ONLY when the module is `effectivelyEnabled()`, and calls
-    /// `teardown()` (the release) otherwise — so a disabled module, or a child of a disabled
-    /// parent, frees everything through `teardown()`, never here. `applyState()` runs on boot
+    /// `release()` (the release) otherwise — so a disabled module, or a child of a disabled
+    /// parent, frees everything through `release()`, never here. `applyState()` runs on boot
     /// and right after any enable/disable toggle, so acquire-on-enable and release-on-disable are
-    /// this build/teardown pair, one path, boot and runtime alike. A module therefore never checks
+    /// this build/release pair, one path, boot and runtime alike. A module therefore never checks
     /// enabled() in setup() or here: setup() is enabled-independent one-time wiring; the acquire
-    /// lives here; the release lives in teardown().
+    /// lives here; the release lives in release().
     ///
     /// Same role as JUCE's `prepareToPlay` or UIKit's `layoutSubviews` — a framework-driven
     /// "set up your derived state for the current config" hook with a no-op default. The verb
     /// is "build" (not "rebuild") on purpose: the operation is idempotent and history-agnostic
     /// — it builds the correct state from current values whether or not it ran before, so boot
     /// and a later control change are the same call, not "build" then "rebuild". The whole
-    /// chain shares the verb: controlChangeTriggersBuildState → Scheduler::buildState() →
-    /// onBuildState(). Mirrors the onBuildControls precedent (build the surface vs build the
+    /// chain shares the verb: controlChangeTriggersPrepare → Scheduler::prepareTree() →
+    /// prepare(). Mirrors the defineControls precedent (build the surface vs build the
     /// state) and the canonical hooks (prepareToPlay/layoutSubviews never say "re" either).
     ///
     /// Intentionally coarse: each module builds its whole derived state, and the Scheduler
@@ -222,8 +222,8 @@ public:
     /// ever grows two independently-buildable aspects where one control touches only one of
     /// them (`width` reshapes a LUT but `gamma` only re-tints a cache, both expensive),
     /// the cheapest upgrade is to forward the changed control name —
-    /// `onBuildState(const char* changedControl)` — and branch inside. The tier-2 gate
-    /// (controlChangeTriggersBuildState) already carries the name, so it's a one-parameter change.
+    /// `prepare(const char* changedControl)` — and branch inside. The tier-2 gate
+    /// (controlChangeTriggersPrepare) already carries the name, so it's a one-parameter change.
     /// Don't add it pre-emptively; no module needs the distinction today.
     ///
     /// **A leaf operation — builds THIS node only.** The tree recursion + the enabled decision live
@@ -231,8 +231,8 @@ public:
     /// then recurses into children. So an override builds its own state and does NOT chain to a base
     /// recursion (there is none). A container that must prepare something for its children before they
     /// build (Drivers hands each driver the shared buffer, Layer builds its LUT) does that work in its
-    /// own onBuildState() body — applyState() then visits the children next, so they build against it.
-    virtual void onBuildState() {}
+    /// own prepare() body — applyState() then visits the children next, so they build against it.
+    virtual void prepare() {}
 
     /// Read this module's first output light as RGB into out[3], returning true if it has
     /// one. Domain-neutral seam (core declares it, the output-owning module overrides):
@@ -272,11 +272,11 @@ public:
     virtual bool respectsEnabled() const { return true; }
 
     /// True unless this module — or an ancestor that respects the enabled flag — is disabled.
-    /// The single predicate the resource-lifecycle gate keys off: `onBuildState()` acquires
+    /// The single predicate the resource-lifecycle gate keys off: `prepare()` acquires
     /// when this is true and releases the module's buffers/peripherals when it is false, so a
     /// disabled parent's whole subtree releases (the disable cascade). A `respectsEnabled()==false`
     /// ancestor is neutral — always-on, it never forces a child on or off. Off the hot path
-    /// (called from the cold onBuildState sweep, not loop()); an inherited/computed property in
+    /// (called from the cold prepare sweep, not tick()); an inherited/computed property in
     /// the shape of a scene-graph `worldVisible` or a CSS cascade — walk to the root, cheap.
     bool effectivelyEnabled() const {
         for (const MoonModule* m = this; m; m = m->parent())
@@ -292,7 +292,7 @@ public:
     virtual bool appearsInUi() const { return true; }
 
     /// Dirty flag — set by HttpServerModule when a control changes. FilesystemModule (or any
-    /// consumer interested in "this module's state has been touched") observes it in loop1s()
+    /// consumer interested in "this module's state has been touched") observes it in tick1s()
     /// and clears it after persisting.
     bool dirty() const { return dirty_; }
     void markDirty() { dirty_ = true; }
@@ -408,7 +408,7 @@ public:
     }
 
     /// Replace child at position i with fresh. Caller owns lifecycle of the removed
-    /// (returned) child — teardown + delete. Returns nullptr if i is out of range.
+    /// (returned) child — release + delete. Returns nullptr if i is out of range.
     /// Used by FilesystemModule at load time to swap a child whose type differs from
     /// the persisted JSON; the caller tears down + Scheduler::deleteTree's the old child.
     MoonModule* replaceChildAt(uint8_t i, MoonModule* fresh) {
@@ -423,7 +423,7 @@ public:
     /// Move child to absolute position newIndex (0..childCount-1). Intermediate siblings
     /// shift toward the vacated slot. Returns false if child isn't found, newIndex is out
     /// of range, or the move is a no-op (already at newIndex). Used by the UI reorder path;
-    /// the caller's follow-up Scheduler::buildState() rebuilds any order-dependent LUT.
+    /// the caller's follow-up Scheduler::prepareTree() rebuilds any order-dependent LUT.
     bool moveChildTo(MoonModule* child, uint8_t newIndex) {
         if (newIndex >= childCount_) return false;
         for (uint8_t i = 0; i < childCount_; i++) {
@@ -446,7 +446,7 @@ public:
     MoonModule* child(uint8_t i) const { return i < childCount_ ? children_[i] : nullptr; }
 
     /// Per-module memory reporting: classSize() is the instance size (set once at registration),
-    /// dynamicBytes() the heap this module allocated (set by onBuildState()).
+    /// dynamicBytes() the heap this module allocated (set by prepare()).
     size_t classSize() const { return classSize_ > 0 ? classSize_ : sizeof(MoonModule); }
     void setClassSize(size_t s) { classSize_ = s; }
     size_t dynamicBytes() const { return dynamicBytes_; }
@@ -474,14 +474,14 @@ public:
     void clearStatus() { status_ = nullptr; severity_ = Severity::Status; }
 
     /// Per-module timing: parents time children, Scheduler times top-level modules.
-    /// loopTimeUs() is the average microseconds per tick over the last 1-second window.
-    uint32_t loopTimeUs() const { return loopTimeUs_; }
+    /// tickTimeUs() is the average microseconds per tick over the last 1-second window.
+    uint32_t tickTimeUs() const { return tickTimeUs_; }
     void addAccumUs(uint32_t us) { accumUs_ += us; }
 
     /// Called by Scheduler every ~1 second. Averages the accumulated tick time and recurses
     /// into children.
     void publishTiming(uint32_t frameCount) {
-        loopTimeUs_ = frameCount > 0 ? accumUs_ / frameCount : 0;
+        tickTimeUs_ = frameCount > 0 ? accumUs_ / frameCount : 0;
         accumUs_ = 0;
         for (uint8_t i = 0; i < childCount_; i++) {
             children_[i]->publishTiming(frameCount);
@@ -491,7 +491,7 @@ public:
 protected:
     ControlList controls_;
 
-    /// Shared body for the loop / loop20ms / loop1s base defaults. Iterates children,
+    /// Shared body for the loop / tick20ms / tick1s base defaults. Iterates children,
     /// gates each by the same rule the Scheduler applies to top-level modules
     /// (!respectsEnabled() || enabled() — children that opted out of the enabled
     /// gate keep ticking; the rest tick only when enabled), dispatches the same
@@ -528,7 +528,7 @@ private:
     size_t dynamicBytes_ = 0;
     const char* status_ = nullptr;  // see status() / setStatus()
     Severity severity_ = Severity::Status;
-    uint32_t loopTimeUs_ = 0;
+    uint32_t tickTimeUs_ = 0;
     uint32_t accumUs_ = 0;
 };
 

@@ -11,7 +11,7 @@
 
 // These tests pin the symbol-buffer LIFECYCLE — the exact class of bug that
 // reached hardware: a review fix made deinit() free symbols_, and because
-// reinit() calls deinit(), every rebuild freed the buffer loop() needs, so the
+// reinit() calls deinit(), every rebuild freed the buffer tick() needs, so the
 // driver silently stopped transmitting. None of that touches the RMT peripheral
 // (ESP32-only); it's pure host-testable buffer ownership, which is why a unit
 // test is the right guard. The symbolBuffer()/symbolCapacity() accessors are
@@ -26,7 +26,7 @@ void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights = 64) {
     REQUIRE(src.allocate(lights, 3));   // a masked alloc failure would fail cases downstream
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
-    d.onBuildControls();
+    d.defineControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
     d.applyState();
@@ -34,7 +34,7 @@ void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
 
 } // namespace
 
-TEST_CASE("RmtLedDriver sizes the symbol buffer in onBuildState") {
+TEST_CASE("RmtLedDriver sizes the symbol buffer in prepare") {
     mm::RmtLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -46,9 +46,9 @@ TEST_CASE("RmtLedDriver sizes the symbol buffer in onBuildState") {
 }
 
 TEST_CASE("RmtLedDriver keeps the symbol buffer across a rebuild (reinit must not free it)") {
-    // The regression: onBuildState() does resizeSymbols() THEN reinit(), and a
+    // The regression: prepare() does resizeSymbols() THEN reinit(), and a
     // bad reinit()->deinit() freed symbols_ right after it was allocated, so the
-    // buffer was null by the time loop() ran. A second onBuildState (what a pins
+    // buffer was null by the time tick() ran. A second prepare (what a pins
     // change / topology rebuild triggers) must leave the buffer present.
     mm::RmtLedDriver d;
     mm::Buffer src;
@@ -64,7 +64,7 @@ TEST_CASE("RmtLedDriver keeps the symbol buffer across a rebuild (reinit must no
 TEST_CASE("RmtLedDriver keeps the symbol buffer across a pins change") {
     // Same regression class as above, multi-pin flavour: editing the pins list
     // triggers a rebuild that re-parses and re-inits N channels — none of which
-    // may free the symbol buffer loop() encodes into.
+    // may free the symbol buffer tick() encodes into.
     mm::RmtLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -93,23 +93,23 @@ TEST_CASE("RmtLedDriver grows the symbol buffer when the grid grows") {
     CHECK(d.symbolCapacity() >= static_cast<size_t>(256) * 3 * 8);
 }
 
-TEST_CASE("RmtLedDriver releases the symbol buffer on teardown") {
-    // The leak CodeRabbit flagged: teardown must free the buffer (and only
-    // teardown — not deinit, which reinit calls).
+TEST_CASE("RmtLedDriver releases the symbol buffer on release") {
+    // The leak CodeRabbit flagged: release must free the buffer (and only
+    // release — not deinit, which reinit calls).
     mm::RmtLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     wire(d, src, corr, 64);
     REQUIRE(d.symbolBuffer() != nullptr);
 
-    d.teardown();
+    d.release();
     CHECK(d.symbolBuffer() == nullptr);
     CHECK(d.symbolCapacity() == 0);
 }
 
 TEST_CASE("RmtLedDriver: disabling releases the resource, re-enabling re-acquires (applyState)") {
-    // Core's applyState() routes an effectively-enabled module to onBuildState() (acquire) and a
-    // disabled one to teardown() (release), so setEnabled(false) + the post-toggle buildState() sweep
+    // Core's applyState() routes an effectively-enabled module to prepare() (acquire) and a
+    // disabled one to release() (release), so setEnabled(false) + the post-toggle prepareTree() sweep
     // frees the peripheral + buffer (pins reusable). Observable via the symbol buffer: present when
     // enabled, gone after the disabled sweep, rebuilt on the re-enabled sweep.
     mm::RmtLedDriver d;
@@ -118,12 +118,12 @@ TEST_CASE("RmtLedDriver: disabling releases the resource, re-enabling re-acquire
     wire(d, src, corr, 64);
     REQUIRE(d.symbolBuffer() != nullptr);   // enabled by default → resource held
 
-    // The Scheduler runs a whole-tree buildState() AFTER the enabled-toggle (Scheduler::setControl),
-    // which calls applyState() on every module. A just-disabled one routes to teardown → released,
+    // The Scheduler runs a whole-tree prepareTree() AFTER the enabled-toggle (Scheduler::setControl),
+    // which calls applyState() on every module. A just-disabled one routes to release → released,
     // and must STAY released on subsequent sweeps (else a disabled RMT driver re-grabs a GPIO an
     // enabled Parlio driver now owns).
     d.setEnabled(false);
-    d.applyState();                         // disabled → teardown
+    d.applyState();                         // disabled → release
     CHECK(d.symbolBuffer() == nullptr);     // buffer freed (RAM back; pins released)
     CHECK(d.symbolCapacity() == 0);
 
@@ -131,13 +131,13 @@ TEST_CASE("RmtLedDriver: disabling releases the resource, re-enabling re-acquire
     CHECK(d.symbolBuffer() == nullptr);
 
     d.setEnabled(true);
-    d.applyState();                         // enabled → onBuildState re-acquires
+    d.applyState();                         // enabled → prepare re-acquires
     CHECK(d.symbolBuffer() != nullptr);     // resource re-acquired on re-enable
 }
 
 TEST_CASE("RmtLedDriver: a DISABLED driver does not acquire through the boot sweep") {
-    // Core's applyState() (the boot Phase-4 sweep + every buildState) calls onBuildState() only when
-    // effectively-enabled, else teardown(). A driver persisted DISABLED but sharing a GPIO with an
+    // Core's applyState() (the boot Phase-4 sweep + every prepareTree) calls prepare() only when
+    // effectively-enabled, else release(). A driver persisted DISABLED but sharing a GPIO with an
     // enabled sibling must not grab the peripheral/pins — else it steals the pin and the enabled
     // sibling's output stays dead. This reproduces the hardware symptom: a disabled RmtLed on GPIO 20
     // blanking an enabled ParlioLed on the same pin.
@@ -146,13 +146,13 @@ TEST_CASE("RmtLedDriver: a DISABLED driver does not acquire through the boot swe
     mm::Correction corr;
     REQUIRE(src.allocate(64, 3));
     corr.rebuild(255, mm::LightPreset::GRB);
-    d.onBuildControls();
+    d.defineControls();
     d.setEnabled(false);          // persisted-disabled at boot
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
 
     d.setup();                    // Phase 3: pure wiring, no acquire
-    d.applyState();               // Phase 4: disabled → routes to teardown, no acquire
+    d.applyState();               // Phase 4: disabled → routes to release, no acquire
     CHECK(d.symbolBuffer() == nullptr);
 
     d.setEnabled(true);           // now enable → acquire on the next sweep
@@ -160,17 +160,17 @@ TEST_CASE("RmtLedDriver: a DISABLED driver does not acquire through the boot swe
     CHECK(d.symbolBuffer() != nullptr);
 }
 
-// MoonModule contract: teardown reverses setup, so setup→teardown→setup→teardown
+// MoonModule contract: release reverses setup, so setup→release→setup→release
 // cycles leave no residue — no leaked heap (ASAN in the test runner catches that),
-// no stuck state. After each teardown the driver must look untouched: no symbol
+// no stuck state. After each release the driver must look untouched: no symbol
 // buffer, no status. Run several cycles to surface any accumulation.
-TEST_CASE("RmtLedDriver setup/teardown is repeatable with no residual state") {
+TEST_CASE("RmtLedDriver setup/release is repeatable with no residual state") {
     mm::RmtLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
     corr.rebuild(255, mm::LightPreset::GRB);
-    d.onBuildControls();
+    d.defineControls();
 
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();                       // (re)init the channel
@@ -179,7 +179,7 @@ TEST_CASE("RmtLedDriver setup/teardown is repeatable with no residual state") {
         d.applyState();                // size buffer + reinit, as the Scheduler does
         REQUIRE(d.symbolBuffer() != nullptr);
 
-        d.teardown();                    // must fully reverse the above
+        d.release();                    // must fully reverse the above
         CHECK(d.symbolBuffer() == nullptr);   // buffer freed (ASAN: no leak across cycles)
         CHECK(d.symbolCapacity() == 0);
         CHECK(d.status() == nullptr);         // no lingering status string
@@ -193,7 +193,7 @@ TEST_CASE("RmtLedDriver setup/teardown is repeatable with no residual state") {
 // at the wrong times; a regression in the C++ flag now fails here.
 TEST_CASE("RmtLedDriver loopbackRxPin tracks the loopbackTest toggle") {
     mm::RmtLedDriver d;
-    d.onBuildControls();
+    d.defineControls();
     auto setTest = [&](bool on) {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);
     };
@@ -207,7 +207,7 @@ TEST_CASE("RmtLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // desktop), but the conditional-visibility contract is host-testable here.
 TEST_CASE("RmtLedDriver loopbackTxPin tracks the loopbackTest toggle") {
     mm::RmtLedDriver d;
-    d.onBuildControls();
+    d.defineControls();
     auto setTest = [&](bool on) {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);
     };
@@ -215,7 +215,7 @@ TEST_CASE("RmtLedDriver loopbackTxPin tracks the loopbackTest toggle") {
 }
 
 // Editing `pins` while the loopback test is ON must refresh the parsed config
-// before the self-test runs — onUpdate fires before the buildState sweep re-parses,
+// before the self-test runs — onControlChanged fires before the prepareTree sweep re-parses,
 // so without the in-branch parseConfig() the test would transmit on the OLD pin and
 // show a verdict for it. Mirrors the fix in ParallelLedDriver; this pins the RMT
 // sibling that the dedup left behind. Host-observable via pinCount(): the refresh
@@ -227,17 +227,17 @@ TEST_CASE("RmtLedDriver loopback re-parses pins before testing (no stale-pin ver
     src.allocate(64, 3);
     corr.rebuild(255, mm::LightPreset::GRB);
     std::strcpy(d.pins, "18");
-    d.onBuildControls();
+    d.defineControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
     d.applyState();
     REQUIRE(d.pinCount() == 1);
 
     // Turn the test on, then edit pins to a 3-pin set and fire the pin update the
-    // way the control framework does (write the buffer, then onUpdate). The config
+    // way the control framework does (write the buffer, then onControlChanged). The config
     // must already reflect 3 pins by the time the self-test reads pinList_.
     mm::test::setControlValue<bool>(d, "loopbackTest", true);
     std::strcpy(d.pins, "18,17,16");
-    d.onUpdate("pins");
+    d.onControlChanged("pins");
     CHECK(d.pinCount() == 3);   // refreshed before the test, not the stale 1
 }

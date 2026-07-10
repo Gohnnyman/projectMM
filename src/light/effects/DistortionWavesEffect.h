@@ -29,13 +29,13 @@ public:
     uint8_t freq_y = 3;   // vertical wave frequency, 1..8
     uint8_t speed = 50;   // animation speed, 0..100 (0 = frozen)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("freq_x", freq_x, 1, 8);
         controls_.addUint8("freq_y", freq_y, 1, 8);
         controls_.addUint8("speed", speed, 0, 100);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

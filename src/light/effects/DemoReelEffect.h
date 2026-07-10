@@ -15,9 +15,9 @@ namespace mm {
 // Demo reel: cycles through every OTHER registered effect, one at a time, auto-advancing every
 // `interval` seconds. It hosts a single live child effect — created from the ModuleFactory registry,
 // parented to this effect's own Layer so the child's layer()/buffer()/width()/elapsed() resolve to
-// the same render target — and delegates loop() to it each tick. On the interval it tears the child
+// the same render target — and delegates tick() to it each tick. On the interval it tears the child
 // down, deletes it, and instantiates the next effect in the registry (or a random one when
-// `shuffle`). This reuses the exact create → onBuildControls → setup → onBuildState → loop lifecycle
+// `shuffle`). This reuses the exact create → defineControls → setup → prepare → loop lifecycle
 // a Layer runs for a normal effect child (HttpServerModule::applyAddModule), so no new machinery:
 // the reel is just an effect that swaps which effect it *is* over time.
 //
@@ -35,7 +35,7 @@ public:
     // D3: the reel produces a COMPLETE frame — it runs the child, extrudes the child's output itself,
     // then draws the name overlay on top — so the Layer must not extrude again (that would fan the
     // child's x=0 column across X and wipe the overlay). The child's own dimensionality is handled
-    // inside loop() via layer()->extrude(child dim) BEFORE the overlay, not by reporting it here.
+    // inside tick() via layer()->extrude(child dim) BEFORE the overlay, not by reporting it here.
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t interval      = 8;      // seconds each effect plays before advancing
@@ -43,7 +43,7 @@ public:
     bool    randomPalette = true;   // pick a random palette on each cycle (showcases the palette set)
     bool    showName      = true;   // overlay the playing effect's name (the reel as a showcase tool)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("interval", interval, 1, 120);
         controls_.addBool("shuffle", shuffle);
         controls_.addBool("randomPalette", randomPalette);
@@ -51,14 +51,14 @@ public:
     }
 
     // Build the eligible-effect list (all Effect-role types except this one) and start the first.
-    void onBuildState() override {
+    void prepare() override {
         buildEligibleList();
         // Restart the reel from the top on any rebuild (grid resize, control change): tear down the
         // current child (its buffers were sized to the old grid) and re-create against the new one.
         swapTo(cursor_ < eligibleCount_ ? cursor_ : 0);
     }
 
-    void loop() override {
+    void tick() override {
         if (eligibleCount_ == 0 || !current_) return;
 
         // Advance on the interval. elapsed() is the Layer's monotonic ms clock (same source every
@@ -69,7 +69,7 @@ public:
             advance();
         }
 
-        current_->loop();   // render the hosted effect into our Layer's buffer this tick
+        current_->tick();   // render the hosted effect into our Layer's buffer this tick
         // Extrude the child's output NOW (the Layer skips it — the reel is D3). A hosted D1/D2 effect
         // (NoiseMeter, FreqMatrix, GEQ…) writes only its x=0 column / z=0 slice; fan it across the
         // unused axes here, BEFORE the name overlay, so the overlay isn't wiped by a later extrude.
@@ -89,9 +89,9 @@ public:
         }
     }
 
-    void teardown() override {
+    void release() override {
         destroyCurrent();
-        EffectBase::teardown();
+        EffectBase::release();
     }
 
     ~DemoReelEffect() override { destroyCurrent(); }
@@ -108,7 +108,7 @@ private:
     uint8_t eligible_[kMaxEligible] = {};
     uint8_t eligibleCount_ = 0;
     uint8_t cursor_ = 0;                 // index INTO eligible_ of the current effect
-    MoonModule* current_ = nullptr;      // the live hosted effect (owned; deleted on swap/teardown)
+    MoonModule* current_ = nullptr;      // the live hosted effect (owned; deleted on swap/release)
     Dim currentDim_ = Dim::D3;           // cached dimensionality of current_ (set in swapTo, drives extrude)
     uint32_t lastSwitchMs_ = 0;
     Random8 rng_;
@@ -136,7 +136,7 @@ private:
         // Showcase the palette set: pick a fresh random palette on each cycle. This overrides the
         // global Drivers palette while the reel runs; the next Drivers rebuild restores the user's
         // choice when the reel is removed (intended — the reel takes over the display). Only on a
-        // real cycle advance, not on rebuild (swapTo is also called from onBuildState).
+        // real cycle advance, not on rebuild (swapTo is also called from prepare).
         if (randomPalette && palettes::kCount > 0) Palettes::setActive(rng_.below(palettes::kCount));
         swapTo(next);
     }
@@ -151,10 +151,10 @@ private:
         if (!mod) return;
         // Parent to the LAYER, not to us: EffectBase::layer() is static_cast<Layer*>(parent()), so
         // the child must see the Layer as its parent for buffer()/dims/elapsed() to resolve. We hold
-        // it privately and drive its loop() ourselves — we do NOT addChild() it (that would make the
+        // it privately and drive its tick() ourselves — we do NOT addChild() it (that would make the
         // Layer tick it a second time). Same create→build lifecycle as a normal effect child.
         mod->setParent(layer());
-        mod->onBuildControls();
+        mod->defineControls();
         mod->setup();
         mod->applyState();   // build if effectively-enabled (walks to the Layer parent), else release
         current_ = mod;
@@ -176,8 +176,8 @@ private:
 
     void destroyCurrent() {
         if (!current_) return;
-        current_->teardown();
-        delete current_;              // teardown-then-delete, the Scheduler's ownership pattern
+        current_->release();
+        delete current_;              // release-then-delete, the Scheduler's ownership pattern
         current_ = nullptr;
     }
 

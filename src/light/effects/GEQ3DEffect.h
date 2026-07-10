@@ -42,19 +42,19 @@ public:
     uint8_t numBands  = 16;    // bands shown (2..16); fewer = wider bars
     bool    borders   = true;  // outline each bar
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 10);
         controls_.addUint8("frontFill", frontFill, 0, 255);
         // MoonLight's horizon range is 0..size.x-1 (set at runtime). The control descriptor here is a
         // fixed 0..255 slider — the source's row index — and the value is clamped to the live row
-        // count in loop(). A width/height-relative descriptor range isn't expressible at build time.
+        // count in tick(). A width/height-relative descriptor range isn't expressible at build time.
         controls_.addUint8("horizon", horizon, 0, 255);
         controls_.addUint8("depth", depth, 0, 255);
         controls_.addUint8("numBands", numBands, 2, 16);
         controls_.addBool("borders", borders);
     }
 
-    void loop() override {
+    void tick() override {
         if (numBands == 0) return;
 
         const int cols = width();

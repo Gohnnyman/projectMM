@@ -19,7 +19,7 @@ namespace mm {
 ///
 // --8<-- [start:wire-format]
 ///   0x03 coordinate table (sent when the geometry changes — every LUT/layout rebuild
-///        via onBuildState — and when a new client connects, so a refresh gets it; never
+///        via prepare — and when a new client connects, so a refresh gets it; never
 ///        per-frame):
 ///        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
 ///        bx/by/bz = bounding-box extent (for client centring); positions are
@@ -55,7 +55,7 @@ public:
     void setBroadcaster(BinaryBroadcaster* b) { broadcaster_ = b; }
 
     /// Bind the one control, `fps` (1-60).
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fps", fps, 1, 60);
     }
 
@@ -72,7 +72,7 @@ public:
     /// resumable colour send *first*: a resize frees+reallocs the producer buffer, so
     /// a half-sent frame would read freed memory — a use-after-free guard pinned by a
     /// test. This coupling spans PreviewDriver ↔ HttpServerModule ↔ the Layer buffer.
-    void onBuildState() override {
+    void prepare() override {
         // A resize frees+reallocs the producer buffer, so any in-flight resumable colour send holds
         // a pointer that's about to dangle — cancel it BEFORE the rebuild (the browser discards the
         // half-sent message and gets the fresh table + frame next tick). Guards a use-after-free.
@@ -85,14 +85,14 @@ public:
     /// The frame rate self-limits to what the link sustains (sheds rate first, then
     /// spatial resolution via adaptive downscale), so a large grid never stalls the
     /// loop or tears — it always delivers a complete frame.
-    void loop() override {
+    void tick() override {
         if (fps == 0) return;
         uint32_t now = platform::millis();
         uint32_t interval = 1000 / fps;
         if (now - lastSendTime_ < interval) return;  // fps CEILING (max rate); link may be slower
         lastSendTime_ = now;
 
-        // The coordinate table is (re)streamed only when the geometry changes (onBuildState — a
+        // The coordinate table is (re)streamed only when the geometry changes (prepare — a
         // resize / LUT rebuild), when a new client connects (clientGeneration bump, so a page
         // refresh gets positions immediately), when the adaptive factor changes, or while a
         // previous stream didn't reach every client (coordPending_ retry). NOT per frame: the
@@ -273,13 +273,13 @@ public:
         if (pc.fill) broadcaster_->pushBinaryFrame(pc.buf, pc.fill);
         // The coord table must reach the browser before colour frames carrying the new count (the
         // browser skips a count-mismatched 0x02). endBinaryFrame() reports whether every client got
-        // it; loop() retries while coordPending_ and withholds colour frames until it lands.
+        // it; tick() retries while coordPending_ and withholds colour frames until it lands.
         coordPending_ = !broadcaster_->endBinaryFrame();
     }
 
     /// Stream one per-frame `0x02` RGB message straight from the producer buffer — no
-    /// intermediate copy. Returns whether every client got it (false → loop() drives
-    /// adaptive downscaling). Public so tests can drive it without loop()'s rate-limit.
+    /// intermediate copy. Returns whether every client got it (false → tick() drives
+    /// adaptive downscaling). Public so tests can drive it without tick()'s rate-limit.
     bool sendFrame() {
         if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
         const uint8_t* src = sourceBuffer_->data();
@@ -302,7 +302,7 @@ public:
             // send (header copied, body = the producer buffer, a stable pointer) — it drains across
             // transport ticks without a copy and without spinning this loop, the fix for the
             // large-frame stall. The common case (any grid ≤ cap, incl. 16K on a no-PSRAM classic).
-            // onBuildState cancels it before a resize frees the buffer (use-after-free guard).
+            // prepare cancels it before a resize frees the buffer (use-after-free guard).
             return broadcaster_->sendBufferedFrame(header, sizeof(header),
                                                    src, static_cast<size_t>(coordCount_) * 3);
         }
@@ -417,7 +417,7 @@ private:
     BinaryBroadcaster* broadcaster_ = nullptr;
     nrOfLightsType coordCount_ = 0;        // lights the lattice keeps = the streamed 0x03/0x02 count
     nrOfLightsType previewStride_ = 1;     // wire field: the lattice/downscale factor (1 = full res)
-    bool coordPending_ = false;            // coord table not yet delivered; loop() retries it
+    bool coordPending_ = false;            // coord table not yet delivered; tick() retries it
     uint8_t bx_ = 0, by_ = 0, bz_ = 0;
     int32_t posScale_ = 0;            // 0 = positions 1:1; else largest box edge (>255) to scale by
     uint32_t lastSendTime_ = 0;

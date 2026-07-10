@@ -28,7 +28,7 @@ public:
     uint16_t spokes = 8;         // number of spokes, 2..64
     uint16_t ledsPerSpoke = 10;  // LEDs along each spoke, 1..256
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint16("spokes", spokes, 2, 64);
         controls_.addUint16("ledsPerSpoke", ledsPerSpoke, 1, 256);
     }

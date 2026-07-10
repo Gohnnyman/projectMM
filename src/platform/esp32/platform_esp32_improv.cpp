@@ -75,7 +75,7 @@ struct ImprovTaskState {
     // Vendor APPLY_OP RPC (command 0xFC): one REST operation as JSON, pushed over
     // serial during provisioning ("Improv = REST over serial"). The frame carries
     // [0xFC][seq][last][chunk bytes…]; chunks are appended to opOut until last=1,
-    // then opReady is set and the module's loop applies the op on the MAIN loop
+    // then opReady is set and the module's tick applies the op on the MAIN loop
     // (never the Improv task). Same producer/consumer dance as the credentials; the
     // buffer is module-owned and sized to hold the largest op (a long pins list).
     // Chunk reassembly + the sequence guard live in mm::ImprovOpReassembler, bound
@@ -221,7 +221,7 @@ static void improvSendWifiNetworks() {
 }
 
 // On WIFI_SETTINGS command: stash credentials for the module to consume.
-// The module's loop1s() polls `g_improv.ready` and calls
+// The module's tick1s() polls `g_improv.ready` and calls
 // NetworkModule::setWifiCredentials, which writes through to the existing
 // wifiStaInit path. We don't call wifiStaInit from this task because we
 // don't want WiFi-driver work on the Improv parser task's stack.
@@ -236,7 +236,7 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     g_improv.ssidOut[g_improv.ssidOutLen - 1] = 0;
     std::strncpy(g_improv.passwordOut, cmd.password.c_str(), g_improv.passwordOutLen - 1);
     g_improv.passwordOut[g_improv.passwordOutLen - 1] = 0;
-    // release-store: pairs with the module's acquire-load in loop1s() so the
+    // release-store: pairs with the module's acquire-load in tick1s() so the
     // SSID/password buffer writes above are visible before the consumer sees
     // ready=true (matters on the dual-core ESP32-S3; single-core ESP32 is a
     // no-op but the explicit ordering documents intent).
@@ -289,7 +289,7 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
 //   [dBm]               0..21 whole dBm; 0 = no cap (lift)
 //
 // On valid: write into g_improv.txPowerOut, set txPowerReady. The module's
-// loop1s() forwards to NetworkModule::setTxPowerSetting (persist + apply).
+// tick1s() forwards to NetworkModule::setTxPowerSetting (persist + apply).
 static constexpr uint8_t IMPROV_CMD_SET_TX_POWER = 0xFD;
 static constexpr uint8_t IMPROV_ERROR_INVALID_TX_POWER = 0x81;
 
@@ -304,7 +304,7 @@ static void improvHandleSetTxPower(const uint8_t* payload, uint8_t len) {
         return;
     }
     *g_improv.txPowerOut = payload[2];
-    // release-store pairs with the module's acquire-load in loop1s().
+    // release-store pairs with the module's acquire-load in tick1s().
     g_improv.txPowerReady->store(true, std::memory_order_release);
     auto rpc = improv::build_rpc_response(
         static_cast<improv::Command>(IMPROV_CMD_SET_TX_POWER),
@@ -325,7 +325,7 @@ static void improvHandleSetTxPower(const uint8_t* payload, uint8_t len) {
 //   [chunk bytes…]      a slice of the op JSON (≤ kImprovMaxPayload-3 bytes)
 // Most ops fit one frame (seq 0, last 1); a long value (e.g. a big pins list)
 // chunks. On last=1 the reassembled JSON is NUL-terminated and opReady is set; the
-// module's loop applies it on the MAIN loop (the factory/tree mutation must not run
+// module's tick applies it on the MAIN loop (the factory/tree mutation must not run
 // on the Improv task). Ack each frame so the installer can pace + retry.
 static constexpr uint8_t IMPROV_CMD_APPLY_OP = 0xFC;
 static constexpr uint8_t IMPROV_ERROR_INVALID_OP = 0x82;

@@ -33,12 +33,12 @@ public:
     uint8_t speed = 50;     // 0 = stopped, 99 = fast
     uint8_t interval = 128; // wavefront spacing: low = tight rings, high = wide
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 0, 99);
         controls_.addUint8("interval", interval, 1, 254);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

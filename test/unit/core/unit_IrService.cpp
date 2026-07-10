@@ -26,7 +26,7 @@ struct FakeDrivers : public MoonModule {
     bool on = true;
     uint8_t brightness = 100;
     uint8_t palette = 1;
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("on", on);
         controls_.addUint8("brightness", brightness, 0, 255);
         // A Select's max is (optionCount - 1); addSelect binds min 0 / max count-1.
@@ -36,7 +36,7 @@ struct FakeDrivers : public MoonModule {
 };
 
 // Build Scheduler + FakeDrivers + IrService, run setup so Scheduler::instance() is live and
-// controls are bound. Caller owns teardown via the scheduler (modules are heap-allocated).
+// controls are bound. Caller owns release via the scheduler (modules are heap-allocated).
 struct Rig {
     Scheduler scheduler;
     FakeDrivers* drivers = new FakeDrivers();
@@ -48,7 +48,7 @@ struct Rig {
         scheduler.addModule(ir);
         scheduler.setup();   // binds controls + sets Scheduler::instance()
     }
-    ~Rig() { scheduler.teardown(); }
+    ~Rig() { scheduler.release(); }
     // Learn `code` to the action at `learnIndex` (1-based: 1=on/off, 2=brightness up, 3=down,
     // 4=palette next, 5=prev), then that code drives the action on later inject. Mirrors the on-device
     // flow: arm the learn select → the next received code binds → subsequent codes fire the action.
@@ -102,7 +102,7 @@ TEST_CASE("IrService: firing a learned code reports what it changed via status")
 TEST_CASE("IrService: pin state drives readiness status") {
     Rig r;
     CHECK(std::strstr(r.ir->status(), "set pin") != nullptr);   // unset pin → warns to set it
-    // Set a valid pin through the real path; onBuildState() re-reports readiness.
+    // Set a valid pin through the real path; prepare() re-reports readiness.
     Scheduler::instance()->setControl("Ir", "pin", "{\"value\":5}");
     CHECK(std::strcmp(r.ir->status(), "ready") == 0);
     // Back to unset → warns again.

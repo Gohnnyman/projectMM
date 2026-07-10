@@ -38,7 +38,7 @@ public:
     uint8_t symmetry = 1;
     uint8_t zTwist = 0;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("petals", petals);
         controls_.addInt16("swirl", swirl, -127, 127);
         controls_.addBool("reverse", reverse);

@@ -123,7 +123,7 @@ void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
     // unaffected). A panic is a worse failure than a dropped frame, so we leave the
     // stuck transfer alone. It self-heals safely: the next tick re-encodes symbols_
     // and calls rmt_transmit again; if the channel is still busy, rmt_transmit
-    // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::loop()
+    // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::tick()
     // skips waiting on that channel (its started[] guard) — no crash, no corruption.
     rmt_tx_wait_all_done(st->channel, timeoutMs);
 }

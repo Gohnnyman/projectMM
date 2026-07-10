@@ -32,7 +32,7 @@ TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
     layer.addChild(&noise);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -61,7 +61,7 @@ TEST_CASE("NoiseEffect produces spatial variation") {
     layer.addChild(&noise);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     // Compare corners — noise should produce different values
@@ -87,7 +87,7 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
     mm::RainbowEffect rainbow;
     layer1.addChild(&rainbow);
     layer1.applyState();
-    layer1.loop();
+    layer1.tick();
 
     // Render noise
     mm::Layer layer2;
@@ -96,7 +96,7 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
     mm::NoiseEffect noise;
     layer2.addChild(&noise);
     layer2.applyState();
-    layer2.loop();
+    layer2.tick();
 
     // Compare buffers — should differ
     bool differs = false;
@@ -126,7 +126,7 @@ TEST_CASE("NoiseEffect produces different output per z-slice with depth > 1") {
     mm::NoiseEffect noise;
     layer.addChild(&noise);
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
     REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);
@@ -151,7 +151,7 @@ TEST_CASE("PlasmaEffect produces different output per z-slice with depth > 1") {
     mm::PlasmaEffect plasma;
     layer.addChild(&plasma);
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
     REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);

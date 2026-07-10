@@ -62,7 +62,7 @@ public:
         controls_.addPin("clockPin", clockPin);
         controls_.addPin("dcPin", dcPin);
     }
-    /// A clockPin or dcPin change triggers a bus rebuild via the onBuildState sweep.
+    /// A clockPin or dcPin change triggers a bus rebuild via the prepare sweep.
     bool busControlTriggersBuild(const char* name) const {
         return std::strcmp(name, "clockPin") == 0 || std::strcmp(name, "dcPin") == 0;
     }

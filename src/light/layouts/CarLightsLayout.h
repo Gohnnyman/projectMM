@@ -43,7 +43,7 @@ public:
     // ledsPerSpoke controls in the source are inactive there too, so dropped).
     uint8_t scale = 2;  // 1..10 — spacing multiplier out from each centre
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("scale", scale, 1, 10);
     }
 

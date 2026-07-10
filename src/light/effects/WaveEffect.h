@@ -43,7 +43,7 @@ public:
     uint8_t fade = 32;   // trail fade per frame (0 = instant clear of the old wave, 255 = long tail)
     uint8_t type = 2;    // index into kTypeOptions (default Sine)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("bpm", bpm, 0, 255);
         controls_.addUint8("fade", fade, 0, 255);
         controls_.addSelect("type", type, kTypeOptions, kTypeCount);
@@ -51,7 +51,7 @@ public:
 
     // The trail is a persistent z=0-plane buffer (w·h·cpl): each frame is faded down, then the new
     // wave drawn on top, so the moving point leaves a tail. Sized off the hot path (cf. Particles).
-    void onBuildState() override {
+    void prepare() override {
         const lengthType w = width(), h = height();
         const uint8_t cpl = channelsPerLight();
         const size_t needed = static_cast<size_t>(w) * h * cpl;
@@ -72,10 +72,10 @@ public:
         setDynamicBytes(trailBytes_);
     }
 
-    void teardown() override { releaseTrail(); setDynamicBytes(0); }
+    void release() override { releaseTrail(); setDynamicBytes(0); }
     ~WaveEffect() override { releaseTrail(); }
 
-    void loop() override {
+    void tick() override {
         if (!trail_) return;
         const lengthType w = width();
         const lengthType h = height();

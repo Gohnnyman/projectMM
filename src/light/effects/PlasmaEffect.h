@@ -23,14 +23,14 @@ public:
     uint8_t scale_y = 48;
     uint8_t hue_shift = 0;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("bpm", bpm, 1, 255);
         controls_.addUint8("scale_x", scale_x, 1, 255);
         controls_.addUint8("scale_y", scale_y, 1, 255);
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();

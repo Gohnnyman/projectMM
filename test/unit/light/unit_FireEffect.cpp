@@ -47,7 +47,7 @@ TEST_CASE("FireEffect renders non-zero buffer after enough sparks") {
     // Run several frames so sparks emerge and propagate
     bool hasNonZero = false;
     for (int frame = 0; frame < 50 && !hasNonZero; frame++) {
-        layer.loop();
+        layer.tick();
         auto& buf = layer.buffer();
         for (size_t i = 0; i < buf.bytes(); i++) {
             if (buf.data()[i] != 0) { hasNonZero = true; break; }

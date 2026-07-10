@@ -45,7 +45,7 @@ public:
     // single "snake" control = panel.snake[1] (the inner loop in 2D); default true.
     bool snake = true;
 
-    void onBuildControls() override {
+    void defineControls() override {
         // Geometry only — MoonLight's pin controls (ledPin selects, nextPin) are dropped.
         // Ranges from MoonLight (1..65536), clamped to lengthType's int16_t max (512-safe).
         controls_.addInt16("panelWidth",  panelWidth,  1, 512);

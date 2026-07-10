@@ -47,8 +47,8 @@ When a struct or enum is the semantic owner of some data — a control descripto
 Three concrete patterns, all already common in this codebase:
 
 - **Discriminator + free functions in the type's own file.** `ControlType` + `writeControlValue` / `applyControlValue` / `controlTypeName` in [Control.cpp](../src/core/Control.cpp); `parseDottedQuad` / `formatDottedQuad` next to `ControlType::IPv4` in [Control.h](../src/core/Control.h); `LightPreset` + `rebuild()` in [Correction.h](../src/light/drivers/Correction.h). Best when the discriminator is a plain enum and the operations are small.
-- **Methods on the owning class.** [Buffer.h](../src/light/layers/Buffer.h)'s `allocate` / `free` / `clear`; [Scheduler.h](../src/core/Scheduler.h)'s `addModule` / `tick` / `buildState`; [ControlList](../src/core/Control.h)'s `addX` family. Best when the class has identity and the operations naturally form a small interface.
-- **Virtual methods on a base class.** [MoonModule.h](../src/core/MoonModule.h)'s lifecycle (`setup`, `loop`, `loop1s`, `onBuildControls`, `onBuildState`, …). Best when polymorphism is already in play.
+- **Methods on the owning class.** [Buffer.h](../src/light/layers/Buffer.h)'s `allocate` / `free` / `clear`; [Scheduler.h](../src/core/Scheduler.h)'s `addModule` / `tick` / `prepareTree`; [ControlList](../src/core/Control.h)'s `addX` family. Best when the class has identity and the operations naturally form a small interface.
+- **Virtual methods on a base class.** [MoonModule.h](../src/core/MoonModule.h)'s lifecycle (`setup`, `tick`, `tick1s`, `defineControls`, `prepare`, …). Best when polymorphism is already in play.
 
 Counter-example to avoid: a `switch (c.type)` on `ControlType` duplicated in HttpServerModule, FilesystemModule, and scenario_runner. That shape forces a new ControlType to be added in four places, and the compiler can't catch a missed switch on a non-exhaustive enum. The per-type dispatch instead lives next to `ControlType` in [Control.cpp](../src/core/Control.cpp); consumers call `writeControlValue(sink, c)` and don't need to know the enum's shape.
 
@@ -67,25 +67,25 @@ When a `switch (type)` outside the type's home file is legitimate: the caller ha
 
 ## Override-and-chain convention
 
-A MoonModule that owns children gets the standard lifecycle methods (`setup`, `loop`, `loop20ms`, `loop1s`, `teardown`, `onBuildControls`, `onBuildState`) propagated to children by the base class default — see [architecture.md § MoonModules](architecture.md#moonmodules). When a container overrides one of these to add its own work, the convention is **when in the override to call the base**:
+A MoonModule that owns children gets the standard lifecycle methods (`setup`, `tick`, `tick20ms`, `tick1s`, `release`, `defineControls`, `prepare`) propagated to children by the base class default — see [architecture.md § MoonModules](architecture.md#moonmodules). When a container overrides one of these to add its own work, the convention is **when in the override to call the base**:
 
-- **`loop` / `loop20ms` / `loop1s`** — option A: parent work first, then chain. The parent prepares state that children consume.
+- **`tick` / `tick20ms` / `tick1s`** — option A: parent work first, then chain. The parent prepares state that children consume.
 
   ```cpp
-  void loop() override {
+  void tick() override {
       if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
           blendMap(...);                  // parent's own work
       }
-      MoonModule::loop();                 // then tick children
+      MoonModule::tick();                 // then tick children
   }
   ```
 
 - **`setup`** — chain first, then parent work. Children must be initialised before the parent depends on them.
-- **`onBuildControls`** — chain first, then parent work. Children register their controls before the parent appends or rewires its own. Lets a parent build a list whose order is "children's controls, then mine."
-- **`onBuildState`** — chain first, then parent work. Children compute their dimensions and dynamic buffers before the parent reads or modifies the shared state (Layer reads child effect/modifier dimensions; Drivers reads Layer output sizing).
-- **`teardown`** — parent work first, then chain. The parent shuts down its own state before the base reverse-iterates children.
+- **`defineControls`** — chain first, then parent work. Children register their controls before the parent appends or rewires its own. Lets a parent build a list whose order is "children's controls, then mine."
+- **`prepare`** — chain first, then parent work. Children compute their dimensions and dynamic buffers before the parent reads or modifies the shared state (Layer reads child effect/modifier dimensions; Drivers reads Layer output sizing).
+- **`release`** — parent work first, then chain. The parent shuts down its own state before the base reverse-iterates children.
 
-Option B (children first on `loop`; parent first on `setup` / `onBuildControls` / `onBuildState`) or a sandwich pattern is allowed only when a specific reason justifies it; add a one-line comment at the override explaining why.
+Option B (children first on `tick`; parent first on `setup` / `defineControls` / `prepare`) or a sandwich pattern is allowed only when a specific reason justifies it; add a one-line comment at the override explaining why.
 
 ## Casts
 

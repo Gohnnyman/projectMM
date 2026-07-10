@@ -7,15 +7,15 @@
 
 namespace {
 // Stand-in wired-by-code child: counts the lifecycle callbacks a real fixed
-// System child (Tasks, I2cScan) would use (setup to init, loop20ms/loop1s to
-// poll + format). Pins that SystemModule's overridden setup()/loop1s() chain to
+// System child (Tasks, I2cScan) would use (setup to init, tick20ms/tick1s to
+// poll + format). Pins that SystemModule's overridden setup()/tick1s() chain to
 // base — without that, a child would never initialise or poll.
 class CountingChild : public mm::MoonModule {
 public:
-    uint32_t setupCalls = 0, loop20msCalls = 0, loop1sCalls = 0;
+    uint32_t setupCalls = 0, tick20msCalls = 0, tick1sCalls = 0;
     void setup() override { setupCalls++; }
-    void loop20ms() override { loop20msCalls++; }
-    void loop1s() override { loop1sCalls++; }
+    void tick20ms() override { tick20msCalls++; }
+    void tick1s() override { tick1sCalls++; }
 };
 } // namespace
 
@@ -32,7 +32,7 @@ TEST_CASE("SystemModule MAC-to-deviceName") {
 TEST_CASE("SystemModule deviceName control") {
     mm::SystemModule sys;
     sys.setup();
-    sys.onBuildControls();
+    sys.defineControls();
 
     bool found = false;
     for (uint8_t i = 0; i < sys.controls().count(); i++) {
@@ -65,14 +65,14 @@ void writeDeviceName(mm::SystemModule& sys, const char* value) {
 } // namespace
 
 // deviceName is the single network identity, so SystemModule keeps it a valid hostname.
-// A live edit to an invalid value ("My Room!") is coerced on the next loop1s tick
+// A live edit to an invalid value ("My Room!") is coerced on the next tick1s tick
 // (mm::sanitizeHostname), the same path mDNS/AP/DHCP read — so they never see spaces.
 TEST_CASE("SystemModule sanitises a live deviceName edit") {
     mm::SystemModule sys;
     sys.setup();
-    sys.onBuildControls();
+    sys.defineControls();
     writeDeviceName(sys, "My Living Room!");
-    sys.loop1s();                                   // the tick that coerces it
+    sys.tick1s();                                   // the tick that coerces it
     CHECK(std::strcmp(sys.deviceName(), "My-Living-Room") == 0);
 }
 
@@ -81,9 +81,9 @@ TEST_CASE("SystemModule sanitises a live deviceName edit") {
 TEST_CASE("SystemModule falls back to the MAC name when deviceName is all-invalid") {
     mm::SystemModule sys;
     sys.setup();
-    sys.onBuildControls();
+    sys.defineControls();
     writeDeviceName(sys, "!@#$");
-    sys.loop1s();
+    sys.tick1s();
     CHECK(std::strcmp(sys.deviceName(), "MM-CAFE") == 0);   // desktop MAC fallback
 }
 
@@ -91,9 +91,9 @@ TEST_CASE("SystemModule falls back to the MAC name when deviceName is all-invali
 TEST_CASE("SystemModule leaves a valid deviceName unchanged") {
     mm::SystemModule sys;
     sys.setup();
-    sys.onBuildControls();
+    sys.defineControls();
     writeDeviceName(sys, "Bench-S3");
-    sys.loop1s();
+    sys.tick1s();
     CHECK(std::strcmp(sys.deviceName(), "Bench-S3") == 0);
 }
 
@@ -107,7 +107,7 @@ TEST_CASE("SystemModule bootReason control populated") {
     // reboot button's crashed-state styling — see ui-spec.md.
     mm::SystemModule sys;
     sys.setup();
-    sys.onBuildControls();
+    sys.defineControls();
 
     bool found = false;
     for (uint8_t i = 0; i < sys.controls().count(); i++) {
@@ -134,10 +134,10 @@ TEST_CASE("SystemModule accepts no user-added children") {
     CHECK(std::strcmp(sys.acceptsChildRoles(), "") == 0);
 }
 
-// Regression: SystemModule overrides setup() and loop1s(); both must chain to
-// MoonModule's base so a wired-by-code child's setup()/loop1s() actually fire.
+// Regression: SystemModule overrides setup() and tick1s(); both must chain to
+// MoonModule's base so a wired-by-code child's setup()/tick1s() actually fire.
 // Without the chain a fixed child (Tasks/I2cScan) would never init or poll (the
-// "children miss callbacks" trap from history/decisions.md). loop20ms() isn't
+// "children miss callbacks" trap from history/decisions.md). tick20ms() isn't
 // overridden, so the base default already propagates it.
 TEST_CASE("SystemModule propagates lifecycle to a wired-by-code child") {
     mm::SystemModule sys;
@@ -147,11 +147,11 @@ TEST_CASE("SystemModule propagates lifecycle to a wired-by-code child") {
     sys.setup();
     CHECK(child.setupCalls == 1);   // setup() chained to base
 
-    sys.loop1s();
-    CHECK(child.loop1sCalls == 1);  // loop1s() chained to base
+    sys.tick1s();
+    CHECK(child.tick1sCalls == 1);  // tick1s() chained to base
 
-    sys.loop20ms();
-    CHECK(child.loop20msCalls == 1); // base default (not overridden) propagates
+    sys.tick20ms();
+    CHECK(child.tick20msCalls == 1); // base default (not overridden) propagates
 }
 
 // roleName maps the Service enum to its lowercase API string.

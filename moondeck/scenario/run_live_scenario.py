@@ -33,7 +33,7 @@ import _observed  # noqa: E402
 
 
 class Client:
-    # Mutating ops (add/delete/replace/control) trigger a full buildState on the
+    # Mutating ops (add/delete/replace/control) trigger a full prepareTree on the
     # device — at 128x128 that frees/reallocates a large buffer + LUT and can
     # take several seconds on a busy ESP32. 5s was too tight (deletes timed out
     # mid-teardown, leaving a half-mutated tree). 15s clears the worst case while
@@ -44,7 +44,7 @@ class Client:
         self.base = f"http://{host}"
 
     def _send(self, req):
-        # A mutating call triggers buildState; while the device is mid-rebuild it
+        # A mutating call triggers prepareTree; while the device is mid-rebuild it
         # can drop the TCP connection (ConnectionResetError / "remote end closed")
         # or briefly refuse one. The device recovers in well under a second, so a
         # single transient drop shouldn't cascade-fail the run — retry once after
@@ -394,7 +394,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         print(f"  SET   {step.get('id','?')}.{step.get('key','?')} — skipped (optional, not present)")
                     elif ce.code == 404:
                         # Transient: a set_control issued right after a structural
-                        # change (replace/add) can race the device's buildState and
+                        # change (replace/add) can race the device's prepareTree and
                         # briefly see "module not found" while the tree rebuilds.
                         # Settle and retry once before treating it as a real failure.
                         time.sleep(1.0)
@@ -405,7 +405,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         raise
                 # If this step doesn't measure (so `collect_metrics` won't wait
                 # for us), still give the device a moment — a set_control that
-                # triggers buildState briefly mutates the module tree, and the
+                # triggers prepareTree briefly mutates the module tree, and the
                 # very next API call can hit a transient "module not found".
                 # 500 ms is empirically enough on the classic board; cheap insurance.
                 if not (step.get("measure") or op == "measure"):
@@ -462,7 +462,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 step_result["status"] = "ok"
                 tail = f", {skipped} kept" if skipped else ""
                 print(f"  clr   {container_id} ({cleared} cleared{tail})")
-                time.sleep(0.5)  # let buildState settle before the next add
+                time.sleep(0.5)  # let prepareTree settle before the next add
 
             elif op == "replace_module":
                 # Swap a child for a fresh module of another type at the same

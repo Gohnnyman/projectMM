@@ -5,7 +5,7 @@
 
 namespace mm {
 
-void FileManagerModule::onBuildControls() {
+void FileManagerModule::defineControls() {
     // Only `show hidden` is a control: the whole File Manager surface is the tree panel (app.js
     // renderFileManager), which lists over /api/dir and reads the gauges from /api/state; the
     // mkdir/delete OPS are their own HTTP endpoints (POST/DELETE /api/dir?path=) — not persisted
@@ -16,7 +16,7 @@ void FileManagerModule::onBuildControls() {
     // Filesystem-usage gauge (used / total bytes), read from the platform. Shown below the tree in
     // the panel — the File Manager is where filesystem space is relevant, so it owns the control.
     // Bound only when the platform reports a real partition (desktop / a no-data-partition chip
-    // reports 0). loop1s refreshes the used value; the total is fixed.
+    // reports 0). tick1s refreshes the used value; the total is fixed.
     totalBytes_ = static_cast<uint32_t>(platform::filesystemTotal());
     usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
     if (totalBytes_ > 0) {
@@ -27,16 +27,16 @@ void FileManagerModule::onBuildControls() {
     // FilesystemModule engine (non-UI); the File Manager just displays it here (this is where
     // filesystem state is topical). Bind the control straight to the engine's live buffer — no
     // per-instance copy — the same no-copy pattern SystemModule uses for its static strings. The
-    // engine is the boot-wired singleton (alive for the device's life), and its loop1s keeps the
+    // engine is the boot-wired singleton (alive for the device's life), and its tick1s keeps the
     // string current. Bound only when the engine exists (it's constructed before this module).
     if (FilesystemModule* fs = FilesystemModule::instance()) {
         controls_.addReadOnly("lastSaved", fs->lastSavedStr());
         controls_.setHidden(controls_.count() - 1, true);   // shown in the panel header, not generically
     }
-    MoonModule::onBuildControls();
+    MoonModule::defineControls();
 }
 
-void FileManagerModule::loop1s() {
+void FileManagerModule::tick1s() {
     if (totalBytes_ > 0) usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
 }
 

@@ -48,7 +48,7 @@ struct Rig {
         writeFile(std::string(root) + "/readme.txt", "hello");
         platform::fsSetRoot(root);
         fm.setTypeName("FileManagerModule");
-        fm.onBuildControls();
+        fm.defineControls();
         fm.setup();
     }
     // Restore the DEFAULT root (fsSetRoot("") → "build"), not ".", so a later test in the same

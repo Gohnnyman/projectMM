@@ -24,7 +24,7 @@ TEST_CASE("PlasmaEffect writes non-zero RGB data to buffer") {
     layer.addChild(&plasma);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -53,7 +53,7 @@ TEST_CASE("PlasmaEffect produces spatial variation") {
     layer.addChild(&plasma);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     uint8_t r0 = data[0], g0 = data[1], b0 = data[2];
@@ -77,7 +77,7 @@ TEST_CASE("PlasmaEffect produces different output than NoiseEffect") {
     mm::PlasmaEffect plasma;
     layer1.addChild(&plasma);
     layer1.applyState();
-    layer1.loop();
+    layer1.tick();
 
     mm::Layer layer2;
     layer2.setLayouts(&layouts);
@@ -85,7 +85,7 @@ TEST_CASE("PlasmaEffect produces different output than NoiseEffect") {
     mm::NoiseEffect noise;
     layer2.addChild(&noise);
     layer2.applyState();
-    layer2.loop();
+    layer2.tick();
 
     bool differs = false;
     for (size_t i = 0; i < layer1.buffer().bytes(); i++) {

@@ -30,7 +30,7 @@ struct ChainRig {
         layer.setLayouts(&group);
         layer.setChannelsPerLight(3);
         for (auto* m : mods) layer.addChild(m);
-        layer.onBuildControls();
+        layer.defineControls();
         group.applyState();
         layer.applyState();
     }

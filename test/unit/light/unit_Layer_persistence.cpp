@@ -23,7 +23,7 @@ struct WriteOnceEffect : mm::EffectBase {
     int calls = 0;
     const char* tags() const override { return ""; }
     mm::Dim dimensions() const override { return mm::Dim::D3; }
-    void loop() override {
+    void tick() override {
         if (calls++ == 0) {
             mm::Buffer& b = layer()->buffer();
             mm::Coord3D dims{width(), height(), depth()};
@@ -38,7 +38,7 @@ struct FadeOnlyEffect : mm::EffectBase {
     uint8_t amt = 0;
     const char* tags() const override { return ""; }
     mm::Dim dimensions() const override { return mm::Dim::D3; }
-    void loop() override { layer()->fadeToBlackBy(amt); }
+    void tick() override { layer()->fadeToBlackBy(amt); }
 };
 
 struct Scene {
@@ -61,12 +61,12 @@ TEST_CASE("Layer: buffer persists across frames (no per-frame clear)") {
     s.layer.addChild(&once);
     s.layer.applyState();
 
-    s.layer.loop();                              // frame 0: writes red at (0,0)
+    s.layer.tick();                              // frame 0: writes red at (0,0)
     CHECK(s.layer.buffer().data()[0] == 255);
-    s.layer.loop();                              // frame 1: writes nothing
+    s.layer.tick();                              // frame 1: writes nothing
     // The pixel is STILL there — the Layer did not wipe it. (An auto-clear would show 0 here.)
     CHECK(s.layer.buffer().data()[0] == 255);
-    s.layer.loop();                              // frame 2
+    s.layer.tick();                              // frame 2
     CHECK(s.layer.buffer().data()[0] == 255);
 }
 
@@ -78,13 +78,13 @@ TEST_CASE("Layer: fadeToBlackBy decays the persisted buffer once per frame") {
     s.layer.addChild(&fade);
     s.layer.applyState();
 
-    s.layer.loop();                              // frame 0: once writes 255; fade collected for next frame
+    s.layer.tick();                              // frame 0: once writes 255; fade collected for next frame
     CHECK(s.layer.buffer().data()[0] == 255);    // not faded yet (consume is at NEXT frame start)
-    s.layer.loop();                              // frame 1: consume fade (255 → ~127), once writes nothing
+    s.layer.tick();                              // frame 1: consume fade (255 → ~127), once writes nothing
     const uint8_t after1 = s.layer.buffer().data()[0];
     CHECK(after1 < 255);
     CHECK(after1 > 0);
-    s.layer.loop();                              // frame 2: fade again
+    s.layer.tick();                              // frame 2: fade again
     CHECK(s.layer.buffer().data()[0] < after1);  // strictly darker — it keeps decaying
 }
 
@@ -98,8 +98,8 @@ TEST_CASE("Layer: multiple fade requests combine with MIN (gentlest wins, longes
     s.layer.addChild(&harsh);
     s.layer.applyState();
 
-    s.layer.loop();                              // frame 0: 255 written; both fades collected → MIN = 8
-    s.layer.loop();                              // frame 1: consume MIN(8,200)=8 → keep = 247/255 of 255
+    s.layer.tick();                              // frame 0: 255 written; both fades collected → MIN = 8
+    s.layer.tick();                              // frame 1: consume MIN(8,200)=8 → keep = 247/255 of 255
     const uint8_t v = s.layer.buffer().data()[0];
     // With the gentle amount (8) the pixel stays near full; the harsh 200 would have crushed it to ~55.
     CHECK(v > 230);                              // proves MIN (gentle) won, not MAX/AVG
@@ -113,26 +113,26 @@ TEST_CASE("Layer: collected fade resets after it is consumed") {
         int n = 0;
         const char* tags() const override { return ""; }
         mm::Dim dimensions() const override { return mm::Dim::D3; }
-        void loop() override { if (n++ == 0) layer()->fadeToBlackBy(128); }
+        void tick() override { if (n++ == 0) layer()->fadeToBlackBy(128); }
     } oneFade;
     s.layer.addChild(&once);
     s.layer.addChild(&oneFade);
     s.layer.applyState();
 
-    s.layer.loop();                              // frame 0: 255 written, fade(128) collected
-    s.layer.loop();                              // frame 1: consume once → ~127, no new fade requested
+    s.layer.tick();                              // frame 0: 255 written, fade(128) collected
+    s.layer.tick();                              // frame 1: consume once → ~127, no new fade requested
     const uint8_t after1 = s.layer.buffer().data()[0];
-    s.layer.loop();                              // frame 2: NO fade pending → value must hold, not decay again
+    s.layer.tick();                              // frame 2: NO fade pending → value must hold, not decay again
     CHECK(s.layer.buffer().data()[0] == after1); // stable: the collected amount did not linger
 }
 
-TEST_CASE("Layer: onBuildState clears the buffer (a rebuild wipes stale pixels)") {
+TEST_CASE("Layer: prepare clears the buffer (a rebuild wipes stale pixels)") {
     Scene s(4, 4);
     WriteOnceEffect once;
     s.layer.addChild(&once);
     s.layer.applyState();
 
-    s.layer.loop();                              // writes red at (0,0)
+    s.layer.tick();                              // writes red at (0,0)
     CHECK(s.layer.buffer().data()[0] == 255);
 
     // A rebuild (config change / resize) clears the buffer — persistence holds between frames but NOT

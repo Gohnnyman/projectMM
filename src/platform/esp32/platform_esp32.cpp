@@ -522,7 +522,7 @@ static bool ethInitEmac() {
     phy_config.reset_gpio_num = ethConfig_.rstGpio;
 
     // Helper to unwind whatever was created so far on any failure — ethInit
-    // runs once at boot, but a clean teardown means a broken PHY/cable degrades
+    // runs once at boot, but a clean release means a broken PHY/cable degrades
     // (returns false → the WiFi/AP cascade takes over) instead of leaking the
     // netif + MAC/PHY drivers.
     auto fail = [&](const char* what, esp_eth_mac_t* m, esp_eth_phy_t* p) -> bool {
@@ -693,7 +693,7 @@ static bool ethInitSpi() {
 // Tear down a running Ethernet driver so a fresh ethInit() can bring it up with
 // new config — the live-reconfigure path. Today only the W5500 SPI driver uses
 // this (clean stop/uninstall/free-bus); RMII keeps apply-on-next-init (its
-// teardown is fiddlier — backlog "live RMII reconfigure"). Safe to call when
+// release is fiddlier — backlog "live RMII reconfigure"). Safe to call when
 // nothing is running. After this, ethInit() can be called again.
 void ethStop() {
     if (!ethHandle_) return;
@@ -1178,7 +1178,7 @@ bool mdnsInit(const char* deviceName) {
 
 void mdnsStop() {
     // Stop ADVERTISING but keep the stack up (a re-init then re-advertises cheaply); full
-    // mdns_free is teardown's job. Drop BOTH advertised services AND the hostname, matching
+    // mdns_free is release's job. Drop BOTH advertised services AND the hostname, matching
     // mdnsInit which adds both _http._tcp and _wled._tcp: a network drop / interface switch
     // (NetworkModule calls this on eth/WiFi drop + switch) must remove BOTH, or a stale
     // _wled._tcp survives the churn and confuses a later re-advertise. mdns_service_remove
@@ -1192,7 +1192,7 @@ void mdnsStop() {
     }
 }
 
-// Full stack teardown (mdns_free) — only at module teardown.
+// Full stack release (mdns_free) — only at module release.
 void mdnsShutdown() {
     if (mdnsStackUp_) { mdns_free(); mdnsStackUp_ = false; }
 }
@@ -1204,7 +1204,7 @@ void mdnsShutdown() {
 // also hosts destabilises our own advertise — see docs/adr/0006-device-discovery-udp-mdns-advertise-only.md.
 
 // Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. A bounded blocking lwIP
-// socket call; the caller (HueDriver) runs it off the render path on loop1s. Mirrors the
+// socket call; the caller (HueDriver) runs it off the render path on tick1s. Mirrors the
 // desktop impl: build request → connect → send → read response → return status + body.
 int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
                 const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen) {
@@ -1233,7 +1233,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
 
     // Bound the CONNECT by timeoutMs: a blocking connect to an unreachable host hangs for the OS
-    // default — and this runs on the driver's loop1s (shared with the render loop), so it must
+    // default — and this runs on the driver's tick1s (shared with the render loop), so it must
     // not stall. Connect non-blocking, wait writable via select() up to timeoutMs, then restore
     // blocking for the bounded send/recv (which use SO_*TIMEO below).
     const int flags = fcntl(fd, F_GETFL, 0);

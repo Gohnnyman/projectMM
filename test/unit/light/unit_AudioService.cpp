@@ -5,7 +5,7 @@
 
 #include <cstring>
 
-// The MoonModule lifecycle for the audio peripheral: setup/teardown is
+// The MoonModule lifecycle for the audio peripheral: setup/release is
 // repeatable and leaves no residue, the static latestFrame() accessor stays
 // coherent through any add/remove order (the robustness rule), and a module
 // that is never configured stays idle. The signal math (level, bands, FFT) is
@@ -17,12 +17,12 @@
 // crash or a hang (the bug class behind the boot-loop).
 
 // active_ is process-wide static and shared with the cases in unit_AudioLevel.cpp;
-// each case here brackets its own setup() with a teardown() so it never leaks a
+// each case here brackets its own setup() with a release() so it never leaks a
 // live mic pointer into another test (the residue the robustness rule forbids).
 
 TEST_CASE("AudioService: a fresh, unconfigured module is idle (pins default unset)") {
     mm::AudioService a;
-    a.onBuildControls();
+    a.defineControls();
     // Pins default to -1 (unset, the standard Pin-control sentinel): the module is
     // user-added when a board has a mic and waits for the real GPIOs. It must never
     // have inited a mic by merely existing — the auto-init-on-boot path is what hung
@@ -31,20 +31,20 @@ TEST_CASE("AudioService: a fresh, unconfigured module is idle (pins default unse
     CHECK(a.sdPin == -1);
     CHECK(a.sckPin == -1);
     a.setup();           // settles the status; no I2S touched on host or unset pins
-    a.loop();            // must be a quiet no-op, not a crash, with nothing inited
-    a.teardown();
+    a.tick();            // must be a quiet no-op, not a crash, with nothing inited
+    a.release();
     CHECK(true);
 }
 
-TEST_CASE("AudioService: setup/teardown is repeatable with no residual state") {
+TEST_CASE("AudioService: setup/release is repeatable with no residual state") {
     mm::AudioService a;
-    a.onBuildControls();
+    a.defineControls();
     const char* afterFirst = nullptr;
     for (int cycle = 0; cycle < 4; cycle++) {
         a.setup();
         a.applyState();   // reinit, as the Scheduler does
-        a.loop();           // a tick: no heap churn, no crash (ASAN across cycles)
-        a.teardown();
+        a.tick();           // a tick: no heap churn, no crash (ASAN across cycles)
+        a.release();
         // The status settles to a stable value, not a growing/changing string —
         // a leak or churn would show up as a different pointer each cycle. On host
         // (hasI2sMic false) that value is the platform-inert note; on a mic target
@@ -54,15 +54,15 @@ TEST_CASE("AudioService: setup/teardown is repeatable with no residual state") {
     }
 }
 
-TEST_CASE("AudioService: teardown clears the active mic (latestFrame falls back to silence)") {
+TEST_CASE("AudioService: release clears the active mic (latestFrame falls back to silence)") {
     {
         mm::AudioService a;
-        a.onBuildControls();
+        a.defineControls();
         a.applyState();                             // build (enabled) registers itself as active_
         REQUIRE(mm::AudioService::latestFrame() == a.audioFrame());
-        a.teardown();                               // must release the registration
+        a.release();                               // must release the registration
     }
-    // After teardown (and destruction) no mic is active: the accessor returns the
+    // After release (and destruction) no mic is active: the accessor returns the
     // static silent frame, never a dangling pointer into the destroyed module.
     const mm::AudioFrame* f = mm::AudioService::latestFrame();
     REQUIRE(f != nullptr);
@@ -74,40 +74,40 @@ TEST_CASE("AudioService: two mics — first wins, survivor re-elects, any order 
     // The robustness rule for a device with TWO AudioServices (two mics). Regression for a real bug:
     // removing the ACTIVE mic used to leave active_ null while the other mic kept running, so every
     // audio effect went silent (latestFrame() returned the static silence). The fix: first live module
-    // wins the seat, teardown() vacates it, and any running module re-claims an empty seat in loop().
+    // wins the seat, release() vacates it, and any running module re-claims an empty seat in tick().
     mm::AudioService a, b;
-    a.onBuildControls();
-    b.onBuildControls();
+    a.defineControls();
+    b.defineControls();
 
     a.applyState();                                     // build (enabled) claims the seat
     CHECK(mm::AudioService::latestFrame() == a.audioFrame());
     b.applyState();                                     // second mic captured, but a keeps the seat
     CHECK(mm::AudioService::latestFrame() == a.audioFrame());   // FIRST wins, not last
 
-    a.teardown();                                       // tearing down the ACTIVE one vacates the seat
-    // Before the survivor's next tick the seat is empty; b re-claims it in loop() (self-election).
-    b.loop();                                           // b (still live) takes over
+    a.release();                                       // tearing down the ACTIVE one vacates the seat
+    // Before the survivor's next tick the seat is empty; b re-claims it in tick() (self-election).
+    b.tick();                                           // b (still live) takes over
     CHECK(mm::AudioService::latestFrame() == b.audioFrame());   // effects keep reading a live frame
-    b.teardown();
+    b.release();
     // Both gone: back to the static silence, no dangling pointer.
     CHECK(mm::AudioService::latestFrame()->level == 0);
 }
 
 TEST_CASE("AudioService: a DISABLED module does not win the mic election at boot") {
-    // Core's applyState() calls onBuildState() (the acquire + election) only when effectively-enabled,
-    // and teardown() otherwise. A persisted DISABLED AudioService must NOT grab the I²S mic or win the
+    // Core's applyState() calls prepare() (the acquire + election) only when effectively-enabled,
+    // and release() otherwise. A persisted DISABLED AudioService must NOT grab the I²S mic or win the
     // active_ seat at boot — else a disabled mic silences an enabled sibling's audio (same class of bug
     // as a disabled RMT driver stealing a GPIO from an enabled Parlio driver).
     mm::AudioService dis, live;
-    dis.onBuildControls();
-    live.onBuildControls();
+    dis.defineControls();
+    live.defineControls();
     // The seat starts empty: any module a prior case left holding it has since destructed, and
     // ~AudioService vacates on destruction (no dangling static — see the destructor).
     REQUIRE(mm::AudioService::latestFrame()->level == 0);
 
     dis.setEnabled(false);        // persisted-disabled at boot
     dis.setup();                  // Phase 3: pure wiring, no election
-    dis.applyState();             // Phase 4: disabled → routes to teardown, NOT the election
+    dis.applyState();             // Phase 4: disabled → routes to release, NOT the election
     // Still empty: the disabled module did NOT take the seat.
     CHECK(mm::AudioService::latestFrame() != dis.audioFrame());
     CHECK(mm::AudioService::latestFrame()->level == 0);
@@ -122,7 +122,7 @@ TEST_CASE("AudioService: a DISABLED module does not win the mic election at boot
     dis.applyState();
     CHECK(mm::AudioService::latestFrame() == live.audioFrame());   // live keeps the seat
 
-    live.teardown();
-    dis.teardown();
+    live.release();
+    dis.release();
     CHECK(mm::AudioService::latestFrame()->level == 0);
 }

@@ -34,7 +34,7 @@ public:
     uint8_t widthControl = 0;     // 0..255; 0 → random brick height, else derived from this
     bool    oneColor     = false; // all bricks in a column share one slowly-advancing colour
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speedControl, 0, 255);
         controls_.addUint8("width", widthControl, 0, 255);
         controls_.addBool("oneColor", oneColor);
@@ -52,7 +52,7 @@ public:
         uint32_t step  = 0;     // state machine / timestamp (see above)
     };
 
-    void onBuildState() override {
+    void prepare() override {
         // One drop per X column. Reallocate only when the column count changes.
         const nrOfLightsType cols = (width() > 0)
                                         ? static_cast<nrOfLightsType>(width()) : 0;
@@ -77,14 +77,14 @@ public:
         setDynamicBytes(static_cast<size_t>(nrOfDrops_) * sizeof(Tetris));
     }
 
-    void teardown() override {
+    void release() override {
         releaseDrops();
         setDynamicBytes(0);
     }
 
     ~TetrixEffect() override { releaseDrops(); }
 
-    void loop() override {
+    void tick() override {
         if (!drops_) return;
 
         const lengthType w = width();
@@ -98,7 +98,7 @@ public:
         const RGB black{0, 0, 0};
 
         // Process exactly the live column count (never the allocated max — robust to a shrink
-        // before onBuildState reruns).
+        // before prepare reruns).
         const nrOfLightsType nrOfDrops = (static_cast<nrOfLightsType>(w) < nrOfDrops_)
                                              ? static_cast<nrOfLightsType>(w) : nrOfDrops_;
 

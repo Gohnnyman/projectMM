@@ -31,7 +31,7 @@ namespace mm {
 /// routers.
 ///
 /// **State machine:** `State` (Idle, WaitingEth, WaitingSta, ConnectedEth, ConnectedSta,
-/// AP) is driven from `loop1s()`. The `mode` control mirrors the state in plain language
+/// AP) is driven from `tick1s()`. The `mode` control mirrors the state in plain language
 /// and is always present, even on the Ethernet-only build. A late-appearing interface
 /// (slow DHCP, cable plugged in after boot, saved WiFi credentials) is promoted from Idle
 /// / AP / ConnectedSta by the periodic upgrade checks — no reboot.
@@ -42,7 +42,7 @@ namespace mm {
 /// config — the `ethType` + pin controls, set per board in the device-model catalog and
 /// seeded from the per-chip default in `platform_config.h`. A W5500 change applies live
 /// (the SPI driver tears down and re-inits, no reboot); an RMII change saves and applies
-/// on the next boot (the EMAC/clock teardown is fiddlier). The eth controls, bound only on
+/// on the next boot (the EMAC/clock release is fiddlier). The eth controls, bound only on
 /// an Ethernet-capable build (`platform::hasEthernet`) and shown per PHY type:
 ///  - `ethType` — PHY dropdown; the stored index maps 0=None, 1=LAN8720 (RMII),
 ///    2=IP101 (RMII), 3=W5500 (SPI), 4=YT8531 (RGMII, the S31's on-chip 1 Gb EMAC),
@@ -74,12 +74,12 @@ namespace mm {
 /// has the IP it reads everything else from the live REST API.
 ///
 /// **Memory:** the network stack cost varies by mode (Ethernet ~20 KB, STA ~40 KB, AP
-/// ~30 KB, STA+AP during the shutdown delay ~60 KB, fully reclaimed after teardown). This
+/// ~30 KB, STA+AP during the shutdown delay ~60 KB, fully reclaimed after release). This
 /// is why NetworkModule registers with the Scheduler BEFORE the light pipeline: network
 /// memory is claimed first so the light pipeline's adaptive allocation sees the real
 /// remaining heap. On a mode change the transition sequence checks heap, tears down light
 /// buffers first if heap is tight (display goes dark temporarily — acceptable, a crash is
-/// not), starts the new mode, then re-runs `scheduler_->buildState()` so allocation uses
+/// not), starts the new mode, then re-runs `scheduler_->prepareTree()` so allocation uses
 /// whatever heap remains. Reported via the standard per-module system; dynamicBytes updates
 /// after each mode change.
 ///
@@ -107,7 +107,7 @@ public:
     /// ImprovProvisioningModule when the browser/CLI pushes new credentials over
     /// USB-serial. Writes the same buffers the AP-fallback UI flow writes via
     /// POST /api/control on `ssid` / `password`, then drives a clean transition
-    /// into `State::WaitingSta` so loop1s() takes over and either reports
+    /// into `State::WaitingSta` so tick1s() takes over and either reports
     /// connected (onConnected) or falls back to AP after the 10 s timeout.
     ///
     /// Why the explicit AP→STA tear-down (rather than just calling wifiStaInit
@@ -164,7 +164,7 @@ public:
                 // Apply the TX-power cap NOW, before the radio's first
                 // probe / auth / assoc burst — that's the window the
                 // weak-power brown-out cap exists to protect. Waiting for the
-                // next loop1s() tick to syncTxPower would leave up to
+                // next tick1s() tick to syncTxPower would leave up to
                 // 1 s of full-power TX during association, the exact
                 // failure mode the cap defends against. syncTxPower
                 // itself is cheap and idempotent.
@@ -198,7 +198,7 @@ public:
         //
         // Live-rename boundary: setHostname() is single-writer-before-readers by
         // contract (see platform_esp32.cpp) — NOT safe to re-call after bring-up from
-        // loop1s without platform-side synchronization. And the DHCP hostname only
+        // tick1s without platform-side synchronization. And the DHCP hostname only
         // rides the DISCOVER, so it can't change until the next lease renewal regardless.
         // So a live deviceName rename updates mDNS immediately (syncMdns re-registers)
         // and the SoftAP SSID on its next start; the DHCP/router-list name follows on the
@@ -235,14 +235,14 @@ public:
         MoonModule::setup();
     }
 
-    void onBuildControls() override {
+    void defineControls() override {
         // Chain to base FIRST so children (Improv on ESP32) register their
         // controls before NetworkModule appends its own — per the override-
         // and-chain convention in docs/coding-standards.md § Override-and-
-        // chain ("onBuildControls — chain first, then parent work").
+        // chain ("defineControls — chain first, then parent work").
         // Earlier shape called this at the end, which inverted the order
         // (parent's controls landed before children's).
-        MoonModule::onBuildControls();
+        MoonModule::defineControls();
 
         setStatus(statusBuf_);
 
@@ -356,7 +356,7 @@ public:
         // Chain to base is at the top of this method — see comment there.
     }
 
-    void loop1s() override {
+    void tick1s() override {
         uint32_t now = platform::millis();
         uint32_t elapsed = now - stateChangeTime_;
 
@@ -492,13 +492,13 @@ public:
         // Tick children after our own state machine — option A: parent prepares,
         // children consume. ImprovProvisioningModule (when present) polls a
         // ready-flag here and may call back into setWifiCredentials().
-        MoonModule::loop1s();
+        MoonModule::tick1s();
     }
 
-    void teardown() override {
+    void release() override {
         // Tear down children first (Improv on ESP32) so the platform-side
         // Improv task stops touching UART0 before we drop the network state.
-        MoonModule::teardown();
+        MoonModule::release();
         platform::mdnsShutdown();
         if constexpr (platform::hasWiFi) {
             if (state_ == State::AP) { platform::wifiApStop(); noteRadioStopped(); }
@@ -567,7 +567,7 @@ private:
     // override". Persisted via the control binding. The platform setter
     // takes quarter-dBm (ESP-IDF's native unit), so syncTxPower() multiplies
     // by 4 at the call site. appliedTxPowerSetting_ tracks the last value
-    // pushed to the radio so syncTxPower() in loop1s() detects changes (UI
+    // pushed to the radio so syncTxPower() in tick1s() detects changes (UI
     // write or board-injected value) and re-applies without needing a
     // per-control change callback.
     int16_t txPowerSetting_ = 0;
@@ -606,7 +606,7 @@ private:
     int8_t  ethSpiSck_     = static_cast<int8_t>(platform::ethConfigDefault.spiSck);
     int8_t  ethSpiCs_      = static_cast<int8_t>(platform::ethConfigDefault.spiCs);
     int8_t  ethSpiIrq_     = static_cast<int8_t>(platform::ethConfigDefault.spiIrq);
-    // Signature of the eth controls last applied, so loop1s() detects a UI/board
+    // Signature of the eth controls last applied, so tick1s() detects a UI/board
     // change (same pattern as appliedTxPowerSetting_). ethSigApplied_ guards the
     // "never applied yet" case rather than a sentinel value, since any uint32 is a
     // valid hash output. setup()'s syncEthConfig() sets it before any compare.
@@ -614,7 +614,7 @@ private:
     bool ethSigApplied_ = false;
 
     // A cheap order-sensitive hash of the eth control members — changes whenever
-    // any eth control does, so loop1s() can detect a live reconfigure. uint32_t so
+    // any eth control does, so tick1s() can detect a live reconfigure. uint32_t so
     // the rolling multiply wraps deterministically (signed overflow is UB).
     uint32_t ethSig() const {
         uint32_t h = ethType_;
@@ -652,11 +652,11 @@ private:
         }
     }
 
-    // Live eth reconfigure — called each tick from loop1s(). When an eth control
+    // Live eth reconfigure — called each tick from tick1s(). When an eth control
     // changed since the last apply AND the (new) type is W5500, tear the SPI driver
     // down and re-init on the spot — no reboot (W5500 is just an SPI device, clean
     // stop/uninstall/re-init). For RMII a live change only updates the stored config
-    // + flags a status hint; the EMAC/clock teardown is fiddlier and applies on the
+    // + flags a status hint; the EMAC/clock release is fiddlier and applies on the
     // next boot (backlog: live RMII reconfigure). Same change-detect shape as
     // syncTxPower's appliedTxPowerSetting_.
     void syncEthLive() {
@@ -669,7 +669,7 @@ private:
             // device with no network (and killing the very connection that set the
             // control). On those boards — and for RMII/none everywhere — just save the
             // config and apply on next boot (backlog: live RMII reconfigure). The
-            // EMAC/clock teardown is fiddlier and isn't hot-swappable yet anyway.
+            // EMAC/clock release is fiddlier and isn't hot-swappable yet anyway.
             const bool hotReinit = (ethType_ == 3) && platform::hasEthW5500;
             if (hotReinit) {
                 platform::ethStop();
@@ -718,7 +718,7 @@ private:
         // rebuild needed for status itself, but rssi/txPower visibility depends
         // on state_ so rebuildControls() re-evaluates their hidden flags.
         rebuildControls();
-        if (scheduler_) scheduler_->buildState();
+        if (scheduler_) scheduler_->prepareTree();
     }
 
     void onConnected(const char* via) {
@@ -753,7 +753,7 @@ private:
         // rebuild needed for status itself, but rssi/txPower visibility depends
         // on state_ so rebuildControls() re-evaluates their hidden flags.
         rebuildControls();
-        if (scheduler_) scheduler_->buildState();
+        if (scheduler_) scheduler_->prepareTree();
     }
 
 public:
@@ -781,7 +781,7 @@ private:
     /// READS it. This is the single identity behind every network name — the mDNS
     /// `<name>.local`, the SoftAP SSID, and the DHCP hostname are all this exact string,
     /// so a device shows one name everywhere. SystemModule guarantees it is a valid,
-    /// non-empty hostname (sanitised + MAC-fallback in its setup/loop1s). Read through
+    /// non-empty hostname (sanitised + MAC-fallback in its setup/tick1s). Read through
     /// this one null-guard (systemModule_ is wired at boot; "" if somehow unwired — the
     /// platform name setters no-op on an empty string). NOT a deviceName of our own:
     /// it's SystemModule's, fetched.
@@ -802,7 +802,7 @@ private:
     // Apply txPowerSetting_ to the radio whenever it changes (UI write,
     // board-injected value, or first time it lands after STA/AP comes up).
     // Mirrors syncMdns()'s shape: cheap idempotent check, called from
-    // loop1s(). esp_wifi_set_max_tx_power requires the WiFi stack started
+    // tick1s(). esp_wifi_set_max_tx_power requires the WiFi stack started
     // — wifiSetTxPower() guards on that and returns false otherwise, which
     // leaves appliedTxPowerSetting_ untouched so the next tick (post-STA-
     // up) retries cleanly.
@@ -842,7 +842,7 @@ private:
 
     // Invalidate the "last applied" tracker so the next syncTxPower()
     // re-applies the cap. Must be called every time the WiFi stack stops
-    // (wifiStaStop / wifiApStop / teardown): ESP-IDF resets the radio's
+    // (wifiStaStop / wifiApStop / release): ESP-IDF resets the radio's
     // TX-power state on stop, so our cached `applied` value no longer
     // reflects what the radio thinks. Without this, the equality check
     // in syncTxPower() short-circuits and the cap never lands on the
@@ -855,7 +855,7 @@ private:
         bool shouldRun = mdnsEnabled_ && (state_ == State::ConnectedEth || state_ == State::ConnectedSta);
         const char* devName = readDeviceName();
         if (shouldRun && !mdnsRunning_) {
-            // Only mark running on success — leave false so loop1s retries next tick.
+            // Only mark running on success — leave false so tick1s retries next tick.
             if (platform::mdnsInit(devName)) {
                 mdnsRunning_ = true;
                 std::strncpy(lastMdnsName_, devName, sizeof(lastMdnsName_) - 1);

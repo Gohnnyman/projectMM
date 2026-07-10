@@ -76,7 +76,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
 
 // Disabling the Layouts container itself zeroes totalLightCount and yields no coordinates.
 TEST_CASE("Disabling the Layouts container reports zero lights and an empty iteration") {
-    // The Scheduler can't gate Layouts (no loop() to skip) so totalLightCount /
+    // The Scheduler can't gate Layouts (no tick() to skip) so totalLightCount /
     // forEachCoord apply the gate themselves. Same universal-enable intent as
     // every other container: disabled means no contribution.
     mm::Layouts layouts;

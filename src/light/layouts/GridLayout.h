@@ -24,7 +24,7 @@ public:
     bool serpentine = false;   // odd rows wired in reverse (boustrophedon) — the standard matrix
                                // strip layout where the strip snakes back and forth row to row.
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("width",  width,  1, 512);
         controls_.addInt16("height", height, 1, 512);
         controls_.addInt16("depth",  depth,  1, 512);

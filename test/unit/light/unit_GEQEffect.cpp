@@ -13,7 +13,7 @@
 // bar from the floor (bottom row) up to a height set by its band's loudness. The frame comes from
 // AudioService::latestFrame() (a process-wide static). To feed a signal on the host (no I2S mic) we run a
 // live AudioService with `simulate` set to an "always" mode — synthesizeFrame() fills the bands each
-// loop(). Every case that needs audio brackets its own AudioService setup()/teardown() so it never leaks
+// tick(). Every case that needs audio brackets its own AudioService setup()/release() so it never leaks
 // the active-mic pointer into another test file. Buffer index = (y*width + x)*3, y=0 is the TOP row so
 // y=height-1 is the floor the bars grow up from.
 
@@ -37,7 +37,7 @@ TEST_CASE("GEQEffect stays black without an audio frame") {
     layer.applyState();
     // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). Each loop
     // fades then reads silence → every bar height 0 → nothing drawn.
-    for (int i = 0; i < 8; i++) layer.loop();
+    for (int i = 0; i < 8; i++) layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 64);
@@ -52,7 +52,7 @@ TEST_CASE("GEQEffect stays black without an audio frame") {
 // pixel above the bar's top stays dark — bars fill upward from the bottom row, not top-down or floating.
 TEST_CASE("GEQEffect fills columns from the floor upward") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 4;   // sweep (always): one band lit at a time, deterministic — column 0 maps to
                           // band 0 (bass), so we can drive a known column loud.
     audio.setup();
@@ -91,8 +91,8 @@ TEST_CASE("GEQEffect fills columns from the floor upward") {
     // the invariant on that column: if the floor is dark, the top must be dark too (a bar never floats).
     bool sawBar = false;
     for (int i = 0; i < 64; i++) {
-        audio.loop();
-        layer.loop();
+        audio.tick();
+        layer.tick();
         for (int x = 0; x < W; x++) {
             if (floorLit(x)) sawBar = true;
             // A lit top pixel with a dark floor would mean the bar didn't grow from the bottom.
@@ -101,14 +101,14 @@ TEST_CASE("GEQEffect fills columns from the floor upward") {
     }
     CHECK(sawBar);   // at least one column rose during the sweep
 
-    audio.teardown();
+    audio.release();
 }
 
 // colorBars colours each bar by its column index, so two well-separated lit columns take different hues
 // rather than sharing the row-height gradient — the toggle changes what colour a bar is.
 TEST_CASE("GEQEffect colorBars colours bars per column") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;   // music (always): keeps every band non-zero so many columns rise together
     audio.setup();
 
@@ -144,8 +144,8 @@ TEST_CASE("GEQEffect colorBars colours bars per column") {
 
     bool compared = false;
     for (int i = 0; i < 64 && !compared; i++) {
-        audio.loop();
-        layer.loop();
+        audio.tick();
+        layer.tick();
         auto ca = color(xa), cb = color(xb);
         if (lit(ca) && lit(cb)) {
             // Column 0 (hue 0) and column 15 (hue 255) are opposite ends of the palette: their bar
@@ -156,14 +156,14 @@ TEST_CASE("GEQEffect colorBars colours bars per column") {
     }
     CHECK(compared);
 
-    audio.teardown();
+    audio.release();
 }
 
 // The hard rule: the effect runs at any grid size without crashing, including 0×0×0 and 1×1, with a live
 // audio frame feeding it every tick.
 TEST_CASE("GEQEffect survives degenerate grid sizes") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;
     audio.setup();
 
@@ -183,9 +183,9 @@ TEST_CASE("GEQEffect survives degenerate grid sizes") {
         layer.addChild(&geq);
 
         layer.applyState();
-        for (int i = 0; i < 4; i++) { audio.loop(); layer.loop(); }
+        for (int i = 0; i < 4; i++) { audio.tick(); layer.tick(); }
     }
     CHECK(true);   // no crash at 0×0×0 or 1×1
 
-    audio.teardown();
+    audio.release();
 }

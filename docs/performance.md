@@ -4,7 +4,7 @@ projectMM's per-step **performance contracts** live in the scenario JSONs — ea
 
 This document holds what scenarios can't carry: structural sizes (`sizeof`), build-variant deltas, and the WiFi/Ethernet physics that explain *why* a contract comes out where it does.
 
-**Render-loop model.** The Layer's buffer **persists** frame-to-frame — `Layer::loop()` does not clear it (the FastLED/WLED/MoonLight convention; see [architecture.md § Buffer persistence](architecture.md#buffer-persistence-the-layer-does-not-clear-each-frame)). This removed the per-frame full-buffer `memset` that a clear-every-frame model pays, and replaced N per-effect `draw::fade` passes with a single **collected fade** (`Layer::fadeToBlackBy` MINs the requested amounts and applies one buffer pass per frame) — so a layer with several fading effects now pays one fade pass, not N. Net hot-path effect on the tick numbers below is small (the clear/fade are one linear pass over the buffer, dwarfed by per-light effect compute and the output driver), but the *model* is what the scenario `observed` blocks were re-measured against on this cycle.
+**Render-loop model.** The Layer's buffer **persists** frame-to-frame — `Layer::tick()` does not clear it (the FastLED/WLED/MoonLight convention; see [architecture.md § Buffer persistence](architecture.md#buffer-persistence-the-layer-does-not-clear-each-frame)). This removed the per-frame full-buffer `memset` that a clear-every-frame model pays, and replaced N per-effect `draw::fade` passes with a single **collected fade** (`Layer::fadeToBlackBy` MINs the requested amounts and applies one buffer pass per frame) — so a layer with several fading effects now pays one fade pass, not N. Net hot-path effect on the tick numbers below is small (the clear/fade are one linear pass over the buffer, dwarfed by per-light effect compute and the output driver), but the *model* is what the scenario `observed` blocks were re-measured against on this cycle.
 
 ---
 
@@ -222,7 +222,7 @@ The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; th
 
 ### MoonLive (scripted effect) — tick + memory
 
-A `MoonLiveEffect` compiles its `source` text to native Xtensa once on the cold path (`onBuildState`), then `run()` is a single function-pointer call each tick. Measured on the S3 at 16×16 (the bench grid the engine is exercised on; the per-tick cost is the native loop, not interpretation):
+A `MoonLiveEffect` compiles its `source` text to native Xtensa once on the cold path (`prepare`), then `run()` is a single function-pointer call each tick. Measured on the S3 at 16×16 (the bench grid the engine is exercised on; the per-tick cost is the native loop, not interpretation):
 
 | Script | Tick (µs) | Exec block (heap) |
 |--------|----:|----:|

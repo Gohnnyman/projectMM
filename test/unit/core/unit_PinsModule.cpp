@@ -31,8 +31,8 @@ struct FakePinModule : MoonModule {
 
     FakePinModule(const char* n) { setName(n); }
 
-    void onBuildControls() override {
-        MoonModule::onBuildControls();
+    void defineControls() override {
+        MoonModule::defineControls();
         controls_.addPin("sckPin", sck);
         controls_.addPin("wsPin", ws);
         controls_.addPin("sdPin", sd);
@@ -64,7 +64,7 @@ std::string allRows(const ListSource& src) {
 
 TEST_CASE("PinsModule: exposes a single read-only pins list, fixed System module (Generic role)") {
     PinsModule pins;
-    pins.onBuildControls();
+    pins.defineControls();
     bool hasList = false;
     for (uint8_t i = 0; i < pins.controls().count(); i++)
         if (std::strcmp(pins.controls()[i].name, "pins") == 0) hasList = true;
@@ -82,7 +82,7 @@ TEST_CASE("PinsModule: collects set Pin controls with name-derived roles, skips 
     scheduler.addModule(&mic);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();   // walk the tree, build the map
+    pins.tick1s();   // walk the tree, build the map
 
     const ListSource* src = pinsSource(pins);
     REQUIRE(src != nullptr);
@@ -110,7 +110,7 @@ TEST_CASE("PinsModule: parses the LED-driver pins CSV into per-lane claims") {
     scheduler.addModule(&driver);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const ListSource* src = pinsSource(pins);
     REQUIRE(src != nullptr);
@@ -139,7 +139,7 @@ TEST_CASE("PinsModule: rows are GPIO-ordered and a double-claim stays visible in
     scheduler.addModule(&b);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const ListSource* src = pinsSource(pins);
     REQUIRE(src != nullptr);
@@ -181,7 +181,7 @@ TEST_CASE("PinsModule: a conflict promotes a strap warn to error (severity is th
     scheduler.addModule(&other);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     // Both GPIO-45 rows: the conflict (error) wins over the strap (warn) — severity is the max.
     const std::string rows = allRows(*pinsSource(pins));
@@ -200,18 +200,18 @@ TEST_CASE("PinsModule: a disabled module's pins are released from the map, re-cl
     scheduler.setup();
 
     // Enabled: the claim shows.
-    pins.loop1s();
+    pins.tick1s();
     CHECK(allRows(*pinsSource(pins)).find("\"gpio\":17") != std::string::npos);
 
     // Disabled: the pin is freed from the map (switching a module off releases its GPIOs, no reboot).
     drv.setEnabled(false);
-    pins.loop1s();
+    pins.tick1s();
     CHECK(allRows(*pinsSource(pins)).find("\"gpio\":17") == std::string::npos);
     CHECK(pinsSource(pins)->listRowCount() == 0);
 
     // Re-enabled: the claim comes back.
     drv.setEnabled(true);
-    pins.loop1s();
+    pins.tick1s();
     CHECK(allRows(*pinsSource(pins)).find("\"gpio\":17") != std::string::npos);
 }
 
@@ -226,7 +226,7 @@ TEST_CASE("PinsModule: a child module's pins are walked (depth-first), not just 
     scheduler.addModule(&container);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const ListSource* src = pinsSource(pins);
     REQUIRE(src != nullptr);
@@ -251,24 +251,24 @@ TEST_CASE("PinsModule: disabling a PARENT frees its children's pins (effectively
     scheduler.setup();
 
     // Both enabled: the child's claim shows.
-    pins.loop1s();
+    pins.tick1s();
     CHECK(allRows(*pinsSource(pins)).find("\"gpio\":20") != std::string::npos);
 
     // Disable the PARENT (child's own flag stays true) — the child is now effectively-disabled, so its
     // pin is freed from the map even though child.enabled() is still true.
     container.setEnabled(false);
-    pins.loop1s();
+    pins.tick1s();
     CHECK(child.enabled());   // the child's OWN flag is untouched
     CHECK(allRows(*pinsSource(pins)).find("\"gpio\":20") == std::string::npos);   // …but its pin is freed
 
     // Re-enable the parent: the child's claim returns.
     container.setEnabled(true);
-    pins.loop1s();
+    pins.tick1s();
     CHECK(allRows(*pinsSource(pins)).find("\"gpio\":20") != std::string::npos);
 }
 
 TEST_CASE("PinsModule: a claim survives its owning module being destroyed (no use-after-free)") {
-    // The map refreshes on loop1s but the UI serializes state right after a delete op — so a claim
+    // The map refreshes on tick1s but the UI serializes state right after a delete op — so a claim
     // must NOT borrow a pointer into the (now-freed) module's name storage. Refresh with the module
     // alive, destroy it, then serialize: the snapshot must still render its owner from its own copy.
     Scheduler scheduler;
@@ -279,7 +279,7 @@ TEST_CASE("PinsModule: a claim survives its owning module being destroyed (no us
         scheduler.addModule(&doomed);
         scheduler.addModule(&pins);
         scheduler.setup();
-        pins.loop1s();   // claim {gpio 7, owner "Doomed"} captured here
+        pins.tick1s();   // claim {gpio 7, owner "Doomed"} captured here
     }   // `doomed` destroyed — its name_[16] storage is gone; a borrowed owner pointer would dangle
 
     const ListSource* src = pinsSource(pins);
@@ -305,7 +305,7 @@ TEST_CASE("PinsModule: an out-of-range CSV pin is skipped, not wrapped to a fals
     scheduler.addModule(&driver);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const ListSource* src = pinsSource(pins);
     REQUIRE(src != nullptr);
@@ -333,7 +333,7 @@ TEST_CASE("PinsModule: a claim on a reserved pin is flagged severity error") {
     scheduler.addModule(&drv);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":30") != std::string::npos);
@@ -355,7 +355,7 @@ TEST_CASE("PinsModule: a driven role on a strap pin is flagged severity warn") {
     scheduler.addModule(&drv);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":45") != std::string::npos);
@@ -376,7 +376,7 @@ TEST_CASE("PinsModule: an input role on an input-only pin is NOT flagged") {
     scheduler.addModule(&mic);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":34") != std::string::npos);
@@ -398,7 +398,7 @@ TEST_CASE("PinsModule: a driven role on an input-only pin IS flagged warn") {
     scheduler.addModule(&drv);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"severity\":\"warn\"") != std::string::npos);
@@ -414,7 +414,7 @@ TEST_CASE("PinsModule: a safe pin carries no severity field") {
     scheduler.addModule(&drv);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":18") != std::string::npos);
@@ -438,7 +438,7 @@ TEST_CASE("PinsModule: a claimed pin with live state emits level + drive columns
     scheduler.addModule(&drv);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"level\":\"HIGH\"") != std::string::npos);
@@ -455,7 +455,7 @@ TEST_CASE("PinsModule: a pin with no live state (valid=false) omits the live col
     scheduler.addModule(&drv);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":18") != std::string::npos);
@@ -484,7 +484,7 @@ TEST_CASE("PinsModule: dir column reflects the live pad direction (out/in/both/o
     scheduler.addModule(&m);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":10") != std::string::npos);
@@ -513,7 +513,7 @@ TEST_CASE("PinsModule: dir is shown as info, NOT a warning — a driven role wit
     scheduler.addModule(&drv);
     scheduler.addModule(&pins);
     scheduler.setup();
-    pins.loop1s();
+    pins.tick1s();
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":14") != std::string::npos);

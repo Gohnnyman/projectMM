@@ -41,7 +41,7 @@ public:
     // Granularity select (0/1/2). MoonLight default 2 ("One LED One Light").
     uint8_t granularity = 2;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addSelect("granularity", granularity, kGranularityOptions, kGranularityCount);
         // Mode 0 only; MoonLight range 1..128.
         controls_.addUint8("nrOfLightsPerGourd", nrOfLightsPerGourd, 1, 128);

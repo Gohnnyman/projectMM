@@ -149,7 +149,7 @@ def run_one(host: str, repeats: int, timeout_s: float) -> bool:
         client.post("/api/modules", {"type": "NetworkReceiveEffect",
                                      "id": "NetworkReceive", "parent_id": "Layer"})
         added = True
-        time.sleep(2.0)  # buildState settle
+        time.sleep(2.0)  # prepareTree settle
 
         # Sweep all three protocols so they can be compared head to head — the
         # receiver autodetects each on its own port, so no device reconfig

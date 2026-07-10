@@ -32,7 +32,7 @@ TEST_CASE("FreqSawsEffect silence with keepOn off leaves the buffer dark") {
     layer.addChild(&saws);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     REQUIRE(layer.buffer().data() != nullptr);
     CHECK_FALSE(anyLit(layer));   // silence in, dark out
@@ -57,7 +57,7 @@ TEST_CASE("FreqSawsEffect keepOn draws bands even with no audio") {
     layer.addChild(&saws);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     CHECK(anyLit(layer));         // keepOn lights the panel with no audio at all
 }
@@ -69,7 +69,7 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     // I2S mic, so simulate is the only source; music-always fills every band). latestFrame() then
     // hands this module's frame to the effect.
     mm::AudioService mic;
-    mic.onBuildControls();
+    mic.defineControls();
     mic.simulate = 3;             // 3 = music (always): synthesize regardless of a real mic
     mic.setup();                  // registers as the active mic
 
@@ -93,13 +93,13 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     // rise instantly (max with target), so a lit column appears within these frames.
     bool lit = false;
     for (int tick = 0; tick < 8 && !lit; tick++) {
-        mic.loop();               // (re)synthesize a loud music frame into the active mic
-        layer.loop();             // effect reads latestFrame() and draws the active bands
+        mic.tick();               // (re)synthesize a loud music frame into the active mic
+        layer.tick();             // effect reads latestFrame() and draws the active bands
         lit = anyLit(layer);
     }
     CHECK(lit);
 
-    mic.teardown();               // vacate the seat so later tests read silence again
+    mic.release();               // vacate the seat so later tests read silence again
 }
 
 // The "runs at every grid size" hard rule: a degenerate 0×0×0 grid and a 1×1 grid both render
@@ -120,7 +120,7 @@ TEST_CASE("FreqSawsEffect runs at degenerate grid sizes without crashing") {
         layer.addChild(&saws);
 
         layer.applyState();
-        layer.loop();
+        layer.tick();
         CHECK(true);              // reaching here without a crash is the assertion
     }
 }

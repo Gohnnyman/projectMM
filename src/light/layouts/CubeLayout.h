@@ -52,7 +52,7 @@ public:
     bool snakeY = true;
     bool snakeZ = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("width",  width,  1, 128);
         controls_.addInt16("height", height, 1, 128);
         controls_.addInt16("depth",  depth,  1, 128);

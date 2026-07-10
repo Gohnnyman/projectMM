@@ -29,7 +29,7 @@ TEST_CASE("StarSkyEffect lights pixels on a populated grid") {
     star.speed = 10;
     wire(layouts, grid, layer, star, 8, 8, 4);
 
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -53,7 +53,7 @@ TEST_CASE("StarSkyEffect white stars paint greyscale pixels") {
     star.speed = 5;
     wire(layouts, grid, layer, star, 8, 8, 1);
 
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     size_t litPixels = 0;
@@ -82,7 +82,7 @@ TEST_CASE("StarSkyEffect always keeps at least one star") {
     // Step several frames; the single star keeps fading/respawning, so within a few frames it lights.
     bool everLit = false;
     for (int f = 0; f < 8 && !everLit; f++) {
-        layer.loop();
+        layer.tick();
         auto* data = layer.buffer().data();
         for (size_t i = 0; i < layer.buffer().bytes(); i++) {
             if (data[i] != 0) { everLit = true; break; }
@@ -100,7 +100,7 @@ TEST_CASE("StarSkyEffect runs at degenerate grid sizes") {
         mm::StarSkyEffect star;
         star.star_fill_ratio = 255;
         wire(layouts, grid, layer, star, 0, 0, 0);
-        layer.loop();   // must not crash on an empty grid
+        layer.tick();   // must not crash on an empty grid
         CHECK(layer.buffer().count() == 0);
     }
     {
@@ -111,7 +111,7 @@ TEST_CASE("StarSkyEffect runs at degenerate grid sizes") {
         star.star_fill_ratio = 255;
         star.speed = 30;
         wire(layouts, grid, layer, star, 1, 1, 1);
-        layer.loop();   // single cell — no out-of-bounds
+        layer.tick();   // single cell — no out-of-bounds
         CHECK(layer.buffer().count() == 1);
     }
 }

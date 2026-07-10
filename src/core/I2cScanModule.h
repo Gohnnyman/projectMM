@@ -50,18 +50,18 @@ public:
     /// Respects the `enabled` toggle (the default): disabling it releases its bus pins in the pin
     /// ownership map (and re-claims them on enable), so a user can free GPIO21/22 for another module
     /// by switching the scanner off. Safe because I2cScan has no loop — it acts only on the `scan`
-    /// button (onUpdate), which still works whether enabled or not; disabling only stops it *claiming*
+    /// button (onControlChanged), which still works whether enabled or not; disabling only stops it *claiming*
     /// its pins, which is exactly what "off" should mean for a pin-holding diagnostic.
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addPin("sda", sda_);
         controls_.addPin("scl", scl_);
         controls_.addButton("scan");
         controls_.addReadOnly("result", resultStr_, sizeof(resultStr_));
-        MoonModule::onBuildControls();
+        MoonModule::defineControls();
     }
 
-    void onUpdate(const char* controlName) override {
+    void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "scan") == 0) scan();
     }
 

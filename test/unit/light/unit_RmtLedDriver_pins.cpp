@@ -21,7 +21,7 @@ void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
     REQUIRE(src.allocate(lights, 3));   // a masked alloc failure would fail cases downstream
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
-    d.onBuildControls();
+    d.defineControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
     d.applyState();
@@ -228,7 +228,7 @@ TEST_CASE("RmtLedDriver idles with a status error on a bad pin list") {
     std::strcpy(d.pins, "18,nope");
     wire(d, src, corr, 64);
 
-    CHECK(d.pinCount() == 0);            // no pins → loop() emits nothing
+    CHECK(d.pinCount() == 0);            // no pins → tick() emits nothing
     CHECK(d.status() != nullptr);        // the parse error is surfaced, not silent
     // Recovery: fixing the control and rebuilding clears the error.
     std::strcpy(d.pins, "18");
@@ -240,7 +240,7 @@ TEST_CASE("RmtLedDriver idles with a status error on a bad pin list") {
 TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assumed)") {
     // Pins now default UNSET (the "default only when it cannot do harm" rule — the
     // strand is user-soldered). A fresh, unconfigured driver must idle, not grab a
-    // GPIO: zero pins, a status note, and a crash-safe no-op loop().
+    // GPIO: zero pins, a status note, and a crash-safe no-op tick().
     mm::RmtLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -249,7 +249,7 @@ TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assume
 
     CHECK(d.pinCount() == 0);             // nothing claimed
     CHECK(d.status() != nullptr);         // "set pins" surfaced, not silent
-    d.loop();                             // must be a no-op, not a crash
+    d.tick();                             // must be a no-op, not a crash
     // Setting pins later brings it live (the user-configures-then-runs flow).
     std::strcpy(d.pins, "18");
     d.applyState();
@@ -259,7 +259,7 @@ TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assume
 
 TEST_CASE("RmtLedDriver re-slices when the source buffer changes") {
     // setSourceBuffer must recompute counts (the Drivers container re-passes the
-    // buffer on every buildState) — a grid resize updates the even split.
+    // buffer on every prepareTree) — a grid resize updates the even split.
     mm::RmtLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -335,22 +335,22 @@ TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slic
     d.setWindow(/*start=*/200, /*count=*/10);
     wire(d, src, corr, 64);
 
-    CHECK(d.pinLightCount(0) == 0);           // nothing to drive; loop() is a no-op
-    d.loop();                                 // must not crash / overrun
+    CHECK(d.pinLightCount(0) == 0);           // nothing to drive; tick() is a no-op
+    d.tick();                                 // must not crash / overrun
 }
 
-// --- loop() robustness -------------------------------------------------------
+// --- tick() robustness -------------------------------------------------------
 //
-// loop()'s transmit-all/wait-all concurrency body is gated out on the desktop
+// tick()'s transmit-all/wait-all concurrency body is gated out on the desktop
 // (platform::rmtTxChannels == 0 → it returns at the top), exactly as
-// LcdLedDriver::loop() is. So the host can pin only the reachable contract:
-// loop() must never crash or overrun for any pin configuration, grid size, or
+// LcdLedDriver::tick() is. So the host can pin only the reachable contract:
+// tick() must never crash or overrun for any pin configuration, grid size, or
 // uninitialised state. The concurrency path itself (parallel transmit, longest-
 // strand cost) is proven on hardware by the real-frame loopback self-test —
 // the platform boundary keeps it out of CI, which is by design.
 
-// loop() is a safe no-op across single-pin, multi-pin and zero-grid configs.
-TEST_CASE("RmtLedDriver loop is crash-safe for every pin configuration") {
+// tick() is a safe no-op across single-pin, multi-pin and zero-grid configs.
+TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
     mm::Correction corr;
     corr.rebuild(255, mm::LightPreset::GRB);
 
@@ -358,32 +358,32 @@ TEST_CASE("RmtLedDriver loop is crash-safe for every pin configuration") {
         mm::RmtLedDriver d; mm::Buffer src;
         std::strcpy(d.pins, "18");
         wire(d, src, corr, 64);
-        d.loop();                       // host: inert; must not crash/overrun
+        d.tick();                       // host: inert; must not crash/overrun
     }
     SUBCASE("multi-pin even split") {
         mm::RmtLedDriver d; mm::Buffer src;
         std::strcpy(d.pins, "18,17,16");
         wire(d, src, corr, 90);
         REQUIRE(d.pinCount() == 3);
-        d.loop();
+        d.tick();
     }
     SUBCASE("zero-light grid — counts and offsets stay zero") {
         // A 0-light buffer allocates nothing (allocate() returns false by
         // design), so wire it by hand rather than through the success-asserting
-        // helper — the point is that loop() tolerates the empty buffer.
+        // helper — the point is that tick() tolerates the empty buffer.
         mm::RmtLedDriver d; mm::Buffer src;
         std::strcpy(d.pins, "18,17");
         CHECK_FALSE(src.allocate(0, 3));
-        d.onBuildControls();
+        d.defineControls();
         d.setSourceBuffer(&src);
         d.setCorrection(&corr);
         d.applyState();
-        d.loop();                       // 0×0×0 must be a clean no-op
+        d.tick();                       // 0×0×0 must be a clean no-op
     }
-    SUBCASE("loop before any buffer is wired") {
+    SUBCASE("tick before any buffer is wired") {
         mm::RmtLedDriver d;
-        d.onBuildControls();
-        d.loop();                       // uninitialised: the guards must hold
+        d.defineControls();
+        d.tick();                       // uninitialised: the guards must hold
     }
     CHECK(true);                        // reached here ⇒ no crash in any subcase
 }

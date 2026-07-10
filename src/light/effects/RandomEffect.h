@@ -30,11 +30,11 @@ public:
 
     uint8_t fade = 70;  // per-frame fadeToBlackBy amount (0..255)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fade", fade, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         Buffer& buf = layer()->buffer();
         const nrOfLightsType n = nrOfLights();
         const uint8_t cpl = buf.channelsPerLight();

@@ -24,7 +24,7 @@ namespace {
 // add, set, and clear-children without pulling in real light modules.
 struct Knob : public mm::MoonModule {
     uint8_t value = 10;
-    void onBuildControls() override { controls_.addUint8("value", value, 0, 100); }
+    void defineControls() override { controls_.addUint8("value", value, 0, 100); }
 };
 struct Box : public mm::MoonModule {
     // accepts any child (the HTTP role gate lives above the apply-core).
@@ -45,7 +45,7 @@ struct Tag : public mm::MoonModule {
         }
         return true;
     }
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addText("label", label, sizeof(label), printableAscii);
     }
 };
@@ -55,14 +55,14 @@ struct Tag : public mm::MoonModule {
 struct FakeDrivers : public mm::MoonModule {
     bool on = true;
     uint8_t brightness = 20;
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("on", on);
         controls_.addUint8("brightness", brightness, 0, 255);
     }
 };
 
 // Build a tree: scheduler root "Root" (a Box) with HttpServerModule wired to it.
-// Returns via out-params so each case starts clean. Caller owns teardown via the
+// Returns via out-params so each case starts clean. Caller owns release via the
 // scheduler.
 void registerTestTypes() {
     static bool done = false;
@@ -250,7 +250,7 @@ TEST_CASE("apply-core: applyWledState sets on + bri independently (no brightness
     s.addModule(root);
     auto* drivers = new FakeDrivers();
     drivers->setName("Drivers");
-    drivers->onBuildControls();       // register on + brightness so applyWledState can find them
+    drivers->defineControls();       // register on + brightness so applyWledState can find them
     s.addModule(drivers);
     mm::HttpServerModule http;
     http.setScheduler(&s);

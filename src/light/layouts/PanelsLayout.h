@@ -51,7 +51,7 @@ public:
     bool       incY        = true; // "Y++": per-panel Y direction
     bool       snake       = true; // "snake": snake each panel's inner loop (default on)
 
-    void onBuildControls() override {
+    void defineControls() override {
         // Panel grid (outer). MoonLight ranges 1..32; clamped to lengthType (int16_t).
         controls_.addInt16("horizontalPanels", horizontalPanels, 1, 32);
         controls_.addInt16("verticalPanels",   verticalPanels,   1, 32);

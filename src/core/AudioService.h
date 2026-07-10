@@ -41,7 +41,7 @@ namespace mm {
 /// gated on `platform::hasI2sMic`, inert with a status note on targets without I2S
 /// and on desktop.
 ///
-/// **The AudioFrame pipeline.** Each `loop()` that completes a block: read a block
+/// **The AudioFrame pipeline.** Each `tick()` that completes a block: read a block
 /// of samples, DC-blocker high-pass, compute the level, window + FFT, map to bands.
 /// The high-pass conditions the raw block once, up front, so both the level and the
 /// spectrum see the same cleaned signal. The DSP choices are textbook defaults on
@@ -93,13 +93,13 @@ public:
     /// Vacate the mic seat if this instance holds it, so a destroyed module never leaves active_
     /// dangling (latestFrame() would then dereference freed memory). Production tears down before
     /// delete, but a bare destruction — a stack instance in a test, an aborted construction — must
-    /// not leave a dangling static. Mirrors teardown()'s vacate; belt-and-suspenders on the static.
+    /// not leave a dangling static. Mirrors release()'s vacate; belt-and-suspenders on the static.
     ~AudioService() override { if (active_ == this) active_ = nullptr; }
 
     /// Unlike a zero-cost diagnostic peripheral, this module pays a
     /// real per-tick cost (the FFT) that IS the capability, not an optional extra,
     /// so it must not run when the user turns it off. We therefore respect `enabled`
-    /// (the default): the Scheduler skips loop() entirely while disabled, so the FFT,
+    /// (the default): the Scheduler skips tick() entirely while disabled, so the FFT,
     /// the level, and the read-outs all stop and the cost goes to zero. Enabled runs
     /// the full pipeline; removing the module stops it the same way. The read-outs
     /// hold their last value while disabled (no consumer reads a disabled module).
@@ -159,7 +159,7 @@ public:
     uint32_t sampleRate() const { return kSampleRates[sampleRateSel < kSampleRateCount
                                                        ? sampleRateSel : 2]; }
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addPin("sckPin", sckPin);
         controls_.addPin("wsPin", wsPin);
         controls_.addPin("sdPin", sdPin);
@@ -186,50 +186,50 @@ public:
             // WLED's 11988 (interop with WLED/MoonLight); change it on BOTH ends to run a
             // private projectMM-only sync group on a non-WLED port. Shown whenever sync is on
             // (Send or Receive), hidden in Off. A `sync` change re-runs this method (it's in
-            // controlChangeTriggersBuildState) so the row toggles live.
+            // controlChangeTriggersPrepare) so the row toggles live.
             controls_.addUint16("syncPort", syncPort, 1, 65535);
             controls_.setHidden(controls_.count() - 1, sync == 0);
             controls_.addReadOnly("sync status", syncStr_, sizeof(syncStr_));
         }
-        // Read-only live read-outs (formatted in loop1s). Derived every second,
+        // Read-only live read-outs (formatted in tick1s). Derived every second,
         // nothing to persist, so ReadOnly (the display-only type) not a flipped
         // Text — same idiom as SystemModule's uptime/fps.
         // "level RMS" = the RMS loudness; the DISPLAYED number is its peak over the 1-second window
-        // (loop1s publishes levelPeak_, the max of the per-block RMS level, then resets it), so a
+        // (tick1s publishes levelPeak_, the max of the per-block RMS level, then resets it), so a
         // beat that lands between samples still registers. The live frame_.level the LEDs use is the
         // instantaneous RMS, recomputed every audio block — this read-out is the human-readable
         // summary of it, not a separate statistic.
         controls_.addReadOnly("level RMS", levelStr_, sizeof(levelStr_));
         controls_.addReadOnly("peakHz", peakStr_, sizeof(peakStr_));
-        MoonModule::onBuildControls();
+        MoonModule::defineControls();
     }
 
     /// A pin or rate change rebuilds the I2S channel (live, no reboot); a `sync` /
     /// `syncPort` change re-binds/unbinds the UDP socket AND re-toggles the port row's
-    /// visibility (all flow through onBuildState → rebuildControls).
-    bool controlChangeTriggersBuildState(const char* name) const override {
+    /// visibility (all flow through prepare → rebuildControls).
+    bool controlChangeTriggersPrepare(const char* name) const override {
         return std::strcmp(name, "wsPin") == 0 || std::strcmp(name, "sdPin") == 0
             || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "mclkPin") == 0
             || std::strcmp(name, "sampleRate") == 0 || std::strcmp(name, "sync") == 0
             || std::strcmp(name, "syncPort") == 0;
     }
 
-    /// Pure build (see MoonModule::onBuildState): claim the mic election (first live mic wins) and
+    /// Pure build (see MoonModule::prepare): claim the mic election (first live mic wins) and
     /// (re)acquire the I²S mic + sync socket. No enabled() check — core's applyState() calls this only
-    /// when effectively-enabled and routes to teardown() otherwise, which releases the mic + sync
+    /// when effectively-enabled and routes to release() otherwise, which releases the mic + sync
     /// socket and vacates the election, so a disabled service (or one under a disabled parent) frees
     /// its pins for another module.
-    void onBuildState() override {
+    void prepare() override {
         if (active_ == nullptr) active_ = this;   // first live mic wins; a 2nd is captured but not read
         reinit();
         syncReinit();
     }
-    /// One-time wiring only; the mic acquire + election live in onBuildState(), the sole gate.
+    /// One-time wiring only; the mic acquire + election live in prepare(), the sole gate.
     void setup() override {}
-    void teardown() override {
+    void release() override {
         deinit();
         if constexpr (platform::hasNetwork) { syncSock_.close(); syncOpen_ = false; }
-        if (active_ == this) active_ = nullptr;   // vacate; a surviving module re-elects itself in loop()
+        if (active_ == this) active_ = nullptr;   // vacate; a surviving module re-elects itself in tick()
     }
 
     /// The latest analysed frame — what effects read. Always valid (zeroed until
@@ -239,7 +239,7 @@ public:
 
     // --- Test seams (host unit tests only; mirror DevicesModule::injectPacketForTest) ---
     // Read-only views of the sync socket lifecycle so unit_AudioService_sync can assert it
-    // through the public loop() without befriending the class or exposing internals broadly.
+    // through the public tick() without befriending the class or exposing internals broadly.
     bool syncOpenForTest() const { return syncOpen_; }
     uint8_t syncFrameCounterForTest() const { return syncFrameCounter_; }
     const char* syncStatusForTest() const { return syncStr_; }
@@ -253,9 +253,9 @@ public:
     ///
     /// Returns the live mic's frame while one exists, else a static all-silent
     /// frame, so an effect added before/without a mic still reads valid silence
-    /// instead of null. The FIRST live module claims the seat in `onBuildState()`, vacates
-    /// it in `teardown()`, and any running module re-claims an empty seat in
-    /// `loop()` — so a device with two mics reads the first consistently, and
+    /// instead of null. The FIRST live module claims the seat in `prepare()`, vacates
+    /// it in `release()`, and any running module re-claims an empty seat in
+    /// `tick()` — so a device with two mics reads the first consistently, and
     /// removing the active one lets a survivor take over. Add/remove in any order
     /// leaves a coherent answer (the robustness rule).
     static const AudioFrame* latestFrame() {
@@ -263,9 +263,9 @@ public:
         return active_ ? &active_->frame_ : &kSilence;
     }
 
-    void loop() override {
-        // Self-elect as the active mic if the seat is empty. onBuildState() gives it to the first live
-        // module and teardown() vacates it, but removing the active module while a second one is still running
+    void tick() override {
+        // Self-elect as the active mic if the seat is empty. prepare() gives it to the first live
+        // module and release() vacates it, but removing the active module while a second one is still running
         // would otherwise leave the seat empty (effects go silent). A running module re-claiming an
         // empty seat here keeps latestFrame() pointing at a live frame for ANY add/remove order — the
         // survivor takes over on its next tick (robustness).
@@ -305,7 +305,7 @@ public:
         const size_t n = platform::audioMicRead(mic_, samples_ + filled_, kBlock - filled_);
         // Mic-health tallies (read here, before the DC-blocker rewrites samples_): the samples the I2S
         // read delivered, and whether any were non-zero, accumulated over the 1 s window and diagnosed
-        // in loop1s(). The two together isolate the two clean failure modes of a mic bring-up: samples
+        // in tick1s(). The two together isolate the two clean failure modes of a mic bring-up: samples
         // arriving proves the clocks (BCLK/WS) + DMA; a non-zero among them proves the data line (SD).
         // All-zero samples = clocks fine, SD dead — otherwise a silent "RMS 0" with no clue which wire.
         micSamples1s_ += n;
@@ -405,7 +405,7 @@ public:
         if (frame_.level > levelPeak_) levelPeak_ = static_cast<uint8_t>(frame_.level);
     }
 
-    void loop1s() override {
+    void tick1s() override {
         std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(levelPeak_));
         std::snprintf(peakStr_, sizeof(peakStr_), "%u Hz", static_cast<unsigned>(frame_.peakHz));
         levelPeak_ = 0;   // reset for the next window
@@ -443,12 +443,12 @@ public:
                                   ? "receiving" : "listening");
             }
         }
-        MoonModule::loop1s();
+        MoonModule::tick1s();
     }
 
 private:
     // The mic that latestFrame() hands to effects. One in practice; the FIRST live module
-    // to build claims the seat (onBuildState sets active_ only while it's null), teardown()
+    // to build claims the seat (prepare sets active_ only while it's null), release()
     // clears it. inline so the header stays standalone.
     static inline AudioService* active_ = nullptr;
 
@@ -469,10 +469,10 @@ private:
     char peakStr_[12] = {};
     uint8_t levelPeak_ = 0;   // peak frame_.level across the current 1 s display window (UI only)
 
-    // Mic-health tallies over the 1 s window (see the read path + loop1s diagnosis). micSamples1s_ =
+    // Mic-health tallies over the 1 s window (see the read path + tick1s diagnosis). micSamples1s_ =
     // raw samples the I2S read delivered (proves clocks/DMA); micNonzero1s_ = reads that carried a
     // non-zero sample (proves the SD data line). micStatusStale_ = a diagnosis is currently posted, so
-    // loop1s clears it once the mic recovers rather than clearing every second.
+    // tick1s clears it once the mic recovers rather than clearing every second.
     uint32_t micSamples1s_ = 0;
     uint32_t micNonzero1s_ = 0;
     bool     micStatusStale_ = false;
@@ -501,7 +501,7 @@ private:
     /// (Re)create the I2S channel for the current pins + rate. On a codec board the
     /// I2S peripheral drives MCLK first, then the codec is configured over I2C. Any
     /// unset pin (-1) or missing I2S support leaves the module idle with a status
-    /// note rather than attempting an init. Called from setup() and onBuildState().
+    /// note rather than attempting an init. Called from setup() and prepare().
     void reinit() {
         if constexpr (!platform::hasI2sMic) {
             setStatus("mic: no I2S on this platform", Severity::Warning);
@@ -546,7 +546,7 @@ private:
         // The INMP441 emits ~250 ms of power-on settling garbage after the clock
         // starts. The read is non-blocking (hot-path rule), so we can't drain a
         // fixed sample count here at init — the DMA has barely filled. Instead the
-        // settling samples flow through the first few loop() reads and the level /
+        // settling samples flow through the first few tick() reads and the level /
         // bands self-correct within that quarter-second; no separate discard is
         // needed, and the frame stays valid (zeroed) until then.
         // Clear any prior status now the mic is live — not just kInitFailMsg, but
@@ -563,14 +563,14 @@ private:
         filled_ = 0;
         // Publish silence: latestFrame() hands frame_ to consumers whenever this is
         // the active mic, independent of inited_. Without this, a mic that worked
-        // and then lost its bus (a failed reinit after a pin edit, or teardown)
+        // and then lost its bus (a failed reinit after a pin edit, or release)
         // would leave the last real frame frozen on the LEDs instead of going dark.
         frame_ = AudioFrame{};
     }
 
     // --- WLED audio sync (guarded: only compiled where platform::hasNetwork) ---
 
-    /// Reset the sync socket to the current mode. Called from setup()/onBuildState()
+    /// Reset the sync socket to the current mode. Called from setup()/prepare()
     /// so a `sync` control change applies live (no reboot). This only CLOSES the socket
     /// and records the mode — it never opens one, because setup() runs at boot before
     /// NetworkModule brings an interface up, and any lwip socket call before then asserts
@@ -599,7 +599,7 @@ private:
         if (sync == 0) return false;
         if (syncOpen_) return true;
         if (!platform::networkReady()) return false;   // interface not up yet — try again next tick
-        // Back off between failed bring-ups: loop() runs every tick, so without this a
+        // Back off between failed bring-ups: tick() runs every tick, so without this a
         // persistent open/bind failure (e.g. the port is busy) would retry — one socket()
         // syscall per tick — dozens of times a second. lastSyncOpenFailMs_ stamps the last
         // failure; hold off until kSyncOpenRetryMs has passed (same throttle form as syncSend).
@@ -630,7 +630,7 @@ private:
     }
 
     /// Broadcast the current frame_ as a WLED v2 packet, throttled to ~40/s. Called
-    /// from loop() in Send mode. Cheap: builds a 44-byte packet, one non-blocking sendTo.
+    /// from tick() in Send mode. Cheap: builds a 44-byte packet, one non-blocking sendTo.
     void syncSend() {
         if constexpr (!platform::hasNetwork) return;
         const uint32_t now = platform::millis();
@@ -645,7 +645,7 @@ private:
 
     /// Drain the sync socket (bounded, non-blocking) in Receive mode. A valid v2 packet
     /// overwrites frame_ and stamps lastSyncRecv_. Returns true while a peer's audio is
-    /// FRESH (within kSyncFallbackMs) so loop() skips the local mic analysis — false once
+    /// FRESH (within kSyncFallbackMs) so tick() skips the local mic analysis — false once
     /// the peer goes quiet, letting the local mic resume (auto-blend).
     bool syncReceive() {
         if constexpr (!platform::hasNetwork) return false;
@@ -659,7 +659,7 @@ private:
                 frame_ = rf;                       // received audio drives the effects
                 lastSyncRecv_ = platform::millis();
                 // Feed the peer level into the same 1 s peak window the local mic uses, so the
-                // "level RMS" read-out (loop1s → levelStr_) reflects received audio too — otherwise
+                // "level RMS" read-out (tick1s → levelStr_) reflects received audio too — otherwise
                 // it freezes at the last local value while a peer is driving the effects.
                 if (frame_.level > levelPeak_)
                     levelPeak_ = static_cast<uint8_t>(frame_.level > 255 ? 255 : frame_.level);

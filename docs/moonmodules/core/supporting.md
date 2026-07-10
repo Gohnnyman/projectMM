@@ -12,7 +12,7 @@ Detail: [technical](moxygen/Control.md)
 
 ### Scheduler
 
-Orders module `setup()` by declared init-order dependencies (WiFi before HTTP, HTTP before WebSocket) and drives the per-tick `loop()` sweep. The one place init-order lives, so modules declare a dependency instead of hard-coding boot sequence.
+Orders module `setup()` by declared init-order dependencies (WiFi before HTTP, HTTP before WebSocket) and drives the per-tick `tick()` sweep. The one place init-order lives, so modules declare a dependency instead of hard-coding boot sequence.
 
 Detail: [technical](moxygen/Scheduler.md)
 
@@ -20,7 +20,7 @@ Detail: [technical](moxygen/Scheduler.md)
 
 ### MoonModule
 
-The base class every module derives from — the shared lifecycle (`setup` / `loop` / `teardown`), the `controls_` list, child propagation, and the self-reporting footprint (`classSize` / `dynamicBytes` / `loopTimeUs`). Learn the pattern once, apply it everywhere.
+The base class every module derives from — the shared lifecycle (`setup` / `tick` / `release`), the `controls_` list, child propagation, and the self-reporting footprint (`classSize` / `dynamicBytes` / `tickTimeUs`). Learn the pattern once, apply it everywhere.
 
 Detail: [technical](moxygen/MoonModule.md)
 
@@ -30,7 +30,7 @@ Detail: [technical](moxygen/MoonModule.md)
 
 ### Filesystem
 
-The persistence **engine**: writes control values to `/.config/*.json` and restores them on boot, overlaying loaded values through each control's pointer during `onBuildControls()`. A non-UI module (renders no card); its "last saved" status is surfaced by the File Manager. The home of the no-reboot live-reconfiguration behaviour (see below).
+The persistence **engine**: writes control values to `/.config/*.json` and restores them on boot, overlaying loaded values through each control's pointer during `defineControls()`. A non-UI module (renders no card); its "last saved" status is surfaced by the File Manager. The home of the no-reboot live-reconfiguration behaviour (see below).
 
 Detail: [technical](moxygen/FilesystemModule.md)
 
@@ -38,4 +38,4 @@ Detail: [technical](moxygen/FilesystemModule.md)
 
 ## Persistence and dynamic rebuild
 
-Control values persist via [FilesystemModule](moxygen/FilesystemModule.md), which overlays loaded values through each control's variable pointer during `onBuildControls()`. Calling `onBuildControls()` again at runtime (e.g. when a Select changes mode) clears and rebuilds the set, so only the controls relevant to the current mode show — this is how a control's conditional `hidden` flag re-evaluates. The rebuild sweep is also how a config change applies live, with no reboot.
+Control values persist via [FilesystemModule](moxygen/FilesystemModule.md), which overlays loaded values through each control's variable pointer during `defineControls()`. Calling `defineControls()` again at runtime (e.g. when a Select changes mode) clears and rebuilds the set, so only the controls relevant to the current mode show — this is how a control's conditional `hidden` flag re-evaluates. The rebuild sweep is also how a config change applies live, with no reboot.

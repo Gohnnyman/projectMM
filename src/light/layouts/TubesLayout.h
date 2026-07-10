@@ -29,7 +29,7 @@ public:
     lengthType tubeDistance = 10;
     bool reversed = false;   // when set, each tube is wired from its top (y descending)
 
-    void onBuildControls() override {
+    void defineControls() override {
         // MoonLight's counterparts are bare "slider" controls (uint8_t, 0..255).
         // These explicit ranges hold the geometry (≥1 tube of ≥1 light,
         // non-negative spacing) while keeping the box bounded.

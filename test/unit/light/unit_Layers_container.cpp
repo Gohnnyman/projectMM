@@ -23,7 +23,7 @@ struct ClockGuard {
 
 // The Layers container is a thin pass-through with one child Layer: behaviour
 // must match what a bare Layer produced before the shape change. These tests
-// pin that — anyone changing Layers::loop() will know immediately if the
+// pin that — anyone changing Layers::tick() will know immediately if the
 // single-child path stops being a no-op.
 //
 // Composition (alpha-blend across multiple Layers) is not yet wired — the
@@ -34,7 +34,7 @@ struct ClockGuard {
 // A Layers container with one child Layer must produce the same output as that Layer used directly (no-op container).
 TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     // Pin virtual time so both Layer paths read the same elapsed value from
-    // RainbowEffect's platform::millis() phase. Without this, the two loop()
+    // RainbowEffect's platform::millis() phase. Without this, the two tick()
     // calls land microseconds apart on the real clock and Rainbow's hue rotates
     // between them — making byte-exact comparison impossible (the structural
     // compare this test used to do hid the actual contract).
@@ -55,7 +55,7 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     mm::RainbowEffect bareEffect;
     bareLayer.addChild(&bareEffect);
     bareLayer.applyState();
-    bareLayer.loop();
+    bareLayer.tick();
 
     // --- New shape: Layers container wrapping one Layer ---
     mm::Layouts layoutsB;
@@ -74,9 +74,9 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     childLayer.addChild(&childEffect);
 
     layersContainer.applyState();
-    // Layers::loop runs each child Layer in order; for the single-child case
-    // that's exactly one bareLayer.loop() equivalent.
-    layersContainer.loop();
+    // Layers::tick runs each child Layer in order; for the single-child case
+    // that's exactly one bareLayer.tick() equivalent.
+    layersContainer.tick();
 
     // --- Both buffers must be byte-identical at the same elapsed time ---
     auto& bufA = bareLayer.buffer();
@@ -87,8 +87,8 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     // clockGuard restores setTestNowMs(0) on scope exit
 }
 
-// With two child Layers, each one's loop() runs and writes its own buffer (the container iterates all enabled children).
-TEST_CASE("Layers with two Layers: each child Layer's loop runs and writes its buffer") {
+// With two child Layers, each one's tick() runs and writes its own buffer (the container iterates all enabled children).
+TEST_CASE("Layers with two Layers: each child Layer's tick runs and writes its buffer") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
@@ -112,7 +112,7 @@ TEST_CASE("Layers with two Layers: each child Layer's loop runs and writes its b
     layersContainer.addChild(&layerB);
     layersContainer.setLayouts(&layouts);
     layersContainer.applyState();
-    layersContainer.loop();
+    layersContainer.tick();
 
     // Both child Layer buffers must be populated — each Layer renders its own
     // buffer here; the Drivers composite of those buffers is pinned by the
@@ -141,7 +141,7 @@ public:
 // Multi-layer composition: Drivers blends ≥2 enabled Layers into its own output
 // buffer and hands THAT to drivers (not a single Layer's buffer). Bottom layer
 // overwrites; top layer blends per its blendMode/opacity. This is the end-to-end
-// pin for the composite loop in Drivers::loop.
+// pin for the composite loop in Drivers::tick.
 TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -169,8 +169,8 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
 
     layersContainer.applyState();
     drivers.applyState();      // sizes + allocates the composite output buffer
-    layersContainer.loop();      // both layers render their own buffers
-    drivers.loop();              // composite into outputBuffer_, hand it to cap
+    layersContainer.tick();      // both layers render their own buffers
+    drivers.tick();              // composite into outputBuffer_, hand it to cap
 
     REQUIRE(layersContainer.enabledLayerCount() == 2);
     // The driver was handed the composite buffer (4 lights × 3ch), not a raw layer.
@@ -219,8 +219,8 @@ TEST_CASE("Drivers composition drops to single layer when one is disabled") {
     top.setEnabled(false);             // only the bottom layer remains
     layersContainer.applyState();
     drivers.applyState();
-    layersContainer.loop();
-    drivers.loop();
+    layersContainer.tick();
+    drivers.tick();
 
     CHECK(layersContainer.enabledLayerCount() == 1);
     REQUIRE(cap.src_ != nullptr);      // driver still has a valid buffer, no crash
@@ -426,7 +426,7 @@ TEST_CASE("Disabling a parent Layer cascades release to its effects (effectively
 
     // Disable the PARENT layer (the effect's own flag stays true) and re-sweep, as the Scheduler
     // does after an enabled-toggle. The effect is now effectively-disabled (ancestor off) → its
-    // applyState routes to teardown → heap freed, even though fire.enabled() is still true.
+    // applyState routes to release → heap freed, even though fire.enabled() is still true.
     layer.setEnabled(false);
     layers.applyState();
     CHECK(fire.enabled());                  // the effect's OWN flag is untouched
@@ -440,10 +440,10 @@ TEST_CASE("Disabling a parent Layer cascades release to its effects (effectively
     CHECK(fire.dynamicBytes() > 0);         // re-acquired
 
     // Effects-specific: an effect builds against the LAYER's LUT/buffer, so the router must run the
-    // Layer's onBuildState() (rebuild the LUT) BEFORE recursing into the effect (applyState visits the
+    // Layer's prepare() (rebuild the LUT) BEFORE recursing into the effect (applyState visits the
     // parent, then children). Prove the re-enabled effect actually RENDERS — a stale/zero-size buffer
     // would leave the frame black. A tick after re-enable must write non-zero pixels.
-    layer.loop();                           // ticks the effect through the Layer
+    layer.tick();                           // ticks the effect through the Layer
     const uint8_t* buf = layer.buffer().data();
     bool anyLit = false;
     for (size_t i = 0; i < layer.buffer().bytes() && !anyLit; i++) anyLit = buf[i] != 0;

@@ -40,6 +40,6 @@ TEST_CASE("Services is a thin grouping node — a service child attaches and tic
     CHECK(services.child(0)->role() == ModuleRole::Service);
 
     // The container has no controls of its own (like Layers) — it's pure structure.
-    services.onBuildControls();
+    services.defineControls();
     CHECK(services.controls().count() == 0);
 }

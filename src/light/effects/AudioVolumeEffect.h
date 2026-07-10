@@ -19,11 +19,11 @@ public:
 
     uint8_t brightness = 255;   // overall ceiling
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("brightness", brightness, 1, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

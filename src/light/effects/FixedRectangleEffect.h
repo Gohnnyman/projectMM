@@ -46,7 +46,7 @@ public:
 
     bool alternateWhite = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("red",   red);
         controls_.addUint8("green", green);
         controls_.addUint8("blue",  blue);
@@ -60,7 +60,7 @@ public:
         controls_.addBool("alternateWhite", alternateWhite);
     }
 
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         const int d = depth();

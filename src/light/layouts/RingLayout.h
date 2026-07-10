@@ -34,7 +34,7 @@ public:
     bool     clockwise  = true;
     uint8_t  scale      = 1;     // 1..10 — spacing multiplier out from the centre
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("nrOfLEDs",    nrOfLEDs,   1, 255);
         controls_.addUint16("angleFirst", angleFirst, 0, 359);
         controls_.addUint16("rotation",   rotation,   0, 360);
@@ -75,7 +75,7 @@ private:
             return;
         }
 
-        // RECONSTRUCTED: MoonLight computes ringCenter in onUpdate() (on the
+        // RECONSTRUCTED: MoonLight computes ringCenter in onControlChanged() (on the
         // nrOfLEDs control change), storing it as an integer Coord3D — the float
         // 1.1 * getRadius(nrOfLEDs) is truncated to int on assignment. projectMM
         // rebuilds fresh each build, so ringCenter is derived inline here from

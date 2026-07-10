@@ -26,14 +26,14 @@ public:
     uint8_t fade = 240;
     uint8_t hue_shift = 0;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("count", count, 1, 255);
         controls_.addUint8("speed", speed, 1, 255);
         controls_.addUint8("fade", fade, 1, 255);
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void onBuildState() override {
+    void prepare() override {
         // D2 effect: trail buffer covers only the z=0 plane (w*h*cpl). Extrude
         // fills z on 3D layers. Avoids allocating depth× more heap than needed.
         uint8_t cpl = channelsPerLight();
@@ -54,7 +54,7 @@ public:
         setDynamicBytes(trailBytes_);
     }
 
-    void teardown() override {
+    void release() override {
         releaseTrail();
         setDynamicBytes(0);
     }
@@ -63,7 +63,7 @@ public:
         releaseTrail();
     }
 
-    void loop() override {
+    void tick() override {
         if (!trail_) return;
 
         lengthType w = width();

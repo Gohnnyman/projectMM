@@ -42,7 +42,7 @@ TEST_CASE("ParticlesEffect renders non-zero buffer after one frame") {
     layer.addChild(&particles);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     bool hasNonZero = false;

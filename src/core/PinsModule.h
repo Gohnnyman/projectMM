@@ -44,13 +44,13 @@ namespace mm {
 /// **Fixed System module.** Wired by code as a child of SystemModule in `main.cpp` (like Tasks and I2cScan),
 /// not user-added — you don't delete the pin map. Base `Generic` role so no container accepts it as a
 /// user-editable child; `markWiredByCode()` exempts it from the persistence trim. Read-only: no editable
-/// controls. The list refreshes on `loop1s()` (a periodic sample, never the hot path), so a live pin change
+/// controls. The list refreshes on `tick1s()` (a periodic sample, never the hot path), so a live pin change
 /// shows on the next second with no reboot. The list uses `ControlType::List` + `ListSource`, the read-only
 /// data-source/adapter shape (UITableView's data source, Qt's `QAbstractItemModel`) as TasksModule.
 class PinsModule : public MoonModule {
 public:
-    void onBuildControls() override {
-        MoonModule::onBuildControls();
+    void defineControls() override {
+        MoonModule::defineControls();
         controls_.addList("pins", pins_);
     }
 
@@ -58,13 +58,13 @@ public:
     /// owner name + role into its own storage, so the rows serialize safely even if the owning module is
     /// deleted between refreshes — the snapshot holds no pointers into module memory. The next refresh
     /// rebuilds from the live tree, so a deleted module's claim drops within a second.
-    void loop1s() override {
-        MoonModule::loop1s();
+    void tick1s() override {
+        MoonModule::tick1s();
         pins_.refresh();
     }
 
 private:
-    /// The pin ownership map: a ListSource over a fixed snapshot rebuilt on loop1s. A claim is one GPIO
+    /// The pin ownership map: a ListSource over a fixed snapshot rebuilt on tick1s. A claim is one GPIO
     /// staked by one control; multiple claims on the same GPIO are kept (a conflict must stay visible, not
     /// be merged away). No allocation — a fixed `Claim[kMaxClaims]`, filled or left at count 0.
     struct PinListSource : ListSource {
@@ -218,7 +218,7 @@ private:
             // must match — a child of a disabled Drivers/Layer container frees its GPIOs too. A System
             // module (Tasks/Pins) ignores the flag via respectsEnabled()==false, so it's never skipped.
             // The map's "freed" is truthful: applyState() routes a disabled (or effectively-disabled)
-            // module to teardown(), which deinits its peripheral (RMT/Parlio/LCD/I²S/socket/IR), so the
+            // module to release(), which deinits its peripheral (RMT/Parlio/LCD/I²S/socket/IR), so the
             // freed GPIO is genuinely reusable, not just hidden — no reboot.
             const bool active = !m->respectsEnabled() || m->effectivelyEnabled();
             const ControlList& cl = m->controls();
@@ -254,7 +254,7 @@ private:
             c.gpio = gpio;
             c.severity = nullptr;
             c.reason = nullptr;
-            c.live = platform::gpioLiveState(gpio);   // sample the live pad now (loop1s, off the hot path)
+            c.live = platform::gpioLiveState(gpio);   // sample the live pad now (tick1s, off the hot path)
             std::strncpy(c.owner, owner ? owner : "", sizeof(c.owner) - 1);
             c.owner[sizeof(c.owner) - 1] = '\0';
             return &c;

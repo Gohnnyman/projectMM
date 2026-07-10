@@ -193,12 +193,12 @@ def _render_card_directives(md: str, domain: str, stem: str) -> str:
 
 # A member signature line moxygen emits as its own paragraph: a backtick-delimited
 # code span alone on a line — an attribute (`uint8_t protocol = 0`) or a method
-# (`virtual inline void onBuildControls() override`). The template wraps each in
+# (`virtual inline void defineControls() override`). The template wraps each in
 # backticks; nothing else on the site opens a line with a bare code span, so this
 # anchors the match to member signatures only.
 _SIG_LINE_RE = re.compile(r'^`(?P<sig>[^`\n]+)`[ \t]*$', re.MULTILINE)
 # A METHOD name is the identifier immediately before the FIRST argument-list `(`
-# (`… onBuildControls(…) override` → `onBuildControls`) — trailing `const`/`override`
+# (`… defineControls(…) override` → `defineControls`) — trailing `const`/`override`
 # come after and must NOT win. An ATTRIBUTE name is the identifier before ` =` or at
 # the end of the declarator (`uint8_t protocol = 0` → `protocol`; `char pins[24] = ""`
 # → `pins`, skipping the `[N]` array bound). Two anchored patterns, method tried first.

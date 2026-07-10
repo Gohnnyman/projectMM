@@ -31,7 +31,7 @@ public:
     lengthType bottomRadius = 10;   // radius at the base, in light-units
     lengthType height = 25;         // vertical rise from base to tip
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("ledCount",     ledCount,     1, 2048);
         controls_.addInt16("bottomRadius", bottomRadius, 1, 100);
         controls_.addInt16("height",       height,       1, 200);

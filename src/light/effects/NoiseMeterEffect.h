@@ -37,12 +37,12 @@ public:
     uint8_t fadeRate = 240;   // per-frame fade-to-black amount (motion trail), range 200..254
     uint8_t width    = 128;   // level→length gain: how much of the column a given level fills (0..255)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fadeRate", fadeRate, 200, 254);
         controls_.addUint8("width", width, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         const int sizeX = width_();
         const int sizeY = height();
         const int sizeZ = depthDim();

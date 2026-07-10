@@ -69,7 +69,7 @@ public:
     bool    infinite   = true;
     uint8_t blur       = 128;
 
-    void onBuildControls() override {
+    void defineControls() override {
         // MoonLight's bgC is a Coord3D 0..255 read as RGB. projectMM has no colour control, so the
         // three components are three uint8s — the native, recognisable shape for an RGB triple here.
         controls_.addUint8("backgroundColorR", backgroundColorR, 0, 255);
@@ -91,12 +91,12 @@ public:
     // Bit-packed alive/dead keeps it small (16K cells = 2KB each plane); colours are one byte each.
     // Off the hot path (cf. Fire's heat_) — never an inline member, so sizeof(GameOfLife) stays tiny
     // (an inline array here caused a P4 stack-overflow bootloop with HueDriver).
-    void onBuildState() override {
+    void prepare() override {
         const nrOfLightsType count = nrOfLights();
         if (count > 0) {
             const size_t planeBytes = (static_cast<size_t>(count) + 7) / 8;
             if (count != cellCount_) {
-                release();
+                freeBuffers();
                 cells_  = static_cast<uint8_t*>(platform::alloc(planeBytes));
                 future_ = static_cast<uint8_t*>(platform::alloc(planeBytes));
                 colors_ = static_cast<uint8_t*>(platform::alloc(count));
@@ -105,19 +105,19 @@ public:
                     planeBytes_ = planeBytes;
                     generation_ = 0;   // force a fresh fill on the next loop
                 } else {
-                    release();
+                    freeBuffers();
                 }
             }
         } else {
-            release();
+            freeBuffers();
         }
         setDynamicBytes(cellCount_ ? planeBytes_ * 2 + cellCount_ : 0);
     }
 
-    void teardown() override { release(); setDynamicBytes(0); }
-    ~GameOfLifeEffect() override { release(); }
+    void release() override { freeBuffers(); setDynamicBytes(0); }
+    ~GameOfLifeEffect() override { freeBuffers(); }
 
-    void onUpdate(const char* name) override {
+    void onControlChanged(const char* name) override {
         if (std::strcmp(name, "ruleset") == 0 || std::strcmp(name, "customRuleString") == 0)
             parseRuleset();
     }
@@ -129,11 +129,11 @@ public:
         testW_ = w; testH_ = h; testD_ = d;
         const nrOfLightsType count = static_cast<nrOfLightsType>(w) * h * d;
         const size_t planeBytes = (static_cast<size_t>(count) + 7) / 8;
-        release();
+        freeBuffers();
         cells_  = static_cast<uint8_t*>(platform::alloc(planeBytes));
         future_ = static_cast<uint8_t*>(platform::alloc(planeBytes));
         colors_ = static_cast<uint8_t*>(platform::alloc(count));
-        if (!cells_ || !future_ || !colors_) { release(); return false; }
+        if (!cells_ || !future_ || !colors_) { freeBuffers(); return false; }
         cellCount_ = count; planeBytes_ = planeBytes;
         std::memset(cells_, 0, planeBytes); std::memset(future_, 0, planeBytes); std::memset(colors_, 0, count);
         generation_ = 1;   // skip the random-fill path
@@ -150,7 +150,7 @@ public:
     bool birthForTest(uint8_t n) const { return birthNumbers_[n]; }
     bool surviveForTest(uint8_t n) const { return surviveNumbers_[n]; }
 
-    void loop() override {
+    void tick() override {
         if (!cells_ || !future_ || !colors_ || cellCount_ == 0) return;
         const lengthType w = width(), h = height(), d = depth();
         const uint8_t cpl = channelsPerLight();
@@ -234,7 +234,7 @@ private:
 
     uint32_t now() const { return elapsed(); }
 
-    void release() {
+    void freeBuffers() {
         if (cells_)  { platform::free(cells_);  cells_  = nullptr; }
         if (future_) { platform::free(future_); future_ = nullptr; }
         if (colors_) { platform::free(colors_); colors_ = nullptr; }

@@ -163,7 +163,7 @@ async function sendApplyOpFrame(port, op) {
     // open-loop (we don't read the ack back: a Web Serial duplex read while we hold the
     // writer is awkward), so the delay must clear the worst-case consume window. A
     // loaded tick (large grid, many modules) can run a few hundred µs, but the op is
-    // applied at the START of the next loop() poll, not after a full render — so ~120 ms
+    // applied at the START of the next tick() poll, not after a full render — so ~120 ms
     // comfortably covers it with headroom. (A read-back ack + retry-on-busy is the
     // closed-loop upgrade; backlogged until a real install drops an op, since each op is
     // also idempotent so a lost one would re-apply cleanly on a re-flash.)

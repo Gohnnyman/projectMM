@@ -43,7 +43,7 @@ TEST_CASE("RubiksCubeEffect paints the cube on the first frame") {
     layer.addChild(&cube);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 8 * 8 * 8);
@@ -76,7 +76,7 @@ TEST_CASE("RubiksCubeEffect only paints the six face colours") {
     layer.addChild(&cube);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     for (size_t i = 0; i + 2 < buf.bytes(); i += 3) {
@@ -86,7 +86,7 @@ TEST_CASE("RubiksCubeEffect only paints the six face colours") {
     }
 }
 
-// turnsPerSecond=0 disables the turn pacing (loop() returns before rotating), but the cube is still
+// turnsPerSecond=0 disables the turn pacing (tick() returns before rotating), but the cube is still
 // drawn on the first frame — init() runs and paints before the turn gate is reached.
 TEST_CASE("RubiksCubeEffect with turnsPerSecond=0 still draws but never turns") {
     ClockGuard guard;
@@ -108,7 +108,7 @@ TEST_CASE("RubiksCubeEffect with turnsPerSecond=0 still draws but never turns") 
     layer.addChild(&cube);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     bool anyLit = false;
@@ -121,13 +121,13 @@ TEST_CASE("RubiksCubeEffect with turnsPerSecond=0 still draws but never turns") 
     // so a full second later the buffer is byte-for-byte identical.
     std::vector<uint8_t> before(buf.data(), buf.data() + buf.bytes());
     mm::platform::setTestNowMs(2000);
-    layer.loop();
+    layer.tick();
     std::vector<uint8_t> after(buf.data(), buf.data() + buf.bytes());
     CHECK(before == after);
 }
 
 // The effect runs at a degenerate grid size without crashing (the "every grid size" hard rule):
-// loop() bails on a zero extent and the buffer stays empty.
+// tick() bails on a zero extent and the buffer stays empty.
 TEST_CASE("RubiksCubeEffect survives a 0x0x0 grid") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1);
@@ -147,7 +147,7 @@ TEST_CASE("RubiksCubeEffect survives a 0x0x0 grid") {
     layer.addChild(&cube);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     CHECK(layer.buffer().count() == 0);
 }

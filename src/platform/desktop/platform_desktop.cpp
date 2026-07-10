@@ -654,7 +654,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
 
     // Bound the CONNECT by timeoutMs: a blocking connect to an unreachable host hangs for the OS
-    // default (tens of seconds) — and this runs on the driver's loop1s (shared with the render
+    // default (tens of seconds) — and this runs on the driver's tick1s (shared with the render
     // loop), so it must not stall. Connect non-blocking, wait writable via select() up to
     // timeoutMs, then restore blocking for the bounded send/recv (which use SO_*TIMEO below).
     if (make_nonblocking(fd) != 0) return 0;

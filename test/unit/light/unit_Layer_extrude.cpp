@@ -44,7 +44,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     layer.addChild(&rainbow);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
@@ -67,7 +67,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
 class D1StubEffect : public mm::EffectBase {
 public:
     mm::Dim dimensions() const override { return mm::Dim::D1; }
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         mm::lengthType w = width();
         mm::lengthType h = height();
@@ -98,7 +98,7 @@ TEST_CASE("D1 effect on 3D grid: columns and z-slices are identical (Layer::extr
     layer.addChild(&d1);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const size_t cpl = 3;
@@ -148,7 +148,7 @@ static void check_d3_on_2d(const char* tag) {
     layer.addChild(&effect);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const size_t expectedBytes = static_cast<size_t>(grid.width) * grid.height * 3;
@@ -180,7 +180,7 @@ static void check_d3_on_1d(const char* tag) {
     layer.addChild(&effect);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const size_t expectedBytes = static_cast<size_t>(grid.width) * 3;
@@ -218,7 +218,7 @@ TEST_CASE("D3 effect on 1D layer: PlasmaEffect produces a valid 1D strip") {
 // not from the effect itself. Catches a regression where a D2 effect either
 // fails to write z=0 (everything black) or where extrude no longer fills z
 // (z>0 stays black). Covers one stateless (Checkerboard) and two stateful
-// (Fire, Particles) effects so changes to onBuildState don't silently
+// (Fire, Particles) effects so changes to prepare don't silently
 // break the contract.
 
 template<typename EffectT>
@@ -241,7 +241,7 @@ static void check_d2_on_3d(const char* tag) {
     // Some effects (Fire, particles with random sparks) need a few frames
     // before they reliably produce visible output; one frame is enough for
     // the deterministic effects we test here.
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;

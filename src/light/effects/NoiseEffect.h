@@ -17,12 +17,12 @@ public:
     uint8_t scale = 4;  // spatial frequency (1-32)
     uint8_t bpm = 60;   // beats per minute — scrolls 8 noise cells per beat
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("scale", scale, 1, 32);
         controls_.addUint8("bpm", bpm, 1, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();

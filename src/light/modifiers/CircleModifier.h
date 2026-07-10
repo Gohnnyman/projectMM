@@ -36,7 +36,7 @@ public:
     Dim dimensions() const override { return Dim::D2; }
 
     // No controls: MoonLight's Circle exposes none — the centre is always the box
-    // middle and the distance is fixed Euclidean. onBuildControls() stays default.
+    // middle and the distance is fixed Euclidean. defineControls() stays default.
 
     void modifyLogicalSize(Coord3D& size) override {
         // Stash the incoming box so the per-light fold (const, no box arg) can read

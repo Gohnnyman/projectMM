@@ -14,7 +14,7 @@ static void buildLayer(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& la
     layer.setChannelsPerLight(3);
     layer.addChild(&sine);
     layer.applyState();
-    layer.loop();
+    layer.tick();
 }
 
 TEST_CASE("SineEffect writes non-zero RGB data") {

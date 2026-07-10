@@ -32,7 +32,7 @@ struct Scene {
 }  // namespace
 
 // The reel enumerates the effect registry, hosts one effect at a time, renders it, and advances
-// through the whole list without crashing — the create/teardown/delete churn every tick is the
+// through the whole list without crashing — the create/release/delete churn every tick is the
 // robustness path this pins. Registering two real effects + the reel gives it something to cycle.
 TEST_CASE("DemoReelEffect cycles registered effects and renders each") {
     REQUIRE(ModuleFactory::registerType<RainbowEffect>("RainbowEffect"));
@@ -52,10 +52,10 @@ TEST_CASE("DemoReelEffect cycles registered effects and renders each") {
     CHECK(std::strcmp(first, "DemoReelEffect") != 0);   // never hosts itself (no infinite recursion)
 
     // One tick renders the hosted effect into the shared buffer.
-    s.layer.loop();
+    s.layer.tick();
     CHECK(s.anyNonZero());
 
-    // Advance through a full lap plus extra — every swap is a create → build → teardown → delete of
+    // Advance through a full lap plus extra — every swap is a create → build → release → delete of
     // a real effect against the live grid. None of it may crash. The buffer is cleared before each
     // render so a per-host render check measures THIS host's output (not pixels left by the prior
     // one); effects that legitimately draw nothing in a single frame (e.g. an audio effect with no
@@ -68,10 +68,10 @@ TEST_CASE("DemoReelEffect cycles registered effects and renders each") {
         REQUIRE(cur != nullptr);
         CHECK(std::strcmp(cur, "DemoReelEffect") != 0);
         draw::fill(s.layer.buffer(), {0, 0, 0});   // clear so the count measures THIS host's output
-        s.layer.loop();                            // render the newly-hosted effect — must not crash
+        s.layer.tick();                            // render the newly-hosted effect — must not crash
         if (s.anyNonZero()) rendered++;
     }
     CHECK(rendered > 0);   // over the run, hosted effects render into the freshly-cleared buffer
 
-    reel.teardown();                   // frees the last hosted child cleanly (no leak/double-free)
+    reel.release();                   // frees the last hosted child cleanly (no leak/double-free)
 }

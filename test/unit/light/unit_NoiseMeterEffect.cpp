@@ -13,7 +13,7 @@
 // bottom-up: row y=0 lights first (the floor is buffer row height-1, since drawY = sizeY-1-y). The frame
 // comes from AudioService::latestFrame() (a process-wide static); on the host with no I2S mic we run a
 // live AudioService with `simulate` set to an "always" mode so synthesizeFrame() fills the level each
-// loop(). Every audio case brackets its own AudioService setup()/teardown() so it never leaks the
+// tick(). Every audio case brackets its own AudioService setup()/release() so it never leaks the
 // active-mic pointer into another test file. Buffer index = (y*width + x)*3.
 
 // Helper: is any byte of the pixel at (x,y) on a width-W grid non-zero.
@@ -42,7 +42,7 @@ TEST_CASE("NoiseMeterEffect fades to dark without an audio frame") {
     layer.applyState();
     // No AudioService is active → latestFrame() is the static all-silence frame (level 0). Each loop fades
     // then reads silence → maxLen 0 → nothing drawn, so the buffer decays to fully dark.
-    for (int i = 0; i < 16; i++) layer.loop();
+    for (int i = 0; i < 16; i++) layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 64);
@@ -58,7 +58,7 @@ TEST_CASE("NoiseMeterEffect fades to dark without an audio frame") {
 // is complete across x, so column 0 and the last column of a lit row agree.
 TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;   // music (always): a swelling non-zero level every tick, so rows light up
     audio.setup();
 
@@ -84,8 +84,8 @@ TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     // Run frames until the meter rises, then assert the bottom-up invariant on the tallest lit column.
     bool sawFill = false;
     for (int i = 0; i < 64; i++) {
-        audio.loop();
-        layer.loop();
+        audio.tick();
+        layer.tick();
         // Floor is buffer row H-1 (drawY = sizeY-1-y, y=0 draws there first).
         if (pixelLit(layer, 0, H - 1, W)) {
             sawFill = true;
@@ -103,14 +103,14 @@ TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     }
     CHECK(sawFill);   // the meter rose off the floor during the run
 
-    audio.teardown();
+    audio.release();
 }
 
 // The `width` gain control scales level→length: width=0 zeroes the length (tmpSound2 = level*2*0/255),
 // so even a loud audio frame lights no row and the buffer stays dark.
 TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;   // loud music every tick
     audio.setup();
 
@@ -132,7 +132,7 @@ TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
     layer.addChild(&meter);
 
     layer.applyState();
-    for (int i = 0; i < 16; i++) { audio.loop(); layer.loop(); }
+    for (int i = 0; i < 16; i++) { audio.tick(); layer.tick(); }
 
     bool anyLit = false;
     for (size_t i = 0; i < layer.buffer().bytes(); i++) {
@@ -140,14 +140,14 @@ TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
     }
     CHECK_FALSE(anyLit);
 
-    audio.teardown();
+    audio.release();
 }
 
 // The "runs at every grid size" hard rule: 0×0×0 and 1×1 both render with a live audio frame every tick
 // without crashing (the sizeX/sizeY<=0 early-out and the maxLen constrain cover them).
 TEST_CASE("NoiseMeterEffect survives degenerate grid sizes") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;
     audio.setup();
 
@@ -167,9 +167,9 @@ TEST_CASE("NoiseMeterEffect survives degenerate grid sizes") {
         layer.addChild(&meter);
 
         layer.applyState();
-        for (int i = 0; i < 4; i++) { audio.loop(); layer.loop(); }
+        for (int i = 0; i < 4; i++) { audio.tick(); layer.tick(); }
     }
     CHECK(true);   // no crash at 0×0×0 or 1×1
 
-    audio.teardown();
+    audio.release();
 }

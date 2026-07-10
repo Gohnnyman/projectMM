@@ -32,7 +32,7 @@ public:
     // Wire the row from the high-x end back to start_x (index 0 at x=start_x+width-1).
     bool reversedOrder = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("starting X", startX, 0, 255);
         controls_.addUint16("width", width, 1, 1000);
         controls_.addUint16("Y position", yPosition, 0, 255);

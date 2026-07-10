@@ -27,13 +27,13 @@ public:
     // Max 64 keeps the (2*64+1)^3 bounding-box scan bounded.
     lengthType radius = 4;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("radius", radius, 1, 64);
     }
 
     nrOfLightsType lightCount() const override {
         // Count the shell points. Cheap relative to rendering, recomputed only
-        // on a radius change (controlChangeTriggersBuildState → rebuild).
+        // on a radius change (controlChangeTriggersPrepare → rebuild).
         nrOfLightsType n = 0;
         forEachShellPoint([](void*, nrOfLightsType, lengthType, lengthType, lengthType) {}, nullptr, &n);
         return n;

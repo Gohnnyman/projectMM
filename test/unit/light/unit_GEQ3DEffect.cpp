@@ -12,14 +12,14 @@
 // These cases pin its behaviour deterministically by freezing the clock
 // (platform::setTestNowMs) and driving a synthesized frame through an active
 // AudioService in "sweep (always)" simulate mode. Restore the real clock and vacate
-// the process-wide active mic on teardown so cases stay order-independent.
+// the process-wide active mic on release so cases stay order-independent.
 struct ClockGuard { ~ClockGuard() { platform::setTestNowMs(0); } };
 
 // Vacates the process-wide active-mic seat on scope exit (even if an assertion aborts
 // the case), so a failed REQUIRE can't leak AudioService::active_ into a later test.
 struct AudioGuard {
     mm::AudioService& mic;
-    ~AudioGuard() { mic.teardown(); }  // clears AudioService::active_ if it is this mic
+    ~AudioGuard() { mic.release(); }  // clears AudioService::active_ if it is this mic
 };
 
 // Silence (no active mic) leaves the buffer all-black — every band magnitude is 0, so no bar rises.
@@ -40,7 +40,7 @@ TEST_CASE("GEQ3DEffect renders black on silence") {
 
     layer.applyState();
     // No AudioService is active, so latestFrame() returns static silence (all bands 0).
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -59,7 +59,7 @@ TEST_CASE("GEQ3DEffect draws a bar where the audio band is energised") {
     AudioGuard micGuard{mic};  // vacate the active mic on scope exit (even if a REQUIRE aborts)
     mic.simulate = 4;          // "sweep (always)" — deterministic single-band test pattern
     mic.setup();               // claims the process-wide active mic seat
-    mic.loop();                // synthesizes the frame at the frozen time
+    mic.tick();                // synthesizes the frame at the frozen time
     REQUIRE(mm::AudioService::latestFrame()->bands[0] > 1);
 
     mm::Layouts layouts;
@@ -77,7 +77,7 @@ TEST_CASE("GEQ3DEffect draws a bar where the audio band is energised") {
     layer.addChild(&geq);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const int w = 16, h = 16;
@@ -114,7 +114,7 @@ TEST_CASE("GEQ3DEffect survives a zero-size grid") {
     layer.addChild(&geq);
 
     layer.applyState();
-    layer.loop();   // must not crash on a 0×0×0 grid
+    layer.tick();   // must not crash on a 0×0×0 grid
     CHECK(true);
 }
 
@@ -127,7 +127,7 @@ TEST_CASE("GEQ3DEffect handles a grid narrower than numBands") {
     AudioGuard micGuard{mic};  // vacate the active mic on scope exit (even if a REQUIRE aborts)
     mic.simulate = 4;
     mic.setup();
-    mic.loop();
+    mic.tick();
 
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -145,7 +145,7 @@ TEST_CASE("GEQ3DEffect handles a grid narrower than numBands") {
     layer.addChild(&geq);
 
     layer.applyState();
-    layer.loop();       // clamps bands to 4 cols → bar width ≥ 1, no crash
+    layer.tick();       // clamps bands to 4 cols → bar width ≥ 1, no crash
 
     // Band 0 maps to the leftmost column of a 4-wide grid; something is lit there.
     auto* data = layer.buffer().data();

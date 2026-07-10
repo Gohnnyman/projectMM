@@ -41,7 +41,7 @@ TaskState mapState(eTaskState s) {
 
 size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
     if (!out || maxTasks == 0) return 0;
-    // Fixed static scratch, NOT a malloc: this runs from loop1s, which the Scheduler dispatches inside
+    // Fixed static scratch, NOT a malloc: this runs from tick1s, which the Scheduler dispatches inside
     // tick() — the hot path, where the no-heap rule applies. uxTaskGetSystemState wants a buffer for
     // every task (a short one returns 0), so the scratch is sized to a generous ceiling; if the system
     // ever exceeds it uxTaskGetSystemState returns 0 and the snapshot is simply empty that tick. The

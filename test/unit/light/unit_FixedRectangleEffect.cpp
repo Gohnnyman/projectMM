@@ -27,7 +27,7 @@ TEST_CASE("FixedRectangleEffect lights only cells inside the configured rect") {
     layer.addChild(&rect);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     REQUIRE(layer.buffer().count() == 16);
@@ -68,7 +68,7 @@ TEST_CASE("FixedRectangleEffect defaults light the origin corner and fill a smal
     layer.addChild(&rect);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
 
@@ -105,7 +105,7 @@ TEST_CASE("FixedRectangleEffect honours a non-zero origin") {
     layer.addChild(&rect);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
 
@@ -136,7 +136,7 @@ TEST_CASE("FixedRectangleEffect survives a degenerate grid") {
     layer.addChild(&rect);
 
     layer.applyState();
-    layer.loop();  // must return without dereferencing an empty buffer
+    layer.tick();  // must return without dereferencing an empty buffer
 
     CHECK(true);
 }

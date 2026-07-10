@@ -24,7 +24,7 @@ TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
     layer.applyState();
 
     // Simulate a frame at elapsed=0 (effect uses platform::millis())
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -59,7 +59,7 @@ TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     // black) — Palettes::active() is a process-wide static any prior test can mutate, so this makes
     // the non-black assertion order-independent.
     mm::Palettes::setActive(0);
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     // Pixel (0,0): the effect maps the diagonal hue through the active palette, so the exact colour
@@ -87,7 +87,7 @@ TEST_CASE("RainbowEffect different positions produce different hues") {
     layer.addChild(&rainbow);
 
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     // Pixel (0,0) and pixel (8,8) should have different colors

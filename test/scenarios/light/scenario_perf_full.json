@@ -178,7 +178,7 @@
     },
     {
       "name": "disable-audio",
-      "description": "Disable the mic (stops I2S sampling in loop()). Diff vs measure-minimal = the audio subsystem's per-tick cost (device only; optional). Targets it by its runtime name 'Audio' (displayNameFor strips the 'Service' suffix).",
+      "description": "Disable the mic (stops I2S sampling in tick()). Diff vs measure-minimal = the audio subsystem's per-tick cost (device only; optional). Targets it by its runtime name 'Audio' (displayNameFor strips the 'Service' suffix).",
       "op": "set_control",
       "id": "Audio",
       "key": "enabled",
@@ -285,7 +285,7 @@
     },
     {
       "name": "disable-devices",
-      "description": "Disable the Devices module (stops the blocking HTTP discovery sweep in loop1s()). Diff = the discovery cost (device only; optional).",
+      "description": "Disable the Devices module (stops the blocking HTTP discovery sweep in tick1s()). Diff = the discovery cost (device only; optional).",
       "op": "set_control",
       "id": "Devices",
       "key": "enabled",

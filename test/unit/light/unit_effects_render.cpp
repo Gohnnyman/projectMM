@@ -64,7 +64,7 @@ struct Ctx {
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
         ctx.layer.applyState(); \
-        ctx.layer.loop(); \
+        ctx.layer.tick(); \
         CHECK(ctx.hasNonZero()); \
     } \
     TEST_CASE(#EFFECT " spatial variation") { \
@@ -72,7 +72,7 @@ struct Ctx {
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
         ctx.layer.applyState(); \
-        ctx.layer.loop(); \
+        ctx.layer.tick(); \
         CHECK(ctx.cornersDiffer()); \
     }
 
@@ -89,7 +89,7 @@ TEST_CASE("LavaLampEffect writes non-zero RGB") {
     mm::LavaLampEffect effect;
     ctx.layer.addChild(&effect);
     ctx.layer.applyState();
-    ctx.layer.loop();
+    ctx.layer.tick();
     CHECK(ctx.hasNonZero());
 }
 
@@ -111,7 +111,7 @@ TEST_CASE("LavaLampEffect spatial variation") {
     bool varied = false;
     for (int i = 0; i < 10 && !varied; i++) {
         mm::platform::setTestNowMs(virtualNow);
-        ctx.layer.loop();
+        ctx.layer.tick();
         if (ctx.hasTwoDistinctColors()) varied = true;
         virtualNow += 50;
     }
@@ -127,7 +127,7 @@ TEST_CASE("RingsEffect writes non-zero RGB") {
     mm::RingsEffect effect;
     ctx.layer.addChild(&effect);
     ctx.layer.applyState();
-    ctx.layer.loop();
+    ctx.layer.tick();
     CHECK(ctx.hasNonZero());
 }
 
@@ -137,7 +137,7 @@ TEST_CASE("RingsEffect spatial variation") {
     mm::RingsEffect effect;
     ctx.layer.addChild(&effect);
     ctx.layer.applyState();
-    ctx.layer.loop();
+    ctx.layer.tick();
     CHECK(ctx.hasTwoDistinctColors());
 }
 
@@ -149,7 +149,7 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
     ctx.layer.applyState();
-    ctx.layer.loop();
+    ctx.layer.tick();
     CHECK(ctx.hasNonZero());
 }
 
@@ -159,6 +159,6 @@ TEST_CASE("RipplesEffect spatial variation") {
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
     ctx.layer.applyState();
-    ctx.layer.loop();
+    ctx.layer.tick();
     CHECK(ctx.hasTwoDistinctColors());
 }

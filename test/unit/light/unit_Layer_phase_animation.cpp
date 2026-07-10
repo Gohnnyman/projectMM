@@ -49,14 +49,14 @@ bool animates_over_ms(int total_ms) {
 
     uint32_t virtualNow = 1000;       // arbitrary non-zero start
     mm::platform::setTestNowMs(virtualNow);
-    layer.loop();
+    layer.tick();
     std::vector<uint8_t> baseline(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
     const int step_ms = 20;
     bool animated = false;
     for (int elapsed = 0; elapsed < total_ms; elapsed += step_ms) {
         virtualNow += step_ms;
         mm::platform::setTestNowMs(virtualNow);
-        layer.loop();
+        layer.tick();
         std::vector<uint8_t> now(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
         if (now != baseline) { animated = true; break; }
     }
@@ -102,21 +102,21 @@ TEST_CASE("Replacing an effect at runtime: new effect still animates") {
 
     layouts.applyState();
     layer.applyState();
-    layer.loop();
+    layer.tick();
 
     auto* fresh = new mm::MetaballsEffect();
     mm::MoonModule* old = layer.replaceChildAt(0, fresh);
-    fresh->onBuildControls();
+    fresh->defineControls();
     fresh->setup();
     fresh->applyState();
-    if (old) { old->teardown(); delete old; }
+    if (old) { old->release(); delete old; }
     layer.applyState();
 
     mm::platform::setTestNowMs(1000);
-    layer.loop();
+    layer.tick();
     std::vector<uint8_t> first(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
     mm::platform::setTestNowMs(1100);
-    layer.loop();
+    layer.tick();
     std::vector<uint8_t> second(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
     mm::platform::setTestNowMs(0);
     CHECK_FALSE_MESSAGE(first == second, "Replaced Metaballs frozen across 100ms gap");

@@ -53,7 +53,7 @@ public:
     bool    keepOn    = false; // keep drawing a band whose speed has decayed to zero
     uint8_t method    = 2;     // 0 Chaos, 1 Chaos fix, 2 BandPhases
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fade", fade, 0, 255);
         controls_.addUint8("increaser", increaser, 0, 255);
         controls_.addUint8("decreaser", decreaser, 0, 255);
@@ -68,11 +68,11 @@ public:
     // small inline member — the "no large inline members" rule targets per-light buffers sized to
     // nrOfLights, which this isn't. Cleared on every (re)build so a grid/control change starts the
     // bands from rest.
-    void onBuildState() override {
+    void prepare() override {
         clearState();
     }
 
-    void loop() override {
+    void tick() override {
         const int sizeX = width();
         const int sizeY = height();
         if (sizeX <= 0 || sizeY <= 0 || channelsPerLight() < 3) return;

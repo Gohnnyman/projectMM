@@ -10,7 +10,7 @@
     "Drivers",
     "NetworkSendDriver"
   ],
-  "description": "Tree mutation on the Layouts container while the pipeline runs: add a second layout (multiple layouts under one Layouts), replace a layout with a different type, and remove a layout. The check is that each mutation leaves the pipeline RENDERING — Layer + Drivers re-wire via buildState and the buffer stays non-null and non-zero. Mirrors the HTTP add/replace/delete handlers; exercises the runner's add_module / replace_module / remove_module ops. NOTE: the Layer renders a dense bounding-box buffer sized by the layouts' coordinate EXTENT, not the summed light count — layouts that overlap in coordinate space share voxels (two 64x64 grids both occupy x,y in 0..63). There are no per-layout coordinate offsets, so multiple layouts share the same coordinate box; these steps assert liveness, not buffer-size arithmetic. Grids are 64x64 so the tick stays above the host's microsecond clock at every step.",
+  "description": "Tree mutation on the Layouts container while the pipeline runs: add a second layout (multiple layouts under one Layouts), replace a layout with a different type, and remove a layout. The check is that each mutation leaves the pipeline RENDERING — Layer + Drivers re-wire via prepareTree and the buffer stays non-null and non-zero. Mirrors the HTTP add/replace/delete handlers; exercises the runner's add_module / replace_module / remove_module ops. NOTE: the Layer renders a dense bounding-box buffer sized by the layouts' coordinate EXTENT, not the summed light count — layouts that overlap in coordinate space share voxels (two 64x64 grids both occupy x,y in 0..63). There are no per-layout coordinate offsets, so multiple layouts share the same coordinate box; these steps assert liveness, not buffer-size arithmetic. Grids are 64x64 so the tick stays above the host's microsecond clock at every step.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -134,7 +134,7 @@
     },
     {
       "name": "add-second-layout",
-      "description": "Add a SECOND layout (a 64x64 grid) under Layouts — two layouts now live under one container. buildState re-runs; the pipeline must still render. (Both grids share the 0..63 coordinate box, so the Layer buffer stays 64x64 — see the scenario NOTE.)",
+      "description": "Add a SECOND layout (a 64x64 grid) under Layouts — two layouts now live under one container. prepareTree re-runs; the pipeline must still render. (Both grids share the 0..63 coordinate box, so the Layer buffer stays 64x64 — see the scenario NOTE.)",
       "op": "add_module",
       "id": "GridB",
       "type": "GridLayout",
@@ -287,7 +287,7 @@
     },
     {
       "name": "remove-second-layout",
-      "description": "Remove the sphere — back to a single grid layout. Layer/Drivers shrink their buffers via buildState.",
+      "description": "Remove the sphere — back to a single grid layout. Layer/Drivers shrink their buffers via prepareTree.",
       "op": "remove_module",
       "id": "GridB"
     },

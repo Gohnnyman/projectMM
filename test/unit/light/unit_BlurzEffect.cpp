@@ -10,8 +10,8 @@
 // Blurz is an audio-reactive effect: its dot is coloured by the current band's magnitude and only
 // appears when there is a signal. The frame comes from AudioService::latestFrame() (a process-wide
 // static). To feed a signal on the host (no I2S mic) we run a live AudioService with `simulate` set to
-// an "always" mode — synthesizeFrame() then fills the bands each loop(). Every case brackets its own
-// AudioService setup()/teardown() so it never leaks the active-mic pointer into another test file.
+// an "always" mode — synthesizeFrame() then fills the bands each tick(). Every case brackets its own
+// AudioService setup()/release() so it never leaks the active-mic pointer into another test file.
 
 // With no live audio source the buffer stays black: the dot is audio-gated, so silence renders nothing.
 TEST_CASE("BlurzEffect stays black without an audio frame") {
@@ -30,9 +30,9 @@ TEST_CASE("BlurzEffect stays black without an audio frame") {
     layer.addChild(&blurz);
 
     layer.applyState();
-    // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). loop()
+    // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). tick()
     // does the first-frame clear + fade, then reads silence and returns before drawing any dot.
-    for (int i = 0; i < 8; i++) layer.loop();
+    for (int i = 0; i < 8; i++) layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 64);
@@ -47,7 +47,7 @@ TEST_CASE("BlurzEffect stays black without an audio frame") {
 // smears it into a soft blob, so at least some lights become non-zero.
 TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;   // music (always): synthesizeFrame() fills the bands every loop, no mic needed
     audio.setup();        // claims the active-mic seat so latestFrame() points at this frame
 
@@ -71,8 +71,8 @@ TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
     // several ticks the dot lands a non-zero magnitude and paints.
     bool anyLit = false;
     for (int i = 0; i < 32 && !anyLit; i++) {
-        audio.loop();
-        layer.loop();
+        audio.tick();
+        layer.tick();
         auto& buf = layer.buffer();
         for (size_t j = 0; j < buf.bytes(); j++) {
             if (buf.data()[j] != 0) { anyLit = true; break; }
@@ -80,14 +80,14 @@ TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
     }
     CHECK(anyLit);
 
-    audio.teardown();   // release the active-mic seat; leave no residue for other tests
+    audio.release();   // release the active-mic seat; leave no residue for other tests
 }
 
 // geqScanner sweeps the dot steadily across the strip: one pixel per frame, so consecutive frames land
 // the lit dot at different linear positions rather than the same spot.
 TEST_CASE("BlurzEffect geqScanner sweeps the dot to a new position each frame") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;   // music (always): keeps the bands non-zero so the dot has colour
     audio.setup();
 
@@ -121,21 +121,21 @@ TEST_CASE("BlurzEffect geqScanner sweeps the dot to a new position each frame") 
         return best;
     };
 
-    audio.loop(); layer.loop();
+    audio.tick(); layer.tick();
     const int pos1 = brightestIndex();
-    audio.loop(); layer.loop();
+    audio.tick(); layer.tick();
     const int pos2 = brightestIndex();
 
     // The scanner advances the dot one pixel per frame, so the brightest pixel moves between frames.
     CHECK(pos1 != pos2);
 
-    audio.teardown();
+    audio.release();
 }
 
 // The hard rule: the effect runs at any grid size without crashing, including a 0×0×0 and a 1×1 grid.
 TEST_CASE("BlurzEffect survives degenerate grid sizes") {
     mm::AudioService audio;
-    audio.onBuildControls();
+    audio.defineControls();
     audio.simulate = 3;
     audio.setup();
 
@@ -155,9 +155,9 @@ TEST_CASE("BlurzEffect survives degenerate grid sizes") {
         layer.addChild(&blurz);
 
         layer.applyState();
-        for (int i = 0; i < 4; i++) { audio.loop(); layer.loop(); }
+        for (int i = 0; i < 4; i++) { audio.tick(); layer.tick(); }
     }
     CHECK(true);   // no crash at 0×0×0 or 1×1
 
-    audio.teardown();
+    audio.release();
 }

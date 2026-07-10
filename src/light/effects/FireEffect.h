@@ -27,12 +27,12 @@ public:
     uint8_t cooling = 55;
     uint8_t sparking = 120;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("cooling", cooling, 1, 255);
         controls_.addUint8("sparking", sparking, 1, 255);
     }
 
-    void onBuildState() override {
+    void prepare() override {
         // D2 effect: heat grid covers only the z=0 plane (w*h). Extrude fills
         // z on 3D layers. Avoids allocating depth× more heap than needed.
         nrOfLightsType count = static_cast<nrOfLightsType>(width()) * height();
@@ -51,7 +51,7 @@ public:
         setDynamicBytes(heatCount_);
     }
 
-    void teardown() override {
+    void release() override {
         releaseHeat();
         setDynamicBytes(0);
     }
@@ -60,7 +60,7 @@ public:
         releaseHeat();
     }
 
-    void loop() override {
+    void tick() override {
         if (!heat_) return;
 
         uint8_t* buf = buffer();

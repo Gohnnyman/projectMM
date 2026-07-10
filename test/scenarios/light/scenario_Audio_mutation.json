@@ -206,7 +206,7 @@
     },
     {
       "name": "configure-sck-pin",
-      "description": "Third and final pin (sckPin). Now all three are set, so the guard passes and a real mic init is attempted. On host hasI2sMic is false so the mic stays inert regardless, but this is the write that completes the install-injected pin set; the buildState rebuild must not disturb the running pipeline.",
+      "description": "Third and final pin (sckPin). Now all three are set, so the guard passes and a real mic init is attempted. On host hasI2sMic is false so the mic stays inert regardless, but this is the write that completes the install-injected pin set; the prepareTree rebuild must not disturb the running pipeline.",
       "op": "set_control",
       "id": "Audio",
       "key": "sckPin",

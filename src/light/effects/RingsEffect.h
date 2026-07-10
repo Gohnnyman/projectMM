@@ -30,14 +30,14 @@ public:
     uint8_t thickness = 3;
     uint8_t hue_shift = 0;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("count", count, 1, 255);
         controls_.addUint8("speed", speed, 1, 255);
         controls_.addUint8("thickness", thickness, 1, 255);
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();

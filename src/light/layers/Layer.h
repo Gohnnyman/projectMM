@@ -43,20 +43,20 @@ public:
     // Composition parameters — INERT on the Layer (it never reads them; a Layer
     // can't know its position in the stack or what's beneath it). The Drivers
     // container reads each enabled Layer's blendMode + opacity and composites the
-    // layers in container order into the physical buffer (see Drivers::loop). The
+    // layers in container order into the physical buffer (see Drivers::tick). The
     // value lives here so it travels with the Layer through add/delete/reorder —
     // no separate, sync-prone blend list on Drivers. The bottom (first-composited)
     // layer's blendMode is moot: it fills the cleared buffer regardless.
     uint8_t blendMode = 0;     // index into kBlendModeOptions; 0 = alpha (over)
     uint8_t opacity = 255;     // 0 = invisible, 255 = full
 
-    void onBuildControls() override {
+    void defineControls() override {
         static constexpr const char* kBlendModeOptions[] = {"alpha", "additive"};
         controls_.addSelect("blendMode", blendMode, kBlendModeOptions, 2);
         controls_.addUint8("opacity", opacity, 0, 255);
         // Cascade to children (effects and modifiers) — preserves the default
         // base behaviour we just overrode.
-        MoonModule::onBuildControls();
+        MoonModule::defineControls();
     }
 
     /// How this Layer composites when stacked above another (read by Drivers).
@@ -72,7 +72,7 @@ public:
     Layouts* layouts() const { return layouts_; }
     void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
 
-    void onBuildState() override {
+    void prepare() override {
         // Treat "no layouts wired" the same as "every layout child disabled" —
         // either way the Layer should be empty (no LUT, no buffer, zero dims).
         // Returning early here used to leave stale state from a previous build,
@@ -85,7 +85,7 @@ public:
         // while Drivers reallocated its output buffer to 0 bytes (a stale LUT
         // + null output buffer = blendMap dereferences null on the next tick).
         // After this branch hasLUT() is false and physicalLightCount() is 0,
-        // so Drivers::onBuildState takes the "no LUT" path and Drivers::loop
+        // so Drivers::prepare takes the "no LUT" path and Drivers::tick
         // skips blendMap entirely.
         if (physicalCount == 0) {
             physicalWidth_ = physicalHeight_ = physicalDepth_ = 0;
@@ -139,7 +139,7 @@ public:
         // applyState() recurses to the effects next — they allocate against the LUT/buffer just built.
     }
 
-    void loop() override {
+    void tick() override {
         // Scheduler already gates the Layer itself by enabled() via respectsEnabled().
         // We still gate per-effect-child explicitly because Layer iterates its own
         // children rather than going through the Scheduler.
@@ -161,7 +161,7 @@ public:
             if (!child(i)->enabled()) continue;
             auto* eff = static_cast<EffectBase*>(child(i));
             uint32_t start = platform::micros();
-            eff->loop();
+            eff->tick();
             // Extrude a lower-dimensional effect across the unused axes so a D1
             // or D2 effect "just works" on a higher-dimensional grid. The effect
             // only writes its own slice (D1 → column x=0,z=0; D2 → slice z=0); the
@@ -170,18 +170,18 @@ public:
             eff->addAccumUs(platform::micros() - start);
         }
         // Tick EVERY enabled modifier AFTER the effect pass (the frame's buffer is
-        // fully written before any modifier acts). A static modifier's loop() is empty;
+        // fully written before any modifier acts). A static modifier's tick() is empty;
         // a beat-driven one (RandomMap) sets a rebuild flag we coalesce below; a live
         // one (Rotate) advances its angle here and remaps in the live pass that follows.
         bool rebuild = false;
         for (uint8_t i = 0; i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Modifier || !child(i)->enabled()) continue;
             auto* m = static_cast<ModifierBase*>(child(i));
-            m->loop();
+            m->tick();
             rebuild |= m->consumeNeedsRebuild();
         }
         // One rebuild per frame even if several modifiers asked (no re-entrant rebuild
-        // from inside a modifier's loop()). applyState() rebuilds the whole pipeline —
+        // from inside a modifier's tick()). applyState() rebuilds the whole pipeline —
         // re-runs rebuildLUT() with the modifiers' fresh state, then recurses to the effects.
         if (rebuild) { applyState(); return; }
 
@@ -191,7 +191,7 @@ public:
         if (hasLive_) applyLivePass();
     }
 
-    // COLD path (called from onBuildState after rebuildLUT): (re)size the live-pass
+    // COLD path (called from prepare after rebuildLUT): (re)size the live-pass
     // snapshot buffer to the current logical buffer, or free it when no modifier is live.
     // Keeping the alloc here means applyLivePass() on the render path only memcpys —
     // never allocates — and the scratch isn't held pinned once live modifiers are removed.
@@ -247,7 +247,7 @@ public:
     }
 
     /// Copy the effect's written slice to fill the unused axes. Called after each
-    /// effect's loop(). Buffer layout is (z * h + y) * w + x channels per light.
+    /// effect's tick(). Buffer layout is (z * h + y) * w + x channels per light.
     ///
     /// Hot-path shape: D3 effects (the default) take the early return and pay
     /// nothing beyond one comparison and a branch. On a 2D layout (depth=1) the
@@ -307,7 +307,7 @@ public:
         return layouts_ ? layouts_->totalLightCount() : 0;
     }
 
-    // Physical dimensions match the actual LED arrangement (computed in onBuildState from
+    // Physical dimensions match the actual LED arrangement (computed in prepare from
     // the Layouts). PreviewDriver and any future driver that needs to describe the LED
     // shape should read these rather than caching values from main.cpp startup.
     lengthType physicalWidth() const { return physicalWidth_; }
@@ -316,13 +316,13 @@ public:
 
     bool lutSkipped() const { return lutSkipped_; }
 
-    /// Cold path, called from onBuildState after physical dimensions are known.
+    /// Cold path, called from prepare after physical dimensions are known.
     /// Applies each enabled static modifier to compute the logical box, allocates
     /// the buffer and LUT, and for each logical light asks the modifier chain for
     /// physical destinations. Without a modifier AND with a dense grid in natural
     /// order (no sparse, no serpentine, x-then-y-then-z) it sets an identity mapping
     /// and skips the table entirely (the FPS floor for the common case).
-    /// Precondition: physicalWidth_/Height_/Depth_ must be set (call from onBuildState).
+    /// Precondition: physicalWidth_/Height_/Depth_ must be set (call from prepare).
     void rebuildLUT() {
         lutSkipped_ = false;
         clearStatus();  // re-evaluated below if a degrade path is taken
@@ -335,7 +335,7 @@ public:
         // modifier stash its own output size (MoonLight's modifierSize cache), so in the
         // per-light fold each modifier reads the box at ITS OWN stage from itself.
         // A dynamic modifier (Rotate, hasModifyLive) is excluded — it remaps per frame in
-        // Layer::loop's live pass, not baked into the mapping.
+        // Layer::tick's live pass, not baked into the mapping.
         uint8_t staticCount = 0;
         hasLive_ = false;
         Coord3D box{physicalWidth_, physicalHeight_, physicalDepth_};

@@ -31,7 +31,7 @@ public:
     bool inverseY = false;
     bool inverseZ = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("XY", transposeXY);
         controls_.addBool("XZ", transposeXZ);
         controls_.addBool("YZ", transposeYZ);

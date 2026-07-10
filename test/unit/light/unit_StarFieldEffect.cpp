@@ -33,7 +33,7 @@ TEST_CASE("StarFieldEffect paints greyscale stars once the throttle elapses") {
 
     // speed=20 → throttle 1000/20 = 50 ms; step_ starts at 0, so millis()=100 clears the gate.
     mm::platform::setTestNowMs(100);
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const size_t count = layer.buffer().count();
@@ -75,7 +75,7 @@ TEST_CASE("StarFieldEffect at speed 0 leaves the buffer black") {
     layer.applyState();
 
     mm::platform::setTestNowMs(1000);
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     bool allBlack = true;
@@ -111,7 +111,7 @@ TEST_CASE("StarFieldEffect with usePalette lights stars from the palette") {
     mm::Palettes::setActive(0);
 
     mm::platform::setTestNowMs(100);
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     const size_t count = layer.buffer().count();
@@ -149,7 +149,7 @@ TEST_CASE("StarFieldEffect survives a 0x0x0 grid") {
 
     layer.applyState();
     mm::platform::setTestNowMs(100);
-    layer.loop();   // must not crash
+    layer.tick();   // must not crash
 
     CHECK(layer.buffer().count() == 0);
 

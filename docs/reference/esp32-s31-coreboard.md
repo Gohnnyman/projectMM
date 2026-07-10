@@ -80,7 +80,8 @@ GPIOs are the chip's fixed IO_MUX pads (the only ones the EMAC accepts; from IDF
 ## Other onboard features
 
 - **Addressable RGB LED** — WS2812 (D7) on **GPIO60**. *(Driven today: the catalog's S31
-  `RmtLedDriver` uses `pins: "60"`.)*
+  `RmtLedDriver` uses `pins: "60"`, with `loopbackTxPin: 48` / `loopbackRxPin: 47` for the
+  self-test — see [§ Free GPIO](#free-gpio-for-user-peripherals-led-strips-loopback).)*
 - **SD card slot** — SD_D0–D3 / SD_CLK / SD_CMD on the module's SDIO pins (GPIO20–25 per the user
   guide). Note: `SOC_SDMMC_SUPPORTED` is **absent** in the S31 soc-caps, so the slot is likely
   SPI-mode (GPSPI) rather than the SDMMC peripheral — confirm before relying on it.
@@ -89,6 +90,34 @@ GPIOs are the chip's fixed IO_MUX pads (the only ones the EMAC accepts; from IDF
   CH9102X with the alternate BOM). Auto-download via DTR/RTS → EN/BOOT.
 - **Buttons** — BOOT (GPIO61), RESET (EN).
 - **40-pin GPIO header** (J2). Optional 32.768 kHz crystal footprint (Y1, NC by default).
+
+## Free GPIO for user peripherals (LED strips, loopback)
+
+The board's own peripherals claim a large, contiguous low-GPIO block; the **J2 header** exposes the rest. Tallying the maps above, the **taken** pins are:
+
+| Peripheral | GPIOs |
+|---|---|
+| Ethernet RGMII | 2, 5–19 |
+| ES8311 audio (I²S + I²C) | 50–57 |
+| SD card (SDIO/SPI) | 20–25 |
+| Onboard WS2812 RGB LED | 60 |
+| BOOT button | 61 |
+
+**J2 is a 2×20 header** — each column carries two GPIOs, a top-row pin above a bottom-row pin. Reading the silkscreen left→right (top / bottom per column):
+
+| col | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **top** | G | RX0 | 60 | G | 3 | 1 | **48** | 46 | 44 | 42 | 38 | 36 | D0 | D2 | CLK | 4 | C | 3V3 | G | 5V |
+| **bottom** | G | TX0 | 61 | 2 | 0 | 49 | **47** | 45 | 43 | 40 | 39 | 37 | 35 | D1 | D3 | CMD | G | 3V3 | G | 5V |
+
+The two pins in **one column are physically stacked**, so a 2-pin jumper cap bridges them with no flying wire — that adjacency is what makes a column a good loopback pair.
+
+**Free on J2 for user I/O** (read off the table above, minus the board peripherals and boot straps): the numbered GPIOs on cols 5–16 — **4, 36, 37, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49** — are plain I/O clear of Ethernet (2, 5–19), audio (50–57), the SD lines (broken out as `D0`–`D3` / `CLK` / `CMD` by function, cols 13–16), the onboard LED (60) and the straps (0, 1, 3, 61). The `C` label at col 17 is a chip-enable, not a GPIO. **The GPIO numbers here are read from the board silkscreen and not yet bench-confirmed** — the S31 reference pin tables have been found off-by-one before (see the [S31 Ethernet lesson](../history/lessons.md)), so probe a pin before committing a design to it.
+
+**Recommended assignment** (what the S31 catalog entry uses):
+
+- **LED strip data:** the onboard WS2812 is on **GPIO 60** (the catalog default). For an *external* strand, use **GPIO 42** as the single-lane pick; a parallel rig (RMT/Parlio) takes the free block (**36–49**, skipping 41 which isn't broken out) for several lanes. **GPIO 4** (col 16 top) also works as an LED data pin and sits one column from the `G` / `3V3` / `5V` power rail (cols 17–20), so a single strip's data + ground + 5 V wires land close together — handy for a tidy 3-wire pigtail. It's a plain I/O with no strap or peripheral tie on this board (the SD lines beside it, D0–D3 / CLK / CMD, are broken out by function name, not GPIO number, so GPIO 4 is *not* one of them; it just neighbours that cluster on the header). The only reason it reads as "distinct" from the rest of the free run is its header position — it's over by the SD/power group rather than in the low-block on cols 8–12.
+- **Loopback self-test:** **Tx = GPIO 48, Rx = GPIO 47** — the two pins of **column 7** (48 top, 47 bottom), so a single jumper cap shorts them. The [RmtLedDriver](../moonmodules/light/drivers.md#rmtled) drives a known WS2812 frame out Tx and reads it back on Rx to verify output on real silicon (same pattern as the P4-NANO bench's 32↔33). They sit at the top of the free run, clear of the operational LED pins so the strip wiring and the jumper don't interfere.
 
 ## SoC capabilities (from `components/soc/esp32s31/include/soc/soc_caps.h`)
 

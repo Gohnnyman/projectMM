@@ -21,7 +21,7 @@
 
 // Pin the "Effects must work at every grid size" rule. A 0-light layout is a
 // real configuration — a modifier can shrink the logical grid to 0,0,0 or
-// every layout child can be disabled. Effects' loop() must be a clean no-op
+// every layout child can be disabled. Effects' tick() must be a clean no-op
 // in that case (no div-by-zero, no OOB writes, no crash).
 
 namespace {
@@ -36,9 +36,9 @@ void run_with_empty_layout() {
     layer.addChild(&e);
     layouts.applyState();
     layer.applyState();  // logical/physical dims all zero, no buffer
-    // The real assertion is "doesn't crash" — if loop() reaches a divide-by-zero
+    // The real assertion is "doesn't crash" — if tick() reaches a divide-by-zero
     // or an OOB write the process dies before we get here.
-    layer.loop();
+    layer.tick();
     CHECK(layer.width() == 0);
     CHECK(layer.height() == 0);
     CHECK(layer.depth() == 0);
@@ -47,7 +47,7 @@ void run_with_empty_layout() {
 } // namespace
 
 // Each per-effect case runs the same probe: build a Layer over an empty Layouts (no children → 0 lights),
-// then onBuildState() + loop(). The assertion is "no crash, no div-by-zero, no OOB write" plus dims == 0.
+// then prepare() + tick(). The assertion is "no crash, no div-by-zero, no OOB write" plus dims == 0.
 
 // Rainbow on 0,0,0 grid: no crash.
 TEST_CASE("RainbowEffect on 0,0,0 grid")     { run_with_empty_layout<mm::RainbowEffect>(); }

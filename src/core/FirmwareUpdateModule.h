@@ -21,7 +21,7 @@ namespace mm {
 // g_otaBytesRead / g_otaBytesTotal are the live byte counters the task writes.
 // The UI renders them as "X KB / Y KB" via the existing progress control. The
 // total starts at 0 (unknown) and flips to the real image size as soon as
-// esp_https_ota_get_image_size returns it; the module's loop1s() re-binds
+// esp_https_ota_get_image_size returns it; the module's tick1s() re-binds
 // the progress control when that transition happens so the static total
 // captured by addProgress reflects reality (addProgress takes total by value,
 // not pointer — re-bind is the cheaper alternative to widening that contract).
@@ -48,7 +48,7 @@ inline bool otaInFlight() {
 /// `platform::http_fetch_to_ota()` — a task that downloads via `esp_https_ota` and
 /// writes the next OTA partition, communicating through the file-scope globals above
 /// (`g_otaStatus`, `g_otaBytesRead`, `g_otaBytesTotal`). This module polls them in
-/// `loop1s()` and copies into its bound control buffers so the WebSocket state push
+/// `tick1s()` and copies into its bound control buffers so the WebSocket state push
 /// picks up the change at 1 Hz. The shared-buffer + 1 Hz poll pattern is the simplest
 /// way to bridge a FreeRTOS task and a MoonModule on the scheduler thread without
 /// locks; no synchronisation, since torn reads of display-only fields are acceptable.
@@ -125,7 +125,7 @@ public:
         std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
     }
 
-    void onBuildControls() override {
+    void defineControls() override {
         // Firmware identity (static), then OTA progress. firmwarePartition is the running app
         // partition's usage; queried here (idempotent, no I/O) so the gate sees a real total.
         controls_.addReadOnly("version", versionStr_, sizeof(versionStr_));
@@ -149,7 +149,7 @@ public:
         controls_.addProgress("update_pct", bytesRead_, totalSnap_);
     }
 
-    void loop1s() override {
+    void tick1s() override {
         // Poll the OTA task's progress + status. No locks: the writer is
         // a single task, reads are atomic at this granularity, and a torn
         // read shows as a brief mid-update glimpse — visually harmless.
@@ -161,7 +161,7 @@ public:
         // any later OTA the user starts — we deliberately don't reset the
         // total to 0 between updates; the previous value is a fine starting
         // estimate until the new task reports the new size). rebuildControls
-        // re-runs onBuildControls() so the addProgress' captured `aux` (total)
+        // re-runs defineControls() so the addProgress' captured `aux` (total)
         // is refreshed to the new totalSnap_ value.
         if (g_otaBytesTotal != totalSnap_) {
             totalSnap_ = g_otaBytesTotal;

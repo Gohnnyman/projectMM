@@ -35,7 +35,7 @@ public:
     bool    color_chaos = false;               // per-line hue variation vs a per-band gradient
     bool    phase_chaos = false;               // random per-frame phase jitter
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("oscillatorOffset", oscillatorOffset, 0, 16);
         controls_.addUint8("numLines", numLines, 2, 255);
         controls_.addUint8("fadeRate", fadeRate, 0, 128);
@@ -44,7 +44,7 @@ public:
         controls_.addBool("phase_chaos", phase_chaos);
     }
 
-    void loop() override {
+    void tick() override {
         const lengthType cols = width(), rows = height(), depth = this->depth();
         const uint8_t cpl = channelsPerLight();
         if (cols == 0 || rows == 0 || cpl < 3) return;   // 0×0×0 and short-channel guard

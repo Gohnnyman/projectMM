@@ -14,7 +14,7 @@ static void buildLayer(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& la
     layer.setChannelsPerLight(3);
     layer.addChild(&fx);
     layer.applyState();
-    layer.loop();
+    layer.tick();
 }
 
 TEST_CASE("DistortionWavesEffect writes non-zero RGB data") {
@@ -43,7 +43,7 @@ TEST_CASE("DistortionWavesEffect speed 0 is frozen (stable across ticks)") {
     buildLayer(layouts, grid, layer, fx, 8, 8, 1);
     auto& buf = layer.buffer();
     uint8_t first = buf.data()[0];
-    layer.loop();   // a second tick — frozen, so the value must not move
+    layer.tick();   // a second tick — frozen, so the value must not move
     CHECK(buf.data()[0] == first);
 }
 

@@ -36,7 +36,7 @@ public:
     uint8_t star_fill_ratio = 42;    // stars per 10000 lights (the pool-size lever)
     bool    usePalette      = false; // false → white stars; true → per-star palette colour
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 0, 42);
         controls_.addUint8("star_fill_ratio", star_fill_ratio, 0, 255);
         controls_.addBool("usePalette", usePalette);
@@ -45,13 +45,13 @@ public:
     // Per-star state on the heap, sized to nb_stars = star_fill_ratio*nrOfLights/10000 + 1. Reallocated
     // whenever the light count or fill ratio changes (so it tracks a live grid/control edit). Off the
     // hot path; never an inline member (a large inline array overflows the registerType<T> probe stack).
-    void onBuildState() override {
+    void prepare() override {
         const nrOfLightsType count = nrOfLights();
         const size_t wanted = count > 0
             ? (static_cast<size_t>(star_fill_ratio) * count) / 10000u + 1u
             : 0u;
         if (wanted != nbStars_ || count != lightCount_) {
-            release();
+            freeBuffers();
             if (wanted > 0) {
                 indexes_    = static_cast<nrOfLightsType*>(platform::alloc(wanted * sizeof(nrOfLightsType)));
                 fadeDir_    = static_cast<uint8_t*>(platform::alloc(wanted));
@@ -62,17 +62,17 @@ public:
                     lightCount_ = count;
                     initStars(count);
                 } else {
-                    release();
+                    freeBuffers();
                 }
             }
         }
         setDynamicBytes(nbStars_ ? nbStars_ * (sizeof(nrOfLightsType) + 3) : 0);
     }
 
-    void teardown() override { release(); setDynamicBytes(0); }
-    ~StarSkyEffect() override { release(); }
+    void release() override { freeBuffers(); setDynamicBytes(0); }
+    ~StarSkyEffect() override { freeBuffers(); }
 
-    void loop() override {
+    void tick() override {
         if (!indexes_ || !fadeDir_ || !brightness_ || !colors_ || nbStars_ == 0) return;
         const lengthType w = width(), h = height(), d = depthDim();
         if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;
@@ -146,7 +146,7 @@ private:
         }
     }
 
-    void release() {
+    void freeBuffers() {
         if (indexes_)    { platform::free(indexes_);    indexes_    = nullptr; }
         if (fadeDir_)    { platform::free(fadeDir_);    fadeDir_    = nullptr; }
         if (brightness_) { platform::free(brightness_); brightness_ = nullptr; }

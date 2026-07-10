@@ -24,7 +24,7 @@ namespace mm {
 // (255-grav)/64+1 time-scale, the 0.9 - i/(numBalls²) dampening, the √(-2g)·rand(5,11)/10 relaunch
 // kick, and the palette-index spacing are reproduced exactly here, written fresh on EffectBase + the
 // shared draw primitives. Per-column ball state lives on the heap (sized to width()×maxNumBalls),
-// allocated in onBuildState and freed in teardown — never a large inline member.
+// allocated in prepare and freed in release — never a large inline member.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Physics effect: gravity-bounced balls trailing along the layer.
 class BouncingBallsEffect : public EffectBase {
@@ -39,12 +39,12 @@ public:
     uint8_t grav     = 128;  // gravity strength (0..255); higher = faster fall (shorter time-scale)
     uint8_t numBalls = 8;    // balls per column (1..maxNumBalls)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("grav", grav, 0, 255);
         controls_.addUint8("numBalls", numBalls, 1, maxNumBalls);
     }
 
-    void onBuildState() override {
+    void prepare() override {
         // One ball array per x column: balls[width][maxNumBalls], flattened. Reallocate only when
         // the column count changes. MoonLight zero-initialises the array (onSizeChanged), so every
         // ball starts with height 0 / impactVelocity 0 and bounces on the very first frame — matched
@@ -66,14 +66,14 @@ public:
         setDynamicBytes(ballCount_ * sizeof(Ball));
     }
 
-    void teardown() override {
+    void release() override {
         releaseBalls();
         setDynamicBytes(0);
     }
 
     ~BouncingBallsEffect() override { releaseBalls(); }
 
-    void loop() override {
+    void tick() override {
         if (!balls_) return;
 
         const int cols = width();

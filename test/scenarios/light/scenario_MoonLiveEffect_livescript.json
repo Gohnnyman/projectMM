@@ -134,7 +134,7 @@
     },
     {
       "name": "edit-source-red",
-      "description": "Live-edit the script source to a new colour. A source edit triggers a recompile (controlChangeTriggersBuildState gates on `source`); the new native code swaps in and keeps rendering.",
+      "description": "Live-edit the script source to a new colour. A source edit triggers a recompile (controlChangeTriggersPrepare gates on `source`); the new native code swaps in and keeps rendering.",
       "op": "set_control",
       "id": "ML",
       "key": "source",
@@ -459,7 +459,7 @@
     },
     {
       "name": "remove-moonlive",
-      "description": "Remove the scripted effect. teardown frees the exec block; the Layer keeps rendering (now empty). Measures add/remove robustness.",
+      "description": "Remove the scripted effect. release frees the exec block; the Layer keeps rendering (now empty). Measures add/remove robustness.",
       "op": "remove_module",
       "id": "ML",
       "measure": true,

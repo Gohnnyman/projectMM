@@ -56,7 +56,7 @@ public:
     uint8_t sensitivity = 30;    // brightness sensitivity (WLED custom3, 10..100)
     bool    audioSpeed  = false; // when set, the audio level modulates the scroll rate
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 255);
         controls_.addUint8("fx", fx, 0, 255);
         controls_.addUint8("lowBin", lowBin, 0, 255);
@@ -65,7 +65,7 @@ public:
         controls_.addBool("audioSpeed", audioSpeed);
     }
 
-    void loop() override {
+    void tick() override {
         // D1: read the live grid each frame; the scroll runs down the x=0 column, length = height().
         const int cols = width();
         const int len  = height();

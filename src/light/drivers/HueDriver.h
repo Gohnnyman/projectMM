@@ -19,7 +19,7 @@ namespace mm {
 ///
 /// It's HTTP, not a wire protocol (`GET /api/<key>/lights`, `PUT .../lights/<id>/state`), so the
 /// rate is bounded by connection churn — each PUT opens a fresh TCP connection (the bridge speaks
-/// `Connection: close`), and loop() does at most one PUT every `kPutIntervalMs` (see there) — giving
+/// `Connection: close`), and tick() does at most one PUT every `kPutIntervalMs` (see there) — giving
 /// smooth ambient colour, not real-time. The shared output Correction applies as on the LED/network
 /// drivers, so the brightness slider and colour-order preset reach the Hue lights too (brightness
 /// 0 → light off). Only colour-capable, reachable lights are driven (see `parseLights`); the `room`
@@ -46,12 +46,12 @@ public:
     /// Register the controls: bridge IP, the persisted app key, the Pair link-button, the room +
     /// light filter dropdowns (both default to index 0 = "All", rebuilt in place from the parsed
     /// bridge data on every control change), the shared window, then refresh the status line.
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addIPv4("bridgeIp", bridgeIp);
         controls_.addText("appKey", appKey, sizeof(appKey));   // persisted credential
         controls_.addButton("pair");                            // link-button pairing
         // Room + light filter. Both default to index 0 = "All". The option arrays are rebuilt
-        // (in place, into stable member buffers) from the parsed bridge data; onBuildControls is
+        // (in place, into stable member buffers) from the parsed bridge data; defineControls is
         // re-run on every control change (HttpServerModule), so these reflect the current room_.
         buildRoomOptions();
         buildLightOptions();
@@ -75,9 +75,9 @@ public:
     /// A control click. "pair" starts the link-button pairing poll; changing the bridge IP or app
     /// key points the driver at a (possibly) different bridge, so the learned light list + push
     /// cache are dropped and re-fetched; a room/light change re-derives the driven subset.
-    void onUpdate(const char* controlName) override {
+    void onControlChanged(const char* controlName) override {
         if (controlName && std::strcmp(controlName, "pair") == 0) {
-            pairTicksLeft_ = kPairWindowTicks;   // begin: poll the bridge for ~30 s on loop1s
+            pairTicksLeft_ = kPairWindowTicks;   // begin: poll the bridge for ~30 s on tick1s
             std::snprintf(statusBuf_, sizeof(statusBuf_), "pairing: press the bridge button");
             setStatus(statusBuf_);
         } else if (controlName &&
@@ -87,7 +87,7 @@ public:
             // Room changed: the light dropdown's options now describe a different set, so the old
             // light_ index may point past the new (shorter) list — clamp it back to "All". The
             // option arrays themselves were already rebuilt by the rebuildControls() that ran just
-            // before this onUpdate (it re-ran onBuildControls() against the new room_). Recompute
+            // before this onControlChanged (it re-ran defineControls() against the new room_). Recompute
             // the driven subset and refresh the status line.
             if (light_ >= lightOptionCount_) light_ = 0;
             rebuildDriven();
@@ -96,7 +96,7 @@ public:
             rebuildDriven();     // a different single light (or back to room's all)
             refreshStatus();     // the driven-of-total count changed → refresh the status line
         }
-        DriverBase::onUpdate(controlName);
+        DriverBase::onControlChanged(controlName);
     }
 
     /// Runs every render tick, but does at most ONE bounded PUT and only when the rate-limit
@@ -104,7 +104,7 @@ public:
     /// round-trip would stall the single-thread render loop (the "never block the loop" rule,
     /// lessons.md). One PUT every kPutIntervalMs, round-robined across the lights; pairing + the
     /// bridge announce ride the slow 1 Hz tick.
-    void loop() override {
+    void tick() override {
         if (pairTicksLeft_ > 0) return;            // pairing owns the bridge during its window
         if (!appKey[0] || !haveBridge() || lightCount_ == 0) return;
         const uint32_t now = platform::millis();
@@ -115,22 +115,22 @@ public:
 
     /// The 1 Hz tick handles the non-render-critical, slower bridge work: the pairing poll, the
     /// one-shot light + group fetch, and the periodic DevicesModule announce. Each is at most one
-    /// bridge call per second — acceptable on a 1 Hz tick, and never in the per-frame loop().
-    void loop1s() override {
-        if (pairTicksLeft_ > 0) { pollPairing(); DriverBase::loop1s(); return; }
-        if (!appKey[0] || !haveBridge()) { DriverBase::loop1s(); return; }
-        if (!sawLights_) { fetchLights(); DriverBase::loop1s(); return; }
-        if (!sawGroups_) { fetchGroups(); DriverBase::loop1s(); return; }
+    /// bridge call per second — acceptable on a 1 Hz tick, and never in the per-frame tick().
+    void tick1s() override {
+        if (pairTicksLeft_ > 0) { pollPairing(); DriverBase::tick1s(); return; }
+        if (!appKey[0] || !haveBridge()) { DriverBase::tick1s(); return; }
+        if (!sawLights_) { fetchLights(); DriverBase::tick1s(); return; }
+        if (!sawGroups_) { fetchGroups(); DriverBase::tick1s(); return; }
         if (++reportTick_ >= kReportEverySec) { reportTick_ = 0; reportBridge(); }
-        DriverBase::loop1s();
+        DriverBase::tick1s();
     }
 
     /// Stop any in-flight pairing and release the dropdown-name heap (a re-add re-fetches and
-    /// re-allocs), then chain to DriverBase::teardown to clear status.
-    void teardown() override {
+    /// re-allocs), then chain to DriverBase::release to clear status.
+    void release() override {
         pairTicksLeft_ = 0;
         freeNameBuffers();   // release the dropdown-name heap; a re-add re-fetches and re-allocs
-        DriverBase::teardown();
+        DriverBase::release();
     }
 
     // Test seam: drive the changed-light diff + PUT formatting without a live bridge — feed a
@@ -185,7 +185,7 @@ private:
     // textbook small-set membership (a bit test replaces a per-id scan), and 16×4 B = 64 B beats a
     // 16×32 id-list's 1 KB inline. static_assert pins the width assumption.
     static_assert(kMaxLights == 32, "Room membership bitmask (roomMask_) assumes 32 colour lights");
-    // One PUT at most every kPutIntervalMs (a millis() gate in loop()). Each PUT opens a fresh
+    // One PUT at most every kPutIntervalMs (a millis() gate in tick()). Each PUT opens a fresh
     // TCP connection (the bridge speaks Connection: close), so the rate is bounded by connection
     // CHURN, not just Hue's command budget: at ~7/s the TIME_WAIT sockets pile into the hundreds
     // and the bridge starts refusing connections (PUTs fail, lights freeze). 500 ms → ~2 PUTs/s
@@ -195,7 +195,7 @@ private:
     static constexpr uint32_t kPutIntervalMs = 500;
     static constexpr int     kPairWindowTicks = 30;  // ~30 s pairing window (link-button press)
     static constexpr uint16_t kReportEverySec = 30;  // re-announce the bridge to DevicesModule
-    // Per-frame PUT (loop()) timeout. A successful PUT to a LAN bridge returns in ~20-50 ms, so
+    // Per-frame PUT (tick()) timeout. A successful PUT to a LAN bridge returns in ~20-50 ms, so
     // this only bounds the WORST case (an unreachable/overloaded bridge) — not the normal cost.
     // 200 ms gives comfortable margin over the real latency (a 60 ms cap intermittently tripped
     // under rapid back-to-back PUTs, failing them) while still bounding a bad frame. kSlowTimeoutMs
@@ -220,14 +220,14 @@ private:
     // Friendly names for the dropdowns. Heap, NOT inline: a fixed [kMaxLights][kNameLen] array
     // would reserve 768 B whether the bridge has 4 lights or 32 (and cap at 32). Instead one
     // contiguous block of (count × kNameLen) is allocated to the ACTUAL light/room count when the
-    // fetch runs, and freed in release()/teardown — so memory scales to the real bridge and
+    // fetch runs, and freed in release()/release — so memory scales to the real bridge and
     // sizeof(HueDriver) stays small (the lightsBuf_ stack-overflow lesson, applied to the names).
     char*    lightNames_ = nullptr;                   // kMaxLights × kNameLen; lightNameAt(i) indexes it
     char*    roomNames_  = nullptr;                   // kMaxRooms  × kNameLen
     char* lightNameAt(uint8_t i) { return lightNames_ ? lightNames_ + static_cast<size_t>(i) * kNameLen : nullptr; }
     char* roomNameAt(uint8_t i)  { return roomNames_  ? roomNames_  + static_cast<size_t>(i) * kNameLen : nullptr; }
     // Allocate the two name blocks lazily on first parse (so an unconfigured driver pays nothing),
-    // and free them on teardown / cache reset (so a removed-then-readded bridge starts clean). The
+    // and free them on release / cache reset (so a removed-then-readded bridge starts clean). The
     // blocks are sized to the kMax bound, not the live count, because the parser fills them
     // incrementally and the count isn't known until it finishes — keeping the names off the
     // resident sizeof(HueDriver) is the win (the lightsBuf_ stack-probe lesson), not per-byte fit.
@@ -253,7 +253,7 @@ private:
 
     // --- Stable option pointer arrays for the two Selects. addSelect borrows the pointer; these
     // live for the driver's lifetime and are refilled in place (pointing into the *Name_ buffers)
-    // by buildRoomOptions / buildLightOptions on every onBuildControls. "All" is always index 0.
+    // by buildRoomOptions / buildLightOptions on every defineControls. "All" is always index 0.
     const char* roomOptions_[kMaxRooms + 1] = {};
     uint8_t     roomOptionCount_ = 1;
     const char* lightOptions_[kMaxLights + 1] = {};
@@ -261,9 +261,9 @@ private:
 
     uint8_t  pushCursor_ = 0;                         // round-robin position across the lights
     uint8_t  drivenCount_ = 0;                        // lights driven this pass (n); fade-time basis
-    uint32_t lastPutMs_ = 0;                          // millis() of the last PUT — the loop() rate gate
+    uint32_t lastPutMs_ = 0;                          // millis() of the last PUT — the tick() rate gate
     int      pairTicksLeft_ = 0;
-    uint16_t reportTick_ = 0;                        // counts loop1s ticks toward kReportEverySec
+    uint16_t reportTick_ = 0;                        // counts tick1s ticks toward kReportEverySec
     char     statusBuf_[40] = "unpaired";
     // /lights read buffer is sized dynamically in fetchLights (grow-and-retry): a small first try
     // covers a typical home; it doubles up to the cap only when a bigger bridge's response fills it.
@@ -353,7 +353,7 @@ private:
         }
     }
 
-    // Drop the learned light list + room list + push cache so loop1s re-fetches (bridge/key change).
+    // Drop the learned light list + room list + push cache so tick1s re-fetches (bridge/key change).
     void resetLightCache() {
         lightCount_ = 0;
         colourCount_ = 0;
@@ -364,7 +364,7 @@ private:
         for (uint8_t i = 0; i < kMaxLights; i++) sent_[i] = false;
         freeNameBuffers();   // drop the old bridge's names; the re-fetch re-allocs for the new one
         // Rebuild the option arrays NOW so roomOptions_/lightOptions_ don't dangle into the freed
-        // name buffers until the next onBuildControls. With the counts above zeroed, both collapse
+        // name buffers until the next defineControls. With the counts above zeroed, both collapse
         // to the single "All" sentinel (no name-buffer deref), which is the correct empty state.
         buildRoomOptions();
         buildLightOptions();
@@ -616,7 +616,7 @@ private:
         if (pushCursor_ >= drivenLightCount_) pushCursor_ = 0;
     }
 
-    // Push AT MOST ONE changed light per call (the loop() gate already limited the rate). The
+    // Push AT MOST ONE changed light per call (the tick() gate already limited the rate). The
     // round-robin cursor walks every light over successive calls, so each gets its turn; we
     // advance the cursor whether or not this light changed, scanning at most one full lap so an
     // all-unchanged frame costs no PUT and returns fast (no blocking I/O on the render loop).

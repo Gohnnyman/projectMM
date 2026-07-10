@@ -42,7 +42,7 @@ public:
     uint8_t blur       = 128;    // per-frame fade-to-black amount (0..255); higher = stronger fade = shorter streaks (draw::fade keep = 255-blur, matching MoonLight's fadeToBlackBy(blur))
     bool    usePalette = false;  // colour stars from the palette instead of greyscale
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 0, 30);
         controls_.addUint8("numStars", numStars, 1, 255);
         controls_.addUint8("blur", blur, 0, 255);
@@ -53,7 +53,7 @@ public:
     // and re-seeds whenever the grid changes (the random spawn ranges depend on width/height). The
     // initial seed scatters stars at random depths (z in [0,width)); respawns later fly in from the
     // far plane.
-    void onBuildState() override {
+    void prepare() override {
         const lengthType w = width();
         const lengthType h = height();
         if (w > 0 && h > 0) {
@@ -66,19 +66,19 @@ public:
                 seedH_ = h;
             }
         } else {
-            release();
+            freeBuffers();
         }
         setDynamicBytes(stars_ ? sizeof(Star) * kMaxStars : 0);
     }
 
-    void teardown() override {
-        release();
+    void release() override {
+        freeBuffers();
         setDynamicBytes(0);
     }
 
-    ~StarFieldEffect() override { release(); }
+    ~StarFieldEffect() override { freeBuffers(); }
 
-    void loop() override {
+    void tick() override {
         if (!stars_) return;
 
         const lengthType w = width();
@@ -179,7 +179,7 @@ private:
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
-    void release() {
+    void freeBuffers() {
         if (stars_) {
             platform::free(stars_);
             stars_ = nullptr;

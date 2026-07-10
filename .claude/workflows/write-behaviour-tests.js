@@ -60,7 +60,7 @@ Repo: the current workspace root (the projectMM checkout you're running in) — 
 1. Read the module header: ${header} — understand what it ACTUALLY does: its controls, its render/modify logic, what it writes to the buffer or how it transforms coordinates. Behaviour is the spec.
 2. Read the module's spec entry if useful: docs/moonmodules/light/${kind === 'effect' ? 'effects.md' : 'modifiers.md'} (find the ${cls.replace(/Effect$|Modifier$/, '')} section).
 3. Read TWO existing tests as your pattern templates — match their idiom EXACTLY (includes, harness, naming, comment style):
-   - For an EFFECT: test/unit/light/unit_RainbowEffect.cpp (Layouts→GridLayout→Layer→addChild(effect)→onBuildState()→loop()→assert on layer.buffer()).
+   - For an EFFECT: test/unit/light/unit_RainbowEffect.cpp (Layouts→GridLayout→Layer→addChild(effect)→prepare()→tick()→assert on layer.buffer()).
    - For a MODIFIER: test/unit/light/unit_RegionModifier.cpp (call modifyLogical / modifyLogicalSize directly; assert coordinate folding / size).
    Pick the one matching this module's kind (${kind}).
 

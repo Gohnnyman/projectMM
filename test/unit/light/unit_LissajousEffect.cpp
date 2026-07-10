@@ -25,7 +25,7 @@ TEST_CASE("LissajousEffect traces a lit curve on the grid") {
     // Pin a colourful palette (Rainbow=0) so painted pixels are non-black regardless of prior tests
     // mutating the process-wide active palette.
     mm::Palettes::setActive(0);
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -57,7 +57,7 @@ TEST_CASE("LissajousEffect leaves untouched pixels black") {
 
     layer.applyState();
     mm::Palettes::setActive(0);
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 1024);
@@ -93,7 +93,7 @@ TEST_CASE("LissajousEffect on a 1x1 grid maps the curve to the origin light") {
 
     layer.applyState();
     mm::Palettes::setActive(0);
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 1);
@@ -118,8 +118,8 @@ TEST_CASE("LissajousEffect on a 0x0x0 grid does not crash") {
     layer.addChild(&lissajous);
 
     layer.applyState();
-    // Degenerate grid: loop() bails on width/height <= 0, so this is a safe no-op frame.
-    layer.loop();
+    // Degenerate grid: tick() bails on width/height <= 0, so this is a safe no-op frame.
+    layer.tick();
 
     CHECK(layer.buffer().count() == 0);
 }

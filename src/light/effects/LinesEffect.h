@@ -20,13 +20,13 @@ public:
     uint8_t speed = 30;   // BPM
     uint8_t axis  = 0;    // 0=all 1=x(red) 2=y(green) 3=z(blue)
 
-    void onBuildControls() override {
+    void defineControls() override {
         static constexpr const char* kAxisOptions[] = {"all", "x (red)", "y (green)", "z (blue)"};
         controls_.addUint8("speed", speed, 1, 240);
         controls_.addSelect("axis", axis, kAxisOptions, 4);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w   = width();
         const lengthType h   = height();

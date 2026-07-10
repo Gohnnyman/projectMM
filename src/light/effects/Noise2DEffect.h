@@ -35,12 +35,12 @@ public:
     uint8_t speed = 8;    // time-flow rate (0..15); higher = faster morph (divisor is 16-speed)
     uint8_t scale = 64;   // noise zoom (2..255); higher = finer/more-detailed field
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 0, 15);
         controls_.addUint8("scale", scale, 2, 255);
     }
 
-    void loop() override {
+    void tick() override {
         const int cols = width();
         const int rows = height();
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;

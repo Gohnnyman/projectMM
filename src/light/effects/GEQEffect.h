@@ -28,8 +28,8 @@ namespace mm {
 // the bottom-up bar fill, the colorBars / smoothBars toggles, and the falling-peak dot are reproduced
 // here, written fresh on projectMM's EffectBase + the shared draw / palette primitives. Reads
 // AudioService::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
-// size. The per-column peak-fall state lives on the heap (sized to width()), allocated in onBuildState
-// and freed in teardown — never a large inline member.
+// size. The per-column peak-fall state lives on the heap (sized to width()), allocated in prepare
+// and freed in release — never a large inline member.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive graphic-equaliser effect: 16 bands as vertical bars.
 class GEQEffect : public EffectBase {
@@ -46,7 +46,7 @@ public:
     bool    colorBars  = false; // colour each bar by its column (true) instead of by row height (false)
     bool    smoothBars = false; // blend each band with its neighbours for a smoother profile
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fadeOut", fadeOut, 0, 255);
         controls_.addUint8("ripple", ripple, 0, 255);
         controls_.addBool("colorBars", colorBars);
@@ -58,7 +58,7 @@ public:
     // re-sizes only when the column count changes, zeroed on (re)build so a grid/control change starts
     // every peak at the floor. Entries are lengthType (the row-count type) so a panel taller than 255
     // rows doesn't truncate the remembered peak height.
-    void onBuildState() override {
+    void prepare() override {
         const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
         if (cols > 0) {
             if (cols != peakCount_) {
@@ -74,14 +74,14 @@ public:
         setDynamicBytes(peakCount_ * sizeof(lengthType));
     }
 
-    void teardown() override {
+    void release() override {
         releasePeaks();
         setDynamicBytes(0);
     }
 
     ~GEQEffect() override { releasePeaks(); }
 
-    void loop() override {
+    void tick() override {
         const int cols = width();
         const int rows = height();
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;

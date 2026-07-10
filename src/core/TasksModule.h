@@ -24,7 +24,7 @@ namespace mm {
 /// high-water-mark; CPU% only in a profiling build); expanding a row reveals the MoonModules that
 /// run inside that task, each with its live cost — `us` (avg loop time), `class` (instance bytes),
 /// `heap` (dynamic bytes). Those three are projectMM's already-collected self-report
-/// (`loopTimeUs()`/`classSize()`/`dynamicBytes()`, see MoonModule), read straight off the live tree,
+/// (`tickTimeUs()`/`classSize()`/`dynamicBytes()`, see MoonModule), read straight off the live tree,
 /// so the cost view is free. Two read-only fields (`core0`/`core1`) name the task on each core.
 ///
 /// **Prior art.** MoonLight's `ModuleTasks` (https://github.com/MoonModules/MoonLight, doc
@@ -35,7 +35,7 @@ namespace mm {
 /// data-source/adapter shape (UITableView's data source, Qt's `QAbstractItemModel`) as DevicesModule.
 ///
 /// **Bespoke, with reason.** Nesting modules *under* a task is projectMM-specific: its Scheduler runs
-/// many modules cooperatively inside one render task (`tick()` calls every `loop()`), whereas in a
+/// many modules cooperatively inside one render task (`tick()` calls every `tick()`), whereas in a
 /// normal RTOS a task *is* the unit. Today every module runs in the one render task, so that task's
 /// detail is the whole module list and other tasks are leaves; the nesting structure is ready for the
 /// future core-affinity split, when modules spread across tasks. Built agile, in steps.
@@ -46,8 +46,8 @@ namespace mm {
 /// persistence trim. Read-only: no user-editable controls.
 class TasksModule : public MoonModule {
 public:
-    void onBuildControls() override {
-        MoonModule::onBuildControls();
+    void defineControls() override {
+        MoonModule::defineControls();
         // One list: the RTOS tasks, each row expanding to the MoonModules that run in it (the
         // per-module cost lives in that detail, not a separate flat list — the nested tree IS the
         // view). core0/core1 name the task on each core; the platform getter leaves them empty on a
@@ -59,8 +59,8 @@ public:
 
     /// Refresh the RTOS snapshot + the current-per-core names once a second (off the hot path). The
     /// module cost table needs no refresh — it reads the live tree on each serialize.
-    void loop1s() override {
-        MoonModule::loop1s();
+    void tick1s() override {
+        MoonModule::tick1s();
         tasks_.refresh();
         platform::currentTaskOnCore(0, core0_, sizeof(core0_));
         platform::currentTaskOnCore(1, core1_, sizeof(core1_));
@@ -69,7 +69,7 @@ public:
 private:
     /// The RTOS task table, a ListSource over a fixed snapshot the platform layer fills. Kept as a
     /// nested source (a dedicated ListSource for the `tasks` control, distinct from the module class).
-    /// `refresh()` re-snapshots on loop1s; the rows serialize from
+    /// `refresh()` re-snapshots on tick1s; the rows serialize from
     /// the buffer. No allocation — a fixed `TaskInfo[kMaxTasks]`, filled or left at count 0 (desktop
     /// / no trace facility → the table is simply empty).
     struct TaskListSource : ListSource {
@@ -99,7 +99,7 @@ private:
         }
 
         // Row detail = the projectMM modules running in this task. Today projectMM is single-threaded:
-        // Scheduler::tick() runs every module's loop() on the one render task, so the render task's
+        // Scheduler::tick() runs every module's tick() on the one render task, so the render task's
         // detail is the whole module list and every other RTOS task has none. When a future multi-task
         // split lands, this predicate broadens to "the modules assigned to this task" — the nesting
         // structure is already here, only the mapping changes.
@@ -121,14 +121,14 @@ private:
                     MoonModule* m = s->module(i);
                     if (!m) continue;
                     if (i) sink.append(",");
-                    // Sum TOP-LEVEL module loop times only: a parent's loopTimeUs already includes its
-                    // children's (the Scheduler times the whole parent loop(), which runs the children
+                    // Sum TOP-LEVEL module loop times only: a parent's tickTimeUs already includes its
+                    // children's (the Scheduler times the whole parent tick(), which runs the children
                     // inside it), so summing top-level is the correct non-double-counting total.
-                    sumUs += m->loopTimeUs();
+                    sumUs += m->tickTimeUs();
                     char line[64];
                     std::snprintf(line, sizeof(line), "%s \xC2\xB7 %uus \xC2\xB7 %uB \xC2\xB7 %uheap",
                                   m->name(),
-                                  static_cast<unsigned>(m->loopTimeUs()),
+                                  static_cast<unsigned>(m->tickTimeUs()),
                                   static_cast<unsigned>(m->classSize()),
                                   static_cast<unsigned>(m->dynamicBytes()));
                     sink.writeJsonString(line);

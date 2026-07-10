@@ -8,7 +8,7 @@
 
 #include <cstdint>
 #include <cstdio>   // snprintf for the loopback status string
-#include <cstring>  // std::strcmp in onUpdate / controlChangeTriggersBuildState
+#include <cstring>  // std::strcmp in onControlChanged / controlChangeTriggersPrepare
 
 namespace mm {
 
@@ -70,7 +70,7 @@ public:
     /// on real silicon (replaces the old standalone test firmware). Tick to run a one-shot RMT
     /// TX→RX round-trip: jumper the first pin (TX) to `loopbackRxPin`, it transmits a known WS2812
     /// pattern, captures it back, decodes, compares → `loopback PASS` / `FAIL: …` / `jumper not
-    /// detected` in the status field. A persistent on/off mode (see onUpdate): while on the test
+    /// detected` in the status field. A persistent on/off mode (see onControlChanged): while on the test
     /// re-runs on every relevant change; turning it off clears the verdict. Hardware lives in
     /// `platform::rmtWs2812Loopback*`.
     bool     loopbackTest = false;  // checkbox: on = run + keep re-running on change
@@ -104,7 +104,7 @@ public:
     /// Bind the driver's controls: the window (start/count), the `pins` and
     /// `ledsPerPin` text lists, and the loopback self-test controls (the TX/RX pin
     /// overrides and frame-stress flag are always bound but shown only in test mode).
-    void onBuildControls() override {
+    void defineControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
@@ -124,9 +124,9 @@ public:
     }
 
     /// Changing the pin list or the per-pin counts re-parses and re-inits the RMT
-    /// channels (live, not reboot-to-apply), so the pipeline-wide onBuildState
+    /// channels (live, not reboot-to-apply), so the pipeline-wide prepare
     /// sweep runs and parseConfig()/reinit() pick up the new lists.
-    bool controlChangeTriggersBuildState(const char* name) const override {
+    bool controlChangeTriggersPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || isWindowControl(name);
     }
@@ -137,7 +137,7 @@ public:
     /// change — turning it on, OR editing pins / loopbackRxPin — so the pins can be
     /// set in any order and the result always reflects the current pins. Turning it
     /// OFF clears the result.
-    void onUpdate(const char* name) override {
+    void onControlChanged(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
         const bool isPinControl  = std::strcmp(name, "pins") == 0
                                 || std::strcmp(name, "loopbackTxPin") == 0
@@ -152,11 +152,11 @@ public:
             parseConfig();
             reinit();
         } else if (loopbackTest && (isTestControl || isPinControl)) {
-            // A `pins` edit changes pinList_/pinCount_, but onUpdate runs BEFORE the
-            // onBuildState() sweep re-parses (and loopbackRxPin/loopbackFrame don't
+            // A `pins` edit changes pinList_/pinCount_, but onControlChanged runs BEFORE the
+            // prepare() sweep re-parses (and loopbackRxPin/loopbackFrame don't
             // trigger that sweep at all), so refresh here before testing — otherwise
             // the self-test would transmit on the STALE pinList_[0] and show a verdict
-            // for the previous pin. Mirrors ParallelLedDriver::onUpdate.
+            // for the previous pin. Mirrors ParallelLedDriver::onControlChanged.
             if (std::strcmp(name, "pins") == 0) { parseConfig(); reinit(); }
             runLoopbackSelfTest();
         }
@@ -170,26 +170,26 @@ public:
     ///   - RMT CHANNELS (hardware): reinit() / deinitAll(), RMT-targets-only
     ///     (if constexpr).
     /// The original bug put the buffer free inside the hardware deinit(), which
-    /// reinit() (a rebuild) calls — so a rebuild freed the buffer loop() needs.
+    /// reinit() (a rebuild) calls — so a rebuild freed the buffer tick() needs.
     /// Keeping the two apart makes that mistake impossible here and lets the host
     /// unit test (unit_RmtLedDriver_lifecycle.cpp) pin it.
     /// One-time wiring only (parse the pin lists into members); the RMT/buffer acquire lives
-    /// in onBuildState(), the sole resource-lifecycle gate. Enabled-independent — the acquire
-    /// happens in the buildState sweep that always follows.
+    /// in prepare(), the sole resource-lifecycle gate. Enabled-independent — the acquire
+    /// happens in the prepareTree sweep that always follows.
     void setup() override { parseConfig(); }
     /// Release the RMT channels and free the symbol buffer, then clear the shared
-    /// fail/config-error state (DriverBase::teardown()).
-    void teardown() override {
+    /// fail/config-error state (DriverBase::release()).
+    void release() override {
         deinitAll();
         freeSymbols();
-        DriverBase::teardown();   // clears failBuf_ + configErr_
+        DriverBase::release();   // clears failBuf_ + configErr_
     }
 
-    /// Pure build (see MoonModule::onBuildState): re-parse, resize the symbol buffer, and (re)init the
-    /// RMT channels off the hot path (loop() never allocates). No enabled() check — core's applyState()
-    /// only calls this when effectively-enabled and routes to teardown() (release) otherwise, so the
+    /// Pure build (see MoonModule::prepare): re-parse, resize the symbol buffer, and (re)init the
+    /// RMT channels off the hot path (tick() never allocates). No enabled() check — core's applyState()
+    /// only calls this when effectively-enabled and routes to release() (release) otherwise, so the
     /// channels + buffer free when the driver, or a parent, is disabled.
-    void onBuildState() override {
+    void prepare() override {
         parseConfig();
         resizeSymbols();
         reinit();
@@ -202,7 +202,7 @@ public:
 
     /// Point the driver at the source frame buffer; re-parse (counts derive from its light count)
     /// and resize the symbol buffer to match. The resize is skipped while (effectively) disabled
-    /// (a disabled driver holds no buffer); the enabled onBuildState() sweep re-sizes it on enable.
+    /// (a disabled driver holds no buffer); the enabled prepare() sweep re-sizes it on enable.
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
         parseConfig();      // counts derive from the buffer's light count
@@ -220,7 +220,7 @@ public:
     /// over this driver's window, then start every pin's transmit before waiting on
     /// any, so the tick costs the longest strand rather than the sum. Inert off RMT
     /// chips and idle until inited with a source buffer + correction.
-    void loop() override {
+    void tick() override {
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data() || !correction_) return;
 
@@ -349,7 +349,7 @@ private:
     // --- pin/count config (plain parsing; runs on every platform) ---
 
     // Re-derive pinList_/pinCounts_/pinOffsets_ from the two text controls and
-    // the current buffer/correction. On error: pinCount_ = 0 (loop() idles) and
+    // the current buffer/correction. On error: pinCount_ = 0 (tick() idles) and
     // the static error literal goes to the status slot; a later successful parse
     // clears it. Off the hot path.
     bool parseConfig() {
@@ -419,7 +419,7 @@ private:
     // MoonModule status slot. The slot stores a const char* (no copy), so PASS /
     // jumper-missing / not-supported are flash literals — zero RAM. Only the
     // FAIL case needs the captured hex, so it borrows a buffer allocated ON
-    // DEMAND and freed by clearFailBuf() (teardown + every non-FAIL outcome) —
+    // DEMAND and freed by clearFailBuf() (release + every non-FAIL outcome) —
     // no permanent member.
     void runLoopbackSelfTest() {
         if constexpr (platform::rmtTxChannels == 0) {
@@ -505,7 +505,7 @@ private:
     static constexpr const char* kInitFailMsg = "RMT init failed — check the pins";
 
     // All-or-nothing: a failing pin deinits everything and reports which pin,
-    // so loop()'s guard stays a single bool and the user sees one clear error
+    // so tick()'s guard stays a single bool and the user sees one clear error
     // instead of some strands dark, some lit.
     void reinit() {
         if constexpr (platform::rmtTxChannels == 0) return;
@@ -514,7 +514,7 @@ private:
         for (uint8_t i = 0; i < pinCount_; i++) {
             if (platform::rmtWs2812Init(rmt_[i], static_cast<uint8_t>(pinList_[i]),
                                         kResolutionHz, cfg_.invert)) continue;
-            // Surface which pin failed instead of silently no-op'ing in loop() —
+            // Surface which pin failed instead of silently no-op'ing in tick() —
             // the status tells the user why output is dark (usually a bad pin),
             // rather than leaving them to wonder why nothing lights.
             deinitAll();
@@ -535,8 +535,8 @@ private:
     }
 
     // Releases only the RMT channels — NOT the symbol buffer (that's
-    // freeSymbols(), owned by teardown). reinit() calls this on every rebuild,
-    // so freeing the buffer here would strand loop() — the original bug.
+    // freeSymbols(), owned by release). reinit() calls this on every rebuild,
+    // so freeing the buffer here would strand tick() — the original bug.
     void deinitAll() {
         if constexpr (platform::rmtTxChannels == 0) return;
         for (uint8_t i = 0; i < kMaxPins; i++) {

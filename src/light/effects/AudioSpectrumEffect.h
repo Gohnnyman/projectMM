@@ -34,12 +34,12 @@ public:
     // what a "spectrum" effect is expected to look like.
     uint8_t colorMode = 1;
 
-    void onBuildControls() override {
+    void defineControls() override {
         static constexpr const char* kColorOptions[] = {"height", "per-band"};
         controls_.addSelect("colorMode", colorMode, kColorOptions, 2);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

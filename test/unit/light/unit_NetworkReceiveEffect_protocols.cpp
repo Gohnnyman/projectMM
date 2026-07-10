@@ -38,7 +38,7 @@ struct Rig {
         layer.setLayouts(&layouts);
         layer.setChannelsPerLight(3);
         layer.addChild(&fx);
-        fx.onBuildControls();
+        fx.defineControls();
         layer.applyState();
     }
 };
@@ -273,7 +273,7 @@ TEST_CASE("NetworkReceiveEffect receives all three protocols at once over localh
 
     bool landed = false;
     for (int i = 0; i < 100 && !landed; i++) {
-        r.layer.loop();
+        r.layer.tick();
         const uint8_t* buf = r.layer.buffer().data();
         landed = buf[0] == 11 && buf[510] == 21 && buf[600] == 31;
         if (!landed) mm::platform::delayMs(1);
@@ -284,5 +284,5 @@ TEST_CASE("NetworkReceiveEffect receives all three protocols at once over localh
     artTx.close();
     e131Tx.close();
     ddpTx.close();
-    r.fx.teardown();
+    r.fx.release();
 }

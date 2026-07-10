@@ -37,7 +37,7 @@ public:
     bool mirrorY = true;
     bool mirrorZ = true;
 
-    void onBuildControls() override {
+    void defineControls() override {
         // 1–64 tiles per axis. More tiles than the grid has pixels just yields
         // 1-pixel tiles (the effective multiplier clamps to the axis extent).
         controls_.addUint8("multiplyX", multiplyX, 1, 64);

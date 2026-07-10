@@ -26,7 +26,7 @@ import { isNewer, parse } from "/semver.js";
 //     loads them — toggling visibility doesn't lose state.
 //   - No-rebuild contract: WS state updates patch values in place via querySelector.
 //     We only rebuild the DOM on structural changes (add/delete/move) and explicit
-//     select-driven onBuildControls rebuilds.
+//     select-driven defineControls rebuilds.
 
 // ---------------------------------------------------------------------------
 // 1. State + storage
@@ -774,7 +774,7 @@ function fmtBytes(n) {
 // (🧠 static, plus "+ dynamic" only when the module allocated heap).
 // Timing is omitted entirely when the module has no measured loop time.
 function formatStats(mod) {
-    const us = (mod.loopTimeUs !== undefined) ? mod.loopTimeUs : 0;
+    const us = (mod.tickTimeUs !== undefined) ? mod.tickTimeUs : 0;
     let timing = "";
     if (us > 0) {
         if (timingMode === "fps") {

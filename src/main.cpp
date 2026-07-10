@@ -234,11 +234,11 @@ static void printModuleMetrics(mm::MoonModule* mod, int depth) {
     if (!mod) return;
     if (mod->dynamicBytes() > 0) {
         std::printf("  %s:%uus/%uKB", mod->name() ? mod->name() : "?",
-                    static_cast<unsigned>(mod->loopTimeUs()),
+                    static_cast<unsigned>(mod->tickTimeUs()),
                     static_cast<unsigned>(mod->dynamicBytes() / 1024));
     } else {
         std::printf("  %s:%uus", mod->name() ? mod->name() : "?",
-                    static_cast<unsigned>(mod->loopTimeUs()));
+                    static_cast<unsigned>(mod->tickTimeUs()));
     }
     for (uint8_t i = 0; i < mod->childCount(); i++) {
         printModuleMetrics(mod->child(i), depth + 1);
@@ -398,7 +398,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // Drivers: top-level container; one or more Driver children. Bound to the
     // Layers container — Drivers re-resolves the active Layer from it at every
-    // buildState, so a Layer cleared+rebuilt via the API self-heals without
+    // prepareTree, so a Layer cleared+rebuilt via the API self-heals without
     // re-running this wiring. Binding the container (not a single Layer) is what
     // lets a driver read across N Layer buffers from one place — the hook
     // multi-layer blending uses.
@@ -411,7 +411,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // uses, so a device only carries the drivers its board actually has instead of
     // every driver the chip is capable of. The Drivers container wires any child
     // generically in passBufferToDrivers() (setSourceBuffer/setLayer/setCorrection)
-    // at setup()/onBuildState(), so a runtime-added driver is wired identically to
+    // at setup()/prepare(), so a runtime-added driver is wired identically to
     // one added at boot, and a non-wiredByCode child persists across reboot via
     // FilesystemModule. A bare flash with no catalog inject therefore has no LED /
     // network output until a board is selected — the deliberate explicit-add model.
@@ -442,7 +442,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // use) — "Improv = REST over serial". Wired here once httpServer exists.
     if (improvModule) improvModule->setHttpServerModule(httpServer);
 
-    // Register top-level modules with scheduler (scheduler deletes on teardown).
+    // Register top-level modules with scheduler (scheduler deletes on release).
     // Order matters: filesystem first (load hook runs before any module's setup),
     // then system (deviceName), fileManager (filesystem browser, reads the persistence
     // engine's "last saved"), firmwareUpdate (status surface, no deps), network (hosts
@@ -573,5 +573,5 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     }
 
     std::printf("\nShutting down.\n");
-    scheduler.teardown();
+    scheduler.release();
 }

@@ -23,14 +23,14 @@ public:
 
     static constexpr uint8_t MAX_BALLS = 8;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("bpm", bpm, 1, 255);
         controls_.addUint8("radius", radius, 4, 255);
         controls_.addUint8("count", count, 1, MAX_BALLS);
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();
@@ -85,7 +85,7 @@ public:
     }
 
 private:
-    // Numerator-only accumulator (units of dt*bpm). See loop() for why.
+    // Numerator-only accumulator (units of dt*bpm). See tick() for why.
     uint64_t phase_num_ = 0;
     uint32_t lastElapsed_ = 0;
 };

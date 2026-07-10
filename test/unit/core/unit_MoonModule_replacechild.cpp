@@ -9,7 +9,7 @@
 namespace {
 
 // Records lifecycle calls in order, so a replace can be checked for the
-// onBuildControls → setup → onBuildState sequence the HTTP handler runs.
+// defineControls → setup → prepare sequence the HTTP handler runs.
 struct Trace {
     std::vector<std::string> calls;
 };
@@ -17,10 +17,10 @@ struct Trace {
 class TracingModule : public mm::MoonModule {
 public:
     Trace* trace = nullptr;
-    void onBuildControls() override { if (trace) trace->calls.push_back(std::string(name()) + ":build"); }
+    void defineControls() override { if (trace) trace->calls.push_back(std::string(name()) + ":build"); }
     void setup() override { if (trace) trace->calls.push_back(std::string(name()) + ":setup"); }
-    void onBuildState() override { if (trace) trace->calls.push_back(std::string(name()) + ":alloc"); }
-    void teardown() override { if (trace) trace->calls.push_back(std::string(name()) + ":teardown"); }
+    void prepare() override { if (trace) trace->calls.push_back(std::string(name()) + ":alloc"); }
+    void release() override { if (trace) trace->calls.push_back(std::string(name()) + ":release"); }
 };
 
 struct Fixture {
@@ -88,10 +88,10 @@ TEST_CASE("replaceChildAt: null replacement returns nullptr") {
     CHECK(f.order() == "ABC");
 }
 
-// After replace, the caller follows the lifecycle order: onBuildControls → setup → onBuildState on the fresh module, then teardown on the old.
+// After replace, the caller follows the lifecycle order: defineControls → setup → prepare on the fresh module, then release on the old.
 TEST_CASE("replace lifecycle: fresh module is built, set up, allocated in order") {
     // Mirrors what HttpServerModule::handleReplaceModule does to the replacement:
-    // onBuildControls → setup → onBuildState, then teardown on the old module.
+    // defineControls → setup → prepare, then release on the old module.
     Fixture f;
     Trace trace;
     f.b.trace = &trace;
@@ -100,14 +100,14 @@ TEST_CASE("replace lifecycle: fresh module is built, set up, allocated in order"
     fresh.trace = &trace;
 
     mm::MoonModule* old = f.parent.replaceChildAt(1, &fresh);
-    fresh.onBuildControls();
+    fresh.defineControls();
     fresh.setup();
     fresh.applyState();
-    old->teardown();
+    old->release();
 
     REQUIRE(trace.calls.size() == 4);
     CHECK(trace.calls[0] == "X:build");
     CHECK(trace.calls[1] == "X:setup");
     CHECK(trace.calls[2] == "X:alloc");
-    CHECK(trace.calls[3] == "B:teardown");
+    CHECK(trace.calls[3] == "B:release");
 }

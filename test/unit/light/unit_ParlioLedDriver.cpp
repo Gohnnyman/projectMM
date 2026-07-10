@@ -34,7 +34,7 @@ void wire(mm::ParlioLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     // on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
-    d.onBuildControls();
+    d.defineControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
     d.applyState();
@@ -156,7 +156,7 @@ TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
     REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
     REQUIRE(src.allocate(64, 3));
     corr.rebuild(255, mm::LightPreset::GRB);
-    d.onBuildControls();
+    d.defineControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
     d.applyState();
@@ -164,7 +164,7 @@ TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
     CHECK(d.laneCount() == 0);            // no lanes claimed
     CHECK(d.frameBytes() == 0);
     CHECK(d.status() != nullptr);         // "set pins" surfaced, not silent
-    d.loop();                             // must be a no-op, not a crash
+    d.tick();                             // must be a no-op, not a crash
 }
 
 // A 0×0×0 grid is a clean idle: zero counts, zero frame, no crash.
@@ -177,13 +177,13 @@ TEST_CASE("ParlioLedDriver tolerates a zero-light buffer") {
     CHECK(d.laneCount() == 8);       // the default 8 pins parse fine
     CHECK(d.maxLaneLights() == 0);
     CHECK(d.frameBytes() == 0);
-    d.loop();                        // must be a no-op, not a crash
+    d.tick();                        // must be a no-op, not a crash
     CHECK(true);
 }
 
-// loop() is crash-safe across single-pin / multi-pin / pre-init configs (the
+// tick() is crash-safe across single-pin / multi-pin / pre-init configs (the
 // transmit path is gated out on the host; this pins the reachable contract).
-TEST_CASE("ParlioLedDriver loop is crash-safe for every pin configuration") {
+TEST_CASE("ParlioLedDriver tick is crash-safe for every pin configuration") {
     mm::Correction corr;
     corr.rebuild(255, mm::LightPreset::GRB);
 
@@ -191,39 +191,39 @@ TEST_CASE("ParlioLedDriver loop is crash-safe for every pin configuration") {
         mm::ParlioLedDriver d; mm::Buffer src;
         std::strcpy(d.pins, "36");
         wire(d, src, corr, 64);
-        d.loop();
+        d.tick();
     }
     SUBCASE("multi-pin even split") {
         mm::ParlioLedDriver d; mm::Buffer src;
         std::strcpy(d.pins, "36,37,38");
         wire(d, src, corr, 90);
         REQUIRE(d.laneCount() == 3);
-        d.loop();
+        d.tick();
     }
-    SUBCASE("loop before any buffer is wired") {
+    SUBCASE("tick before any buffer is wired") {
         mm::ParlioLedDriver d;
-        d.onBuildControls();
-        d.loop();
+        d.defineControls();
+        d.tick();
     }
     CHECK(true);
 }
 
-// setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
-TEST_CASE("ParlioLedDriver setup/teardown is repeatable") {
+// setup/release cycles leave no residue (status clean, ASAN-checked heap).
+TEST_CASE("ParlioLedDriver setup/release is repeatable") {
     mm::ParlioLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
     corr.rebuild(255, mm::LightPreset::GRB);
     std::strcpy(d.pins, "20,21,22,23,24,25,26,27");   // pins now default UNSET
-    d.onBuildControls();
+    d.defineControls();
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();
         d.setSourceBuffer(&src);
         d.setCorrection(&corr);
         d.applyState();
         REQUIRE(d.laneCount() == 8);   // the 8 pins set above
-        d.teardown();
+        d.release();
         CHECK(d.status() == nullptr);
     }
 }
@@ -231,7 +231,7 @@ TEST_CASE("ParlioLedDriver setup/teardown is repeatable") {
 // loopbackRxPin is bound always, visible only while loopbackTest is on.
 TEST_CASE("ParlioLedDriver loopbackRxPin tracks the loopbackTest toggle") {
     mm::ParlioLedDriver d;
-    d.onBuildControls();
+    d.defineControls();
     bool found = false;
     for (uint8_t i = 0; i < d.controls().count(); i++) {
         if (std::strcmp(d.controls()[i].name, "loopbackRxPin") == 0) {
@@ -249,7 +249,7 @@ TEST_CASE("ParlioLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // ways and asserts the control stays bound while flipping visibility).
 TEST_CASE("ParlioLedDriver loopbackTxPin tracks the loopbackTest toggle") {
     mm::ParlioLedDriver d;
-    d.onBuildControls();
+    d.defineControls();
     auto setTest = [&](bool on) {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);
     };

@@ -14,7 +14,7 @@
 // RandomMapModifier remaps every light to another — a 1:1 permutation — and reshuffles
 // on a bpm timer. A static fold: modifyLogical folds a physical coord to its permuted
 // logical coord (the box is unchanged). These pin the bijection, determinism, reshuffle,
-// and the empty-grid degrade, plus the loop() beat behaviour through a real Layer.
+// and the empty-grid degrade, plus the tick() beat behaviour through a real Layer.
 
 namespace {
 
@@ -114,7 +114,7 @@ TEST_CASE("RandomMapModifier rebuilds on a grid resize") {
     for (mm::nrOfLightsType i = 0; i < n; i++) CHECK(seen[i] == 1);
 }
 
-// loop() timer behaviour through a real Layer: the modifier reads the Layer clock and,
+// tick() timer behaviour through a real Layer: the modifier reads the Layer clock and,
 // on a beat, asks the Layer to rebuild (coalesced). We observe the MODIFIER'S MAPPING
 // before vs after a timed run. A beat reshuffles (mapping differs); bpm 0 freezes it.
 namespace {
@@ -136,7 +136,7 @@ bool mappingChangesOverMs(uint8_t bpm, int total_ms) {
     uint32_t now = 1000;
     for (int e = 0; e <= total_ms; e += 50) {
         mm::platform::setTestNowMs(now + e);
-        layer.loop();   // sets the Layer clock, then ticks the modifier's loop()
+        layer.tick();   // sets the Layer clock, then ticks the modifier's tick()
     }
     const auto after = mapAll(mod, 8, 8, 1);
     mm::platform::setTestNowMs(0);
@@ -144,10 +144,10 @@ bool mappingChangesOverMs(uint8_t bpm, int total_ms) {
 }
 } // namespace
 
-TEST_CASE("RandomMapModifier loop() reshuffles on a beat (bpm 60 ≈ 1/s)") {
+TEST_CASE("RandomMapModifier tick() reshuffles on a beat (bpm 60 ≈ 1/s)") {
     CHECK(mappingChangesOverMs(60, 1500) == true);
 }
 
-TEST_CASE("RandomMapModifier loop() with bpm 0 never reshuffles (frozen)") {
+TEST_CASE("RandomMapModifier tick() with bpm 0 never reshuffles (frozen)") {
     CHECK(mappingChangesOverMs(0, 5000) == false);
 }

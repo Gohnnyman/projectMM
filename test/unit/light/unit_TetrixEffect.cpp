@@ -7,7 +7,7 @@
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time
 
 // TetrixEffect runs one falling-brick state machine per X column. Every column is seeded with a 2 s
-// start delay (step = millis()+2000) in onBuildState(), so nothing renders until that delay elapses;
+// start delay (step = millis()+2000) in prepare(), so nothing renders until that delay elapses;
 // once it does the column spawns a brick that falls and stacks. The per-effect Random8 has a fixed
 // default seed, so with the clock frozen via setTestNowMs the whole effect is deterministic — the
 // cases below freeze/advance virtual time so the state machine crosses its delays predictably. Each
@@ -46,13 +46,13 @@ bool anyLit(mm::Layer& layer) {
 // nothing: the buffer is entirely black even though the effect is enabled and built.
 TEST_CASE("TetrixEffect renders black during the start delay") {
     ClockGuard guard;
-    mm::platform::setTestNowMs(1000);   // freeze; onBuildState seeds step = 1000+2000
+    mm::platform::setTestNowMs(1000);   // freeze; prepare seeds step = 1000+2000
 
     TetrixRig rig(8, 8);
     rig.layer.applyState();
 
     // Still inside the 2 s start window (3000 > 1000), so the state machine only waits.
-    rig.layer.loop();
+    rig.layer.tick();
 
     CHECK(rig.grid.width * rig.grid.height == 64);
     CHECK_FALSE(anyLit(rig.layer));
@@ -73,7 +73,7 @@ TEST_CASE("TetrixEffect lights up with palette colour after the start delay") {
     bool lit = false;
     for (uint32_t t = 3000; t <= 8000 && !lit; t += 25) {
         mm::platform::setTestNowMs(t);
-        rig.layer.loop();
+        rig.layer.tick();
         lit = anyLit(rig.layer);
     }
     REQUIRE(lit);
@@ -95,7 +95,7 @@ TEST_CASE("TetrixEffect lights up with palette colour after the start delay") {
 TEST_CASE("TetrixEffect survives degenerate and minimal grids") {
     ClockGuard guard;
 
-    // 0×0×0: onBuildState allocates zero drops, loop() bails on the w<=0 guard.
+    // 0×0×0: prepare allocates zero drops, tick() bails on the w<=0 guard.
     {
         TetrixRig rig(0, 0);
         rig.grid.depth = 0;
@@ -103,7 +103,7 @@ TEST_CASE("TetrixEffect survives degenerate and minimal grids") {
         rig.layer.applyState();
         for (uint32_t t = 0; t <= 6000; t += 500) {
             mm::platform::setTestNowMs(t);
-            rig.layer.loop();
+            rig.layer.tick();
         }
         CHECK(rig.layer.buffer().count() == 0);
     }
@@ -115,7 +115,7 @@ TEST_CASE("TetrixEffect survives degenerate and minimal grids") {
         rig.layer.applyState();
         for (uint32_t t = 0; t <= 8000; t += 25) {
             mm::platform::setTestNowMs(t);
-            rig.layer.loop();
+            rig.layer.tick();
         }
         CHECK(rig.layer.buffer().count() == 1);
     }

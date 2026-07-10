@@ -33,7 +33,7 @@
 
 namespace mm {
 
-void HttpServerModule::onBuildControls() {
+void HttpServerModule::defineControls() {
     controls_.addUint16("port", port);
 }
 
@@ -43,15 +43,15 @@ void HttpServerModule::setup() {
     }
 }
 
-void HttpServerModule::teardown() {
+void HttpServerModule::release() {
     previewSend_.active = false;   // drop any in-flight send before the clients go (body is borrowed)
     for (auto& ws : wsClients_) ws.close();
     server_.close();
 }
 
-void HttpServerModule::loop20ms() {
+void HttpServerModule::tick20ms() {
     // Drain the in-flight resumable preview frame on the TRANSPORT-poll cadence (20 ms), NOT the
-    // per-render-tick loop(): pushing frame bytes to the socket must not be charged to the LED
+    // per-render-tick tick(): pushing frame bytes to the socket must not be charged to the LED
     // render hot path. The render tick stays free of preview work; the preview frame rate is
     // bounded by this 20 ms drain cadence (a few fps at large full-res frames) — an acceptable
     // trade, since the preview is a *view* and the LEDs are not. This drain is the consumer-side
@@ -68,7 +68,7 @@ void HttpServerModule::loop20ms() {
     if (conn.valid()) handleConnection(conn);
 }
 
-void HttpServerModule::loop1s() {
+void HttpServerModule::tick1s() {
     pushStateToWebSockets();
 }
 
@@ -548,7 +548,7 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
 // then reads the remainder straight off the socket — feeding fsWriteStream in fixed chunks so the
 // device never holds the whole upload in RAM.
 namespace {
-// This drain runs SYNCHRONOUSLY on the loop20ms() tick, which is inside Scheduler::tick — so it
+// This drain runs SYNCHRONOUSLY on the tick20ms() tick, which is inside Scheduler::tick — so it
 // blocks rendering for the duration of the transfer (LEDs freeze until the upload completes or a
 // bound trips). Accepted trade-off: an upload is user-initiated and transient (and a firmware upload
 // reboots the device anyway), so a brief freeze is fine where a persistent one wouldn't be. The two
@@ -572,7 +572,7 @@ constexpr uint32_t kUploadHardMs = 60000;   // absolute whole-request ceiling (a
 // ceiling. Sizing: 1.5 MB at a poor-but-real 10 KB/s is ~2.5 min, so 3 min covers any firmware over any
 // LAN link with margin — deliberately NOT more, because this cap also bounds the worst-case render
 // freeze: like the file upload, the firmware drain runs SYNCHRONOUSLY (otaWriteStream loops uploadPull
-// to completion inside one loop20ms tick), so a slow-but-steady transfer freezes rendering for its whole
+// to completion inside one tick20ms tick), so a slow-but-steady transfer freezes rendering for its whole
 // duration. kUploadIdleMs (5 s, reset per read) still bounds a *stalled* transfer; this bounds a *slow*
 // one. The proper fix is the same zero-freeze drain-a-chunk-per-tick pattern drainPreviewSend uses
 // (backlogged, see the kUploadHardMs comment above) — until it lands, keep this ceiling as tight as a
@@ -803,19 +803,19 @@ void HttpServerModule::buildStateJson(JsonSink& sink) {
 }
 
 void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
-    // Per-module header: name, role, enabled, loopTimeUs (fps/ms display),
+    // Per-module header: name, role, enabled, tickTimeUs (fps/ms display),
     // classSize (static C++ object bytes) + dynamicBytes (heap), controls
     const char* roleStr = roleName(mod->role());
     const char* type = mod->typeName();
     if (!type) type = "";
     sink.appendf(
         "{\"name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"enabled\":%s,"
-        "\"loopTimeUs\":%u,\"classSize\":%u,\"dynamicBytes\":%u",
+        "\"tickTimeUs\":%u,\"classSize\":%u,\"dynamicBytes\":%u",
         mod->name() ? mod->name() : "",
         type,
         roleStr,
         mod->enabled() ? "true" : "false",
-        static_cast<unsigned>(mod->loopTimeUs()),
+        static_cast<unsigned>(mod->tickTimeUs()),
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
     writeStatus(sink, mod);
@@ -1335,7 +1335,7 @@ void HttpServerModule::writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, b
         "%s{\"name\":\"%s\",\"us\":%u,\"classSize\":%u,\"heap\":%u",
         first ? "" : ",",
         mod->name() ? mod->name() : "?",
-        static_cast<unsigned>(mod->loopTimeUs()),
+        static_cast<unsigned>(mod->tickTimeUs()),
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
     writeStatus(sink, mod);
@@ -1380,12 +1380,12 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     // runs after persistence load; single source of truth.
     if (scheduler_) scheduler_->ensureUniqueName(mod);
 
-    // Lifecycle in Scheduler::setup() order: onBuildControls() (bind buffers) →
+    // Lifecycle in Scheduler::setup() order: defineControls() (bind buffers) →
     // setup() (may read them) → applyState() (build if effectively-enabled, else release).
-    mod->onBuildControls();
+    mod->defineControls();
     mod->setup();
     mod->applyState();
-    if (scheduler_) scheduler_->buildState();
+    if (scheduler_) scheduler_->prepareTree();
 
     // Persist the new tree shape (debounced save via noteDirty).
     parent->markDirty();
@@ -1424,7 +1424,7 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
 
 // Apply-core: DELETE every user-editable child of `parentName` (the catalog
 // inject's replaceChildren — an entry's effects replace the boot defaults instead
-// of stacking). Same removeChild → teardown → deleteTree the HTTP delete does.
+// of stacking). Same removeChild → release → deleteTree the HTTP delete does.
 // Code-wired children (Preview, Improv) are left in place; they aren't what a
 // catalog entry replaces. Transport-free.
 HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* parentName) {
@@ -1437,12 +1437,12 @@ HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* pare
         auto* c = parent->child(static_cast<uint8_t>(i));
         if (!c || !c->userEditable()) continue;
         parent->removeChild(c);
-        c->teardown();
+        c->release();
         Scheduler::deleteTree(c);
         removedAny = true;
     }
     if (removedAny) {
-        if (scheduler_) scheduler_->buildState();
+        if (scheduler_) scheduler_->prepareTree();
         parent->markDirty();
         FilesystemModule::noteDirty();
     }
@@ -1497,7 +1497,7 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
 
     // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
     // have no parent — they're registered via Scheduler::addModule in main.cpp and the
-    // top-level shape is policy-fixed. Reject the delete here instead of teardown+delete'ing
+    // top-level shape is policy-fixed. Reject the delete here instead of release+delete'ing
     // a module that the scheduler still holds a pointer to (which would dangle on next tick).
     auto* parent = mod->parent();
     if (!parent) {
@@ -1521,10 +1521,10 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     // here would only free mod's children_ pointer array (MoonModule's
     // destructor calls `delete[] children_`); each child module the array
     // pointed to would leak. Use the same pair handleReplaceModule does.
-    mod->teardown();
+    mod->release();
     Scheduler::deleteTree(mod);
 
-    if (scheduler_) scheduler_->buildState();
+    if (scheduler_) scheduler_->prepareTree();
 
     // Persist the new tree shape — marking the parent dirty rewrites its file
     // without the deleted child slot. The parent is guaranteed non-null by the
@@ -1597,14 +1597,14 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     MoonModule* old = parent->replaceChildAt(index, fresh);
 
     // Lifecycle on the fresh module — same phase order as the add path.
-    fresh->onBuildControls();
+    fresh->defineControls();
     fresh->setup();
     fresh->applyState();
 
-    // Tear down the old subtree (teardown + recursive delete) — same pair
+    // Tear down the old subtree (release + recursive delete) — same pair
     // FilesystemModule::applyNode uses; a bare delete would leak its children.
     if (old) {
-        old->teardown();
+        old->release();
         Scheduler::deleteTree(old);
     }
 
@@ -1615,9 +1615,9 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     // that triggers a suffix. No-op for a preserved custom name that's unique.
     if (scheduler_) scheduler_->ensureUniqueName(fresh);
 
-    // Re-run onBuildState across the tree so Layer LUT / Drivers buffer
+    // Re-run prepare across the tree so Layer LUT / Drivers buffer
     // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.
-    if (scheduler_) scheduler_->buildState();
+    if (scheduler_) scheduler_->prepareTree();
 
     // Persist: children are encoded positionally, so marking the parent dirty
     // rewrites "<index>.type" with the new typeName at the same slot.
@@ -1672,7 +1672,7 @@ void HttpServerModule::serveTypes(platform::TcpConnection& conn) {
 void HttpServerModule::writeTypeDefaults(JsonSink& sink, const char* typeName) {
     MoonModule* probe = ModuleFactory::create(typeName);
     if (!probe) return;
-    probe->onBuildControls();
+    probe->defineControls();
     auto& cs = probe->controls();
     bool first = true;
     for (uint8_t i = 0; i < cs.count(); i++) {
@@ -1685,7 +1685,7 @@ void HttpServerModule::writeTypeDefaults(JsonSink& sink, const char* typeName) {
         writeControlValue(sink, c);
         first = false;
     }
-    probe->teardown();
+    probe->release();
     delete probe;
 }
 
@@ -1715,7 +1715,7 @@ void HttpServerModule::handleMoveModule(platform::TcpConnection& conn, const cha
     // file is rewritten with the new order (same as add/delete handlers).
     parent->markDirty();
     FilesystemModule::noteDirty();
-    if (scheduler_) scheduler_->buildState();
+    if (scheduler_) scheduler_->prepareTree();
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 
@@ -2044,10 +2044,10 @@ bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen
     previewSend_.bodyLen = bodyLen;
     for (int i = 0; i < MAX_WS_CLIENTS; i++) previewSend_.sent[i] = 0;
     previewSend_.active = true;
-    // Deliberately do NOT drain here. sendBufferedFrame is called from PreviewDriver's loop() on the
+    // Deliberately do NOT drain here. sendBufferedFrame is called from PreviewDriver's tick() on the
     // RENDER thread; a socket writeSome is variable-cost (0..~ms) and would land that cost — and its
     // jitter — directly on the render tick, hitching the LEDs. So we only queue the frame (copy the
-    // header, point at the body) and let drainPreviewSend() push bytes purely on loop20ms, off the
+    // header, point at the body) and let drainPreviewSend() push bytes purely on tick20ms, off the
     // render hot path. The frame starts draining within one transport poll (≤20 ms).
     return true;
 }

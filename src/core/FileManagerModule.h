@@ -43,13 +43,13 @@ namespace mm {
 /// @card FileManagerModule.png
 class FileManagerModule : public MoonModule {
 public:
-    void onBuildControls() override;
+    void defineControls() override;
     void setup() override;
-    void loop1s() override;
+    void tick1s() override;
 
 private:
     bool showHidden_ = false;      // reveal dot-prefixed entries (forwarded to /api/dir by the UI)
-    uint32_t usedBytes_ = 0;       // "filesystem" progress: bytes used, refreshed in loop1s
+    uint32_t usedBytes_ = 0;       // "filesystem" progress: bytes used, refreshed in tick1s
     uint32_t totalBytes_ = 0;      // "filesystem" progress: partition total, read once at build
 };
 

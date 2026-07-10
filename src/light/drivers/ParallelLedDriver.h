@@ -68,7 +68,7 @@ public:
 
     /// On-device loopback self-test — jumper a lane's TX to `loopbackRxPin`, tick to transmit a
     /// known WS2812 pattern and bit-verify the capture, proving the peripheral emits correct bytes
-    /// on real silicon. A persistent on/off mode (see onUpdate): while on it re-runs on every
+    /// on real silicon. A persistent on/off mode (see onControlChanged): while on it re-runs on every
     /// relevant change; off clears the verdict. The verdict lands in the status slot.
     bool     loopbackTest = false;
     /// Optional TX override for the self-test: when set (>= 0), the loopback transmits on THIS pin
@@ -86,7 +86,7 @@ public:
     /// `ledsPerPin` text lists, any derived-supplied bus controls (i80 adds
     /// clockPin/dcPin, Parlio none), and the loopback self-test controls (TX/RX pin
     /// overrides always bound but shown only in test mode).
-    void onBuildControls() override {
+    void defineControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
@@ -101,8 +101,8 @@ public:
 
     /// A change to the pins, per-lane counts, the window, or a derived bus control
     /// (clockPin/dcPin on i80) re-parses and re-inits the bus live via the
-    /// onBuildState sweep.
-    bool controlChangeTriggersBuildState(const char* name) const override {
+    /// prepare sweep.
+    bool controlChangeTriggersPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || isWindowControl(name)
             || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80
@@ -110,9 +110,9 @@ public:
 
     /// React to a control change off the render loop. loopbackTest is a persistent
     /// on/off mode: while ON, the self-test re-runs on every relevant change (with a
-    /// lane-config refresh first, since onUpdate precedes the onBuildState sweep);
+    /// lane-config refresh first, since onControlChanged precedes the prepare sweep);
     /// turning it OFF clears the verdict and re-derives the real driver status.
-    void onUpdate(const char* name) override {
+    void onControlChanged(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
         const bool isPinControl  = std::strcmp(name, "pins") == 0
                                 || std::strcmp(name, "loopbackTxPin") == 0
@@ -126,8 +126,8 @@ public:
             parseConfig();
             reinit();
         } else if (loopbackTest && (isTestControl || isPinControl)) {
-            // A pin edit changes laneList_/laneCount_/frameBytes_, but onUpdate runs
-            // BEFORE the onBuildState() sweep (and loopbackRxPin doesn't trigger that
+            // A pin edit changes laneList_/laneCount_/frameBytes_, but onControlChanged runs
+            // BEFORE the prepare() sweep (and loopbackRxPin doesn't trigger that
             // sweep at all), so refresh the lane config here before testing it —
             // otherwise the self-test would build its private bus from stale pins.
             if (isPinControl) { parseConfig(); reinit(); }
@@ -136,21 +136,21 @@ public:
     }
 
     /// One-time wiring only (parse the lane lists into members); the bus acquire lives in
-    /// onBuildState(), the sole resource gate. Enabled-independent — the acquire happens in the
-    /// buildState sweep that always follows.
+    /// prepare(), the sole resource gate. Enabled-independent — the acquire happens in the
+    /// prepareTree sweep that always follows.
     void setup() override { parseConfig(); }
     /// Deinit the bus, then clear the shared fail/config-error state
-    /// (DriverBase::teardown()).
-    void teardown() override {
+    /// (DriverBase::release()).
+    void release() override {
         deinit();
-        DriverBase::teardown();   // clears failBuf_ + configErr_
+        DriverBase::release();   // clears failBuf_ + configErr_
     }
 
-    /// Pure build (see MoonModule::onBuildState): re-parse the lanes and (re)init the bus off the
+    /// Pure build (see MoonModule::prepare): re-parse the lanes and (re)init the bus off the
     /// hot path. No enabled() check — core's applyState() calls this only when effectively-enabled
-    /// and routes to teardown() (bus + DMA buffer freed) otherwise, so a shared GPIO is released
+    /// and routes to release() (bus + DMA buffer freed) otherwise, so a shared GPIO is released
     /// when the driver, or a parent, is disabled.
-    void onBuildState() override {
+    void prepare() override {
         parseConfig();
         reinit();
     }
@@ -168,7 +168,7 @@ public:
     /// active lane and transposes it into 3-slot bus bytes in the platform-owned DMA
     /// buffer, then ships the frame as one autonomous transfer. Inert off this chip
     /// and idle until inited with a source buffer + correction.
-    void loop() override {
+    void tick() override {
         if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
         if (!inited_ || !dmaBuf_ || !sourceBuffer_ || !sourceBuffer_->data()
             || !correction_ || laneCount_ == 0 || maxLaneLights_ == 0) return;

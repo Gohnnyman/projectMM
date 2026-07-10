@@ -37,7 +37,7 @@ public:
     // MoonLight default 2, range 1..10.
     uint8_t scale = 2;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("scale", scale, 1, 10);
     }
 

@@ -65,14 +65,14 @@ TEST_CASE("TasksModule: a fixed System module (Generic role, no delete affordanc
 }
 
 TEST_CASE("TasksModule: the empty desktop snapshot is safe (no RTOS on host)") {
-    // loop1s refreshes the (empty on host) task snapshot + fills core0/core1 (empty strings). This
+    // tick1s refreshes the (empty on host) task snapshot + fills core0/core1 (empty strings). This
     // just confirms the refresh path doesn't crash and the tasks list serializes to an empty array.
     platform::setTestTaskSnapshot(nullptr, 0, "");
     Scheduler scheduler;
     TasksModule tasks;
     scheduler.addModule(&tasks);
     scheduler.setup();
-    tasks.loop1s();   // platform::taskSnapshot returns 0 on desktop → 0 rows, no crash
+    tasks.tick1s();   // platform::taskSnapshot returns 0 on desktop → 0 rows, no crash
     CHECK(true);      // reaching here without a crash is the assertion
 }
 
@@ -89,7 +89,7 @@ TEST_CASE("TasksModule: the tasks list renders the injected RTOS tasks with thei
     TasksModule tasks;
     scheduler.addModule(&tasks);
     scheduler.setup();
-    tasks.loop1s();   // pulls the injected snapshot into the ListSource
+    tasks.tick1s();   // pulls the injected snapshot into the ListSource
 
     const ListSource* src = tasksSource(tasks);
     REQUIRE(src != nullptr);
@@ -127,7 +127,7 @@ TEST_CASE("TasksModule: the render task's detail nests the modules + the ∑/tic
     scheduler.addModule(&b);
     scheduler.addModule(&tasks);
     scheduler.setup();
-    tasks.loop1s();
+    tasks.tick1s();
 
     const ListSource* src = tasksSource(tasks);
     REQUIRE(src != nullptr);

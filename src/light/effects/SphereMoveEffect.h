@@ -35,11 +35,11 @@ public:
 
     uint8_t speed = 50;  // origin sweep rate (0..99); higher = faster (divisor is 100-speed)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 0, 99);
     }
 
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         const int d = depth();

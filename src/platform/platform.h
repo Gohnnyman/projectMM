@@ -14,7 +14,7 @@ uint32_t micros();
 // of reading the platform clock. Production code never calls this; tests use it
 // to drive virtual time deterministically (replaces the wall-clock delayMs in
 // animation tests). Pass 0 to restore real-clock behaviour — tests must reset
-// in teardown so cases stay independent. ESP32 honours the override too so a
+// in release so cases stay independent. ESP32 honours the override too so a
 // scenario-tests run on real hardware can still freeze time if needed.
 void setTestNowMs(uint32_t ms);
 
@@ -54,7 +54,7 @@ size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
 // FreeRTOS type escapes src/platform/ (the platform-boundary rule). ESP32 fills it from
 // uxTaskGetSystemState (the textbook RTOS-introspection call, needs CONFIG_FREERTOS_USE_TRACE_
 // FACILITY); it uses a fixed static scratch (no heap) but briefly suspends the scheduler while it
-// walks the task list — call it off the per-frame path (loop1s, once a second), not from loop().
+// walks the task list — call it off the per-frame path (tick1s, once a second), not from tick().
 // Desktop returns 0 (no RTOS). cpuPermille is 0..1000, or kTaskCpuUnmeasured when run-time-stats are
 // compiled out (the cheap default) — the caller shows a CPU% column only when it's a real number.
 enum class TaskState : uint8_t { Running, Ready, Blocked, Suspended, Deleted, Invalid, Unknown };
@@ -99,14 +99,14 @@ struct GpioCapability {
 GpioCapability gpioCapability(uint8_t gpio);
 // Test-only (desktop): make gpioCapability(gpio) return `cap` for one specific gpio, so PinsModule's
 // severity derivation (reserved→error, driven-role-on-strap/input-only→warn) is testable on the host
-// where every real pin is otherwise "safe". Call per gpio under test; reset in teardown.
+// where every real pin is otherwise "safe". Call per gpio under test; reset in release.
 void setTestGpioCapability(uint8_t gpio, GpioCapability cap);
 void clearTestGpioCapability();
 
 // Live electrical state of one GPIO — the pin map's second axis (what a pin is *doing now*, vs.
 // gpioCapability's static "what it *is*"). The see-the-wire HAL check: gpio_get_level reads the pad on
 // ANY pin, even one a peripheral drives, so a driver's output must toggle when it renders and a mic
-// clock must toggle when the mic runs. Sampled on loop1s (off the hot path), not per frame. Desktop
+// clock must toggle when the mic runs. Sampled on tick1s (off the hot path), not per frame. Desktop
 // returns valid=false (no real pins) so the UI omits the live columns there.
 struct GpioLiveState {
     bool valid = false;    // pin is readable (false = out of range, or desktop → columns omitted)
@@ -123,7 +123,7 @@ void clearTestGpioLiveState();
 
 // Test-only cap on the value maxAllocBlock() reports; 0 = no cap (real value).
 // Lets a test force MappingLUT's paged-destinations fallback without an actual
-// fragmented heap. Production never calls this; reset to 0 in teardown.
+// fragmented heap. Production never calls this; reset to 0 in release.
 void setTestMaxAllocBlock(size_t bytes);
                                 // (scarce; use this as the memory-pressure KPI).
                                 // PSRAM blocks dominate on S3/S2 boards and make
@@ -273,7 +273,7 @@ bool mdnsInit(const char* deviceName);
 // Stop advertising: remove both services and clear the hostname, keeping the stack up so
 // a later mdnsInit re-advertises without a full re-init (the mDNS toggle uses this).
 void mdnsStop();
-// Full mdns_free — call at teardown.
+// Full mdns_free — call at release.
 void mdnsShutdown();
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
@@ -312,7 +312,7 @@ bool http_fetch_to_ota(const char* url,
 // set_boot_partition, then RETURNS true (it does NOT reboot — the caller sends its HTTP 200 first,
 // then reboots into the flashed image, the same order /api/reboot uses). SYNCHRONOUS (unlike
 // http_fetch_to_ota, which runs on its own task): the caller is the HTTP request handler, which runs
-// on the loop20ms tick INSIDE Scheduler::tick — so this blocks rendering for the flash duration. That
+// on the tick20ms tick INSIDE Scheduler::tick — so this blocks rendering for the flash duration. That
 // is the accepted trade-off (a firmware upload is user-initiated and reboots the device on success),
 // bounded by the same upload idle/hard limits; the caller needs the result to reply.
 // `statusBuf` / `bytesReadOut` are updated in place (bytesTotal is the caller-supplied
@@ -326,7 +326,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
 // with `reqBody` (NUL-terminated; "" for none — a Content-Length + JSON content-type are
 // added when non-empty), and copies the RESPONSE BODY into `body` (NUL-terminated, truncated
 // to bodyLen-1). Returns the HTTP status code, or 0 on connect/timeout/error. Blocks up to
-// `timeoutMs`. Caller runs this OFF the render hot path (HueDriver on loop1s, like the OTA
+// `timeoutMs`. Caller runs this OFF the render hot path (HueDriver on tick1s, like the OTA
 // fetch / the old mDNS browse). Built on raw sockets, same primitives as the HTTP server.
 int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
                 const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen);
@@ -341,7 +341,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
 // true it emits Improv's wrong-state error frame. Otherwise it copies the
 // credentials into the caller-owned buffers `ssidOut` / `passwordOut` (sized
 // to hold 33 + 64 bytes, matching NetworkModule's storage) and sets `*ready`
-// to true. The caller's loop1s() polls `ready`, copies the buffers onward,
+// to true. The caller's tick1s() polls `ready`, copies the buffers onward,
 // and clears the flag.
 //
 // `statusBuf` mirrors http_fetch_to_ota's pattern: the task writes short
@@ -430,7 +430,7 @@ public:
     }
 
     // Non-blocking outbound connect to host:port, for a client that must NOT stall the render loop
-    // (MQTT runs on loop1s inside Scheduler::tick). `connectStart` resolves `host` (a hostname via
+    // (MQTT runs on tick1s inside Scheduler::tick). `connectStart` resolves `host` (a hostname via
     // getaddrinfo — one bounded DNS lookup — or a dotted-quad IP) and kicks off a non-blocking
     // connect, returning immediately; `connectPoll` checks the in-flight connect WITHOUT blocking and
     // returns Pending / Connected / Failed. The caller polls across ticks and enforces its own overall

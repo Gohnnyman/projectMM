@@ -45,7 +45,7 @@ public:
     bool    freqMap    = false;  // position the dot by dominant frequency instead of scanning/random
     bool    geqScanner = false;  // steady sweep across the strip (vs. random jump) when freqMap is off
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fadeRate", fadeRate, 1, 255);
         controls_.addUint8("blur", blur, 1, 255);
         controls_.addBool("freqMap", freqMap);
@@ -55,13 +55,13 @@ public:
     // WLED clears the segment once on the first call (SEGENV.call == 0 → fadeToBlackBy(255), a full
     // wipe to black). A grid rebuild (resize / re-add) restarts the effect, so reset the one-shot
     // clear + the scanner/band cursors here so the dot starts from a known state on any reconfig.
-    void onBuildState() override {
+    void prepare() override {
         firstFrame_ = true;
         freqBand_   = 0;
         scanPos_    = 0;
     }
 
-    void loop() override {
+    void tick() override {
         const int cols = width();
         const int rows = height();
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;

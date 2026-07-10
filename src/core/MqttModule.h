@@ -59,7 +59,7 @@ namespace mm {
 /// comparison is always-newer, and this update entity is where a real projectMM update surfaces once
 /// the release-check component lands.
 ///
-/// **Lifecycle** (all on loop1s(), off the render hot path — MQTT is slow control): connect lazily
+/// **Lifecycle** (all on tick1s(), off the render hot path — MQTT is slow control): connect lazily
 /// once `networkReady() && enabled`, CONNECT → CONNACK → SUBSCRIBE to the `set` topics, PINGREQ every
 /// keepalive/2, drain inbound bytes through MqttInboundParser and route PUBLISHes to Drivers, and
 /// publish the `get` topics whenever the local value changes (and on connect, so mqttthing never
@@ -76,11 +76,11 @@ public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
 
     void setup() override;
-    void teardown() override;                          // free the lazily-allocated discovery buffers
-    void onBuildControls() override;
-    void onUpdate(const char* controlName) override;   // a broker/port/cred change re-homes the socket
+    void release() override;                          // free the lazily-allocated discovery buffers
+    void defineControls() override;
+    void onControlChanged(const char* controlName) override;   // a broker/port/cred change re-homes the socket
     void onEnabled(bool enabled) override;             // enable/disable → connect / clean DISCONNECT
-    void loop1s() override;
+    void tick1s() override;
 
     /// Feed inbound bytes as if they arrived from the broker socket — the entry the host unit tests
     /// drive (there's no live broker in ctest). Mirrors IrService::injectCodeForTest.
@@ -98,7 +98,7 @@ public:
     static constexpr size_t kDiscoveryDynamicBytes = 320 + 448;
 
 private:
-    // Connection state machine — advanced by loop1s(). ConnectingTcp = a non-blocking TCP connect is
+    // Connection state machine — advanced by tick1s(). ConnectingTcp = a non-blocking TCP connect is
     // in flight (polled, never blocks the tick); Connecting = TCP up, CONNECT sent, awaiting CONNACK.
     enum class Conn : uint8_t { Idle, ConnectingTcp, Connecting, Connected };
 
@@ -177,7 +177,7 @@ private:
     bool     lastConnectFailed_ = false;  // widen the backoff after a failure (esp. a slow DNS lookup)
 
     // Discovery-config scratch — HEAP, allocated lazily only when discovery actually publishes
-    // (connected + haDiscovery on), freed in teardown() and when discovery is turned off, per the
+    // (connected + haDiscovery on), freed in release() and when discovery is turned off, per the
     // pay-for-what-you-use rule (architecture.md § Memory strategy): a device that has the MQTT module
     // but never enables HA discovery pays ZERO for it. Heap (not a fixed member) also keeps the ~360 B
     // config frame off the shared 8 KB main-task stack (the P4 registerType-stack lesson). Two regions
@@ -190,7 +190,7 @@ private:
     char*    discoveryPayload_ = nullptr;
     uint8_t* discoveryBuf_     = nullptr;
     bool ensureDiscoveryBuffers();   // lazily alloc both; false on OOM. Sets dynamicBytes.
-    void freeDiscoveryBuffers();     // free both + dynamicBytes(0). Called on teardown / discovery-off.
+    void freeDiscoveryBuffers();     // free both + dynamicBytes(0). Called on release / discovery-off.
 
     // Test-only outbound capture (null in production). sendPacket appends every emitted packet here.
     uint8_t* sendCapture_    = nullptr;

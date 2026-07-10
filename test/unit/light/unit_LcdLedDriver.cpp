@@ -29,7 +29,7 @@ void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     // empty buffer on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
-    d.onBuildControls();
+    d.defineControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
     d.applyState();
@@ -125,7 +125,7 @@ TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
     REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
     REQUIRE(src.allocate(64, 3));
     corr.rebuild(255, mm::LightPreset::GRB);
-    d.onBuildControls();
+    d.defineControls();
     d.setSourceBuffer(&src);
     d.setCorrection(&corr);
     d.applyState();
@@ -133,7 +133,7 @@ TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
     CHECK(d.laneCount() == 0);            // no lanes claimed
     CHECK(d.frameBytes() == 0);
     CHECK(d.status() != nullptr);         // "set pins" surfaced, not silent
-    d.loop();                             // must be a no-op, not a crash
+    d.tick();                             // must be a no-op, not a crash
 }
 
 // IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than
@@ -161,26 +161,26 @@ TEST_CASE("LcdLedDriver tolerates a zero-light buffer") {
     CHECK(d.laneCount() == 8);       // pins parse fine
     CHECK(d.maxLaneLights() == 0);
     CHECK(d.frameBytes() == 0);
-    d.loop();                        // must be a no-op, not a crash
+    d.tick();                        // must be a no-op, not a crash
     CHECK(true);
 }
 
-// setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
-TEST_CASE("LcdLedDriver setup/teardown is repeatable") {
+// setup/release cycles leave no residue (status clean, ASAN-checked heap).
+TEST_CASE("LcdLedDriver setup/release is repeatable") {
     mm::LcdLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
     corr.rebuild(255, mm::LightPreset::GRB);
     std::strcpy(d.pins, "1,2,4,5,6,7,8,9");   // pins now default UNSET
-    d.onBuildControls();
+    d.defineControls();
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();
         d.setSourceBuffer(&src);
         d.setCorrection(&corr);
         d.applyState();
         REQUIRE(d.laneCount() == 8);
-        d.teardown();
+        d.release();
         CHECK(d.status() == nullptr);
     }
 }
@@ -188,7 +188,7 @@ TEST_CASE("LcdLedDriver setup/teardown is repeatable") {
 // loopbackRxPin is bound always, visible only while loopbackTest is on.
 TEST_CASE("LcdLedDriver loopbackRxPin tracks the loopbackTest toggle") {
     mm::LcdLedDriver d;
-    d.onBuildControls();
+    d.defineControls();
     bool found = false;
     for (uint8_t i = 0; i < d.controls().count(); i++) {
         if (std::strcmp(d.controls()[i].name, "loopbackRxPin") == 0) {
@@ -206,7 +206,7 @@ TEST_CASE("LcdLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // ways and asserts the control stays bound while flipping visibility).
 TEST_CASE("LcdLedDriver loopbackTxPin tracks the loopbackTest toggle") {
     mm::LcdLedDriver d;
-    d.onBuildControls();
+    d.defineControls();
     auto setTest = [&](bool on) {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);
     };

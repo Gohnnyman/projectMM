@@ -10,7 +10,7 @@ namespace mm {
 // Randomly remaps every light to another light — a true 1:1 permutation (every light
 // goes somewhere, no gaps or duplicates) — and reshuffles on a `bpm` timer. A static
 // fold whose mapping changes on a beat: modifyLogical applies the permutation (the box
-// is unchanged, each light maps to exactly one other), and the bpm tick (loop()) bumps
+// is unchanged, each light maps to exactly one other), and the bpm tick (tick()) bumps
 // the generation and rebuilds the Layer's mapping on a beat boundary — the same rebuild
 // path a control change takes, scoped to one Layer. (Not a per-frame modifyLive: a
 // permutation is a discrete reshuffle, not smooth motion, so a beat-gated rebuild is the
@@ -34,13 +34,13 @@ public:
 
     ~RandomMapModifier() override { releasePerm(); }
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("bpm", bpm, 0, 60);
     }
 
     // `bpm` only changes future reshuffle timing — the current permutation is unchanged,
-    // and loop() reads bpm live each tick, so a bpm edit needs no rebuild.
-    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return false; }
+    // and tick() reads bpm live each tick, so a bpm edit needs no rebuild.
+    bool controlChangeTriggersPrepare(const char* /*controlName*/) const override { return false; }
 
     // A remap leaves the box unchanged but needs it for the permutation — stash it.
     void modifyLogicalSize(Coord3D& size) override { box_ = size; }
@@ -72,9 +72,9 @@ public:
 
     // Dynamic-modifier tick: accumulate the bpm timer; on each beat boundary bump the
     // generation (so the next rebuild reshuffles) and trigger the Layer's rebuild.
-    // bpm 0 freezes. Layer::loop() invokes this per enabled modifier child; it sets a
-    // dirty flag the Layer coalesces into one rebuild (see Layer::loop()).
-    void loop() override {
+    // bpm 0 freezes. Layer::tick() invokes this per enabled modifier child; it sets a
+    // dirty flag the Layer coalesces into one rebuild (see Layer::tick()).
+    void tick() override {
         const uint32_t now = platform::millis();
         if (lastElapsed_ == 0) lastElapsed_ = now;   // first tick: no dt jump
         const uint32_t dt = now - lastElapsed_;
@@ -87,7 +87,7 @@ public:
         if (beat != lastBeat_) {
             lastBeat_ = beat;
             reshuffle();              // bump the generation; the Layer's rebuild applies it
-            needsRebuild_ = true;     // Layer::loop() reads + clears this, one rebuild/frame
+            needsRebuild_ = true;     // Layer::tick() reads + clears this, one rebuild/frame
         }
     }
 
@@ -161,7 +161,7 @@ private:
     uint64_t phaseNum_ = 0;     // dt*bpm accumulator (numerator; one beat per 60000)
     uint64_t lastBeat_ = 0;
     uint32_t lastElapsed_ = 0;
-    bool     needsRebuild_ = false;   // set on a beat, consumed by Layer::loop (coalesced rebuild)
+    bool     needsRebuild_ = false;   // set on a beat, consumed by Layer::tick (coalesced rebuild)
 };
 
 } // namespace mm
