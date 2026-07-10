@@ -5,6 +5,7 @@
 #include "light/layouts/GridLayout.h"
 
 #include <cstring>
+#include <cstdio>   // snprintf — bounded writes into the fixed text_ buffer
 
 using namespace mm;
 
@@ -38,12 +39,12 @@ TEST_CASE("TextEffect: static text draws glyph pixels, empty draws nothing") {
     Scene s(48, 8);
     s.text.scroll = false;
     s.text.font = 1;                 // 6x8
-    std::strcpy(s.text.text_, "AB");
+    std::snprintf(s.text.text_, sizeof(s.text.text_), "AB");
     s.layer.applyState();
     s.layer.loop();
     CHECK(s.litPixels() > 0);        // "AB" drew something
 
-    std::strcpy(s.text.text_, "");   // empty string → blank frame
+    std::snprintf(s.text.text_, sizeof(s.text.text_), "");   // empty string → blank frame
     s.layer.loop();
     CHECK(s.litPixels() == 0);
 }
@@ -62,7 +63,7 @@ TEST_CASE("TextEffect: newline wraps to a second row") {
     Scene s(24, 16);
     s.text.scroll = false;
     s.text.font = 0;                 // 4x6, height 6
-    std::strcpy(s.text.text_, "A\nB");
+    std::snprintf(s.text.text_, sizeof(s.text.text_), "A\nB");
     s.layer.applyState();
     s.layer.loop();
 
@@ -84,13 +85,13 @@ TEST_CASE("TextEffect: newline wraps to a second row") {
 TEST_CASE("TextEffect: scroll animates and is safe at any size") {
     Scene s(16, 8);
     s.text.scroll = true;
-    std::strcpy(s.text.text_, "MoonModules");
+    std::snprintf(s.text.text_, sizeof(s.text.text_), "MoonModules");
     s.layer.applyState();
     for (int i = 0; i < 5; i++) s.layer.loop();   // several frames — must not crash
     // 1×1 and 0×0 must not crash either.
-    Scene tiny(1, 1); tiny.text.scroll = true; std::strcpy(tiny.text.text_, "X");
+    Scene tiny(1, 1); tiny.text.scroll = true; std::snprintf(tiny.text.text_, sizeof(tiny.text.text_), "X");
     tiny.layer.applyState(); tiny.layer.loop();
-    Scene zero(0, 0); zero.text.scroll = true; std::strcpy(zero.text.text_, "X");
+    Scene zero(0, 0); zero.text.scroll = true; std::snprintf(zero.text.text_, sizeof(zero.text.text_), "X");
     zero.layer.applyState(); zero.layer.loop();
     CHECK(true);   // reaching here without a crash is the assertion
 }

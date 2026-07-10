@@ -123,6 +123,7 @@ nav:
       # resource it is, rather than warning about an unresolvable absolute path.
       - Web installer: https://moonmodules.org/projectMM/install/
   - Use cases:
+      - Build your own MoonModules: usecases/build-your-own-moonmodules.md
       - Home automation: usecases/home-automation.md
       - LED signal integrity: usecases/led-signal-integrity.md
   - Effects & building shows:

@@ -18,7 +18,7 @@
 // modifier is skipped. The single-modifier and sphere cases live in unit_Layer_sparse_mapping.
 
 namespace {
-// Build a dense w×h grid Layer with the given modifiers added in order, run onBuildState.
+// Build a dense w×h grid Layer with the given modifiers added in order, run applyState.
 struct ChainRig {
     mm::Layouts group;
     mm::GridLayout grid;

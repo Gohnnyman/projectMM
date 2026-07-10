@@ -20,7 +20,7 @@
 
 namespace {
 
-// Build a Layer over a single layout, run onBuildState, return it wired.
+// Build a Layer over a single layout, run applyState, return it wired.
 struct LayerRig {
     mm::Layouts group;
     mm::Layer layer;

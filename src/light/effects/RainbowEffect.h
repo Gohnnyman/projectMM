@@ -1,8 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"   // colorFromPalette + the global active palette
-#include "core/color.h"
+#include "light/effects/Effect.h"   // base + render context + draw/palette/math/color helpers
 
 namespace mm {
 

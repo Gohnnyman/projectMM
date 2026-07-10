@@ -20,7 +20,7 @@
 namespace {
 
 // Wire a driver up to a source buffer + correction the way the Drivers container
-// does, then run onBuildState (the sizing hook). Returns nothing; the caller
+// does, then run applyState (the sizing hook). Returns nothing; the caller
 // inspects the driver.
 void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights = 64) {

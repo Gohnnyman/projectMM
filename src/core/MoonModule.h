@@ -141,14 +141,15 @@ public:
     }
 
     /// Called once when the enabled flag flips (the Scheduler runs a full buildState() right
-    /// after, so onBuildState() re-derives state on the same toggle). Default no-op. Override
-    /// ONLY for a genuine edge-triggered one-shot that is NOT "rebuild derived state" — e.g. a
-    /// clean protocol DISCONNECT (MqttModule sends a courtesy MQTT frame + resets its backoff).
-    /// Resource acquire/release does NOT belong here: buffers and peripherals are (re)built and
-    /// freed in onBuildState(), keyed on effectivelyEnabled(), so a disabled module — or a child
-    /// of a disabled parent — releases everything through the one sweep. The scheduler always
-    /// invokes loop()/loop20ms()/loop1s() only while (effectively) enabled, so a disabled
-    /// module's loop never runs.
+    /// after, which routes through applyState() to re-derive state on the same toggle). Default
+    /// no-op. Override ONLY for a genuine edge-triggered one-shot that is NOT "rebuild derived
+    /// state" — e.g. a clean protocol DISCONNECT (MqttModule sends a courtesy MQTT frame + resets
+    /// its backoff). Resource acquire/release does NOT belong here: buffers and peripherals are
+    /// built in onBuildState() and released in teardown(), and applyState() picks which to call
+    /// per node from effectivelyEnabled() — so a disabled module, or a child of a disabled parent,
+    /// releases everything via teardown() through the one sweep. The scheduler always invokes
+    /// loop()/loop20ms()/loop1s() only while (effectively) enabled, so a disabled module's loop
+    /// never runs.
     virtual void onEnabled(bool /*newEnabled*/) {}
 
     /// Cheap per-control reaction, tier 1 of the three-tier control-change split (mirrors
@@ -196,14 +197,15 @@ public:
     /// LUT, the Drivers output buffer. Default propagates to children. Reached via
     /// Scheduler::buildState() (whole-tree) when a tier-2 gate returns true.
     ///
-    /// **This is the sole resource-lifecycle gate.** Build derived state (buffers AND
-    /// peripherals) for the current controls and `effectivelyEnabled()`. When
-    /// `!effectivelyEnabled()` — the module is disabled, or a parent is — build the **empty**
-    /// state: release every buffer and peripheral it holds, so a disabled subtree frees
-    /// everything. The Scheduler runs a full buildState() right after any enable/disable toggle,
-    /// so this hook (not onEnabled) is where acquire-on-enable and release-on-disable both
-    /// happen — one path, boot and runtime alike. A module therefore never checks enabled()
-    /// in setup(): setup() is enabled-independent one-time wiring; the acquire lives here.
+    /// **A pure build — the acquire half of the resource lifecycle.** Build derived state
+    /// (buffers AND peripherals) for the current controls; no `enabled()` check. `applyState()`
+    /// (the core router) calls this ONLY when the module is `effectivelyEnabled()`, and calls
+    /// `teardown()` (the release) otherwise — so a disabled module, or a child of a disabled
+    /// parent, frees everything through `teardown()`, never here. `applyState()` runs on boot
+    /// and right after any enable/disable toggle, so acquire-on-enable and release-on-disable are
+    /// this build/teardown pair, one path, boot and runtime alike. A module therefore never checks
+    /// enabled() in setup() or here: setup() is enabled-independent one-time wiring; the acquire
+    /// lives here; the release lives in teardown().
     ///
     /// Same role as JUCE's `prepareToPlay` or UIKit's `layoutSubviews` — a framework-driven
     /// "set up your derived state for the current config" hook with a no-op default. The verb

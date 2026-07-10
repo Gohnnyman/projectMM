@@ -253,7 +253,7 @@ public:
     ///
     /// Returns the live mic's frame while one exists, else a static all-silent
     /// frame, so an effect added before/without a mic still reads valid silence
-    /// instead of null. The FIRST live module claims the seat in `setup()`, vacates
+    /// instead of null. The FIRST live module claims the seat in `onBuildState()`, vacates
     /// it in `teardown()`, and any running module re-claims an empty seat in
     /// `loop()` — so a device with two mics reads the first consistently, and
     /// removing the active one lets a survivor take over. Add/remove in any order
@@ -264,8 +264,8 @@ public:
     }
 
     void loop() override {
-        // Self-elect as the active mic if the seat is empty. setup() gives it to the first live module
-        // and teardown() vacates it, but removing the active module while a second one is still running
+        // Self-elect as the active mic if the seat is empty. onBuildState() gives it to the first live
+        // module and teardown() vacates it, but removing the active module while a second one is still running
         // would otherwise leave the seat empty (effects go silent). A running module re-claiming an
         // empty seat here keeps latestFrame() pointing at a live frame for ANY add/remove order — the
         // survivor takes over on its next tick (robustness).

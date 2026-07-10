@@ -36,7 +36,7 @@ private:
 };
 
 // Simulate Scheduler::buildState() + one tick: walk the top-level modules calling
-// onBuildState() then loop().
+// applyState() then loop().
 void rebuildAndTick(mm::Layouts& layouts, mm::Layers& layersC, mm::Drivers& driversC) {
     layouts.applyState();
     layersC.applyState();
