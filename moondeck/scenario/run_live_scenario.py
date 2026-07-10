@@ -136,7 +136,7 @@ def _detect_target(state: dict) -> str:
     ESP32: read FirmwareUpdateModule.firmware (`esp32`, `esp32-eth`, `esp32-eth-wifi`,
     `esp32s3-n16r8`, …) — set at compile time from MM_FIRMWARE_NAME and
     exposed through the `firmware` control. Desktop: same key but reports
-    `unknown`, so we substitute pc-<host-os> using the runtime os name (still
+    `unknown`, so we substitute desktop-<host-os> using the runtime os name (still
     distinguishes macOS vs Linux vs Windows builds, which can differ in tick
     noticeably). See docs/architecture.md § Firmware vs board.
     """
@@ -153,8 +153,8 @@ def _detect_target(state: dict) -> str:
     if firmware and firmware != "unknown":
         return firmware
     # Desktop fallback
-    osmap = {"Darwin": "pc-macos", "Linux": "pc-linux", "Windows": "pc-windows"}
-    return osmap.get(platform.system(), "pc-unknown")
+    osmap = {"Darwin": "desktop-macos", "Linux": "desktop-linux", "Windows": "desktop-windows"}
+    return osmap.get(platform.system(), "desktop-unknown")
 
 
 def _sum_dynamic_bytes(state: dict) -> int:
@@ -549,18 +549,18 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 # Defaults reflect run-to-run variance, not "I don't care":
                 #   pc-*       — multi-process OS jitter, 20% pct + 200us absolute
                 #                floor. The floor dominates below ~1ms tick (the
-                #                realistic case for PC scenarios today).
+                #                realistic case for desktop scenarios today).
                 #   esp32-*    — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us
                 #                absolute floor.
                 # KEEP IN SYNC: the in-process runner re-declares the same defaults
                 # at test/scenario_runner.cpp contract-block handler — tuning one
                 # without the other silently desyncs the two tiers.
-                is_pc = target.startswith("pc-")
+                is_desktop = target.startswith("desktop-")
                 tick_tol_pct = contract_block.get("tick_tolerance_pct",
-                                                  20 if is_pc else 10)
+                                                  20 if is_desktop else 10)
                 heap_tol_pct = contract_block.get("heap_tolerance_pct",
-                                                  20 if is_pc else 10)
-                tol_us_abs = contract_block.get("tolerance_us", 200 if is_pc else 5)
+                                                  20 if is_desktop else 10)
+                tol_us_abs = contract_block.get("tolerance_us", 200 if is_desktop else 5)
                 exp_tick = contract_block.get("tick_us")
                 exp_heap = contract_block.get("free_heap")
                 if exp_tick is not None and exp_tick > 0:
@@ -604,7 +604,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                     # asserted: maxBlock is always served by current firmware
                     # (src/core/HttpServerModule.cpp), so 0 means the device
                     # reports zero contiguous heap — a real failure, not a
-                    # missing field. (Contrast with free_heap on PC where 0
+                    # missing field. (Contrast with free_heap on desktop where 0
                     # is the "unlimited" sentinel — that's a desktop-only
                     # convention not used by the live runner.)
                     if max_block <= 0:

@@ -2,7 +2,7 @@
   "name": "scenario_MoonLiveEffect_livescript",
   "module": "MoonLiveEffect",
   "mode": "mutate",
-  "skip_on": ["pc-windows", "pc-linux"],
+  "skip_on": ["desktop-windows", "desktop-linux"],
   "also": [
     "Layouts",
     "GridLayout",
@@ -76,7 +76,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             393
@@ -141,7 +141,7 @@
       "value": "fill(255, 0, 0);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             398
@@ -206,7 +206,7 @@
       "value": "fill(nope);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             267
@@ -271,7 +271,7 @@
       "value": "fill(0, 255, 0);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             414
@@ -336,7 +336,7 @@
       "value": 1,
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -401,7 +401,7 @@
       "value": 16,
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             14
@@ -464,7 +464,7 @@
       "id": "ML",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             10
@@ -529,7 +529,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             16

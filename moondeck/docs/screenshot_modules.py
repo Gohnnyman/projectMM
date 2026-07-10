@@ -17,7 +17,7 @@ Saves to (by domain/type, mirroring src — see docs/backlog/folder-structure-pr
   docs/assets/light/{modifiers,layouts,drivers}/  — other light modules
   docs/assets/core/<TypeName>.png                 — core modules
   docs/assets/ui/ui_overview.png                  — projectMM full-page screenshot
-  docs/assets/ui/moondeck_{pc,esp32,live}.png     — MoonDeck tabs
+  docs/assets/ui/moondeck_{desktop,esp32,live}.png     — MoonDeck tabs
   docs/assets/ui/installer.png                    — web installer page
 
 Usage:
@@ -47,7 +47,7 @@ Prerequisites (one-time, machine-local — NOT in the repo or the venv):
 
 Running server: the script captures against whatever is on --host (default
 :8080). Start ONE fresh server:  uv run moondeck/build/build_desktop.py && ./build/<host>/projectMM
-(or via MoonDeck's PC tab — same per-host build dir, so they share the binary). GOTCHA: a leftover binary on :8080 captures the WRONG
+(or via MoonDeck's Desktop tab — same per-host build dir, so they share the binary). GOTCHA: a leftover binary on :8080 captures the WRONG
 images silently — e.g. a `build/macos/projectMM` from a MoonDeck run still bound
 to the port serves the OLD code, so a renamed/changed effect screenshots as its
 previous version no matter how often you rebuild. The script now prints a STALE
@@ -183,11 +183,11 @@ INSTALLER_URL  = "http://localhost:8000"
 
 EXTRA_SHOTS = [
     (
-        "moondeck_pc.png",
-        f"{MOONDECK_URL}/?tab=pc",
+        "moondeck_desktop.png",
+        f"{MOONDECK_URL}/?tab=desktop",
         ".tab-content.active",
         ["README.md", "moondeck/MoonDeck.md"],
-        "## PC Tab",
+        "## Desktop Tab",
     ),
     (
         "moondeck_esp32.png",
@@ -675,7 +675,7 @@ def main() -> int:
             _get(f"http://{args.host}/api/state", timeout=3)
         except Exception as e:
             print(f"Cannot reach projectMM at {args.host}: {e}")
-            print("Start the server first: uv run moondeck/moondeck.py  (then build+run from PC tab)")
+            print("Start the server first: uv run moondeck/moondeck.py  (then build+run from Desktop tab)")
             return 1
 
     # Module-related state — only meaningful when projectMM is reachable.
@@ -741,7 +741,7 @@ def main() -> int:
         missing = [r for r in ("Layer", "Drivers", "Layouts") if r not in parents]
         if missing:
             print(f"Pipeline containers not found: {missing}")
-            print("Build and run projectMM first (PC tab → Build → Run).")
+            print("Build and run projectMM first (Desktop tab → Build → Run).")
             return 1
         print(f"  Layer={parents['Layer']!r} (nav={nav_roots['Layer']!r})")
         print(f"  Drivers={parents['Drivers']!r} (nav={nav_roots['Drivers']!r})")

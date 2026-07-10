@@ -115,9 +115,9 @@ Once prerequisites are in place, launch MoonDeck, the browser-based dev console:
 uv run moondeck/moondeck.py
 ```
 
-Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [moondeck/MoonDeck.md](moondeck/MoonDeck.md).
+Open `http://localhost:8420`: Desktop tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [moondeck/MoonDeck.md](moondeck/MoonDeck.md).
 
-![Moondeck Pc](docs/assets/ui/moondeck_pc.png)
+![Moondeck Desktop](docs/assets/ui/moondeck_desktop.png)
 
 ## Documentation
 

@@ -79,7 +79,7 @@
         }
       },
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 120,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -87,7 +87,7 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             1,
             319
@@ -105,7 +105,7 @@
             "2026-07-02"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             225,
             445

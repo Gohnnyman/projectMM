@@ -54,8 +54,8 @@ GIF_RE        = re.compile(r'!\[.*?\]\(.*?assets/.*?\.gif.*?\)')
 #   doc_rel_path: repo-relative path to the doc file
 #   anchor_text:  heading/line after which to insert (exact prefix match)
 EXTRA_SHOTS = [
-    ("moondeck_pc.png",    "README.md",           "![MoonDeck]"),
-    ("moondeck_pc.png",    "moondeck/MoonDeck.md", "## PC Tab"),
+    ("moondeck_desktop.png",    "README.md",           "![MoonDeck]"),
+    ("moondeck_desktop.png",    "moondeck/MoonDeck.md", "## Desktop Tab"),
     ("moondeck_esp32.png", "moondeck/MoonDeck.md", "## ESP32 Tab"),
     ("moondeck_live.png",  "moondeck/MoonDeck.md", "## Live Tab"),
     ("installer.png",      "README.md",           "**ESP32 — flash from your browser.**"),

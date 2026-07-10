@@ -66,8 +66,8 @@ _MEASURE_RE = re.compile(
 
 def _host_target() -> str:
     """Same shape run_live_scenario.py's _detect_target falls back to on desktop."""
-    return {"Darwin": "pc-macos", "Linux": "pc-linux", "Windows": "pc-windows"}.get(
-        platform.system(), "pc-unknown"
+    return {"Darwin": "desktop-macos", "Linux": "desktop-linux", "Windows": "desktop-windows"}.get(
+        platform.system(), "desktop-unknown"
     )
 
 
@@ -80,7 +80,7 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
     contracts only when renegotiated."""
     # Honour a scenario-level `skip_on` allowlist of host targets that lack a
     # capability the scenario exercises (today: MoonLive scenarios opt out on
-    # pc-windows / pc-linux — the desktop JIT backend is arm64-only, so an
+    # desktop-windows / desktop-linux — the desktop JIT backend is arm64-only, so an
     # x86_64 host renders dark and the "buffer non-zero" check would fail for
     # a platform-capability reason the scenario isn't the right vehicle to
     # assert. The C++ ctest suite gates the same tests on MM_MOONLIVE_HAS_HOST_JIT.

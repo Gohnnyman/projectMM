@@ -269,7 +269,7 @@ the install button can actually flash.
 
 ### Render-only (no flash)
 
-Quickest. In MoonDeck: **PC tab → Preview Installer**. Or from the CLI:
+Quickest. In MoonDeck: **Desktop tab → Preview Installer**. Or from the CLI:
 
 ```bash
 uv run moondeck/run/preview_installer.py

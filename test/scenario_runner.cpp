@@ -210,16 +210,16 @@ static void registerScenarioTypes() {
 
 // Target key for the per-step expected[<target>] lookup. The in-process runner
 // builds for the host only — there's no cross-compiled scenario_runner — so the
-// key is always pc-<host-os>. Matches the run_live_scenario.py convention.
+// key is always desktop-<host-os>. Matches the run_live_scenario.py convention.
 static const char* hostTarget() {
 #if defined(__APPLE__)
-    return "pc-macos";
+    return "desktop-macos";
 #elif defined(_WIN32)
-    return "pc-windows";
+    return "desktop-windows";
 #elif defined(__linux__)
-    return "pc-linux";
+    return "desktop-linux";
 #else
-    return "pc-unknown";
+    return "desktop-unknown";
 #endif
 }
 
@@ -399,7 +399,7 @@ static int runScenario(const char* path) {
 
     // Honour a scenario-level `skip_on` allowlist of host targets that lack
     // a capability the scenario exercises (today: MoonLive scenarios opt out
-    // on pc-windows / pc-linux — the desktop JIT is arm64-only, so an x86_64
+    // on desktop-windows / desktop-linux — the desktop JIT is arm64-only, so an x86_64
     // host renders dark and the scenario's "buffer non-zero" check would fail
     // for a platform-capability reason it isn't the right vehicle to assert).
     // Absent / empty `skip_on` runs everywhere (the existing default). Same
@@ -795,23 +795,23 @@ static int runScenario(const char* path) {
             if (step.has("contract") && step["contract"].has(hostTarget())) {
                 const auto& exp = step["contract"][hostTarget()];
                 // Per-target defaults reflect run-to-run variance, not "I don't care":
-                //   pc-*    — multi-process OS jitter, 20% pct + 200us absolute floor.
-                //             The floor dominates below ~1ms tick (the realistic case).
-                //   esp32-* — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us floor.
+                //   desktop-* — multi-process OS jitter, 20% pct + 200us absolute floor.
+                //               The floor dominates below ~1ms tick (the realistic case).
+                //   esp32-*   — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us floor.
                 // KEEP IN SYNC: the live runner re-declares the same defaults at
                 // moondeck/scenario/run_live_scenario.py contract-block handler —
                 // tuning one without the other silently desyncs the two tiers.
-                const bool isPc = std::strncmp(hostTarget(), "pc-", 3) == 0;
+                const bool isDesktop = std::strncmp(hostTarget(), "desktop-", 8) == 0;
                 double tickTolPct = exp.has("tick_tolerance_pct") ? exp["tick_tolerance_pct"].num
-                                                                   : (isPc ? 20.0 : 10.0);
+                                                                   : (isDesktop ? 20.0 : 10.0);
                 double heapTolPct = exp.has("heap_tolerance_pct") ? exp["heap_tolerance_pct"].num
-                                                                   : (isPc ? 20.0 : 10.0);
-                // Absolute floor: at very small ticks (sub-millisecond on PC),
-                // OS scheduling jitter dwarfs any percentage tolerance. The PC
+                                                                   : (isDesktop ? 20.0 : 10.0);
+                // Absolute floor: at very small ticks (sub-millisecond on desktop),
+                // OS scheduling jitter dwarfs any percentage tolerance. The desktop
                 // floor of 200us absorbs typical desktop noise; the ESP32 floor
                 // of 5us is realistic for the bounded RTOS clock.
                 double tolUs = exp.has("tolerance_us") ? exp["tolerance_us"].num
-                                                       : (isPc ? 200.0 : 5.0);
+                                                       : (isDesktop ? 200.0 : 5.0);
                 if (exp.has("tick_us") && exp["tick_us"].num > 0) {
                     // tick is a *ceiling* — faster than contract is good news,
                     // same shape as heap being a floor. Tolerance absorbs upward

@@ -276,9 +276,9 @@ def render_scenarios(files: list[dict]) -> str:
     lines.append("")
     lines.append(
         "Scenario tests are the integration tier in the [test strategy](../testing.md): "
-        "each one is a JSON script that drives the full pipeline (PC or live ESP32) "
+        "each one is a JSON script that drives the full pipeline (desktop or live ESP32) "
         "and captures tick / heap per step against per-target contracts. "
-        "Run them with `moondeck/scenario/run_scenario.py` (PC) or "
+        "Run them with `moondeck/scenario/run_scenario.py` (desktop) or "
         "`moondeck/scenario/run_live_scenario.py` (live device). "
         "See [testing.md § Performance contracts](../testing.md#performance-contracts-contracttarget) "
         "for the contract semantics."

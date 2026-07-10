@@ -177,7 +177,7 @@ Every measurable step carries a per-target `contract` block — the **performanc
     "set_by": "2026-06-02",
     "reason": "initial contract"
   },
-  "pc-macos": {
+  "desktop-macos": {
     "tick_us": 300,
     "free_heap": 0,
     "set_by": "2026-06-02",
@@ -193,14 +193,14 @@ Every measurable step carries a per-target `contract` block — the **performanc
 - Both are **hand-set promises**, not auto-captured last readings. Renegotiating a contract requires `--update-contract --reason "..."` — see below.
 - `set_by` records when the contract was last (re)negotiated; `reason` records why. Both stamped automatically by `--update-contract`.
 
-Target keys match `SystemModule.firmware` on a flashed device (`esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8`, …) plus `pc-macos` / `pc-linux` / `pc-windows` for desktop builds. The in-process runner picks the host OS automatically; the live runner reads the device's `firmware` control. (See [architecture.md § Firmware vs deviceModel vs board](architecture.md#firmware-vs-devicemodel-vs-board) for the distinction.)
+Target keys match `SystemModule.firmware` on a flashed device (`esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8`, …) plus `desktop-macos` / `desktop-linux` / `desktop-windows` for desktop builds. The in-process runner picks the host OS automatically; the live runner reads the device's `firmware` control. (See [architecture.md § Firmware vs deviceModel vs board](architecture.md#firmware-vs-devicemodel-vs-board) for the distinction.)
 
 **Tolerance** absorbs run-to-run jitter only — not "I don't care":
 
-- Default tick tolerance: **20% on pc-*** (multi-process OS scheduling), **10% on ESP32** (lwIP / EMAC jitter).
+- Default tick tolerance: **20% on desktop-*** (multi-process OS scheduling), **10% on ESP32** (lwIP / EMAC jitter).
 - Default heap tolerance: same percentages.
-- Default absolute floor on tick: **200 µs on pc-***, **5 µs on ESP32** — prevents percentage tolerance from going sub-noise on tiny ticks.
-- **On pc-*, the floor dominates** for any contract under ~1 ms tick (effectively all PC contracts today: 5–300 µs). The percentage knob only matters for slow PC ticks. This is honest: a 100 µs PC contract realistically can't assert anything tighter than ±200 µs because multi-process scheduling jitter routinely adds 100+ µs all by itself. If you need a tight assertion, run the contract on ESP32 — bounded RTOS clocks are tighter.
+- Default absolute floor on tick: **200 µs on desktop-***, **5 µs on ESP32** — prevents percentage tolerance from going sub-noise on tiny ticks.
+- **On desktop-*, the floor dominates** for any contract under ~1 ms tick (effectively all desktop contracts today: 5–300 µs). The percentage knob only matters for slow desktop tick. This is honest: a 100 µs desktop contract realistically can't assert anything tighter than ±200 µs because multi-process scheduling jitter routinely adds 100+ µs all by itself. If you need a tight assertion, run the contract on ESP32 — bounded RTOS clocks are tighter.
 - Per-step overrides: `tick_tolerance_pct`, `heap_tolerance_pct`, `tolerance_us` inside the per-target block.
 
 **Predicted-vs-actual heap.** The runner additionally prints the sum of `dynamicBytes()` from the live module tree as `model=N`. This is what the system *says* it allocated; comparing it to `free_heap` reveals framework overhead (lwIP, WiFi, HTTP buffers). The model number is informational, not asserted.
@@ -237,7 +237,7 @@ Open any scenario JSON and the range tells you both the typical case (the value 
 A contract changes only when there's a reason: a code change improved performance and you want to commit to the new ceiling, or an accepted regression requires loosening it. Either way the diff records *what* changed and *why*:
 
 ```bash
-# After an optimisation: tighten the ceiling for pc-*
+# After an optimisation: tighten the ceiling for desktop-*
 uv run moondeck/scenario/run_scenario.py --update-contract \
     --reason "Layer LUT inline copy"
 
@@ -286,7 +286,7 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
           "tick_us": 100000, "free_heap": 105000,
           "set_by": "2026-06-02", "reason": "initial contract"
         },
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 120, "free_heap": 0,
           "set_by": "2026-06-02", "reason": "initial contract"
         }
@@ -347,7 +347,7 @@ ctest --test-dir build/macos --output-on-failure   # all
 uv run moondeck/test/test_desktop.py --module Layer # filtered by module
 ```
 
-Or via MoonDeck (PC tab → Unit Test card). Pick a module from the shared module dropdown above the card to filter the run. Tests button shows the per-module inventory.
+Or via MoonDeck (Desktop tab → Unit Test card). Pick a module from the shared module dropdown above the card to filter the run. Tests button shows the per-module inventory.
 
 Output is summary-only on a full run (the doctest `-s` flag is added only on filtered runs, where the assertion-level detail is small enough to be useful).
 
@@ -363,7 +363,7 @@ uv run moondeck/scenario/run_scenario.py --name scenario_Layer_base_pipeline  # 
 uv run moondeck/scenario/run_scenario.py --module Layer                       # all for one module
 ```
 
-Or via MoonDeck (PC tab → Scenarios card). The module dropdown is shared with the Unit Test card above it: pick a module once and both card's run-set narrows. Steps button shows the per-scenario step list.
+Or via MoonDeck (Desktop tab → Scenarios card). The module dropdown is shared with the Unit Test card above it: pick a module once and both card's run-set narrows. Steps button shows the per-scenario step list.
 
 **Scenarios with `"live_only": true`** are skipped in-process (they need a real device — e.g. measure real-Ethernet throughput at a given grid size). They appear in the inventory but only run via the live tier below. The symmetric case (scenarios that only make sense in-process) is already handled by `mode: "construct"`, which skips on live.
 

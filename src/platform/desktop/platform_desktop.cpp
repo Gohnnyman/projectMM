@@ -547,7 +547,7 @@ bool ethLinkUp() { return false; }
 bool ethConnected() { return false; }
 void ethGetIPv4(uint8_t out[4]) {
     // Desktop has no real interface state, but DevicesModule needs the host's LAN
-    // IP to scan from (otherwise a PC projectMM instance reports "no network" and
+    // IP to scan from (otherwise a desktop projectMM instance reports "no network" and
     // never sweeps). hostIp() resolves it via the outbound-route trick; report it
     // as the "ethernet" IP so DevicesModule's localIp() (eth-first) picks it up.
     out[0] = out[1] = out[2] = out[3] = 0;

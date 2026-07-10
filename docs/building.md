@@ -15,7 +15,7 @@ Use whichever fits. Neither path is "more official" than the other; the scripts 
 
 MoonDeck has three tabs:
 
-- **PC** — desktop build, run, test. Fast iteration.
+- **Desktop** — build, run, test. Fast iteration.
 - **ESP32** — chip type and USB port selection. Build, flash, monitor.
 - **Live** — device discovery and monitoring against running devices on the network.
 
@@ -57,9 +57,9 @@ uv run moondeck/run/run_desktop.py            # run as detached background proce
 uv run moondeck/test/test_desktop.py          # unit tests
 ```
 
-Or use MoonDeck's PC tab for the same operations with a status dot per card. The desktop run detaches and outlives the launching script — the same model as flashing an ESP32, where the device runs independently afterwards.
+Or use MoonDeck's Desktop tab for the same operations with a status dot per card. The desktop run detaches and outlives the launching script — the same model as flashing an ESP32, where the device runs independently afterwards.
 
-![MoonDeck PC tab](assets/ui/moondeck_pc.png)
+![MoonDeck Desktop tab](assets/ui/moondeck_desktop.png)
 
 Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/windows/`. The per-host layout mirrors the ESP32 side's `build/esp32-<board>/` shape — one directory per target, no cross-target clobbering on a multi-host dev machine.
 

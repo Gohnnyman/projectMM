@@ -2,7 +2,7 @@
   "name": "scenario_MoonLiveEffect_controls",
   "module": "MoonLiveEffect",
   "mode": "mutate",
-  "skip_on": ["pc-windows", "pc-linux"],
+  "skip_on": ["desktop-windows", "desktop-linux"],
   "also": [
     "Layouts",
     "GridLayout",
@@ -57,7 +57,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             4
@@ -86,7 +86,7 @@
       "value": "uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -115,7 +115,7 @@
       "value": 12,
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -144,7 +144,7 @@
       "value": "uint8_t speed = 7; // @control 0..15\nuint8_t hue = 128; // @control 0..255\nsetRGB(speed, hue, 0, 255);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -173,7 +173,7 @@
       "value": "uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -202,7 +202,7 @@
       "value": "uint8_t speed = ;",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             8
@@ -231,7 +231,7 @@
       "value": "uint8_t bright = 200; // @control 0..255\nfill(0, 0, bright);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -266,7 +266,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             2

@@ -84,7 +84,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             25
@@ -156,7 +156,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             5
@@ -191,7 +191,7 @@
       "measure": true,
       "optional": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             17
@@ -263,7 +263,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             5
@@ -298,7 +298,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             20
@@ -370,7 +370,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             4
@@ -403,7 +403,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             10
@@ -475,7 +475,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             1,
             1
@@ -515,7 +515,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             12
@@ -587,7 +587,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             5
@@ -620,7 +620,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             7
@@ -692,7 +692,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             9
@@ -736,7 +736,7 @@
       "measure": true,
       "optional": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             31
@@ -808,7 +808,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             4
@@ -853,7 +853,7 @@
       "measure": true,
       "optional": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             13
@@ -925,7 +925,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             5
@@ -970,7 +970,7 @@
       "measure": true,
       "optional": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             11
@@ -1042,7 +1042,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             12
@@ -1097,7 +1097,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             10
@@ -1169,7 +1169,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             3,
             5
@@ -1208,7 +1208,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             1,
             28
@@ -1280,7 +1280,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             12,
             127
@@ -1319,7 +1319,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             3,
             110
@@ -1391,7 +1391,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             49,
             87
@@ -1430,7 +1430,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             16,
             490
@@ -1502,7 +1502,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             196,
             276
@@ -1549,7 +1549,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             3,
             28
@@ -1621,7 +1621,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             9,
             13
@@ -1660,7 +1660,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             14,
             92
@@ -1732,7 +1732,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             36,
             52
@@ -1771,7 +1771,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             62,
             472
@@ -1843,7 +1843,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             145,
             260
@@ -1882,7 +1882,7 @@
       "op": "measure",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             271,
             2452
@@ -1954,7 +1954,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             592,
             851
@@ -2019,7 +2019,7 @@
             "2026-06-25"
           ]
         },
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             1,
             5
@@ -2073,7 +2073,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             2,
             5
@@ -2130,7 +2130,7 @@
             "2026-06-26"
           ]
         },
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             3,
             170
@@ -2184,7 +2184,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             9,
             16
@@ -2241,7 +2241,7 @@
             "2026-06-25"
           ]
         },
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             14,
             239
@@ -2295,7 +2295,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             36,
             55
@@ -2352,7 +2352,7 @@
             "2026-06-25"
           ]
         },
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             61,
             769
@@ -2406,7 +2406,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             145,
             1010

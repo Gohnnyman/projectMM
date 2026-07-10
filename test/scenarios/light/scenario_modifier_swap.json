@@ -149,7 +149,7 @@
       "measure": true,
       "description": "Multiply modifier active — pipeline live, LUT folds the grid.",
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             6,
             40
@@ -239,7 +239,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             14,
             20
@@ -271,7 +271,7 @@
       "measure": true,
       "description": "Checkerboard modifier active — masks half the lights; pipeline stays live (driver buffer non-null).",
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             17,
             239
@@ -361,7 +361,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             41,
             61
@@ -393,7 +393,7 @@
       "measure": true,
       "description": "Back to Multiply — replace round-trips cleanly, pipeline live again.",
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             6,
             99
@@ -483,7 +483,7 @@
             "2026-06-25"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             13,
             22

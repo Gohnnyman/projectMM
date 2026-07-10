@@ -22,7 +22,7 @@ namespace mm {
 ///
 /// Core + domain-neutral: it finds "a projectMM / a WLED device" and light modules
 /// (Art-Net sync, device groups) consume the list rather than living here, so its
-/// card looks the same on every projectMM instance, ESP32 or PC. Submodule of
+/// card looks the same on every projectMM instance, ESP32 or desktop. Submodule of
 /// NetworkModule — discovery depends on the network being up (the same placement
 /// reasoning as the Improv provisioning module), wired in `main.cpp` and marked
 /// wired-by-code so persistence preserves it.

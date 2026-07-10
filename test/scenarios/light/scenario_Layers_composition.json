@@ -104,7 +104,7 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             52,
             870
@@ -122,7 +122,7 @@
             "2026-07-01"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             549,
             3747
