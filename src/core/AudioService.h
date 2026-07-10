@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/ActiveInstance.h"   // the one-active-mic election (the seat + its RAII vacate)
 #include "core/AudioFrame.h"
 #include "core/AudioLevel.h"
 #include "core/AudioBands.h"
@@ -90,11 +91,6 @@ public:
 
     ModuleRole role() const override { return ModuleRole::Service; }
 
-    /// Vacate the mic seat if this instance holds it, so a destroyed module never leaves active_
-    /// dangling (latestFrame() would then dereference freed memory). Production tears down before
-    /// delete, but a bare destruction — a stack instance in a test, an aborted construction — must
-    /// not leave a dangling static. Mirrors release()'s vacate; belt-and-suspenders on the static.
-    ~AudioService() override { if (active_ == this) active_ = nullptr; }
 
     /// Unlike a zero-cost diagnostic peripheral, this module pays a
     /// real per-tick cost (the FFT) that IS the capability, not an optional extra,
@@ -186,7 +182,7 @@ public:
             // WLED's 11988 (interop with WLED/MoonLight); change it on BOTH ends to run a
             // private projectMM-only sync group on a non-WLED port. Shown whenever sync is on
             // (Send or Receive), hidden in Off. A `sync` change re-runs this method (it's in
-            // controlChangeTriggersPrepare) so the row toggles live.
+            // affectsPrepare) so the row toggles live.
             controls_.addUint16("syncPort", syncPort, 1, 65535);
             controls_.setHidden(controls_.count() - 1, sync == 0);
             controls_.addReadOnly("sync status", syncStr_, sizeof(syncStr_));
@@ -207,7 +203,7 @@ public:
     /// A pin or rate change rebuilds the I2S channel (live, no reboot); a `sync` /
     /// `syncPort` change re-binds/unbinds the UDP socket AND re-toggles the port row's
     /// visibility (all flow through prepare → rebuildControls).
-    bool controlChangeTriggersPrepare(const char* name) const override {
+    bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "wsPin") == 0 || std::strcmp(name, "sdPin") == 0
             || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "mclkPin") == 0
             || std::strcmp(name, "sampleRate") == 0 || std::strcmp(name, "sync") == 0
@@ -220,7 +216,7 @@ public:
     /// socket and vacates the election, so a disabled service (or one under a disabled parent) frees
     /// its pins for another module.
     void prepare() override {
-        if (active_ == nullptr) active_ = this;   // first live mic wins; a 2nd is captured but not read
+        micSeat_.claim();   // first live mic wins the seat; a 2nd is captured but not read (claim-if-empty)
         reinit();
         syncReinit();
     }
@@ -229,7 +225,7 @@ public:
     void release() override {
         deinit();
         if constexpr (platform::hasNetwork) { syncSock_.close(); syncOpen_ = false; }
-        if (active_ == this) active_ = nullptr;   // vacate; a surviving module re-elects itself in tick()
+        micSeat_.vacate();   // vacate the seat; a surviving mic re-claims it in tick()
     }
 
     /// The latest analysed frame — what effects read. Always valid (zeroed until
@@ -260,7 +256,8 @@ public:
     /// leaves a coherent answer (the robustness rule).
     static const AudioFrame* latestFrame() {
         static const AudioFrame kSilence{};
-        return active_ ? &active_->frame_ : &kSilence;
+        AudioService* a = ActiveInstance<AudioService>::active();
+        return a ? &a->frame_ : &kSilence;
     }
 
     void tick() override {
@@ -268,9 +265,9 @@ public:
         // module and release() vacates it, but removing the active module while a second one is still running
         // would otherwise leave the seat empty (effects go silent). A running module re-claiming an
         // empty seat here keeps latestFrame() pointing at a live frame for ANY add/remove order — the
-        // survivor takes over on its next tick (robustness).
-        //
-        if (active_ == nullptr) active_ = this;
+        // survivor takes over on its next tick (robustness). claim() is idempotent — a no-op while the
+        // seat is held, the reclaim once it's empty.
+        micSeat_.claim();
 
         // WLED audio sync. Send broadcasts the current frame_ (throttled). Receive drains
         // the socket into frame_ and, while a peer's audio is fresh, RETURNS so the local
@@ -447,10 +444,11 @@ public:
     }
 
 private:
-    // The mic that latestFrame() hands to effects. One in practice; the FIRST live module
-    // to build claims the seat (prepare sets active_ only while it's null), release()
-    // clears it. inline so the header stays standalone.
-    static inline AudioService* active_ = nullptr;
+    // The one-active-mic election: the FIRST live module to build claims the seat, release() vacates
+    // it, and a survivor re-claims an empty seat in tick(). latestFrame() reads the winner. The seat
+    // is per-type static inside ActiveInstance; the destructor vacates it, so a bare destruction never
+    // dangles it. (The election SEAT, distinct from the platform mic `mic_` handle below.)
+    ActiveInstance<AudioService> micSeat_{*this};
 
     platform::AudioMicHandle mic_;
     bool inited_ = false;

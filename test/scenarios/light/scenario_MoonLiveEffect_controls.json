@@ -79,7 +79,7 @@
     },
     {
       "name": "set-source-with-control",
-      "description": "Edit the source to the control script. A source edit recompiles (controlChangeTriggersPrepare gates on `source`); the engine derives the `speed` control and the binding surfaces it.",
+      "description": "Edit the source to the control script. A source edit recompiles (affectsPrepare gates on `source`); the engine derives the `speed` control and the binding surfaces it.",
       "op": "set_control",
       "id": "ML",
       "key": "source",
@@ -108,7 +108,7 @@
     },
     {
       "name": "change-control-live",
-      "description": "Change the `speed` control value (a slider move). This must NOT recompile — controlChangeTriggersPrepare returns false for a scripted control; the arena byte updates and the next render tick reads it. Tick stays cheap (a recompile would spike it).",
+      "description": "Change the `speed` control value (a slider move). This must NOT recompile — affectsPrepare returns false for a scripted control; the arena byte updates and the next render tick reads it. Tick stays cheap (a recompile would spike it).",
       "op": "set_control",
       "id": "ML",
       "key": "speed",

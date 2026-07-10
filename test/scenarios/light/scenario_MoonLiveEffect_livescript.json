@@ -134,7 +134,7 @@
     },
     {
       "name": "edit-source-red",
-      "description": "Live-edit the script source to a new colour. A source edit triggers a recompile (controlChangeTriggersPrepare gates on `source`); the new native code swaps in and keeps rendering.",
+      "description": "Live-edit the script source to a new colour. A source edit triggers a recompile (affectsPrepare gates on `source`); the new native code swaps in and keeps rendering.",
       "op": "set_control",
       "id": "ML",
       "key": "source",

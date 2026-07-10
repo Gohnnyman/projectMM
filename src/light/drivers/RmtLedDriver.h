@@ -123,7 +123,7 @@ public:
     /// Changing the pin list or the per-pin counts re-parses and re-inits the RMT
     /// channels (live, not reboot-to-apply), so the pipeline-wide prepare
     /// sweep runs and parseConfig()/reinit() pick up the new lists.
-    bool controlChangeTriggersPrepare(const char* name) const override {
+    bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || isWindowControl(name);
     }

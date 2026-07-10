@@ -20,7 +20,7 @@ public:
 
     /// A modifier control change alters the mapping, so the owning Layer must rebuild
     /// it — the pipeline-wide rebuild path. See MoonModule::onControlChanged.
-    bool controlChangeTriggersPrepare(const char* /*controlName*/) const override { return true; }
+    bool affectsPrepare(const char* /*controlName*/) const override { return true; }
 
     /// Which axes the modifier can transform. Defaults to D3 — a modifier that
     /// touches the mapping is assumed to work in 3D unless it declares otherwise.

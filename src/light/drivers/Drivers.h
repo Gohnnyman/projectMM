@@ -154,7 +154,7 @@ public:
     }
 
     // Brightness / light-preset changes only rebuild the (cheap) correction LUT — no
-    // pipeline realloc. This is what keeps the brightness slider fluent: controlChangeTriggersPrepare
+    // pipeline realloc. This is what keeps the brightness slider fluent: affectsPrepare
     // stays false for Drivers, so handleSetControl skips scheduler_->prepareTree().
     void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "palette") == 0) {

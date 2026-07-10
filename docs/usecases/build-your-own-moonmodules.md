@@ -135,6 +135,31 @@ controls_.addBool("mirror", mirror);                    // a checkbox
 controls_.addSelect("mode", mode, kModeOptions, kModeCount);   // a dropdown
 ```
 
+### Reacting to a control change
+
+Most of the time you don't need to *react* to a control at all — you just read the member variable in `tick()`, and because the framework keeps it in sync with the slider, the next frame already reflects the new value. A `speed` change is invisible plumbing: `tick()` reads `speed`, done.
+
+Two hooks exist for the times a change needs *work*, not just a fresh read. They're the "control-change split" — pick the one that matches how expensive the reaction is:
+
+| Hook | When the core calls it | Use it for |
+|---|---|---|
+| `onControlChanged(name)` | On **every** control edit, immediately | A *cheap* reaction: recompute a small lookup table, re-seed a PRNG, re-parse a short string. Runs in the UI-request context, so keep it light. |
+| `affectsPrepare(name)` | A **question** the core asks on every edit — return `true`/`false` | Say "yes" for a control whose change reshapes your **derived state** (a grid dimension, a buffer size). A `true` makes the core call your `prepare()` again, so the expensive rebuild lands there, off the hot path — not in `tick()`. |
+
+```cpp
+// React cheaply to one specific control. `name` is the control that changed.
+void onControlChanged(const char* name) override {
+    if (std::strcmp(name, "ruleset") == 0) parseRuleset();   // re-parse a short string, cheaply
+}
+
+// Does editing this control need a full rebuild? Return true → the core re-runs prepare().
+bool affectsPrepare(const char* name) const override {
+    return std::strcmp(name, "starCount") == 0;   // more stars → resize the scratch buffer in prepare()
+}
+```
+
+The division of labour: **read a value → just use it in `tick()`; a cheap side-effect → `onControlChanged()`; a change that resizes memory or reshapes the grid → `affectsPrepare()` returns `true` and the rebuild happens in `prepare()`.** Both hooks default to "do nothing" / "no rebuild", so a simple effect (like the rainbow above) overrides neither. This split is also what makes every config change apply live with no reboot — the core routes a dimension-changing edit through the same `prepare()` sweep as a boot.
+
 ### Registering it so the UI can add it
 
 One line in `src/main.cpp` makes your effect appear in the "add effect" list:

@@ -225,7 +225,7 @@ static const char* hostTarget() {
 
 // Apply a set_control step in-process: find the module by id, find the control by
 // name, write the typed value, then mirror what HttpServerModule::handleSetControl
-// does — call onControlChanged(), and if controlChangeTriggersPrepare() returns true
+// does — call onControlChanged(), and if affectsPrepare() returns true
 // trigger Scheduler::prepareTree() so the pipeline reconciles. Returns true if the
 // write applied; false on any lookup miss or unsupported type (caller may want to
 static bool applySetControl(mm::Scheduler& scheduler,
@@ -263,7 +263,7 @@ static bool applySetControl(mm::Scheduler& scheduler,
         if (r != mm::ApplyResult::Ok) return false;
         if (c.type == mm::ControlType::Select) target->rebuildControls();
         target->onControlChanged(controlName);
-        if (target->controlChangeTriggersPrepare(controlName)) {
+        if (target->affectsPrepare(controlName)) {
             scheduler.prepareTree();
         }
         return true;

@@ -39,7 +39,7 @@ public:
 
     // `bpm` only changes future reshuffle timing — the current permutation is unchanged,
     // and tick() reads bpm live each tick, so a bpm edit needs no rebuild.
-    bool controlChangeTriggersPrepare(const char* /*controlName*/) const override { return false; }
+    bool affectsPrepare(const char* /*controlName*/) const override { return false; }
 
     // A remap leaves the box unchanged but needs it for the permutation — stash it.
     void modifyLogicalSize(Coord3D& size) override { box_ = size; }

@@ -42,7 +42,7 @@ public:
 
     // `speed` only changes how fast the angle advances; rotation is applied live in
     // modifyLive, not baked into the mapping, so a speed edit needs no rebuild.
-    bool controlChangeTriggersPrepare(const char* /*controlName*/) const override { return false; }
+    bool affectsPrepare(const char* /*controlName*/) const override { return false; }
 
     // Per-frame backward map: a destination logical cell `pos` is replaced by the
     // SOURCE cell it samples — the inverse rotation R(-θ) about the box centre.

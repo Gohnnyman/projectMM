@@ -48,7 +48,7 @@ inline const char* roleName(ModuleRole role) {
 /// Select changing the visible control set rebuilds cleanly), and `prepare()` is the single
 /// derived-state hook (buffers, LUTs, the module's heap-byte report), reached at setup and via
 /// `Scheduler::prepareTree()` whenever a control that changes physical dimensions fires
-/// `controlChangeTriggersPrepare()`. This build sweep is what makes every config change apply
+/// `affectsPrepare()`. This build sweep is what makes every config change apply
 /// live, with no reboot. Controls bind by reference, so persisted values overlay the bound
 /// variables before any `setup()` runs.
 ///
@@ -175,7 +175,7 @@ public:
     /// Cheap per-control reaction, tier 1 of the three-tier control-change split (mirrors
     /// MoonLight's onUpdate / requestMappings / onSizeChanged; see architecture.md § Rebuild
     /// propagation). Runs on EVERY change — recompute a small LUT, re-bind a socket, etc.
-    /// The other tiers are `controlChangeTriggersPrepare()` (tier 2, the gate for the
+    /// The other tiers are `affectsPrepare()` (tier 2, the gate for the
     /// pipeline-wide sweep, true only for controls that change physical dimensions / mapping
     /// shape) and `prepare()` (tier 3, build derived state, reached via
     /// `Scheduler::prepareTree()` when tier 2 returns true).
@@ -189,7 +189,7 @@ public:
     /// path that need no realloc. Layout and Modifier override to return true (their
     /// controls change physical dimensions / LUT shape). Most overriders ignore the name
     /// and return true for every control they expose.
-    virtual bool controlChangeTriggersPrepare(const char* /*controlName*/) const { return false; }
+    virtual bool affectsPrepare(const char* /*controlName*/) const { return false; }
 
     /// defineControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
     /// No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
@@ -232,7 +232,7 @@ public:
     /// is "build" (not "rebuild") on purpose: the operation is idempotent and history-agnostic
     /// — it builds the correct state from current values whether or not it ran before, so boot
     /// and a later control change are the same call, not "build" then "rebuild". The whole
-    /// chain shares the verb: controlChangeTriggersPrepare → Scheduler::prepareTree() →
+    /// chain shares the verb: affectsPrepare → Scheduler::prepareTree() →
     /// prepare(). Mirrors the defineControls precedent (build the surface vs build the
     /// state) and the canonical hooks (prepareToPlay/layoutSubviews never say "re" either).
     ///
@@ -243,7 +243,7 @@ public:
     /// them (`width` reshapes a LUT but `gamma` only re-tints a cache, both expensive),
     /// the cheapest upgrade is to forward the changed control name —
     /// `prepare(const char* changedControl)` — and branch inside. The tier-2 gate
-    /// (controlChangeTriggersPrepare) already carries the name, so it's a one-parameter change.
+    /// (affectsPrepare) already carries the name, so it's a one-parameter change.
     /// Don't add it pre-emptively; no module needs the distinction today.
     ///
     /// **A leaf operation — builds THIS node only.** The tree recursion + the enabled decision live

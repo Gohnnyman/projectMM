@@ -22,7 +22,7 @@ public:
 
     /// Every layout control (grid width/height/depth, …) changes the physical light
     /// count and therefore needs the pipeline-wide rebuild. See MoonModule::onControlChanged.
-    bool controlChangeTriggersPrepare(const char* /*controlName*/) const override { return true; }
+    bool affectsPrepare(const char* /*controlName*/) const override { return true; }
 };
 
 } // namespace mm

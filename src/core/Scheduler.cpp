@@ -244,7 +244,7 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
         target->onControlChanged(controlName);
         target->markDirty();
         if (noteDirtyHook_) noteDirtyHook_();
-        if (target->controlChangeTriggersPrepare(controlName)) prepareTree();
+        if (target->affectsPrepare(controlName)) prepareTree();
         return SetControlResult::Ok;
     }
     return SetControlResult::ControlNotFound;

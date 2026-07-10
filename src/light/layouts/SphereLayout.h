@@ -31,7 +31,7 @@ public:
 
     nrOfLightsType lightCount() const override {
         // Count the shell points. Cheap relative to rendering, recomputed only
-        // on a radius change (controlChangeTriggersPrepare → rebuild).
+        // on a radius change (affectsPrepare → rebuild).
         nrOfLightsType n = 0;
         forEachShellPoint([](void*, nrOfLightsType, lengthType, lengthType, lengthType) {}, nullptr, &n);
         return n;

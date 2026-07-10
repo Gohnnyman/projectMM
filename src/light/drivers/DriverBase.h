@@ -92,7 +92,7 @@ protected:
     }
 
     /// True if `name` is one of the window controls — a driver folds this into its
-    /// controlChangeTriggersPrepare() so editing the slice re-runs its config.
+    /// affectsPrepare() so editing the slice re-runs its config.
     static bool isWindowControl(const char* name) {
         return std::strcmp(name, "start") == 0 || std::strcmp(name, "count") == 0;
     }

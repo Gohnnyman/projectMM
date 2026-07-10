@@ -102,7 +102,7 @@ public:
     /// A change to the pins, per-lane counts, the window, or a derived bus control
     /// (clockPin/dcPin on i80) re-parses and re-inits the bus live via the
     /// prepare sweep.
-    bool controlChangeTriggersPrepare(const char* name) const override {
+    bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || isWindowControl(name)
             || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80

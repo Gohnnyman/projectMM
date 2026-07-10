@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/ActiveInstance.h"   // the boot-registry seat election (the seat + its RAII vacate)
 #include "core/Control.h"
 #include "core/JsonSink.h"
 #include "core/JsonUtil.h"         // recursive reader — restoreList parses the persisted array
@@ -185,12 +186,7 @@ public:
     /// The boot DevicesModule (exactly one exists). A foreign-bridge driver in the light domain
     /// (a Hue driver) registers a discovered bridge through this without a compile-time dependency
     /// on DevicesModule's address — the same static-seam shape as `AudioService::latestFrame()`.
-    static DevicesModule* active() { return active_; }
-
-    /// Vacate the boot-instance seat if this holds it, so a destroyed module never leaves active_
-    /// dangling (a Hue driver routing through active() would then hit freed memory). Production
-    /// tears down before delete; this guards a bare destruction. Mirrors release()'s vacate.
-    ~DevicesModule() override { if (active_ == this) active_ = nullptr; }
+    static DevicesModule* active() { return ActiveInstance<DevicesModule>::active(); }
 
     /// Register a Hue bridge a light-domain driver has connected to. Unlike upsertDevice (driven by a UDP
     /// presence packet), a bridge is discovered out-of-band — the driver already holds its IP +
@@ -225,7 +221,7 @@ public:
     /// One-time wiring, enabled-INDEPENDENT: show the cached device list on boot. The last-known
     /// list is restored before setup() by the persistence overlay (the `devices` List round-trips
     /// as JSON), so the UI shows it INSTANTLY — even for a disabled instance, which still displays
-    /// what it last saw. The active_ seat + socket (the actual resource) are handled in prepare.
+    /// what it last saw. The seat + socket (the actual resource) are handled in prepare.
     void setup() override {
         MoonModule::setup();
         if (deviceCount_) {
@@ -235,18 +231,19 @@ public:
         setStatus(statusBuf_);
     }
 
-    /// Pure build (see MoonModule::prepare): claim the singleton active_ seat (the Hue-bridge
-    /// routing target). No enabled() check — core's applyState() calls this only when effectively-
-    /// enabled and routes to release() otherwise, which vacates the seat and closes the presence
-    /// socket, so a disabled instance (or one under a disabled parent) frees the port.
+    /// Pure build (see MoonModule::prepare): claim the singleton seat (the Hue-bridge routing target).
+    /// No enabled() check — core's applyState() calls this only when effectively-enabled and routes to
+    /// release() otherwise, which vacates the seat and closes the presence socket, so a disabled
+    /// instance (or one under a disabled parent) frees the port. Exactly one DevicesModule exists, so
+    /// claim-if-empty is equivalent to an unconditional claim here.
     void prepare() override {
-        active_ = this;
+        seat_.claim();
     }
 
     /// Close the presence socket so its port is released (the module holds it via the lazy
     /// ensureListener bind). Also runs on module removal so the fd doesn't leak.
     void release() override {
-        if (active_ == this) active_ = nullptr;
+        seat_.vacate();
         listener_.close();
         listenerBound_ = false;
         MoonModule::release();
@@ -313,8 +310,9 @@ private:
                                     ///< (the figure for sizing a layout). 0 for non-bridge rows.
     };
 
-    // The boot instance, for active() — the foreign-bridge static seam (mirrors AudioService).
-    static inline DevicesModule* active_ = nullptr;
+    // The boot-instance seat, for active() — the foreign-bridge static seam (mirrors AudioService).
+    // Claimed on build, vacated on release + on destruction (the RAII member's dtor guards the static).
+    ActiveInstance<DevicesModule> seat_{*this};
 
     static constexpr uint8_t  kMaxDevices = 32;   ///< a LAN's worth; bounded, no heap
     /// Broadcast our presence every this-many tick1s ticks (≈ seconds). Slow + light, like

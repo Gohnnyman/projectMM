@@ -68,7 +68,7 @@ public:
     /// A start/count change resizes the window this sink sends; route it through the prepare
     /// sweep so resizeCorrected() re-sizes corrected_ for the new slice — otherwise growing the
     /// window past the old corrected_ silently drops to passthrough.
-    bool controlChangeTriggersPrepare(const char* name) const override {
+    bool affectsPrepare(const char* name) const override {
         return isWindowControl(name);
     }
 

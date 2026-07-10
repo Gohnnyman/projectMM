@@ -166,12 +166,12 @@ Both shapes extend to any future producer/consumer pair (a sensor owning a state
 A control changes, or the module tree is mutated (a child added, deleted, replaced, moved), and other modules may need to react. The framework provides a three-tier split so each change costs only as much as it has to, from cheapest to most expensive:
 
 1. **`onControlChanged(controlName)`**: runs on *every* control change, but only on the module whose own control changed. A cheap, in-place, per-control reaction that touches nothing else: recompute a small derived table, re-bind a socket. Default no-op.
-2. **`controlChangeTriggersPrepare(controlName)`**: a gate, default `false`. A module returns `true` only for controls that change the size or shape of its derived state (and thus may ripple to other modules); for controls that just tweak a value in place it stays `false`. When `true`, the framework runs the tree-wide rebuild; when `false`, it doesn't.
+2. **`affectsPrepare(controlName)`**: a gate, default `false`. A module returns `true` only for controls that change the size or shape of its derived state (and thus may ripple to other modules); for controls that just tweak a value in place it stays `false`. When `true`, the framework runs the tree-wide rebuild; when `false`, it doesn't.
 3. **`prepare()`**: the module (re)builds its derived state (buffers, tables) for the current control values. Reached via `Scheduler::prepareTree()`, the coordinator-driven sweep that walks every module's `prepare`.
 
 `Scheduler::prepareTree()` fires from two triggers: a tier-2 gate returning true after a control change, **and** any tree mutation (HTTP add/delete/replace/move handlers all call it unconditionally, since a structural change is rare and unambiguously needs a rebuild). Both triggers funnel through the same sweep; each module's `prepare` is idempotent (e.g. an effect only reallocs when its grid count actually changed), so over-rebuilding is wasted work, not a correctness hazard.
 
-This is the recognised layout/prepare-pass pattern (JUCE `prepareToPlay`, UIKit `layoutSubviews`, gated by per-object metadata like WPF's `AffectsMeasure`, here `controlChangeTriggersPrepare`); the pull-and-prepare-pass-not-pub/sub decision is [ADR-0011](adr/0011-data-exchange-pull-and-prepare-pass-not-pubsub.md). The light domain consumes it for the mapping rebuild ([§ Mapping and blending](#mapping-and-blending)); the mechanism itself is core.
+This is the recognised layout/prepare-pass pattern (JUCE `prepareToPlay`, UIKit `layoutSubviews`, gated by per-object metadata like WPF's `AffectsMeasure`, here `affectsPrepare`); the pull-and-prepare-pass-not-pub/sub decision is [ADR-0011](adr/0011-data-exchange-pull-and-prepare-pass-not-pubsub.md). The light domain consumes it for the mapping rebuild ([§ Mapping and blending](#mapping-and-blending)); the mechanism itself is core.
 
 ### Live reconfiguration: every change applies without a reboot
 
@@ -439,7 +439,7 @@ A modifier is a coordinate transform, applied in one of two ways (the fold contr
 
 The blend+map step walks each layer in turn: reads each logical light, uses that layer's LUT to find the physical position(s), blends the colour into the physical output buffer. This is where logical space meets physical space.
 
-Each mapping LUT is a flat, contiguous lookup table allocated outside the hot path. It is built in `Layer::prepare()` and rebuilt whenever a Layout or Modifier control changes (the controls' `controlChangeTriggersPrepare` returns true) or a Modifier/Layout child is added/removed/replaced/moved; both triggers flow through the same core mechanism, see [§ Event triggering between modules](#event-triggering-between-modules).
+Each mapping LUT is a flat, contiguous lookup table allocated outside the hot path. It is built in `Layer::prepare()` and rebuilt whenever a Layout or Modifier control changes (the controls' `affectsPrepare` returns true) or a Modifier/Layout child is added/removed/replaced/moved; both triggers flow through the same core mechanism, see [§ Event triggering between modules](#event-triggering-between-modules).
 
 The LUT supports four mapping types:
 

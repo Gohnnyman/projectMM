@@ -50,7 +50,7 @@ public:
     // script swaps in live (the script-editor loop). A SCRIPTED CONTROL's value change must NOT
     // recompile: it just updates an arena byte the running native code reads next tick. So only
     // "source" triggers a rebuild; every scripted control returns false (the live-edit path).
-    bool controlChangeTriggersPrepare(const char* controlName) const override {
+    bool affectsPrepare(const char* controlName) const override {
         return std::strcmp(controlName, "source") == 0;
     }
 

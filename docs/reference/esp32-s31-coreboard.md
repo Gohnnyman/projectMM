@@ -89,6 +89,12 @@ GPIOs are the chip's fixed IO_MUX pads (the only ones the EMAC accepts; from IDF
 - **USB-C ×2** — one is USB Serial/JTAG (native), one is a USB-to-UART bridge (CP2102N default, or
   CH9102X with the alternate BOM). Auto-download via DTR/RTS → EN/BOOT.
 - **Buttons** — BOOT (GPIO61), RESET (EN).
+- **J5 — power/enable jumper** (a 2-pin header next to the 5V→3.3V DC/DC converter U4 and the 3.3V
+  power-on LED D11). **Leave it installed.** With J5 removed the board is *half-powered*: the CP2102N
+  runs off USB VBUS so its port still enumerates, but the ESP32-S31's 3.3V/EN rail is incomplete and
+  the chip drives nothing — you get a serial port that opens but zero bytes from the MCU, at any baud,
+  in any reset/download mode (see [lessons.md](../history/lessons.md) — this cost an hour of chasing a
+  cable that wasn't the problem).
 - **40-pin GPIO header** (J2). Optional 32.768 kHz crystal footprint (Y1, NC by default).
 
 ## Free GPIO for user peripherals (LED strips, loopback)
@@ -117,7 +123,7 @@ The two pins in **one column are physically stacked**, so a 2-pin jumper cap bri
 **Recommended assignment** (what the S31 catalog entry uses):
 
 - **LED strip data:** the onboard WS2812 is on **GPIO 60** (the catalog default). For an *external* strand, use **GPIO 42** as the single-lane pick; a parallel rig (RMT/Parlio) takes the free block (**36–49**, skipping 41 which isn't broken out) for several lanes. **GPIO 4** (col 16 top) also works as an LED data pin and sits one column from the `G` / `3V3` / `5V` power rail (cols 17–20), so a single strip's data + ground + 5 V wires land close together — handy for a tidy 3-wire pigtail. It's a plain I/O with no strap or peripheral tie on this board (the SD lines beside it, D0–D3 / CLK / CMD, are broken out by function name, not GPIO number, so GPIO 4 is *not* one of them; it just neighbours that cluster on the header). The only reason it reads as "distinct" from the rest of the free run is its header position — it's over by the SD/power group rather than in the low-block on cols 8–12.
-- **Loopback self-test:** **Tx = GPIO 48, Rx = GPIO 47** — the two pins of **column 7** (48 top, 47 bottom), so a single jumper cap shorts them. The [RmtLedDriver](../moonmodules/light/drivers.md#rmtled) drives a known WS2812 frame out Tx and reads it back on Rx to verify output on real silicon (same pattern as the P4-NANO bench's 32↔33). They sit at the top of the free run, clear of the operational LED pins so the strip wiring and the jumper don't interfere.
+- **Loopback self-test:** **Tx = GPIO 48, Rx = GPIO 47** — the two pins of **column 7** (48 top, 47 bottom), so a single jumper cap shorts them. A driver transmits a known WS2812 frame out Tx and reads it back on Rx to verify output on real silicon (same pattern as the P4-NANO bench's 32↔33). They sit at the top of the free run, clear of the operational LED pins so the strip wiring and the jumper don't interfere. **Bench-confirmed PASS on the S31 for both [RmtLedDriver](../moonmodules/light/drivers.md#rmtled) and [ParlioLedDriver](../moonmodules/light/drivers.md#parlioled)** — the two WS2812 output drivers the S31 supports. [LcdLedDriver](../moonmodules/light/drivers.md#lcdled) is **not** one of them: it's the ESP32-S3-specific LCD_CAM i80 driver, and the RISC-V S31 has no LCD_CAM peripheral (it reports "no valid pins"). Testing several drivers in a row, they all default loopback to GPIO 48, so only one can hold the pin at a time — toggle each driver's `loopbackTest` off before testing the next.
 
 ## SoC capabilities (from `components/soc/esp32s31/include/soc/soc_caps.h`)
 
