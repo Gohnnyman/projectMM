@@ -47,6 +47,7 @@ void HttpServerModule::release() {
     previewSend_.active = false;   // drop any in-flight send before the clients go (body is borrowed)
     for (auto& ws : wsClients_) ws.close();
     server_.close();
+    MoonModule::release();   // chain: uniform override-and-chain (no buffers/children today, but the convention holds)
 }
 
 void HttpServerModule::tick20ms() {

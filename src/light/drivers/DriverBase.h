@@ -60,10 +60,16 @@ public:
 
     /// Clear every shared status string on release — fail buffer, config error, and config
     /// warning — so a stopped driver leaves nothing behind (frees the owned `failBuf_`; retracts
-    /// the warning the same "clear only MY status" way as the error). A driver that overrides
-    /// release() for its own peripheral cleanup chains to this afterwards:
-    /// `deinit(); DriverBase::release();`.
-    void release() override { clearFailBuf(); clearConfigErr(); setConfigWarn(nullptr); }
+    /// the warning the same "clear only MY status" way as the error), then chain to
+    /// MoonModule::release() so any ScratchBuffer the driver holds frees on disable and children
+    /// recurse. A driver that overrides release() for its own peripheral cleanup chains to this
+    /// afterwards: `deinit(); DriverBase::release();`.
+    void release() override {
+        clearFailBuf();
+        clearConfigErr();
+        setConfigWarn(nullptr);
+        MoonModule::release();
+    }
 
 protected:
     Layer* layer_ = nullptr;

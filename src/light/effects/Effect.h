@@ -37,3 +37,5 @@
 
 #include <cstring>                // memset / memcpy / strcmp — buffer + control-name handling
 #include <cmath>                  // sqrtf / sinf / log10f — per-frame float maths (never per-light)
+#include <cstdint>                // fixed-width ints — the phase accumulators / packed state effects use
+#include <array>                  // std::array — fixed-size effect state tables (cube faces, LUTs)

@@ -215,12 +215,12 @@ private:
             // concerned — skip its claims. Uses effectivelyEnabled() (not the raw enabled() flag) so a
             // module under a DISABLED PARENT also shows its pins freed: the applyState() cascade tears
             // that module's peripheral down (a disabled parent releases its whole subtree), so the map
-            // must match — a child of a disabled Drivers/Layer container frees its GPIOs too. A System
-            // module (Tasks/Pins) ignores the flag via respectsEnabled()==false, so it's never skipped.
-            // The map's "freed" is truthful: applyState() routes a disabled (or effectively-disabled)
-            // module to release(), which deinits its peripheral (RMT/Parlio/LCD/I²S/socket/IR), so the
-            // freed GPIO is genuinely reusable, not just hidden — no reboot.
-            const bool active = !m->respectsEnabled() || m->effectivelyEnabled();
+            // must match — a child of a disabled Drivers/Layer container frees its GPIOs too. The gate
+            // is exactly the router's: applyState() calls release() on any node that is NOT
+            // effectivelyEnabled(), so the map's "active" must be the same predicate or it would show a
+            // pin held that the router already freed. The map's "freed" is truthful: release() deinits
+            // the peripheral (RMT/Parlio/LCD/I²S/socket/IR), so the GPIO is genuinely reusable — no reboot.
+            const bool active = m->effectivelyEnabled();
             const ControlList& cl = m->controls();
             for (uint8_t i = 0; active && i < cl.count(); i++) {
                 const ControlDescriptor& d = cl[i];

@@ -225,7 +225,8 @@ public:
     void release() override {
         deinit();
         if constexpr (platform::hasNetwork) { syncSock_.close(); syncOpen_ = false; }
-        micSeat_.vacate();   // vacate the seat; a surviving mic re-claims it in tick()
+        micSeat_.vacate();       // vacate the seat; a surviving mic re-claims it in tick()
+        MoonModule::release();   // chain: free any registered buffers + recurse (override-and-chain convention)
     }
 
     /// The latest analysed frame — what effects read. Always valid (zeroed until

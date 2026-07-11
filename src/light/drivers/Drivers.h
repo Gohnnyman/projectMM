@@ -2,6 +2,7 @@
 
 #include "light/drivers/DriverBase.h"  // DriverBase — the Drivers container casts its children to it
 #include "core/MoonModule.h"
+#include "core/ActiveInstance.h"  // the summary-seat election (the seat + its RAII vacate)
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/layers/Layers.h"
@@ -78,14 +79,15 @@ public:
     /// when no Drivers is in the tree, so a consumer always reads a valid POD, never null.
     static const LightSummary* latestSummary() {
         static const LightSummary kNone{};
-        return active_ ? &active_->summary_ : &kNone;
+        Drivers* a = ActiveInstance<Drivers>::active();
+        return a ? &a->summary_ : &kNone;
     }
 
     // Vacate the summary seat when this Drivers is removed, so latestSummary() falls back to the
     // all-zero default rather than a dangling pointer (the robustness rule). MoonModule::release
     // recurses to children.
     void release() override {
-        if (active_ == this) active_ = nullptr;
+        seat_.vacate();
         MoonModule::release();
     }
 
@@ -222,7 +224,7 @@ public:
         // no enabled layer → zero lights. One POD, overwritten in place on each rebuild.
         summary_.lightCount = out ? static_cast<uint32_t>(out->physicalLightCount()) : 0;
         summary_.channelsPerLight = out ? out->channelsPerLight() : 3;
-        active_ = this;
+        seat_.claim();   // first live Drivers wins the summary seat (claim-if-empty; one exists in practice)
         passBufferToDrivers();
     }
 
@@ -285,11 +287,13 @@ private:
     Buffer outputBuffer_;
     Correction correction_;
 
-    // Published to core via latestSummary(). active_ points at the Drivers whose summary is live
-    // (mirrors AudioService::active_): set in prepare, cleared in release so a removed Drivers
-    // stops being read; only one Drivers exists in the pinned tree, so no re-election dance is needed.
+    // Published to core via latestSummary(). The seat points at the Drivers whose summary is live —
+    // claimed in prepare(), vacated in release() and (via the ActiveInstance destructor) on teardown,
+    // so a removed Drivers never leaves latestSummary() dangling. Only one Drivers exists in the
+    // pinned tree, so claim-if-empty needs no re-election dance — but the RAII vacate is the same
+    // dangling-static guard the mic + registry seats use (see ActiveInstance.h).
     LightSummary summary_;
-    inline static Drivers* active_ = nullptr;
+    ActiveInstance<Drivers> seat_{*this};
 
     void passBufferToDrivers() {
         // No active Layer (e.g. the last Layer was just deleted): clear every

@@ -3,8 +3,6 @@
 #include "light/drivers/ParallelLedDriver.h"   // shared CRTP body
 #include "platform/platform.h"
 
-#include <cstdint>
-#include <cstring>  // std::strcmp
 
 namespace mm {
 

@@ -22,3 +22,4 @@
 #include <cstring>                      // std::strcmp (onControlChanged) / memset (buffer clears)
 #include <cstdint>                      // fixed-width ints
 #include <cstdio>                       // std::snprintf for status strings
+#include <algorithm>                    // std::min / max / clamp (chunk loops, size clamps)

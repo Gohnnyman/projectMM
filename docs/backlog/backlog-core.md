@@ -341,6 +341,14 @@ Fix options: (a) make every live mutate scenario clear+rebuild its own canvas (c
 
 ## Housekeeping
 
+### Heap-allocate the `registerType<T>` boot probe (lift a per-module lesson into core)
+
+`ModuleFactory::registerType<T>` stack-constructs a `T probe` at boot to capture `sizeof(T)`. On the main task's ~8 KB stack, a module with large inline members can overflow it and bootloop — a lesson the code records *per module* as a comment rather than fixing once in core: GameOfLifeEffect (`an inline array here caused a P4 stack-overflow bootloop`), HueDriver (`the lightsBuf_ stack-probe lesson`), and AudioService still carries ~5 KB of inline scratch while being factory-registered. This is the [*Complexity lives in core*](../../CLAUDE.md#principles) "lift the rule into core, don't paste it per module" clause: heap-allocate the probe (`MoonModule::operator new` already routes to PSRAM), or capture `sizeof` without constructing at all, so no module author ever has to remember the stack budget. Flagged by the 👾 Reviewer on PR #43. Small, core-only, its own `/plan`.
+
+### Migrate HueDriver's name buffers to `ScratchBuffer` (finish the ScratchBuffer sweep)
+
+`HueDriver::ensureNameBuffers()` / `freeNameBuffers()` is the alloc-in-build / free-in-release / null-guard bundle that `ScratchBuffer` absorbs — and it does **no** `dynamicBytes` accounting, so the module's memory readout under-reports its Hue-light name buffers. It was skipped in the ScratchBuffer migration (its buffers are `char[]` name tables, not the grid-sized state the sweep targeted). Now that `DriverBase::release()` chains to `MoonModule::release()` (fixed on PR #43), a `ScratchBuffer` member here would free correctly on disable and self-report its bytes. Mechanical, one-file, behaviour-preserving. Flagged by the 👾 Reviewer on PR #43.
+
 ### Socket-pair fixture for HttpServerModule WS-send tests (test infra)
 
 `HttpServerModule`'s resumable preview send (`sendBufferedFrame` / `drainPreviewSend` / `cancelBufferedSend`, the newest-wins drop, the per-client cursor over `[hdr ++ body]`, the memory-adaptive chunk) has no direct unit test because driving it needs real `TcpConnection` clients whose `writeSome` returns partial / WouldBlock under control — and there's no socket-pair test fixture today. The send *contract* is covered indirectly: `unit_PreviewDriver` drives a `CaptureBroadcaster` mock for route-to-buffered / gate-on-idle / cancel-on-rebuild, and the live device sweep exercises the real drain across ticks. A loopback `socketpair()` fixture on the desktop platform (a `TcpConnection` pair where the test reads the bytes the server pushed, and can simulate a stalled receiver by not draining) would let the drain/drop/cancel/over-push paths be pinned host-side. Build it when the next core transport change lands (it'd also serve future WS tests).

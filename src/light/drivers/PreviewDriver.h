@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio
+#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
 
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 #include "core/BinaryBroadcaster.h"

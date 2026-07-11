@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio
+#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
 
 #include "core/JsonUtil.h"          // parse the bridge's JSON responses
 #include "core/FilesystemModule.h"  // noteDirty — persist the app key after pairing

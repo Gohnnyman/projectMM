@@ -6,9 +6,6 @@
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared)
 #include "platform/platform.h"
 
-#include <cstdint>
-#include <cstdio>   // snprintf for status strings
-#include <cstring>  // std::strcmp, std::memset
 
 namespace mm {
 
