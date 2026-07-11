@@ -10,6 +10,8 @@
 
 namespace mm {
 
+class JsonSink;   // writeNode serializes into one (streaming/heap mode); full def in JsonSink.h (the .cpp includes it)
+
 class Scheduler;
 struct ControlDescriptor;
 
@@ -67,8 +69,9 @@ struct ControlDescriptor;
 /// **Platform layer.** Filesystem access goes through `platform::fs*` (mount, mkdir,
 /// read, atomic write-then-rename, used/total). ESP32 uses LittleFS on a dedicated
 /// partition; desktop uses `std::filesystem` rooted at `build/` (overridable via
-/// `fsSetRoot` for test isolation). Save/load shares one `MAX_FILE_BYTES` buffer; a
-/// subtree that serialises larger than that fails the write.
+/// `fsSetRoot` for test isolation). Save and load are both cap-free: the save serializes into a
+/// growable `JsonSink` (heap, no ceiling) and the load reads the whole file into a heap buffer
+/// sized to it — a config of any size (many light presets, a wide fixture) round-trips in full.
 ///
 /// **First boot:** no files exist → load is a no-op, modules run with default
 /// member-initialised values; after the first UI change the debounce creates the file.
@@ -78,7 +81,6 @@ struct ControlDescriptor;
 class FilesystemModule : public MoonModule {
 public:
     static constexpr const char* CONFIG_DIR = "/.config";
-    static constexpr size_t MAX_FILE_BYTES = 2048;
     static constexpr size_t MAX_PATH = 64;
     static constexpr size_t MAX_KEY = 48;
     static constexpr uint32_t DEBOUNCE_MS = 2000;
@@ -138,11 +140,10 @@ private:
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
     char lastSaveStr_[24] = "never";  ///< "last saved" status string; FileManagerModule reads it via lastSavedStr()
-    /// Shared load/save buffer — load runs once at boot (phase 2), save runs in tick1s after
-    /// the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
-    /// since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32
-    /// default task stack ceiling (4–8KB).
-    char fileBuf_[MAX_FILE_BYTES] = {};
+    // No persistent load/save buffer: save serializes into a transient growable JsonSink and load
+    // into a transient file-sized heap buffer, each allocated for the operation and freed after — so
+    // the module holds NO large standing buffer (the old fixed 2 KB member is gone), and the heap is
+    // used only briefly during a save (debounced, ~every 2 s) or the one boot load.
 
     // ---- Internals ----
     void updateLastSavedStr();
@@ -153,9 +154,7 @@ private:
     void applyNode(MoonModule* m, const char* json, const char* prefix);
     void applyValue(const ControlDescriptor& c, const char* json, const char* key);
     bool saveSubtree(MoonModule* m);
-    bool writeNode(MoonModule* m, char* buf, size_t bufLen, int& pos, const char* prefix,
-                   bool firstField = true);
-    bool writeValue(const ControlDescriptor& c, char* buf, size_t bufLen, int& pos);
+    void writeNode(MoonModule* m, JsonSink& sink, const char* prefix, bool firstField = true);
     static bool subtreeDirty(MoonModule* m);
     static void clearSubtreeDirty(MoonModule* m);
     static bool pathFor(MoonModule* m, char* out, size_t n);

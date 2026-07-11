@@ -55,8 +55,11 @@ public:
     /// interface, not the concrete HTTP server.
     void setBroadcaster(BinaryBroadcaster* b) { broadcaster_ = b; }
 
+    /// Preview shows the raw logical buffer, no correction.
+    bool hasCorrectionControls() const override { return false; }
+
     /// Bind the one control, `fps` (1-60).
-    void defineControls() override {
+    void defineDriverControls() override {
         controls_.addUint8("fps", fps, 1, 60);
     }
 

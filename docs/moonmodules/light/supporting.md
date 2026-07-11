@@ -57,6 +57,16 @@ Detail: [technical](moxygen/Drivers.md)
 
 [Tests](../../tests/unit-tests.md#drivers)
 
+<a id="lightpresets"></a>
+
+### LightPresets
+
+The reusable light-preset library — a Drivers submodule that owns the named channel-role wirings drivers reference. A light preset is a channel layout (which channel carries Red, Green, Blue, White, WarmWhite, Yellow, UV, or a fixture role like Pan/Tilt); a curated set of real fixtures is seeded as read-only entries — the colour orders (RGB, GRB, BGR, RGBW, GRBW, WRGB), multi-channel LED/par fixtures (Curtain GRB6, Lightbar RGBWYP, RGBCCT, IRGB), and moving heads (MH BeeEyes 15, MH BeTopper 32, MH 19x15W-24) — and a user adds custom named wirings alongside them. A driver stores only a preset's stable id and resolves it here at rebuild time, so one wiring is reusable across every driver and reordering/deleting other presets never disturbs a reference. Built on the editable-list control primitive (add/delete/reorder/edit rows), which custom palettes reuse later.
+
+- `presets` — the editable list of preset definitions. Each row: a name, a channel count, and one role picker per channel. Built-in rows are read-only; custom rows are fully editable and persist across reboot.
+
+Detail: [technical](moxygen/LightPresetsModule.md)
+
 ### Buffer
 
 Contiguous light-data buffer, shared between the layers that write it (effects) and the driver groups that read it. A raw `uint8_t*` so any channel layout fits — RGB, RGBW, multi-channel DMX.

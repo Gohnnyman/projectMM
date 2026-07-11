@@ -67,6 +67,7 @@
 #include "light/modifiers/PinwheelModifier.h"
 #include "light/modifiers/RippleXZModifier.h"
 #include "light/drivers/Drivers.h"   // the Drivers container (registered + wired below); driver subclasses include DriverBase.h directly
+#include "light/drivers/LightPresetsModule.h"  // the reusable light-preset library (Drivers submodule)
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
@@ -125,6 +126,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Layers>("Layers", "light/supporting.md#layers");
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/supporting.md#layer");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/supporting.md#drivers");
+    mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule", "light/supporting.md#lightpresets");
     // Concrete modules. registerType<T> captures the type's dimensions() via
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
@@ -421,6 +423,15 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // main.cpp has and the catalog can't supply. It reads the active Layer (resolved
     // by the Drivers container's setLayers above) for the light positions and the
     // sparse buffer it streams; it owns its own scratch buffers.
+    // The light-preset library: a boot-wired singleton under Drivers (child role `preset`). It owns
+    // the named channel-role wirings every driver references by id; exactly one exists, so drivers
+    // resolve it via its ActiveInstance seat. Wired-by-code so a persistence load keeps the seeded
+    // built-ins + the singleton, like preview below.
+    auto* lightPresets =
+        static_cast<mm::LightPresetsModule*>(mm::ModuleFactory::create("LightPresetsModule"));
+    drivers->addChild(lightPresets);
+    lightPresets->markWiredByCode();
+
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
     drivers->addChild(preview);
     // Marked wired-by-code so a persistence load can't replace the wired instance

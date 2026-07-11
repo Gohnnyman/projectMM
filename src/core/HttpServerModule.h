@@ -303,6 +303,16 @@ private:
     void serveTypes(platform::TcpConnection& conn);
     void writeTypeDefaults(JsonSink& sink, const char* typeName);
     void handleMoveModule(platform::TcpConnection& conn, const char* moduleName, const char* body);
+    // Editable list (the CRUD primitive): `<tail>` is the path after "/api/list/", i.e.
+    // "<module>/<control>[/<id>]". Add appends a row (POST), patch edits/reorders one (PATCH),
+    // delete removes one (DELETE). resolveEditableList does the shared parse + validation.
+    void handleListAddRow(platform::TcpConnection& conn, const char* tail);
+    void handleListPatchRow(platform::TcpConnection& conn, const char* tail, const char* jsonBody);
+    void handleListDeleteRow(platform::TcpConnection& conn, const char* tail);
+    ListSource* resolveEditableList(platform::TcpConnection& conn, const char* tail,
+                                    uint32_t& outId, bool& outHasId);
+    MoonModule* listMutationModule_ = nullptr;  // module whose list a CRUD op resolved to (for markDirty)
+    void afterListMutation();
     void handleReboot(platform::TcpConnection& conn);
     /// OTA: `POST /api/firmware/url` body=`{"url":"..."}`. Body parsed; URL handed
     /// to platform::http_fetch_to_ota which spawns a task and returns. Caller

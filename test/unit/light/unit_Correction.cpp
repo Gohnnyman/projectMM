@@ -9,7 +9,10 @@
 // white derivation. The Drivers container owns a Correction, rebuilds it on a
 // brightness/light-preset change, and hands it to each physical driver, which calls
 // apply() per light. These tests pin the transform so a regression in the LUT fill,
-// the preset→order mapping, or the white math fails here.
+// the preset→role-offset mapping, or the white math fails here. A light is a span of
+// outChannels bytes with a named offset per colour role (offRed/offGreen/offBlue, and
+// offWhite for the RGBW family; kAbsent = no white), so the checks read the observable
+// apply() output plus outChannels, not an internal permutation table.
 
 using mm::Correction;
 using mm::LightPreset;
@@ -36,7 +39,7 @@ TEST_CASE("Correction RGB preset: apply is identity at full brightness") {
     Correction c;
     c.rebuild(255, LightPreset::RGB);
     CHECK(c.outChannels == 3);
-    CHECK_FALSE(c.deriveWhite);
+    CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[3] = {};
     c.apply(src, out);
@@ -50,7 +53,7 @@ TEST_CASE("Correction GRB preset: channels reordered, 3 output channels") {
     Correction c;
     c.rebuild(255, LightPreset::GRB);
     CHECK(c.outChannels == 3);
-    CHECK_FALSE(c.deriveWhite);
+    CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
     const uint8_t src[3] = {10, 20, 30};  // R=10 G=20 B=30
     uint8_t out[3] = {};
     c.apply(src, out);
@@ -76,7 +79,7 @@ TEST_CASE("Correction RGBW preset: 4 channels, white = min(r,g,b)") {
     Correction c;
     c.rebuild(255, LightPreset::RGBW);
     CHECK(c.outChannels == 4);
-    CHECK(c.deriveWhite);
+    CHECK(c.offWhite == 3);   // white derived into the 4th channel
     const uint8_t src[3] = {10, 20, 30};  // min = 10
     uint8_t out[4] = {};
     c.apply(src, out);
@@ -123,5 +126,101 @@ TEST_CASE("Correction: rebuild switches output channel count RGB<->RGBW") {
     CHECK(c.outChannels == 4);
     c.rebuild(255, LightPreset::GRB);
     CHECK(c.outChannels == 3);
-    CHECK_FALSE(c.deriveWhite);
+    CHECK(c.offWhite == Correction::kAbsent);   // white dropped back to absent
+}
+
+using mm::WhiteMode;
+
+// whiteMode = Min is the default and derives W = min(scaled R,G,B) leaving RGB intact —
+// this is the byte-identical behaviour the earlier RGBW tests already pin. whiteMode =
+// None leaves the white channel untouched (0 here), for effects that drive W themselves.
+TEST_CASE("Correction whiteMode None: no white synthesised") {
+    Correction c;
+    c.rebuild(255, LightPreset::RGBW);
+    c.whiteMode = WhiteMode::None;
+    const uint8_t src[3] = {10, 20, 30};
+    uint8_t out[4] = {0, 0, 0, 77};   // pre-fill W to prove it's left untouched
+    c.apply(src, out);
+    CHECK(out[0] == 10);
+    CHECK(out[1] == 20);
+    CHECK(out[2] == 30);
+    CHECK(out[3] == 77);   // untouched — None writes no white
+}
+
+// whiteMode = Accurate pulls the common white component OUT of RGB (so the white LED
+// carries it) rather than adding it on top — R,G,B each drop by min(R,G,B).
+TEST_CASE("Correction whiteMode Accurate: white subtracted from RGB") {
+    Correction c;
+    c.rebuild(255, LightPreset::RGBW);
+    c.whiteMode = WhiteMode::Accurate;
+    const uint8_t src[3] = {10, 20, 30};  // min = 10
+    uint8_t out[4] = {};
+    c.apply(src, out);
+    CHECK(out[0] == 0);    // R: 10 - 10
+    CHECK(out[1] == 10);   // G: 20 - 10
+    CHECK(out[2] == 20);   // B: 30 - 10
+    CHECK(out[3] == 10);   // W: min(10,20,30)
+}
+
+using mm::ChannelRole;
+
+// A Custom wiring is described by a channel-role array; rebuild() derives the colour
+// offsets from it. Here: white first, then B, G, R — a 4-channel arbitrary order that no
+// curated preset names, proving the role array reaches any wiring.
+TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offsets") {
+    Correction c;
+    const ChannelRole roles[4] = {ChannelRole::White, ChannelRole::Blue,
+                                  ChannelRole::Green, ChannelRole::Red};
+    c.rebuild(128, roles, 4);   // half brightness
+    // Offsets derived from the array: each role's channel index.
+    CHECK(c.offWhite == 0);
+    CHECK(c.offBlue == 1);
+    CHECK(c.offGreen == 2);
+    CHECK(c.offRed == 3);
+    CHECK(c.outChannels == 4);
+    CHECK(c.briLut[255] == 128);   // LUT refreshed (brightness applied)
+    const uint8_t src[3] = {200, 100, 60};  // scaled: 100, 50, 30 → min = 30
+    uint8_t out[4] = {};
+    c.apply(src, out);
+    CHECK(out[3] == 100);  // R at channel 3
+    CHECK(out[2] == 50);   // G at channel 2
+    CHECK(out[1] == 30);   // B at channel 1
+    CHECK(out[0] == 30);   // W = min at channel 0
+}
+
+// A colour role absent from the array stays kAbsent and apply() doesn't write it — a wiring
+// can carry any SUBSET of colour roles (e.g. a 2-channel R,B light with no green channel).
+TEST_CASE("Correction roles array: absent colour role is not emitted") {
+    Correction c;
+    const ChannelRole roles[2] = {ChannelRole::Red, ChannelRole::Blue};   // no green channel
+    c.rebuild(255, roles, 2);
+    CHECK(c.offRed == 0);
+    CHECK(c.offBlue == 1);
+    CHECK(c.offGreen == Correction::kAbsent);   // green has nowhere to go
+    CHECK(c.outChannels == 2);
+    const uint8_t src[3] = {10, 20, 30};
+    uint8_t out[2] = {0, 0};
+    c.apply(src, out);
+    CHECK(out[0] == 10);   // R
+    CHECK(out[1] == 30);   // B — green (20) simply not written
+}
+
+// A non-colour role (Pan) occupies a channel but apply()'s RGB path ignores it — the channel
+// is left for the fixture role writer, and outChannels still counts it.
+TEST_CASE("Correction roles array: non-colour role reserves a channel apply() skips") {
+    Correction c;
+    const ChannelRole roles[4] = {ChannelRole::Pan, ChannelRole::Red,
+                                  ChannelRole::Green, ChannelRole::Blue};
+    c.rebuild(255, roles, 4);
+    CHECK(c.outChannels == 4);
+    CHECK(c.offRed == 1);
+    CHECK(c.offGreen == 2);
+    CHECK(c.offBlue == 3);
+    const uint8_t src[3] = {10, 20, 30};
+    uint8_t out[4] = {77, 0, 0, 0};   // channel 0 (Pan) pre-set; apply() must leave it
+    c.apply(src, out);
+    CHECK(out[0] == 77);   // Pan channel untouched by the RGB path
+    CHECK(out[1] == 10);   // R
+    CHECK(out[2] == 20);   // G
+    CHECK(out[3] == 30);   // B
 }

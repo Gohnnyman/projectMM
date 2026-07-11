@@ -31,7 +31,7 @@ void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 }
 
@@ -91,7 +91,8 @@ TEST_CASE("LcdLedDriver frame grows on RGBW preset") {
     wire(d, src, corr, 100);
     CHECK(d.frameBytes() == expectFrame(50, 3));
 
-    corr.rebuild(255, mm::LightPreset::GRBW);
+    // The driver owns its Correction, so mutate that copy (not the external one).
+    d.correctionForTest().rebuild(255, mm::LightPreset::GRBW);
     d.onCorrectionChanged();
     CHECK(d.frameBytes() == expectFrame(50, 4));
 }
@@ -127,7 +128,7 @@ TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
     corr.rebuild(255, mm::LightPreset::GRB);
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 
     CHECK(d.laneCount() == 0);            // no lanes claimed
@@ -177,7 +178,7 @@ TEST_CASE("LcdLedDriver setup/release is repeatable") {
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();
         d.setSourceBuffer(&src);
-        d.setCorrection(&corr);
+        d.correctionForTest() = corr;
         d.applyState();
         REQUIRE(d.laneCount() == 8);
         d.release();

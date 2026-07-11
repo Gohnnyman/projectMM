@@ -270,6 +270,10 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             handleMakeDir(conn, queryStart ? queryStart + 1 : "");
         } else if (std::strcmp(path, "/api/modules") == 0 && body) {
             handleAddModule(conn, body);
+        } else if (std::strncmp(path, "/api/list/", 10) == 0) {
+            // Editable list: POST /api/list/<module>/<control> appends a new row and returns
+            // its stable id. The row's fields are then set via PATCH /api/list/.../<id>.
+            handleListAddRow(conn, path + 10);
         } else if (isMoveRoute && body) {
             char nameBuf[32] = {};
             size_t nameLen = pathLen - 13 - 5;  // strip "/api/modules/" prefix and "/move" suffix
@@ -310,10 +314,22 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
+    } else if (std::strcmp(method, "PATCH") == 0) {
+        // Editable list: PATCH /api/list/<module>/<control>/<id> edits one row — a field
+        // ({"field":F,"value":V}) or a reorder ({"to":N}). PATCH is the REST verb for a
+        // partial update of an existing resource (the row); create is POST, delete is DELETE.
+        if (std::strncmp(path, "/api/list/", 10) == 0 && body) {
+            handleListPatchRow(conn, path + 10, body);
+        } else {
+            sendResponse(conn, 404, "text/plain", "Not found");
+        }
     } else if (std::strcmp(method, "DELETE") == 0) {
         // DELETE /api/modules/ModuleName
         if (std::strncmp(path, "/api/modules/", 13) == 0) {
             handleDeleteModule(conn, path + 13);
+        } else if (std::strncmp(path, "/api/list/", 10) == 0) {
+            // Editable list: DELETE /api/list/<module>/<control>/<id> removes one row.
+            handleListDeleteRow(conn, path + 10);
         } else if (std::strcmp(path, "/api/dir") == 0) {
             // File Manager: DELETE /api/dir?path=<rel> → remove a file or empty dir.
             handleRemoveEntry(conn, queryStart ? queryStart + 1 : "");
@@ -353,7 +369,7 @@ void HttpServerModule::sendPreflightResponse(platform::TcpConnection& conn) {
     const char* response =
         "HTTP/1.1 204 No Content\r\n"
         "Access-Control-Allow-Origin: *\r\n"
-        "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n"
+        "Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\n"
         "Access-Control-Allow-Headers: Content-Type\r\n"
         "Access-Control-Max-Age: 3600\r\n"
         "Connection: close\r\n"
@@ -891,6 +907,14 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         writeControlMetadata(sink, c);
         // Emit optional flags only when set (common case is false; omit to save bytes).
         if (c.readonly) sink.append(",\"readonly\":true");
+        if (c.stepper) sink.append(",\"stepper\":true");
+        // An editable List (the CRUD primitive) tells the UI to show add/delete/reorder + inline
+        // row editors; a plain List stays read-only. The row objects carry a stable "id" the
+        // /api/list/* ops address, and each editable row's detail carries its field descriptors.
+        if (c.type == ControlType::List) {
+            const auto* ls = static_cast<const ListSource*>(c.ptr);
+            if (ls && ls->isEditableList()) sink.append(",\"editable\":true");
+        }
         sink.append(c.hidden ? ",\"hidden\":true}" : "}");
     }
 }
@@ -1717,6 +1741,139 @@ void HttpServerModule::handleMoveModule(platform::TcpConnection& conn, const cha
     parent->markDirty();
     FilesystemModule::noteDirty();
     if (scheduler_) scheduler_->prepareTree();
+    sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+}
+
+// Resolve `/api/list/<module>/<control>[/<id>]` (the tail after "/api/list/") into the module's
+// editable List source, the parsed id (if the tail has one), and a flag saying whether an id was
+// present. Returns nullptr (and sends the right 4xx) on any failure: bad path, unknown module or
+// control, a control that isn't an editable list. Shared by the add / patch / delete handlers so
+// the parse + validation lives once.
+ListSource* HttpServerModule::resolveEditableList(platform::TcpConnection& conn, const char* tail,
+                                                  uint32_t& outId, bool& outHasId) {
+    // Split the tail into "<module>/<control>[/<id>]" on '/'. Names have no '/', so two slashes
+    // at most: module, control, and an optional numeric id.
+    char moduleName[32] = {};
+    char controlName[32] = {};
+    outHasId = false;
+    outId = 0;
+    const char* s1 = std::strchr(tail, '/');
+    if (!s1) { sendResponse(conn, 400, "application/json", "{\"error\":\"bad list path\"}"); return nullptr; }
+    const size_t mLen = static_cast<size_t>(s1 - tail);
+    if (mLen == 0 || mLen >= sizeof(moduleName)) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad module\"}"); return nullptr;
+    }
+    std::memcpy(moduleName, tail, mLen);
+    const char* cStart = s1 + 1;
+    const char* s2 = std::strchr(cStart, '/');
+    const size_t cLen = s2 ? static_cast<size_t>(s2 - cStart) : std::strlen(cStart);
+    if (cLen == 0 || cLen >= sizeof(controlName)) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad control\"}"); return nullptr;
+    }
+    std::memcpy(controlName, cStart, cLen);
+    if (s2 && s2[1]) {   // an id segment follows the control
+        outId = static_cast<uint32_t>(std::strtoul(s2 + 1, nullptr, 10));
+        outHasId = true;
+    }
+
+    MoonModule* mod = findModuleByName(moduleName);
+    if (!mod) { sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}"); return nullptr; }
+    auto& cs = mod->controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (cs[i].type == ControlType::List && std::strcmp(cs[i].name, controlName) == 0) {
+            auto* src = static_cast<ListSource*>(cs[i].ptr);
+            if (!src || !src->isEditableList()) {
+                sendResponse(conn, 400, "application/json", "{\"error\":\"list not editable\"}");
+                return nullptr;
+            }
+            listMutationModule_ = mod;   // remembered so afterListMutation marks IT dirty (persistence)
+            return src;
+        }
+    }
+    sendResponse(conn, 404, "application/json", "{\"error\":\"control not found\"}");
+    return nullptr;
+}
+
+// After a list mutation: persist the owning module's storage and re-run the tree so a consumer
+// (a driver referencing a preset by id) picks up the change on the next prepare. Mirrors the
+// add/delete/move module handlers' dirty + prepareTree tail.
+void HttpServerModule::afterListMutation() {
+    // Mark the owning module dirty so its subtree is actually written — noteDirty() alone only sets
+    // the debounce flag; the flush loop skips a subtree whose module isn't dirty (subtreeDirty). This
+    // is the same markDirty()+noteDirty() pair the add/delete/move module handlers use; without the
+    // markDirty a mutated list persisted nothing and was lost on reboot.
+    if (listMutationModule_) listMutationModule_->markDirty();
+    FilesystemModule::noteDirty();
+    if (scheduler_) {
+        // Rebuild EVERY module's controls: a list mutation can change what OTHER modules present —
+        // adding/removing a light preset changes the option set of every driver's `preset` Select
+        // (which is built from the library). Without this, a driver's Select keeps its stale option
+        // count and a just-added preset is unselectable ("value out of range"). Mirrors the phase-2b
+        // tree-wide rebuild after persistence load.
+        for (uint8_t i = 0; i < scheduler_->moduleCount(); i++)
+            if (auto* m = scheduler_->module(i)) m->rebuildControls();
+        // Re-resolve each driver's preset → correction so an EDIT flows to output immediately. This
+        // is a tier-1 correction refresh (rebuildCorrection → onCorrectionChanged), NOT a tier-3
+        // prepareTree(): a preset edit changes correction data, not pipeline STRUCTURE, so it must
+        // not re-run prepare() — that reinits each driver's output peripheral (an RMT channel
+        // teardown blanks the strip for a tick, even on drivers not using the edited preset), which
+        // Live-reconfiguration forbids (a config change applies with no visible glitch). Drivers is
+        // the one container that owns driver corrections; core already couples to it (latestSummary).
+        if (auto* drivers = static_cast<Drivers*>(findModuleByName("Drivers")))
+            drivers->rebuildAllCorrections();
+    }
+}
+
+void HttpServerModule::handleListAddRow(platform::TcpConnection& conn, const char* tail) {
+    uint32_t id; bool hasId;
+    ListSource* src = resolveEditableList(conn, tail, id, hasId);
+    if (!src) return;   // response already sent
+    uint32_t newId = 0;
+    if (!src->addListRow(newId)) {
+        sendResponse(conn, 409, "application/json", "{\"error\":\"list full or add refused\"}");
+        return;
+    }
+    afterListMutation();
+    char body[48];
+    std::snprintf(body, sizeof(body), "{\"ok\":true,\"id\":%lu}", static_cast<unsigned long>(newId));
+    sendResponse(conn, 200, "application/json", body);
+}
+
+void HttpServerModule::handleListPatchRow(platform::TcpConnection& conn, const char* tail, const char* jsonBody) {
+    uint32_t id; bool hasId;
+    ListSource* src = resolveEditableList(conn, tail, id, hasId);
+    if (!src) return;
+    if (!hasId) { sendResponse(conn, 400, "application/json", "{\"error\":\"row id required\"}"); return; }
+    // A PATCH is either a reorder ({"to":N}) or a field edit ({"field":F,"value":V}).
+    if (mm::json::hasKey(jsonBody, "to")) {
+        int to = mm::json::parseInt(jsonBody, "to");
+        if (to < 0 || !src->moveListRow(id, static_cast<uint8_t>(to))) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"move failed\"}");
+            return;
+        }
+    } else {
+        char field[32] = {};
+        mm::json::parseString(jsonBody, "field", field, sizeof(field));
+        if (!field[0]) { sendResponse(conn, 400, "application/json", "{\"error\":\"field required\"}"); return; }
+        if (!src->setListRowField(id, field, jsonBody)) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"field edit failed\"}");
+            return;
+        }
+    }
+    afterListMutation();
+    sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+}
+
+void HttpServerModule::handleListDeleteRow(platform::TcpConnection& conn, const char* tail) {
+    uint32_t id; bool hasId;
+    ListSource* src = resolveEditableList(conn, tail, id, hasId);
+    if (!src) return;
+    if (!hasId) { sendResponse(conn, 400, "application/json", "{\"error\":\"row id required\"}"); return; }
+    if (!src->deleteListRow(id)) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"delete failed (bad id or protected)\"}");
+        return;
+    }
+    afterListMutation();
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 

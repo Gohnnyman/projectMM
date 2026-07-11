@@ -45,14 +45,15 @@ namespace mm {
 /// composite: the fast path applies (no-LUT → zero-copy; with a LUT → one blend+map pass
 /// into the output buffer).
 ///
-/// **Output correction.** Drivers owns the shared output-correction state (a
-/// `Correction`: brightness LUT, channel-order table, output channel count, derive-white
-/// flag) and exposes `brightness`, `lightPreset`, and the global `palette` controls; each
-/// *physical* driver child applies the correction per-light as it reads the source buffer,
-/// while Preview ignores it (shows the raw logical buffer). `onControlChanged` rebuilds the
-/// correction on a `brightness`/`lightPreset` change and hands each child a
-/// `const Correction*`. Every driver sees the same composited output. Palette model +
-/// names follow FastLED's, credited as prior art; implementation in `src/light/Palette.h`.
+/// **Output correction.** Each *physical* driver owns its own `Correction` (channel-order
+/// table, output channel count, white synthesis, and a brightness LUT), applied per-light as
+/// it reads the source buffer; Preview ignores it (shows the raw logical buffer). Drivers owns
+/// only the GLOBAL `brightness` (plus `on` and `palette`); on a power/brightness change it
+/// calls each child's `rebuildCorrection(globalBrightness)`, which bakes global × that driver's
+/// local brightness into its LUT. So outputs on one board can differ — a GRB strip and an RGBW
+/// panel, each at its own brightness — while every driver still sees the same composited RGB
+/// source. Palette model + names follow FastLED's, credited as prior art; implementation in
+/// `src/light/Palette.h`.
 ///
 /// **Per-driver source window (`start` / `count`).** A window-aware output driver reads
 /// the shared source buffer and outputs a contiguous slice of it — its *window* — making
@@ -70,6 +71,11 @@ namespace mm {
 /// @card Drivers.png
 class Drivers : public MoonModule {
 public:
+    // Accepts output drivers only, so the "+ add" picker under Drivers offers just the drivers — not
+    // every generic system module (Devices, Filesystem, …), which would bury them. The one non-driver
+    // child, the boot-wired LightPresetsModule (ModuleRole::Generic), is added directly at boot via
+    // addChild — that path bypasses acceptsChildRoles — and is userEditable(false), a non-deletable
+    // singleton, so it never needs to be user-added and `generic` isn't needed in this accept list.
     const char* acceptsChildRoles() const override { return "driver"; }
 
     /// The live light-pipeline summary (light count, channels), for the domain-neutral core
@@ -109,17 +115,10 @@ public:
     /// `Scheduler::setControl` — define-once, reuse everywhere (the first slice of a global
     /// lights-control surface). Default on so a freshly-flashed board lights up.
     bool on = true;
-    /// Physical wire format: channel order and whether the light is RGBW (index into
-    /// `kLightPresetOptions`; options `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`,
-    /// `GRBW`). RGBW presets make each driver emit 4 channels per light with white
-    /// derived as `min(R,G,B)` from the (brightness-scaled) RGB.
-    ///
-    /// GRB (index 2) is the wire order of WS2812/SK6812 strips — the common case, so a
-    /// freshly-flashed board with a strip attached shows correct colours out of the box.
-    /// Only the physical output drivers apply this reorder; PreviewDriver reads the RGB
-    /// source buffer directly, so the simulator is unaffected. RGB-ordered outputs (some
-    /// ArtNet/network sinks) flip it back.
-    uint8_t lightPreset = 2;  ///< index into kLightPresetOptions; 2 = GRB
+    // The physical wire format (channel order, RGBW white, per-driver brightness) is owned
+    // per driver on DriverBase (defineCorrectionControls) — a GRB strip and an RGBW panel on
+    // the same board each carry their own preset. The container owns only the GLOBAL brightness
+    // above, which each driver's LUT multiplies with its local brightness.
     /// The global active colour palette (index into `mm::palettes::kBuiltins`;
     /// `Rainbow`, `Party`, `Lava`, `Ocean`, …). Palette-driven effects read it via
     /// `Palettes::active()` and colour their pixels through `colorFromPalette(index)`, so
@@ -150,38 +149,45 @@ public:
     void defineControls() override {
         controls_.addBool("on", on);   // master power — first so it renders at the top of the card
         controls_.addUint8("brightness", brightness, 0, 255);
-        controls_.addSelect("lightPreset", lightPreset, kLightPresetOptions, kLightPresetCount);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
-        MoonModule::defineControls();  // cascade to driver children
+        MoonModule::defineControls();  // cascade to driver children (each owns its lightPreset/whiteMode)
     }
 
-    // Brightness / light-preset changes only rebuild the (cheap) correction LUT — no
-    // pipeline realloc. This is what keeps the brightness slider fluent: affectsPrepare
-    // stays false for Drivers, so handleSetControl skips scheduler_->prepareTree().
+    // A global power / brightness change re-bakes every driver's LUT (global × that driver's
+    // local brightness) — cheap, no pipeline realloc, which keeps the brightness slider fluent
+    // (affectsPrepare stays false for Drivers, so handleSetControl skips prepareTree). The
+    // per-driver channel order / white / local brightness live on each driver and rebuild there.
     void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "palette") == 0) {
             Palettes::setActive(palette);   // rebuild the active 16-entry lookup (cheap, off the hot path)
             return;
         }
         if (std::strcmp(controlName, "on") == 0 ||
-            std::strcmp(controlName, "brightness") == 0 ||
-            std::strcmp(controlName, "lightPreset") == 0) {
-            correction_.rebuild(effectiveBrightness(), static_cast<LightPreset>(lightPreset));
-            // Propagate so physical drivers that maintain a correction-applied
-            // buffer (today: ArtNet) can resize off the hot path. A brightness-
-            // only change is a no-op for resizing (outChannels stays 3); the
-            // RGB↔RGBW preset switch is the case that actually grows/shrinks.
-            for (uint8_t i = 0; i < childCount(); i++) {
-                static_cast<DriverBase*>(child(i))->onCorrectionChanged();
-            }
+            std::strcmp(controlName, "brightness") == 0) {
+            rebuildAllCorrections();
+        }
+    }
+
+    /// Re-resolve every driver's correction (preset roles + brightness LUT) into its flat
+    /// Correction, WITHOUT re-preparing the tree. This is the correction-only path: a global
+    /// brightness change AND a light-preset edit both need it, but neither is a structural
+    /// change, so routing them through prepare() would needlessly reinit each driver's output
+    /// peripheral (an RMT channel teardown blanks the strip for a tick — Live-reconfiguration
+    /// says a config change applies with no visible glitch). rebuildCorrection() calls the
+    /// driver's onCorrectionChanged() (resize the correction buffer) but never its prepare(),
+    /// so the peripheral is left running. The LightPresetsModule (role Generic) is skipped — only
+    /// a Driver owns a correction.
+    void rebuildAllCorrections() {
+        for (uint8_t i = 0; i < childCount(); i++) {
+            if (child(i)->role() != ModuleRole::Driver) continue;
+            static_cast<DriverBase*>(child(i))->rebuildCorrection(effectiveBrightness());
         }
     }
 
     void setup() override {
-        correction_.rebuild(effectiveBrightness(), static_cast<LightPreset>(lightPreset));
         Palettes::setActive(palette);   // seed the global active palette from the persisted index
         MoonModule::setup();
-        passBufferToDrivers();
+        passBufferToDrivers();           // seeds each driver's correction via rebuildCorrection()
     }
 
     void prepare() override {
@@ -285,7 +291,6 @@ private:
     Layers* layers_ = nullptr;  // bound container; layer_ re-resolved from it at prepareTree
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
-    Correction correction_;
 
     // Published to core via latestSummary(). The seat points at the Drivers whose summary is live —
     // claimed in prepare(), vacated in release() and (via the ActiveInstance destructor) on teardown,
@@ -316,6 +321,9 @@ private:
                                                                : &out->buffer())
                           : nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
+            // Skip the non-driver child (the LightPresetsModule, role Generic): it has no source
+            // buffer / correction to wire — only output drivers do.
+            if (child(i)->role() != ModuleRole::Driver) continue;
             auto* drv = static_cast<DriverBase*>(child(i));
             drv->setSourceBuffer(buf);
             // Geometry uses layer_ (activeLayer()'s fallback — valid even when every
@@ -324,7 +332,10 @@ private:
             // still idles (no stale frame) when nothing is enabled. layer_ is null
             // only when no Layer is registered at all (the documented idle state).
             drv->setLayer(layer_);
-            drv->setCorrection(&correction_);  // physical drivers apply it; Preview ignores
+            // Each driver owns its correction; push the current global brightness so it can
+            // bake global × its local brightness into its own LUT (physical drivers apply it,
+            // Preview ignores). A driver's own correction-control edits rebuild it themselves.
+            drv->rebuildCorrection(effectiveBrightness());
         }
     }
 };

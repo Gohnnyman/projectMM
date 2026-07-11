@@ -179,6 +179,42 @@ struct ListSource {
     // owns its (de)serialization — Control.h stays free of the JsonUtil include, and
     // the control system stays generic. Returns true if it took.
     virtual bool restoreList(const char* /*json*/, const char* /*key*/) { return false; }
+
+    // --- Editable list (the CRUD extension) -----------------------------------------
+    // A ListSource that supports adding / removing / reordering / editing rows. This is
+    // the editable-data-grid primitive (the write half of the same data-source/adapter
+    // shape UITableView-editing / QAbstractItemModel-with-setData use) — a module that
+    // owns a library of named things (light presets, and later custom palettes) mixes it
+    // in and gets a full editable list in the UI for free, reused rather than re-built.
+    //
+    // Rows are addressed by a STABLE id (writeListRow emits it as "id"), NOT the row
+    // index: a consumer that references a row (a driver pointing at a preset) survives an
+    // add / delete / reorder because the id is invariant. isEditableList() reports whether
+    // this source is editable (so the generic serializer/UI know to show the affordances);
+    // a plain ListSource stays read-only. Each op returns whether it took, so the API layer
+    // maps the result onto an HTTP status.
+    virtual bool isEditableList() const { return false; }
+
+    // Append a new row with default values; write the new row's stable id into `outId`.
+    // Returns false if the list is full or otherwise refuses (e.g. a read-only source).
+    virtual bool addListRow(uint32_t& /*outId*/) { return false; }
+
+    // Remove the row with this stable id. Returns false if no such id, or the row is
+    // protected (a seeded read-only entry). A referenced-elsewhere row may still be
+    // removed — the reference side degrades (id no longer resolves), it does not block.
+    virtual bool deleteListRow(uint32_t /*id*/) { return false; }
+
+    // Move the row with this stable id to position `to` (clamped). Returns false on a
+    // bad id. Reorder never changes an id, so references are unaffected.
+    virtual bool moveListRow(uint32_t /*id*/, uint8_t /*to*/) { return false; }
+
+    // Set one field of the row with this stable id from a JSON value. `field` is the row
+    // field name (e.g. "name", "channels", "ch3"); `valueJson` is the request body the
+    // source parses for "value" (same convention as applyControlValue). Returns false on
+    // a bad id / unknown field / protected row / malformed value. The source owns which
+    // fields are editable and their validation — the primitive stays domain-neutral.
+    virtual bool setListRowField(uint32_t /*id*/, const char* /*field*/,
+                                 const char* /*valueJson*/) { return false; }
 };
 
 struct ControlDescriptor {
@@ -202,6 +238,12 @@ struct ControlDescriptor {
                             // users (e.g. SystemModule.deviceModel, which MoonDeck and the web installer
                             // inject via POST /api/control). HTTP writes still succeed — the flag
                             // is a UI rendering hint, not a write gate. Set via setReadOnly().
+    bool stepper = false;   // UI hint for a bounded numeric (Uint8/Uint16): render as a plain number
+                            // input with up/down spinner, NOT a slider. A slider suits a continuous
+                            // magnitude you tune by feel (brightness, a rate); a COUNT you set exactly
+                            // (a channel count, a lane count) reads better as a number field. Rendering
+                            // hint only, like hidden/readonly; the bound (min/max) still applies. Set
+                            // via setStepper().
     // Optional per-control input validator (Text/Password only; nullptr = accept anything
     // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
     // write and returns ApplyResult::Malformed on reject, so the check covers EVERY write
@@ -303,7 +345,7 @@ public:
     void addText(const char* name, char* var, uint16_t bufSize = 16,
                  bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, validate};
     }
 
     // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
@@ -311,7 +353,7 @@ public:
     void addTextArea(const char* name, char* var, uint16_t bufSize = 16,
                      bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, validate};
     }
 
     // Like addText but the value is a secret: the API serializes it
@@ -398,6 +440,13 @@ public:
     // The UI renders the control display-only; HTTP /api/control writes still apply.
     void setReadOnly(uint8_t i, bool readonly) {
         if (i < count_) controls_[i].readonly = readonly;
+    }
+
+    // Mark a bounded numeric to render as a number+spinner instead of a slider. Typical use:
+    // call addUint8/addUint16 then setStepper(count() - 1) for a count control (a channel count,
+    // a lane count) the user sets exactly rather than drags.
+    void setStepper(uint8_t i, bool stepper = true) {
+        if (i < count_) controls_[i].stepper = stepper;
     }
 
 private:

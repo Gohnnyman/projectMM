@@ -28,7 +28,7 @@ void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 }
 
@@ -149,7 +149,7 @@ TEST_CASE("RmtLedDriver: a DISABLED driver does not acquire through the boot swe
     d.defineControls();
     d.setEnabled(false);          // persisted-disabled at boot
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
 
     d.setup();                    // Phase 3: pure wiring, no acquire
     d.applyState();               // Phase 4: disabled → routes to release, no acquire
@@ -175,7 +175,7 @@ TEST_CASE("RmtLedDriver setup/release is repeatable with no residual state") {
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();                       // (re)init the channel
         d.setSourceBuffer(&src);         // resizeSymbols allocates the buffer
-        d.setCorrection(&corr);
+        d.correctionForTest() = corr;
         d.applyState();                // size buffer + reinit, as the Scheduler does
         REQUIRE(d.symbolBuffer() != nullptr);
 
@@ -229,7 +229,7 @@ TEST_CASE("RmtLedDriver loopback re-parses pins before testing (no stale-pin ver
     std::strcpy(d.pins, "18");
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
     REQUIRE(d.pinCount() == 1);
 

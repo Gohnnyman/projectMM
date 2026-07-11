@@ -41,11 +41,11 @@ let wsHeartbeat = null;
 let wsPaused = false;            // gated by document.visibilityState
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
-const dragTs = {};               // per-control last-touched timestamp (ms)
+const dragTs = {};               // per-control last-touched timestamp (ms) — a short post-interaction cooldown
 // Control types whose value the user can edit — updateModuleControls suppresses a
-// WS state push for one of these while the user is mid-edit (see dragTs). The
-// read-only types (display/display-int/time/progress) and the composite `list`
-// are absent on purpose: they always reflect the latest push.
+// WS state push for one of these while the user is mid-edit. The read-only types
+// (display/display-int/time/progress) and the composite `list` are absent on
+// purpose: they always reflect the latest push.
 const EDITABLE_CONTROL_TYPES = new Set(
     ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "password", "select", "palette", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
@@ -211,6 +211,73 @@ async function refetchState() {
         renderNav();
         renderCards();
     } catch {}
+}
+
+// --- Editable-list row ops (the client half of the editable List primitive) ---
+// Same best-effort fetch style as sendControl: non-ok + network errors are logged,
+// not retried. After a successful mutation the server persists + re-runs prepare and
+// pushes fresh state over the WS; we also refetchState() to match the module add/
+// delete/move ops (which don't wait for the WS push either). The row `id` is a number;
+// it goes into the URL path as-is. `c` (control name) may contain any chars, so encode.
+async function listAddRow(moduleName, ctrlName) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: "{}"
+        });
+        if (!res.ok) { console.warn(`[list] add ${moduleName}.${ctrlName} failed (status=${res.status})`); return null; }
+        const j = await res.json();
+        refetchState();
+        return j && typeof j.id === "number" ? j.id : null;
+    } catch (e) {
+        console.warn(`[list] add ${moduleName}.${ctrlName} failed (error=${e && e.message ? e.message : e})`);
+        return null;
+    }
+}
+
+async function listDeleteRow(moduleName, ctrlName, id) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}/${id}`, {method: "DELETE"});
+        if (!res.ok) { console.warn(`[list] delete ${moduleName}.${ctrlName}#${id} failed (status=${res.status})`); return; }
+        refetchState();
+    } catch (e) {
+        console.warn(`[list] delete ${moduleName}.${ctrlName}#${id} failed (error=${e && e.message ? e.message : e})`);
+    }
+}
+
+async function listMoveRow(moduleName, ctrlName, id, to) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}/${id}`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({to: to})
+        });
+        if (!res.ok) { console.warn(`[list] move ${moduleName}.${ctrlName}#${id}→${to} failed (status=${res.status})`); return; }
+        refetchState();
+    } catch (e) {
+        console.warn(`[list] move ${moduleName}.${ctrlName}#${id} failed (error=${e && e.message ? e.message : e})`);
+    }
+}
+
+async function listSetField(moduleName, ctrlName, id, field, value) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}/${id}`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({field: field, value: value})
+        });
+        if (!res.ok) { console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (status=${res.status})`); return false; }
+        // A FIELD edit does NOT refetch: the value is already applied server-side and the WS push
+        // reconciles it, so rebuilding here would collapse the open row and snap an in-progress edit
+        // back (a `channels` change also reshapes the row's fields — that structural update rides the
+        // WS push, guarded by the dragTs cooldown, not a rebuild-on-every-keystroke). Structural ops
+        // (add/delete/move) DO refetch — they change the row set. Return true so the caller can decide.
+        return true;
+    } catch (e) {
+        console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (error=${e && e.message ? e.message : e})`);
+        return false;
+    }
 }
 
 async function addModule(type, parentName) {
@@ -960,6 +1027,27 @@ function createControl(moduleName, moduleType, ctrl) {
 
     switch (ctrl.type) {
         case "uint8": {
+            // A `stepper` control is a count set exactly, not a magnitude dragged — render it as a
+            // plain number+spinner (no slider), the same number-only affordance uint16-unbounded uses.
+            if (ctrl.stepper) {
+                const nMin = Number(ctrl.min ?? 0);
+                const nMax = Number(ctrl.max ?? 255);
+                const input = document.createElement("input");
+                input.type = "number";
+                input.min = nMin;
+                input.max = nMax;
+                input.value = Math.max(nMin, Math.min(nMax, Number(ctrl.value ?? 0)));
+                input.dataset.mid = moduleName;
+                input.dataset.key = ctrl.name;
+                input.addEventListener("input", () => {
+                    dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
+                    const v = Math.max(nMin, Math.min(nMax, parseInt(input.value) || nMin));
+                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
+                });
+                row.appendChild(input);
+                appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+                break;
+            }
             const input = document.createElement("input");
             input.type = "range";
             input.min = ctrl.min ?? 0;
@@ -1452,7 +1540,12 @@ function createControl(moduleName, moduleType, ctrl) {
             list.className = "list-control";
             list.dataset.mid = moduleName;
             list.dataset.key = ctrl.name;
-            buildListEntries(list, rows, details, new Set());   // initial: nothing expanded
+            // When ctrl.editable is set, the list gains add/delete/reorder + inline field
+            // editing (the editable-List primitive); otherwise it stays read-only (identical
+            // to before). The flag flows through to both render paths via the opts object.
+            if (ctrl.editable) list.dataset.editable = "true";
+            buildListEntries(list, rows, details, new Set(),   // initial: nothing expanded
+                {editable: ctrl.editable, moduleName: moduleName, ctrlName: ctrl.name});
             row.appendChild(list);
             break;
         }
@@ -1470,9 +1563,27 @@ function createControl(moduleName, moduleType, ctrl) {
 // texts whose detail panels start expanded — pass `new Set()` for a fresh build, or
 // the currently-open set on a live re-render so an expanded row stays open. Shared by
 // createControl (initial) and updateModuleControls (WS live patch) so the two can't drift.
-function buildListEntries(container, rows, details, openSet) {
+//
+// `opts` optionally carries {editable, moduleName, ctrlName}. When editable is true the
+// list gains row add/delete/reorder + inline field editing (the editable-List primitive);
+// each row must then carry a numeric `id`, and each detail an array `fields[]` of field
+// descriptors. When editable is falsy the render is exactly the read-only path (unchanged).
+// Stable key for the open-detail set. An editable row carries a durable `id` (survives
+// field edits: renaming a preset or changing its channel count doesn't change the id), so
+// key on it — otherwise changing a field that shows in the summary label would fold the
+// open row shut (the label-text key no longer matches after the rebuild). A read-only row
+// (e.g. a discovered device) has no `id`; fall back to the summary label, which is stable
+// enough there (identity by display text, the previous behaviour, unchanged for devices).
+function listRowKey(item, labelText) {
+    return (item && item.id != null) ? "#" + item.id : labelText;
+}
+
+function buildListEntries(container, rows, details, openSet, opts) {
+    const editable = !!(opts && opts.editable);
+    const moduleName = opts && opts.moduleName;
+    const ctrlName = opts && opts.ctrlName;
     container.replaceChildren();
-    if (rows.length === 0) {
+    if (rows.length === 0 && !editable) {
         const empty = document.createElement("div");
         empty.className = "list-empty";
         empty.textContent = "(none)";
@@ -1503,13 +1614,84 @@ function buildListEntries(container, rows, details, openSet) {
             summary.appendChild(dot);
         }
         const label = document.createElement("span");
+        label.className = "list-summary-label";
         label.textContent = listSummaryText(item);
         summary.appendChild(label);
         const detailPanel = document.createElement("div");
         detailPanel.className = "list-detail";
-        detailPanel.hidden = !openSet.has(summary.textContent);
+        // Keyed via listRowKey (stable `id` for editable rows, else the label text — see the
+        // helper) so an expanded row stays expanded across a live re-render, even when the field
+        // that changed is shown in the summary label (e.g. a preset's channel count).
+        detailPanel.hidden = !openSet.has(listRowKey(item, label.textContent));
         summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
-        fillListDetail(detailPanel, details[i] ?? item);
+        const locked = !!(item && item.locked);
+        if (editable) {
+            // Right-side row actions: delete (✕) then a `⠿` drag-to-reorder handle, in that order —
+            // handles on the RIGHT, after delete, keep every row's controls aligned in one column
+            // (the common data-grid layout). A `locked` (seeded) row isn't draggable and has no
+            // delete — the server refuses both, so the UI shows neither, and locked rows have an
+            // empty actions area that still aligns. The buttons stop click propagation so they don't
+            // toggle the detail panel. entry carries the row id so a drop knows what moved where.
+            entry.dataset.rowId = item.id;
+            entry.dataset.rowIndex = i;
+            const actions = document.createElement("span");
+            actions.className = "list-actions";
+            if (!locked) {
+                const del = document.createElement("button");
+                del.type = "button";
+                del.className = "list-action-btn";
+                del.textContent = "✕";
+                del.title = "Delete";
+                del.addEventListener("click", (e) => { e.stopPropagation(); listDeleteRow(moduleName, ctrlName, item.id); });
+                actions.appendChild(del);
+
+                const handle = document.createElement("span");
+                handle.className = "list-drag-handle";
+                handle.textContent = "⠿";                 // a braille-dots grab affordance (the ::: idiom)
+                handle.title = "Drag to reorder";
+                handle.setAttribute("aria-hidden", "true");
+                handle.addEventListener("click", (e) => e.stopPropagation());
+                // The entry is draggable, gated by the SAME mechanism the module-card drag uses
+                // (attachDragHandlers): a capture-phase MOUSEDOWN handler sets `draggable` based on where
+                // the grab landed. HTML5 drag initiates from mousedown, so the flag must be set there —
+                // a pointerdown handler runs too late (the browser has already read draggable at
+                // mousedown) and dragstart never fires. Here the row drags ONLY when the grab is on the
+                // handle (a click elsewhere expands the row); the touchstart mirror arms mobile drag.
+                const dragGate = (e) => { entry.draggable = !!e.target.closest(".list-drag-handle"); };
+                entry.addEventListener("mousedown", dragGate, true);
+                entry.addEventListener("touchstart", dragGate, {capture: true, passive: true});
+                entry.addEventListener("dragstart", (e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(item.id));
+                    entry.classList.add("list-dragging");
+                });
+                entry.addEventListener("dragend", () => {
+                    entry.draggable = false;
+                    entry.classList.remove("list-dragging");
+                    container.querySelectorAll(".list-drop-target").forEach(el => el.classList.remove("list-drop-target"));
+                });
+                actions.appendChild(handle);
+            }
+            summary.appendChild(actions);
+            // Every editable row is a drop TARGET (drop a dragged row onto it to move there). A drop
+            // onto a locked row is clamped server-side to the first custom slot, so it's harmless.
+            entry.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; entry.classList.add("list-drop-target"); });
+            entry.addEventListener("dragleave", () => entry.classList.remove("list-drop-target"));
+            entry.addEventListener("drop", (e) => {
+                e.preventDefault();
+                entry.classList.remove("list-drop-target");
+                const draggedId = parseInt(e.dataTransfer.getData("text/plain"));
+                if (!Number.isNaN(draggedId) && draggedId !== item.id) {
+                    listMoveRow(moduleName, ctrlName, draggedId, i);   // move the dragged row to THIS row's index
+                }
+            });
+            // Editable detail: render each field descriptor as an inline control, unless
+            // the row is locked (then fall back to the read-only key/value render).
+            if (locked) fillListDetail(detailPanel, details[i] ?? item);
+            else fillEditableListDetail(detailPanel, details[i] ?? item, moduleName, ctrlName, item.id);
+        } else {
+            fillListDetail(detailPanel, details[i] ?? item);
+        }
         const toggle = () => {
             detailPanel.hidden = !detailPanel.hidden;
             summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
@@ -1521,6 +1703,88 @@ function buildListEntries(container, rows, details, openSet) {
         entry.append(summary, detailPanel);
         container.appendChild(entry);
     });
+    if (editable) {
+        // "+ Add" appends a new row (server assigns the id, then state refreshes).
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "list-add-btn";
+        addBtn.textContent = "+ Add";
+        addBtn.addEventListener("click", () => listAddRow(moduleName, ctrlName));
+        container.appendChild(addBtn);
+    }
+}
+
+// Render an editable row's detail: each descriptor in `detail.fields[]` becomes an inline
+// control (text→<input>, uint8→<input type=number>, select→<select>). On change we call
+// listSetField(...) and let the normal refresh reflect the persisted state — no optimistic
+// local mutation. A field with `readonly:true` renders as a plain read-only value (same look
+// as fillListDetail). Fields carry a dragTs cooldown so a WS state push mid-edit can't revert
+// what's being typed/picked, mirroring the select/text guards in createControl.
+function fillEditableListDetail(panel, detail, moduleName, ctrlName, id) {
+    panel.replaceChildren();
+    const fields = detail && Array.isArray(detail.fields) ? detail.fields : [];
+    for (const f of fields) {
+        const r = document.createElement("div");
+        r.className = "list-detail-row";
+        const kEl = document.createElement("span");
+        kEl.className = "list-detail-key";
+        kEl.textContent = f.name;
+        const vEl = document.createElement("span");
+        vEl.className = "list-detail-val";
+        // Per-field cooldown key: unique per module/control/row/field so edits don't collide.
+        const dragKey = `list:${moduleName}:${ctrlName}:${id}:${f.name}`;
+        if (f.readonly) {
+            vEl.textContent = String(f.value ?? "");
+            vEl.classList.add("list-detail-muted");
+        } else if (f.type === "select") {
+            const sel = document.createElement("select");
+            sel.className = "list-field-input";
+            sel.dataset.dragkey = dragKey;
+            (f.options || []).forEach((opt, idx) => {
+                const o = document.createElement("option");
+                o.value = idx;
+                o.textContent = opt;
+                if (idx === f.value) o.selected = true;
+                sel.appendChild(o);
+            });
+            const mark = () => { dragTs[dragKey] = Date.now(); };
+            sel.addEventListener("pointerdown", mark);
+            sel.addEventListener("focus", mark);
+            sel.addEventListener("change", () => {
+                dragTs[dragKey] = Date.now();
+                listSetField(moduleName, ctrlName, id, f.name, parseInt(sel.value));
+            });
+            vEl.appendChild(sel);
+        } else if (f.type === "uint8") {
+            const inp = document.createElement("input");
+            inp.type = "number";
+            inp.className = "list-field-input";
+            inp.dataset.dragkey = dragKey;
+            if (f.min !== undefined) inp.min = f.min;
+            if (f.max !== undefined) inp.max = f.max;
+            inp.value = f.value ?? 0;
+            inp.addEventListener("input", () => { dragTs[dragKey] = Date.now(); });
+            inp.addEventListener("change", () => {
+                dragTs[dragKey] = Date.now();
+                listSetField(moduleName, ctrlName, id, f.name, parseInt(inp.value));
+            });
+            vEl.appendChild(inp);
+        } else {   // "text" and any unknown type render as a text input
+            const inp = document.createElement("input");
+            inp.type = "text";
+            inp.className = "list-field-input";
+            inp.dataset.dragkey = dragKey;
+            inp.value = f.value ?? "";
+            inp.addEventListener("input", () => { dragTs[dragKey] = Date.now(); });
+            inp.addEventListener("change", () => {
+                dragTs[dragKey] = Date.now();
+                listSetField(moduleName, ctrlName, id, f.name, inp.value);
+            });
+            vEl.appendChild(inp);
+        }
+        r.append(kEl, vEl);
+        panel.appendChild(r);
+    }
 }
 
 // Join a list row's scalar fields into a one-line summary (skips marker fields — `self`, `severity`
@@ -1826,8 +2090,11 @@ function syncVisibleControls(mod) {
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
     const haveNames = haveRows.map(r => r.dataset.key);
     if (wantNames.length === haveNames.length && wantNames.every((n, i) => n === haveNames[i])) {
-        return false;  // unchanged — the common case
+        return false;  // unchanged — the common case, so an idle WS push rebuilds nothing
     }
+    // The visible-control set genuinely drifted (a hidden flag flipped — e.g. whiteMode appearing when
+    // the preset changes). Rebuild to reflect it; latest state wins. We don't defer for an in-progress
+    // edit: the drift is a consequence of a real change, and suppressing it would hide that change.
 
     // Remove rows whose control is no longer visible.
     const wantSet = new Set(wantNames);
@@ -2008,21 +2275,33 @@ function updateModuleControls(mod) {
                 break;
             }
             case "list": {
-                // Rows change wholesale between scans, so rebuild the list's entries
-                // in place rather than patching individual fields. Preserves which
-                // detail panels were open by summary text (best-effort) so a live
-                // refresh doesn't collapse a row the user just expanded.
                 const list = document.querySelector(`div.list-control[data-mid="${mid}"][data-key="${k}"]`);
                 if (!list) break;
-                // Preserve which detail panels are currently open (by summary text) so
-                // a live refresh doesn't collapse a row the user just expanded.
+                const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
+                const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
+                // ONLY REBUILD IF THE LIST ACTUALLY CHANGED. The device pushes full state ~1/sec, so an
+                // unconditional rebuild destroyed + recreated every row (and its inline dropdowns / drag
+                // handlers) every second — collapsing an open dropdown and breaking a drag. Compare the
+                // incoming rows+details against the last rendered snapshot cached on the element; if
+                // identical, do nothing (the common case, and the whole fix). Only a GENUINE change
+                // (someone edited the list) rebuilds — latest state wins, no attempt to protect a stale
+                // in-progress view (that would suppress the user's own edit from re-rendering). A
+                // rebuild on a real change is momentary and a direct consequence of that change.
+                const sig = JSON.stringify([rows, details]);
+                if (list.dataset.sig === sig) break;   // unchanged — leave the DOM (and any open edit) alone
+                list.dataset.sig = sig;
+                // Preserve which detail panels are open across the rebuild. Capture the SAME key
+                // listRowKey emits: the row's stable `id` (on entry.dataset.rowId for editable
+                // rows) when present, else the summary label text. Keying on id means changing a
+                // field shown in the label (a preset's channel count) keeps the row expanded.
                 const open = new Set(
                     [...list.querySelectorAll(".list-entry")]
                         .filter(e => { const d = e.querySelector(".list-detail"); return d && !d.hidden; })
-                        .map(e => e.querySelector(".list-summary")?.textContent));
-                const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
-                const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
-                buildListEntries(list, rows, details, open);
+                        .map(e => e.dataset.rowId != null
+                            ? "#" + e.dataset.rowId
+                            : e.querySelector(".list-summary-label")?.textContent));
+                buildListEntries(list, rows, details, open,
+                    {editable: ctrl.editable, moduleName: mod.name, ctrlName: ctrl.name});
                 break;
             }
         }

@@ -53,6 +53,108 @@ struct StubDevices : mm::ListSource {
 
 }  // namespace
 
+// A minimal EDITABLE list source — the CRUD half of the primitive. Rows are {id, name},
+// with a monotonic id counter so an id is never reused. Pins the contract the /api/list/*
+// endpoints call: add returns a fresh stable id, delete/move/setField address by id, and an
+// id stays put across add/delete/reorder (so a consumer referencing a row by id survives).
+struct StubLibrary : mm::ListSource {
+    struct Row { uint32_t id; char name[16]; bool locked; };
+    Row rows[8];
+    uint8_t n = 0;
+    uint32_t nextId = 1;
+
+    uint8_t listRowCount() const override { return n; }
+    void writeListRow(mm::JsonSink& s, uint8_t row) const override {
+        s.append("{\"id\":");
+        char b[16]; std::snprintf(b, sizeof(b), "%lu", (unsigned long)rows[row].id); s.append(b);
+        s.append(",\"name\":\""); s.append(rows[row].name); s.append("\"}");
+    }
+    bool isEditableList() const override { return true; }
+    bool addListRow(uint32_t& outId) override {
+        if (n >= 8) return false;
+        outId = nextId++;
+        rows[n] = {outId, "", false};
+        std::snprintf(rows[n].name, sizeof(rows[n].name), "row%u", (unsigned)outId);
+        n++;
+        return true;
+    }
+    int indexOf(uint32_t id) const { for (uint8_t i = 0; i < n; i++) if (rows[i].id == id) return i; return -1; }
+    bool deleteListRow(uint32_t id) override {
+        int i = indexOf(id); if (i < 0 || rows[i].locked) return false;
+        for (uint8_t j = i; j + 1 < n; j++) rows[j] = rows[j + 1];
+        n--; return true;
+    }
+    bool moveListRow(uint32_t id, uint8_t to) override {
+        int i = indexOf(id); if (i < 0) return false;
+        if (to >= n) to = n - 1;
+        Row moved = rows[i];
+        if (to > i) for (int j = i; j < to; j++) rows[j] = rows[j + 1];
+        else        for (int j = i; j > to; j--) rows[j] = rows[j - 1];
+        rows[to] = moved; return true;
+    }
+    bool setListRowField(uint32_t id, const char* field, const char* valueJson) override {
+        int i = indexOf(id); if (i < 0 || rows[i].locked) return false;
+        if (std::strcmp(field, "name") != 0) return false;
+        mm::json::parseString(valueJson, "value", rows[i].name, sizeof(rows[i].name));
+        return true;
+    }
+};
+
+TEST_CASE("EditableList: a plain ListSource is not editable") {
+    StubDevices src;   // read-only source from above
+    CHECK_FALSE(src.isEditableList());
+    uint32_t id = 0;
+    CHECK_FALSE(src.addListRow(id));       // the default hooks refuse
+    CHECK_FALSE(src.deleteListRow(1));
+}
+
+TEST_CASE("EditableList: add returns a fresh stable id each time") {
+    StubLibrary lib;
+    uint32_t a = 0, b = 0, c = 0;
+    CHECK(lib.addListRow(a));
+    CHECK(lib.addListRow(b));
+    CHECK(lib.addListRow(c));
+    CHECK(lib.n == 3);
+    CHECK(a != b); CHECK(b != c); CHECK(a != c);   // ids are distinct
+}
+
+TEST_CASE("EditableList: edit a row field by id") {
+    StubLibrary lib;
+    uint32_t id = 0; lib.addListRow(id);
+    CHECK(lib.setListRowField(id, "name", "{\"value\":\"MovingHead\"}"));
+    CHECK(std::strcmp(lib.rows[lib.indexOf(id)].name, "MovingHead") == 0);
+    CHECK_FALSE(lib.setListRowField(id, "bogus", "{\"value\":\"x\"}"));  // unknown field
+    CHECK_FALSE(lib.setListRowField(9999, "name", "{\"value\":\"x\"}")); // bad id
+}
+
+TEST_CASE("EditableList: delete by id; a locked row is protected") {
+    StubLibrary lib;
+    uint32_t a = 0, b = 0; lib.addListRow(a); lib.addListRow(b);
+    lib.rows[lib.indexOf(a)].locked = true;      // a seeded read-only built-in
+    CHECK_FALSE(lib.deleteListRow(a));           // protected → refused
+    CHECK(lib.deleteListRow(b));                 // unlocked → removed
+    CHECK(lib.n == 1);
+    CHECK_FALSE(lib.deleteListRow(9999));        // bad id
+}
+
+// The load-bearing invariant for reference-by-id: an id assigned to a row NEVER changes across
+// add / delete / reorder of OTHER rows. A driver that stored "preset id 2" still resolves it.
+TEST_CASE("EditableList: a row id is stable across add / delete / reorder") {
+    StubLibrary lib;
+    uint32_t a = 0, b = 0, c = 0;
+    lib.addListRow(a); lib.addListRow(b); lib.addListRow(c);   // rows [a,b,c]
+    // Reorder: move c to the front → [c,a,b]. Ids unchanged.
+    CHECK(lib.moveListRow(c, 0));
+    CHECK(lib.rows[0].id == c); CHECK(lib.rows[1].id == a); CHECK(lib.rows[2].id == b);
+    // Delete the middle (a) → [c,b]. b's id is still b, c's still c.
+    CHECK(lib.deleteListRow(a));
+    CHECK(lib.indexOf(b) >= 0); CHECK(lib.indexOf(c) >= 0);
+    CHECK(lib.rows[lib.indexOf(b)].id == b);   // b's id survived a's deletion
+    // Add a new row → gets a NEW id, never reuses a's freed id.
+    uint32_t d = 0; lib.addListRow(d);
+    CHECK(d != a); CHECK(d != b); CHECK(d != c);
+}
+
 TEST_CASE("ControlType::List value serializes as an array of row summaries") {
     StubDevices src;
     mm::ControlList controls;

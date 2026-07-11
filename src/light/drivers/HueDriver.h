@@ -35,6 +35,13 @@ namespace mm {
 /// @card HueDriver.png
 class HueDriver : public DriverBase {
 public:
+    /// HueDriver reads apply()'s output back as R,G,B to convert to HSV for the bridge, so it
+    /// references the "RGB" preset (a GRB reorder would corrupt the hue). It opts out of the
+    /// correction controls (hasCorrectionControls() → false), so the order stays RGB — only the
+    /// global × local brightness varies. (A future refinement guards against a non-RGB wiring being
+    /// pointed at a Hue light; today it's the vanilla RGB passthrough.)
+    HueDriver() { setDefaultPresetName("RGB"); }
+
     /// The bridge's LAN IP, entered in the UI (4 octets).
     uint8_t  bridgeIp[4] = {};
     /// The Hue username/app key — filled by the Pair button, then persisted.
@@ -43,7 +50,10 @@ public:
     /// Register the controls: bridge IP, the persisted app key, the Pair link-button, the room +
     /// light filter dropdowns (both default to index 0 = "All", rebuilt in place from the parsed
     /// bridge data on every control change), the shared window, then refresh the status line.
-    void defineControls() override {
+    /// Hue converts to HSV, RGB-fixed, no correction UI.
+    bool hasCorrectionControls() const override { return false; }
+
+    void defineDriverControls() override {
         controls_.addIPv4("bridgeIp", bridgeIp);
         controls_.addText("appKey", appKey, sizeof(appKey));   // persisted credential
         controls_.addButton("pair");                            // link-button pairing
@@ -62,12 +72,6 @@ public:
 
     /// Take the shared source buffer this driver reads its window from.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; }
-
-    /// Take the shared output Correction (global brightness LUT + channel order), same as the
-    /// physical LED / network drivers — so the brightness slider and a swapped colour order reach
-    /// the Hue lights too. Applied per pixel before RGB→HSV; the RGBW/white part is irrelevant here
-    /// (Hue takes hue/sat), we use the RGB result.
-    void setCorrection(const Correction* c) override { correction_ = c; }
 
     /// A control click. "pair" starts the link-button pairing poll; changing the bridge IP or app
     /// key points the driver at a (possibly) different bridge, so the learned light list + push
@@ -201,7 +205,6 @@ private:
     static constexpr uint32_t kSlowTimeoutMs = 400;
 
     Buffer* sourceBuffer_ = nullptr;
-    const Correction* correction_ = nullptr;   // shared brightness LUT + channel order (may be null)
 
     // Per-light Hue id + the last RGB we pushed (the changed-only filter). hueId maps a window
     // index → the bridge's light id, learned from GET /api/<key>/lights.
@@ -638,7 +641,7 @@ private:
             // brightness slider and a swapped colour order reach Hue too — same as the physical
             // drivers. apply() writes outChannels bytes; we read the first three (RGB) for HSV.
             uint8_t rgb[4] = { px[0], px[1], px[2], 0 };
-            if (correction_) correction_->apply(px, rgb);
+            correction_.apply(px, rgb);
             char body[80];
             if (diffAndFormat(li, rgb[0], rgb[1], rgb[2], body, sizeof(body))) {
                 char host[16]; bridgeStr(host);

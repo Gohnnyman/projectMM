@@ -26,6 +26,12 @@ namespace mm {
 /// @card NetworkSendDriver.png
 class NetworkSendDriver : public DriverBase {
 public:
+    /// DMX-over-network fixtures (ArtNet / E1.31 / DDP) are RGB by convention — the
+    /// xLights/Falcon default — so a network sink references the "RGB" preset by default, unlike the
+    /// WS2812 LED drivers that default to the strips' physical "GRB" order. The user can still
+    /// pick any preset from the library; this only sets the sensible starting point per driver type.
+    NetworkSendDriver() { setDefaultPresetName("RGB"); }
+
     /// Protocol names, index-aligned with the constants used in tick()'s switch (0 = ArtNet,
     /// 1 = E1.31, 2 = DDP). The destination port follows the protocol (6454 / 5568 / 4048) — see
     /// connectIfDestChanged().
@@ -54,9 +60,10 @@ public:
     /// Send-rate ceiling (Hz); tick() rate-limits to this so a fast render tick doesn't flood the LAN.
     uint8_t fps = 50;
 
-    /// Register the controls in UI order: protocol, destination IP, universe offset, the shared
-    /// window (start/count), then the rate cap.
-    void defineControls() override {
+    /// This driver's own controls, added AFTER the per-driver correction block the base places at
+    /// the top of every driver card: protocol, destination IP, universe offset, the shared window
+    /// (start/count), then the rate cap.
+    void defineDriverControls() override {
         controls_.addSelect("protocol", protocol, kProtocolOptions, kProtocolCount);
         controls_.addIPv4("ip", ip);
         controls_.addUint16("universe_start", universeStart);
@@ -64,11 +71,13 @@ public:
         controls_.addUint8("fps", fps, 1, 120);
     }
 
-    /// A start/count change resizes the window this sink sends; route it through the prepare
-    /// sweep so resizeCorrected() re-sizes corrected_ for the new slice — otherwise growing the
-    /// window past the old corrected_ silently drops to passthrough.
+    /// A start/count change resizes the window this sink sends, and a Custom channel-count
+    /// change grows outChannels; both route through the prepare sweep so resizeCorrected()
+    /// re-sizes corrected_ — otherwise growing past the old buffer silently drops to passthrough.
+    /// The rest of the correction controls (order/white/brightness) rebuild the LUT in place
+    /// via DriverBase::onControlChanged, no prepare needed.
     bool affectsPrepare(const char* name) const override {
-        return isWindowControl(name);
+        return isWindowControl(name) || isCorrectionControl(name);
     }
 
     /// One-time wiring only: derive the stable E1.31 component id (CID) from the MAC once — no
@@ -92,17 +101,10 @@ public:
     }
 
     /// Take the shared source buffer and (re)size the corrected_ buffer for it. Called from
-    /// Drivers::passBufferToDrivers inside prepare (and once at setup); resizeCorrected() is a
-    /// no-op while correction_ is still null on the first call, and the second call (after
-    /// setCorrection) lands the actual allocation. All off the hot path.
+    /// Drivers::passBufferToDrivers inside prepare (and once at setup); resizeCorrected() sizes
+    /// corrected_ to the driver's own correction outChannels. All off the hot path.
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
-        resizeCorrected();
-    }
-
-    /// Take the shared output correction and re-size corrected_ to its channel count.
-    void setCorrection(const Correction* c) override {
-        correction_ = c;
         resizeCorrected();
     }
 
@@ -116,14 +118,14 @@ public:
         resizeCorrected();
     }
 
-    /// Preset toggle (RGB↔RGBW) changes correction_->outChannels without a structural rebuild;
-    /// Drivers::onControlChanged forwards this hook so corrected_ tracks the new channel count.
+    /// A preset toggle (RGB↔RGBW) changes correction_.outChannels without a structural rebuild;
+    /// rebuildCorrection() calls this hook so corrected_ tracks the new channel count.
     void onCorrectionChanged() override {
         resizeCorrected();
     }
 
-    /// Rate-limit to `fps`, apply the shared correction into corrected_ (passthrough if unwired),
-    /// then chunk the window slice into protocol packets and send the whole frame inline.
+    /// Rate-limit to `fps`, apply this driver's correction into corrected_ (passthrough if it
+    /// emits no channels), then chunk the window slice into protocol packets and send inline.
     void tick() override {
         if (!sourceBuffer_ || !sourceBuffer_->data()) return;
 
@@ -151,18 +153,17 @@ public:
         // isn't packed/sent for lights it doesn't own. winStart is the first light.
         nrOfLightsType winStart, nLights;
         windowSlice(sourceBuffer_->count(), winStart, nLights);
-        // Three guards before applying correction: (a) correction wired,
-        // (b) corrected_ has the row count we need, (c) corrected_'s
-        // per-light stride is at least outChannels — otherwise dst + i *
-        // outCh would overrun the allocation. Falls back to passthrough
-        // when any guard fails (same degradation the old in-loop allocate
-        // had on allocation failure). resizeCorrected() should keep
-        // corrected_'s stride in sync with outChannels off the hot path,
-        // but the hot-path check stays defensive — a stale corrected_
-        // (e.g. correction_ swapped without onCorrectionChanged firing)
-        // should miss the apply, not corrupt memory.
-        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
-        if (correction_ && corrected_.data()
+        // Three guards before applying correction: (a) correction produces channels
+        // (outChannels != 0 — a Custom wiring with no roles placed emits nothing),
+        // (b) corrected_ has the row count we need, (c) corrected_'s per-light stride
+        // is at least outChannels — otherwise dst + i * outCh would overrun the
+        // allocation. Falls back to passthrough when any guard fails (same degradation
+        // the old in-loop allocate had on allocation failure). resizeCorrected() keeps
+        // corrected_'s stride in sync with outChannels off the hot path, but the hot-path
+        // check stays defensive — a stale corrected_ (e.g. a preset change without
+        // onCorrectionChanged firing) should miss the apply, not corrupt memory.
+        const uint8_t outCh = correction_.outChannels;
+        if (outCh != 0 && corrected_.data()
             && corrected_.count() >= nLights
             && corrected_.channelsPerLight() >= outCh) {
             const uint8_t* src = sourceBuffer_->data();
@@ -170,7 +171,7 @@ public:
             uint8_t* dst = corrected_.data();
             for (nrOfLightsType i = 0; i < nLights; i++) {
                 // Read the windowed light (slice starts at winStart); pack densely.
-                correction_->apply(src + (winStart + i) * srcCh, dst + i * outCh);
+                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh);
             }
             data = dst;
             totalBytes = static_cast<size_t>(nLights) * outCh;
@@ -229,7 +230,6 @@ public:
 private:
     platform::UdpSocket socket_;
     Buffer* sourceBuffer_ = nullptr;
-    const Correction* correction_ = nullptr;
     Buffer corrected_;               // owned: source bytes after brightness/order/white
     uint8_t sequence_ = 0;
     uint32_t lastSendTime_ = 0;
@@ -257,17 +257,17 @@ private:
         lastConnectedProtocol_ = protocol;
     }
 
-    // Called off the hot path (prepare, onCorrectionChanged, setters) to
-    // make sure corrected_ is sized for the current source + correction. Skips
-    // when nothing is wired yet, or when the existing allocation already fits.
+    // Called off the hot path (prepare, onCorrectionChanged, setSourceBuffer) to make
+    // sure corrected_ is sized for the current source + this driver's correction. Skips
+    // when no source is wired yet, or when the existing allocation already fits.
     void resizeCorrected() {
-        if (!correction_ || !sourceBuffer_) return;
+        if (!sourceBuffer_) return;
         // Size for the window slice this sender actually transmits, not the whole
         // frame — a sink covering 64 of a 16K-light buffer reserves 64. The same
         // windowSlice() the send loop uses, so the buffers stay in lock-step.
         nrOfLightsType winStart, n;
         windowSlice(sourceBuffer_->count(), winStart, n);
-        const uint8_t ch = correction_->outChannels;
+        const uint8_t ch = correction_.outChannels;
         if (n == 0 || ch == 0) return;
         if (corrected_.count() >= n && corrected_.channelsPerLight() >= ch) return;
         corrected_.allocate(n, ch);

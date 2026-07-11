@@ -36,6 +36,10 @@ template <class Derived>
 /// configErr_/failBuf_ come from DriverBase (shared with RmtLedDriver too).
 class ParallelLedDriver : public DriverBase {
 public:
+    /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its LcdLedDriver
+    /// subclass) references the "GRB" preset by default. The user can pick any preset.
+    ParallelLedDriver() { this->setDefaultPresetName("GRB"); }
+
     /// Bus width this increment: 8 of the peripheral's 16 lanes (matches the platform's lane
     /// constant; widening to 16 is a later constant change).
     static constexpr uint8_t kMaxLanes = 8;
@@ -83,7 +87,7 @@ public:
     /// `ledsPerPin` text lists, any derived-supplied bus controls (i80 adds
     /// clockPin/dcPin, Parlio none), and the loopback self-test controls (TX/RX pin
     /// overrides always bound but shown only in test mode).
-    void defineControls() override {
+    void defineDriverControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
@@ -130,6 +134,10 @@ public:
             if (isPinControl) { parseConfig(); reinit(); }
             runLoopbackSelfTest();
         }
+        // Chain to the base so a correction-control edit (localBrightness / preset / whiteMode)
+        // rebuilds this driver's correction LUT — without this the LED driver's brightness/preset
+        // controls were dead (only the global-brightness push reached the LUT).
+        DriverBase::onControlChanged(name);
     }
 
     /// One-time wiring only (parse the lane lists into members); the bus acquire lives in
@@ -158,8 +166,6 @@ public:
 
     /// Point the driver at the source frame buffer and re-parse the lane config.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; parseConfig(); }
-    /// Point the driver at the shared correction and re-parse the lane config.
-    void setCorrection(const Correction* c) override { correction_ = c; parseConfig(); }
 
     /// Per-tick output: a fused per-ROW pass corrects the same light index of every
     /// active lane and transposes it into 3-slot bus bytes in the platform-owned DMA
@@ -168,8 +174,8 @@ public:
     void tick() override {
         if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
         if (!inited_ || !dmaBuf_ || !sourceBuffer_ || !sourceBuffer_->data()
-            || !correction_ || laneCount_ == 0 || maxLaneLights_ == 0) return;
-        const uint8_t outCh = correction_->outChannels;
+            || laneCount_ == 0 || maxLaneLights_ == 0) return;
+        const uint8_t outCh = correction_.outChannels;
         if (outCh == 0 || frameBytes_ > derived()->busCapacity()) return;
 
         // Fused per-ROW pass: correct the same light index of every active lane
@@ -186,7 +192,7 @@ public:
                 mask |= static_cast<uint8_t>(1u << lane);
                 // winStart_ shifts this driver's whole slice; laneStart_ is the
                 // per-lane offset within it.
-                correction_->apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
+                correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
                                    wire + lane * 4);
             }
             encodeWs2812LcdSlots(wire, mask, outCh, out);
@@ -218,7 +224,6 @@ protected:
     const Derived* derived() const { return static_cast<const Derived*>(this); }
 
     Buffer* sourceBuffer_ = nullptr;
-    const Correction* correction_ = nullptr;
 
     LedDriverConfig cfg_;
     bool inited_ = false;
@@ -290,7 +295,7 @@ protected:
             start = static_cast<nrOfLightsType>(start + laneCounts_[i]);
             if (laneCounts_[i] > maxLaneLights_) maxLaneLights_ = laneCounts_[i];
         }
-        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
+        const uint8_t outCh = correction_.outChannels;
         frameBytes_ = frameBytesFor(maxLaneLights_, outCh);
         clearConfigErr();
         // A lane clamped to the WS2812 ceiling still drives — Warning, not error (see RmtLed).
@@ -371,7 +376,7 @@ protected:
             setStatus("loopback: set loopbackRxPin (jumper it to the TX pin)", Severity::Status);
             return;
         }
-        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
+        const uint8_t outCh = correction_.outChannels;
         if (frameBytes_ == 0 || maxLaneLights_ == 0 || outCh == 0) {
             clearFailBuf();
             setStatus("loopback: no lights to encode", Severity::Warning);

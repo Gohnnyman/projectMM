@@ -298,7 +298,7 @@
       "esp32-16mb"
     ],
     "image": "assets/deviceModels/serg-unishield-v5.jpg",
-    "url": "https://www.tindie.com/stores/serg74/",
+    "url": "https://www.tindie.com/products/serg74/wled-shield-board-for-addressable-leds/",
     "supported": [
       "LEDs",
       "WiFi"

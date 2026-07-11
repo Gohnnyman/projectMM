@@ -23,7 +23,7 @@ void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 }
 
@@ -376,7 +376,7 @@ TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
         CHECK_FALSE(src.allocate(0, 3));
         d.defineControls();
         d.setSourceBuffer(&src);
-        d.setCorrection(&corr);
+        d.correctionForTest() = corr;
         d.applyState();
         d.tick();                       // 0×0×0 must be a clean no-op
     }

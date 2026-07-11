@@ -1,11 +1,14 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/ScratchBuffer.h"
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/drivers/Correction.h"
+#include "light/drivers/LightPresetsModule.h"   // the shared preset library a driver references by id
 #include "platform/platform.h"
 
+#include <cstdio>
 #include <cstring>
 
 namespace mm {
@@ -21,6 +24,26 @@ class DriverBase : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Driver; }
     virtual void setSourceBuffer(Buffer* buf) = 0;
+
+    /// Template method: every driver card leads with the per-driver output correction
+    /// (localBrightness / lightPreset / whiteMode / Custom offsets), added once here in the base
+    /// so no driver re-implements the placement (the No-duplication rule) — then the driver's own
+    /// controls via defineDriverControls(). A driver overrides defineDriverControls(), NOT this.
+    /// A driver that emits raw RGB and ignores correction (Preview) or fixes it internally (Hue)
+    /// opts out by returning false from hasCorrectionControls().
+    void defineControls() final {
+        if (hasCorrectionControls()) defineCorrectionControls();
+        defineDriverControls();
+    }
+
+    /// A driver's own controls (its pins, protocol, IP, window, …), added AFTER the correction
+    /// block. This is what a driver overrides instead of defineControls(). Default: none.
+    virtual void defineDriverControls() {}
+
+    /// Whether this driver exposes the per-driver correction controls. True for physical drivers
+    /// that apply the reorder/white/brightness; false for Preview (shows the raw logical buffer)
+    /// and Hue (RGB-fixed, converts to HSV — a reorder would corrupt the hue).
+    virtual bool hasCorrectionControls() const { return true; }
     /// Set the active Layer this driver reads dimensions from. Optional: drivers that
     /// need dimensions (such as PreviewDriver describing the LED grid in the WebSocket
     /// frame) call `layer_` for current physical width/height/depth; ArtNet doesn't need
@@ -44,18 +67,65 @@ public:
     /// (such as after the last Layer was deleted). Drivers must tolerate null here.
     Layer* layer() const { return layer_; }
 
-    /// Hand this driver the shared output correction (brightness LUT + channel order +
-    /// white) owned by the Drivers container. Default no-op so Preview (which shows the
-    /// raw logical buffer) and any preview-style driver opt out for free; only physical
-    /// drivers (ArtNet, LED) override to apply it.
-    virtual void setCorrection(const Correction* /*c*/) {}
+    /// Rebuild this driver's own output correction, baking the global brightness the
+    /// Drivers container passes together with this driver's local brightness into one LUT
+    /// (`global × local`, both 0..255). Called by Drivers on setup and on a global
+    /// brightness / power change, and by the driver itself when one of its own correction
+    /// controls (lightPreset, whiteMode, offsets, localBrightness) changes. The multiply
+    /// happens once here on the cold path, so the hot-path apply() stays a single LUT
+    /// lookup per channel — the per-driver correction costs nothing extra per light.
+    /// Preview-style drivers read the raw logical buffer and ignore correction; the
+    /// couple of bytes of unused Correction they carry is cheaper than a virtual opt-out.
+    void rebuildCorrection(uint8_t globalBrightness) {
+        lastGlobalBrightness_ = globalBrightness;   // remembered for self-triggered rebuilds
+        // The brightness LUT bakes global × local so BOTH sliders reach the output — a localBrightness
+        // change alone re-scales the LUT here (its own onControlChanged routes through this), and a
+        // global change from the container does too. Applied unconditionally, so brightness works even
+        // if the preset library isn't up yet (the roles then stay at correction_'s default until the
+        // library resolves). One cold-path multiply; the hot path is unchanged.
+        const uint8_t effective =
+            static_cast<uint8_t>((globalBrightness * localBrightness_) / 255);
+        correction_.whiteMode = static_cast<WhiteMode>(whiteMode_);
+        // Resolve the referenced preset's channel-role wiring from the library into our flat
+        // Correction (cold path). On a missing id (a deleted preset) fall back to the library default
+        // so a driver degrades to a valid RGB output rather than crashing — Robust-to-any-input.
+        if (auto* lib = LightPresetsModule::active()) {
+            if (presetId_ == 0) presetId_ = lib->defaultId();
+            if (!lib->deriveCorrection(presetId_, effective, correction_)) {
+                presetId_ = lib->defaultId();                       // dangling → re-point to default
+                lib->deriveCorrection(presetId_, effective, correction_);
+            }
+        } else {
+            // No library yet (early boot / a unit test without one): still apply brightness, so the
+            // LUT reflects the sliders. deriveCorrection would have rebuilt the LUT; do it here too.
+            correction_.rebuildBrightness(effective);
+        }
+        onCorrectionChanged();      // let a driver resize its correction-applied buffer
+    }
 
-    /// Notified by Drivers when the shared Correction's outChannels may have changed (a
-    /// lightPreset switch RGB↔RGBW). Default no-op; physical drivers that own an
-    /// intermediate correction-applied buffer override to resize it OFF the hot path.
-    /// Topology changes (light count, channels per light) already flow through
-    /// prepare — this hook is just for the preset-driven channel-count change that
-    /// doesn't trigger a structural rebuild.
+    /// Base onControlChanged: rebuild this driver's correction when one of ITS correction
+    /// controls (order/white/brightness/Custom offsets) changed, reusing the last global
+    /// brightness the container pushed. A driver overriding onControlChanged() for its own
+    /// controls chains to this so it doesn't re-implement the correction branch (the
+    /// Complexity-lives-in-core rule: the correction rule lives here, once, for every driver).
+    void onControlChanged(const char* name) override {
+        // A preset Select change: map the chosen INDEX to a stable preset id (what we store +
+        // persist), so the reference survives a later reorder/delete of other presets.
+        if (std::strcmp(name, "preset") == 0) {
+            if (auto* lib = LightPresetsModule::active()) {
+                presetId_ = lib->idAt(presetSel_);
+                std::snprintf(presetRef_, sizeof(presetRef_), "%s", lib->nameAt(presetSel_));  // persist the name
+            }
+        }
+        if (isCorrectionControl(name)) rebuildCorrection(lastGlobalBrightness_);
+        MoonModule::onControlChanged(name);
+    }
+
+    /// Notified when this driver's Correction outChannels may have changed (a lightPreset
+    /// switch RGB↔RGBW, or a Custom channel-count edit). Default no-op; physical drivers
+    /// that own an intermediate correction-applied buffer override to resize it OFF the
+    /// hot path. Topology changes (light count) already flow through prepare — this hook
+    /// is just for the preset-driven channel-count change that doesn't rebuild structure.
     virtual void onCorrectionChanged() {}
 
     /// Clear every shared status string on release — fail buffer, config error, and config
@@ -71,8 +141,103 @@ public:
         MoonModule::release();
     }
 
+    /// Test-only: the driver's own Correction, mutable so a test can set a preset directly
+    /// (`drv.correctionForTest().rebuild(255, LightPreset::GRBW)`) instead of going through the
+    /// container. Production wiring rebuilds via rebuildCorrection(); this is the injection
+    /// point the encoder/packet tests use in place of the removed shared-pointer setter.
+    Correction& correctionForTest() { return correction_; }
+
 protected:
     Layer* layer_ = nullptr;
+
+    // --- Per-driver output correction (references a shared preset; brightness + white are local) ---
+    // Each physical driver owns its Correction — the flat hot-path cache apply() reads — but the
+    // channel-role WIRING comes from a NAMED PRESET in the LightPresets library, referenced by a
+    // stable id. A driver stores only presetId_ (+ its own localBrightness / whiteMode); it holds no
+    // role array. rebuildCorrection() resolves the id via LightPresetsModule::active()->deriveCorrection
+    // ONCE on the cold path into correction_; the render loop never touches the library. So building a
+    // wiring once (in the LightPresets card) makes it reusable across every driver, and a preset's
+    // brightness/order still costs exactly one LUT lookup per channel per light.
+    Correction correction_;
+    uint32_t presetId_ = 0;          // stable id into the LightPresets library (0 → resolve to default)
+    uint8_t presetSel_ = 0;          // the preset Select's chosen INDEX (mapped to an id in onControlChanged)
+    uint8_t whiteMode_ = static_cast<uint8_t>(WhiteMode::Min);  // index into kWhiteModeOptions
+    uint8_t localBrightness_ = 255;  // per-driver dim, multiplied with the global brightness
+    uint8_t lastGlobalBrightness_ = 0;  // last global brightness the container pushed (for self-rebuilds)
+    // The PERSISTED reference: a preset id is a runtime handle (reassigned each boot), so what
+    // survives a reboot is the preset NAME — stable, human-readable, and reorder-proof. A hidden
+    // persistable text control round-trips it; on load, rebuildCorrection resolves name → live id.
+    char presetRef_[16] = {};        // referenced preset's name (the durable reference)
+
+    /// Add the correction controls: localBrightness first (the setting a user reaches for most),
+    /// then the preset Select (its options are the LightPresets library's names; the chosen index
+    /// maps to a stable preset id), then whiteMode. A driver calls this from its defineDriverControls
+    /// via the DriverBase::defineControls template method. The Select is rebuilt from the library on
+    /// every defineControls (which re-runs on a control change), so adding/renaming a preset shows up.
+    void defineCorrectionControls() {
+        controls_.addUint8("localBrightness", localBrightness_, 0, 255);
+        buildPresetOptions();                        // fill presetOptions_ from the library, sync id/sel/ref
+        controls_.addSelect("preset", presetSel_, presetOptions_, presetOptionCount_);
+        controls_.addSelect("whiteMode", whiteMode_, kWhiteModeOptions, kWhiteModeCount);
+        // whiteMode only applies when the REFERENCED preset carries a white channel (there's nothing
+        // to synthesise on an RGB/GRB strip) — hide it otherwise. defineControls re-runs on a preset
+        // change, so this tracks the live reference.
+        auto* lib = LightPresetsModule::active();
+        controls_.setHidden(controls_.count() - 1, !(lib && lib->presetHasWhite(presetId_)));
+        // The durable reference (the preset NAME) persists but isn't shown — the preset Select above
+        // is the user-facing control; presetRef_ just carries the reference across a reboot.
+        controls_.addText("presetRef", presetRef_, sizeof(presetRef_));
+        controls_.setHidden(controls_.count() - 1, true);
+    }
+
+    /// A driver sets its default referenced preset by NAME in its constructor (e.g. a WS2812 LED
+    /// driver "GRB", a network sink / Hue "RGB"). Until the library resolves it to a live id
+    /// (buildPresetOptions), this is the durable reference; a user can still pick any preset.
+    void setDefaultPresetName(const char* name) { std::snprintf(presetRef_, sizeof(presetRef_), "%s", name); }
+
+    /// True if `name` is one of the correction controls — a driver folds this into its
+    /// affectsPrepare() and its correction rebuilds in onControlChanged (both handled by DriverBase).
+    static bool isCorrectionControl(const char* name) {
+        return std::strcmp(name, "preset") == 0 || std::strcmp(name, "localBrightness") == 0
+            || std::strcmp(name, "whiteMode") == 0;
+    }
+
+private:
+    // The preset Select's options: pointers to the library's preset names, refreshed each
+    // defineControls. addSelect borrows these pointers, so they must outlive the control list — the
+    // library owns the name storage (it lives for the device's life), and this array of borrowed
+    // pointers is a stable member. Also (re)syncs presetSel_ to the row that currently holds presetId_
+    // so the Select renders at the referenced preset even after a reorder.
+    const char* presetOptions_[LightPresetsModule::kMaxPresets] = {};
+    uint8_t presetOptionCount_ = 0;
+    void buildPresetOptions() {
+        presetOptionCount_ = 0;
+        auto* lib = LightPresetsModule::active();
+        if (!lib) { presetOptions_[0] = "(none)"; presetOptionCount_ = 1; presetSel_ = 0; return; }
+        const uint8_t n = lib->presetCount();
+        for (uint8_t i = 0; i < n; i++) presetOptions_[i] = lib->nameAt(i);
+        presetOptionCount_ = n;
+        // Reconcile the three representations (Select index / stable id / persisted name), preferring
+        // whichever is the freshest source of truth in this rebuild:
+        //   1. A USER PICK: the Select index points at a valid preset whose id differs from ours —
+        //      the user just chose it. Adopt the Select's id. (This rebuild runs BEFORE
+        //      onControlChanged in Scheduler::setControl, so it MUST honour the new Select value, or
+        //      the pick is reverted before onControlChanged can read it.)
+        //   2. Otherwise the persisted NAME (survives reboot) resolves to an id.
+        //   3. Else the current id, or the library default for a fresh driver.
+        // Then sync all three so they agree.
+        if (presetSel_ < n && lib->idAt(presetSel_) != presetId_) {
+            presetId_ = lib->idAt(presetSel_);                 // user picked a different preset
+        } else if (presetRef_[0]) {
+            for (uint8_t i = 0; i < n; i++)
+                if (std::strcmp(lib->nameAt(i), presetRef_) == 0) { presetId_ = lib->idAt(i); break; }
+        }
+        if (presetId_ == 0) presetId_ = lib->defaultId();
+        presetSel_ = lib->indexOfId(presetId_);
+        std::snprintf(presetRef_, sizeof(presetRef_), "%s", lib->nameAt(presetSel_));
+    }
+
+protected:
 
     // --- Shared source-buffer window (start, count) ---------------------------
     /// Every driver reads the SAME shared source buffer (Drivers hands the one
