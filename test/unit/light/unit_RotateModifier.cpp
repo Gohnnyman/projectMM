@@ -6,7 +6,7 @@
 // RotateModifier is the one DYNAMIC modifier: it overrides modifyLive (per-frame
 // backward map, dest→source via an explicit 2×2 rotation matrix) and reports
 // hasModifyLive() so the Layer runs its live pass. At the initial angle (0) the
-// rotation is identity. loop() advances the angle; a unit test without a Layer keeps
+// rotation is identity. tick() advances the angle; a unit test without a Layer keeps
 // it at 0, so these pin the angle-0 identity and the in-box invariants.
 
 // Apply the live remap to (x,y) in a w×h box; returns the source coord it samples.

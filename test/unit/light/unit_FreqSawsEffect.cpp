@@ -1,11 +1,11 @@
 // @module FreqSawsEffect
-// @also AudioModule
+// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/FreqSawsEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 
 // Helper: any non-zero byte in the layer buffer (a lit pixel somewhere).
 static bool anyLit(mm::Layer& layer) {
@@ -31,8 +31,8 @@ TEST_CASE("FreqSawsEffect silence with keepOn off leaves the buffer dark") {
     saws.keepOn = false;          // a decayed band draws nothing
     layer.addChild(&saws);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     REQUIRE(layer.buffer().data() != nullptr);
     CHECK_FALSE(anyLit(layer));   // silence in, dark out
@@ -56,8 +56,8 @@ TEST_CASE("FreqSawsEffect keepOn draws bands even with no audio") {
     saws.fade = 0;                // no fade so a just-drawn pixel survives the frame
     layer.addChild(&saws);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     CHECK(anyLit(layer));         // keepOn lights the panel with no audio at all
 }
@@ -68,8 +68,8 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     // Claim the active-mic seat with a module synthesizing loud "music" every tick (desktop has no
     // I2S mic, so simulate is the only source; music-always fills every band). latestFrame() then
     // hands this module's frame to the effect.
-    mm::AudioModule mic;
-    mic.onBuildControls();
+    mm::AudioService mic;
+    mic.defineControls();
     mic.simulate = 3;             // 3 = music (always): synthesize regardless of a real mic
     mic.setup();                  // registers as the active mic
 
@@ -87,19 +87,19 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     saws.keepOn = false;          // any light MUST come from the audio, not keepOn
     saws.fade = 0;
     layer.addChild(&saws);
-    layer.onBuildState();
+    layer.applyState();
 
     // A few ticks: each refreshes the synthesized loud frame, then the effect renders it. Loud bands
     // rise instantly (max with target), so a lit column appears within these frames.
     bool lit = false;
     for (int tick = 0; tick < 8 && !lit; tick++) {
-        mic.loop();               // (re)synthesize a loud music frame into the active mic
-        layer.loop();             // effect reads latestFrame() and draws the active bands
+        mic.tick();               // (re)synthesize a loud music frame into the active mic
+        layer.tick();             // effect reads latestFrame() and draws the active bands
         lit = anyLit(layer);
     }
     CHECK(lit);
 
-    mic.teardown();               // vacate the seat so later tests read silence again
+    mic.release();               // vacate the seat so later tests read silence again
 }
 
 // The "runs at every grid size" hard rule: a degenerate 0×0×0 grid and a 1×1 grid both render
@@ -119,8 +119,8 @@ TEST_CASE("FreqSawsEffect runs at degenerate grid sizes without crashing") {
         saws.keepOn = true;       // exercise the draw path too, not just the early-out
         layer.addChild(&saws);
 
-        layer.onBuildState();
-        layer.loop();
+        layer.applyState();
+        layer.tick();
         CHECK(true);              // reaching here without a crash is the assertion
     }
 }

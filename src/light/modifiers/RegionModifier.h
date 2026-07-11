@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 
@@ -42,7 +42,7 @@ public:
     lengthType startX = 0,   startY = 0,   startZ = 0;
     lengthType endX   = 100, endY   = 100, endZ   = 100;
 
-    void onBuildControls() override {
+    void defineControls() override {
         // Int16 so negative / >100 percentages round-trip; the carve math clamps.
         controls_.addInt16("startX", startX);
         controls_.addInt16("startY", startY);

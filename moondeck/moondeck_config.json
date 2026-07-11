@@ -2,7 +2,7 @@
   "scripts": [
     {
       "id": "build_desktop",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "build",
       "label": "Build",
       "help": "build_desktop",
@@ -10,7 +10,7 @@
     },
     {
       "id": "test_desktop",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "test",
       "label": "Unit Test",
       "help": "test_desktop",
@@ -19,7 +19,7 @@
     },
     {
       "id": "scenario_pipeline",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "test",
       "label": "Scenarios",
       "help": "scenario_pipeline",
@@ -29,7 +29,7 @@
     },
     {
       "id": "run_desktop",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "run",
       "label": "Run",
       "help": "run_desktop",
@@ -39,7 +39,7 @@
     },
     {
       "id": "show_crash_log",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "run",
       "label": "Crash Log",
       "help": "show_crash_log",
@@ -47,7 +47,7 @@
     },
     {
       "id": "preview_installer",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "run",
       "label": "Installer Preview",
       "help": "preview_installer",
@@ -57,7 +57,7 @@
     },
     {
       "id": "check_specs",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "check",
       "label": "Spec Check",
       "help": "check_specs",
@@ -65,7 +65,7 @@
     },
     {
       "id": "check_platform_boundary",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "check",
       "label": "Platform Boundary",
       "help": "check_platform_boundary",
@@ -73,7 +73,7 @@
     },
     {
       "id": "check_devices",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "check",
       "label": "Board Catalog",
       "help": "check_devices",
@@ -81,7 +81,7 @@
     },
     {
       "id": "check_firmwares",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "check",
       "label": "Firmware List",
       "help": "check_firmwares",
@@ -89,7 +89,7 @@
     },
     {
       "id": "collect_kpi",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "check",
       "label": "KPI Report",
       "help": "collect_kpi",
@@ -97,7 +97,7 @@
     },
     {
       "id": "history_report",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "check",
       "label": "History Report",
       "help": "history_report",
@@ -105,7 +105,7 @@
     },
     {
       "id": "install_playwright",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "docs",
       "label": "Install Playwright",
       "help": "screenshot_modules",
@@ -113,7 +113,7 @@
     },
     {
       "id": "screenshot_modules",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "docs",
       "label": "Screenshot Modules",
       "help": "screenshot_modules",
@@ -127,7 +127,7 @@
     },
     {
       "id": "update_module_docs",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "docs",
       "label": "Update Module Docs",
       "help": "update_module_docs",
@@ -135,7 +135,7 @@
     },
     {
       "id": "build_docs",
-      "tab": "pc",
+      "tab": "desktop",
       "group": "docs",
       "label": "Preview Docs Site",
       "help": "build_docs",

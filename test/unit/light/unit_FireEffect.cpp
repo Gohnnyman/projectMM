@@ -21,7 +21,7 @@ TEST_CASE("FireEffect allocates heat buffer when enabled") {
     mm::FireEffect fire;
     layer.addChild(&fire);
 
-    layer.onBuildState();
+    layer.applyState();
     CHECK(fire.dynamicBytes() == 16 * 16);
 }
 
@@ -42,12 +42,12 @@ TEST_CASE("FireEffect renders non-zero buffer after enough sparks") {
     fire.sparking = 255;
     layer.addChild(&fire);
 
-    layer.onBuildState();
+    layer.applyState();
 
     // Run several frames so sparks emerge and propagate
     bool hasNonZero = false;
     for (int frame = 0; frame < 50 && !hasNonZero; frame++) {
-        layer.loop();
+        layer.tick();
         auto& buf = layer.buffer();
         for (size_t i = 0; i < buf.bytes(); i++) {
             if (buf.data()[i] != 0) { hasNonZero = true; break; }
@@ -72,13 +72,13 @@ TEST_CASE("FireEffect frees heat buffer when disabled") {
     mm::FireEffect fire;
     layer.addChild(&fire);
 
-    layer.onBuildState();
+    layer.applyState();
     CHECK(fire.dynamicBytes() > 0);
 
     // Disable + rebuild via the parent's lifecycle — same path the
     // production scheduler uses, not a direct child call which would
     // bypass the propagation tested elsewhere.
     fire.setEnabled(false);
-    layer.onBuildState();
+    layer.applyState();
     CHECK(fire.dynamicBytes() == 0);
 }

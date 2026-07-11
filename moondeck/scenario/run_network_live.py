@@ -6,11 +6,11 @@ real firmware. Devices come from moondeck/moondeck.json (the MoonDeck device
 list, active network, online only). Each round one device is the SENDER and
 every other device LISTENS:
 
-  1. The PC seeds the sender three times — once per protocol, each with its own
+  1. The desktop seeds the sender three times — once per protocol, each with its own
      colour — to the sender's protocol ports (6454/5568/4048); the
      NetworkReceiveEffect (added to each device's Layer for the run) listens on
      all three at once. The sender's /ws preview stream must show each colour —
-     proves PC → device receive per protocol.
+     proves desktop → device receive per protocol.
   2. The sender's own NetworkSendDriver is pointed at each listener in turn,
      with its protocol control cycled round-robin so all three send paths get
      exercised across a matrix run; the listener's preview must show the
@@ -203,7 +203,7 @@ def main() -> int:
                     help="per-channel colour tolerance (default 0 — preview is byte-exact)")
     ap.add_argument("--timeout", type=float, default=10.0,
                     help="seconds to wait for a matching preview frame per leg")
-    ap.add_argument("--packets", type=int, default=10, help="PC seed frame repeats")
+    ap.add_argument("--packets", type=int, default=10, help="desktop seed frame repeats")
     ap.add_argument("--pace-ms", type=int, default=50, help="pause between seed frames")
     ap.add_argument("--settle", type=float, default=2.0,
                     help="seconds after a mutating call before asserting")
@@ -217,7 +217,7 @@ def main() -> int:
     print(f"devices: {len(devices)} selected — "
           + ", ".join(f"{d.get('deviceName', '?')} ({d['ip']})" for d in devices), flush=True)
     if len(devices) == 1:
-        print("note: only one device selected — running the PC→device leg; "
+        print("note: only one device selected — running the desktop→device leg; "
               "the device↔device matrix needs ≥2 boards", flush=True)
 
     boards = [Board(d) for d in devices]
@@ -239,7 +239,7 @@ def main() -> int:
             print(f"== round {k + 1}/{len(boards)}: sender {sender.name}, "
                   f"colour {colour}", flush=True)
 
-            # Leg 1 — the seed sweep: the PC seeds the sender once per protocol,
+            # Leg 1 — the seed sweep: the desktop seeds the sender once per protocol,
             # each with a rotated colour (a stale frame from the previous
             # protocol can't false-pass); the receiver autodetects all three.
             # The sender's preview shows the RAW colour (uncorrected buffer).
@@ -251,7 +251,7 @@ def main() -> int:
                 ok, pct, pts, detail = _preview_ws.wait_for_solid(
                     sender.host, proto_colour, args.tolerance, 100.0, args.timeout)
                 if ok:
-                    print(f"PASS  pc → {sender.name} [{proto}] (preview solid, {pts} points)",
+                    print(f"PASS  desktop → {sender.name} [{proto}] (preview solid, {pts} points)",
                           flush=True)
                     passed += 1
                     seeded_colour = proto_colour

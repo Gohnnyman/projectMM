@@ -106,15 +106,15 @@ struct PreviewRig {
         group.addChild(layout);
         layer.setLayouts(&group);
         layer.setChannelsPerLight(cpl);
-        layer.onBuildControls();
-        layer.onBuildState();
+        layer.defineControls();
+        layer.applyState();
 
         preview = new mm::PreviewDriver();
         preview->setBroadcaster(&cap);
         drivers.addChild(preview);
         drivers.setLayer(&layer);          // passBufferToDrivers wires preview's source + layer
-        drivers.onBuildControls();
-        drivers.onBuildState();
+        drivers.defineControls();
+        drivers.applyState();
     }
 
     void produce() {
@@ -227,21 +227,21 @@ TEST_CASE("PreviewDriver fps default") {
 
 // Regression: a coordinate table dropped under backpressure must be RETRIED, and colour
 // frames withheld until it lands — otherwise the device sends 0x02 frames the browser skips
-// (count mismatch) and the preview freezes for the whole session. Drives loop() (where the
+// (count mismatch) and the preview freezes for the whole session. Drives tick() (where the
 // coord-pending logic lives) with a broadcaster that drops every 0x03, then lets it through.
 TEST_CASE("PreviewDriver retries a dropped coordinate table, withholds frames until it lands") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;   // 256 lights, full res
     PreviewRig rig(&g);
     rig.cap.dropCoord = true;                 // every coord table is lost to backpressure
     rig.cap.frameMsgs = 0;                     // ignore any frame from rig construction
-    rig.cap.generation = 1;                    // a "new client" — forces loop() to rebuild+resend
+    rig.cap.generation = 1;                    // a "new client" — forces tick() to rebuild+resend
                                                // the coord table, which dropCoord now loses
 
-    // Advance the test clock past the fps gate (interval = 1000/24 ≈ 42 ms) before each loop().
+    // Advance the test clock past the fps gate (interval = 1000/24 ≈ 42 ms) before each tick().
     uint32_t t = 1000;
-    auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->loop(); };
+    auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
 
-    // Pump loop() several times. The rebuilt 0x03 never lands, so NO colour frame may go out —
+    // Pump tick() several times. The rebuilt 0x03 never lands, so NO colour frame may go out —
     // a 0x02 now would carry a count the browser can't map (the freeze the guard prevents).
     for (int i = 0; i < 5; i++) tick();
     CHECK(rig.cap.frameMsgs == 0);            // frames withheld while the table is pending
@@ -260,11 +260,11 @@ TEST_CASE("PreviewDriver retries a dropped coordinate table, withholds frames un
 // Regression: deleting the active Layer must not leave a driver holding a
 // dangling layer_ pointer. Previously Drivers::passBufferToDrivers early-returned
 // when the active Layer was null, leaving PreviewDriver's layer_ pointing at the
-// freed Layer; the next onBuildState read layer_->layouts() on freed memory and
+// freed Layer; the next prepare read layer_->layouts() on freed memory and
 // crashed the device (LoadProhibited → boot loop, since the broken tree persists).
 // Now passBufferToDrivers clears the drivers' layer_/sourceBuffer_ to null, a safe
 // idle state. This drives the real path: Drivers bound to a Layers CONTAINER
-// (self-healing), the Layer removed, then buildState re-resolves activeLayer()=null.
+// (self-healing), the Layer removed, then prepareTree re-resolves activeLayer()=null.
 TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
     mm::Layouts group; group.addChild(&g);
@@ -273,27 +273,27 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     layer->setChannelsPerLight(3);
     layers.addChild(layer);
     layers.setLayouts(&group);
-    layers.onBuildControls();
+    layers.defineControls();
 
     mm::Drivers drivers;
     auto* preview = new mm::PreviewDriver();
     CaptureBroadcaster cap;
     preview->setBroadcaster(&cap);
     drivers.addChild(preview);
-    drivers.setLayers(&layers);          // container-bound: layer_ re-resolved at buildState
-    drivers.onBuildControls();
+    drivers.setLayers(&layers);          // container-bound: layer_ re-resolved at prepareTree
+    drivers.defineControls();
 
-    layers.onBuildState();
-    drivers.onBuildState();
+    layers.applyState();
+    drivers.applyState();
     REQUIRE(preview->layer() == layer);  // wired to the active Layer
 
     // Remove the only Layer, then rebuild — activeLayer() now returns null.
     layers.removeChild(layer);
-    layer->teardown();
+    layer->release();
     mm::Scheduler::deleteTree(layer);    // free it — a stale pointer would now dangle
 
-    layers.onBuildState();
-    drivers.onBuildState();              // must NOT deref the freed Layer
+    layers.applyState();
+    drivers.applyState();              // must NOT deref the freed Layer
     CHECK(preview->layer() == nullptr);  // cleared, not dangling
 
     // And producing a frame on the empty pipeline is a safe no-op (no crash).
@@ -305,28 +305,28 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
 // Coordinates are sent ONLY when the geometry changes or a new client connects — never
 // per-frame and never on a timer (a periodic full-table rebuild would starve the tick).
 // A new client (clientGeneration bump) re-sends immediately so a page refresh shows the
-// preview at once. Driven through loop() with a frozen clock for determinism.
+// preview at once. Driven through tick() with a frozen clock for determinism.
 TEST_CASE("PreviewDriver sends coordinates only on change / new client, never on a timer") {
     mm::platform::setTestNowMs(100000);
     PreviewRig rig(new mm::GridLayout(), 3);
 
-    rig.preview->loop();                 // first loop: coords sent (count was 0)
+    rig.preview->tick();                 // first loop: coords sent (count was 0)
     int afterFirst = rig.cap.coordMsgs;
     CHECK(afterFirst >= 1);
 
-    // Advance a FULL 3 seconds with no new client and no rebuild: loop() keeps sending
+    // Advance a FULL 3 seconds with no new client and no rebuild: tick() keeps sending
     // colour frames but must NOT re-send the coordinate table. This is the regression
     // guard — the removed ~1 Hz timer would have re-sent ~3 times here.
     for (int t = 1; t <= 3; t++) {
         mm::platform::setTestNowMs(100000 + t * 1000);
-        rig.preview->loop();
+        rig.preview->tick();
     }
     CHECK(rig.cap.coordMsgs == afterFirst);   // no timer-driven re-send across 3s
 
-    // A new client connects (generation bumps). The next loop() re-sends coords at once.
+    // A new client connects (generation bumps). The next tick() re-sends coords at once.
     rig.cap.generation++;
     mm::platform::setTestNowMs(104200);
-    rig.preview->loop();
+    rig.preview->tick();
     CHECK(rig.cap.coordMsgs == afterFirst + 1);   // re-sent for the fresh client
 
     mm::platform::setTestNowMs(0);       // restore the real clock for other tests
@@ -389,7 +389,7 @@ TEST_CASE("PreviewDriver dense downsample packs colours by closed-form index, in
     mm::platform::setTestMaxAllocBlock(0);
 }
 
-// ADAPTIVE FRAME RATE: while a buffered send is still draining (a slow link), loop() must NOT start
+// ADAPTIVE FRAME RATE: while a buffered send is still draining (a slow link), tick() must NOT start
 // a new frame — it waits for bufferedSendIdle(). So the effective rate self-limits to the link.
 TEST_CASE("PreviewDriver gates the next frame on the buffered send draining (adaptive fps)") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
@@ -397,7 +397,7 @@ TEST_CASE("PreviewDriver gates the next frame on the buffered send draining (ada
     rig.cap.bufferedDrains = 3;        // each send stays "in flight" for 3 idle-polls (slow link)
 
     uint32_t t = 1000;
-    auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->loop(); };
+    auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
 
     tick();                            // first loop: coord table + first buffered frame starts
     const int after1 = rig.cap.bufferedFrames;
@@ -411,7 +411,7 @@ TEST_CASE("PreviewDriver gates the next frame on the buffered send draining (ada
 }
 
 // USE-AFTER-FREE GUARD: a geometry rebuild (resize) frees+reallocs the producer buffer, so any
-// in-flight buffered send (which holds a pointer into it) MUST be cancelled in onBuildState before
+// in-flight buffered send (which holds a pointer into it) MUST be cancelled in prepare before
 // the buffer goes away — else drainPreviewSend would read freed memory.
 TEST_CASE("PreviewDriver cancels an in-flight buffered send on rebuild (resize safety)") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
@@ -422,11 +422,11 @@ TEST_CASE("PreviewDriver cancels an in-flight buffered send on rebuild (resize s
     CHECK(rig.cap.bufferedFrames >= 1);
     const int cancelsBefore = rig.cap.bufferedCanceled;
 
-    // A resize: rebuild the pipeline. PreviewDriver::onBuildState must cancel the active send
+    // A resize: rebuild the pipeline. PreviewDriver::prepare must cancel the active send
     // BEFORE the buffer is reallocated.
     g.width = 32; g.height = 32;
-    rig.layer.onBuildState();          // reallocs the producer buffer (the body the send pointed at)
-    rig.preview->onBuildState();       // must cancel the in-flight send
+    rig.layer.applyState();          // reallocs the producer buffer (the body the send pointed at)
+    rig.preview->applyState();       // must cancel the in-flight send
 
     CHECK(rig.cap.bufferedCanceled == cancelsBefore + 1);   // the stale send was cancelled
 }

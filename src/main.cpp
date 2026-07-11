@@ -96,9 +96,12 @@
 #endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
-#include "core/AudioModule.h"
+#include "core/Services.h"
+#include "core/AudioService.h"
 #include "core/I2cScanModule.h"
-#include "core/IrModule.h"
+#include "core/TasksModule.h"
+#include "core/PinsModule.h"
+#include "core/IrService.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
@@ -210,17 +213,20 @@ static void registerModuleTypes() {
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers.md#parlioled");
 #endif
-    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/services.md");
-    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/services.md#system");
-    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/services.md#audio");
-    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/services.md#i2c-scan");
-    mm::ModuleFactory::registerType<mm::IrModule>("IrModule", "core/services.md#ir");
-    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/services.md#file-manager");
-    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/services.md#firmware-update");
-    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/services.md#improv-provisioning");
-    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/services.md#mqtt");
-    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/services.md#devices");
-    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/services.md#network");
+    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/system.md");
+    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/system.md#system");
+    mm::ModuleFactory::registerType<mm::Services>("Services", "core/services.md#services");
+    mm::ModuleFactory::registerType<mm::AudioService>("AudioService", "core/services.md#audio");
+    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/system.md#i2c-scan");
+    mm::ModuleFactory::registerType<mm::TasksModule>("TasksModule", "core/system.md#tasks");
+    mm::ModuleFactory::registerType<mm::PinsModule>("PinsModule", "core/system.md#pins");
+    mm::ModuleFactory::registerType<mm::IrService>("IrService", "core/services.md#ir");
+    mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
+    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
+    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");
+    mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/system.md#mqtt");
+    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/system.md#devices");
+    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/system.md#network");
     mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/supporting.md#filesystem");
 }
 
@@ -228,11 +234,11 @@ static void printModuleMetrics(mm::MoonModule* mod, int depth) {
     if (!mod) return;
     if (mod->dynamicBytes() > 0) {
         std::printf("  %s:%uus/%uKB", mod->name() ? mod->name() : "?",
-                    static_cast<unsigned>(mod->loopTimeUs()),
+                    static_cast<unsigned>(mod->tickTimeUs()),
                     static_cast<unsigned>(mod->dynamicBytes() / 1024));
     } else {
         std::printf("  %s:%uus", mod->name() ? mod->name() : "?",
-                    static_cast<unsigned>(mod->loopTimeUs()));
+                    static_cast<unsigned>(mod->tickTimeUs()));
     }
     for (uint8_t i = 0; i < mod->childCount(); i++) {
         printModuleMetrics(mod->child(i), depth + 1);
@@ -278,20 +284,40 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
     systemModule->setScheduler(&scheduler);
 
+    // Fixed System modules — the device's inspection / bring-up toolkit (what runs,
+    // what's on the I²C bus). Wired by code as System children (like Improv under
+    // Network), not user-added: always present, no add/delete. markWiredByCode()
+    // exempts them from the persistence trim, and their base Generic role means no
+    // container accepts them as a user-editable child (so the card shows no delete).
+    auto* tasksModule = static_cast<mm::TasksModule*>(mm::ModuleFactory::create("TasksModule"));
+    tasksModule->markWiredByCode();
+    systemModule->addChild(tasksModule);
+    auto* i2cScanModule = static_cast<mm::I2cScanModule*>(mm::ModuleFactory::create("I2cScanModule"));
+    i2cScanModule->markWiredByCode();
+    systemModule->addChild(i2cScanModule);
+    auto* pinsModule = static_cast<mm::PinsModule*>(mm::ModuleFactory::create("PinsModule"));
+    pinsModule->markWiredByCode();
+    systemModule->addChild(pinsModule);
+
+    // Services — top-level container for user-added capability modules (Audio, IR).
+    // The core-domain twin of the light domain's Layers/Drivers: a grouping node
+    // whose children the user adds/removes at runtime. Added as a root below.
+    auto* servicesModule = static_cast<mm::Services*>(mm::ModuleFactory::create("Services"));
+
     // The deviceModel identity (e.g. "Olimex ESP32-Gateway Rev G") is now SystemModule's
     // `deviceModel` control — no separate module. SystemModule owns the device identity
     // (deviceName + deviceModel) directly; tooling injects deviceModel like any catalog
     // default — via /api/control (MoonDeck) or an APPLY_OP `set System.deviceModel` over
     // serial (the installer) — both routed through the apply-core + the control's validator.
 
-    // AudioModule is NOT auto-wired. It is a mic peripheral, useful only on a board
+    // AudioService is NOT auto-wired. It is a mic peripheral, useful only on a board
     // that actually has an I2S microphone, so the user adds it through the UI when
     // they have one (the same model as the effects: registered in the factory,
     // user-added, not boot-wired). Auto-wiring it on every flash forced an I2S init
     // on boards with no mic, which on the classic ESP32 hung setup() and boot-looped
     // the device. When added, its pins default to empty so it stays idle until the
     // user enters the real GPIOs. The audio effects reach it via the static
-    // AudioModule::latestFrame(), which returns a silent frame when no mic exists.
+    // AudioService::latestFrame(), which returns a silent frame when no mic exists.
 
     // FirmwareUpdate — surfaces OTA status as two read-only controls.
     // The actual flash is driven by POST /api/firmware/url; this module just
@@ -372,7 +398,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // Drivers: top-level container; one or more Driver children. Bound to the
     // Layers container — Drivers re-resolves the active Layer from it at every
-    // buildState, so a Layer cleared+rebuilt via the API self-heals without
+    // prepareTree, so a Layer cleared+rebuilt via the API self-heals without
     // re-running this wiring. Binding the container (not a single Layer) is what
     // lets a driver read across N Layer buffers from one place — the hook
     // multi-layer blending uses.
@@ -381,11 +407,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // Output drivers (NetworkSend + the LED drivers: RMT / LCD_CAM / Parlio) are
     // NOT boot-wired. They are added explicitly per board through the catalog
-    // (POST /api/modules to the Drivers container), the same model AudioModule
+    // (POST /api/modules to the Drivers container), the same model AudioService
     // uses, so a device only carries the drivers its board actually has instead of
     // every driver the chip is capable of. The Drivers container wires any child
     // generically in passBufferToDrivers() (setSourceBuffer/setLayer/setCorrection)
-    // at setup()/onBuildState(), so a runtime-added driver is wired identically to
+    // at setup()/prepare(), so a runtime-added driver is wired identically to
     // one added at boot, and a non-wiredByCode child persists across reboot via
     // FilesystemModule. A bare flash with no catalog inject therefore has no LED /
     // network output until a board is selected — the deliberate explicit-add model.
@@ -416,14 +442,17 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // use) — "Improv = REST over serial". Wired here once httpServer exists.
     if (improvModule) improvModule->setHttpServerModule(httpServer);
 
-    // Register top-level modules with scheduler (scheduler deletes on teardown).
+    // Register top-level modules with scheduler (scheduler deletes on release).
     // Order matters: filesystem first (load hook runs before any module's setup),
     // then system (deviceName), fileManager (filesystem browser, reads the persistence
     // engine's "last saved"), firmwareUpdate (status surface, no deps), network (hosts
     // ImprovProvisioning and Mqtt as children — same lifecycle, one less top-level entry
     // each; Improv only exists to feed Network credentials, and Mqtt only bridges once the
-    // network is up), light pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler
-    // walks roots in this order each tick; child propagation happens inside each root.
+    // network is up), services (the user-added-capability container: Audio, IR — placed after
+    // network because a service may use it, e.g. WLED audio sync, and before the light pipeline
+    // so a capability like audio is available to the effects that consume it), light pipeline
+    // (Layouts → Layers → Drivers), then HTTP. The Scheduler walks roots in this order each
+    // tick; child propagation happens inside each root.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
     scheduler.addModule(fileManagerModule);
@@ -442,6 +471,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     devicesModule->setSelfName(systemModule->deviceName());
     networkModule->addChild(devicesModule);
     scheduler.addModule(networkModule);
+    scheduler.addModule(servicesModule);
     scheduler.addModule(layouts);
     scheduler.addModule(layersContainer);
     scheduler.addModule(drivers);
@@ -543,5 +573,5 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     }
 
     std::printf("\nShutting down.\n");
-    scheduler.teardown();
+    scheduler.release();
 }

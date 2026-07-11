@@ -164,7 +164,7 @@ function setupTabs() {
 
 // The network bar (selector + WiFi panel) only matters when the workflow
 // involves a device on the LAN — ESP32 tab uses the active network's port
-// + WiFi creds (Improv), Live tab uses the device list. The PC tab runs on
+// + WiFi creds (Improv), Live tab uses the device list. The Desktop tab runs on
 // localhost and has no network concept; hide the bar so it doesn't add noise.
 function applyNetworkBarVisibility(tab) {
     const bar = document.getElementById("network-bar");
@@ -270,7 +270,7 @@ function buildModuleRow({ rowClass, onChange }) {
 
 function renderScripts() {
     const containers = {
-        pc: document.getElementById("scripts-pc"),
+        desktop: document.getElementById("scripts-desktop"),
         esp32: document.getElementById("scripts-esp32"),
         live: document.getElementById("scripts-live"),
     };

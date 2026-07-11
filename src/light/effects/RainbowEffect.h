@@ -1,8 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"   // colorFromPalette + the global active palette
-#include "core/color.h"
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -18,11 +16,11 @@ public:
 
     uint8_t speed = 20; // BPM — one full hue cycle every 3 s; 60 (a whole rainbow per second) reads too fast
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 255);
     }
 
-    void loop() override {
+    void tick() override {
         // D2 effect — writes only z=0; Layer::extrude duplicates across z.
         uint8_t* buf = buffer();
         lengthType w = width();

@@ -107,7 +107,7 @@
 /* ---------------------------------------------------------------------------
    Signature standout on the generated moxygen technical pages. Each attribute /
    method renders as a paragraph leading with its declaration
-   (`uint8_t protocol = 0`, `virtual void onBuildControls() override`) followed
+   (`uint8_t protocol = 0`, `virtual void defineControls() override`) followed
    by a `: summary`. gen_api.py rewrites each into
    `<code class="mm-sig">…<span class="mm-sig-name">name</span>…</code>` so the
    chip can highlight ONLY the declared member name while the type and arguments

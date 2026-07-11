@@ -4,13 +4,13 @@ projectMM's per-step **performance contracts** live in the scenario JSONs — ea
 
 This document holds what scenarios can't carry: structural sizes (`sizeof`), build-variant deltas, and the WiFi/Ethernet physics that explain *why* a contract comes out where it does.
 
-**Render-loop model.** The Layer's buffer **persists** frame-to-frame — `Layer::loop()` does not clear it (the FastLED/WLED/MoonLight convention; see [architecture.md § Buffer persistence](architecture.md#buffer-persistence-the-layer-does-not-clear-each-frame)). This removed the per-frame full-buffer `memset` that a clear-every-frame model pays, and replaced N per-effect `draw::fade` passes with a single **collected fade** (`Layer::fadeToBlackBy` MINs the requested amounts and applies one buffer pass per frame) — so a layer with several fading effects now pays one fade pass, not N. Net hot-path effect on the tick numbers below is small (the clear/fade are one linear pass over the buffer, dwarfed by per-light effect compute and the output driver), but the *model* is what the scenario `observed` blocks were re-measured against on this cycle.
+**Render-loop model.** The Layer's buffer **persists** frame-to-frame — `Layer::tick()` does not clear it (the FastLED/WLED/MoonLight convention; see [architecture.md § Buffer persistence](architecture.md#buffer-persistence-the-layer-does-not-clear-each-frame)). This removed the per-frame full-buffer `memset` that a clear-every-frame model pays, and replaced N per-effect `draw::fade` passes with a single **collected fade** (`Layer::fadeToBlackBy` MINs the requested amounts and applies one buffer pass per frame) — so a layer with several fading effects now pays one fade pass, not N. Net hot-path effect on the tick numbers below is small (the clear/fade are one linear pass over the buffer, dwarfed by per-light effect compute and the output driver), but the *model* is what the scenario `observed` blocks were re-measured against on this cycle.
 
 ---
 
 ## Desktop (64-bit)
 
-Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in per-host `contract.pc-<os>` blocks across the scenarios — `pc-macos` for macOS arm64, `pc-windows` for Windows x64, `pc-linux` for Linux. The `sizeof` and dynamic-memory numbers below apply to all 64-bit desktop targets; tick numbers differ by host CPU and live in the scenario contracts.
+Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in per-host `contract.desktop-<os>` blocks across the scenarios — `desktop-macos` for macOS arm64, `desktop-windows` for Windows x64, `desktop-linux` for Linux. The `sizeof` and dynamic-memory numbers below apply to all 64-bit desktop targets; tick numbers differ by host CPU and live in the scenario contracts.
 
 ### sizeof (desktop, 64-bit)
 
@@ -222,7 +222,7 @@ The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; th
 
 ### MoonLive (scripted effect) — tick + memory
 
-A `MoonLiveEffect` compiles its `source` text to native Xtensa once on the cold path (`onBuildState`), then `run()` is a single function-pointer call each tick. Measured on the S3 at 16×16 (the bench grid the engine is exercised on; the per-tick cost is the native loop, not interpretation):
+A `MoonLiveEffect` compiles its `source` text to native Xtensa once on the cold path (`prepare`), then `run()` is a single function-pointer call each tick. Measured on the S3 at 16×16 (the bench grid the engine is exercised on; the per-tick cost is the native loop, not interpretation):
 
 | Script | Tick (µs) | Exec block (heap) |
 |--------|----:|----:|
@@ -251,7 +251,7 @@ Absolute tick at each step (the diff vs the prior row is that subsystem's cost):
 | Step | classic | S3 | P4 | Reading |
 |---|--:|--:|--:|---|
 | Render floor (Grid+Layer+Checkerboard) | 129 | 133 | 67 | the baseline; P4 ~2× faster |
-| − AudioModule disabled | 116 | 111 | n/a | **audio ≈ +13–22µs/tick** (fixed I2S block-read; no mic on the P4) |
+| − Audio disabled | 116 | 111 | n/a | **audio ≈ +13–22µs/tick** (fixed I2S block-read; no mic on the P4) |
 | − Devices discovery disabled | 116 | 112 | 56 | idle discovery is free (boot sweep is one-shot) |
 | + MultiplyModifier (2×2) | 315 | 292 | 96 | **+180–200µs** — the per-frame blend+map over the LUT |
 | + PreviewDriver | 115 | 118 | 56 | apparatus; free |

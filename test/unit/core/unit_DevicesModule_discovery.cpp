@@ -105,3 +105,26 @@ TEST_CASE("DevicesModule: a projectMM device is not downgraded by a later WLED p
     CHECK(std::strstr(row.c_str(), "\"type\":\"projectMM\"") != nullptr);
     CHECK(std::strstr(row.c_str(), "\"type\":\"WLED\"") == nullptr);
 }
+
+TEST_CASE("DevicesModule: a DISABLED module does not claim the active_ seat at boot") {
+    // Core's applyState() calls prepare() (which claims the seat) only when effectively-enabled,
+    // and release() otherwise. A persisted DISABLED DevicesModule must NOT claim the singleton active_
+    // seat at boot — else the presence pipeline (and Hue-bridge routing) points at a module the user
+    // turned off. active_ is a process-wide static, so each case brackets applyState()/release() to
+    // leave it clean (the same discipline as the AudioService cases).
+    DevicesModule dis;
+    dis.setEnabled(false);
+    dis.setup();                           // Phase 3: pure wiring
+    dis.applyState();                      // Phase 4: disabled → routes to release, not the seat claim
+    CHECK(DevicesModule::active() != &dis); // the disabled module did not claim it
+
+    DevicesModule live;
+    live.setup();
+    live.applyState();                     // enabled by default → build claims the seat
+    CHECK(DevicesModule::active() == &live);
+
+    live.release();                       // vacates
+    dis.release();                        // was never active → still a clean no-op
+    CHECK(DevicesModule::active() != &dis);
+    CHECK(DevicesModule::active() != &live);
+}

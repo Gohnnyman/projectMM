@@ -32,7 +32,7 @@
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "core/SystemModule.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 #include "light/effects/AudioVolumeEffect.h"
 #include "light/effects/AudioSpectrumEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
@@ -166,7 +166,7 @@ static std::string readFile(const char* path) {
 }
 
 // Register the module types this runner can replay. Heap-allocated by the
-// factory (new T()) so Scheduler::teardown()'s deleteTree can validly delete
+// factory (new T()) so Scheduler::release()'s deleteTree can validly delete
 // them — same ownership model as production main.cpp. Idempotent: safe to call
 // before every scenario.
 static void registerScenarioTypes() {
@@ -198,7 +198,7 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule");
-    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule");
+    mm::ModuleFactory::registerType<mm::AudioService>("AudioService");
     mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
@@ -210,23 +210,23 @@ static void registerScenarioTypes() {
 
 // Target key for the per-step expected[<target>] lookup. The in-process runner
 // builds for the host only — there's no cross-compiled scenario_runner — so the
-// key is always pc-<host-os>. Matches the run_live_scenario.py convention.
+// key is always desktop-<host-os>. Matches the run_live_scenario.py convention.
 static const char* hostTarget() {
 #if defined(__APPLE__)
-    return "pc-macos";
+    return "desktop-macos";
 #elif defined(_WIN32)
-    return "pc-windows";
+    return "desktop-windows";
 #elif defined(__linux__)
-    return "pc-linux";
+    return "desktop-linux";
 #else
-    return "pc-unknown";
+    return "desktop-unknown";
 #endif
 }
 
 // Apply a set_control step in-process: find the module by id, find the control by
 // name, write the typed value, then mirror what HttpServerModule::handleSetControl
-// does — call onUpdate(), and if controlChangeTriggersBuildState() returns true
-// trigger Scheduler::buildState() so the pipeline reconciles. Returns true if the
+// does — call onControlChanged(), and if affectsPrepare() returns true
+// trigger Scheduler::prepareTree() so the pipeline reconciles. Returns true if the
 // write applied; false on any lookup miss or unsupported type (caller may want to
 static bool applySetControl(mm::Scheduler& scheduler,
                             mm::MoonModule* target,
@@ -262,9 +262,9 @@ static bool applySetControl(mm::Scheduler& scheduler,
                                                   mm::ApplyPolicy::Strict);
         if (r != mm::ApplyResult::Ok) return false;
         if (c.type == mm::ControlType::Select) target->rebuildControls();
-        target->onUpdate(controlName);
-        if (target->controlChangeTriggersBuildState(controlName)) {
-            scheduler.buildState();
+        target->onControlChanged(controlName);
+        if (target->affectsPrepare(controlName)) {
+            scheduler.prepareTree();
         }
         return true;
     }
@@ -276,7 +276,7 @@ struct ScenarioContext {
     mm::Scheduler scheduler;
     std::map<std::string, mm::MoonModule*> modules;
 
-    // Modules are heap-allocated by the factory; Scheduler::teardown owns and
+    // Modules are heap-allocated by the factory; Scheduler::release owns and
     // deletes them.
     mm::MoonModule* createModule(const char* type) {
         return mm::ModuleFactory::create(type);
@@ -314,7 +314,7 @@ struct ScenarioContext {
             if (std::strcmp(type, "Layers") == 0) {
                 // Wire the container's Layouts (mirrors main.cpp's
                 // layersContainer->setLayouts). Layers re-propagates this to its
-                // child Layers at every buildState, so a Layer added later picks
+                // child Layers at every prepareTree, so a Layer added later picks
                 // it up — the self-healing path the device relies on.
                 if (props.has("layouts")) {
                     auto* layoutsModule = static_cast<mm::Layouts*>(modules[props["layouts"].str]);
@@ -331,7 +331,7 @@ struct ScenarioContext {
                 }
             } else if (std::strcmp(type, "Drivers") == 0) {
                 // Prefer binding the Layers container (self-healing: the active
-                // Layer is re-resolved at every buildState, so a Layer cleared
+                // Layer is re-resolved at every prepareTree, so a Layer cleared
                 // and rebuilt mid-scenario is picked up — mirrors main.cpp).
                 // Fall back to pinning a specific Layer for older fixtures.
                 if (props.has("layers")) {
@@ -399,7 +399,7 @@ static int runScenario(const char* path) {
 
     // Honour a scenario-level `skip_on` allowlist of host targets that lack
     // a capability the scenario exercises (today: MoonLive scenarios opt out
-    // on pc-windows / pc-linux — the desktop JIT is arm64-only, so an x86_64
+    // on desktop-windows / desktop-linux — the desktop JIT is arm64-only, so an x86_64
     // host renders dark and the scenario's "buffer non-zero" check would fail
     // for a platform-capability reason it isn't the right vehicle to assert).
     // Absent / empty `skip_on` runs everywhere (the existing default). Same
@@ -516,7 +516,7 @@ static int runScenario(const char* path) {
         // Section boundary banners + lazy scheduler start.
         if (section == Section::Fixture && stepIdx == fixtureSize) {
             // Fixture done: start the scheduler so set_control works (controls
-            // are populated in onBuildControls during setup()).
+            // are populated in defineControls during setup()).
             ensureStarted();
             section = resetSize > 0 ? Section::Reset : Section::Steps;
             std::printf(section == Section::Reset
@@ -552,9 +552,9 @@ static int runScenario(const char* path) {
             // Mid-scenario adds: setup the new module immediately and rebuild
             // pipeline state. Mirrors what HttpServerModule does on /api/modules.
             if (schedulerStarted) {
-                mod->onBuildControls();
+                mod->defineControls();
                 mod->setup();
-                ctx.scheduler.buildState();
+                ctx.scheduler.prepareTree();
             }
             std::printf("  +     %s (%s)\n", id, type);
         } else if (std::strcmp(op, "set_control") == 0) {
@@ -581,7 +581,7 @@ static int runScenario(const char* path) {
             // or a scenario silently no-ops on one tier.
             // Remove a child module from its parent — mirrors
             // HttpServerModule::handleDeleteModule (remove from parent,
-            // teardown + recursive delete, rebuild pipeline state). Only child
+            // release + recursive delete, rebuild pipeline state). Only child
             // modules can be removed; top-level modules are policy-fixed.
             const char* targetId = step["id"].c_str();
             auto* target = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
@@ -593,10 +593,10 @@ static int runScenario(const char* path) {
             }
             auto* parent = target->parent();
             parent->removeChild(target);
-            target->teardown();
+            target->release();
             ctx.purgeSubtree(target);  // erase target + any registered descendants before freeing
             mm::Scheduler::deleteTree(target);
-            if (schedulerStarted) ctx.scheduler.buildState();
+            if (schedulerStarted) ctx.scheduler.prepareTree();
             std::printf("  -     %s (%s)\n", name, targetId);
         } else if (std::strcmp(op, "clear_children") == 0) {
             // Delete every child of a container, leaving the container itself.
@@ -604,7 +604,7 @@ static int runScenario(const char* path) {
             // about the device's starting tree, clears a container, then adds
             // what it needs. Children are deleted including ones the scenario
             // never added (a live device's pre-existing effects/modifiers).
-            // Mirrors remove_module's teardown, looped over all children. Walk
+            // Mirrors remove_module's release, looped over all children. Walk
             // back-to-front since removeChild compacts the array in place.
             const char* targetId = step["id"].c_str();
             auto* container = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
@@ -620,14 +620,14 @@ static int runScenario(const char* path) {
                 // the in-process clear matches what the live device does.
                 if (!childMod->userEditable()) continue;
                 container->removeChild(childMod);
-                childMod->teardown();
+                childMod->release();
                 // Purge the child AND any registered descendants (e.g. a Layer's
                 // effect child) before freeing, so no id is left dangling.
                 ctx.purgeSubtree(childMod);
                 mm::Scheduler::deleteTree(childMod);
                 cleared++;
             }
-            if (schedulerStarted) ctx.scheduler.buildState();
+            if (schedulerStarted) ctx.scheduler.prepareTree();
             std::printf("  clr     %s (%s: %d cleared)\n", name, targetId, cleared);
         } else if (std::strcmp(op, "replace_module") == 0) {
             // Replace a child with a fresh module of another type at the same
@@ -656,9 +656,9 @@ static int runScenario(const char* path) {
             }
             fresh->setName(targetId);
             mm::MoonModule* old = parent->replaceChildAt(index, fresh);
-            fresh->onBuildControls();
+            fresh->defineControls();
             fresh->setup();
-            fresh->onBuildState();
+            fresh->prepare();
             if (old) {
                 // Mirror the remove_module / clear_children branches: purge any
                 // ctx.modules entries pointing at old or its descendants before
@@ -666,11 +666,11 @@ static int runScenario(const char* path) {
                 // by id reads a dangling pointer. purgeSubtree also removes the
                 // targetId mapping; we re-register it to fresh on the next line.
                 ctx.purgeSubtree(old);
-                old->teardown();
+                old->release();
                 mm::Scheduler::deleteTree(old);
             }
             ctx.modules[targetId] = fresh;
-            if (schedulerStarted) ctx.scheduler.buildState();
+            if (schedulerStarted) ctx.scheduler.prepareTree();
             std::printf("  ~     %s (%s → %s)\n", name, targetId, newType);
         } else if (std::strcmp(op, "measure") == 0) {
             // Pure measurement step — no side effects. op:"measure" is the
@@ -795,23 +795,23 @@ static int runScenario(const char* path) {
             if (step.has("contract") && step["contract"].has(hostTarget())) {
                 const auto& exp = step["contract"][hostTarget()];
                 // Per-target defaults reflect run-to-run variance, not "I don't care":
-                //   pc-*    — multi-process OS jitter, 20% pct + 200us absolute floor.
-                //             The floor dominates below ~1ms tick (the realistic case).
-                //   esp32-* — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us floor.
+                //   desktop-* — multi-process OS jitter, 20% pct + 200us absolute floor.
+                //               The floor dominates below ~1ms tick (the realistic case).
+                //   esp32-*   — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us floor.
                 // KEEP IN SYNC: the live runner re-declares the same defaults at
                 // moondeck/scenario/run_live_scenario.py contract-block handler —
                 // tuning one without the other silently desyncs the two tiers.
-                const bool isPc = std::strncmp(hostTarget(), "pc-", 3) == 0;
+                const bool isDesktop = std::strncmp(hostTarget(), "desktop-", 8) == 0;
                 double tickTolPct = exp.has("tick_tolerance_pct") ? exp["tick_tolerance_pct"].num
-                                                                   : (isPc ? 20.0 : 10.0);
+                                                                   : (isDesktop ? 20.0 : 10.0);
                 double heapTolPct = exp.has("heap_tolerance_pct") ? exp["heap_tolerance_pct"].num
-                                                                   : (isPc ? 20.0 : 10.0);
-                // Absolute floor: at very small ticks (sub-millisecond on PC),
-                // OS scheduling jitter dwarfs any percentage tolerance. The PC
+                                                                   : (isDesktop ? 20.0 : 10.0);
+                // Absolute floor: at very small ticks (sub-millisecond on desktop),
+                // OS scheduling jitter dwarfs any percentage tolerance. The desktop
                 // floor of 200us absorbs typical desktop noise; the ESP32 floor
                 // of 5us is realistic for the bounded RTOS clock.
                 double tolUs = exp.has("tolerance_us") ? exp["tolerance_us"].num
-                                                       : (isPc ? 200.0 : 5.0);
+                                                       : (isDesktop ? 200.0 : 5.0);
                 if (exp.has("tick_us") && exp["tick_us"].num > 0) {
                     // tick is a *ceiling* — faster than contract is good news,
                     // same shape as heap being a floor. Tolerance absorbs upward
@@ -904,7 +904,7 @@ static int runScenario(const char* path) {
         }
     }
 
-    ctx.scheduler.teardown();
+    ctx.scheduler.release();
 
     // Summary
     std::printf("---\n");

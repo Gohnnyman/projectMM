@@ -214,6 +214,66 @@ size_t maxInternalAllocBlock() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
+// No RTOS on desktop — the TasksModule shows only its MoonModule cost table here.
+// Test seam: a unit test can inject a canned task snapshot + render-task name so TasksModule's
+// row/detail JSON + the nesting predicate are exercised on the host (no RTOS here otherwise). Empty
+// by default → the real "desktop shows no tasks" behaviour. Declared in platform.h under a test guard.
+static const TaskInfo* g_testTasks = nullptr;
+static size_t g_testTaskCount = 0;
+static const char* g_testRenderTask = "";
+void setTestTaskSnapshot(const TaskInfo* tasks, size_t count, const char* renderTask) {
+    g_testTasks = tasks; g_testTaskCount = count; g_testRenderTask = renderTask ? renderTask : "";
+}
+size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
+    if (!g_testTasks || !out) return 0;
+    const size_t n = g_testTaskCount < maxTasks ? g_testTaskCount : maxTasks;
+    for (size_t i = 0; i < n; i++) out[i] = g_testTasks[i];
+    return n;
+}
+void currentTaskOnCore(int, char* out, size_t cap) { if (out && cap) out[0] = '\0'; }
+const char* renderTaskName() { return g_testRenderTask; }
+
+// A host build has no real GPIOs to protect — every pin is valid, output-capable, and free of
+// straps/reserved roles. So the pin map on desktop flags nothing (which is correct: there's no
+// silicon to corrupt). The ESP32 build fills the real capability in platform_esp32_gpio.cpp.
+// A test can override one pin's capability (setTestGpioCapability) to exercise PinsModule's severity
+// derivation on the host; a small fixed table (no heap) holds the overrides.
+namespace {
+struct GpioCapOverride { uint8_t gpio; GpioCapability cap; bool set; };
+GpioCapOverride g_gpioCapOverrides[16] = {};
+}  // namespace
+GpioCapability gpioCapability(uint8_t gpio) {
+    for (const auto& o : g_gpioCapOverrides)
+        if (o.set && o.gpio == gpio) return o.cap;
+    return GpioCapability{};
+}
+void setTestGpioCapability(uint8_t gpio, GpioCapability cap) {
+    for (auto& o : g_gpioCapOverrides)
+        if (!o.set || o.gpio == gpio) { o = {gpio, cap, true}; return; }
+}
+void clearTestGpioCapability() {
+    for (auto& o : g_gpioCapOverrides) o.set = false;
+}
+
+// Live state — desktop has no real pins, so valid=false (the map omits the live columns) unless a
+// test injects one. Same small fixed override table as the capability stub.
+namespace {
+struct GpioLiveOverride { uint8_t gpio; GpioLiveState state; bool set; };
+GpioLiveOverride g_gpioLiveOverrides[16] = {};
+}  // namespace
+GpioLiveState gpioLiveState(uint8_t gpio) {
+    for (const auto& o : g_gpioLiveOverrides)
+        if (o.set && o.gpio == gpio) return o.state;
+    return GpioLiveState{};   // valid=false
+}
+void setTestGpioLiveState(uint8_t gpio, GpioLiveState state) {
+    for (auto& o : g_gpioLiveOverrides)
+        if (!o.set || o.gpio == gpio) { o = {gpio, state, true}; return; }
+}
+void clearTestGpioLiveState() {
+    for (auto& o : g_gpioLiveOverrides) o.set = false;
+}
+
 size_t totalHeap() {
     return 0; // Not meaningful on desktop
 }
@@ -487,7 +547,7 @@ bool ethLinkUp() { return false; }
 bool ethConnected() { return false; }
 void ethGetIPv4(uint8_t out[4]) {
     // Desktop has no real interface state, but DevicesModule needs the host's LAN
-    // IP to scan from (otherwise a PC projectMM instance reports "no network" and
+    // IP to scan from (otherwise a desktop projectMM instance reports "no network" and
     // never sweeps). hostIp() resolves it via the outbound-route trick; report it
     // as the "ethernet" IP so DevicesModule's localIp() (eth-first) picks it up.
     out[0] = out[1] = out[2] = out[3] = 0;
@@ -594,7 +654,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
 
     // Bound the CONNECT by timeoutMs: a blocking connect to an unreachable host hangs for the OS
-    // default (tens of seconds) — and this runs on the driver's loop1s (shared with the render
+    // default (tens of seconds) — and this runs on the driver's tick1s (shared with the render
     // loop), so it must not stall. Connect non-blocking, wait writable via select() up to
     // timeoutMs, then restore blocking for the bounded send/recv (which use SO_*TIMEO below).
     if (make_nonblocking(fd) != 0) return 0;
@@ -750,7 +810,7 @@ bool UdpSocket::bind(uint16_t port) {
     // TIME_WAIT (never allows two live binds to overlap). On Winsock its meaning is the
     // opposite of POSIX — two live sockets can bind the same port, so a second bind()
     // returns success instead of the EADDRINUSE the audio-sync retry-backoff logic reads
-    // as "port owned by someone else" (unit_AudioModule_sync's hog-then-module scenario
+    // as "port owned by someone else" (unit_AudioService_sync's hog-then-module scenario
     // exercises exactly that). Windows' equivalent-to-POSIX behaviour is the *default*,
     // so on Windows we skip the setsockopt and let a second bind fail naturally. Same
     // observable outcome on both platforms: overlapping binds are refused.
@@ -1057,7 +1117,7 @@ bool audioCodecInit(CodecType /*type*/, const AudioCodecPins& /*pins*/, uint32_t
 }
 void audioCodecDeinit() {}
 
-// I2S microphone — no capture on desktop (hasI2sMic == false, AudioModule inert),
+// I2S microphone — no capture on desktop (hasI2sMic == false, AudioService inert),
 // so init fails and read returns nothing.
 bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
                   uint16_t /*sckPin*/, int16_t /*mclkPin*/, uint32_t /*sampleRate*/) {
@@ -1093,8 +1153,9 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
     return kI2cBusUnavailable;
 }
 
-// No IR receiver on the host — the seam is a no-op so IrModule runs (its buttons still work
+// No IR receiver on the host — the seam is a no-op so IrService runs (its buttons still work
 // through Scheduler::setControl); reception is ESP32-only.
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
+void irStop() {}   // no IR hardware on desktop
 
 } // namespace mm::platform

@@ -17,7 +17,7 @@ namespace {
 class CaptureDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer* buf) override { source_ = buf; }
-    void loop() override {
+    void tick() override {
         if (source_ && source_->data()) {
             lastBytes = source_->bytes();
             lastNonZero = false;
@@ -35,23 +35,23 @@ private:
     mm::Buffer* source_ = nullptr;
 };
 
-// Simulate Scheduler::buildState() + one tick: walk the top-level modules calling
-// onBuildState() then loop().
+// Simulate Scheduler::prepareTree() + one tick: walk the top-level modules calling
+// applyState() then tick().
 void rebuildAndTick(mm::Layouts& layouts, mm::Layers& layersC, mm::Drivers& driversC) {
-    layouts.onBuildState();
-    layersC.onBuildState();
+    layouts.applyState();
+    layersC.applyState();
     driversC.setLayer(layersC.activeLayer());
-    driversC.onBuildState();
-    layersC.loop();
-    driversC.loop();
+    driversC.applyState();
+    layersC.tick();
+    driversC.tick();
 }
 
 } // namespace
 
 // Disabling the only layout child and re-enabling it must not crash Drivers, and rendering resumes cleanly.
 TEST_CASE("Toggle a single layout off then on: pipeline survives and renders again") {
-    // Regression: disabling the only layout child crashed Drivers::loop with a
-    // null-pointer blendMap on the next tick — Layer::onBuildState bailed
+    // Regression: disabling the only layout child crashed Drivers::tick with a
+    // null-pointer blendMap on the next tick — Layer::prepare bailed
     // early on physicalCount==0 without dropping the old LUT, while Drivers
     // reallocated its output buffer to 0 bytes. The fix tears down the LUT and
     // buffer on empty so Drivers takes the no-LUT path cleanly.
@@ -83,9 +83,9 @@ TEST_CASE("Toggle a single layout off then on: pipeline survives and renders aga
     CHECK_MESSAGE(capture.lastNonZero, "initial frame: driver saw zero pixels");
 
     // Disable the only layout child. Drivers must survive (no crash) and see
-    // an empty source — assert both the structural teardown AND that the driver
+    // an empty source — assert both the structural release AND that the driver
     // actually received an empty buffer (catches a regression where a stale
-    // buffer would forward through to the driver after layer teardown).
+    // buffer would forward through to the driver after layer release).
     grid.setEnabled(false);
     rebuildAndTick(layouts, layersC, driversC);
     CHECK(layouts.totalLightCount() == 0);

@@ -13,7 +13,7 @@ namespace mm {
 ///
 /// **Coordinate iteration is owned by the container, not the layer:** `forEachCoord` walks every enabled child layout's coordinates in registration order, offsetting physical indices so multiple layouts (for example 16 strips making one panel) stitch into a single flat physical address space without overlap. A Layer *uses* those coordinates to build its LUT. `totalLightCount` (the sum across enabled children) sizes both the layer buffer and the driver output buffer.
 ///
-/// **Disabling a layout:** disabling a layout child (the `enabled` toggle) removes its lights from the LUT entirely, and the indices of any layouts after it shift down to close the gap — with two grids of 4 and 2 lights, disabling the first leaves the second at indices 0–1 and `totalLightCount` drops from 6 to 2. A `Scheduler::buildState` fires so the LUT, layer buffer, and driver output buffer reallocate. Side effect: ArtNet universe assignments shift with the indices — to keep driver-to-fixture mapping stable across enable changes, disable the driver instead of the layout. Disabling the container itself reports zero lights and an empty iteration, the same effect as disabling every child.
+/// **Disabling a layout:** disabling a layout child (the `enabled` toggle) removes its lights from the LUT entirely, and the indices of any layouts after it shift down to close the gap — with two grids of 4 and 2 lights, disabling the first leaves the second at indices 0–1 and `totalLightCount` drops from 6 to 2. A `Scheduler::prepareTree` fires so the LUT, layer buffer, and driver output buffer reallocate. Side effect: ArtNet universe assignments shift with the indices — to keep driver-to-fixture mapping stable across enable changes, disable the driver instead of the layout. Disabling the container itself reports zero lights and an empty iteration, the same effect as disabling every child.
 ///
 /// **Reordering:** layout children reorder by drag-and-drop (`POST /api/modules/<name>/move` with `{"to": <index>}`), with insert (not swap) semantics — the standard reorderable-list behaviour (Finder, Trello, SortableJS). Order sets the physical index range each layout occupies, which drives ArtNet universe assignment. The same `move` op applies to every container.
 ///
@@ -33,9 +33,9 @@ public:
     /// Disabling the container itself reports zero lights and an empty iteration —
     /// same effect as disabling every child, so the universal-gate intent ("enabled
     /// on every module means: exclude my contribution") holds for the container too.
-    /// The Scheduler can't enforce this for us because Layouts has no loop() — the
-    /// work happens in these cold-path methods called from Layer::onBuildState
-    /// and Drivers::onBuildState.
+    /// The Scheduler can't enforce this for us because Layouts has no tick() — the
+    /// work happens in these cold-path methods called from Layer::prepare
+    /// and Drivers::prepare.
     nrOfLightsType totalLightCount() const {
         if (!enabled()) return 0;
         nrOfLightsType total = 0;
@@ -73,7 +73,7 @@ public:
     /// via the status slot (not controls) so it costs no spec-check entry and
     /// renders generically. Recomputed only on a rebuild (cold path). A degenerate
     /// setup (no lights / zero box) flags Warning so the UI shows it's empty.
-    void onBuildState() override {
+    void prepare() override {
         const nrOfLightsType lights = totalLightCount();
         // One forEachCoord pass for the bounding box: max coordinate + 1 per axis.
         struct Extent { lengthType x, y, z; bool any; } e{0, 0, 0, false};
@@ -91,7 +91,6 @@ public:
                       static_cast<unsigned>(lights),
                       static_cast<unsigned>(w), static_cast<unsigned>(h), static_cast<unsigned>(d));
         setStatus(statusBuf_, lights == 0 ? Severity::Warning : Severity::Status);
-        MoonModule::onBuildState();
     }
 
 private:

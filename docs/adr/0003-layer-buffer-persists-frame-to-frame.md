@@ -8,7 +8,7 @@ An early design cleared the render buffer before every effect frame, on the reas
 
 ## Decision
 
-The render buffer is **not** cleared each frame. `Layer::loop()` leaves the previous frame's pixels in place, zeroed once on allocation/resize, then persistent, matching the FastLED / WLED / MoonLight convention (their `leds[]` / segment / VirtualLayer buffers all persist). Each effect owns its background inside its own `loop()`: a full-grid effect overwrites every pixel, a trail calls `fadeToBlackBy`, a sparse effect that wants a clean frame calls `draw::fill` itself. There is no per-effect "persist" flag (a flag would be bespoke). `fadeToBlackBy` is a Layer operation collected once per frame: effects register an amount, the Layer keeps the MIN across them and applies one pass at the next frame's start.
+The render buffer is **not** cleared each frame. `Layer::tick()` leaves the previous frame's pixels in place, zeroed once on allocation/resize, then persistent, matching the FastLED / WLED / MoonLight convention (their `leds[]` / segment / VirtualLayer buffers all persist). Each effect owns its background inside its own `tick()`: a full-grid effect overwrites every pixel, a trail calls `fadeToBlackBy`, a sparse effect that wants a clean frame calls `draw::fill` itself. There is no per-effect "persist" flag (a flag would be bespoke). `fadeToBlackBy` is a Layer operation collected once per frame: effects register an amount, the Layer keeps the MIN across them and applies one pass at the next frame's start.
 
 ## Consequences
 

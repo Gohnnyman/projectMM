@@ -52,6 +52,7 @@ find_program(UV_EXECUTABLE NAMES uv REQUIRED
 # here so both the application and the test binary link them.
 add_library(mm_core STATIC
     src/core/Control.cpp
+    src/core/ScratchBuffer.cpp
     src/core/HttpServerModule.cpp
     src/core/FilesystemModule.cpp
     src/core/FileManagerModule.cpp

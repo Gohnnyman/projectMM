@@ -30,17 +30,17 @@ struct ControlDescriptor;
 /// **Structural reconciliation.** The `type` field per child drives reconciliation at
 /// load time: when the JSON describes a child type at position N that differs from the
 /// live tree's child at N, the loader factory-creates the JSON type, runs its
-/// `onBuildControls()`, and swaps it into place. Children present in the live tree but
+/// `defineControls()`, and swaps it into place. Children present in the live tree but
 /// missing from the JSON are torn down; children in the JSON beyond the live tree's end
 /// are appended. Phases 3+4 cascade into the reconciled tree, so newly-created children
 /// are fully initialised like any other.
 ///
 /// **Boot flow (Scheduler::setup, four phases):**
-///   - phase 1 `onBuildControls()` — every module binds its full control set (incl. hidden)
+///   - phase 1 `defineControls()` — every module binds its full control set (incl. hidden)
 ///   - phase 2 `loadAllHook` — this module reads each file and overlays bound variables
-///   - phase 2b `rebuildControls()` — re-runs onBuildControls so conditional hidden flags see the persisted values
+///   - phase 2b `rebuildControls()` — re-runs defineControls so conditional hidden flags see the persisted values
 ///   - phase 3 `setup()` — modules' own init runs with persisted values in members
-///   - phase 4 `onBuildState()` — buffers sized to final values
+///   - phase 4 `prepare()` — buffers sized to final values
 ///
 /// The Scheduler exposes `setLoadAllHook()` as a function pointer so it stays
 /// independent of this module's type (no circular include); the hook is wired from
@@ -49,11 +49,11 @@ struct ControlDescriptor;
 /// **Save flow.** HttpServerModule calls `markDirty()` + `noteDirty()` on every
 /// successful mutation — control changes AND tree-shape changes (add / delete / move a
 /// module marks the parent dirty so its file is rewritten with the new child set).
-/// `noteDirty()` stamps `lastDirtyMs_`; `loop1s()` waits `DEBOUNCE_MS` (2 s) after the
+/// `noteDirty()` stamps `lastDirtyMs_`; `tick1s()` waits `DEBOUNCE_MS` (2 s) after the
 /// last dirty mark, then walks the tree and serialises any subtree with a dirty
 /// descendant to a flat JSON blob, written atomically (write to `.tmp`, then rename). A
 /// subtree's dirty flag clears only after its write succeeds; a failed write leaves it
-/// set so `loop1s()` retries. `flushPending()` forces all dirty subtrees through
+/// set so `tick1s()` retries. `flushPending()` forces all dirty subtrees through
 /// synchronously (the reboot handler calls it so an add-then-reboot doesn't lose the
 /// change); losing power before the debounce expires loses the in-flight change — the
 /// cost of debouncing for fewer flash writes.
@@ -102,12 +102,12 @@ public:
 
     void setScheduler(Scheduler* s);
     void setup() override;
-    void loop1s() override;
+    void tick1s() override;
 
     /// The engine's live "last saved" buffer — "never" before the first save, else "5m ago". This
     /// is the persistence engine's status; FileManagerModule binds its read-only "lastSaved" control
     /// straight to this buffer (no copy — same no-per-instance-copy pattern SystemModule uses for
-    /// its statics), and this module's loop1s keeps it current. Returns the mutable buffer because
+    /// its statics), and this module's tick1s keeps it current. Returns the mutable buffer because
     /// addReadOnly takes a char* it points the control at. FilesystemModule itself has NO controls —
     /// it's a non-UI engine, not a card in the module tree.
     char* lastSavedStr() { return lastSaveStr_; }
@@ -117,16 +117,16 @@ public:
     static FilesystemModule* instance() { return instance_; }
 
     /// Synchronous save of every dirty subtree, bypassing the debounce. Same work
-    /// loop1s does once the debounce expires. Exposed for tests so they can assert
+    /// tick1s does once the debounce expires. Exposed for tests so they can assert
     /// the file appears without wall-clock waits; production callers shouldn't need this.
     void flush();
 
     /// Static convenience for callers (such as the reboot handler) that need to force any
-    /// debounced saves through before a teardown — mirrors noteDirty's call style.
+    /// debounced saves through before a release — mirrors noteDirty's call style.
     static void flushPending();
 
     /// Called by HttpServerModule on every successful control mutation so the
-    /// 2s debounce starts. Cheap timestamp record; the actual walk happens in loop1s().
+    /// 2s debounce starts. Cheap timestamp record; the actual walk happens in tick1s().
     static void noteDirty();
 
 private:
@@ -138,7 +138,7 @@ private:
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
     char lastSaveStr_[24] = "never";  ///< "last saved" status string; FileManagerModule reads it via lastSavedStr()
-    /// Shared load/save buffer — load runs once at boot (phase 2), save runs in loop1s after
+    /// Shared load/save buffer — load runs once at boot (phase 2), save runs in tick1s after
     /// the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
     /// since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32
     /// default task stack ceiling (4–8KB).

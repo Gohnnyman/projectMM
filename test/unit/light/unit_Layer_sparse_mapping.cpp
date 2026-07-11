@@ -20,7 +20,7 @@
 
 namespace {
 
-// Build a Layer over a single layout, run onBuildState, return it wired.
+// Build a Layer over a single layout, run applyState, return it wired.
 struct LayerRig {
     mm::Layouts group;
     mm::Layer layer;
@@ -29,8 +29,8 @@ struct LayerRig {
         group.addChild(layout);
         layer.setLayouts(&group);
         layer.setChannelsPerLight(cpl);
-        layer.onBuildControls();
-        layer.onBuildState();
+        layer.defineControls();
+        layer.applyState();
     }
 };
 
@@ -77,7 +77,7 @@ TEST_CASE("Layer: serpentine grid leaves the identity path and builds a LUT") {
 
     // Flipping serpentine off returns it to the identity fast path (no LUT).
     g.serpentine = false;
-    rig.layer.onBuildState();
+    rig.layer.applyState();
     CHECK_FALSE(rig.layer.lut().hasLUT());
 }
 
@@ -125,8 +125,8 @@ TEST_CASE("Layer: sphere + mirror maps into driver-index space") {
     mm::MultiplyModifier mirror;
     mirror.mirrorX = true;
     layer.addChild(&mirror);
-    layer.onBuildControls();
-    layer.onBuildState();
+    layer.defineControls();
+    layer.applyState();
 
     CHECK(layer.lut().hasLUT());
     CHECK(layer.physicalLightCount() == N);
@@ -156,8 +156,8 @@ TEST_CASE("Layer: high fan-out Multiply builds a full, in-range LUT (no overflow
     mm::MultiplyModifier mult;
     mult.multiplyX = 8; mult.multiplyY = 8; mult.multiplyZ = 4;  // raw product 256
     layer.addChild(&mult);
-    layer.onBuildControls();
-    layer.onBuildState();
+    layer.defineControls();
+    layer.applyState();
 
     const mm::nrOfLightsType N = layer.physicalLightCount();   // 16384
     CHECK(N == 16384);
@@ -199,8 +199,8 @@ TEST_CASE("Layer: RegionModifier carves the logical box to a sub-region") {
     region.startX = 0; region.endX = 50;      // left half  → pixels 0..3
     region.startY = 0; region.endY = 50;      // top half   → pixels 0..3
     layer.addChild(&region);
-    layer.onBuildControls();
-    layer.onBuildState();
+    layer.defineControls();
+    layer.applyState();
 
     // Logical box is the carved quarter (4×4), not the full 8×8 box.
     CHECK(layer.width() == 4);

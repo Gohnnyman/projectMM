@@ -1,14 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, blend, Palettes::active()
-#include "light/draw.h"           // draw::line (perspective edges + depth shorten), draw::fade
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::bands[16]
-#include "core/math8.h"           // map8
-
-#include <cmath>                  // lroundf (once-per-frame maxHeight, not per-light)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -23,7 +15,7 @@ namespace mm {
 // Prior art: MoonLight's GEQ3D (E_MoonModules / MoonModules, TroyHacks), itself descended from the
 // WLED-MM "GEQ 3D" effect. The perspective-bar geometry, the projector split, the per-face
 // darkening, and the `depth` line-shorten are reproduced exactly here, written fresh on EffectBase
-// + the shared draw primitives. Reads AudioModule::latestFrame(); silence → flat → dark, safe on
+// + the shared draw primitives. Reads AudioService::latestFrame(); silence → flat → dark, safe on
 // any target and grid size. (MoonLight's `softHack` anti-alias toggle is dropped — draw::line is a
 // crisp Bresenham; the `soft` arg has no projectMM equivalent.)
 // Author: @TroyHacks (MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
@@ -42,19 +34,19 @@ public:
     uint8_t numBands  = 16;    // bands shown (2..16); fewer = wider bars
     bool    borders   = true;  // outline each bar
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 10);
         controls_.addUint8("frontFill", frontFill, 0, 255);
         // MoonLight's horizon range is 0..size.x-1 (set at runtime). The control descriptor here is a
         // fixed 0..255 slider — the source's row index — and the value is clamped to the live row
-        // count in loop(). A width/height-relative descriptor range isn't expressible at build time.
+        // count in tick(). A width/height-relative descriptor range isn't expressible at build time.
         controls_.addUint8("horizon", horizon, 0, 255);
         controls_.addUint8("depth", depth, 0, 255);
         controls_.addUint8("numBands", numBands, 2, 16);
         controls_.addBool("borders", borders);
     }
 
-    void loop() override {
+    void tick() override {
         if (numBands == 0) return;
 
         const int cols = width();
@@ -88,7 +80,7 @@ public:
         const int hzn = horizon < rows ? horizon : rows - 1;
         const int split = imap(projector, 0, cols, 0, NUM_BANDS - 1);
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
 
         // Bar heights: map each band magnitude onto maxHeight (slightly reduced on small panels).
         uint8_t heights[16] = {0};

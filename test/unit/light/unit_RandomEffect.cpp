@@ -22,13 +22,13 @@ TEST_CASE("RandomEffect lights exactly one light per frame") {
     effect.fade = 255;  // fade every remaining light fully black, isolating this frame's single write
     layer.addChild(&effect);
 
-    layer.onBuildState();
+    layer.applyState();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
     REQUIRE(buf.count() == 64);
 
-    layer.loop();
+    layer.tick();
 
     // Count lights with any non-black channel. With fade=255 the whole buffer is cleared each frame,
     // so precisely the one randomly chosen light survives — the direct equivalent of MoonLight's
@@ -59,10 +59,10 @@ TEST_CASE("RandomEffect scatters colour across many lights over many frames") {
     effect.fade = 1;  // barely fade, so lit lights linger and the field fills over frames
     layer.addChild(&effect);
 
-    layer.onBuildState();
+    layer.applyState();
 
     // 200 frames each add one sparkle; with almost no fade the field accumulates well past one light.
-    for (int f = 0; f < 200; f++) layer.loop();
+    for (int f = 0; f < 200; f++) layer.tick();
 
     auto& buf = layer.buffer();
     const uint8_t cpl = buf.channelsPerLight();
@@ -91,8 +91,8 @@ TEST_CASE("RandomEffect survives degenerate grids") {
         mm::RandomEffect effect;
         layer.addChild(&effect);
 
-        layer.onBuildState();
-        layer.loop();  // must not crash on 0×0×0 or 1×1×1
+        layer.applyState();
+        layer.tick();  // must not crash on 0×0×0 or 1×1×1
 
         CHECK(true);  // reaching here means no crash / hang
     }

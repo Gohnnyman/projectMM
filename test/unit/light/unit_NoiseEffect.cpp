@@ -31,8 +31,8 @@ TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
     mm::NoiseEffect noise;
     layer.addChild(&noise);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -60,8 +60,8 @@ TEST_CASE("NoiseEffect produces spatial variation") {
     mm::NoiseEffect noise;
     layer.addChild(&noise);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     // Compare corners — noise should produce different values
@@ -86,8 +86,8 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
     layer1.setChannelsPerLight(3);
     mm::RainbowEffect rainbow;
     layer1.addChild(&rainbow);
-    layer1.onBuildState();
-    layer1.loop();
+    layer1.applyState();
+    layer1.tick();
 
     // Render noise
     mm::Layer layer2;
@@ -95,8 +95,8 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
     layer2.setChannelsPerLight(3);
     mm::NoiseEffect noise;
     layer2.addChild(&noise);
-    layer2.onBuildState();
-    layer2.loop();
+    layer2.applyState();
+    layer2.tick();
 
     // Compare buffers — should differ
     bool differs = false;
@@ -125,8 +125,8 @@ TEST_CASE("NoiseEffect produces different output per z-slice with depth > 1") {
     layer.setChannelsPerLight(3);
     mm::NoiseEffect noise;
     layer.addChild(&noise);
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
     REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);
@@ -150,8 +150,8 @@ TEST_CASE("PlasmaEffect produces different output per z-slice with depth > 1") {
     layer.setChannelsPerLight(3);
     mm::PlasmaEffect plasma;
     layer.addChild(&plasma);
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
     REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);

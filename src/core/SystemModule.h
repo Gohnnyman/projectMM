@@ -31,7 +31,7 @@ namespace mm {
 /// platform returns an empty string and the control is not added). Reports the detected
 /// slave firmware version (`C6 fw 2.12.9`) when the link is up, or `not detected` when
 /// the C6 never completes its handshake / reports 0.0.0 — the signature of absent or
-/// incompatible C6 slave firmware. `loop1s()` re-queries it, so the state stays current
+/// incompatible C6 slave firmware. `tick1s()` re-queries it, so the state stays current
 /// if the link comes up after boot or the C6 is reflashed without a host reboot.
 ///
 /// **Device name:** `deviceName` is the single network identity across the system —
@@ -39,7 +39,7 @@ namespace mm {
 /// DHCP hostname, and MoonDeck shows it in the device list. It is coerced to a valid,
 /// non-empty hostname every tick (sanitize + MAC fallback) so whatever the user typed or
 /// persistence restored, a live rename propagates everywhere within one tick — see
-/// `loop1s()`. The default `MM-XXXX` derives from the last 4 hex of the MAC.
+/// `tick1s()`. The default `MM-XXXX` derives from the last 4 hex of the MAC.
 ///
 /// **Device model:** `deviceModel` is the physical-hardware identity (which product this
 /// is, for example `Olimex ESP32-Gateway Rev G`) — the entry name from the device-model
@@ -61,9 +61,11 @@ namespace mm {
 /// `totalHeap > totalInternal` is the "PSRAM present" signal. Boards without PSRAM skip
 /// the `psram` control naturally, with no per-platform code path.
 ///
-/// **Children:** accepts user-added Peripheral children (sensors, actuators) through the
-/// generic MoonModule add/replace/delete + persistence path — the same firmware runs
-/// with or without them.
+/// **Children:** accepts no user-added children — System is fixed infrastructure. Its child
+/// modules (Tasks, I2cScan, …) are wired by code in main.cpp and marked wired-by-code;
+/// user-added capability modules live under the `Services` container instead. (The deviceModel
+/// identity is a SystemModule control above, not a child module — SystemModule owns the
+/// device's identity, name + model, directly.)
 ///
 /// **Prior art:** MoonLight — system diagnostics via REST API; device name used for
 /// mDNS.
@@ -76,13 +78,12 @@ public:
     /// from the UI for no good reason, and the user can't easily re-enable.
     bool respectsEnabled() const override { return false; }
 
-    /// Accepts user-added Peripheral children (sensors, actuators — bridges to
-    /// hardware/network the user solders on or off). The same firmware runs with
-    /// or without them, so the user adds/deletes them at runtime; the add/replace/
-    /// delete + persistence machinery is the generic MoonModule path. (The deviceModel
-    /// identity is a SystemModule control above, not a child module — SystemModule owns
-    /// the device's identity, name + model, directly.)
-    const char* acceptsChildRoles() const override { return "peripheral"; }
+    /// Accepts no user-added children — System is fixed infrastructure. Its child
+    /// modules (Tasks, I2cScan, …) are wired by code in main.cpp and marked
+    /// wired-by-code; user-added capability modules live under the `Services`
+    /// container instead. (The deviceModel identity is a SystemModule control above,
+    /// not a child module — SystemModule owns the device's identity, name + model,
+    /// directly.)
 
     void setup() override {
         // Compute default deviceName from MAC: MM-XXXX. Skip if a persisted value was
@@ -100,7 +101,7 @@ public:
         }
 
         // chip / sdk / mac / bootReason controls bind straight to the platform's static strings (no
-        // per-module copy — see onBuildControls). version / build / firmware (firmware identity, incl.
+        // per-module copy — see defineControls). version / build / firmware (firmware identity, incl.
         // the build date) moved to FirmwareUpdateModule — SystemModule keeps only the IDF `sdk`.
         if constexpr (platform::hasWifiCoprocessor) {
             (void)platform::coprocessorWifi();   // prime the static (the control points at it)
@@ -111,13 +112,13 @@ public:
                           static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
         }
 
-        // Chain to base so children (user-added Peripherals) get
-        // their setup() — a peripheral initialises its hardware here. Overriding
+        // Chain to base so children (the wired-by-code System modules — Tasks, I2cScan)
+        // get their setup() — a child initialises its state here. Overriding
         // setup() shadows the base default that would otherwise propagate.
         MoonModule::setup();
     }
 
-    void onBuildControls() override {
+    void defineControls() override {
         // Platform-derived totals queried here (idempotent, no I/O) so the conditionals that
         // gate the Progress controls see real values rather than waiting on setup().
         totalInternalVal_ = static_cast<uint32_t>(platform::totalInternalHeap());
@@ -179,25 +180,25 @@ public:
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
         // cost — vanishes on native-radio builds (classic/S3/desktop) and the
         // eth-only P4. Its value proves the C6 slave-firmware state ("C6 fw 2.12.9"
-        // vs "not detected"). loop1s() refreshes it.
+        // vs "not detected"). tick1s() refreshes it.
         if constexpr (platform::hasWifiCoprocessor) {
             controls_.addReadOnly("wifiCoproc", const_cast<char*>(platform::coprocessorWifi()));
         }
 
-        // Chain into children (user-added Peripherals). Per the override-and-chain
+        // Chain into children (the wired-by-code System modules). Per the override-and-chain
         // convention in architecture.md § Lifecycle propagation to children:
-        // `onBuildControls` cascades to children via MoonModule's base default;
+        // `defineControls` cascades to children via MoonModule's base default;
         // overriding the method shadows that default, so we must call it
         // explicitly. Order doesn't matter here — SystemModule's own controls
         // don't depend on children's controls.
-        MoonModule::onBuildControls();
+        MoonModule::defineControls();
     }
 
-    void loop1s() override {
+    void tick1s() override {
         // deviceName is the single network identity (mDNS <name>.local, SoftAP SSID,
         // DHCP hostname all derive from it), so it must stay a valid hostname whatever
         // the user typed or persistence restored. Coerce it here each tick — idempotent
-        // on an already-valid name, and it runs before NetworkModule::loop1s() reads it,
+        // on an already-valid name, and it runs before NetworkModule::tick1s() reads it,
         // so a live rename ("My Room" → "My-Room") propagates everywhere within a tick.
         sanitizeHostname(deviceName_);
         if (deviceName_[0] == 0) {        // user cleared it / all-invalid → MAC fallback
@@ -244,12 +245,12 @@ public:
             (void)platform::coprocessorWifi();
         }
 
-        // Chain to base so children get their loop1s() — a Peripheral formats
-        // its read-only display values here. Overriding loop1s() shadows the
-        // base default that would otherwise propagate. (setup/loop20ms/loop/
-        // teardown propagate too: setup is chained above, loop20ms/loop/teardown
+        // Chain to base so children get their tick1s() — a System child (e.g. Tasks)
+        // refreshes its read-only display values here. Overriding tick1s() shadows the
+        // base default that would otherwise propagate. (setup/tick20ms/loop/
+        // release propagate too: setup is chained above, tick20ms/loop/release
         // aren't overridden so the base default carries them.)
-        MoonModule::loop1s();
+        MoonModule::tick1s();
     }
 
     /// The device's network identity (mDNS hostname, SoftAP SSID, DHCP hostname all
@@ -291,7 +292,7 @@ private:
     // caps str_len against this size dynamically.
     char deviceModel_[32] = {};
 
-    // Dynamic (updated in loop1s)
+    // Dynamic (updated in tick1s)
     char uptimeStr_[16] = {};
     char fpsStr_[8] = {};
     char tickStr_[8] = {};

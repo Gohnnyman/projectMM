@@ -22,11 +22,11 @@ TEST_CASE("PraxisEffect fills every pixel from the palette") {
     mm::PraxisEffect praxis;
     layer.addChild(&praxis);
 
-    layer.onBuildState();
+    layer.applyState();
     // Rainbow palette (0) is generated at full saturation/value, so every wheel index
     // maps to a lit colour — makes "every pixel lit" order-independent of prior tests.
     mm::Palettes::setActive(0);
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.data() != nullptr);
@@ -59,9 +59,9 @@ TEST_CASE("PraxisEffect varies colour across the grid") {
     mm::PraxisEffect praxis;
     layer.addChild(&praxis);
 
-    layer.onBuildState();
+    layer.applyState();
     mm::Palettes::setActive(0);
-    layer.loop();
+    layer.tick();
 
     auto* data = layer.buffer().data();
     // The y·macro·x cross term makes far-apart pixels land on different hues. Compare the
@@ -90,8 +90,8 @@ TEST_CASE("PraxisEffect survives degenerate grid sizes") {
         mm::PraxisEffect praxis;
         layer.addChild(&praxis);
 
-        layer.onBuildState();
-        layer.loop();  // must not crash at 0×0×0 or 1×1×1
+        layer.applyState();
+        layer.tick();  // must not crash at 0×0×0 or 1×1×1
         CHECK(true);
     }
 }

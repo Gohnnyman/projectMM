@@ -14,7 +14,7 @@ uint32_t micros();
 // of reading the platform clock. Production code never calls this; tests use it
 // to drive virtual time deterministically (replaces the wall-clock delayMs in
 // animation tests). Pass 0 to restore real-clock behaviour — tests must reset
-// in teardown so cases stay independent. ESP32 honours the override too so a
+// in release so cases stay independent. ESP32 honours the override too so a
 // scenario-tests run on real hardware can still freeze time if needed.
 void setTestNowMs(uint32_t ms);
 
@@ -49,9 +49,81 @@ size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve ch
 size_t maxAllocBlock();     // largest contiguous block (any memory type — incl PSRAM)
 size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
 
+// --- RTOS task introspection (TasksModule) --------------------------------------------------
+// A fixed-size, allocation-free snapshot of the OS tasks, filled by the platform layer so no
+// FreeRTOS type escapes src/platform/ (the platform-boundary rule). ESP32 fills it from
+// uxTaskGetSystemState (the textbook RTOS-introspection call, needs CONFIG_FREERTOS_USE_TRACE_
+// FACILITY); it uses a fixed static scratch (no heap) but briefly suspends the scheduler while it
+// walks the task list — call it off the per-frame path (tick1s, once a second), not from tick().
+// Desktop returns 0 (no RTOS). cpuPermille is 0..1000, or kTaskCpuUnmeasured when run-time-stats are
+// compiled out (the cheap default) — the caller shows a CPU% column only when it's a real number.
+enum class TaskState : uint8_t { Running, Ready, Blocked, Suspended, Deleted, Invalid, Unknown };
+constexpr uint32_t kTaskCpuUnmeasured = 0xFFFFFFFFu;
+struct TaskInfo {
+    char      name[16] = {};
+    TaskState state = TaskState::Unknown;
+    int8_t    core = -1;               // 0, 1, or -1 (no affinity)
+    uint8_t   priority = 0;
+    uint32_t  stackFreeBytes = 0;      // high-water-mark: min free stack ever seen for this task
+    uint32_t  cpuPermille = kTaskCpuUnmeasured;  // 0..1000, or kTaskCpuUnmeasured (stats off)
+};
+// Fill `out` with up to `maxTasks` task rows; returns the count written. 0 on a target without
+// an RTOS (desktop) or without the trace facility compiled in.
+size_t taskSnapshot(TaskInfo* out, size_t maxTasks);
+// Name of the task currently running on `core` (0 or 1); empty string if unavailable/single-core.
+void currentTaskOnCore(int core, char* out, size_t cap);
+// Name of the RTOS task that runs the render loop (Scheduler::tick) — the task every MoonModule
+// executes inside today. TasksModule nests the module rows under the matching `tasks` entry rather
+// than hardcoding a task name. Empty on a target with no distinct render task (desktop).
+const char* renderTaskName();
+// Test-only (desktop): inject a canned task snapshot + render-task name so TasksModule's row/detail
+// JSON + nesting predicate are testable on the host (no RTOS otherwise). `tasks` must outlive the use.
+void setTestTaskSnapshot(const TaskInfo* tasks, size_t count, const char* renderTask);
+
+// --- GPIO capability introspection (PinsModule) ---------------------------------------------
+// Static per-pin capability for one GPIO, so the pin ownership map can flag a claim that lands on
+// an unsafe pin — an output role driven onto an input-only pin or a boot strap, or any role on a
+// reserved (flash/PSRAM/USB) pin. Domain-neutral; no chip API escapes src/platform/. ESP32 fills
+// `validGpio`/`outputCapable`/`rtc` from the IDF's own GPIO_IS_VALID_GPIO / GPIO_IS_VALID_OUTPUT_
+// GPIO / rtc_gpio_is_valid_gpio (the textbook, always-correct SDK queries), and overlays `strap` /
+// `reserved` from a small per-chip table sourced from docs/reference/gpio-usage.md (the SDK has no
+// "is this a strap / flash pin" query — that's board/datasheet knowledge). Desktop returns
+// "all valid, nothing reserved" (a host build has no real GPIOs to protect). Pure lookup, no state.
+struct GpioCapability {
+    bool validGpio = true;      // a real, usable GPIO on this chip (false = out of range / not bonded)
+    bool outputCapable = true;  // has an output driver (false = input-only, e.g. classic ESP32 34-39)
+    bool rtc = false;           // an RTC/low-power-domain pin (usable for deep-sleep wake / RTC I/O)
+    bool strap = false;         // a boot-strapping pin — driving it at reset can change boot mode
+    bool reserved = false;      // wired to flash / PSRAM / native USB — routing I/O here corrupts the device
+};
+GpioCapability gpioCapability(uint8_t gpio);
+// Test-only (desktop): make gpioCapability(gpio) return `cap` for one specific gpio, so PinsModule's
+// severity derivation (reserved→error, driven-role-on-strap/input-only→warn) is testable on the host
+// where every real pin is otherwise "safe". Call per gpio under test; reset in release.
+void setTestGpioCapability(uint8_t gpio, GpioCapability cap);
+void clearTestGpioCapability();
+
+// Live electrical state of one GPIO — the pin map's second axis (what a pin is *doing now*, vs.
+// gpioCapability's static "what it *is*"). The see-the-wire HAL check: gpio_get_level reads the pad on
+// ANY pin, even one a peripheral drives, so a driver's output must toggle when it renders and a mic
+// clock must toggle when the mic runs. Sampled on tick1s (off the hot path), not per frame. Desktop
+// returns valid=false (no real pins) so the UI omits the live columns there.
+struct GpioLiveState {
+    bool valid = false;    // pin is readable (false = out of range, or desktop → columns omitted)
+    bool level = false;    // current pad level: true = HIGH, false = LOW (gpio_get_level)
+    bool output = false;   // the pad's output driver is enabled RIGHT NOW (gpio_get_io_config .oe)
+    bool input = false;    // the pad's input buffer is enabled RIGHT NOW (.ie) — a pin can be both
+    uint8_t driveCap = 0;  // output drive strength 0..3 = WEAK / MEDIUM / STRONG / STRONGEST
+};
+GpioLiveState gpioLiveState(uint8_t gpio);
+// Test-only (desktop): inject a live state for one gpio so PinsModule's level/drive columns are
+// host-testable. Same shape as setTestGpioCapability.
+void setTestGpioLiveState(uint8_t gpio, GpioLiveState state);
+void clearTestGpioLiveState();
+
 // Test-only cap on the value maxAllocBlock() reports; 0 = no cap (real value).
 // Lets a test force MappingLUT's paged-destinations fallback without an actual
-// fragmented heap. Production never calls this; reset to 0 in teardown.
+// fragmented heap. Production never calls this; reset to 0 in release.
 void setTestMaxAllocBlock(size_t bytes);
                                 // (scarce; use this as the memory-pressure KPI).
                                 // PSRAM blocks dominate on S3/S2 boards and make
@@ -201,7 +273,7 @@ bool mdnsInit(const char* deviceName);
 // Stop advertising: remove both services and clear the hostname, keeping the stack up so
 // a later mdnsInit re-advertises without a full re-init (the mDNS toggle uses this).
 void mdnsStop();
-// Full mdns_free — call at teardown.
+// Full mdns_free — call at release.
 void mdnsShutdown();
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
@@ -240,7 +312,7 @@ bool http_fetch_to_ota(const char* url,
 // set_boot_partition, then RETURNS true (it does NOT reboot — the caller sends its HTTP 200 first,
 // then reboots into the flashed image, the same order /api/reboot uses). SYNCHRONOUS (unlike
 // http_fetch_to_ota, which runs on its own task): the caller is the HTTP request handler, which runs
-// on the loop20ms tick INSIDE Scheduler::tick — so this blocks rendering for the flash duration. That
+// on the tick20ms tick INSIDE Scheduler::tick — so this blocks rendering for the flash duration. That
 // is the accepted trade-off (a firmware upload is user-initiated and reboots the device on success),
 // bounded by the same upload idle/hard limits; the caller needs the result to reply.
 // `statusBuf` / `bytesReadOut` are updated in place (bytesTotal is the caller-supplied
@@ -254,7 +326,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
 // with `reqBody` (NUL-terminated; "" for none — a Content-Length + JSON content-type are
 // added when non-empty), and copies the RESPONSE BODY into `body` (NUL-terminated, truncated
 // to bodyLen-1). Returns the HTTP status code, or 0 on connect/timeout/error. Blocks up to
-// `timeoutMs`. Caller runs this OFF the render hot path (HueDriver on loop1s, like the OTA
+// `timeoutMs`. Caller runs this OFF the render hot path (HueDriver on tick1s, like the OTA
 // fetch / the old mDNS browse). Built on raw sockets, same primitives as the HTTP server.
 int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
                 const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen);
@@ -269,7 +341,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
 // true it emits Improv's wrong-state error frame. Otherwise it copies the
 // credentials into the caller-owned buffers `ssidOut` / `passwordOut` (sized
 // to hold 33 + 64 bytes, matching NetworkModule's storage) and sets `*ready`
-// to true. The caller's loop1s() polls `ready`, copies the buffers onward,
+// to true. The caller's tick1s() polls `ready`, copies the buffers onward,
 // and clears the flag.
 //
 // `statusBuf` mirrors http_fetch_to_ota's pattern: the task writes short
@@ -358,7 +430,7 @@ public:
     }
 
     // Non-blocking outbound connect to host:port, for a client that must NOT stall the render loop
-    // (MQTT runs on loop1s inside Scheduler::tick). `connectStart` resolves `host` (a hostname via
+    // (MQTT runs on tick1s inside Scheduler::tick). `connectStart` resolves `host` (a hostname via
     // getaddrinfo — one bounded DNS lookup — or a dotted-quad IP) and kicks off a non-blocking
     // connect, returning immediately; `connectPoll` checks the in-flight connect WITHOUT blocking and
     // returns Pending / Connected / Failed. The caller polls across ticks and enforces its own overall
@@ -593,11 +665,11 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 // Some boards put an analog mic behind an I2S audio codec (configured over I2C)
 // rather than a direct digital I2S MEMS mic; the codec must be brought up before
 // the I2S read. This is a no-op returning true on a board with a direct mic
-// (CodecType::None) or a target without a codec, so AudioModule always calls it and
+// (CodecType::None) or a target without a codec, so AudioService always calls it and
 // the path stays uniform.
 // Returns true when there's nothing to do (CodecType::None / no codec on this
 // target) or the codec came up; false on an I2C/codec error (the module then
-// idles with a status error, same as a failed mic init). AudioModule calls this
+// idles with a status error, same as a failed mic init). AudioService calls this
 // *after* audioMicInit: the I2S channel must already be driving MCLK before the
 // codec is configured (the ES8311 won't answer I2C without MCLK running). The
 // codec then presents standard I2S the read picks up.
@@ -612,7 +684,7 @@ struct AudioMicHandle { void* impl = nullptr; };
 // (24-bit data in a 32-bit slot, mono). `mclkPin` drives the I2S master clock —
 // −1 for a self-clocked direct MEMS mic (INMP441), or the codec's MCLK pin when a
 // codec needs the clock to run (the ES8311 won't even answer I2C without it, so
-// AudioModule starts I2S *before* audioCodecInit on a codec board). Returns false
+// AudioService starts I2S *before* audioCodecInit on a codec board). Returns false
 // on failure (bad pins, no I2S, out of memory) — the module idles with a status error.
 bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
                   uint16_t sckPin, int16_t mclkPin, uint32_t sampleRate);
@@ -637,7 +709,7 @@ void audioFft(const float* windowed, size_t n, float* outMag);
 // off a device's address. Self-contained: opens a temporary master bus on the
 // given pins, scans, tears it down. The bus is transient, so it only conflicts
 // with a driver that *currently* holds the port (e.g. the ES8311 codec keeps
-// I2C_NUM_0 open while AudioModule is active) — that case is reported as
+// I2C_NUM_0 open while AudioService is active) — that case is reported as
 // kI2cBusUnavailable, not silently as "0 devices". Internal pull-ups enabled.
 // ---------------------------------------------------------------------------
 
@@ -654,8 +726,14 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 // frame into `codeOut` when a fresh code is available since the last call, false otherwise
 // (nothing received, or IR decode unavailable on this target). Self-contained like i2cScan —
 // it owns whatever peripheral it needs (an RMT RX channel on ESP32). Non-blocking: safe to
-// call every tick. IrModule is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
+// call every tick. IrService is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
 // hardware and always returns false.
 bool irRead(uint16_t pin, uint32_t& codeOut);
+
+// Release the IR RX channel so the pin it held is free for another module. irRead lazily reopens
+// it on the next call, so this is safe to call any time; IrService calls it on disable (the pin
+// then shows as freed in the pin map, and is genuinely reusable). No-op if no channel is open, and
+// on desktop (no IR hardware).
+void irStop();
 
 } // namespace mm::platform

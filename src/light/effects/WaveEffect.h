@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"     // colorFromPalette + the global active palette
-#include "core/math8.h"        // sin8 (integer sine LUT)
-#include "core/noise.h"        // inoise8 — the shared value-noise field (the "Noise" waveform)
-#include "core/color.h"        // scale8
-#include "platform/platform.h" // alloc — the fade trail buffer
-
-#include <cstring>
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -43,7 +36,7 @@ public:
     uint8_t fade = 32;   // trail fade per frame (0 = instant clear of the old wave, 255 = long tail)
     uint8_t type = 2;    // index into kTypeOptions (default Sine)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("bpm", bpm, 0, 255);
         controls_.addUint8("fade", fade, 0, 255);
         controls_.addSelect("type", type, kTypeOptions, kTypeCount);
@@ -51,31 +44,23 @@ public:
 
     // The trail is a persistent z=0-plane buffer (w·h·cpl): each frame is faded down, then the new
     // wave drawn on top, so the moving point leaves a tail. Sized off the hot path (cf. Particles).
-    void onBuildState() override {
+    void prepare() override {
         const lengthType w = width(), h = height();
         const uint8_t cpl = channelsPerLight();
         const size_t needed = static_cast<size_t>(w) * h * cpl;
-        if (enabled() && needed > 0) {
-            if (needed != trailBytes_) {
-                releaseTrail();
-                trail_ = static_cast<uint8_t*>(platform::alloc(needed));
-                if (trail_) { std::memset(trail_, 0, needed); trailBytes_ = needed; }
-            } else if (w != trailW_ || h != trailH_ || cpl != trailCpl_) {
-                // Same byte count but different geometry (e.g. 8×16 → 16×8): the trail bytes are laid
-                // out for the old w/h, so reusing them smears stale pixels. Clear rather than realloc.
-                std::memset(trail_, 0, trailBytes_);
-            }
-            trailW_ = w; trailH_ = h; trailCpl_ = cpl;
-        } else {
-            releaseTrail();
+        const size_t had = trail_.bytes();
+        // resize() reallocs (zero-filled) only when the byte count changes, and frees on 0.
+        trail_.resize(needed);
+        if (needed > 0 && needed == had && (w != trailW_ || h != trailH_ || cpl != trailCpl_)) {
+            // Same byte count but different geometry (e.g. 8×16 → 16×8): resize() left the old bytes
+            // in place, but they're laid out for the old w/h, so reusing them smears stale pixels.
+            // Clear rather than realloc.
+            std::memset(trail_.data(), 0, trail_.bytes());
         }
-        setDynamicBytes(trailBytes_);
+        trailW_ = w; trailH_ = h; trailCpl_ = cpl;
     }
 
-    void teardown() override { releaseTrail(); setDynamicBytes(0); }
-    ~WaveEffect() override { releaseTrail(); }
-
-    void loop() override {
+    void tick() override {
         if (!trail_) return;
         const lengthType w = width();
         const lengthType h = height();
@@ -84,7 +69,7 @@ public:
         if (w == 0 || h == 0 || cpl < 3) return;
 
         // 1. Fade the trail (scale8 toward black) — a smaller `fade` = shorter tail.
-        for (size_t i = 0; i < trailBytes_; i++) trail_[i] = scale8(trail_[i], fade);
+        for (size_t i = 0; i < trail_.bytes(); i++) trail_[i] = scale8(trail_[i], fade);
 
         // 2. Advance the travel phase from bpm. First tick: seed lastElapsed_ to now so the wave
         //    starts from phase 0 instead of jumping by the whole device uptime (lastElapsed_ is 0
@@ -115,7 +100,7 @@ public:
         }
 
         // 4. Blit the trail (faded history + this frame's wave) into the output buffer.
-        std::memcpy(buf, trail_, trailBytes_);
+        std::memcpy(buf, trail_.data(), trail_.bytes());
     }
 
     // Test seam: the pure waveform map (phase → y), no buffer/time needed.
@@ -127,8 +112,10 @@ private:
     // How much each column delays the phase — the horizontal travel speed of the wave shape.
     static constexpr uint8_t kColumnSkew = 8;
 
-    uint8_t* trail_ = nullptr;
-    size_t   trailBytes_ = 0;
+    // Persistent z=0-plane trail (w·h·cpl). The buffer sizes itself in prepare(), frees itself
+    // on disable/teardown, and reports its own bytes. The geometry (trailW_/H_/Cpl_) is tracked
+    // separately so prepare() can clear a same-byte-count reshape (which resize() can't detect).
+    ScratchBuffer<uint8_t> trail_{*this};
     lengthType trailW_ = 0, trailH_ = 0;   // geometry the trail bytes are laid out for (clear on change)
     uint8_t  trailCpl_ = 0;
     uint64_t phase_ = 0;
@@ -168,15 +155,10 @@ private:
     void plot(lengthType x, lengthType y, const RGB& c, uint8_t cpl, lengthType w) {
         if (x < 0 || y < 0 || x >= w) return;
         const size_t off = (static_cast<size_t>(y) * w + x) * cpl;
-        if (off + 2 >= trailBytes_) return;
+        if (off + 2 >= trail_.bytes()) return;
         trail_[off + 0] = c.r;
         trail_[off + 1] = c.g;
         trail_[off + 2] = c.b;
-    }
-
-    void releaseTrail() {
-        if (trail_) { platform::free(trail_); trail_ = nullptr; }
-        trailBytes_ = 0;
     }
 };
 

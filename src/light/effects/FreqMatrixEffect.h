@@ -1,12 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::get
-#include "core/color.h"           // RGB
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::level / peakHz
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -30,7 +24,7 @@ namespace mm {
 // pixVal = level·fx·sensitivity/256 brightness, the 80 Hz / quarter-volume gate, the
 // upperLimit = 80 + 42·highBin / lowerLimit = 80 + 3·lowBin frequency window, and the
 // map(peakHz, lower, upper, 0, 255) hue index are reproduced here, written fresh on EffectBase + the
-// shared draw/palette primitives. Reads AudioModule::latestFrame() (null-safe via the static silence
+// shared draw/palette primitives. Reads AudioService::latestFrame() (null-safe via the static silence
 // frame); safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
@@ -56,7 +50,7 @@ public:
     uint8_t sensitivity = 30;    // brightness sensitivity (WLED custom3, 10..100)
     bool    audioSpeed  = false; // when set, the audio level modulates the scroll rate
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 255);
         controls_.addUint8("fx", fx, 0, 255);
         controls_.addUint8("lowBin", lowBin, 0, 255);
@@ -65,7 +59,7 @@ public:
         controls_.addBool("audioSpeed", audioSpeed);
     }
 
-    void loop() override {
+    void tick() override {
         // D1: read the live grid each frame; the scroll runs down the x=0 column, length = height().
         const int cols = width();
         const int len  = height();
@@ -74,7 +68,7 @@ public:
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(len), depthDim()};
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // static silence frame is non-null in practice; guard for safety
 
         // --- Scroll throttle (WLED: secondHand = micros()/(256-speed)/500 % 16; act only when it

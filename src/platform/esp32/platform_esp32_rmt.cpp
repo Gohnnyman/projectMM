@@ -123,7 +123,7 @@ void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
     // unaffected). A panic is a worse failure than a dropped frame, so we leave the
     // stuck transfer alone. It self-heals safely: the next tick re-encodes symbols_
     // and calls rmt_transmit again; if the channel is still busy, rmt_transmit
-    // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::loop()
+    // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::tick()
     // skips waiting on that channel (its started[] guard) — no crash, no corruption.
     rmt_tx_wait_all_done(st->channel, timeoutMs);
 }
@@ -263,6 +263,12 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     int lo = gpio_get_level(static_cast<gpio_num_t>(rxGpio));
     gpio_reset_pin(static_cast<gpio_num_t>(txGpio));
     gpio_reset_pin(static_cast<gpio_num_t>(rxGpio));
+    // Log the raw levels — this one line is a genuine bench HAL diagnostic (it pinned the
+    // MHC-WLED P4 shield loopback: hi=0 lo=0 = no signal path, hi=1 lo=1 = the Rx pin is
+    // externally pulled up, hi=1 lo=0 = clean). Only runs when the loopback self-test is
+    // invoked (off the hot path), so it costs nothing in normal operation.
+    ESP_LOGI("mm_loopback", "continuity tx=%u->rx=%u: hi=%d lo=%d (want hi=1 lo=0)",
+             txGpio, rxGpio, hi, lo);
     return hi == 1 && lo == 0;
 }
 

@@ -1,12 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"        // colorFromPalette, Palettes::active — heat → palette colour
-#include "core/color.h"
-#include "core/math8.h"           // mm::Random8 — the shared per-effect PRNG (sparks/cooling)
-#include "platform/platform.h"
-
-#include <cstring>
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -27,40 +21,20 @@ public:
     uint8_t cooling = 55;
     uint8_t sparking = 120;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("cooling", cooling, 1, 255);
         controls_.addUint8("sparking", sparking, 1, 255);
     }
 
-    void onBuildState() override {
-        // D2 effect: heat grid covers only the z=0 plane (w*h). Extrude fills
-        // z on 3D layers. Avoids allocating depth× more heap than needed.
-        nrOfLightsType count = static_cast<nrOfLightsType>(width()) * height();
-        if (enabled() && count > 0) {
-            if (count != heatCount_) {
-                releaseHeat();
-                heat_ = static_cast<uint8_t*>(platform::alloc(count));
-                if (heat_) {
-                    std::memset(heat_, 0, count);
-                    heatCount_ = count;
-                }
-            }
-        } else {
-            releaseHeat();
-        }
-        setDynamicBytes(heatCount_);
+    void prepare() override {
+        // D2 effect: heat grid covers only the z=0 plane (w*h). Extrude fills z on 3D
+        // layers — avoids allocating depth× more heap than needed. resize() reallocs
+        // only when the count changes, zero-fills, frees on 0, and keeps dynamicBytes
+        // current; the disable path frees it through MoonModule::release().
+        heat_.resize(static_cast<size_t>(width()) * height());
     }
 
-    void teardown() override {
-        releaseHeat();
-        setDynamicBytes(0);
-    }
-
-    ~FireEffect() override {
-        releaseHeat();
-    }
-
-    void loop() override {
+    void tick() override {
         if (!heat_) return;
 
         uint8_t* buf = buffer();
@@ -70,7 +44,7 @@ public:
 
         // 1. Cool every cell by a small random amount
         uint8_t coolMax = static_cast<uint8_t>((static_cast<uint16_t>(cooling) * 10) / (h > 0 ? h : 1) + 2);
-        for (nrOfLightsType i = 0; i < heatCount_; i++) {
+        for (nrOfLightsType i = 0; i < heat_.count(); i++) {
             uint8_t c = rand8() % coolMax;
             heat_[i] = (heat_[i] > c) ? static_cast<uint8_t>(heat_[i] - c) : 0;
         }
@@ -118,7 +92,7 @@ public:
         //    than taking the palette's index-0 colour (Lava's is black, but Ocean's is blue, which
         //    would tint the whole background). Only a warm cell is coloured.
         const Palette& pal = *Palettes::active();
-        for (nrOfLightsType i = 0; i < heatCount_; i++) {
+        for (nrOfLightsType i = 0; i < heat_.count(); i++) {
             RGB c = heat_[i] == 0 ? RGB{0, 0, 0} : colorFromPalette(pal, heat_[i]);
             size_t off = static_cast<size_t>(i) * cpl;
             if (cpl >= 1) buf[off + 0] = c.r;
@@ -128,18 +102,12 @@ public:
     }
 
 private:
-    uint8_t* heat_ = nullptr;
-    nrOfLightsType heatCount_ = 0;
+    // One byte of "heat" per light on the z=0 plane. The buffer sizes itself in prepare(),
+    // frees itself on disable/teardown, and reports its own bytes — no free-helper, no
+    // destructor, no setDynamicBytes, no cast (see ScratchBuffer.h).
+    ScratchBuffer<uint8_t> heat_{*this};
     Random8 rng_{0xC0FFEEu};   // the shared PRNG; rand8() adapts it to the call shape below
     uint8_t rand8() { return rng_.next8(); }
-
-    void releaseHeat() {
-        if (heat_) {
-            platform::free(heat_);
-            heat_ = nullptr;
-        }
-        heatCount_ = 0;
-    }
 };
 
 } // namespace mm

@@ -15,7 +15,7 @@ static constexpr size_t kCodeCap = 768;
 // Drop the prior compilation's CODE (the exec block + the typed fn pointers), but NOT the control
 // arena — the arena's address must survive a recompile so a control pointer the binding bound to
 // a slot stays valid (the arena only ever grows; see ensureArena). free() additionally releases
-// the arena (full teardown).
+// the arena (full release).
 void MoonLive::freeCode() {
     if (code_) platform::freeExec(code_, codeCap_);
     code_ = nullptr;
@@ -83,7 +83,7 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table) {
 // full kMaxCtrls capacity and never reallocated, so its address — and every control pointer the
 // binding bound to a slot — is fixed for the engine's lifetime (the stable-slot contract
 // controlSlot() promises; a recompile that adds a control must not move a pointer the previous
-// onBuildControls already published). kMaxCtrls bytes is a handful; the up-front allocation is
+// defineControls already published). kMaxCtrls bytes is a handful; the up-front allocation is
 // cheaper than the move-and-rebind it avoids. A NEW slot (beyond the previous count) is seeded
 // from its declared default; an EXISTING slot keeps its live value (a source edit that keeps the
 // control preserves the slider position). Returns false on alloc failure.
@@ -108,7 +108,7 @@ bool MoonLive::compileAnimated() {
 
 void MoonLive::free() {
     freeCode();                       // exec block + fn pointers
-    if (ctrlArena_) platform::free(ctrlArena_);   // full teardown also releases the control arena
+    if (ctrlArena_) platform::free(ctrlArena_);   // full release also releases the control arena
     ctrlArena_ = nullptr;
     controlCount_ = 0;
 }

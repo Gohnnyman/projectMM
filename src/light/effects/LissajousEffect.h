@@ -1,10 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // sin8, cos8 (pure 256-step LUT)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -35,13 +31,13 @@ public:
     uint8_t fadeRate   = 128;  // per-frame trail fade (higher = shorter trail)
     uint8_t speed      = 128;  // phase advance rate
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("xFrequency", xFrequency, 0, 255);
         controls_.addUint8("fadeRate", fadeRate, 0, 255);
         controls_.addUint8("speed", speed, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;

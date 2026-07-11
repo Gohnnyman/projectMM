@@ -1,10 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer(), nrOfLights()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::fade (whole-buffer fadeToBlackBy)
-#include "core/math8.h"           // Random8
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -30,11 +26,11 @@ public:
 
     uint8_t fade = 70;  // per-frame fadeToBlackBy amount (0..255)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fade", fade, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         Buffer& buf = layer()->buffer();
         const nrOfLightsType n = nrOfLights();
         const uint8_t cpl = buf.channelsPerLight();

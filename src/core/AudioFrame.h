@@ -4,7 +4,7 @@
 
 namespace mm {
 
-// One snapshot of analysed audio, produced by AudioModule (src/core/AudioModule.h)
+// One snapshot of analysed audio, produced by AudioService (src/core/AudioService.h)
 // once per render tick and consumed by audio-reactive effects (AudioVolumeEffect,
 // AudioSpectrumEffect). The producer/consumer-via-plain-struct model the codebase
 // already uses (PreviewDriver writes pixels HttpServer reads); the struct is the

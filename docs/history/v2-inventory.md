@@ -48,7 +48,7 @@ Key patterns:
 
 ### 4. PAL — one file per concern
 
-Unlike v1's monolithic Pal.h, v2 splits into: PalHeap, PalRtos, PalUdp, PalWifi, PalFs, PalHttp, PalWs, PalSystemInfo. Each has ESP32 and PC implementations in the same file via `#ifdef ARDUINO`. Clean separation.
+Unlike v1's monolithic Pal.h, v2 splits into: PalHeap, PalRtos, PalUdp, PalWifi, PalFs, PalHttp, PalWs, PalSystemInfo. Each has ESP32 and desktop implementations in the same file via `#ifdef ARDUINO`. Clean separation.
 
 ### 5. PixelEffectBase — shared effect spine
 

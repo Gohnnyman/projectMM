@@ -268,7 +268,7 @@ def _apply_modules_to_device(ip: str, modules: list) -> bool:
     Each unit is `{type, id, parent_id?, controls?}` — the SAME shape deviceModels.json
     catalog entries use, so the deviceModel push (_push_device) drives it. Per
     module: add it first when it has a parent_id (a fresh flash has no user-added
-    modules like AudioModule, so a control write would 404), then set its controls.
+    modules like AudioService, so a control write would 404), then set its controls.
     A module without parent_id is boot-wired/top-level (Board under System,
     Network) that already exists — skip the add, just set controls. The add is
     idempotent (an existing id returns 200). Returns True iff EVERY POST returned
@@ -515,7 +515,7 @@ def load_state():
         if "networks" not in state and ("devices" in state or "port" in state):
             state = _migrate_to_networks(state)
         return state
-    return {"networks": [], "active_network": "", "tab": "pc"}
+    return {"networks": [], "active_network": "", "tab": "desktop"}
 
 
 def _migrate_to_networks(old_state: dict) -> dict:
@@ -562,7 +562,7 @@ def _migrate_to_networks(old_state: dict) -> dict:
                  if k not in ("devices", "port", "env")}
     new_state["networks"] = networks
     new_state["active_network"] = networks[0]["name"] if networks else ""
-    new_state.setdefault("tab", "pc")
+    new_state.setdefault("tab", "desktop")
     print(f"moondeck: migrated {len(devices)} device(s) into {len(networks)} "
           f"network(s): {', '.join(n['name'] for n in networks)}", file=sys.stderr)
     return new_state
@@ -2142,7 +2142,7 @@ document.addEventListener("click", function(e) {{
 
     def _serve_static(self):
         """Serve files from moondeck_ui/ and docs/assets/."""
-        # Strip query string before resolving path (e.g. /?tab=pc → /)
+        # Strip query string before resolving path (e.g. /?tab=desktop → /)
         raw = self.path.split("?", 1)[0].lstrip("/")
         path = raw if raw else "index.html"
 

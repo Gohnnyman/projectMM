@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // beatsin8
-#include "core/noise.h"           // inoise8 (2-arg 2D field)
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::level
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -24,7 +17,7 @@ namespace mm {
 // Prior art: WLED's "Noisemeter" sound-reactive effect (Andrew Tuline / WLED-SR). The fadeRate/width
 // knobs, the level→length mapping, the inoise8(row·level + aux0, aux1 + row·level) field sampling, and
 // the bottom-up fill are reproduced here, written fresh on projectMM's EffectBase + the shared draw /
-// palette / noise / beatsin8 primitives. Reads AudioModule::latestFrame(); silence → level 0 →
+// palette / noise / beatsin8 primitives. Reads AudioService::latestFrame(); silence → level 0 →
 // maxLen 0 → the panel fades to dark, safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive effect: a noise field modulated by sound level.
@@ -37,18 +30,18 @@ public:
     uint8_t fadeRate = 240;   // per-frame fade-to-black amount (motion trail), range 200..254
     uint8_t width    = 128;   // level→length gain: how much of the column a given level fills (0..255)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fadeRate", fadeRate, 200, 254);
         controls_.addUint8("width", width, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         const int sizeX = width_();
         const int sizeY = height();
         const int sizeZ = depthDim();
         if (sizeX <= 0 || sizeY <= 0 || channelsPerLight() < 3) return;
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
         Buffer& buf = layer()->buffer();

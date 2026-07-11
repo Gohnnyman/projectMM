@@ -2,6 +2,7 @@
 
 #include "light/drivers/DriverBase.h"  // DriverBase — the Drivers container casts its children to it
 #include "core/MoonModule.h"
+#include "core/ActiveInstance.h"  // the summary-seat election (the seat + its RAII vacate)
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/layers/Layers.h"
@@ -11,7 +12,7 @@
 #include "core/LightSummary.h"   // the POD published for the domain-neutral WLED/MQTT consumers
 #include "platform/platform.h"
 
-#include <cstring>  // std::strcmp in onUpdate
+#include <cstring>  // std::strcmp in onControlChanged
 
 namespace mm {
 
@@ -48,7 +49,7 @@ namespace mm {
 /// `Correction`: brightness LUT, channel-order table, output channel count, derive-white
 /// flag) and exposes `brightness`, `lightPreset`, and the global `palette` controls; each
 /// *physical* driver child applies the correction per-light as it reads the source buffer,
-/// while Preview ignores it (shows the raw logical buffer). `onUpdate` rebuilds the
+/// while Preview ignores it (shows the raw logical buffer). `onControlChanged` rebuilds the
 /// correction on a `brightness`/`lightPreset` change and hands each child a
 /// `const Correction*`. Every driver sees the same composited output. Palette model +
 /// names follow FastLED's, credited as prior art; implementation in `src/light/Palette.h`.
@@ -73,25 +74,26 @@ public:
 
     /// The live light-pipeline summary (light count, channels), for the domain-neutral core
     /// consumers (WLED /json shim, MQTT). Static so a factory-created consumer reaches it without
-    /// a wiring inject — the same shape as `AudioModule::latestFrame()`. Points at the active
-    /// Drivers' summary (set in onBuildState, vacated in teardown); a default all-zero summary
+    /// a wiring inject — the same shape as `AudioService::latestFrame()`. Points at the active
+    /// Drivers' summary (set in prepare, vacated in release); a default all-zero summary
     /// when no Drivers is in the tree, so a consumer always reads a valid POD, never null.
     static const LightSummary* latestSummary() {
         static const LightSummary kNone{};
-        return active_ ? &active_->summary_ : &kNone;
+        Drivers* a = ActiveInstance<Drivers>::active();
+        return a ? &a->summary_ : &kNone;
     }
 
     // Vacate the summary seat when this Drivers is removed, so latestSummary() falls back to the
-    // all-zero default rather than a dangling pointer (the robustness rule). MoonModule::teardown
+    // all-zero default rather than a dangling pointer (the robustness rule). MoonModule::release
     // recurses to children.
-    void teardown() override {
-        if (active_ == this) active_ = nullptr;
-        MoonModule::teardown();
+    void release() override {
+        seat_.vacate();
+        MoonModule::release();
     }
 
     /// Global brightness (0–255). Scales every channel through a 256-entry LUT
     /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
-    /// `onUpdate` tier — no pipeline realloc, so the slider is fluent. Gamma /
+    /// `onControlChanged` tier — no pipeline realloc, so the slider is fluent. Gamma /
     /// white-balance fold into this LUT later as a per-channel R/G/B split.
     ///
     /// Default low (≈8%). A fresh device with LEDs wired but no power budget set
@@ -122,14 +124,14 @@ public:
     /// `Rainbow`, `Party`, `Lava`, `Ocean`, …). Palette-driven effects read it via
     /// `Palettes::active()` and colour their pixels through `colorFromPalette(index)`, so
     /// changing this recolours every such effect live. The select index expands the chosen
-    /// gradient into the active 16-entry palette on `onUpdate` (cheap, off the hot path).
+    /// gradient into the active 16-entry palette on `onControlChanged` (cheap, off the hot path).
     uint8_t palette = 0;
 
     // Two ways to wire the source Layer:
     //  - setLayers(Layers*): bind the container; layer_ is re-resolved from
-    //    activeLayer() at every buildState. This makes the link self-healing —
+    //    activeLayer() at every prepareTree. This makes the link self-healing —
     //    a Layer cleared and rebuilt via the API (clear_children + add_module)
-    //    is picked up on the next buildState without re-running main.cpp wiring.
+    //    is picked up on the next prepareTree without re-running main.cpp wiring.
     //  - setLayer(Layer*): pin a specific Layer directly (test rigs that build a
     //    Layer outside a Layers container). Skips re-resolution.
     void setLayers(Layers* layers) {
@@ -145,18 +147,18 @@ public:
     // `on` and `brightness` independent means "off" never clobbers the level the user chose.
     uint8_t effectiveBrightness() const { return on ? brightness : 0; }
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("on", on);   // master power — first so it renders at the top of the card
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addSelect("lightPreset", lightPreset, kLightPresetOptions, kLightPresetCount);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
-        MoonModule::onBuildControls();  // cascade to driver children
+        MoonModule::defineControls();  // cascade to driver children
     }
 
     // Brightness / light-preset changes only rebuild the (cheap) correction LUT — no
-    // pipeline realloc. This is what keeps the brightness slider fluent: controlChangeTriggersBuildState
-    // stays false for Drivers, so handleSetControl skips scheduler_->buildState().
-    void onUpdate(const char* controlName) override {
+    // pipeline realloc. This is what keeps the brightness slider fluent: affectsPrepare
+    // stays false for Drivers, so handleSetControl skips scheduler_->prepareTree().
+    void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "palette") == 0) {
             Palettes::setActive(palette);   // rebuild the active 16-entry lookup (cheap, off the hot path)
             return;
@@ -182,7 +184,7 @@ public:
         passBufferToDrivers();
     }
 
-    void onBuildState() override {
+    void prepare() override {
         // Re-resolve the active Layer from the bound container so a Layer that
         // was cleared and rebuilt via the API is picked up here (self-healing).
         // setLayer() pins a Layer directly and leaves layers_ null — skip then.
@@ -193,7 +195,7 @@ public:
         // (logical≠physical). A lone no-LUT layer needs no output buffer (drivers
         // read its buffer directly — the zero-copy fast path).
         // If allocation fails (no contiguous heap — a real risk on no-PSRAM ESP32
-        // with fragmented DRAM), outputBuffer_ stays data_=nullptr; loop() checks
+        // with fragmented DRAM), outputBuffer_ stays data_=nullptr; tick() checks
         // that before blending (else a null deref panics — same defensive pattern
         // Layer::allocateBuffer uses). Sized from the active layer: every layer
         // composites into the same physical space, so its physicalLightCount() /
@@ -222,13 +224,12 @@ public:
         // no enabled layer → zero lights. One POD, overwritten in place on each rebuild.
         summary_.lightCount = out ? static_cast<uint32_t>(out->physicalLightCount()) : 0;
         summary_.channelsPerLight = out ? out->channelsPerLight() : 3;
-        active_ = this;
+        seat_.claim();   // first live Drivers wins the summary seat (claim-if-empty; one exists in practice)
         passBufferToDrivers();
-        MoonModule::onBuildState();
     }
 
     // First output light as RGB — the live colour of pixel 0, read from whichever buffer
-    // loop() is currently driving (the composited outputBuffer_ when allocated, else the
+    // tick() is currently driving (the composited outputBuffer_ when allocated, else the
     // first enabled layer's own buffer — the zero-copy single-layer path). The WLED shim
     // tints the app's device card with this. RGB is the buffer's logical channel order
     // (0,1,2); the per-strip wire reorder is applied later by the physical drivers, not here.
@@ -243,10 +244,10 @@ public:
         return true;
     }
 
-    void loop() override {
+    void tick() override {
         // Composite into outputBuffer_ when one is allocated (≥2 enabled layers,
-        // or a single layer with a LUT — see onBuildState). A null data_ means
-        // onBuildState couldn't claim a block (heap fragmentation): skip the blend;
+        // or a single layer with a LUT — see prepare). A null data_ means
+        // prepare couldn't claim a block (heap fragmentation): skip the blend;
         // drivers then read the raw Layer buffer / send nothing.
         if (outputBuffer_.data() && layers_ && layers_->enabledLayerCount() > 1) {
             // Multi-layer composite: blend each enabled layer in container order.
@@ -277,20 +278,22 @@ public:
         // Option A: parent work first (blend), then chain to base to tick children
         // on the freshly-composited buffer. Per-child enabled gating + timing live
         // in MoonModule::tickChildren.
-        MoonModule::loop();
+        MoonModule::tick();
     }
 
 private:
-    Layers* layers_ = nullptr;  // bound container; layer_ re-resolved from it at buildState
+    Layers* layers_ = nullptr;  // bound container; layer_ re-resolved from it at prepareTree
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
     Correction correction_;
 
-    // Published to core via latestSummary(). active_ points at the Drivers whose summary is live
-    // (mirrors AudioModule::active_): set in onBuildState, cleared in teardown so a removed Drivers
-    // stops being read; only one Drivers exists in the pinned tree, so no re-election dance is needed.
+    // Published to core via latestSummary(). The seat points at the Drivers whose summary is live —
+    // claimed in prepare(), vacated in release() and (via the ActiveInstance destructor) on teardown,
+    // so a removed Drivers never leaves latestSummary() dangling. Only one Drivers exists in the
+    // pinned tree, so claim-if-empty needs no re-election dance — but the RAII vacate is the same
+    // dangling-static guard the mic + registry seats use (see ActiveInstance.h).
     LightSummary summary_;
-    inline static Drivers* active_ = nullptr;
+    ActiveInstance<Drivers> seat_{*this};
 
     void passBufferToDrivers() {
         // No active Layer (e.g. the last Layer was just deleted): clear every
@@ -302,7 +305,7 @@ private:
         // Drivers read the composed outputBuffer_ when we composite (≥2 enabled
         // layers) or when the single layer needs a LUT map; otherwise the lone
         // no-LUT layer's buffer is handed directly (zero-copy fast path). Mirrors
-        // the same decision loop() makes (outputBuffer_ is allocated iff this).
+        // the same decision tick() makes (outputBuffer_ is allocated iff this).
         // The source is the first *enabled* layer, never the disabled fallback
         // activeLayer() returns when all layers are off — with no enabled layer
         // buf stays null and every driver idles (its last frame is not re-sent).

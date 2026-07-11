@@ -2,7 +2,7 @@
 
 MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `moondeck/`, so the CLI (`uv run moondeck/<group>/<name>.py`) and MoonDeck run exactly the same code — agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/building.md § MoonDeck](../docs/building.md#moondeck--the-dev-console); this page is the per-script reference.
 
-Launch it with `uv run moondeck/moondeck.py` and open <http://localhost:8420>. The console has three tabs — **PC** (desktop build / run / test), **ESP32** (chip + port, build / flash / monitor), and **Live** (discovery and live runs against networked devices) — above a network bar and per-device deviceModel pickers. Script definitions live in `moondeck/moondeck_config.json` (committed); runtime state (selected network, devices, ports) persists in `moondeck/moondeck.json` (gitignored).
+Launch it with `uv run moondeck/moondeck.py` and open <http://localhost:8420>. The console has three tabs — **Desktop** (build build / run / test), **ESP32** (chip + port, build / flash / monitor), and **Live** (discovery and live runs against networked devices) — above a network bar and per-device deviceModel pickers. Script definitions live in `moondeck/moondeck_config.json` (committed); runtime state (selected network, devices, ports) persists in `moondeck/moondeck.json` (gitignored).
 
 Below: the UI behaviours common to every card, described once, then one section per script grouped by the tab it appears on. Each section gives the equivalent CLI invocation, so the page doubles as the command reference for running anything without the browser.
 
@@ -16,10 +16,10 @@ Below: the UI behaviours common to every card, described once, then one section 
 - **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
 - **Network bar** (top of the sidebar): switch between known networks. Each network holds its own device list, last-used serial port, and WiFi credentials (consumed by Improv). On startup, MoonDeck auto-selects the network whose subnet matches the host's current LAN — moving the laptop between networks usually requires no clicks. Manual override (the dropdown) pins the selection until the pinned network's subnet stops matching the host. Add / Rename buttons next to the dropdown manage the catalog. State persisted in `moondeck/moondeck.json` under `networks` + `active_network`.
 - **Device-model picker** on each device row: dropdown of device models from [web-installer/deviceModels.json](../web-installer/deviceModels.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one deviceModel (e.g. `esp32-eth` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's `deviceModel` control on [SystemModule](../docs/moonmodules/core/SystemModule.md) via `POST /api/control` on next discover. For firmwares with no unique deviceModel (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported deviceModel not in the catalog still shows up as `<key> (unknown)` so the value survives. MoonDeck's picker is a **text dropdown for an already-running device** — distinct from the web installer's flash-time *picture* deviceModel picker; both read the same catalog, but MoonDeck doesn't need the per-deviceModel `image`/`url` fields (those are installer-picker UX). Selecting a deviceModel pushes its full catalog config — each entry is a list of `{type, id, parent_id?, controls?}` module units (the [nested catalog schema](../web-installer/README.md), add-then-configure), so MoonDeck adds the deviceModel's modules (`POST /api/modules`) then sets their controls (`POST /api/control`); see `_push_device` in [moondeck.py](moondeck.py).
-## PC Tab
+## Desktop Tab
 
 
-![Moondeck Pc](../docs/assets/ui/moondeck_pc.png)
+![Moondeck Desktop](../docs/assets/ui/moondeck_desktop.png)
 
 ### build_desktop
 
@@ -121,7 +121,7 @@ Collect the per-target KPI line (tick/FPS, memory, sizes) for the commit message
 uv run moondeck/check/collect_kpi.py
 ```
 
-Captures a live tick from a connected ESP32 (and the PC scenario ticks) plus source/test line counts, emitting the `tick:Xus(FPS:Y)` one-liner the commit gate records.
+Captures a live tick from a connected ESP32 (and the desktop scenario ticks) plus source/test line counts, emitting the `tick:Xus(FPS:Y)` one-liner the commit gate records.
 
 ### scenario_pipeline
 
@@ -172,7 +172,7 @@ Connects to a running projectMM server, builds a minimal pipeline scaffold (Layo
 - `<TypeName>.png` — module card screenshot for every module in the catalogue
 - `<TypeName>.gif` — 3-second preview animation for effects and modifiers (requires `--gif`)
 - `ui_overview.png` — full-page screenshot of the projectMM UI
-- `moondeck_pc.png`, `moondeck_esp32.png`, `moondeck_live.png` — MoonDeck tab screenshots (requires MoonDeck running on port 8420)
+- `moondeck_desktop.png`, `moondeck_esp32.png`, `moondeck_live.png` — MoonDeck tab screenshots (requires MoonDeck running on port 8420)
 - `installer.png` — web installer preview (requires `preview_installer` running on port 8421)
 
 Without `--force`, existing screenshots are skipped — only missing files are captured. Run with `--force` to re-capture everything (e.g. after a UI change).
@@ -231,7 +231,7 @@ For a full description of each scenario, see the [scenario inventory](/api/docs/
 
 ### run_network_live
 
-End-to-end lights-over-UDP matrix test across every online board in moondeck.json's active network — the live proof for [NetworkReceiveEffect](../docs/moonmodules/light/effects.md#networkreceive) and [NetworkSendDriver](../docs/moonmodules/light/drivers.md#networksend). Each round one device is the sender and every other device listens: the PC seeds the sender **three times — once per protocol (ArtNet, E1.31, DDP), each with its own colour** — asserting the sender's `/ws` preview stream shows each one, then points the sender's own NetworkSendDriver at each listener with the protocol control cycled round-robin and asserts the listener's preview shows the sender's corrected colour (brightness + channel order replicated host-side). With one device online only the PC→device sweep runs.
+End-to-end lights-over-UDP matrix test across every online board in moondeck.json's active network — the live proof for [NetworkReceiveEffect](../docs/moonmodules/light/effects.md#networkreceive) and [NetworkSendDriver](../docs/moonmodules/light/drivers.md#networksend). Each round one device is the sender and every other device listens: the desktop seeds the sender **three times — once per protocol (ArtNet, E1.31, DDP), each with its own colour** — asserting the sender's `/ws` preview stream shows each one, then points the sender's own NetworkSendDriver at each listener with the protocol control cycled round-robin and asserts the listener's preview shows the sender's corrected colour (brightness + channel order replicated host-side). With one device online only the desktop→device sweep runs.
 
 ```bash
 uv run moondeck/scenario/run_network_live.py                      # full matrix over all online devices
@@ -243,7 +243,7 @@ Everything it mutates (grid size → 16×16 for the run, NetworkSend `ip`/`proto
 
 ### run_network_roundtrip
 
-Minimal **PC→device→PC latency probe** across **all three protocols**: per device, the PC sends one solid-colour frame over ArtNet, then E1.31, then DDP, each time timing how long until that colour appears in the device's `/ws` preview stream (PC → NetworkReceiveEffect → PreviewDriver → PC). The receiver autodetects each protocol on its own port, so there's no device reconfig between them. Reports min / median / max over N repeats per protocol and a per-device median-per-protocol comparison line — the spread is the signal for the latency / hiccup symptom, the protocol comparison shows which transport is fastest on a given board, and running across boards makes the per-chip difference visible (a classic ESP32 measures slower than an S3). Runs against **every device checked in the Live tab** (the same `selected` set the matrix test uses); unreachable checked devices are warned and skipped. The measured time includes the PreviewDriver's own fps quantisation (≈42 ms at the 24 fps default), so it's "state visible within" latency, not wire latency; raise the device's Preview fps to tighten it. Deliberately minimal — per-frame sequence matching, the device→device chain, and jitter/drop histograms are left as later extensions.
+Minimal **desktop→device→desktop latency probe** across **all three protocols**: per device, the desktop sends one solid-colour frame over ArtNet, then E1.31, then DDP, each time timing how long until that colour appears in the device's `/ws` preview stream (desktop → NetworkReceiveEffect → PreviewDriver → desktop). The receiver autodetects each protocol on its own port, so there's no device reconfig between them. Reports min / median / max over N repeats per protocol and a per-device median-per-protocol comparison line — the spread is the signal for the latency / hiccup symptom, the protocol comparison shows which transport is fastest on a given board, and running across boards makes the per-chip difference visible (a classic ESP32 measures slower than an S3). Runs against **every device checked in the Live tab** (the same `selected` set the matrix test uses); unreachable checked devices are warned and skipped. The measured time includes the PreviewDriver's own fps quantisation (≈42 ms at the 24 fps default), so it's "state visible within" latency, not wire latency; raise the device's Preview fps to tighten it. Deliberately minimal — per-frame sequence matching, the device→device chain, and jitter/drop histograms are left as later extensions.
 
 ```bash
 uv run moondeck/scenario/run_network_roundtrip.py                  # every checked device, 10 probes each
@@ -259,7 +259,7 @@ Browser-faithful **3D-preview stream health probe** — measures the device's `/
 ```bash
 uv run moondeck/diag/preview_health.py                              # every online device, 30s each
 uv run moondeck/diag/preview_health.py --host 192.168.1.156         # one explicit device
-uv run moondeck/diag/preview_health.py localhost:8080 --grid 128    # PC build, force a 128×128 grid first
+uv run moondeck/diag/preview_health.py localhost:8080 --grid 128    # desktop build, force a 128×128 grid first
 uv run moondeck/diag/preview_health.py 192.168.1.132 --seconds 60   # longer window to catch rare stalls
 ```
 

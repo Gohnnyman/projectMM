@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 
@@ -31,7 +31,7 @@ public:
     bool inverseY = false;
     bool inverseZ = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("XY", transposeXY);
         controls_.addBool("XZ", transposeXZ);
         controls_.addBool("YZ", transposeYZ);

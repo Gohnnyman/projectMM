@@ -1,15 +1,13 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"      // colorFromPalette + the global active palette
-#include "core/AudioModule.h"   // AudioModule::latestFrame()
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
 // Audio-reactive VU effect: the whole grid pulses with the microphone's sound
 // level. The simplest audio consumer — one scalar (AudioFrame::level) drives a
 // single brightness, a colour shifting from calm to hot as it rises. Reads the
-// live frame from AudioModule::latestFrame(); with no mic (or silence) the frame is
+// live frame from AudioService::latestFrame(); with no mic (or silence) the frame is
 // zero and the grid stays dark, so the effect is safe on any target.
 // Author: projectMM original (VU-meter)
 /// Audio-reactive effect: drives brightness/colour from the overall sound level.
@@ -19,11 +17,11 @@ public:
 
     uint8_t brightness = 255;   // overall ceiling
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("brightness", brightness, 1, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();
@@ -34,7 +32,7 @@ public:
         // level is ~0..255; scale to the brightness ceiling. Uses the SMOOTHED level so the whole
         // surface glows/breathes with the music instead of jittering per audio block (the calm VU
         // look, the same choice as AudioSpectrum's VU bar).
-        const uint16_t level = AudioModule::latestFrame()->levelSmoothed;
+        const uint16_t level = AudioService::latestFrame()->levelSmoothed;
         const uint16_t v = static_cast<uint16_t>(
             (level > 255 ? 255 : level) * brightness / 255);
 

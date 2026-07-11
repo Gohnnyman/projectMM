@@ -1,9 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"   // colorFromPalette + active palette
-#include "core/color.h"
-#include "core/math8.h"   // sin8/cos8/dist8/atan2_8
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -23,14 +20,14 @@ public:
     uint8_t scale_y = 48;
     uint8_t hue_shift = 0;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("bpm", bpm, 1, 255);
         controls_.addUint8("scale_x", scale_x, 1, 255);
         controls_.addUint8("scale_y", scale_y, 1, 255);
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();

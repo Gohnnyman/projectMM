@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstdint>
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -27,13 +25,13 @@ public:
     // Max 64 keeps the (2*64+1)^3 bounding-box scan bounded.
     lengthType radius = 4;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("radius", radius, 1, 64);
     }
 
     nrOfLightsType lightCount() const override {
         // Count the shell points. Cheap relative to rendering, recomputed only
-        // on a radius change (controlChangeTriggersBuildState → rebuild).
+        // on a radius change (affectsPrepare → rebuild).
         nrOfLightsType n = 0;
         forEachShellPoint([](void*, nrOfLightsType, lengthType, lengthType, lengthType) {}, nullptr, &n);
         return n;

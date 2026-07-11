@@ -1,7 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "core/math8.h"   // sin8 — integer sine LUT
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -28,13 +27,13 @@ public:
     uint8_t amplitude = 255;   // peak brightness, 0..255 (255 = full)
     uint8_t bpm = 30;          // scroll speed (reshuffles per minute of the phase)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("frequency", frequency, 1, 20);
         controls_.addUint8("amplitude", amplitude, 0, 255);
         controls_.addUint8("bpm", bpm, 1, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

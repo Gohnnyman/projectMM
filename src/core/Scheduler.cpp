@@ -21,7 +21,7 @@ void Scheduler::setup() {
     // Phase 1: bind each module's controls. After this, ControlList descriptors hold
     // (name → variable pointer) so the persistence hook can apply file values.
     for (uint8_t i = 0; i < moduleCount_; i++) {
-        modules_[i]->onBuildControls();
+        modules_[i]->defineControls();
     }
 
     // Phase 2: persistence load. No-op if no hook is set.
@@ -35,7 +35,7 @@ void Scheduler::setup() {
     // get " 2", " 3", … suffixes.
     deduplicateNamesInTree();
 
-    // Phase 2b: re-run onBuildControls with persisted values in place so any conditional
+    // Phase 2b: re-run defineControls with persisted values in place so any conditional
     // hidden flags (e.g. NetworkModule's static-IP fields depending on addressing_) are
     // evaluated against the loaded state, not the default. rebuildControls clears the
     // descriptor list before re-binding, so this is idempotent.
@@ -52,9 +52,10 @@ void Scheduler::setup() {
         modules_[i]->setup();
     }
 
-    // Phase 4: allocate buffers sized to final control values.
+    // Phase 4: build derived state — buffers/peripherals — via the applyState() router, which
+    // per node builds when effectively-enabled and releases (release) when not, recursing the tree.
     for (uint8_t i = 0; i < moduleCount_; i++) {
-        modules_[i]->onBuildState();
+        modules_[i]->applyState();
     }
 
     lastLoop20ms_ = platform::millis();
@@ -77,7 +78,7 @@ void Scheduler::tick() {
     for (uint8_t i = 0; i < moduleCount_; i++) {
         if (!shouldRun(modules_[i])) continue;
         uint32_t modStart = platform::micros();
-        modules_[i]->loop();
+        modules_[i]->tick();
         modules_[i]->addAccumUs(platform::micros() - modStart);
     }
 
@@ -86,7 +87,7 @@ void Scheduler::tick() {
         for (uint8_t i = 0; i < moduleCount_; i++) {
             if (!shouldRun(modules_[i])) continue;
             uint32_t modStart = platform::micros();
-            modules_[i]->loop20ms();
+            modules_[i]->tick20ms();
             modules_[i]->addAccumUs(platform::micros() - modStart);
         }
     }
@@ -96,7 +97,7 @@ void Scheduler::tick() {
         for (uint8_t i = 0; i < moduleCount_; i++) {
             if (!shouldRun(modules_[i])) continue;
             uint32_t modStart = platform::micros();
-            modules_[i]->loop1s();
+            modules_[i]->tick1s();
             modules_[i]->addAccumUs(platform::micros() - modStart);
         }
     }
@@ -118,13 +119,13 @@ void Scheduler::tick() {
     }
 }
 
-void Scheduler::teardown() {
-    // Two passes: tear down all modules first (so a module's teardown can still safely
+void Scheduler::release() {
+    // Two passes: tear down all modules first (so a module's release can still safely
     // observe sibling modules' state), then delete the trees. Otherwise the reverse-order
-    // teardown-then-delete pattern would leave a module's teardown looking at already-freed
+    // release-then-delete pattern would leave a module's release looking at already-freed
     // siblings — relevant for any cross-module cleanup work.
     for (uint8_t i = moduleCount_; i > 0; i--) {
-        modules_[i - 1]->teardown();
+        modules_[i - 1]->release();
     }
     for (uint8_t i = moduleCount_; i > 0; i--) {
         deleteTree(modules_[i - 1]);
@@ -137,9 +138,9 @@ uint32_t Scheduler::elapsed() const {
     return platform::millis() - startTime_;
 }
 
-void Scheduler::buildState() {
+void Scheduler::prepareTree() {
     for (uint8_t i = 0; i < moduleCount_; i++) {
-        modules_[i]->onBuildState();
+        modules_[i]->applyState();
     }
 }
 
@@ -219,7 +220,7 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
         target->setEnabled(mm::json::parseBool(valueJson, "value"));
         target->markDirty();
         if (noteDirtyHook_) noteDirtyHook_();
-        buildState();
+        prepareTree();
         return SetControlResult::Ok;
     }
 
@@ -236,14 +237,14 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
             case ApplyResult::Malformed:  return SetControlResult::Malformed;
             case ApplyResult::ReadOnly:   return SetControlResult::ReadOnly;
         }
-        // Rebuild the control list so onBuildControls() re-evaluates conditional visibility
-        // for the new value; fire the three-tier change reaction (onUpdate always, a
-        // tree-wide buildState only when the control reshapes dims/mapping); persist.
+        // Rebuild the control list so defineControls() re-evaluates conditional visibility
+        // for the new value; fire the three-tier change reaction (onControlChanged always, a
+        // tree-wide prepareTree only when the control reshapes dims/mapping); persist.
         target->rebuildControls();
-        target->onUpdate(controlName);
+        target->onControlChanged(controlName);
         target->markDirty();
         if (noteDirtyHook_) noteDirtyHook_();
-        if (target->controlChangeTriggersBuildState(controlName)) buildState();
+        if (target->affectsPrepare(controlName)) prepareTree();
         return SetControlResult::Ok;
     }
     return SetControlResult::ControlNotFound;

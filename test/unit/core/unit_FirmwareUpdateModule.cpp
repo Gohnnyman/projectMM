@@ -16,7 +16,7 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
     // "firmware" is the compiled-binary variant; the physical board is separate.)
     mm::FirmwareUpdateModule fw;
     fw.setup();
-    fw.onBuildControls();
+    fw.defineControls();
 
     bool found = false;
     for (uint8_t i = 0; i < fw.controls().count(); i++) {
@@ -47,7 +47,7 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
 }
 
 // OTA phase is surfaced through the shared status slot (MoonModule::setStatus()),
-// not a control. publishStatus() runs in setup()/loop1s() and maps the platform
+// not a control. publishStatus() runs in setup()/tick1s() and maps the platform
 // OTA status string to a severity: "idle" clears the banner, an "error: " prefix
 // is Severity::Error, anything else is neutral Severity::Status.
 TEST_CASE("FirmwareUpdateModule OTA status routes through the status slot") {
@@ -60,19 +60,19 @@ TEST_CASE("FirmwareUpdateModule OTA status routes through the status slot") {
 
     // An in-flight phase shows as a neutral status banner.
     std::strncpy(mm::g_otaStatus, "downloading", sizeof(mm::g_otaStatus));
-    fw.loop1s();
+    fw.tick1s();
     REQUIRE(fw.status() != nullptr);
     CHECK(std::strcmp(fw.status(), "downloading") == 0);
     CHECK(fw.severity() == mm::MoonModule::Severity::Status);
 
     // A failure (platform prefixes every failure with "error: ") is an error banner.
     std::strncpy(mm::g_otaStatus, "error: ota perform ESP_FAIL", sizeof(mm::g_otaStatus));
-    fw.loop1s();
+    fw.tick1s();
     REQUIRE(fw.status() != nullptr);
     CHECK(fw.severity() == mm::MoonModule::Severity::Error);
 
     // Returning to idle clears the banner again.
     std::strncpy(mm::g_otaStatus, "idle", sizeof(mm::g_otaStatus));
-    fw.loop1s();
+    fw.tick1s();
     CHECK(fw.status() == nullptr);
 }

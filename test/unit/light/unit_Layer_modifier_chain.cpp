@@ -18,7 +18,7 @@
 // modifier is skipped. The single-modifier and sphere cases live in unit_Layer_sparse_mapping.
 
 namespace {
-// Build a dense w×h grid Layer with the given modifiers added in order, run onBuildState.
+// Build a dense w×h grid Layer with the given modifiers added in order, run applyState.
 struct ChainRig {
     mm::Layouts group;
     mm::GridLayout grid;
@@ -30,9 +30,9 @@ struct ChainRig {
         layer.setLayouts(&group);
         layer.setChannelsPerLight(3);
         for (auto* m : mods) layer.addChild(m);
-        layer.onBuildControls();
-        group.onBuildState();
-        layer.onBuildState();
+        layer.defineControls();
+        group.applyState();
+        layer.applyState();
     }
 };
 } // namespace
@@ -123,7 +123,7 @@ TEST_CASE("Layer skips a disabled modifier in the chain") {
         rig.layer.lut().forEachDestination(li, [&](mm::nrOfLightsType) { withoutMask++; });
 
     mask.setEnabled(true);
-    rig.layer.onBuildState();
+    rig.layer.applyState();
     std::size_t withMask = 0;
     for (mm::nrOfLightsType li = 0; li < rig.layer.lut().logicalCount(); li++)
         rig.layer.lut().forEachDestination(li, [&](mm::nrOfLightsType) { withMask++; });

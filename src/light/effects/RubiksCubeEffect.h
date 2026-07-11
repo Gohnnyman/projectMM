@@ -1,14 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/draw.h"           // draw::pixel
-#include "light/Palette.h"        // colorFromPalette + the active palette (usePalette)
-#include "core/math8.h"           // Random8
-
-#include <array>
-#include <cstdint>
-#include <cstring>                // std::strcmp
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath/cstdint/array
 
 namespace mm {
 
@@ -41,7 +33,7 @@ public:
     bool    usePalette     = false;   // off = the classic 6 Rubik's face colours; on = 6 samples
                                       // of the system-wide palette (advised: a primary-ish palette)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("turnsPerSecond", turnsPerSecond, 0, 20);
         controls_.addUint8("cubeSize", cubeSize, 1, 8);
         controls_.addBool("randomTurning", randomTurning);
@@ -63,13 +55,13 @@ public:
     }
 
     // cubeSize / randomTurning changes re-scramble (MoonLight reinitialises on those controls). No
-    // heap state to rebuild, so the cheap onUpdate hook is enough — flag a fresh init for the next loop.
-    void onUpdate(const char* name) override {
+    // heap state to rebuild, so the cheap onControlChanged hook is enough — flag a fresh init for the next loop.
+    void onControlChanged(const char* name) override {
         if (std::strcmp(name, "cubeSize") == 0 || std::strcmp(name, "randomTurning") == 0)
             doInit_ = true;
     }
 
-    void loop() override {
+    void tick() override {
         const lengthType w = width(), h = height(), d = depth();
         if (w <= 0 || h <= 0 || d <= 0 || channelsPerLight() < 3) return;
 

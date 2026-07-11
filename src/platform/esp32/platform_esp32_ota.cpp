@@ -95,7 +95,7 @@ void otaTask(void* arg) {
     int total = esp_https_ota_get_image_size(handle);
     if (total > 0) {
         // Publish the real total so the UI can render "X KB / Y KB".
-        // FirmwareUpdateModule's loop1s() rebuildControls picks this up on
+        // FirmwareUpdateModule's tick1s() rebuildControls picks this up on
         // the next 1 Hz poll (re-binds the progress descriptor with the new
         // total snapshot).
         *p->bytesTotalOut = static_cast<uint32_t>(total);

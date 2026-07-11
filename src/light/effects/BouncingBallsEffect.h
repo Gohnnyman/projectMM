@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // Random8
-#include "platform/platform.h"    // platform::alloc / platform::free
-
-#include <cmath>                  // sqrtf, lroundf — per-ball physics, not per-light
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -24,7 +17,7 @@ namespace mm {
 // (255-grav)/64+1 time-scale, the 0.9 - i/(numBalls²) dampening, the √(-2g)·rand(5,11)/10 relaunch
 // kick, and the palette-index spacing are reproduced exactly here, written fresh on EffectBase + the
 // shared draw primitives. Per-column ball state lives on the heap (sized to width()×maxNumBalls),
-// allocated in onBuildState and freed in teardown — never a large inline member.
+// allocated in prepare and freed in release — never a large inline member.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Physics effect: gravity-bounced balls trailing along the layer.
 class BouncingBallsEffect : public EffectBase {
@@ -39,41 +32,21 @@ public:
     uint8_t grav     = 128;  // gravity strength (0..255); higher = faster fall (shorter time-scale)
     uint8_t numBalls = 8;    // balls per column (1..maxNumBalls)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("grav", grav, 0, 255);
         controls_.addUint8("numBalls", numBalls, 1, maxNumBalls);
     }
 
-    void onBuildState() override {
-        // One ball array per x column: balls[width][maxNumBalls], flattened. Reallocate only when
-        // the column count changes. MoonLight zero-initialises the array (onSizeChanged), so every
-        // ball starts with height 0 / impactVelocity 0 and bounces on the very first frame — matched
-        // here with a memset to zero.
+    void prepare() override {
+        // One ball array per x column: balls[width][maxNumBalls], flattened. resize() reallocs only
+        // when the count changes and zero-fills — Ball is trivially zeroable, so a zeroed block equals
+        // the MoonLight Ball{} init (height 0 / impactVelocity 0, bounces on the first frame). Frees on
+        // 0; the disable path frees it through MoonModule::release().
         const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
-        const size_t count = cols * maxNumBalls;
-        if (enabled() && count > 0) {
-            if (count != ballCount_) {
-                releaseBalls();
-                balls_ = static_cast<Ball*>(platform::alloc(count * sizeof(Ball)));
-                if (balls_) {
-                    for (size_t i = 0; i < count; i++) balls_[i] = Ball{};  // zero-init, like MoonLight
-                    ballCount_ = count;
-                }
-            }
-        } else {
-            releaseBalls();
-        }
-        setDynamicBytes(ballCount_ * sizeof(Ball));
+        balls_.resize(cols * maxNumBalls);
     }
 
-    void teardown() override {
-        releaseBalls();
-        setDynamicBytes(0);
-    }
-
-    ~BouncingBallsEffect() override { releaseBalls(); }
-
-    void loop() override {
+    void tick() override {
         if (!balls_) return;
 
         const int cols = width();
@@ -99,7 +72,7 @@ public:
         const uint32_t timeScale = static_cast<uint32_t>((255 - grav) / 64 + 1);
 
         for (int x = 0; x < cols; x++) {
-            Ball* column = balls_ + static_cast<size_t>(x) * maxNumBalls;
+            Ball* column = balls_.data() + static_cast<size_t>(x) * maxNumBalls;
             for (int i = 0; i < nBalls; i++) {
                 Ball& ball = column[i];
 
@@ -156,16 +129,9 @@ private:
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
-    void releaseBalls() {
-        if (balls_) {
-            platform::free(balls_);
-            balls_ = nullptr;
-        }
-        ballCount_ = 0;
-    }
-
-    Ball* balls_ = nullptr;     // balls[width][maxNumBalls], flattened; column x = balls_ + x*maxNumBalls
-    size_t ballCount_ = 0;      // number of Ball entries allocated (width * maxNumBalls)
+    // balls[width][maxNumBalls], flattened; column x = balls_.data() + x*maxNumBalls. Self-sizing,
+    // self-freeing, self-reporting.
+    ScratchBuffer<Ball> balls_{*this};
     Random8 rng_;               // relaunch-kick randomness (FastLED random8(5,11) → below(5,11))
 };
 

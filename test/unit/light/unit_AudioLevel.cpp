@@ -1,9 +1,9 @@
-// @module AudioModule
+// @module AudioService
 // @also AudioVolumeEffect
 
 #include "doctest.h"
 #include "core/AudioLevel.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 #include "core/ModuleFactory.h"
 #include "light/effects/AudioVolumeEffect.h"
 #include "light/effects/AudioSpectrumEffect.h"
@@ -13,7 +13,7 @@
 #include <numbers>
 #include <vector>
 
-// The success spec for the level path, written RED before AudioModule's reader
+// The success spec for the level path, written RED before AudioService's reader
 // exists: the two I2S-mic facts that AudioLevel.h handles must hold on
 // synthesized blocks — DC offset is removed (a biased-but-silent block reads 0),
 // the noise floor gates quiet hiss, gain scales what survives — and the whole
@@ -155,20 +155,20 @@ TEST_CASE("AudioLevel: isqrt64 matches floor(sqrt) on a spread of values") {
 }
 
 // Regression: the boot wiring in main.cpp does
-//   create("AudioModule")->markWiredByCode()
+//   create("AudioService")->markWiredByCode()
 // and create() returns nullptr for an UNREGISTERED type — so a missing
-// registerType<AudioModule> made the deref crash and the device boot-looped (found
-// on the S3 bench). These pin that AudioModule and the two audio effects are all
+// registerType<AudioService> made the deref crash and the device boot-looped (found
+// on the S3 bench). These pin that AudioService and the two audio effects are all
 // registered + createable through the factory, and that latestFrame() is never
 // null even with no mic (so a consumer added before the mic can't deref null).
-TEST_CASE("AudioModule + audio effects are registered and createable (boot-loop guard)") {
-    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule");
+TEST_CASE("AudioService + audio effects are registered and createable (boot-loop guard)") {
+    mm::ModuleFactory::registerType<mm::AudioService>("AudioService");
     mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect");
 
-    auto* mic = mm::ModuleFactory::create("AudioModule");
+    auto* mic = mm::ModuleFactory::create("AudioService");
     REQUIRE(mic != nullptr);
-    CHECK(mic->role() == mm::ModuleRole::Peripheral);
+    CHECK(mic->role() == mm::ModuleRole::Service);
 
     auto* vol = mm::ModuleFactory::create("AudioVolumeEffect");
     auto* spec = mm::ModuleFactory::create("AudioSpectrumEffect");
@@ -180,8 +180,8 @@ TEST_CASE("AudioModule + audio effects are registered and createable (boot-loop 
     delete spec;
 }
 
-TEST_CASE("AudioModule::latestFrame is never null (silent frame with no active mic)") {
-    const mm::AudioFrame* f = mm::AudioModule::latestFrame();
+TEST_CASE("AudioService::latestFrame is never null (silent frame with no active mic)") {
+    const mm::AudioFrame* f = mm::AudioService::latestFrame();
     REQUIRE(f != nullptr);
     // With no mic having run setup(), it's the static silent frame.
     CHECK(f->level == 0);

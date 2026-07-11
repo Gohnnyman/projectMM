@@ -35,7 +35,7 @@ struct Correction {
     bool    deriveWhite = false;    // RGBW presets: W = min(r, g, b)
 
     // Cold path: recompute the LUT + preset-derived layout. Called from Drivers on
-    // setup, on a structural rebuild, and on a brightness / light-preset onUpdate.
+    // setup, on a structural rebuild, and on a brightness / light-preset onControlChanged.
     void rebuild(uint8_t brightness, LightPreset preset) {
         for (int v = 0; v < 256; v++) {
             briLut[v] = static_cast<uint8_t>((v * brightness) / 255);

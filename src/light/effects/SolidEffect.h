@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fill
-#include "core/math8.h"           // (scale8 lives in color.h, pulled in via draw.h)
-#include "platform/platform.h"    // alloc/free — heap validIndices table
-
-#include <cmath>                  // sqrtf — RMS palette average (cold, once per frame)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -46,7 +39,7 @@ public:
         "RGB(W)", "Palette", "Palette avg", "Palette rows", "Palette cols"};
     static constexpr uint8_t kColorModeCount = 5;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("red", red, 0, 255);
         controls_.addUint8("green", green, 0, 255);
         controls_.addUint8("blue", blue, 0, 255);
@@ -59,20 +52,16 @@ public:
 
     // The band modes (3/4) need a 256-entry table of valid wheel indices. 256 bytes is small, but
     // the contract keeps per-effect buffers off the inline footprint (the registerType<T> probe
-    // lives on an 8 KB stack), so it's a lazily-allocated heap buffer, freed on teardown.
-    void onBuildState() override {
-        if (enabled() && !validIndices_) {
-            validIndices_ = static_cast<uint8_t*>(platform::alloc(256));
-        } else if (!enabled() && validIndices_) {
-            release();
-        }
-        setDynamicBytes(validIndices_ ? 256 : 0);
+    // lives on an 8 KB stack), so it's a lazily-allocated heap buffer, freed on release.
+    // Pure build (see MoonModule::prepare): allocate the table. No enabled() check — applyState()
+    // routes a disabled effect to release()/freeBuffers() instead of calling this.
+    void prepare() override {
+        // Fixed 256-entry table (small, but kept off the inline footprint per the registerType<T>
+        // probe contract). resize() is a no-op once allocated, frees on disable via release().
+        validIndices_.resize(256);
     }
 
-    void teardown() override { release(); setDynamicBytes(0); }
-    ~SolidEffect() override { release(); }
-
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         const int d = depth();
@@ -184,11 +173,8 @@ public:
     }
 
 private:
-    uint8_t* validIndices_ = nullptr;
-
-    void release() {
-        if (validIndices_) { platform::free(validIndices_); validIndices_ = nullptr; }
-    }
+    // 256-entry wheel-index table for the band modes. Self-sizing, self-freeing, self-reporting.
+    ScratchBuffer<uint8_t> validIndices_{*this};
 
     // Write the white channel (4th) on every light. RGB stays as already filled. `w` may be 0 to
     // clear a stale white the palette modes never overwrite (draw::pixel/draw::fill touch RGB only).

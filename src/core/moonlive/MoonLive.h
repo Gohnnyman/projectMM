@@ -58,7 +58,7 @@ public:
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }
 
-    // Release the exec block + the control arena (the "destructor" role — teardown returns the
+    // Release the exec block + the control arena (the "destructor" role — release returns the
     // memory).
     void free();
 

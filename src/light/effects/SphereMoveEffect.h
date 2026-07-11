@@ -1,12 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // Random8
-
-#include <cmath>                  // sinf, cosf, sqrtf — per-frame origin + per-pixel distance (float kept for fidelity)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -35,11 +29,11 @@ public:
 
     uint8_t speed = 50;  // origin sweep rate (0..99); higher = faster (divisor is 100-speed)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 0, 99);
     }
 
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         const int d = depth();

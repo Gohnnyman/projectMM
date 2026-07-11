@@ -44,7 +44,7 @@ const char* controlTypeName(ControlType t) {
 
 bool isPersistable(ControlType t) {
     // Display-only / device-derived types: no point saving — the next
-    // loop1s overwrites them.
+    // tick1s overwrites them.
     switch (t) {
         case ControlType::ReadOnly:
         case ControlType::ReadOnlyInt:
@@ -340,7 +340,7 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
         }
         case ControlType::Button:
             // No value to store, but return Ok (NOT ReadOnly): the HTTP handler
-            // runs onUpdate() only on a non-error apply, and onUpdate IS the
+            // runs onControlChanged() only on a non-error apply, and onControlChanged IS the
             // button's action. ReadOnly would 400 and swallow the click.
             return ApplyResult::Ok;
     }

@@ -99,10 +99,10 @@
       "description": "Two stacked modifiers: Region(top-left quarter) then Multiply(2x mirror) compose into one mapping. Measure the live composite.",
       "op": "measure",
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             6,
-            41
+            108
           ],
           "free_heap": [
             0,
@@ -114,10 +114,10 @@
           ],
           "at": [
             "2026-06-26",
-            "2026-06-30"
+            "2026-07-09"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             13,
             25
@@ -146,10 +146,10 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             5,
-            55
+            67
           ],
           "free_heap": [
             0,
@@ -161,10 +161,10 @@
           ],
           "at": [
             "2026-06-26",
-            "2026-07-01"
+            "2026-07-09"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             12,
             20
@@ -191,7 +191,7 @@
       "id": "MULT",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             18,
             153
@@ -209,7 +209,7 @@
             "2026-07-01"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             42,
             58
@@ -238,7 +238,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             32,
             195
@@ -256,7 +256,7 @@
             "2026-07-01"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             69,
             138

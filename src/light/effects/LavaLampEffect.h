@@ -1,9 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"   // colorFromPalette, Palettes::active — the blob field → palette colour
-#include "core/color.h"
-#include "core/math8.h"   // sin8/cos8/dist8/atan2_8
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -25,13 +22,13 @@ public:
     uint8_t radius = 36;
     uint8_t intensity = 200;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("bpm", bpm, 1, 255);
         controls_.addUint8("radius", radius, 8, 255);
         controls_.addUint8("intensity", intensity, 1, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();
@@ -84,7 +81,7 @@ public:
     }
 
 private:
-    // Numerator-only accumulator (units of dt*bpm). See loop() for why.
+    // Numerator-only accumulator (units of dt*bpm). See tick() for why.
     uint64_t phase_num_ = 0;
     uint32_t lastElapsed_ = 0;
 };

@@ -130,6 +130,7 @@ _CATALOG_PAGES = {
     # transform, one common authoring process for every summary page (supporting rows
     # just leave the preview/controls columns blank).
     "moonmodules/core/supporting.md",
+    "moonmodules/core/system.md",
     "moonmodules/core/services.md",
     "moonmodules/light/supporting.md",
 }

@@ -1,21 +1,21 @@
 // @module PaintBrushEffect
-// @also AudioModule
+// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/PaintBrushEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioModule.h"
+#include "core/AudioService.h"
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time
 
 // PaintBrushEffect is audio-driven: it draws a set of oscillating lines whose length is scaled by an
-// audio band's magnitude (bands from AudioModule::latestFrame(), a process-wide static), fading the
+// audio band's magnitude (bands from AudioService::latestFrame(), a process-wide static), fading the
 // field a little each frame so the moving strokes leave trails. A line only draws when it is longer
 // than minLength, and a band of 0 yields length 0, so silence draws nothing and fades to dark. To feed
-// a signal on the host (no I2S mic) a live AudioModule runs in a simulate "always" mode — synthesizeFrame()
-// fills the bands each loop() off platform::millis(). The clock is frozen with setTestNowMs so the frame
+// a signal on the host (no I2S mic) a live AudioService runs in a simulate "always" mode — synthesizeFrame()
+// fills the bands each tick() off platform::millis(). The clock is frozen with setTestNowMs so the frame
 // (and the effect's own oscillators, which read elapsed()==millis()) are deterministic. Each case that
-// needs audio brackets its own AudioModule setup()/teardown() via the guard so it never leaks the
+// needs audio brackets its own AudioService setup()/release() via the guard so it never leaks the
 // active-mic pointer or the frozen clock into another test file.
 
 namespace {
@@ -23,32 +23,32 @@ namespace {
 // Restores real-clock behaviour and vacates the process-wide active-mic seat so each case is
 // independent (both are global state a prior case could leave set).
 struct AudioGuard {
-    mm::AudioModule& mic;
+    mm::AudioService& mic;
     ~AudioGuard() {
-        mic.teardown();                 // clears AudioModule::active_ if it is this mic
+        mic.release();                 // clears AudioService::active_ if it is this mic
         mm::platform::setTestNowMs(0);  // restore the platform clock
     }
 };
 
 // Bring the mic up in "music (always)" at a frozen time so every band carries a magnitude and the
 // synthesized frame is deterministic; several loops let the levelSmoothed EMA settle.
-void driveMusic(mm::AudioModule& mic, uint32_t ms) {
-    mic.onBuildControls();
+void driveMusic(mm::AudioService& mic, uint32_t ms) {
+    mic.defineControls();
     mic.simulate = 3;   // music, always — keeps every band non-zero (loud, broadband)
     mm::platform::setTestNowMs(ms);
     mic.setup();
-    for (int i = 0; i < 8; i++) mic.loop();   // fill the frame off the frozen clock
+    for (int i = 0; i < 8; i++) mic.tick();   // fill the frame off the frozen clock
 }
 
 } // namespace
 
 // A live broadband signal draws strokes: at least some lights are lit after a frame.
 TEST_CASE("PaintBrushEffect draws lit strokes from a live audio frame") {
-    mm::AudioModule mic;
+    mm::AudioService mic;
     AudioGuard guard{mic};
     driveMusic(mic, 500);
     // Sanity: the synthesized frame actually carries band energy the effect can react to.
-    const mm::AudioFrame* f = mm::AudioModule::latestFrame();
+    const mm::AudioFrame* f = mm::AudioService::latestFrame();
     bool anyBand = false;
     for (uint8_t b = 0; b < 16; b++) if (f->bands[b] > 0) anyBand = true;
     REQUIRE(anyBand);
@@ -67,9 +67,9 @@ TEST_CASE("PaintBrushEffect draws lit strokes from a live audio frame") {
     mm::PaintBrushEffect fx;
     fx.minLength = 0;   // no length gate: any stroke with band energy draws
     layer.addChild(&fx);
-    layer.onBuildState();
+    layer.applyState();
 
-    layer.loop();   // draws the oscillating lines for the current (frozen) frame
+    layer.tick();   // draws the oscillating lines for the current (frozen) frame
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 256);
@@ -84,9 +84,9 @@ TEST_CASE("PaintBrushEffect draws lit strokes from a live audio frame") {
 // 0 (below the minLength gate) and the buffer stays fully black.
 TEST_CASE("PaintBrushEffect stays black on silence") {
     // Ensure no mic holds the active seat, so latestFrame() is the static all-zero frame.
-    { mm::AudioModule idle; idle.teardown(); }
+    { mm::AudioService idle; idle.release(); }
     mm::platform::setTestNowMs(1000);
-    REQUIRE(mm::AudioModule::latestFrame()->bands[0] == 0);
+    REQUIRE(mm::AudioService::latestFrame()->bands[0] == 0);
 
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -101,11 +101,11 @@ TEST_CASE("PaintBrushEffect stays black on silence") {
 
     mm::PaintBrushEffect fx;
     layer.addChild(&fx);
-    layer.onBuildState();
+    layer.applyState();
 
     // Run several frames: the per-frame fade only decays what's there, and silence never adds a stroke,
     // so the field never lights.
-    for (int i = 0; i < 8; i++) layer.loop();
+    for (int i = 0; i < 8; i++) layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 256);
@@ -119,7 +119,7 @@ TEST_CASE("PaintBrushEffect stays black on silence") {
 // The minLength gate suppresses strokes: raised to its maximum, no line is ever long enough to draw, so
 // even a loud broadband frame leaves the buffer black — the gate, not the audio, decides.
 TEST_CASE("PaintBrushEffect minLength gate suppresses all strokes") {
-    mm::AudioModule mic;
+    mm::AudioService mic;
     AudioGuard guard{mic};
     driveMusic(mic, 500);
 
@@ -137,9 +137,9 @@ TEST_CASE("PaintBrushEffect minLength gate suppresses all strokes") {
     mm::PaintBrushEffect fx;
     fx.minLength = 255;   // length is a 0..255 fraction; "> 255" is never true → no line draws
     layer.addChild(&fx);
-    layer.onBuildState();
+    layer.applyState();
 
-    layer.loop();
+    layer.tick();
 
     auto& buf = layer.buffer();
     bool anyLit = false;
@@ -151,7 +151,7 @@ TEST_CASE("PaintBrushEffect minLength gate suppresses all strokes") {
 
 // The "runs at every grid size" hard rule: degenerate grids never crash, with a live frame each tick.
 TEST_CASE("PaintBrushEffect survives degenerate grid sizes") {
-    mm::AudioModule mic;
+    mm::AudioService mic;
     AudioGuard guard{mic};
     driveMusic(mic, 500);
 
@@ -169,8 +169,8 @@ TEST_CASE("PaintBrushEffect survives degenerate grid sizes") {
 
         mm::PaintBrushEffect fx;
         layer.addChild(&fx);
-        layer.onBuildState();
-        for (int i = 0; i < 4; i++) { mic.loop(); layer.loop(); }   // must not crash on 0×0×0 or 1×1×1
+        layer.applyState();
+        for (int i = 0; i < 4; i++) { mic.tick(); layer.tick(); }   // must not crash on 0×0×0 or 1×1×1
     }
     CHECK(true);
 }

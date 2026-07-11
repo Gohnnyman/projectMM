@@ -1,10 +1,7 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/draw.h"           // draw::pixel, draw::fade, draw::offsetOf
-#include "light/light_types.h"    // Coord3D, lengthType
-#include "core/color.h"           // RGB
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
+
 
 namespace mm {
 
@@ -46,7 +43,7 @@ public:
 
     bool alternateWhite = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("red",   red);
         controls_.addUint8("green", green);
         controls_.addUint8("blue",  blue);
@@ -60,7 +57,7 @@ public:
         controls_.addBool("alternateWhite", alternateWhite);
     }
 
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         const int d = depth();

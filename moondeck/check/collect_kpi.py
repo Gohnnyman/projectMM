@@ -356,7 +356,7 @@ def format_oneliner(desktop, esp32, code):
     if "lights" in desktop:
         parts.append(f"{desktop['lights']}lights")
     if "binary_kb" in desktop:
-        parts.append(f"PC:{desktop['binary_kb']}KB")
+        parts.append(f"Desktop:{desktop['binary_kb']}KB")
     if "tick_us" in desktop:
         ticks = '/'.join(str(t) for t in desktop['tick_us'])
         fps = '/'.join(str(f) for f in desktop.get('fps', []))

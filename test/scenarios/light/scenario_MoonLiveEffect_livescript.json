@@ -2,7 +2,7 @@
   "name": "scenario_MoonLiveEffect_livescript",
   "module": "MoonLiveEffect",
   "mode": "mutate",
-  "skip_on": ["pc-windows", "pc-linux"],
+  "skip_on": ["desktop-windows", "desktop-linux"],
   "also": [
     "Layouts",
     "GridLayout",
@@ -76,7 +76,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             393
@@ -134,14 +134,14 @@
     },
     {
       "name": "edit-source-red",
-      "description": "Live-edit the script source to a new colour. A source edit triggers a recompile (controlChangeTriggersBuildState gates on `source`); the new native code swaps in and keeps rendering.",
+      "description": "Live-edit the script source to a new colour. A source edit triggers a recompile (affectsPrepare gates on `source`); the new native code swaps in and keeps rendering.",
       "op": "set_control",
       "id": "ML",
       "key": "source",
       "value": "fill(255, 0, 0);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             398
@@ -206,7 +206,7 @@
       "value": "fill(nope);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             267
@@ -271,7 +271,7 @@
       "value": "fill(0, 255, 0);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             414
@@ -336,7 +336,7 @@
       "value": 1,
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -401,7 +401,7 @@
       "value": 16,
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             14
@@ -459,12 +459,12 @@
     },
     {
       "name": "remove-moonlive",
-      "description": "Remove the scripted effect. teardown frees the exec block; the Layer keeps rendering (now empty). Measures add/remove robustness.",
+      "description": "Remove the scripted effect. release frees the exec block; the Layer keeps rendering (now empty). Measures add/remove robustness.",
       "op": "remove_module",
       "id": "ML",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             10
@@ -529,7 +529,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             16

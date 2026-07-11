@@ -1,12 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel
-#include "core/math8.h"           // beatsin16
-
-#include <cstdint>
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath/cstdint/array
 
 namespace mm {
 
@@ -46,7 +40,7 @@ public:
     uint8_t microMutatorMin  = 200;  // micro mutator low end (0..255)
     uint8_t microMutatorMax  = 255;  // micro mutator high end (0..255)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 64);
         controls_.addUint8("macroMutatorFreq", macroMutatorFreq, 0, 15);
         controls_.addUint8("macroMutatorMin", macroMutatorMin, 0, 255);
@@ -56,7 +50,7 @@ public:
         controls_.addUint8("microMutatorMax", microMutatorMax, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;

@@ -63,16 +63,16 @@ struct Ctx {
         Ctx ctx(16, 16); \
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
-        ctx.layer.onBuildState(); \
-        ctx.layer.loop(); \
+        ctx.layer.applyState(); \
+        ctx.layer.tick(); \
         CHECK(ctx.hasNonZero()); \
     } \
     TEST_CASE(#EFFECT " spatial variation") { \
         Ctx ctx(32, 32); \
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
-        ctx.layer.onBuildState(); \
-        ctx.layer.loop(); \
+        ctx.layer.applyState(); \
+        ctx.layer.tick(); \
         CHECK(ctx.cornersDiffer()); \
     }
 
@@ -88,8 +88,8 @@ TEST_CASE("LavaLampEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::LavaLampEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
-    ctx.layer.loop();
+    ctx.layer.applyState();
+    ctx.layer.tick();
     CHECK(ctx.hasNonZero());
 }
 
@@ -106,12 +106,12 @@ TEST_CASE("LavaLampEffect spatial variation") {
     mm::LavaLampEffect effect;
     effect.bpm = 60;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
+    ctx.layer.applyState();
     uint32_t virtualNow = 1000;
     bool varied = false;
     for (int i = 0; i < 10 && !varied; i++) {
         mm::platform::setTestNowMs(virtualNow);
-        ctx.layer.loop();
+        ctx.layer.tick();
         if (ctx.hasTwoDistinctColors()) varied = true;
         virtualNow += 50;
     }
@@ -126,8 +126,8 @@ TEST_CASE("RingsEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RingsEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
-    ctx.layer.loop();
+    ctx.layer.applyState();
+    ctx.layer.tick();
     CHECK(ctx.hasNonZero());
 }
 
@@ -136,8 +136,8 @@ TEST_CASE("RingsEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RingsEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
-    ctx.layer.loop();
+    ctx.layer.applyState();
+    ctx.layer.tick();
     CHECK(ctx.hasTwoDistinctColors());
 }
 
@@ -148,8 +148,8 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
-    ctx.layer.loop();
+    ctx.layer.applyState();
+    ctx.layer.tick();
     CHECK(ctx.hasNonZero());
 }
 
@@ -158,7 +158,7 @@ TEST_CASE("RipplesEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
-    ctx.layer.loop();
+    ctx.layer.applyState();
+    ctx.layer.tick();
     CHECK(ctx.hasTwoDistinctColors());
 }

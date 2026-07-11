@@ -591,6 +591,12 @@ body {
 }
 .list-summary:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .list-self { box-shadow: inset 3px 0 0 var(--accent); }   /* this device, marked */
+/* Generic per-row severity marker — a coloured left edge + a faint row tint, driven by a `severity`
+   field ("error"/"warn", set in app.js's rowSeverityClass). Same left-edge idiom as .list-self, in
+   the same red/yellow palette as the age dots. Not pins-specific: any ListSource emitting `severity`
+   gets it. PinsModule is the first user (a claim on a reserved/strap/input-only GPIO). */
+.list-severity-warn  { box-shadow: inset 3px 0 0 var(--yellow); background: color-mix(in srgb, var(--yellow) 8%, transparent); }
+.list-severity-error { box-shadow: inset 3px 0 0 var(--red);    background: color-mix(in srgb, var(--red) 8%, transparent); }
 /* Freshness dot on a list summary row + matching tint on its detail "last seen"
    value. Driven by a `*Sec` duration field (generic, set in app.js's ageBucketClass):
    green < 1 min, orange < 1 hour, red beyond. */

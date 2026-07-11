@@ -1,10 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "core/color.h"
-
-#include <cmath>
-#include <cstring>
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -33,12 +29,12 @@ public:
     uint8_t speed = 50;     // 0 = stopped, 99 = fast
     uint8_t interval = 128; // wavefront spacing: low = tight rings, high = wide
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 0, 99);
         controls_.addUint8("interval", interval, 1, 254);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

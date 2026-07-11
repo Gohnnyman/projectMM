@@ -115,9 +115,9 @@ Once prerequisites are in place, launch MoonDeck, the browser-based dev console:
 uv run moondeck/moondeck.py
 ```
 
-Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [moondeck/MoonDeck.md](moondeck/MoonDeck.md).
+Open `http://localhost:8420`: Desktop tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [moondeck/MoonDeck.md](moondeck/MoonDeck.md).
 
-![Moondeck Pc](docs/assets/ui/moondeck_pc.png)
+![Moondeck Desktop](docs/assets/ui/moondeck_desktop.png)
 
 ## Documentation
 
@@ -164,13 +164,13 @@ We built, maintained, and contributed to these projects, so projectMM is grounde
 
 Specific people whose work directly shaped parts of projectMM. We study their thinking with respect and write our own code against our architecture rather than tracing theirs — these credits name the prior art behind a feature:
 
-- **Frank ([softhack007](https://github.com/softhack007))** — main author of the WLED-MM audio-reactive usermod, the most-used open-source audio-reactive LED implementation. The ideas behind [AudioModule](docs/moonmodules/core/AudioModule.md) (including the adaptive noise-gate concept, analysed with his permission) descend from years of collaboration on WLED-SR / WLED-MM.
-- **[troyhacks](https://github.com/troyhacks/WLED)** — reworked the WLED-MM audio-reactive DSP to run on Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT (a low-latency, "stupid fast" alternative to ArduinoFFT); the same esp-dsp FFT choice [AudioModule](docs/moonmodules/core/AudioModule.md) makes. See its Prior art notes.
+- **Frank ([softhack007](https://github.com/softhack007))** — main author of the WLED-MM audio-reactive usermod, the most-used open-source audio-reactive LED implementation. The ideas behind [AudioService](docs/moonmodules/core/moxygen/AudioService.md) (including the adaptive noise-gate concept, analysed with his permission) descend from years of collaboration on WLED-SR / WLED-MM.
+- **[troyhacks](https://github.com/troyhacks/WLED)** — reworked the WLED-MM audio-reactive DSP to run on Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT (a low-latency, "stupid fast" alternative to ArduinoFFT); the same esp-dsp FFT choice [AudioService](docs/moonmodules/core/moxygen/AudioService.md) makes. See its Prior art notes.
 - **[hpwit](https://github.com/hpwit) (Yves Bazin)** — the clockless I2S / RMT / Parlio LED-driver techniques and the [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) live-script engine behind the LED drivers and MoonLive.
 - **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))** — author of the native [WLED-Android](https://github.com/Moustachauve/WLED-Android) app. Its source let us reverse-engineer exactly what the WLED app reads, so projectMM devices appear in (and are controllable from) the native WLED apps.
 - **The [Improv Wi-Fi](https://github.com/improv-wifi) project** — the open Improv serial provisioning standard ([sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js)) that the projectMM web installer uses to provision a freshly-flashed device over USB.
 - **[FastLED](https://github.com/FastLED/FastLED)** — the canonical LED-effects library whose conventions the LED-effect world shares. projectMM links no part of FastLED, but it carries forward FastLED's recognisable *names and models* for the colour/animation primitives — `scale8`, `sin8`, the gradient-palette model (`CRGBPalette16` / `colorFromPalette`), the `beatsin8` / `inoise8` / `qadd8` family — so a contributor recognises them on sight. The implementations are projectMM's own, integer-only and hot-path-tuned for our render loop; FastLED is the prior art behind the convention, credited here and in each primitive's notes.
-- **wladi ([myhome-control](https://shop.myhome-control.de))** — designer of the [MHC-WLED ESP32-P4 shield](https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027), and the source of the hardware and the pinout details that got its **line-in audio** working in [AudioModule](docs/moonmodules/core/AudioModule.md): the onboard PCM1808 I2S ADC (WS 26 / SD 33 / SCK 32 / MCLK 36), the PCM1808's stereo wiring, and its `FMT` format-select jumper (open = I2S/Philips, our default; tie to 3V3 for left-justified) — which is what confirmed the standard-I2S path the ADC needs.
+- **wladi ([myhome-control](https://shop.myhome-control.de))** — designer of the [MHC-WLED ESP32-P4 shield](https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027), and the source of the hardware and the pinout details that got its **line-in audio** working in [AudioService](docs/moonmodules/core/moxygen/AudioService.md): the onboard PCM1808 I2S ADC (WS 26 / SD 33 / SCK 32 / MCLK 36), the PCM1808's stereo wiring, and its `FMT` format-select jumper (open = I2S/Philips, our default; tie to 3V3 for left-justified) — which is what confirmed the standard-I2S path the ADC needs.
 
 ## Contributing
 

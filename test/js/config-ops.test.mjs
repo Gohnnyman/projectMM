@@ -77,8 +77,8 @@ test("a module's add precedes its own set ops", () => {
 });
 
 test("S3 testbench entry adds Grid + Layer fresh and clears the pre-existing containers", () => {
-    const s3 = catalog.find(b => b && b.name === "projectMM testbench S3");
-    assert.ok(s3, "projectMM testbench S3 entry missing from deviceModels.json");
+    const s3 = catalog.find(b => b && b.name === "MM testbench S3");
+    assert.ok(s3, "MM testbench S3 entry missing from deviceModels.json");
     const ops = planConfigOps(s3);
     const added = new Set(ops.filter(o => o.op === "add").map(o => o.id));
     const cleared = new Set(ops.filter(o => o.op === "clearChildren").map(o => o.parent));
@@ -87,10 +87,13 @@ test("S3 testbench entry adds Grid + Layer fresh and clears the pre-existing con
     for (const id of ["Grid", "Layer"]) {
         assert.ok(added.has(id), `S3 entry no longer adds "${id}" — a non-erased device without that boot default gets no ${id}`);
     }
-    // Pre-existing containers (not added by the entry) are cleared so stale children go.
-    for (const p of ["Drivers", "System", "Layouts", "Layers"]) {
+    // Pre-existing containers the entry adds children into are cleared so stale children go.
+    // Audio is a Service now (added under Services, not System) — System hosts no user-added
+    // children, so the entry never touches it and emits no clearChildren for it.
+    for (const p of ["Services", "Drivers", "Layouts", "Layers"]) {
         assert.ok(cleared.has(p), `S3 entry does not clear pre-existing "${p}"`);
     }
+    assert.ok(!cleared.has("System"), `S3 entry clears "System" — but System has no user-added children to clear`);
     // Layer is added fresh, so it must NOT be cleared (would be a ModuleNotFound no-op).
     assert.ok(!cleared.has("Layer"), `S3 entry clears "Layer" but also adds it fresh — redundant`);
 });
@@ -98,7 +101,7 @@ test("S3 testbench entry adds Grid + Layer fresh and clears the pre-existing con
 test("a deduped parent is cleared exactly once", () => {
     // Drivers hosts two modules in the S3 entry (RmtLed + NetworkSend); it must be cleared
     // once, not once per child (a second clear would wipe the first child just re-added).
-    const s3 = catalog.find(b => b && b.name === "projectMM testbench S3");
+    const s3 = catalog.find(b => b && b.name === "MM testbench S3");
     const driversClears = planConfigOps(s3).filter(o => o.op === "clearChildren" && o.parent === "Drivers");
     assert.equal(driversClears.length, 1, "Drivers cleared more than once — clears must be deduped");
 });

@@ -29,7 +29,7 @@ TEST_CASE("FilesystemModule round-trip") {
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(tmpRoot);
 
-    // Scheduler::teardown() deletes its modules — they must be heap-allocated.
+    // Scheduler::release() deletes its modules — they must be heap-allocated.
     // --- First run: set deviceName, save ---
     {
         mm::Scheduler scheduler;
@@ -55,7 +55,7 @@ TEST_CASE("FilesystemModule round-trip") {
             }
         }
 
-        // flush() does the same work as loop1s() does once the debounce expires, but
+        // flush() does the same work as tick1s() does once the debounce expires, but
         // synchronously — used here to keep the test deterministic without wall-clock waits.
         fs->flush();
 
@@ -63,7 +63,7 @@ TEST_CASE("FilesystemModule round-trip") {
         std::snprintf(path, sizeof(path), "%s/.config/SystemModule.json", tmpRoot);
         CHECK(std::filesystem::exists(path));
 
-        scheduler.teardown();
+        scheduler.release();
     }
 
     // --- Second run: fresh modules, load from disk ---
@@ -81,7 +81,7 @@ TEST_CASE("FilesystemModule round-trip") {
 
         CHECK(std::strcmp(sys->deviceName(), "MM-ROUND") == 0);
 
-        scheduler.teardown();
+        scheduler.release();
     }
 
     std::filesystem::remove_all(tmpRoot);
@@ -137,7 +137,7 @@ TEST_CASE("FilesystemModule structural reconciliation") {
     REQUIRE(layer->childCount() == 1);
     CHECK(std::strcmp(layer->child(0)->typeName(), "RainbowEffect") == 0);
 
-    scheduler.teardown();
+    scheduler.release();
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
@@ -191,7 +191,7 @@ TEST_CASE("FilesystemModule preserves code-wired children when JSON predates the
     CHECK(std::strcmp(layer->child(0)->typeName(), "RainbowEffect") == 0);
     CHECK(layer->child(0)->isWiredByCode() == true);
 
-    scheduler.teardown();
+    scheduler.release();
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
@@ -242,7 +242,7 @@ TEST_CASE("FilesystemModule does not replace code-wired child on type mismatch")
     CHECK(std::strcmp(layer->child(0)->typeName(), "RainbowEffect") == 0);
     CHECK(layer->child(0)->isWiredByCode() == true);
 
-    scheduler.teardown();
+    scheduler.release();
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
@@ -297,7 +297,7 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
     // And the catastrophic "}{ or "X""Y syntactic shape must not appear.
     CHECK(content.find("\"\"") == std::string::npos);
 
-    scheduler.teardown();
+    scheduler.release();
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
@@ -305,7 +305,7 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
 // Singleton survives probe lifecycle: /api/types factory-creates a probe of every
 // registered type (including FilesystemModule) to capture defaults, then deletes it.
 // The probe's destructor must NOT clear the singleton — otherwise every save path
-// (noteDirty, debounced loop1s, flushPending on reboot) silently no-ops for the rest
+// (noteDirty, debounced tick1s, flushPending on reboot) silently no-ops for the rest
 // of the device's life. The fix is to register the singleton in setScheduler(), not
 // in the constructor. This test catches that singleton-clear regression.
 // /api/types factory-creates a temporary FilesystemModule probe; its destruction must NOT clear the static singleton (otherwise every later save silently no-ops).
@@ -355,7 +355,7 @@ TEST_CASE("FilesystemModule singleton survives probe construct+destruct") {
     CHECK(f.is_open());
     f.close();  // Windows holds an exclusive lock on open files — close before remove_all.
 
-    scheduler.teardown();
+    scheduler.release();
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
@@ -397,7 +397,7 @@ TEST_CASE("FilesystemModule Int16 controls round-trip preserves the saved value"
     CHECK(region->endX == 100);
     CHECK(region->endY == -100);
 
-    scheduler.teardown();
+    scheduler.release();
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }

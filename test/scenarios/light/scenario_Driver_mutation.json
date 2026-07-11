@@ -74,10 +74,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             8,
-            73
+            81
           ],
           "free_heap": [
             0,
@@ -89,10 +89,10 @@
           ],
           "at": [
             "2026-06-13",
-            "2026-06-30"
+            "2026-07-10"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             36,
             51
@@ -131,7 +131,7 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             8,
             98
@@ -149,7 +149,7 @@
             "2026-07-01"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             35,
             70
@@ -188,10 +188,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             8,
-            75
+            95
           ],
           "free_heap": [
             0,
@@ -203,10 +203,10 @@
           ],
           "at": [
             "2026-06-13",
-            "2026-07-01"
+            "2026-07-10"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             43,
             84
@@ -243,10 +243,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             8,
-            66
+            83
           ],
           "free_heap": [
             0,
@@ -258,10 +258,10 @@
           ],
           "at": [
             "2026-06-13",
-            "2026-07-01"
+            "2026-07-10"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             42,
             66
@@ -298,10 +298,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             8,
-            63
+            81
           ],
           "free_heap": [
             0,
@@ -313,10 +313,10 @@
           ],
           "at": [
             "2026-06-13",
-            "2026-07-01"
+            "2026-07-10"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             36,
             56

@@ -26,8 +26,8 @@ TEST_CASE("SolidEffect mode 0 fills the buffer with one uniform colour") {
     solid.brightness = 255;  // brightness 255 leaves the colour unscaled
     layer.addChild(&solid);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 16);
@@ -60,8 +60,8 @@ TEST_CASE("SolidEffect mode 0 scales the flat colour by brightness") {
     solid.brightness = 128;  // half brightness roughly halves each channel
     layer.addChild(&solid);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     auto& buf = layer.buffer();
     // 200*128/255 = 100, 100*128/255 = 50, 0 stays 0 — uniform across the grid.
@@ -94,8 +94,8 @@ TEST_CASE("SolidEffect mode 0 writes the white channel on an RGBW layer") {
     solid.brightness = 255;
     layer.addChild(&solid);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     auto& buf = layer.buffer();
     for (size_t i = 0; i < buf.count(); i++) {
@@ -124,8 +124,8 @@ TEST_CASE("SolidEffect survives a 0x0x0 grid across all colour modes") {
 
     for (uint8_t mode = 0; mode < mm::SolidEffect::kColorModeCount; mode++) {
         solid.colorMode = mode;
-        layer.onBuildState();
-        layer.loop();  // must not crash on an empty grid
+        layer.applyState();
+        layer.tick();  // must not crash on an empty grid
     }
     CHECK(true);
 }

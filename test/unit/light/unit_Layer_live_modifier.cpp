@@ -15,7 +15,7 @@
 #include <utility>
 #include <cstring>
 
-// The live (per-frame) modifier seam: Layer::loop() applies a live modifier's
+// The live (per-frame) modifier seam: Layer::tick() applies a live modifier's
 // modifyLive remap to the rendered buffer every frame WITHOUT a mapping rebuild,
 // and runs that pass ONLY when an enabled modifier reports hasModifyLive() — a
 // static-only Layer pays nothing (the pay-for-what-you-use guarantee). These pin
@@ -29,7 +29,7 @@ namespace {
 // the live pass, not the effect animating itself.
 class GradientEffect : public mm::EffectBase {
 public:
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         if (!buf) return;
         const mm::lengthType w = width(), h = height();
@@ -44,10 +44,10 @@ public:
     }
 };
 
-// Snapshot the Layer's buffer after one loop() at virtual time `t`.
+// Snapshot the Layer's buffer after one tick() at virtual time `t`.
 std::vector<uint8_t> frameAt(mm::Layer& layer, uint32_t t) {
     mm::platform::setTestNowMs(t);
-    layer.loop();
+    layer.tick();
     const mm::Buffer& b = layer.buffer();
     std::vector<uint8_t> out(b.bytes());
     if (b.data()) std::memcpy(out.data(), b.data(), b.bytes());
@@ -70,8 +70,8 @@ TEST_CASE("Layer live pass: Rotate remaps the buffer per frame") {
     GradientEffect fx; layer.addChild(&fx);
     mm::RotateModifier rot; rot.speed = 200;   // fast enough to cross several angle steps
     layer.addChild(&rot);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     auto f0 = frameAt(layer, 1000);
     auto f1 = frameAt(layer, 1000);   // same time → same angle → identical frame
@@ -93,8 +93,8 @@ TEST_CASE("Layer live pass: skipped when no modifier is live") {
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     GradientEffect fx; layer.addChild(&fx);   // no modifiers at all
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     auto f0 = frameAt(layer, 1000);
     auto f1 = frameAt(layer, 5000);   // far later — but nothing animates the buffer
@@ -115,8 +115,8 @@ TEST_CASE("Layer live pass: a disabled live modifier does not run") {
     GradientEffect fx; layer.addChild(&fx);
     mm::RotateModifier rot; rot.speed = 200; rot.setEnabled(false);
     layer.addChild(&rot);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     auto f0 = frameAt(layer, 1000);
     auto f1 = frameAt(layer, 1300);
@@ -125,7 +125,7 @@ TEST_CASE("Layer live pass: a disabled live modifier does not run") {
 }
 
 // COALESCED REBUILD: two beat-driven modifiers (RandomMap) on one Layer both ask for
-// a rebuild on a beat; Layer::loop() must rebuild ONCE (not re-enter onBuildState per
+// a rebuild on a beat; Layer::tick() must rebuild ONCE (not re-enter prepare per
 // modifier) and the Layer must stay valid — the composed mapping changes, no crash.
 TEST_CASE("Layer coalesces rebuilds from two dynamic modifiers") {
     mm::Layouts layouts;
@@ -140,8 +140,8 @@ TEST_CASE("Layer coalesces rebuilds from two dynamic modifiers") {
     mm::RandomMapModifier b; b.bpm = 60;
     layer.addChild(&a);
     layer.addChild(&b);
-    layouts.onBuildState();
-    layer.onBuildState();
+    layouts.applyState();
+    layer.applyState();
 
     REQUIRE(layer.lut().logicalCount() == 64);
 
@@ -165,7 +165,7 @@ TEST_CASE("Layer coalesces rebuilds from two dynamic modifiers") {
     CHECK(beforeOk);   // the composed two-permutation mapping is itself a bijection
 
     // Advance past a beat boundary in small ticks (both modifiers tick each frame).
-    for (uint32_t t = 1000; t <= 2500; t += 50) { mm::platform::setTestNowMs(t); layer.loop(); }
+    for (uint32_t t = 1000; t <= 2500; t += 50) { mm::platform::setTestNowMs(t); layer.tick(); }
     mm::platform::setTestNowMs(0);
 
     auto [after, afterOk] = mapping();

@@ -54,16 +54,22 @@ public:
     /// lightPreset switch RGB↔RGBW). Default no-op; physical drivers that own an
     /// intermediate correction-applied buffer override to resize it OFF the hot path.
     /// Topology changes (light count, channels per light) already flow through
-    /// onBuildState — this hook is just for the preset-driven channel-count change that
+    /// prepare — this hook is just for the preset-driven channel-count change that
     /// doesn't trigger a structural rebuild.
     virtual void onCorrectionChanged() {}
 
-    /// Clear every shared status string on teardown — fail buffer, config error, and config
+    /// Clear every shared status string on release — fail buffer, config error, and config
     /// warning — so a stopped driver leaves nothing behind (frees the owned `failBuf_`; retracts
-    /// the warning the same "clear only MY status" way as the error). A driver that overrides
-    /// teardown() for its own peripheral cleanup chains to this afterwards:
-    /// `deinit(); DriverBase::teardown();`.
-    void teardown() override { clearFailBuf(); clearConfigErr(); setConfigWarn(nullptr); }
+    /// the warning the same "clear only MY status" way as the error), then chain to
+    /// MoonModule::release() so any ScratchBuffer the driver holds frees on disable and children
+    /// recurse. A driver that overrides release() for its own peripheral cleanup chains to this
+    /// afterwards: `deinit(); DriverBase::release();`.
+    void release() override {
+        clearFailBuf();
+        clearConfigErr();
+        setConfigWarn(nullptr);
+        MoonModule::release();
+    }
 
 protected:
     Layer* layer_ = nullptr;
@@ -83,7 +89,7 @@ protected:
     uint16_t start_ = 0;   ///< First source-buffer light this driver outputs (default 0).
     uint16_t count_ = 0;   ///< Lights to output from `start_`; 0 = to end of buffer.
 
-    /// Add the two window controls — call from a driver's onBuildControls(). Kept a
+    /// Add the two window controls — call from a driver's defineControls(). Kept a
     /// helper (not auto-added) so a driver opts in by calling it where its other
     /// controls go, keeping control *order* in the driver's hands.
     void addWindowControls() {
@@ -92,7 +98,7 @@ protected:
     }
 
     /// True if `name` is one of the window controls — a driver folds this into its
-    /// controlChangeTriggersBuildState() so editing the slice re-runs its config.
+    /// affectsPrepare() so editing the slice re-runs its config.
     static bool isWindowControl(const char* name) {
         return std::strcmp(name, "start") == 0 || std::strcmp(name, "count") == 0;
     }

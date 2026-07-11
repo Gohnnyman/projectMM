@@ -627,7 +627,7 @@ Origin: projectMM original, on the WLED-SR GEQ / spectrum concept (Andrew Tuline
 
 Detail: [technical](moxygen/AudioSpectrumEffect.md)
 
-[Tests](../../tests/unit-tests.md#audiomodule)
+[Tests](../../tests/unit-tests.md#audioservice)
 
 <a id="audiovolume"></a>
 
@@ -641,7 +641,7 @@ Origin: projectMM original (VU meter)
 
 Detail: [technical](moxygen/AudioVolumeEffect.md)
 
-[Tests](../../tests/unit-tests.md#audiomodule)
+[Tests](../../tests/unit-tests.md#audioservice)
 
 <a id="demoreel"></a>
 

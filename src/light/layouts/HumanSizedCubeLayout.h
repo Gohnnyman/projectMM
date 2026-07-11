@@ -1,9 +1,6 @@
 #pragma once
 
-#include <limits>
-#include <cstdint>
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -32,7 +29,7 @@ public:
     uint8_t height = 10;
     uint8_t depth  = 10;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("width",  width,  1, 20);
         controls_.addUint8("height", height, 1, 20);
         controls_.addUint8("depth",  depth,  1, 20);

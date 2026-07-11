@@ -1,9 +1,6 @@
 #pragma once
 
-#include <cstdint>
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"   // lengthType, nrOfLightsType
-#include "core/math8.h"          // sin8, cos8 — integer trig LUT
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -28,7 +25,7 @@ public:
     uint16_t spokes = 8;         // number of spokes, 2..64
     uint16_t ledsPerSpoke = 10;  // LEDs along each spoke, 1..256
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint16("spokes", spokes, 2, 64);
         controls_.addUint16("ledsPerSpoke", ledsPerSpoke, 1, 256);
     }

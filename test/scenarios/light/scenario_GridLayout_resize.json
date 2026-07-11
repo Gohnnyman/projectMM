@@ -101,7 +101,7 @@
       "value": 128,
       "measure": true,
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 120,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -115,10 +115,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             95,
-            317
+            1254
           ],
           "free_heap": [
             0,
@@ -130,7 +130,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-07-02"
+            "2026-07-10"
           ]
         },
         "esp32-eth-wifi": {
@@ -187,7 +187,7 @@
             "2026-06-02"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             219,
             1242
@@ -252,7 +252,7 @@
       "value": 64,
       "measure": true,
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 60,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -266,10 +266,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             46,
-            213
+            357
           ],
           "free_heap": [
             0,
@@ -281,7 +281,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-08"
+            "2026-07-10"
           ]
         },
         "esp32-eth-wifi": {
@@ -338,7 +338,7 @@
             "2026-06-02"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             94,
             164
@@ -403,7 +403,7 @@
       "value": 128,
       "measure": true,
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 120,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -417,10 +417,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             98,
-            318
+            671
           ],
           "free_heap": [
             0,
@@ -432,7 +432,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-07-02"
+            "2026-07-10"
           ]
         },
         "esp32-eth-wifi": {
@@ -489,7 +489,7 @@
             "2026-06-02"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             217,
             2544

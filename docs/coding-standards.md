@@ -47,8 +47,8 @@ When a struct or enum is the semantic owner of some data — a control descripto
 Three concrete patterns, all already common in this codebase:
 
 - **Discriminator + free functions in the type's own file.** `ControlType` + `writeControlValue` / `applyControlValue` / `controlTypeName` in [Control.cpp](../src/core/Control.cpp); `parseDottedQuad` / `formatDottedQuad` next to `ControlType::IPv4` in [Control.h](../src/core/Control.h); `LightPreset` + `rebuild()` in [Correction.h](../src/light/drivers/Correction.h). Best when the discriminator is a plain enum and the operations are small.
-- **Methods on the owning class.** [Buffer.h](../src/light/layers/Buffer.h)'s `allocate` / `free` / `clear`; [Scheduler.h](../src/core/Scheduler.h)'s `addModule` / `tick` / `buildState`; [ControlList](../src/core/Control.h)'s `addX` family. Best when the class has identity and the operations naturally form a small interface.
-- **Virtual methods on a base class.** [MoonModule.h](../src/core/MoonModule.h)'s lifecycle (`setup`, `loop`, `loop1s`, `onBuildControls`, `onBuildState`, …). Best when polymorphism is already in play.
+- **Methods on the owning class.** [Buffer.h](../src/light/layers/Buffer.h)'s `allocate` / `free` / `clear`; [Scheduler.h](../src/core/Scheduler.h)'s `addModule` / `tick` / `prepareTree`; [ControlList](../src/core/Control.h)'s `addX` family. Best when the class has identity and the operations naturally form a small interface.
+- **Virtual methods on a base class.** [MoonModule.h](../src/core/MoonModule.h)'s lifecycle (`setup`, `tick`, `tick1s`, `defineControls`, `prepare`, …). Best when polymorphism is already in play.
 
 Counter-example to avoid: a `switch (c.type)` on `ControlType` duplicated in HttpServerModule, FilesystemModule, and scenario_runner. That shape forces a new ControlType to be added in four places, and the compiler can't catch a missed switch on a non-exhaustive enum. The per-type dispatch instead lives next to `ControlType` in [Control.cpp](../src/core/Control.cpp); consumers call `writeControlValue(sink, c)` and don't need to know the enum's shape.
 
@@ -62,29 +62,32 @@ When a `switch (type)` outside the type's home file is legitimate: the caller ha
 
 - **Light-domain modules and the `MoonModule` base: header-only.** Every effect, modifier, driver, layout, the light-domain containers (`Layouts`, `Layers`, `Drivers`, `Layer`), and the `MoonModule` base class live in a single `.h` with implementation inline. The benefit is concrete: a contributor copies `RainbowEffect.h`, edits, saves as `MyEffect.h`, registers one line in `main.cpp` — no "where does the `.cpp` go, what does CMake need" friction. The chain `RainbowEffect.h → EffectBase.h → MoonModule.h` is uniform; readers don't pivot to a different file shape at the base. When a light-domain file outgrows one concern, extract a helper into its own header (`BlendMap`, `MappingLUT`) rather than splitting to `.h` + `.cpp`. Header-only is a feature of the light domain.
 - **Core service modules: `.h` + `.cpp`.** Core modules that bridge to the platform layer or implement substantial infrastructure (`HttpServerModule`, `FilesystemModule`, `NetworkModule`, `Scheduler`, `SystemModule`, `Control`) ship as a `.h` (interface) plus a `.cpp` (implementation). Three reasons that compound: (a) implementation changes recompile only the `.cpp`, not every TU that includes the header — incremental builds are 2–5× faster on the kind of edits that happen in development; (b) readers want the interface separately from the body; (c) symbol bloat and link-time stay bounded. Small core utilities that are *almost entirely declarations or inline accessors* — `types.h`, `color.h`, `version.h`, `BinaryBroadcaster.h`, `JsonUtil.h`, `JsonSink.h`, `Sha1.h`, `Base64.h` — stay header-only. Templates (e.g. `ModuleFactory::registerType<T>`) also must stay in the header because of C++ instantiation rules; a module that's mostly template can therefore stay header-only.
+- **A catalog module includes ONLY its umbrella.** Every effect, modifier, layout, and concrete driver leads with exactly one include — `light/effects/Effect.h`, `light/layouts/Layout.h`, `light/modifiers/Modifier.h`, or `light/drivers/Driver.h` — and nothing else at the top of the file. The umbrella is the module author's **standard library**: it pulls in the base class, the render context, the common domain helpers (`draw` / `Palette` / `math8` / `noise` / `color` / `crc` for effects; `DriverBase` for drivers; the base + integer trig for modifiers/layouts), the lifecycle primitives (`ScratchBuffer`), the audio source, AND the standard-library headers the bodies use (`<cstring>`, `<cmath>`, `<cstdint>`, `<array>`; drivers add `<cstdio>`, `<algorithm>`). Bundling this whole surface is **byte-free** — unused declarations emit no code (measured: the ESP32 image did not grow when the umbrellas were maximised), so the reflex is *add the common header to the umbrella, don't scatter it per file*. That keeps every module in a domain reading identically and the copy-edit-register workflow free of include guesswork; it's also the surface a scripted MoonLive module gets uniformly. This is a *maximal* (prelude-style) umbrella on purpose — a recognisable pattern (Rust's `std::prelude`, a project-wide `framework.h`), justified at the introduction site in each umbrella's header comment.
+
+  **The only permitted second include** is a helper that is genuinely *outside* the domain's standard surface — a network packet format (`ArtNetPacket.h`), a font table (`fonts.h`), the module factory, a platform primitive (`platform.h`), a specialised core service (`JsonUtil.h`, `DevicesModule.h`) — and it carries a one-line justification comment so the exception is visibly deliberate. If the "extra" is a *common* header two-plus modules of the same kind reach for, it is not an exception: **move it into the umbrella instead** (that is how `<cstdint>`/`<array>`/`<algorithm>` got there). Two structural notes: the umbrella includes the *kind's* real common set, not a blanket one (a driver umbrella is mostly `DriverBase`, which already bundles `Layer`/`Buffer`/`Correction`/platform); and it can't be the base class itself — `EffectBase.h` forward-declares `Layer` (whose accessors are defined in `Layer.h`), so folding `Layer.h` into the base would be circular. The umbrella is the *separate* thin header that depends on both.
 - **Exceptions need a one-line comment at the top of the file naming the reason.** Without a stated reason the file is expected to follow the default for its category. When in doubt: light → header-only, core → `.h` + `.cpp`.
 
 ## Override-and-chain convention
 
-A MoonModule that owns children gets the standard lifecycle methods (`setup`, `loop`, `loop20ms`, `loop1s`, `teardown`, `onBuildControls`, `onBuildState`) propagated to children by the base class default — see [architecture.md § MoonModules](architecture.md#moonmodules). When a container overrides one of these to add its own work, the convention is **when in the override to call the base**:
+A MoonModule that owns children gets the standard lifecycle methods (`setup`, `tick`, `tick20ms`, `tick1s`, `release`, `defineControls`, `prepare`) propagated to children by the base class default — see [architecture.md § MoonModules](architecture.md#moonmodules). When a container overrides one of these to add its own work, the convention is **when in the override to call the base**:
 
-- **`loop` / `loop20ms` / `loop1s`** — option A: parent work first, then chain. The parent prepares state that children consume.
+- **`tick` / `tick20ms` / `tick1s`** — option A: parent work first, then chain. The parent prepares state that children consume.
 
   ```cpp
-  void loop() override {
+  void tick() override {
       if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
           blendMap(...);                  // parent's own work
       }
-      MoonModule::loop();                 // then tick children
+      MoonModule::tick();                 // then tick children
   }
   ```
 
 - **`setup`** — chain first, then parent work. Children must be initialised before the parent depends on them.
-- **`onBuildControls`** — chain first, then parent work. Children register their controls before the parent appends or rewires its own. Lets a parent build a list whose order is "children's controls, then mine."
-- **`onBuildState`** — chain first, then parent work. Children compute their dimensions and dynamic buffers before the parent reads or modifies the shared state (Layer reads child effect/modifier dimensions; Drivers reads Layer output sizing).
-- **`teardown`** — parent work first, then chain. The parent shuts down its own state before the base reverse-iterates children.
+- **`defineControls`** — chain first, then parent work. Children register their controls before the parent appends or rewires its own. Lets a parent build a list whose order is "children's controls, then mine."
+- **`prepare`** — chain first, then parent work. Children compute their dimensions and dynamic buffers before the parent reads or modifies the shared state (Layer reads child effect/modifier dimensions; Drivers reads Layer output sizing).
+- **`release`** — parent work first, then chain. The parent shuts down its own state before the base reverse-iterates children.
 
-Option B (children first on `loop`; parent first on `setup` / `onBuildControls` / `onBuildState`) or a sandwich pattern is allowed only when a specific reason justifies it; add a one-line comment at the override explaining why.
+Option B (children first on `tick`; parent first on `setup` / `defineControls` / `prepare`) or a sandwich pattern is allowed only when a specific reason justifies it; add a one-line comment at the override explaining why.
 
 ## Casts
 
@@ -122,7 +125,7 @@ Where each kind of fact lives. The guiding rule: **document a thing once, in the
 
 ### The tree mirrors `src/`
 
-[Everything is a MoonModule](architecture.md#moonmodules); `docs/moonmodules/` mirrors `src/`, a **`core/`** subtree and a **`light/`** subtree. Within each, a module is either **UI** (user-facing and configurable — the core services like Network/System/FileSystem, and the light **catalog modules**: layouts, effects, modifiers, drivers) or **supporting** (the machinery UI modules lean on — `Control`, `Scheduler`, `Layer`, `Buffer`, the `*Base` classes). [Peripherals](architecture.md#peripherals) are UI modules that bridge to hardware (a driver, a sensor).
+[Everything is a MoonModule](architecture.md#moonmodules); `docs/moonmodules/` mirrors `src/`, a **`core/`** subtree and a **`light/`** subtree. Within each, a module is either **UI** (user-facing and configurable — the System modules like Network/System/FileSystem, the user-added [Services](architecture.md#services), and the light **catalog modules**: layouts, effects, modifiers, drivers) or **supporting** (the machinery UI modules lean on — `Control`, `Scheduler`, `Layer`, `Buffer`, the `*Base` classes). [Services](architecture.md#services) are UI modules that bridge to hardware (a sensor, a network integration).
 
 ### The two surfaces
 

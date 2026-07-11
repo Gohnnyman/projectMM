@@ -1,13 +1,8 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"      // layer()->buffer()
-#include "light/Palette.h"           // colorFromPalette, Palettes::active()
-#include "light/draw.h"              // draw::text / draw::glyph / draw::fill
-#include "light/fonts.h"             // fonts::kAll — the selectable bitmap fonts
-#include "core/math8.h"              // beat8-style time (elapsed())
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
-#include <cstring>                   // strlen, strchr
+#include "light/fonts.h"             // fonts::kAll — the selectable bitmap fonts
 
 namespace mm {
 
@@ -38,7 +33,7 @@ public:
     uint8_t speed  = 30;                  // marquee speed (pixels/sec-ish); only used when scrolling
     uint8_t hue    = 128;                 // palette index for the text colour (mid-palette; 0 is black in some palettes)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addTextArea("text", text_, sizeof(text_));
         controls_.addBool("scroll", scroll);
         static constexpr const char* kFontOptions[] = {"4x6", "6x8"};
@@ -47,7 +42,7 @@ public:
         controls_.addUint8("hue", hue, 0, 255);
     }
 
-    void loop() override {
+    void tick() override {
         const int w = width();
         const int h = height();
         if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;

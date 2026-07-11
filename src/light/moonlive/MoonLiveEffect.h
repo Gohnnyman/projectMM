@@ -7,11 +7,11 @@
 
 // MoonLiveEffect — a scripted effect rendered by the MoonLive engine (§3.3 of
 // livescripts-analysis-top-down.md). The thin binding side of the engine/binding seam: it
-// IS a first-class EffectBase (role, controls, lifecycle, generic UI), and its loop()
+// IS a first-class EffectBase (role, controls, lifecycle, generic UI), and its tick()
 // delegates to a compiled MoonLive over this effect's own buffer.
 //
-// The effect holds a `source` text control; onBuildState compiles it through the engine and
-// loop() runs the emitted native code over the buffer (emit → allocExec → call → write). A
+// The effect holds a `source` text control; prepare compiles it through the engine and
+// tick() runs the emitted native code over the buffer (emit → allocExec → call → write). A
 // source edit recompiles live; a parse error shows in the module status and the layer goes
 // dark — robust, no reboot.
 
@@ -29,13 +29,13 @@ public:
     // reference to the engine's live control-arena slot, so a slider write lands in the slot the
     // next render tick reads — no recompile (the live-edit guarantee). Editing the source
     // recompiles (the script-editor loop), which re-derives the control set.
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addTextArea("source", source_, sizeof(source_));
         uint8_t n = 0;
         const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
-            if (!slot) continue;   // engine not compiled yet (first sweep) — controls appear after onBuildState
+            if (!slot) continue;   // engine not compiled yet (first sweep) — controls appear after prepare
             // The declared name is a span into source_ (not NUL-terminated); copy it into a stable
             // member pool so the control descriptor's borrowed name pointer stays valid. The compiler
             // rejects names ≥ kMaxControlName, so the full name always fits — no truncation, no
@@ -46,19 +46,19 @@ public:
         }
     }
 
-    // A `source` edit must recompile — route it through the onBuildState rebuild sweep so a new
+    // A `source` edit must recompile — route it through the prepare rebuild sweep so a new
     // script swaps in live (the script-editor loop). A SCRIPTED CONTROL's value change must NOT
     // recompile: it just updates an arena byte the running native code reads next tick. So only
     // "source" triggers a rebuild; every scripted control returns false (the live-edit path).
-    bool controlChangeTriggersBuildState(const char* controlName) const override {
+    bool affectsPrepare(const char* controlName) const override {
         return std::strcmp(controlName, "source") == 0;
     }
 
     // Compile the source on the cold rebuild path. A failed compile (parse error or no exec
-    // memory) surfaces in the module status and leaves loop() a no-op — the effect renders
+    // memory) surfaces in the module status and leaves tick() a no-op — the effect renders
     // dark, the device keeps running (robustness + no-reboot). A *source* edit re-enters here and
     // recompiles, so a new script swaps in live; a broken edit just shows its diagnostic.
-    void onBuildState() override {
+    void prepare() override {
         if (engine_.compile(source_, moonlive::lightBuiltins())) {
             clearStatus();
         } else {
@@ -71,16 +71,15 @@ public:
         // Report the exec block as the module's heap use (codeCap, the word-rounded allocation),
         // so the UI card's "+ dynamic" reflects the JIT'd program — 0 when the compile failed.
         setDynamicBytes(engine_.ok() ? engine_.codeCap() : 0);
-        EffectBase::onBuildState();
     }
 
-    void loop() override {
+    void tick() override {
         if (engine_.ok()) engine_.run(buffer(), nrOfLights(), channelsPerLight(), elapsed());
     }
 
-    void teardown() override {
+    void release() override {
         engine_.free();   // release the exec block — the destructor role
-        EffectBase::teardown();
+        EffectBase::release();
     }
 
 private:

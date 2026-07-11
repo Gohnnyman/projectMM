@@ -101,7 +101,7 @@
       "value": 4,
       "measure": true,
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 120,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -115,10 +115,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             97,
-            316
+            660
           ],
           "free_heap": [
             0,
@@ -130,7 +130,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-25"
+            "2026-07-10"
           ]
         },
         "esp32-eth-wifi": {
@@ -187,7 +187,7 @@
             "2026-07-05"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             227,
             383
@@ -234,7 +234,7 @@
       "value": false,
       "measure": true,
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 200,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -248,10 +248,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             108,
-            350
+            662
           ],
           "free_heap": [
             0,
@@ -263,7 +263,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-07-01"
+            "2026-07-10"
           ]
         },
         "esp32-eth-wifi": {
@@ -320,7 +320,7 @@
             "2026-07-05"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             278,
             2500
@@ -367,7 +367,7 @@
       "value": false,
       "measure": true,
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 400,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -381,10 +381,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             107,
-            522
+            664
           ],
           "free_heap": [
             0,
@@ -396,7 +396,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-15"
+            "2026-07-10"
           ]
         },
         "esp32-eth-wifi": {
@@ -453,7 +453,7 @@
             "2026-07-05"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             766,
             3398
@@ -508,7 +508,7 @@
       "value": true,
       "measure": true,
       "contract": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": 120,
           "free_heap": 0,
           "set_by": "2026-06-02",
@@ -522,10 +522,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             96,
-            298
+            667
           ],
           "free_heap": [
             0,
@@ -537,7 +537,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-30"
+            "2026-07-10"
           ]
         },
         "esp32-eth-wifi": {
@@ -594,7 +594,7 @@
             "2026-07-05"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             206,
             3399

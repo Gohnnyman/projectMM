@@ -2,7 +2,7 @@
   "name": "scenario_MoonLiveEffect_controls",
   "module": "MoonLiveEffect",
   "mode": "mutate",
-  "skip_on": ["pc-windows", "pc-linux"],
+  "skip_on": ["desktop-windows", "desktop-linux"],
   "also": [
     "Layouts",
     "GridLayout",
@@ -57,7 +57,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             4
@@ -79,14 +79,14 @@
     },
     {
       "name": "set-source-with-control",
-      "description": "Edit the source to the control script. A source edit recompiles (controlChangeTriggersBuildState gates on `source`); the engine derives the `speed` control and the binding surfaces it.",
+      "description": "Edit the source to the control script. A source edit recompiles (affectsPrepare gates on `source`); the engine derives the `speed` control and the binding surfaces it.",
       "op": "set_control",
       "id": "ML",
       "key": "source",
       "value": "uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -108,14 +108,14 @@
     },
     {
       "name": "change-control-live",
-      "description": "Change the `speed` control value (a slider move). This must NOT recompile — controlChangeTriggersBuildState returns false for a scripted control; the arena byte updates and the next render tick reads it. Tick stays cheap (a recompile would spike it).",
+      "description": "Change the `speed` control value (a slider move). This must NOT recompile — affectsPrepare returns false for a scripted control; the arena byte updates and the next render tick reads it. Tick stays cheap (a recompile would spike it).",
       "op": "set_control",
       "id": "ML",
       "key": "speed",
       "value": 12,
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -144,7 +144,7 @@
       "value": "uint8_t speed = 7; // @control 0..15\nuint8_t hue = 128; // @control 0..255\nsetRGB(speed, hue, 0, 255);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -173,7 +173,7 @@
       "value": "uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -202,7 +202,7 @@
       "value": "uint8_t speed = ;",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             8
@@ -231,7 +231,7 @@
       "value": "uint8_t bright = 200; // @control 0..255\nfill(0, 0, bright);",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             1
@@ -253,7 +253,7 @@
     },
     {
       "name": "remove-control-effect",
-      "description": "Remove the effect — the engine releases its exec block AND its control arena (teardown).",
+      "description": "Remove the effect — the engine releases its exec block AND its control arena (release).",
       "op": "remove_module",
       "id": "ML"
     },
@@ -266,7 +266,7 @@
       "parent_id": "Layer",
       "measure": true,
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             0,
             2

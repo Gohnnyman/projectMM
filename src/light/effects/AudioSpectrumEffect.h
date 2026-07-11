@@ -1,11 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"      // colorFromPalette + the global active palette
-#include "core/color.h"        // hsvToRgb, RGB
-#include "core/AudioModule.h"    // AudioModule::latestFrame()
-
-#include <cstring>             // std::memset
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -18,7 +13,7 @@ namespace mm {
 // (a horizontal VU bar) and the bars sit above it; shorter grids use the full
 // height for the spectrum.
 //
-// Reads the live frame from AudioModule::latestFrame(); no mic / silence → all
+// Reads the live frame from AudioService::latestFrame(); no mic / silence → all
 // bands zero → dark, so it is safe on any target and any grid size (including
 // 0×0). On a 1D strip (height 1) the bars collapse to per-column brightness.
 // Author: projectMM original, on the WLED-SR GEQ / spectrum-analyser concept (Andrew Tuline) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
@@ -34,12 +29,12 @@ public:
     // what a "spectrum" effect is expected to look like.
     uint8_t colorMode = 1;
 
-    void onBuildControls() override {
+    void defineControls() override {
         static constexpr const char* kColorOptions[] = {"height", "per-band"};
         controls_.addSelect("colorMode", colorMode, kColorOptions, 2);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();
@@ -49,7 +44,7 @@ public:
 
         std::memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
 
         auto setRGB = [&](lengthType x, lengthType y, lengthType z,
                           uint8_t r, uint8_t g, uint8_t b) {

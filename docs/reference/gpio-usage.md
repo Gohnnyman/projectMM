@@ -36,6 +36,7 @@ Everything else is free for user I/O. Since the ESP32 I²S / RMT / LED periphera
 | Role-conflict | **19, 20** | Native USB D-/D+ (the USB-C port on DevKitC boards). Usable, but breaks the native-USB console/DFU. |
 | Role-conflict | **43, 44** | UART0 TX/RX — the default serial console. Take them and you lose `printf`-over-serial. |
 | Role-conflict | **0, 45, 46** | Boot straps. Don't drive at reset. |
+| Absent | **22, 23, 24, 25** | These GPIO numbers **do not exist** on the S3 (a numbering gap in the silicon). Setting a pin control to one is invalid — `GPIO_IS_VALID_GPIO` rejects it, and the pin map flags it as an error. |
 
 **Clear for I/O on the N16R8:** 1-18, 21, 47, 48 (mind GPIO 3 is a soft strap; the on-board WS2812 LED sits on **48** on DevKitC-1 rev v1.1 but on **38** on rev v1.0, so avoid whichever your board uses — the bench board is a rev v1.0, LED on 38, leaving 48 free). Example, the bench mic on the N16R8 is **SCK=47 / WS=48 / SD=21** — clear of octal PSRAM, JTAG (39-42 stay free for a future JTAG probe), the boot straps, and (on this rev) the LED, with the mic wires kept away from the Wi-Fi antenna end.
 ## ESP32-P4
@@ -49,7 +50,7 @@ Everything else is free for user I/O. Since the ESP32 I²S / RMT / LED periphera
 | Role-conflict | **37, 38** | UART0 console on the P4-NANO (`CONFIG_ESP_CONSOLE_UART_DEFAULT`) — the runtime `ESP_LOGI` lines come out here, not over USB. |
 | Board-wired (P4-NANO) | **Ethernet RMII** 28-31 / 49-52, **C6 SDIO** 14-19 / 54, **I2C** 7-8 | Consumed by the NANO's on-board Ethernet PHY, the C6 WiFi co-processor, and the I2C bus. |
 
-**Clear on the P4-NANO:** 20-27, 32-33, 39-48 (the LED-driver default is `pins="20,21,22,23,24,25,26,27"`). Exact free set is board-specific; the NANO's is the reference.
+**Clear on the P4-NANO:** 20-27, 32-33, 39-48 (the LED-driver default is `pins="20,21,22,23,24,25,26,27"`). Exact free set is board-specific; the NANO's is the reference. A carrier board changes what's exposed and how — the [MHC-WLED ESP32-P4 shield](mhc-wled-esp32-p4-shield.md) routes every terminal through level shifters / RS-485 transceivers / protected inputs (no bare GPIO), which is why a direct loopback jumper fails on it; its full terminal map is on that page.
 
 ## ESP32-S31
 

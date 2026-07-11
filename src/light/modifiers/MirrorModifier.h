@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 
@@ -36,7 +36,7 @@ public:
     bool mirrorY = true;
     bool mirrorZ = true;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("mirrorX", mirrorX);
         controls_.addBool("mirrorY", mirrorY);
         controls_.addBool("mirrorZ", mirrorZ);

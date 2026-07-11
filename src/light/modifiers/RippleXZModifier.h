@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 
@@ -15,7 +15,7 @@ namespace mm {
 // Prior art: MoonLight's RippleXZ modifier (M_MoonLight.h) — same shrink/towardsX/
 // towardsZ axis collapse (`modifySize` sets the axis to 1, `modifyPosition` sets
 // the coordinate to 0). MoonLight additionally runs a per-frame buffer shift in
-// loop() that propagates a ripple wave along the collapsed axis by reading and
+// tick() that propagates a ripple wave along the collapsed axis by reading and
 // writing the layer's RGB pixels (setRGB/getRGB). That is a render-buffer effect,
 // not a coordinate transform, and has no place in the static build-time fold this
 // base class expresses — projectMM modifiers emit coordinates only, so the wave
@@ -34,7 +34,7 @@ public:
     bool towardsX = true;
     bool towardsZ = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("shrink", shrink);
         controls_.addBool("towardsX", towardsX);
         controls_.addBool("towardsZ", towardsZ);

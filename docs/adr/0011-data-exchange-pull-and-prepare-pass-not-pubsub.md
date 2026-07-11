@@ -12,7 +12,7 @@ Do not use pub/sub. There is one producer per data kind and the consumer explici
 
 - **Shared-struct pull** for hot-path data: the producer owns a small POD struct overwritten in place each tick; the consumer holds a `const Foo*` (set at wiring time) and reads it per frame. Lock-free for a small POD (a half-updated read self-corrects next tick); a large frame buffer uses the two-core double-buffer swap instead, not this pull.
 - **Push to a domain-neutral sink** when a producer hands bytes to a generic core service: the core defines a narrow interface (`BinaryBroadcaster`), the producer pushes, the sink knows nothing about the payload.
-- **A framework-driven prepare-pass** for derived-state rebuilds: a three-tier split (`onUpdate` per-control, a `controlChangeTriggersBuildState` gate, `onBuildState` rebuild) where the coordinator walks every module, gated by per-module metadata. This is the recognised layout/prepare-pass pattern (JUCE `prepareToPlay`, UIKit `layoutSubviews`, WPF `AffectsMeasure`), not an event bus: the publisher tells the coordinator to run the pass, the coordinator walks every module.
+- **A framework-driven prepare-pass** for derived-state rebuilds: a three-tier split (`onControlChanged` per-control, a `affectsPrepare` gate, `prepare` rebuild) where the coordinator walks every module, gated by per-module metadata. This is the recognised layout/prepare-pass pattern (JUCE `prepareToPlay`, UIKit `layoutSubviews`, WPF `AffectsMeasure`), not an event bus: the publisher tells the coordinator to run the pass, the coordinator walks every module.
 
 Direct method calls cover the one remaining case (a producer notifying one known consumer): the producer holds a pointer set at wiring time and calls it.
 

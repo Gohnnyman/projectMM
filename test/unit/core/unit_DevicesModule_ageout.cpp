@@ -6,9 +6,9 @@
 // presence packet stamps lastSeenMs, so the drop is an "unheard too long" check. Virtual
 // time (platform::setTestNowMs) drives it deterministically, no network or wall clock.
 //
-// The module's age-out runs in loop1s(); the test restores a cached list (the public
-// persistence entry point), advances virtual time, and ticks loop1s() to observe which
-// rows survive via listRowCount(). The UDP listener loop1s() drains is inert here (no live
+// The module's age-out runs in tick1s(); the test restores a cached list (the public
+// persistence entry point), advances virtual time, and ticks tick1s() to observe which
+// rows survive via listRowCount(). The UDP listener tick1s() drains is inert here (no live
 // packets on the host bind), and the self row is registered against the host's own IP — so
 // the state the test exercises is the age-out path.
 
@@ -64,7 +64,7 @@ bool aPresentAfter(uint32_t t0, uint32_t dt, bool reconfirmA) {
         dev.injectPacketForTest(pkt, sizeof(pkt), ip);
     }
     platform::setTestNowMs(t0 + dt);
-    dev.loop1s();                           // runs ageOut() against the advanced clock
+    dev.tick1s();                           // runs ageOut() against the advanced clock
     return present(dev, "192.168.1.20");    // ClockGuard restores the real clock on return
 }
 

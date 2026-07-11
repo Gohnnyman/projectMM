@@ -1,8 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"   // colorFromPalette + active palette
-#include "core/noise.h"      // inoise8 — the shared value-noise field
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -17,12 +15,12 @@ public:
     uint8_t scale = 4;  // spatial frequency (1-32)
     uint8_t bpm = 60;   // beats per minute — scrolls 8 noise cells per beat
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("scale", scale, 1, 32);
         controls_.addUint8("bpm", bpm, 1, 255);
     }
 
-    void loop() override {
+    void tick() override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();

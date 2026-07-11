@@ -7,20 +7,20 @@ namespace mm {
 
 /// Light-domain MoonModule base for modifiers. A modifier is a **coordinate transform** that reshapes how a Layer's effect output maps onto the physical lights. Multiple modifiers on one Layer **compose**: they apply in child order, each reshaping the result of the one below (Region *then* Multiply-mirror *then* Rotate).
 ///
-/// **The fold contract:** a Layer builds its mapping by walking the physical lights and folding each through every enabled modifier in order — the composition M₁∘M₂∘…∘Mₙ collapsed into one mapping, so the per-frame render stays a single lookup. Three hooks, each a no-op by default so a modifier implements only what it needs: `modifyLogicalSize` (static, once per rebuild, reshapes the running logical box), `modifyLogical` (static, per physical light, folds a coordinate into this stage's logical space, returns false to reject), and `modifyLive` (dynamic, per-frame, a backward map that remaps a coordinate without rebuilding). A beat-driven modifier sets a flag in `loop`; the Layer polls `consumeNeedsRebuild` and rebuilds the mapping once if any asks. `dimensions` advertises which axes the modifier can transform.
+/// **The fold contract:** a Layer builds its mapping by walking the physical lights and folding each through every enabled modifier in order — the composition M₁∘M₂∘…∘Mₙ collapsed into one mapping, so the per-frame render stays a single lookup. Three hooks, each a no-op by default so a modifier implements only what it needs: `modifyLogicalSize` (static, once per rebuild, reshapes the running logical box), `modifyLogical` (static, per physical light, folds a coordinate into this stage's logical space, returns false to reject), and `modifyLive` (dynamic, per-frame, a backward map that remaps a coordinate without rebuilding). A beat-driven modifier sets a flag in `tick`; the Layer polls `consumeNeedsRebuild` and rebuilds the mapping once if any asks. `dimensions` advertises which axes the modifier can transform.
 ///
 /// **Fan-out is free:** because the build walks physical lights, fan-out (one logical cell driving N physical lights — a Multiply kaleidoscope) emerges naturally: N physical lights fold onto the same logical cell. There is no build-time fan-out list and no product-of-multipliers ceiling — each physical light contributes at most one destination, so the mapping can never overflow.
 ///
 /// **Affine modifiers:** most modifiers are non-affine (a mask is a predicate, a tile is modulo) and express their fold directly. The rotate modifier is the exception and the codebase's transform-matrix reference: rotation is the canonical affine transform, written as an explicit integer 2×2 rotation matrix in `modifyLive`. A future affine "Transform" modifier (translate+scale+rotate+shear in one) would compose its matrix the same way and apply it through the same hook — the fold interface hosts a matrix-backed modifier with no change.
 ///
-/// **Prior art:** the two building blocks are the textbook image-warping pattern — bake a coordinate transform into a precomputed spatial LUT, and build that table by BACKWARD mapping (walk the destinations, find each one's source) so no output pixel is ever left unmapped (https://towardsdatascience.com/forward-and-backward-mapping-for-computer-vision-833436e2472/). What is specific here — and credited to MoonLight — is collapsing a whole *chain* of discrete pixel folds into ONE index table: a PC node graph (TouchDesigner, shader graphs) gives each node its own frame buffer; an ESP32 can't spare a buffer per modifier, so the chain is folded into a single LUT and the hot path stays one gather. MoonLight's `modifySize` / `modifyPosition` / `modifyXYZ` map to our `modifyLogicalSize` / `modifyLogical` / `modifyLive`, written fresh against our `MappingLUT` (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h).
+/// **Prior art:** the two building blocks are the textbook image-warping pattern — bake a coordinate transform into a precomputed spatial LUT, and build that table by BACKWARD mapping (walk the destinations, find each one's source) so no output pixel is ever left unmapped (https://towardsdatascience.com/forward-and-backward-mapping-for-computer-vision-833436e2472/). What is specific here — and credited to MoonLight — is collapsing a whole *chain* of discrete pixel folds into ONE index table: a desktop node graph (TouchDesigner, shader graphs) gives each node its own frame buffer; an ESP32 can't spare a buffer per modifier, so the chain is folded into a single LUT and the hot path stays one gather. MoonLight's `modifySize` / `modifyPosition` / `modifyXYZ` map to our `modifyLogicalSize` / `modifyLogical` / `modifyLive`, written fresh against our `MappingLUT` (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h).
 class ModifierBase : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Modifier; }
 
     /// A modifier control change alters the mapping, so the owning Layer must rebuild
-    /// it — the pipeline-wide rebuild path. See MoonModule::onUpdate.
-    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return true; }
+    /// it — the pipeline-wide rebuild path. See MoonModule::onControlChanged.
+    bool affectsPrepare(const char* /*controlName*/) const override { return true; }
 
     /// Which axes the modifier can transform. Defaults to D3 — a modifier that
     /// touches the mapping is assumed to work in 3D unless it declares otherwise.
@@ -64,10 +64,10 @@ public:
     virtual bool hasModifyLive() const { return false; }
 
     /// A modifier whose mapping changes on a timer (RandomMap reshuffles on a beat)
-    /// sets a flag in its loop(); the Layer polls this once per frame across all its
+    /// sets a flag in its tick(); the Layer polls this once per frame across all its
     /// enabled modifiers and rebuilds the mapping ONCE if any returns true — so
     /// several dynamic modifiers ticking together coalesce to a single rebuild rather
-    /// than each re-entering onBuildState(). Returns true at most once per change,
+    /// than each re-entering prepare(). Returns true at most once per change,
     /// clearing the flag. Default false: a static modifier never asks for a rebuild.
     virtual bool consumeNeedsRebuild() { return false; }
 };

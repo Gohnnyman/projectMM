@@ -21,8 +21,8 @@ public:
     virtual void forEachCoord(CoordCallback cb, void* ctx) const = 0;
 
     /// Every layout control (grid width/height/depth, …) changes the physical light
-    /// count and therefore needs the pipeline-wide rebuild. See MoonModule::onUpdate.
-    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return true; }
+    /// count and therefore needs the pipeline-wide rebuild. See MoonModule::onControlChanged.
+    bool affectsPrepare(const char* /*controlName*/) const override { return true; }
 };
 
 } // namespace mm

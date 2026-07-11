@@ -13,7 +13,7 @@
 // These tests pin the receive side of the shared OpDmx wire format: parser
 // accept/reject, universe→buffer placement and clamping (via the public
 // applyDmx test surface — no sockets needed), the staging-buffer lifecycle
-// (sized off the hot path, never reallocated by loop, freed on teardown), and
+// (sized off the hot path, never reallocated by loop, freed on release), and
 // one real localhost UDP round-trip that exercises the platform bind/recvFrom
 // path end to end on desktop CI.
 
@@ -36,8 +36,8 @@ struct Rig {
         layer.setLayouts(&layouts);
         layer.setChannelsPerLight(3);
         layer.addChild(&fx);
-        fx.onBuildControls();
-        layer.onBuildState();
+        fx.defineControls();
+        layer.applyState();
     }
 };
 
@@ -99,7 +99,7 @@ TEST_CASE("NetworkReceiveEffect places universes at consecutive 510-byte offsets
 
     r.fx.applyDmx(0, u0, sizeof(u0));
     r.fx.applyDmx(1, u1, sizeof(u1));
-    r.layer.loop();   // staging → layer buffer
+    r.layer.tick();   // staging → layer buffer
 
     const uint8_t* buf = r.layer.buffer().data();
     CHECK(buf[0] == 0xAA);
@@ -114,8 +114,8 @@ TEST_CASE("NetworkReceiveEffect holds the last frame across ticks without new pa
     uint8_t u0[3] = {10, 20, 30};
     r.fx.applyDmx(0, u0, sizeof(u0));
 
-    r.layer.loop();
-    r.layer.loop();   // no new packet — must still show the last frame
+    r.layer.tick();
+    r.layer.tick();   // no new packet — must still show the last frame
     const uint8_t* buf = r.layer.buffer().data();
     CHECK(buf[0] == 10);
     CHECK(buf[1] == 20);
@@ -131,7 +131,7 @@ TEST_CASE("NetworkReceiveEffect respects universe_start") {
 
     r.fx.applyDmx(4, below, sizeof(below));   // below start — ignored
     r.fx.applyDmx(5, at, sizeof(at));         // at start — offset 0
-    r.layer.loop();
+    r.layer.tick();
 
     const uint8_t* buf = r.layer.buffer().data();
     CHECK(buf[0] == 7);
@@ -147,7 +147,7 @@ TEST_CASE("NetworkReceiveEffect clamps payloads to the buffer") {
 
     r.fx.applyDmx(1, u1, sizeof(u1));   // offset 510 + 510 bytes > 768 → clamp to 258
     r.fx.applyDmx(2, u1, sizeof(u1));   // offset 1020 — entirely beyond → ignored
-    r.layer.loop();
+    r.layer.tick();
 
     const uint8_t* buf = r.layer.buffer().data();
     CHECK(buf[510] == 0xCC);
@@ -159,23 +159,23 @@ TEST_CASE("NetworkReceiveEffect tolerates a zero-light grid") {
     Rig r(0, 0);
     uint8_t u0[3] = {1, 2, 3};
     r.fx.applyDmx(0, u0, sizeof(u0));
-    r.layer.loop();
+    r.layer.tick();
     CHECK(true);   // reaching here without a crash is the assertion
 }
 
 // --- staging lifecycle ---------------------------------------------------------
 
-// Staging is sized in onBuildState (off the hot path), loop() never reallocates it, teardown frees it.
+// Staging is sized in prepare (off the hot path), tick() never reallocates it, release frees it.
 TEST_CASE("NetworkReceiveEffect staging buffer lifecycle") {
     Rig r;
     REQUIRE(r.fx.stagingData() != nullptr);
     CHECK(r.fx.stagingBytes() == r.layer.buffer().bytes());
 
     const uint8_t* before = r.fx.stagingData();
-    r.layer.loop();
+    r.layer.tick();
     CHECK(r.fx.stagingData() == before);   // no realloc in the hot path
 
-    r.fx.teardown();
+    r.fx.release();
     CHECK(r.fx.stagingData() == nullptr);
     CHECK(r.fx.stagingBytes() == 0);
 }
@@ -203,7 +203,7 @@ TEST_CASE("NetworkReceiveEffect receives over localhost UDP") {
     // bounded retry (≤100 ms) so CI stays deterministic.
     bool landed = false;
     for (int i = 0; i < 100 && !landed; i++) {
-        r.layer.loop();
+        r.layer.tick();
         const uint8_t* buf = r.layer.buffer().data();
         landed = buf[0] == 42 && buf[1] == 43 && buf[2] == 44;
         if (!landed) mm::platform::delayMs(1);
@@ -211,5 +211,5 @@ TEST_CASE("NetworkReceiveEffect receives over localhost UDP") {
     CHECK(landed);
 
     tx.close();
-    r.fx.teardown();
+    r.fx.release();
 }

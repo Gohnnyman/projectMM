@@ -104,10 +104,10 @@
         }
       },
       "observed": {
-        "pc-macos": {
+        "desktop-macos": {
           "tick_us": [
             52,
-            870
+            909
           ],
           "free_heap": [
             0,
@@ -119,10 +119,10 @@
           ],
           "at": [
             "2026-06-25",
-            "2026-07-01"
+            "2026-07-10"
           ]
         },
-        "pc-windows": {
+        "desktop-windows": {
           "tick_us": [
             549,
             3747

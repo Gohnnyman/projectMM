@@ -325,28 +325,28 @@ void MqttModule::setup() {
 }
 
 // Release the lazily-allocated discovery buffers when the module is torn down (deleted from the tree,
-// or on device shutdown). The socket is closed via the normal reset path; MoonModule::teardown()
+// or on device shutdown). The socket is closed via the normal reset path; MoonModule::release()
 // recurses to children (this module has none). No memory outlives the module.
-void MqttModule::teardown() {
+void MqttModule::release() {
     freeDiscoveryBuffers();
-    MoonModule::teardown();
+    MoonModule::release();
 }
 
-void MqttModule::onBuildControls() {
+void MqttModule::defineControls() {
     controls_.addText("broker", broker_, sizeof(broker_));
     controls_.addUint16("port", port_, 1, 65535);
     controls_.addText("username", username_, sizeof(username_));
     controls_.addPassword("password", password_, sizeof(password_));
     controls_.addBool("haDiscovery", haDiscovery_);   // announce a HA MQTT-discovery light (default off; WLED /json covers HA)
     controls_.addReadOnly("mqtt_status", statusStr_, sizeof(statusStr_));
-    MoonModule::onBuildControls();
+    MoonModule::defineControls();
 }
 
-// A broker/port/credentials change re-homes the connection: drop the socket so loop1s reconnects
-// with the new settings on the next tick. Scoped to THIS module's controls via onUpdate (not the
-// whole-tree onBuildState sweep), so an unrelated change — a grid resize, a layout edit — never
+// A broker/port/credentials change re-homes the connection: drop the socket so tick1s reconnects
+// with the new settings on the next tick. Scoped to THIS module's controls via onControlChanged (not the
+// whole-tree prepare sweep), so an unrelated change — a grid resize, a layout edit — never
 // drops the MQTT connection. Live, no reboot.
-void MqttModule::onUpdate(const char* controlName) {
+void MqttModule::onControlChanged(const char* controlName) {
     if (std::strcmp(controlName, "broker") == 0 || std::strcmp(controlName, "port") == 0 ||
         std::strcmp(controlName, "username") == 0 || std::strcmp(controlName, "password") == 0) {
         resetConnection(enabled() ? "reconnecting" : "disabled");
@@ -366,7 +366,7 @@ void MqttModule::onUpdate(const char* controlName) {
 }
 
 // Enable/disable transition. On disable we send a clean DISCONNECT + close (rather than leaving a
-// dangling socket for the broker to time out) — loop1s stops being called once disabled, so this
+// dangling socket for the broker to time out) — tick1s stops being called once disabled, so this
 // transition hook is the only place a disable can act.
 void MqttModule::onEnabled(bool enabled) {
     if (!enabled && conn_.valid()) {
@@ -382,7 +382,7 @@ void MqttModule::onEnabled(bool enabled) {
 // control packet is ≤256 B, far under the socket send buffer, so a healthy socket accepts it all in
 // one call. A partial or zero write means the buffer is backing up (a zero-window / stalled broker) —
 // return false so the caller resets the connection rather than spin-retrying forever, which is what
-// the blocking write() would do inside loop1s (the hot-path violation this avoids).
+// the blocking write() would do inside tick1s (the hot-path violation this avoids).
 bool MqttModule::sendPacket(const uint8_t* data, size_t len) {
     if (len == 0) return true;
     // Test seam: mirror the outbound bytes into the capture buffer (null in production) so a unit test
@@ -411,15 +411,15 @@ void MqttModule::resetConnection(const char* status) {
     setStatusLine(status);
 }
 
-void MqttModule::loop1s() {
-    if constexpr (!platform::hasNetwork) { MoonModule::loop1s(); return; }
+void MqttModule::tick1s() {
+    if constexpr (!platform::hasNetwork) { MoonModule::tick1s(); return; }
 
     if (!enabled() || broker_[0] == '\0') {
         if (conn_.valid()) resetConnection(enabled() ? "idle" : "disabled");
-        MoonModule::loop1s();
+        MoonModule::tick1s();
         return;
     }
-    if (!platform::networkReady()) { MoonModule::loop1s(); return; }
+    if (!platform::networkReady()) { MoonModule::tick1s(); return; }
 
     const uint32_t now = platform::millis();
     switch (state_) {
@@ -453,10 +453,10 @@ void MqttModule::loop1s() {
             serviceConnected();
             break;
     }
-    MoonModule::loop1s();
+    MoonModule::tick1s();
 }
 
-// Begin a NON-BLOCKING TCP connect (getaddrinfo + connect kicked off, returns immediately). loop1s
+// Begin a NON-BLOCKING TCP connect (getaddrinfo + connect kicked off, returns immediately). tick1s
 // polls it in ConnectingTcp so the render loop never stalls on an unreachable broker.
 void MqttModule::startConnect() {
     setStatusLine("connecting");

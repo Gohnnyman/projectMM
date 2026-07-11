@@ -179,7 +179,7 @@ TEST_CASE("MoonLive controls: arena address is STABLE across a recompile and the
     CHECK(*eng.controlSlot(1) == 200);                   // hue seeded from its default
 }
 
-TEST_CASE("MoonLive controls: free() releases the arena (no stale slot after teardown)") {
+TEST_CASE("MoonLive controls: free() releases the arena (no stale slot after release)") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);", kCtrlTable));
     REQUIRE(eng.controlSlot(0) != nullptr);

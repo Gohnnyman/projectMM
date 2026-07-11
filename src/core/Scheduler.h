@@ -14,16 +14,16 @@ namespace mm {
 /// **Boot phases:** see the `setup()` comment in Scheduler.cpp.
 ///
 /// **Tick:** gates each top-level module by `enabled()` / `respectsEnabled()` and
-/// dispatches `loop` / `loop20ms` / `loop1s`. A per-second window averages the tick
+/// dispatches `tick` / `tick20ms` / `tick1s`. A per-second window averages the tick
 /// time and publishes each module's loop time.
 ///
-/// **Loop rates:** three cadences cover every module. `loop()` is the hot path for
+/// **Loop rates:** three cadences cover every module. `tick()` is the hot path for
 /// effects and drivers, called every iteration — the Scheduler handles pacing (yielding
 /// to other tasks between iterations via `taskYIELD()` on ESP32, an optional sleep on
-/// desktop). `loop20ms()` runs every ~20 ms for UI updates, control reads, and network
-/// polling. `loop1s()` runs every ~1 second for diagnostics, reconnects, and
-/// housekeeping. Not every module needs `loop()`: system modules (HTTP, WiFi) use
-/// `loop20ms()` or `loop1s()` only.
+/// desktop). `tick20ms()` runs every ~20 ms for UI updates, control reads, and network
+/// polling. `tick1s()` runs every ~1 second for diagnostics, reconnects, and
+/// housekeeping. Not every module needs `tick()`: system modules (HTTP, WiFi) use
+/// `tick20ms()` or `tick1s()` only.
 ///
 /// **Timing:** effects animate off a synchronized clock (millis from the platform), so
 /// the visual speed is frame-rate independent — the same at 30 fps and 60 fps. For
@@ -40,13 +40,13 @@ namespace mm {
 /// dependency graph.
 ///
 /// **Prior art:** MoonLight's `effectTask` / `svelteTask` — two FreeRTOS tasks (effects
-/// on core 1, system/drivers on core 0) with a per-node `loop()` every frame and a
-/// `loop20ms()` for slow updates.
+/// on core 1, system/drivers on core 0) with a per-node `tick()` every frame and a
+/// `tick20ms()` for slow updates.
 ///
 /// This is the `.h` interface; bodies live in Scheduler.cpp.
 class Scheduler {
 public:
-    /// Function-pointer hook invoked between phase 1 (`onBuildControls`) and phase 3
+    /// Function-pointer hook invoked between phase 1 (`defineControls`) and phase 3
     /// (`setup`). Used by FilesystemModule to overlay persisted control values onto bound
     /// variables before modules' setup() runs. Scheduler stays independent of
     /// FilesystemModule's type (no circular include). Wired in via setLoadAllHook from
@@ -63,10 +63,10 @@ public:
     void addModule(MoonModule* mod);
     void setup();
     void tick();
-    void teardown();
+    void release();
 
     uint32_t elapsed() const;
-    void buildState();
+    void prepareTree();
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
@@ -89,9 +89,9 @@ public:
     /// First module in tree-walk order with this name, or nullptr if none.
     MoonModule* firstByName(const char* name);
 
-    /// The single live Scheduler, or nullptr before setup() / after teardown(). Mirrors
+    /// The single live Scheduler, or nullptr before setup() / after release(). Mirrors
     /// FilesystemModule::instance_ — the one Scheduler is statically reachable so a module
-    /// created by the factory (IrModule) can call setControl() without a per-module injection.
+    /// created by the factory (IrService) can call setControl() without a per-module injection.
     static Scheduler* instance() { return instance_; }
 
     /// Outcome of setControl — the generic control-set primitive's result. Transport
@@ -107,7 +107,7 @@ public:
 
     /// Set one control by (module name, control name) to a value, applying the full
     /// control-change reaction: parse+validate, rebuild the module's control list, fire
-    /// onUpdate, mark dirty for persistence, and buildState() when the control reshapes
+    /// onControlChanged, mark dirty for persistence, and prepareTree() when the control reshapes
     /// dims/mapping. `valueJson` is a small JSON object read for its "value" key
     /// (`{"value":128}`) — the same shape /api/control, Improv, and the WLED bridge send.
     /// This is THE domain-neutral way for any module (IR, buttons, network bridges) to

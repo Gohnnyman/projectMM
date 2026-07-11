@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/PinList.h"        // parsePinList — the domain-neutral GPIO-CSV parser (core primitive)
 #include "light/light_types.h"  // nrOfLightsType
 
 #include <cstdint>
@@ -7,37 +8,12 @@
 
 namespace mm {
 
-// Shared pin/count list parsing for multi-output LED drivers — RmtLedDriver
-// (one RMT channel per pin) and LcdLedDriver (one LCD_CAM lane per pin) both
-// drive consecutive slices of the source buffer from the same two text
-// controls, so the parsers live once here (extracted when the second user
-// landed, per the increment-1 plan's "concrete first" rule). Both return
-// nullptr on success or a static error literal the caller feeds straight into
-// setStatus(); both are strtol-based like parseDottedQuad (Control.h) and
-// fully host-testable (unit_RmtLedDriver_pins.cpp pins them for both drivers).
-
-// Parse "18,17,16" into out[0..maxPins). Spaces around tokens are fine
-// (strtol skips them). Rejects empty input, bad tokens, trailing commas,
-// duplicates, and more than maxPins entries (the chip's channel/lane cap).
-inline const char* parsePinList(const char* s, uint16_t* out, uint8_t maxPins,
-                                uint8_t& nOut) {
-    nOut = 0;
-    if (!s || !*s) return "invalid pin list";
-    const char* p = s;
-    while (true) {
-        char* end = nullptr;
-        const long v = std::strtol(p, &end, 10);
-        if (end == p || v < 0 || v > 0xFFFF) return "invalid pin list";
-        while (*end == ' ') end++;
-        if (nOut >= maxPins) return "too many pins for this chip";
-        for (uint8_t i = 0; i < nOut; i++)
-            if (out[i] == static_cast<uint16_t>(v)) return "duplicate pin";
-        out[nOut++] = static_cast<uint16_t>(v);
-        if (*end == '\0') return nullptr;
-        if (*end != ',') return "invalid pin list";
-        p = end + 1;
-    }
-}
+// The LIGHT-DOMAIN half of pin/count list parsing for multi-output LED drivers — RmtLedDriver (one RMT
+// channel per pin) and LcdLedDriver (one LCD_CAM lane per pin) drive consecutive slices of the source
+// buffer from two text controls. The GPIO-CSV parser (`parsePinList`) is a domain-neutral core primitive
+// (core/PinList.h); the LED-count distribution below (`assignCounts`, which speaks nrOfLightsType) stays
+// here in the light layer. Both return nullptr on success or a static error literal for setStatus();
+// host-tested by unit_RmtLedDriver_pins.cpp.
 
 // The per-pin light ceiling for a WS2812-class 1-wire protocol (RMT / LCD_CAM / Parlio
 // all shift the same NRZ wire timing): one line clocks a fixed ~30 us/LED (24 bits ×

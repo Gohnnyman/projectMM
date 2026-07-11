@@ -1,14 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // beat8
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::bands[16]
-
-#include <cstring>                // memset (clear the per-band state on (re)build)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -35,7 +27,7 @@ namespace mm {
 // Prior art: MoonLight's FreqSaws (E_MoonModules / MoonModules), an audio-reactive matrix effect. The
 // per-band rise/decay physics, the three position methods, the bpmMax / increaser / decreaser knobs,
 // and the per-band phase bookkeeping are reproduced exactly here, written fresh on projectMM's
-// EffectBase + the shared draw / palette / beat8 primitives. Reads AudioModule::latestFrame();
+// EffectBase + the shared draw / palette / beat8 primitives. Reads AudioService::latestFrame();
 // silence → every band decays → flat → dark, safe on any target and grid size.
 // Author: @TroyHacks (MoonLight / WLED MoonModules) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Audio-reactive effect: sawtooth bands driven by the frequency spectrum.
@@ -53,7 +45,7 @@ public:
     bool    keepOn    = false; // keep drawing a band whose speed has decayed to zero
     uint8_t method    = 2;     // 0 Chaos, 1 Chaos fix, 2 BandPhases
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fade", fade, 0, 255);
         controls_.addUint8("increaser", increaser, 0, 255);
         controls_.addUint8("decreaser", decreaser, 0, 255);
@@ -68,17 +60,16 @@ public:
     // small inline member — the "no large inline members" rule targets per-light buffers sized to
     // nrOfLights, which this isn't. Cleared on every (re)build so a grid/control change starts the
     // bands from rest.
-    void onBuildState() override {
+    void prepare() override {
         clearState();
-        MoonModule::onBuildState();
     }
 
-    void loop() override {
+    void tick() override {
         const int sizeX = width();
         const int sizeY = height();
         if (sizeX <= 0 || sizeY <= 0 || channelsPerLight() < 3) return;
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
         Buffer& buf = layer()->buffer();

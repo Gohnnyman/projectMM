@@ -138,7 +138,7 @@ how each *renders*.)
 |---|---|---|---|
 | `slider` (uint8/uint16) | range + numeric display | drag → label instant; value sent debounced; reset-to-default ↺ | 150 ms |
 | `toggle` (bool) | switch (pill + thumb; hidden `<input type=checkbox>` is the source of truth) | sends on change | none |
-| `select` | dropdown | sends immediately; server may rebuild controls (dynamic `onBuildControls`) | none |
+| `select` | dropdown | sends immediately; server may rebuild controls (dynamic `defineControls`) | none |
 | `text` | text input | sends debounced | 500 ms |
 | `password` | password input | masked; hold-to-peek reveals the stored value | 500 ms |
 | `display` (read-only) | static text | WS push updates in place | n/a |

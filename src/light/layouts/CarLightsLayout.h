@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cmath>    // sinf, cosf, fmodf
-#include <cstdint>
-#include <numbers>  // std::numbers::pi_v — portable pi
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -34,7 +30,7 @@ namespace mm {
 // a rebuild), never the hot render loop, so it's allowed here. MoonLight's
 // pin/wiring plumbing (nextPin / doNextPin) is dropped — a projectMM layout
 // emits coordinates only; the driver owns pins.
-// Author: projectMM / custom fixture
+// Author: Eric Marciniak (Discord) — custom car-lights fixture, reconstructed for projectMM
 /// Layout mapping automotive light-strip coordinates.
 /// @card CarLightsLayout.gif
 class CarLightsLayout : public LayoutBase {
@@ -43,7 +39,7 @@ public:
     // ledsPerSpoke controls in the source are inactive there too, so dropped).
     uint8_t scale = 2;  // 1..10 — spacing multiplier out from each centre
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("scale", scale, 1, 10);
     }
 

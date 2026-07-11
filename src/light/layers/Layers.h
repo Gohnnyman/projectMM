@@ -9,7 +9,7 @@ namespace mm {
 
 /// Top-level container for one or more `Layer` children. Each child Layer renders independently into its own buffer using the shared `Layouts` instance for physical topology. `Drivers` composites the resulting buffers in container order (bottom→top) per each Layer's blendMode and opacity.
 ///
-/// **Why a container:** multi-layer composition (alpha-blend, additive, layered overlays) needs a place to walk every layer in order so drivers can merge their buffers before consuming the result. With one child Layer this is a thin pass-through: loop() runs the child Layer's loop() in order; behaviour matches the single-Layer pipeline byte-for-byte (Drivers takes its single-layer fast path).
+/// **Why a container:** multi-layer composition (alpha-blend, additive, layered overlays) needs a place to walk every layer in order so drivers can merge their buffers before consuming the result. With one child Layer this is a thin pass-through: tick() runs the child Layer's tick() in order; behaviour matches the single-Layer pipeline byte-for-byte (Drivers takes its single-layer fast path).
 ///
 /// **No buffer of its own:** each Layer owns its buffer and the `Drivers` container owns the composited output. Layers wires the shared `Layouts` into every child so each can size its buffer. Two queries serve the Drivers compositor: `activeLayer` (the first enabled child, or a disabled one as fallback) answers physical dimensions and feeds the single-layer fast path, and `forEachEnabledLayer` walks the enabled children in container order (bottom→top) marking the bottom layer that clears the buffer. `enabledLayerCount` lets Drivers pick the fast path (one enabled layer → hand its buffer straight to the driver) versus the composite path (≥2 → blend into the output buffer).
 ///
@@ -20,7 +20,7 @@ public:
     const char* acceptsChildRoles() const override { return "layer"; }
 
     /// Wire the shared Layouts. Propagates to every child Layer so their
-    /// onBuildState() can size buffers from it. Idempotent — call again
+    /// prepare() can size buffers from it. Idempotent — call again
     /// after adding a Layer child to wire the new one. Non-Layer children
     /// (UI shouldn't allow them; engine doesn't enforce — yet) are skipped
     /// rather than miscast, so a stray child can't UB the cast.
@@ -38,9 +38,8 @@ public:
     /// Re-wire children before they build their state, so a Layer added via the
     /// API (clear_children + add_module) gets the shared Layouts without anyone
     /// re-running main.cpp's setLayouts. Then chain to base to build the children.
-    void onBuildState() override {
+    void prepare() override {
         setLayouts(layouts_);
-        MoonModule::onBuildState();
     }
 
     /// Role-filtered loop propagation: only tick children that are Layers.
@@ -49,13 +48,13 @@ public:
     /// ticking it through Layers would run its loop at the wrong tree
     /// depth (an Effect that should be ticked inside a Layer). Matches
     /// the role-filter precedent in setLayouts / activeLayer above.
-    void loop() override {
+    void tick() override {
         for (uint8_t i = 0; i < childCount(); i++) {
             MoonModule* c = child(i);
             if (!c || c->role() != ModuleRole::Layer) continue;
             if (c->respectsEnabled() && !c->enabled()) continue;
             uint32_t start = platform::micros();
-            c->loop();
+            c->tick();
             c->addAccumUs(platform::micros() - start);
         }
     }

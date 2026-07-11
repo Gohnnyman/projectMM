@@ -1,9 +1,6 @@
 #pragma once
 
-#include <limits>
-#include <cstdint>
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -52,7 +49,7 @@ public:
     bool snakeY = true;
     bool snakeZ = false;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("width",  width,  1, 128);
         controls_.addInt16("height", height, 1, 128);
         controls_.addInt16("depth",  depth,  1, 128);

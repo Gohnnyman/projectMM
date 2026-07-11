@@ -5,7 +5,7 @@
 // matching Drivers control through the shared Scheduler::setControl primitive — the same seam IR and
 // the WLED bridge use. The socket is not involved: feedForTest() injects raw MQTT bytes (built with
 // the tested MqttPacket builders) exactly as the broker would deliver them, so the routing is
-// provable with no broker (mirrors IrModule::injectCodeForTest). A FakeDrivers stands in for the
+// provable with no broker (mirrors IrService::injectCodeForTest). A FakeDrivers stands in for the
 // real Drivers with the on / brightness / palette controls MQTT targets.
 
 #include "doctest.h"
@@ -30,7 +30,7 @@ struct FakeDrivers : public MoonModule {
     bool on = true;
     uint8_t brightness = 100;
     uint8_t palette = 0;
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addBool("on", on);
         controls_.addUint8("brightness", brightness, 0, 255);
         // A Uint8 palette with the real built-in range (0..255 is a superset of the ~60 built-ins),
@@ -60,7 +60,7 @@ struct Rig {
         scheduler.addModule(mqtt);
         scheduler.setup();   // binds controls, sets Scheduler::instance()
     }
-    ~Rig() { scheduler.teardown(); }
+    ~Rig() { scheduler.release(); }
 
     // Deliver a PUBLISH to `suffix` (under the derived prefix, e.g. "on/set") with a string payload,
     // as the broker socket would. Pass a leading "/" to send an ABSOLUTE topic (for the wrong-prefix
@@ -224,7 +224,7 @@ TEST_CASE("MqttModule: CONNACK publishes a retained HA discovery config") {
 // Regression (found live on P4/S31 hardware): turning haDiscovery OFF must free the discovery buffers
 // EVEN when the socket is not currently Connected (mid-reconnect). The original guard bailed on
 // `state_ != Connected` before reaching the free, so a discovery-off toggle during a reconnect stranded
-// the 768 B until teardown — breaking "no memory when discovery is off". Freeing local memory needs no
+// the 768 B until release — breaking "no memory when discovery is off". Freeing local memory needs no
 // socket, so the retract path frees unconditionally; only the empty-retained PUBLISH needs a live link.
 TEST_CASE("MqttModule: retract frees the discovery buffers even while disconnected") {
     Rig r;

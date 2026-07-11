@@ -8,7 +8,7 @@ Plan-09 attempted ~1700 LOC of JSON-based persistence for module state. It was f
 
 ## Decision
 
-Persist POD module state with a single `memcpy(file, this + sizeof(MoonModule), classSize - sizeof(MoonModule))`, loading it back before any module's `setup()` / `onBuildControls()` by memcpy into member memory directly. Plan-10 took this path and shipped.
+Persist POD module state with a single `memcpy(file, this + sizeof(MoonModule), classSize - sizeof(MoonModule))`, loading it back before any module's `setup()` / `defineControls()` by memcpy into member memory directly. Plan-10 took this path and shipped.
 
 ## Consequences
 

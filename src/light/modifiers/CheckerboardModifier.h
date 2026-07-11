@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 
@@ -21,7 +21,7 @@ public:
     uint8_t size = 2;       // checker square edge, in lights (≥1)
     bool invert = false;    // flip which squares pass through
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("size", size, 1, 64);
         controls_.addBool("invert", invert);
     }

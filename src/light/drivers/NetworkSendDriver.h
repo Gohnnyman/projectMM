@@ -1,14 +1,12 @@
 #pragma once
 
+#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
+
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format
 #include "light/E131Packet.h"     // shared E1.31/sACN wire format
-#include "light/drivers/DriverBase.h"
 #include "platform/platform.h"
 
-#include <algorithm>  // std::min in the chunk loop
-#include <cstdint>
-#include <cstring>
 
 namespace mm {
 
@@ -21,14 +19,14 @@ namespace mm {
 /// multicast (no IGMP join; MoonLight ships without it too). E1.31 framing: CID stable per device
 /// (from the MAC), source name `projectMM`, priority 100, one frame-level sequence per frame.
 ///
-/// **Synchronous send:** the whole frame goes out inline in loop() (~35 ms Ethernet / ~90 ms WiFi at
+/// **Synchronous send:** the whole frame goes out inline in tick() (~35 ms Ethernet / ~90 ms WiFi at
 /// 128×128 ArtNet; DDP less). A decoupling send task is a PSRAM-gated backlog item. Added per board
 /// via the catalog like the LED drivers; applies the same shared Correction, so network and wired
 /// outputs show identical colours.
 /// @card NetworkSendDriver.png
 class NetworkSendDriver : public DriverBase {
 public:
-    /// Protocol names, index-aligned with the constants used in loop()'s switch (0 = ArtNet,
+    /// Protocol names, index-aligned with the constants used in tick()'s switch (0 = ArtNet,
     /// 1 = E1.31, 2 = DDP). The destination port follows the protocol (6454 / 5568 / 4048) — see
     /// connectIfDestChanged().
     static constexpr const char* kProtocolOptions[] = {"ArtNet", "E1.31", "DDP"};
@@ -53,12 +51,12 @@ public:
     /// device↔device pairs align out of the box. Orthogonal to the DriverBase window (start/count),
     /// which picks WHICH buffer slice is sent — this picks which universe it lands on.
     uint16_t universeStart = 0;
-    /// Send-rate ceiling (Hz); loop() rate-limits to this so a fast render tick doesn't flood the LAN.
+    /// Send-rate ceiling (Hz); tick() rate-limits to this so a fast render tick doesn't flood the LAN.
     uint8_t fps = 50;
 
     /// Register the controls in UI order: protocol, destination IP, universe offset, the shared
     /// window (start/count), then the rate cap.
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addSelect("protocol", protocol, kProtocolOptions, kProtocolCount);
         controls_.addIPv4("ip", ip);
         controls_.addUint16("universe_start", universeStart);
@@ -66,31 +64,35 @@ public:
         controls_.addUint8("fps", fps, 1, 120);
     }
 
-    /// A start/count change resizes the window this sink sends; route it through the onBuildState
+    /// A start/count change resizes the window this sink sends; route it through the prepare
     /// sweep so resizeCorrected() re-sizes corrected_ for the new slice — otherwise growing the
     /// window past the old corrected_ silently drops to passthrough.
-    bool controlChangeTriggersBuildState(const char* name) const override {
+    bool affectsPrepare(const char* name) const override {
         return isWindowControl(name);
     }
 
-    /// Open the socket and derive the stable E1.31 component id (CID) from the MAC once — no UUID
-    /// machinery needed for a deterministic, unique-enough id — then bind the destination so each
-    /// per-packet send skips the address parse + route lookup (re-bound in loop() on an ip/protocol
-    /// change; see connectIfDestChanged).
+    /// One-time wiring only: derive the stable E1.31 component id (CID) from the MAC once — no
+    /// UUID machinery needed for a deterministic, unique-enough id. The socket open (the acquire)
+    /// lives in prepare(), the sole resource gate; enabled-independent here.
     void setup() override {
-        socket_.open();
         std::memcpy(cid_, "projectMM\0", 10);
         platform::getMacAddress(cid_ + 10);
-        connectIfDestChanged();
     }
 
-    /// Close the socket on teardown; DriverBase::teardown (via the base) clears any status.
-    void teardown() override {
+    /// Close the socket on release, then chain to the base to clear any status this driver set.
+    void release() override {
         socket_.close();
+        // Reset the cached destination so a re-enable (prepare → socket_.open() +
+        // connectIfDestChanged()) forces a fresh connect on the new socket. Without this,
+        // connectIfDestChanged() would see the unchanged ip/protocol and early-out, leaving
+        // the reopened socket unconnected and sends silently failing.
+        std::memset(lastConnectedIp_, 0, 4);
+        lastConnectedProtocol_ = 0xFF;
+        DriverBase::release();
     }
 
     /// Take the shared source buffer and (re)size the corrected_ buffer for it. Called from
-    /// Drivers::passBufferToDrivers inside onBuildState (and once at setup); resizeCorrected() is a
+    /// Drivers::passBufferToDrivers inside prepare (and once at setup); resizeCorrected() is a
     /// no-op while correction_ is still null on the first call, and the second call (after
     /// setCorrection) lands the actual allocation. All off the hot path.
     void setSourceBuffer(Buffer* buf) override {
@@ -104,22 +106,25 @@ public:
         resizeCorrected();
     }
 
-    /// Topology change (light count, channels per light, or LUT path swap) — the framework calls
-    /// this after Layer/Drivers reshape. Resize off the hot path so loop() never allocates.
-    void onBuildState() override {
+    /// Pure build (see MoonModule::prepare): open the UDP socket (idempotent), re-resolve the
+    /// destination, and resize corrected_ off the hot path (tick() never allocates). No enabled()
+    /// check — core's applyState() calls this only when effectively-enabled and routes to release()
+    /// (socket closed, freed) otherwise, so a disabled sender (or one under a disabled parent) frees it.
+    void prepare() override {
+        socket_.open();          // idempotent: no-op if already open
+        connectIfDestChanged();
         resizeCorrected();
-        MoonModule::onBuildState();
     }
 
     /// Preset toggle (RGB↔RGBW) changes correction_->outChannels without a structural rebuild;
-    /// Drivers::onUpdate forwards this hook so corrected_ tracks the new channel count.
+    /// Drivers::onControlChanged forwards this hook so corrected_ tracks the new channel count.
     void onCorrectionChanged() override {
         resizeCorrected();
     }
 
     /// Rate-limit to `fps`, apply the shared correction into corrected_ (passthrough if unwired),
     /// then chunk the window slice into protocol packets and send the whole frame inline.
-    void loop() override {
+    void tick() override {
         if (!sourceBuffer_ || !sourceBuffer_->data()) return;
 
         // FPS limiting
@@ -134,7 +139,7 @@ public:
 
         // Apply output correction (brightness / channel order / RGBW white) into the
         // pre-sized corrected_ buffer, then send that. Pure reader — sizing happens
-        // in resizeCorrected() off the hot path (onBuildState / onCorrectionChanged
+        // in resizeCorrected() off the hot path (prepare / onCorrectionChanged
         // / setSourceBuffer / setCorrection). If correction isn't wired (e.g. a unit
         // test constructs the driver outside a Drivers parent) or its buffer doesn't
         // match the source size, fall back to passthrough — same degradation the
@@ -217,7 +222,7 @@ public:
     // with NetworkReceiveEffect — each wire format exists in exactly one place.
 
     // Test-only accessor for the correction-applied buffer. Lets the unit
-    // tests pin the no-allocation-in-loop contract (size set in onBuildState
+    // tests pin the no-allocation-in-loop contract (size set in prepare
     // / onCorrectionChanged, never in loop). Not part of any runtime API.
     const Buffer& correctedBuffer() const { return corrected_; }
 
@@ -252,7 +257,7 @@ private:
         lastConnectedProtocol_ = protocol;
     }
 
-    // Called off the hot path (onBuildState, onCorrectionChanged, setters) to
+    // Called off the hot path (prepare, onCorrectionChanged, setters) to
     // make sure corrected_ is sized for the current source + correction. Skips
     // when nothing is wired yet, or when the existing allocation already fits.
     void resizeCorrected() {

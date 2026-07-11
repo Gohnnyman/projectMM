@@ -129,7 +129,7 @@ enum class ControlType : uint8_t {
                 ///< uses, one level up. (Data-over-objects: no per-row object graph,
                 ///< no allocation on rebuild — see docs/architecture.md hot-path.)
     Button,     ///< a momentary action, not a stored value. The UI renders a button;
-                ///< a click POSTs a value and the module's onUpdate() runs the action.
+                ///< a click POSTs a value and the module's onControlChanged() runs the action.
                 ///< No backing storage (ptr unused) and non-persistable — distinct
                 ///< from Bool, which is an on/off STATE that renders as a toggle and a
                 ///< toggle is the wrong affordance for "do this now" (e.g. rescan).
@@ -227,7 +227,7 @@ struct ControlDescriptor {
 ///
 /// **Persistence and dynamic rebuild:** control values persist via FilesystemModule,
 /// which overlays loaded values through each control's pointer during
-/// `onBuildControls()`. Calling `onBuildControls()` again at runtime (e.g. when a
+/// `defineControls()`. Calling `defineControls()` again at runtime (e.g. when a
 /// Select changes) clears and rebuilds the set, so only controls relevant to the
 /// current mode are shown — this is how conditional `hidden` flags re-evaluate.
 ///
@@ -374,7 +374,7 @@ public:
     }
 
     // A momentary action button (ControlType::Button). No backing storage — a click
-    // POSTs through to the module's onUpdate(name), which performs the action. Use
+    // POSTs through to the module's onControlChanged(name), which performs the action. Use
     // for "do this now" (rescan, reset, self-test); use addBool for on/off state.
     void addButton(const char* name) {
         grow();
@@ -433,7 +433,7 @@ const char* controlTypeName(ControlType t);
 
 // Whether this type round-trips through FilesystemModule's load/save. False
 // for ReadOnly / ReadOnlyInt / Progress (device-derived display values that
-// would just get overwritten on the next loop1s).
+// would just get overwritten on the next tick1s).
 bool isPersistable(ControlType t);
 
 // Whether `/api/types`'s default-values block should emit a default for this

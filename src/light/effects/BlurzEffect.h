@@ -1,14 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade, draw::fill, draw::blur
-#include "core/math8.h"           // Random8
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::bands[16], peakHz
-
-#include <cmath>                  // log10f, roundf (once-per-frame freqMap, not per-light)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -25,7 +17,7 @@ namespace mm {
 //
 // Prior art: WLED's "Blurz" audio effect, carried into MoonLight. The per-band colour cursor, the
 // frequency→position map, and the fade-then-blur pipeline are reproduced here, written fresh on
-// EffectBase + the shared draw primitives. Reads AudioModule::latestFrame(); with simulation off or no
+// EffectBase + the shared draw primitives. Reads AudioService::latestFrame(); with simulation off or no
 // publisher the bands read 0 → the strip fades to black, safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR), with enhancements by @softhack007 — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
@@ -45,7 +37,7 @@ public:
     bool    freqMap    = false;  // position the dot by dominant frequency instead of scanning/random
     bool    geqScanner = false;  // steady sweep across the strip (vs. random jump) when freqMap is off
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fadeRate", fadeRate, 1, 255);
         controls_.addUint8("blur", blur, 1, 255);
         controls_.addBool("freqMap", freqMap);
@@ -55,14 +47,13 @@ public:
     // WLED clears the segment once on the first call (SEGENV.call == 0 → fadeToBlackBy(255), a full
     // wipe to black). A grid rebuild (resize / re-add) restarts the effect, so reset the one-shot
     // clear + the scanner/band cursors here so the dot starts from a known state on any reconfig.
-    void onBuildState() override {
+    void prepare() override {
         firstFrame_ = true;
         freqBand_   = 0;
         scanPos_    = 0;
-        MoonModule::onBuildState();
     }
 
-    void loop() override {
+    void tick() override {
         const int cols = width();
         const int rows = height();
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;
@@ -80,7 +71,7 @@ public:
         // Per-frame fade gives the blurred dot its decaying trail (WLED fadeToBlackBy(fadeRate)).
         layer()->fadeToBlackBy(fadeRate);
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;
 
         // Advance the band cursor: one band per frame, wrapping 0..15 (NUM_GEQ_CHANNELS).

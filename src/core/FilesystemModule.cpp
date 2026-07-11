@@ -41,13 +41,13 @@ void FilesystemModule::setup() {
 }
 
 // FilesystemModule is a non-UI persistence engine: it holds no controls (hence no
-// onBuildControls override), so it renders no card in the module tree — a card here would
+// defineControls override), so it renders no card in the module tree — a card here would
 // confuse an end user next to the File Manager. Its one piece of status, "last saved", is
 // displayed by FileManagerModule, which reads it via FilesystemModule::instance()->lastSavedStr().
 // The filesystem-usage gauge likewise lives on FileManagerModule (that's where filesystem state
 // is topical).
 
-void FilesystemModule::loop1s() {
+void FilesystemModule::tick1s() {
     if (!mounted_ || !scheduler_) return;
     updateLastSavedStr();
     if (!dirtyPending_) return;
@@ -93,7 +93,7 @@ void FilesystemModule::flush() {
             }
         }
     }
-    // Keep dirtyPending_ set if anything failed, so loop1s retries.
+    // Keep dirtyPending_ set if anything failed, so tick1s retries.
     dirtyPending_ = !allSaved;
 }
 
@@ -190,8 +190,8 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     // Reconcile children with the JSON's tree shape. For each position, look up
     // "<prefix><idx>.type"; if it differs from the live child (or no live child
     // exists), factory-create the JSON type and place it at that position. The
-    // newly-created child gets onBuildControls() here so the recursive applyNode
-    // below can overlay its persisted values. Phases 3+4 (setup, onBuildState)
+    // newly-created child gets defineControls() here so the recursive applyNode
+    // below can overlay its persisted values. Phases 3+4 (setup, prepare)
     // cascade into the new child automatically.
     // Walk JSON child positions in order; stop when "<idx>.type" is absent. No fixed cap —
     // the JSON itself terminates the loop. childCount_ is a uint8_t so the practical ceiling
@@ -222,10 +222,10 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
                 // below removes any live children past that point.
                 break;
             }
-            created->onBuildControls();
+            created->defineControls();
             if (live) {
                 MoonModule* old = m->replaceChildAt(i, created);
-                if (old) { old->teardown(); Scheduler::deleteTree(old); }
+                if (old) { old->release(); Scheduler::deleteTree(old); }
             } else {
                 m->addChild(created);
             }
@@ -255,7 +255,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
         MoonModule* extra = m->child(i);
         if (!extra) continue;
         if (extra->isWiredByCode()) continue;
-        extra->teardown();
+        extra->release();
         m->removeChild(extra);
         Scheduler::deleteTree(extra);
     }

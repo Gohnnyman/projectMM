@@ -6,7 +6,7 @@
 //
 // Scope is narrow on purpose: this verifies the buffer copy + dirty flag,
 // not the WiFi state transitions (which need the platform layer, a real
-// radio, and the loop1s() tick). The desktop platform's wifiStaInit stub
+// radio, and the tick1s() tick). The desktop platform's wifiStaInit stub
 // returns false safely, so the call completes without raising side effects.
 
 #include "doctest.h"
@@ -16,7 +16,7 @@
 
 #include <cstring>
 
-// setWifiCredentials copies SSID + password into internal buffers and raises the dirty flag so the next loop1s() applies them.
+// setWifiCredentials copies SSID + password into internal buffers and raises the dirty flag so the next tick1s() applies them.
 TEST_CASE("NetworkModule::setWifiCredentials copies SSID + password and marks dirty") {
     mm::NetworkModule net;
     CHECK_FALSE(net.dirty());
@@ -73,7 +73,7 @@ TEST_CASE("NetworkModule mode control reflects current state") {
     net.setup();
     // setup() falls through to startAP() on the desktop platform (no Eth, no
     // SSID), which already calls rebuildControls() internally. Calling
-    // onBuildControls() again would duplicate every control; use
+    // defineControls() again would duplicate every control; use
     // rebuildControls() to clear-then-build a single time.
     net.rebuildControls();
 
@@ -127,7 +127,7 @@ TEST_CASE("NetworkModule static-IP fields are IPv4-typed") {
     net.setup();
     // setup() falls through to startAP() on the desktop platform (no Eth, no
     // SSID), which already calls rebuildControls() internally. Calling
-    // onBuildControls() again would duplicate every control; use
+    // defineControls() again would duplicate every control; use
     // rebuildControls() to clear-then-build a single time.
     net.rebuildControls();
 
@@ -155,7 +155,7 @@ TEST_CASE("NetworkModule rssi/txPower controls hidden in non-WiFi states") {
     net.setup();
     // setup() falls through to startAP() on the desktop platform (no Eth, no
     // SSID), which already calls rebuildControls() internally. Calling
-    // onBuildControls() again would duplicate every control; use
+    // defineControls() again would duplicate every control; use
     // rebuildControls() to clear-then-build a single time.
     net.rebuildControls();
 

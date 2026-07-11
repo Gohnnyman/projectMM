@@ -25,7 +25,7 @@ class Scheduler;
 ///
 /// **REST API:** `GET /` serves index.html and the UI assets (`/app.js`, `/style.css`,
 /// `/moonlight-logo.png`). `GET /api/state` returns the full module-tree JSON (each entry
-/// carries name, type, role, enabled, loopTimeUs, classSize, dynamicBytes, `controls[]`,
+/// carries name, type, role, enabled, tickTimeUs, classSize, dynamicBytes, `controls[]`,
 /// status + severity when set, and `userEditable:false` only when the module opts out of
 /// UI delete/replace). `GET /api/system` returns fps, tickTimeUs, freeHeap, freeInternal,
 /// maxBlock, uptime. `GET /api/types` returns the type catalog (stable factory `name`,
@@ -40,16 +40,16 @@ class Scheduler;
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
 /// base64), up to 4 concurrent clients. Server pushes full state JSON as text frames from
-/// `loop1s()`. Binary frames take two paths, both without a frame-sized buffer: a synchronous
+/// `tick1s()`. Binary frames take two paths, both without a frame-sized buffer: a synchronous
 /// stream (`beginBinaryFrame` / `pushBinaryFrame` / `endBinaryFrame`) for a forward-only
 /// producer, and a resumable buffered send (`sendBufferedFrame`) that drains a memory-adaptive
-/// chunk per client per `loop20ms` from a stable caller-owned buffer — so a large frame is
+/// chunk per client per `tick20ms` from a stable caller-owned buffer — so a large frame is
 /// delivered over wall-clock ticks without spinning any loop, yet stays one atomic WS message.
 /// One buffered send is in flight at a time (newest-wins backpressure: a new offer while one
 /// is active is dropped). Clients send nothing back over WS; mutations go through REST.
 ///
-/// **Hot-path split:** the resumable drain runs on `loop20ms` (the 20 ms transport poll),
-/// deliberately NOT the per-render-tick `loop()`, so pushing preview bytes to the socket is
+/// **Hot-path split:** the resumable drain runs on `tick20ms` (the 20 ms transport poll),
+/// deliberately NOT the per-render-tick `tick()`, so pushing preview bytes to the socket is
 /// never charged to the LED render hot path. The LED output is never delayed by the preview;
 /// the preview frame rate is instead bounded by the 20 ms drain cadence, which is the right
 /// trade since the preview is a view and the LEDs are not.
@@ -104,7 +104,7 @@ public:
     bool endBinaryFrame() override;
 
     /// Resumable one-frame send from a stable caller-owned buffer (no copy), drained a bounded chunk
-    /// per client per loop20ms (drainPreviewSend) so a large frame stays off this module's hot path;
+    /// per client per tick20ms (drainPreviewSend) so a large frame stays off this module's hot path;
     /// a would-block socket resumes next tick. See BinaryBroadcaster.
     bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                            const uint8_t* body, size_t bodyLen) override;
@@ -124,11 +124,11 @@ public:
     /// module loop to skip this module.
     bool appearsInUi() const override { return false; }
 
-    void onBuildControls() override;
+    void defineControls() override;
     void setup() override;
-    void teardown() override;
-    void loop20ms() override;
-    void loop1s() override;
+    void release() override;
+    void tick20ms() override;
+    void tick1s() override;
 
     // -----------------------------------------------------------------------
     // Transport-free apply-core — "the REST API, callable in-process"
@@ -193,7 +193,7 @@ private:
 
     // Resumable full-frame send (BinaryBroadcaster::sendBufferedFrame). One WS message = a copied
     // header + a pointer into the caller's STABLE body buffer (the PreviewDriver producer buffer),
-    // drained a bounded chunk per client per loop20ms via writeSome — so a large frame is delivered
+    // drained a bounded chunk per client per tick20ms via writeSome — so a large frame is delivered
     // over wall-clock ticks without spinning any loop, yet stays ONE atomic WS message to the
     // browser. One in flight at a time (drop-new: a frame offered while one is active is rejected,
     // the in-flight one kept). The caller calls cancelBufferedSend() before freeing/reallocating the
@@ -208,7 +208,7 @@ private:
     };
     PreviewSend previewSend_;
     // Drain one memory-adaptive chunk per client of the in-flight resumable send; mark it done when
-    // every live client has the whole frame. Called from loop20ms. No-op when none is active.
+    // every live client has the whole frame. Called from tick20ms. No-op when none is active.
     void drainPreviewSend();
     // Largest chunk to push per client per drain tick, derived from free contiguous memory so a
     // tight board takes small bites (bounded tick occupancy) and a roomy board drains fast.

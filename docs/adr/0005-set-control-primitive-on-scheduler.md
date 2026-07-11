@@ -4,7 +4,7 @@ Status: Accepted
 
 ## Context
 
-Adding IR remote control raised: how does one module drive another module's control? The wrong answer is a bespoke seam per target (`Drivers::adjustBrightness`, then `setPalette`, and N more one-offs). The right primitive already existed half-hidden: the WLED-app bridge set brightness via `applySetControl(module, control, value)`, the generic find → validate → apply → `onUpdate` → persist → conditional-`buildState` path, but it was private on HttpServerModule.
+Adding IR remote control raised: how does one module drive another module's control? The wrong answer is a bespoke seam per target (`Drivers::adjustBrightness`, then `setPalette`, and N more one-offs). The right primitive already existed half-hidden: the WLED-app bridge set brightness via `applySetControl(module, control, value)`, the generic find → validate → apply → `onControlChanged` → persist → conditional-`prepareTree` path, but it was private on HttpServerModule.
 
 ## Decision
 

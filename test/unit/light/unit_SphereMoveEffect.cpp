@@ -16,7 +16,7 @@ static void buildSphere(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& l
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     layer.addChild(&sphere);
-    layer.onBuildState();
+    layer.applyState();
 }
 
 // The effect fully clears the buffer each frame, so a thin shell leaves the vast majority of a large
@@ -33,7 +33,7 @@ TEST_CASE("SphereMoveEffect leaves most of a large volume dark (thin shell, full
     auto& buf = layer.buffer();
     for (size_t i = 0; i < buf.bytes(); i++) buf.data()[i] = 255;
 
-    layer.loop();
+    layer.tick();
 
     size_t lit = 0;
     for (size_t p = 0; p < buf.count(); p++) {
@@ -57,7 +57,7 @@ TEST_CASE("SphereMoveEffect only writes non-black palette colours") {
     // Rainbow palette (index 0) is generated at full saturation/value, so no entry is black — a lit
     // shell voxel is therefore always non-black. Palettes::active() is a process-wide static, so pin it.
     mm::Palettes::setActive(0);
-    layer.loop();
+    layer.tick();
 
     // Any pixel that is set has all-black or a genuine colour; because the buffer was zero-initialised
     // and cleared, every non-zero pixel here is a shell voxel. Assert the shell exists and is coloured.
@@ -87,7 +87,7 @@ TEST_CASE("SphereMoveEffect survives degenerate grids") {
         mm::Layer layer;
         mm::SphereMoveEffect sphere;
         buildSphere(layouts, grid, layer, sphere, 0, 0, 0);
-        layer.loop();  // must not crash
+        layer.tick();  // must not crash
         CHECK(layer.buffer().count() == 0);
     }
     {
@@ -96,7 +96,7 @@ TEST_CASE("SphereMoveEffect survives degenerate grids") {
         mm::Layer layer;
         mm::SphereMoveEffect sphere;
         buildSphere(layouts, grid, layer, sphere, 1, 1, 1);
-        layer.loop();  // must not crash
+        layer.tick();  // must not crash
         CHECK(layer.buffer().count() == 1);
     }
 }

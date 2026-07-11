@@ -1,9 +1,6 @@
 #pragma once
 
-#include <limits>
-#include <cstdint>
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 // Prior art: MoonLight SingleColumnLayout (MoonModules/MoonLight, layout nodes).
 // A vertical line of lights at a fixed x, running along y. Geometry reproduced
@@ -24,7 +21,7 @@ public:
     uint16_t xposition = 0;        // "X position", 0..255
     bool     reversed_order = false;  // "reversed order"
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("starting Y", start_y, 0, 255);
         controls_.addUint16("height", height, 1, 1000);
         controls_.addUint16("X position", xposition, 0, 255);

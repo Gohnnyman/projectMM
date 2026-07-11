@@ -26,7 +26,7 @@ namespace mm {
 /// This module is the status surface: one read-only `provision_status` control that reports
 /// `listening` / `received credentials` / `connecting` / `connected: <ssid>` / `error: reason`
 /// / `not supported on this platform` (desktop). The actual protocol parsing + UART task live
-/// in the platform layer (`mm::platform::improvProvisioningInit`, platform.h). loop1s() polls a
+/// in the platform layer (`mm::platform::improvProvisioningInit`, platform.h). tick1s() polls a
 /// `ready` flag the platform task sets when credentials arrive, then calls
 /// NetworkModule::setWifiCredentials, which writes through to the same buffers the AP-fallback
 /// UI flow uses. A code-wired child of NetworkModule (`markWiredByCode()`) so persistence-apply
@@ -130,7 +130,7 @@ public:
         }
     }
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addReadOnly("provision_status", statusStr_, sizeof(statusStr_));
     }
 
@@ -139,7 +139,7 @@ public:
     /// writes are visible before we read them). The TX-power cap is applied first on purpose (see
     /// the inline note), and the deviceModel arrives like any other catalog default via the
     /// APPLY_OP poll below rather than here.
-    void loop1s() override {
+    void tick1s() override {
         // Vendor SET_TX_POWER RPC — handled BEFORE the credentials on purpose:
         // when an installer sends the cap and the credentials back-to-back,
         // both flags can land within one tick, and the cap must be persisted
@@ -166,7 +166,7 @@ public:
         // control's per-control validator (handled in the APPLY_OP poll below).
     }
 
-    /// Apply a pending APPLY_OP through HttpServerModule::applyOp. Polled per-TICK (not loop1s)
+    /// Apply a pending APPLY_OP through HttpServerModule::applyOp. Polled per-TICK (not tick1s)
     /// because the installer pushes a burst of ops during provisioning and single-buffers them:
     /// the Improv task refuses a new op until this consumes the previous (clears
     /// pendingOpReady_), so a fast poll keeps the busy-window to ~one tick and the install
@@ -174,7 +174,7 @@ public:
     /// mutation off the serial task — the same discipline the credentials/deviceModel paths
     /// follow. A failed op can't travel back on the already-spent frame ack, so it's surfaced
     /// over serial + in provision_status rather than looking like a clean install.
-    void loop() override {
+    void tick() override {
         if (pendingOpReady_.load(std::memory_order_acquire) && httpServerModule_) {
             // The Improv task already acked frame RECEIPT; the op is APPLIED here. A
             // failed op (UnknownType, OutOfRange, a not-found target) can't travel back
@@ -194,7 +194,7 @@ public:
             std::memset(pendingOp_, 0, sizeof(pendingOp_));
             pendingOpReady_.store(false, std::memory_order_release);
         }
-        MoonModule::loop();   // tick children (none today, but keep the contract)
+        MoonModule::tick();   // tick children (none today, but keep the contract)
     }
 
 private:
@@ -204,7 +204,7 @@ private:
     char statusStr_[64] = "listening";
 
     // Buffers the platform task writes; sized to NetworkModule's storage.
-    // std::atomic<bool> for the ready flag — read by loop1s() on the
+    // std::atomic<bool> for the ready flag — read by tick1s() on the
     // scheduler thread, written by the Improv task. Acquire/release fencing
     // ensures the buffer writes are ordered against the flag publication,
     // which matters on dual-core Xtensa where the producer and consumer can

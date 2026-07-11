@@ -12,12 +12,12 @@ public:
     bool enabled = true;
 
     bool setupCalled = false;
-    bool teardownCalled = false;
+    bool releaseCalled = false;
 
     void setup() override { setupCalled = true; }
-    void teardown() override { teardownCalled = true; }
+    void release() override { releaseCalled = true; }
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addUint8("speed", speed, 1, 255);
         controls_.addBool("enabled", enabled);
@@ -33,14 +33,14 @@ public:
 
 } // namespace
 
-// setup() and teardown() each fire exactly when called and update their respective state flags.
+// setup() and release() each fire exactly when called and update their respective state flags.
 TEST_CASE("MoonModule lifecycle") {
     TestModule mod;
     CHECK_FALSE(mod.setupCalled);
     mod.setup();
     CHECK(mod.setupCalled);
-    mod.teardown();
-    CHECK(mod.teardownCalled);
+    mod.release();
+    CHECK(mod.releaseCalled);
 }
 
 // name() starts empty; setName() copies the string into the internal 16-byte buffer.
@@ -90,7 +90,7 @@ TEST_CASE("MoonModule parent") {
 // Adding Uint8/Bool controls stores live pointers to the module's fields, so changes propagate either direction (field ↔ control->ptr).
 TEST_CASE("Control binding via ControlList") {
     TestModule mod;
-    mod.onBuildControls();
+    mod.defineControls();
 
     CHECK(mod.controls().count() == 3);
     CHECK(std::strcmp(mod.controls()[0].name, "brightness") == 0);
@@ -106,16 +106,16 @@ TEST_CASE("Control binding via ControlList") {
     CHECK(mod.brightness == 50);
 }
 
-// controls().clear() empties the list; calling onBuildControls() again repopulates it (the standard rebuild path).
+// controls().clear() empties the list; calling defineControls() again repopulates it (the standard rebuild path).
 TEST_CASE("ControlList clear and rebuild") {
     TestModule mod;
-    mod.onBuildControls();
+    mod.defineControls();
     CHECK(mod.controls().count() == 3);
 
     mod.controls().clear();
     CHECK(mod.controls().count() == 0);
 
-    mod.onBuildControls();
+    mod.defineControls();
     CHECK(mod.controls().count() == 3);
 }
 
@@ -192,7 +192,7 @@ TEST_CASE("Module enabled property") {
 // addBool binds a bool field — toggling the field updates control.ptr's view.
 TEST_CASE("Bool control binding") {
     TestModule mod;
-    mod.onBuildControls();
+    mod.defineControls();
 
     auto& ctrl = mod.controls()[2];
     CHECK(std::strcmp(ctrl.name, "enabled") == 0);
@@ -225,7 +225,7 @@ TEST_CASE("MoonModule appearsInUi defaults true, overridable false") {
 // Drivers.on through this). Returns the bound value; returns the caller's default when absent/wrong-type.
 TEST_CASE("MoonModule readBool/readUint8 return the value, or the default when absent") {
     TestModule mod;
-    mod.onBuildControls();   // binds brightness(Uint8), speed(Uint8), enabled(Bool)
+    mod.defineControls();   // binds brightness(Uint8), speed(Uint8), enabled(Bool)
 
     // Present controls read their live value.
     CHECK(mod.readUint8("brightness", 99) == 128);   // TestModule brightness default

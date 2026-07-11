@@ -36,23 +36,23 @@ namespace mm {
 /// control's own `[min, max]` — read generically from the target's `ControlDescriptor`, so the
 /// same code adjusts a 0–255 brightness slider and an N-option palette Select without knowing
 /// either's domain. A future LightsControl hub (docs/backlog) absorbs this as the normalised
-/// interface effects read; `latestCode()` is the seam it consumes (the `AudioModule::latestFrame`
+/// interface effects read; `latestCode()` is the seam it consumes (the `AudioService::latestFrame`
 /// pattern).
 ///
-/// **Not auto-wired.** Factory-registered like AudioModule / I2cScanModule, so a board with an IR
-/// receiver adds it via the installer device catalog (its `pin` carrying that board's IR GPIO) or
-/// the user adds it from the UI. On the SE16 the IR line shares GPIO 5 with the Ethernet MISO
+/// **Not auto-wired.** Factory-registered like AudioService, so a board with an IR
+/// receiver adds it under the `Services` container via the installer device catalog (its `pin`
+/// carrying that board's IR GPIO) or the user adds it from the UI. On the SE16 the IR line shares GPIO 5 with the Ethernet MISO
 /// through the board's hardware switch; the pin is the receiver input.
 ///
 /// **Prior art:** consumer IR remotes use the NEC protocol (a 32-bit address+command frame,
 /// LSB-first, ~9 ms lead burst); the ESP-IDF RMT peripheral decodes it (the espressif
 /// `ir_nec_transceiver` example). The decode itself lives behind `platform::irRead`.
-/// @card IrModule.png
-class IrModule : public MoonModule {
+/// @card IrService.png
+class IrService : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Peripheral; }
+    ModuleRole role() const override { return ModuleRole::Service; }
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addPin("pin", pin_);
         controls_.addSelect("learn", learn_, kLearnOptions, kActionCount + 1);
         for (uint8_t i = 0; i < kActionCount; i++) {
@@ -67,21 +67,29 @@ public:
         }
         // No "last code" control — a received code shows in the status line ("received 0x…" /
         // "learned … = 0x…"), so a separate read-out would duplicate it.
-        MoonModule::onBuildControls();
+        MoonModule::defineControls();
     }
 
     // Setup state so the module says whether it can receive (a pin is required). Re-run on any
     // rebuild so setting the pin updates the status live. Also rebuild the fast uint32 lookup from
     // the persisted hex strings — persistence restores the codeStr_ buffers (Text controls), so
     // parse each back into learnedCode_ here (post-load) so a learned binding survives a reboot.
-    void onBuildState() override {
+    /// Pure build (see MoonModule::prepare): rebuild the fast uint32 lookup from the persisted
+    /// hex strings (persistence restores the codeStr_ Text controls, so parse each back post-load so a
+    /// learned binding survives a reboot) and report readiness. The IR RX channel is opened lazily in
+    /// tick()/irRead when enabled; the release lives in release(), which applyState() routes a
+    /// disabled service to.
+    void prepare() override {
         for (uint8_t i = 0; i < kActionCount; i++)
             learnedCode_[i] = codeStr_[i][0] ? std::strtoul(codeStr_[i], nullptr, 0) : 0;
         reportReady();
-        MoonModule::onBuildState();
     }
 
-    void onUpdate(const char* controlName) override {
+    /// Release the IR RX channel (opened lazily in loop) so its pin is free for another module.
+    /// applyState() calls this when the service, or a parent, is disabled; re-acquire is lazy on enable.
+    void release() override { platform::irStop(); MoonModule::release(); }
+
+    void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "pin") == 0) reportReady();
         else if (std::strcmp(controlName, "learn") == 0) {
             if (learn_ != 0) setStatus("learning: press a remote button", Severity::Status);
@@ -89,7 +97,7 @@ public:
         }
     }
 
-    void loop() override {
+    void tick() override {
         if (pin_ < 0) return;
         uint32_t code = 0;
         if (platform::irRead(static_cast<uint16_t>(pin_), code)) processCode(code);
@@ -146,7 +154,7 @@ private:
             setStatus(statusBuf_);
             learn_ = 0;
             // Persist the new binding: markDirty flags the subtree, noteDirty stamps the debounce
-            // timer loop1s watches. A bound code is written straight to codeStr_ here (not via
+            // timer tick1s watches. A bound code is written straight to codeStr_ here (not via
             // setControl), so it must schedule the save itself — else the binding could be lost
             // before an unrelated save happens to run.
             markDirty();

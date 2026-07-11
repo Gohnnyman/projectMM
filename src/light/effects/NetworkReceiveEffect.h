@@ -1,12 +1,11 @@
 #pragma once
 
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
+
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format
 #include "light/E131Packet.h"     // shared E1.31/sACN wire format
-#include "light/layers/Layer.h"
-#include "platform/platform.h"
-
-#include <cstring>
+#include "platform/platform.h"    // platform::UdpSocket (the receive sockets — not a scratch buffer)
 
 namespace mm {
 
@@ -51,15 +50,28 @@ public:
     // source can't bleed its 2 padding bytes into the next universe's data.
     uint16_t channelsPerUniverse = static_cast<uint16_t>(MAX_CHANNELS_PER_UNIVERSE);
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint16("universe_start", universeStart);
         controls_.addUint16("channels_per_universe", channelsPerUniverse);
     }
 
-    void setup() override {
-        // One socket per protocol port, all listening at once. Each bind is
-        // attempted independently so one taken port can't stop the others from
-        // draining; any failure is reported once.
+    void release() override {
+        // Close the sockets (this effect's own non-buffer state), then chain to the base — which
+        // frees the registered staging_ ScratchBuffer (and recurses to children). Chaining is
+        // required: without MoonModule::release() the staging buffer would leak on disable.
+        artnetSocket_.close();
+        e131Socket_.close();
+        ddpSocket_.close();
+        MoonModule::release();
+        clearStatus();
+    }
+
+    /// Pure build (see MoonModule::prepare): open + bind the three receive sockets (each bind
+    /// independent so one taken port can't stop the others) and size the staging buffer to the layer
+    /// (one byte per channel byte, zeroed so a fresh grid starts dark). No enabled() check — core's
+    /// applyState() calls this only when effectively-enabled and routes to release() (sockets closed,
+    /// staging freed) otherwise, so a disabled effect (or one under a disabled parent) frees the ports.
+    void prepare() override {
         const bool artnetOk = artnetSocket_.open() && artnetSocket_.bind(ARTNET_PORT);
         const bool e131Ok = e131Socket_.open() && e131Socket_.bind(E131_PORT);
         const bool ddpOk = ddpSocket_.open() && ddpSocket_.bind(DDP_PORT);
@@ -68,40 +80,12 @@ public:
         } else {
             setStatus(kBindFailMsg, Severity::Error);
         }
+        // Size the staging buffer to the layer (one byte per channel byte). resize() reallocs
+        // (zero-filled) only when the byte count changes, frees on 0, and keeps dynamicBytes current.
+        staging_.resize(static_cast<size_t>(nrOfLights()) * channelsPerLight());
     }
 
-    void teardown() override {
-        artnetSocket_.close();
-        e131Socket_.close();
-        ddpSocket_.close();
-        releaseStaging();
-        setDynamicBytes(0);
-        clearStatus();
-    }
-
-    ~NetworkReceiveEffect() override { releaseStaging(); }
-
-    // Size staging to the layer buffer (one byte per channel byte), off the
-    // hot path — the GameOfLifeEffect resource shape. Zeroed on (re)alloc so a
-    // fresh grid starts dark, not with stale bytes.
-    void onBuildState() override {
-        const size_t need = static_cast<size_t>(nrOfLights()) * channelsPerLight();
-        if (enabled() && need > 0) {
-            if (need != stagingBytes_) {
-                releaseStaging();
-                staging_ = static_cast<uint8_t*>(platform::alloc(need));
-                if (staging_) {
-                    stagingBytes_ = need;
-                    std::memset(staging_, 0, need);
-                }
-            }
-        } else {
-            releaseStaging();
-        }
-        setDynamicBytes(stagingBytes_);
-    }
-
-    void loop() override {
+    void tick() override {
         if (!staging_) return;
         // Bounded non-blocking drain per socket: 128 packets ≈ one full ArtNet
         // frame for ~21k RGB lights; a flood costs at most 3×128 recvfrom calls
@@ -140,7 +124,7 @@ public:
         uint8_t* buf = buffer();
         if (!buf) return;
         const size_t bufBytes = static_cast<size_t>(nrOfLights()) * channelsPerLight();
-        std::memcpy(buf, staging_, stagingBytes_ < bufBytes ? stagingBytes_ : bufBytes);
+        std::memcpy(buf, staging_.data(), staging_.bytes() < bufBytes ? staging_.bytes() : bufBytes);
     }
 
     // Place one universe's payload: byte offset (universe − universeStart) ×
@@ -160,16 +144,16 @@ public:
     // check runs BEFORE any addition so a hostile 32-bit offset can't overflow
     // past it.
     void applyBytes(size_t offset, const uint8_t* data, uint16_t len) {
-        if (!staging_ || offset >= stagingBytes_) return;
+        if (!staging_ || offset >= staging_.bytes()) return;
         size_t n = len;
-        if (offset + n > stagingBytes_) n = stagingBytes_ - offset;
-        std::memcpy(staging_ + offset, data, n);
+        if (offset + n > staging_.bytes()) n = staging_.bytes() - offset;
+        std::memcpy(staging_.data() + offset, data, n);
     }
 
     // Test-only accessors — let the unit tests pin the staging lifecycle
-    // (sized off the hot path, never reallocated by loop, freed on teardown).
-    const uint8_t* stagingData() const { return staging_; }
-    size_t stagingBytes() const { return stagingBytes_; }
+    // (sized off the hot path, never reallocated by loop, freed on release).
+    const uint8_t* stagingData() const { return staging_.data(); }
+    size_t stagingBytes() const { return staging_.bytes(); }
 
 private:
     static constexpr int kMaxPacketsPerTick = 128;
@@ -182,8 +166,9 @@ private:
     platform::UdpSocket e131Socket_;
     platform::UdpSocket ddpSocket_;
     uint8_t pkt_[1500] = {};       // one datagram, any protocol (DDP max 1450)
-    uint8_t* staging_ = nullptr;   // owned; layer-buffer-sized
-    size_t stagingBytes_ = 0;
+    // Layer-buffer-sized staging (hold-last-frame). Self-sizing, self-freeing, self-reporting;
+    // freed on disable via MoonModule::release() (the release() override chains to it).
+    ScratchBuffer<uint8_t> staging_{*this};
 
     // Swap the "receiving <protocol>" diagnostic — but never clobber a bind
     // error. Pointer compares only (all four strings are static literals).
@@ -212,14 +197,6 @@ private:
         buildArtPollReply(reply, myIp, mac, "projectMM", "projectMM NetworkReceive",
                           universeStart);
         artnetSocket_.sendToAddr(pollerIp, ARTNET_PORT, reply, sizeof(reply));
-    }
-
-    void releaseStaging() {
-        if (staging_) {
-            platform::free(staging_);
-            staging_ = nullptr;
-            stagingBytes_ = 0;
-        }
     }
 };
 

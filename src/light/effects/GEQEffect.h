@@ -1,13 +1,6 @@
 #pragma once
 
-#include "light/effects/EffectBase.h"
-#include "light/layers/Layer.h"   // layer()->buffer()
-#include "light/Palette.h"        // colorFromPalette, Palettes::active()
-#include "light/draw.h"           // draw::pixel, draw::fade
-#include "core/math8.h"           // (no beat/trig here; included for parity with the effect family)
-#include "core/AudioModule.h"     // AudioModule::latestFrame()
-#include "core/AudioFrame.h"      // AudioFrame::bands[16]
-#include "platform/platform.h"    // platform::alloc / platform::free (per-column peak-fall state)
+#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
 
 namespace mm {
 
@@ -27,9 +20,9 @@ namespace mm {
 // MoonLight as the GEQ effect. The band→column mapping, the 7·band + 3·prev + 3·next smoothing weights,
 // the bottom-up bar fill, the colorBars / smoothBars toggles, and the falling-peak dot are reproduced
 // here, written fresh on projectMM's EffectBase + the shared draw / palette primitives. Reads
-// AudioModule::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
-// size. The per-column peak-fall state lives on the heap (sized to width()), allocated in onBuildState
-// and freed in teardown — never a large inline member.
+// AudioService::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
+// size. The per-column peak-fall state lives on the heap (sized to width()), allocated in prepare
+// and freed in release — never a large inline member.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive graphic-equaliser effect: 16 bands as vertical bars.
 class GEQEffect : public EffectBase {
@@ -46,7 +39,7 @@ public:
     bool    colorBars  = false; // colour each bar by its column (true) instead of by row height (false)
     bool    smoothBars = false; // blend each band with its neighbours for a smoother profile
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("fadeOut", fadeOut, 0, 255);
         controls_.addUint8("ripple", ripple, 0, 255);
         controls_.addBool("colorBars", colorBars);
@@ -58,37 +51,23 @@ public:
     // re-sizes only when the column count changes, zeroed on (re)build so a grid/control change starts
     // every peak at the floor. Entries are lengthType (the row-count type) so a panel taller than 255
     // rows doesn't truncate the remembered peak height.
-    void onBuildState() override {
-        const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
-        if (enabled() && cols > 0) {
-            if (cols != peakCount_) {
-                releasePeaks();
-                peaks_ = static_cast<lengthType*>(platform::alloc(cols * sizeof(lengthType)));
-                if (peaks_) peakCount_ = cols;
-            }
-            if (peaks_) for (size_t i = 0; i < peakCount_; i++) peaks_[i] = 0;  // zero-init, like WLED
-        } else {
-            releasePeaks();
-        }
+    void prepare() override {
+        // One peak entry per column. resize() reallocs only when the column count changes (frees on
+        // 0, keeps dynamicBytes current). Zero every peak on EVERY (re)build so a grid/control change
+        // starts each peak at the floor (matching WLED's zero-init) — resize() only zero-fills on a
+        // size change, so a same-width rebuild (e.g. a height-only edit) needs the explicit clear.
+        peaks_.resize(static_cast<size_t>(width() > 0 ? width() : 0));
+        if (peaks_) std::memset(peaks_.data(), 0, peaks_.bytes());
         rippleCounter_ = 0;
-        setDynamicBytes(peakCount_ * sizeof(lengthType));
-        MoonModule::onBuildState();
     }
 
-    void teardown() override {
-        releasePeaks();
-        setDynamicBytes(0);
-    }
-
-    ~GEQEffect() override { releasePeaks(); }
-
-    void loop() override {
+    void tick() override {
         const int cols = width();
         const int rows = height();
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;
         if (!peaks_) return;   // build hasn't allocated yet (e.g. disabled) — nothing to draw
 
-        const AudioFrame* f = AudioModule::latestFrame();
+        const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
         Buffer& buf = layer()->buffer();
@@ -177,16 +156,9 @@ private:
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
-    void releasePeaks() {
-        if (peaks_) {
-            platform::free(peaks_);
-            peaks_ = nullptr;
-        }
-        peakCount_ = 0;
-    }
-
-    lengthType* peaks_ = nullptr;  // previousBarHeight[width]: per-column peak-dot row (0..rows from floor)
-    size_t   peakCount_ = 0;       // number of peak entries allocated (== width)
+    // previousBarHeight[width]: per-column peak-dot row (0..rows from floor). The buffer sizes
+    // itself in prepare(), frees itself on disable/teardown, and reports its own bytes.
+    ScratchBuffer<lengthType> peaks_{*this};
     uint8_t  rippleCounter_ = 0;   // counts frames toward the next peak-fall step (gated by `ripple`)
 };
 

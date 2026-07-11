@@ -30,8 +30,8 @@ TEST_CASE("BouncingBallsEffect lights the bottom row on the first frame") {
     mm::BouncingBallsEffect balls;
     layer.addChild(&balls);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 16);
@@ -73,11 +73,11 @@ TEST_CASE("BouncingBallsEffect with zero balls leaves the buffer black") {
     layer.setChannelsPerLight(3);
 
     mm::BouncingBallsEffect balls;
-    balls.numBalls = 0;  // nBalls <= 0 → loop() returns before drawing
+    balls.numBalls = 0;  // nBalls <= 0 → tick() returns before drawing
     layer.addChild(&balls);
 
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     auto& buf = layer.buffer();
     bool anyLit = false;
@@ -104,8 +104,8 @@ TEST_CASE("BouncingBallsEffect survives a 0x0x0 grid") {
     layer.addChild(&balls);
 
     // No allocation, no draw, no crash on a zero grid.
-    layer.onBuildState();
-    layer.loop();
+    layer.applyState();
+    layer.tick();
 
     CHECK(layer.buffer().count() == 0);
 }
@@ -130,11 +130,11 @@ TEST_CASE("BouncingBallsEffect balls rise above the floor as time advances") {
     balls.numBalls = 8;
     layer.addChild(&balls);
 
-    layer.onBuildState();
+    layer.applyState();
 
     // Frame one at t=1 relaunches every ball (impactVelocity kick set from its floor bounce).
     mm::platform::setTestNowMs(1);
-    layer.loop();
+    layer.tick();
 
     // A ball with the maximum kick (√19.62·1.0 ≈ 4.43) climbs for ~450ms before falling back; sample
     // partway up its arc. Scan a spread of instants so the assertion doesn't hinge on one exact frame.
@@ -142,7 +142,7 @@ TEST_CASE("BouncingBallsEffect balls rise above the floor as time advances") {
     bool roseAboveFloor = false;
     for (uint32_t t = 50; t <= 400 && !roseAboveFloor; t += 50) {
         mm::platform::setTestNowMs(1 + t);
-        layer.loop();
+        layer.tick();
         for (int y = 0; y < h - 1; y++) {  // any row strictly above the floor
             size_t idx = static_cast<size_t>(y * w + 0) * 3;
             if (layer.buffer().data()[idx] | layer.buffer().data()[idx + 1] | layer.buffer().data()[idx + 2]) {

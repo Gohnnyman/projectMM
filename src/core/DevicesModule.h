@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/ActiveInstance.h"   // the boot-registry seat election (the seat + its RAII vacate)
 #include "core/Control.h"
 #include "core/JsonSink.h"
 #include "core/JsonUtil.h"         // recursive reader — restoreList parses the persisted array
@@ -22,7 +23,7 @@ namespace mm {
 ///
 /// Core + domain-neutral: it finds "a projectMM / a WLED device" and light modules
 /// (Art-Net sync, device groups) consume the list rather than living here, so its
-/// card looks the same on every projectMM instance, ESP32 or PC. Submodule of
+/// card looks the same on every projectMM instance, ESP32 or desktop. Submodule of
 /// NetworkModule — discovery depends on the network being up (the same placement
 /// reasoning as the Improv provisioning module), wired in `main.cpp` and marked
 /// wired-by-code so persistence preserves it.
@@ -177,15 +178,15 @@ public:
         return ok;      // false on a malformed/missing file (list left empty)
     }
 
-    void onBuildControls() override {
-        MoonModule::onBuildControls();
+    void defineControls() override {
+        MoonModule::defineControls();
         controls_.addList("devices", *this);   // this module is the ListSource
     }
 
     /// The boot DevicesModule (exactly one exists). A foreign-bridge driver in the light domain
     /// (a Hue driver) registers a discovered bridge through this without a compile-time dependency
-    /// on DevicesModule's address — the same static-seam shape as `AudioModule::latestFrame()`.
-    static DevicesModule* active() { return active_; }
+    /// on DevicesModule's address — the same static-seam shape as `AudioService::latestFrame()`.
+    static DevicesModule* active() { return ActiveInstance<DevicesModule>::active(); }
 
     /// Register a Hue bridge a light-domain driver has connected to. Unlike upsertDevice (driven by a UDP
     /// presence packet), a bridge is discovered out-of-band — the driver already holds its IP +
@@ -217,12 +218,12 @@ public:
         if (persistChanged || wasCached) refreshStatus();
     }
 
+    /// One-time wiring, enabled-INDEPENDENT: show the cached device list on boot. The last-known
+    /// list is restored before setup() by the persistence overlay (the `devices` List round-trips
+    /// as JSON), so the UI shows it INSTANTLY — even for a disabled instance, which still displays
+    /// what it last saw. The seat + socket (the actual resource) are handled in prepare.
     void setup() override {
         MoonModule::setup();
-        active_ = this;
-        // The last-known device list is restored automatically before setup() by the
-        // persistence overlay (the `devices` List control round-trips as JSON). So the
-        // UI shows it INSTANTLY on boot — no waiting for an announcement to re-arrive.
         if (deviceCount_) {
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s (cached)",
                           deviceCount_, deviceCount_ == 1 ? "" : "s");
@@ -230,12 +231,30 @@ public:
         setStatus(statusBuf_);
     }
 
+    /// Pure build (see MoonModule::prepare): claim the singleton seat (the Hue-bridge routing target).
+    /// No enabled() check — core's applyState() calls this only when effectively-enabled and routes to
+    /// release() otherwise, which vacates the seat and closes the presence socket, so a disabled
+    /// instance (or one under a disabled parent) frees the port. Exactly one DevicesModule exists, so
+    /// claim-if-empty is equivalent to an unconditional claim here.
+    void prepare() override {
+        seat_.claim();
+    }
+
+    /// Close the presence socket so its port is released (the module holds it via the lazy
+    /// ensureListener bind). Also runs on module removal so the fd doesn't leak.
+    void release() override {
+        seat_.vacate();
+        listener_.close();
+        listenerBound_ = false;
+        MoonModule::release();
+    }
+
     /// Every tick: ensure we're online, drain inbound presence packets through the plugins,
     /// broadcast our own presence on a slow cadence, and age out devices unheard for
     /// kStaleMs. The drain is non-blocking (recvFrom returns -1 when nothing pending), so it
     /// never stalls the tick — the hot-path-safe replacement for the old mDNS query.
-    void loop1s() override {
-        MoonModule::loop1s();
+    void tick1s() override {
+        MoonModule::tick1s();
         uint8_t local[4] = {};
         localIp(local);
         const bool online = local[0] || local[1] || local[2] || local[3];
@@ -291,11 +310,12 @@ private:
                                     ///< (the figure for sizing a layout). 0 for non-bridge rows.
     };
 
-    // The boot instance, for active() — the foreign-bridge static seam (mirrors AudioModule).
-    static inline DevicesModule* active_ = nullptr;
+    // The boot-instance seat, for active() — the foreign-bridge static seam (mirrors AudioService).
+    // Claimed on build, vacated on release + on destruction (the RAII member's dtor guards the static).
+    ActiveInstance<DevicesModule> seat_{*this};
 
     static constexpr uint8_t  kMaxDevices = 32;   ///< a LAN's worth; bounded, no heap
-    /// Broadcast our presence every this-many loop1s ticks (≈ seconds). Slow + light, like
+    /// Broadcast our presence every this-many tick1s ticks (≈ seconds). Slow + light, like
     /// WLED's ~30 s beacon; a new device appears within this window. A departed device
     /// clears within kStaleMs (sized to a few intervals so a present-but-quiet device isn't
     /// dropped between its broadcasts).
@@ -325,7 +345,7 @@ private:
 
     platform::UdpSocket listener_;       // bound to the presence port; drained each tick
     bool     listenerBound_ = false;
-    uint32_t broadcastTick_ = 0;         // counts loop1s ticks toward the next presence broadcast
+    uint32_t broadcastTick_ = 0;         // counts tick1s ticks toward the next presence broadcast
 
     Device  devices_[kMaxDevices];
     uint8_t deviceCount_ = 0;
@@ -367,7 +387,7 @@ private:
             listenerBound_ = true;
         } else {
             // bind failed (port busy this tick) — CLOSE the just-opened socket before
-            // returning, or each retry would open() a fresh fd and leak one per loop1s
+            // returning, or each retry would open() a fresh fd and leak one per tick1s
             // until the process runs out, slowing everything to a crawl.
             listener_.close();
         }

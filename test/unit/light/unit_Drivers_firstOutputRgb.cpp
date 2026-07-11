@@ -27,8 +27,8 @@ struct Rig {
         layouts.addChild(&grid);
         layer.setLayouts(&layouts);
         layer.setChannelsPerLight(3);
-        layouts.onBuildState();
-        layer.onBuildState();
+        layouts.applyState();
+        layer.applyState();
         drivers.setLayer(&layer);   // pin: Drivers reads this layer's buffer
     }
 };

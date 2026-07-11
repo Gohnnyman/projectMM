@@ -55,7 +55,7 @@ public:
     /// int (1/2/3) is emitted in `/api/types`; the UI derives the 📏/🟦/🧊 chip from
     /// it, so it isn't repeated in each module's `tags()`.
     ///
-    /// **Contract — loop() must honour layer dimensions.** `dimensions()` is a
+    /// **Contract — tick() must honour layer dimensions.** `dimensions()` is a
     /// claim about which axes the effect *iterates*, not a guarantee that the
     /// layer has that many axes. A D3 effect may run on a D1 or D2 layer (the
     /// layer just has depth=1 and/or height=1). Your loop must read `width()`,

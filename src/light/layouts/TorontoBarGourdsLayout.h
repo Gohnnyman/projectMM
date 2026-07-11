@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstdint>
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType, Coord3D
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -30,7 +28,7 @@ namespace mm {
 // runs it with a no-op callback to tally, forEachCoord() runs it to emit, so the
 // count and the emitted set can never disagree (the RingLayout/SphereLayout
 // pattern). Integer math throughout; this is the cold build path.
-// Author: projectMM / custom fixture
+// Author: troyhacks — custom Toronto bar decorative-gourd installation, reconstructed for projectMM — https://github.com/troyhacks/WLED
 /// Layout for the Toronto bar decorative-gourd installation.
 /// @card TorontoBarGourdsLayout.gif
 class TorontoBarGourdsLayout : public LayoutBase {
@@ -41,7 +39,7 @@ public:
     // Granularity select (0/1/2). MoonLight default 2 ("One LED One Light").
     uint8_t granularity = 2;
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addSelect("granularity", granularity, kGranularityOptions, kGranularityCount);
         // Mode 0 only; MoonLight range 1..128.
         controls_.addUint8("nrOfLightsPerGourd", nrOfLightsPerGourd, 1, 128);

@@ -1,9 +1,6 @@
 #pragma once
 
-#include "light/modifiers/ModifierBase.h"
-#include "core/math8.h"           // sin8, cos8 — integer trig
-
-#include <cstdint>
+#include "light/modifiers/Modifier.h"   // umbrella: ModifierBase + light_types + math8 + cmath/cstdint/cstdlib/algorithm
 
 namespace mm {
 
@@ -39,13 +36,13 @@ public:
 
     uint8_t speed = 1;   // rotation speed, 1..255 (turns faster as it rises)
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("speed", speed, 1, 255);
     }
 
     // `speed` only changes how fast the angle advances; rotation is applied live in
     // modifyLive, not baked into the mapping, so a speed edit needs no rebuild.
-    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return false; }
+    bool affectsPrepare(const char* /*controlName*/) const override { return false; }
 
     // Per-frame backward map: a destination logical cell `pos` is replaced by the
     // SOURCE cell it samples — the inverse rotation R(-θ) about the box centre.
@@ -75,8 +72,8 @@ public:
     // Dynamic tick: advance the angle on the timer. No rebuild — modifyLive applies
     // the new angle on the next frame. The angle is uint8 turn units (256 = a turn);
     // dt·speed accumulates so a sub-ms frame isn't lost (the integer-accumulator idiom
-    // the effects use). Layer::loop() invokes this per enabled modifier child.
-    void loop() override {
+    // the effects use). Layer::tick() invokes this per enabled modifier child.
+    void tick() override {
         const uint32_t now = platform::millis();
         if (lastElapsed_ == 0) lastElapsed_ = now;
         const uint32_t dt = now - lastElapsed_;

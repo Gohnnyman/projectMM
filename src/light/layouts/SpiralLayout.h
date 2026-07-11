@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cmath>    // sinf, cosf
-#include <cstdint>
-#include <limits>   // std::numeric_limits (lightCount clamp, matches GridLayout)
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -31,7 +27,7 @@ public:
     lengthType bottomRadius = 10;   // radius at the base, in light-units
     lengthType height = 25;         // vertical rise from base to tip
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addInt16("ledCount",     ledCount,     1, 2048);
         controls_.addInt16("bottomRadius", bottomRadius, 1, 100);
         controls_.addInt16("height",       height,       1, 200);

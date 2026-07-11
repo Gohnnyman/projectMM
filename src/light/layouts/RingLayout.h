@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cmath>    // sinf, cosf, fmodf
-#include <cstdint>
-#include <numbers>  // std::numbers::pi_v — portable pi (M_PI is a non-standard <cmath> extension)
-#include "light/layouts/LayoutBase.h"
-#include "light/light_types.h"  // lengthType, nrOfLightsType
+#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
 
 namespace mm {
 
@@ -34,7 +30,7 @@ public:
     bool     clockwise  = true;
     uint8_t  scale      = 1;     // 1..10 — spacing multiplier out from the centre
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addUint8("nrOfLEDs",    nrOfLEDs,   1, 255);
         controls_.addUint16("angleFirst", angleFirst, 0, 359);
         controls_.addUint16("rotation",   rotation,   0, 360);
@@ -75,7 +71,7 @@ private:
             return;
         }
 
-        // RECONSTRUCTED: MoonLight computes ringCenter in onUpdate() (on the
+        // RECONSTRUCTED: MoonLight computes ringCenter in onControlChanged() (on the
         // nrOfLEDs control change), storing it as an integer Coord3D — the float
         // 1.1 * getRadius(nrOfLEDs) is truncated to int on assignment. projectMM
         // rebuilds fresh each build, so ringCenter is derived inline here from
