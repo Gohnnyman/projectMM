@@ -191,8 +191,8 @@ public:
     /// Register a Hue bridge a light-domain driver has connected to. Unlike upsertDevice (driven by a UDP
     /// presence packet), a bridge is discovered out-of-band — the driver already holds its IP +
     /// app key — so this is the explicit entry point for that. Idempotent: updates the name +
-    /// colour count of the existing row, or inserts one. `colour` is how many of the bridge's
-    /// lights are colour-capable, the figure for sizing a layout. Persisted like any device row.
+    /// color count of the existing row, or inserts one. `color` is how many of the bridge's
+    /// lights are color-capable, the figure for sizing a layout. Persisted like any device row.
     void upsertHueBridge(const uint8_t ip[4], const char* name, uint8_t color) {
         Device* d = findByIp(ip);
         bool persistChanged = false;
@@ -306,7 +306,7 @@ private:
                                  ///< session. Cleared on the first live sighting.
         uint32_t lastSeenMs = 0; ///< platform::millis() at the most recent presence sighting.
                                  ///< Age-out drops a non-self device unheard for kStaleMs.
-        uint8_t  colorCount = 0; ///< Hue bridge only: how many of its lights are colour-capable
+        uint8_t  colorCount = 0; ///< Hue bridge only: how many of its lights are color-capable
                                     ///< (the figure for sizing a layout). 0 for non-bridge rows.
     };
 
@@ -366,7 +366,7 @@ private:
             DiscoveredDevice found;
             if (p->classifyPacket(data, len, srcIp, found)) { upsertDevice(srcIp, found); return; }
         }
-        // No plugin claimed it — an unrecognised packet on a port we listen on; ignore.
+        // No plugin claimed it — an unrecognized packet on a port we listen on; ignore.
     }
 
     // Bind the discovery listener once the network is up. Idempotent — a no-op once bound.

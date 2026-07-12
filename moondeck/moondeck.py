@@ -426,6 +426,10 @@ def refresh_devices(known_devices):
             fresh["deviceModel"] = device["deviceModel"]
         if device.get("last_port"):
             fresh["last_port"] = device["last_port"]
+        if device.get("usbSerial"):
+            fresh["usbSerial"] = device["usbSerial"]
+        if device.get("probedChip"):
+            fresh["probedChip"] = device["probedChip"]
         return fresh
 
     if not known_devices:
@@ -490,10 +494,19 @@ def _link_last_flash(probed: list) -> None:
         # this port from any OTHER device that still carries it (a stale link from a previous
         # flash), else two records share a last_port and port→device lookups (baud resolution,
         # the flash chip) can pick the wrong, stale board.
+        serial = _port_serial(port)
         for d in probed:
             if d is not matches[0] and d.get("last_port") == port:
                 d.pop("last_port", None)
+            # usbSerial is the drift-immune key (the adapter's, not the OS path);
+            # like last_port it belongs to exactly one board, so clear stale holders.
+            if d is not matches[0] and serial and d.get("usbSerial") == serial:
+                d.pop("usbSerial", None)
         matches[0]["last_port"] = port
+        # Record the stable per-adapter serial so the port dropdown can re-identify
+        # this board after the path drifts (see describe_serial_ports).
+        if serial:
+            matches[0]["usbSerial"] = serial
         with suppress(OSError):
             _LAST_FLASH_FILE.unlink()   # linked → consume so it applies once
     # 0 matches (device hasn't rebooted into the new firmware yet) or 2+ (ambiguous legacy
@@ -879,6 +892,275 @@ def list_serial_ports() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Port identity — three levels of "which board is this?"
+#
+# The port PATH drifts between sessions (macOS renumbers cu.usbserial-* on
+# replug); ports don't self-identify. So we build up to three levels of info,
+# each degrading gracefully to the one below:
+#   1. path  — always (the cu.* / COM* string itself)
+#   2. chip  — the ESP32 family (esp32-s3 / -p4 / classic), from the USB
+#              descriptor when the board has native USB (Espressif VID 0x303A);
+#              otherwise inferred from the registry's stored firmware.
+#   3. board — the specific board name (e.g. "MM-LC16"), from a registry match:
+#              on native-USB Espressif chips the USB serial number IS the MAC,
+#              so we match MAC→device directly; on external UART adapters
+#              (CP210x / CH343) the stable per-adapter serial embedded in the
+#              port name keys a device's `usbSerial` field.
+# None of this resets or opens the board — it reads the USB descriptor the OS
+# already enumerated, so it's safe to run on every dropdown refresh.
+# ---------------------------------------------------------------------------
+
+# Espressif chips with *native* USB (no external UART bridge) advertise VID
+# 0x303A; the product-descriptor PID names the family. Boards behind a CP210x
+# (SiLabs 0x10C4) or CH343 (WCH 0x1A86) UART bridge expose only the adapter, so
+# their chip family isn't in USB — it comes from the registry firmware instead.
+_ESPRESSIF_VID = 0x303A
+# PID 0x1001 is the SHARED USB-Serial-JTAG PID across S3/C3/C6/H2/P4 — it does NOT identify the
+# specific chip (the P4-NANO reports it too), and the product string is always the generic "USB
+# JTAG/serial debug unit", so there's nothing to disambiguate with. Map it only to "native-USB
+# Espressif, family unknown"; the specific chip comes from a registry match (MAC/usbSerial) or the
+# Identify probe. Only 0x1002 (the S2's own PID) names a chip. Others fall through to the generic.
+_ESP_PID_CHIP = {
+    0x1002: "esp32-s2",
+}
+
+# VIDs that could front an ESP32: Espressif native USB, plus the USB-UART bridges
+# ESP32 dev boards ship (SiLabs CP210x, WCH CH34x, FTDI, Prolific). A port whose
+# USB vendor is known but NOT in this set (any other USB serial device on the
+# machine — a monitor's control channel, a dongle, a keyboard) is definitely not
+# an ESP32, so it's labeled by its own product name and skipped from the probe.
+_ESP_CAPABLE_VIDS = frozenset({
+    _ESPRESSIF_VID,   # 0x303A Espressif native USB
+    0x10C4,           # Silicon Labs CP210x
+    0x1A86,           # WCH CH340 / CH343
+    0x0403,           # FTDI
+    0x067B,           # Prolific PL2303
+})
+
+
+def _chip_from_usb(vid: int, pid: int) -> str:
+    """Map a native-USB Espressif (vid, pid) to an ESP32 family, or "" if the
+    descriptor doesn't reveal the chip (external UART bridge — vid isn't Espressif's,
+    or an unknown PID). The product string is always the generic "USB JTAG/serial
+    debug unit" (never the SoC), so the PID table is what identifies the chip. Pure."""
+    if vid != _ESPRESSIF_VID:
+        return ""  # external adapter — chip family not carried in USB
+    return _ESP_PID_CHIP.get(pid, "esp32 (native-usb)")
+
+
+def _firmware_to_chip(firmware: str) -> str:
+    """Best-effort ESP32 family from a registry firmware id (e.g.
+    'esp32s3-n8r8' → 'esp32-s3', 'esp32p4-eth' → 'esp32-p4', 'esp32' →
+    'esp32 (classic)'). The fallback for boards behind a UART bridge. Pure."""
+    f = (firmware or "").lower()
+    for key, chip in (("p4", "esp32-p4"), ("s3", "esp32-s3"),
+                      ("s2", "esp32-s2"), ("c6", "esp32-c6"), ("c3", "esp32-c3")):
+        if key in f:
+            return chip
+    if f.startswith("esp32"):
+        return "esp32 (classic)"
+    return ""
+
+
+def _port_serial(path: str) -> str:
+    """The stable per-adapter serial embedded in a macOS port name:
+    /dev/cu.usbserial-20213240 → '20213240', /dev/cu.usbmodem5ABA0767291 →
+    '5ABA0767291'. This survives path drift (the number is the adapter's, not
+    the OS enumeration order). Returns "" when the name carries no serial. Pure."""
+    import re
+    m = re.search(r"usb(?:serial-|modem)(.+)$", path)
+    return m.group(1) if m else ""
+
+
+def _resolve_port(path: str, usb: dict, devices: list) -> dict:
+    """Build the {path, chip, board, ip} identity for one port. `usb` is that
+    port's USB descriptor ({vid,pid,product,serial}) or {} if unknown; `devices`
+    is the active network's device list. Pure — all I/O done by the caller."""
+    chip = _chip_from_usb(usb.get("vid", 0), usb.get("pid", 0))
+    board = ip = ""
+    # Level 3: match a registry device. Native-USB Espressif chips report their
+    # MAC as the USB serial number, so match that first; then fall back to the
+    # per-adapter serial (from the port name) against a stored `usbSerial`.
+    usb_serial = usb.get("serial", "")
+    serial = _port_serial(path)
+    match = None
+    for d in devices:
+        mac = (d.get("mac") or "").upper()
+        if usb_serial and mac and _mac_matches(mac, usb_serial):
+            match = d
+            break
+        if serial and d.get("usbSerial") and serial == d["usbSerial"]:
+            match = d
+            break
+    if match:
+        board, ip = match.get("deviceName", ""), match.get("ip", "")
+        # A registry match knows the SPECIFIC chip (from an esptool probe, or derived from the
+        # flashed firmware). That beats the USB descriptor's family: for a native-USB board the
+        # descriptor only ever gives the generic "esp32 (native-usb)" (0x1001 is shared across
+        # S3/C3/C6/H2/P4), so a real probe/firmware chip must win over it. Keep a *specific* USB
+        # chip (the S2's 0x1002) if the registry has nothing better.
+        known = match.get("probedChip", "") or _firmware_to_chip(match.get("firmware", ""))
+        if known and (not chip or chip == "esp32 (native-usb)"):
+            chip = known
+    elif not chip:
+        pass   # no match, no USB chip → stays "" (path/level-1 only), unchanged
+    # `probeable`: could this port be an ESP32 at all? True unless the USB vendor
+    # is known-but-not-ESP-capable (a monitor, dongle, keyboard — resetting those
+    # wastes a ~10s reset for nothing). This is a DEV bench where boards move
+    # between ports constantly, so Identify re-probes every probeable port every
+    # time — even already-labeled ones — because a fresh read of the board
+    # actually on the port beats trusting a cache that a swap may have staled.
+    vid = usb.get("vid", 0)
+    known_not_esp = bool(vid) and vid not in _ESP_CAPABLE_VIDS
+    probeable = not known_not_esp
+    # Label a non-ESP port with its actual USB product name (whatever the device
+    # reports) so you can see what's on the port, not just that it's skipped;
+    # fall back to "not an ESP32" when the descriptor has no product string.
+    note = ""
+    if known_not_esp and not board:
+        note = usb.get("product", "").strip() or "not an ESP32"
+    return {"path": path, "chip": chip, "board": board, "ip": ip,
+            "probeable": probeable, "note": note}
+
+
+def _read_usb_ports() -> dict:
+    """macOS: parse `ioreg` into {port_path: {vid,pid,product,serial}} for every
+    USB serial callout device, without opening (resetting) the port. Returns {}
+    on non-macOS or if ioreg is unavailable — callers degrade to path-only."""
+    if sys.platform != "darwin":
+        return {}
+    import re
+    try:
+        out = subprocess.run(
+            ["ioreg", "-l", "-w0"],
+            capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    # The IORegistry is a tree: a USB device node holds the descriptor
+    # (idVendor/idProduct/USB Serial Number), and a *child* IOSerialBSDClient
+    # node holds IOCalloutDevice (the /dev path). They're in different `+-o`
+    # blocks, so pair them by tree depth: track a stack of nodes keyed on the
+    # indent of their `+-o` marker, and attach each callout to its nearest
+    # ancestor that carries a descriptor field.
+    def depth(ln):
+        i = ln.find("+-o")
+        return i if i >= 0 else None
+    stack: list = []            # (depth, node-dict)
+    cur: dict | None = None
+    result: dict = {}
+    fields = (("idVendor", "vid", int), ("idProduct", "pid", int),
+              ("USB Product Name", "product", str), ("USB Serial Number", "serial", str))
+    for ln in out.splitlines():
+        d = depth(ln)
+        if d is not None:
+            while stack and stack[-1][0] >= d:
+                stack.pop()
+            cur = {"vid": 0, "pid": 0, "product": "", "serial": ""}
+            stack.append((d, cur))
+        if cur is not None:
+            for tag, key, cast in fields:
+                m = re.search(rf'"{tag}" = (?:"([^"]*)"|(\d+))', ln)
+                if m:
+                    cur[key] = cast(m.group(1) if m.group(1) is not None else m.group(2))
+        mc = re.search(r'"IOCalloutDevice" = "([^"]+)"', ln)
+        if mc:
+            desc = {"vid": 0, "pid": 0, "product": "", "serial": ""}
+            for _, node in reversed(stack):   # nearest ancestor wins per field
+                for key in desc:
+                    if not desc[key] and node[key]:
+                        desc[key] = node[key]
+            result[mc.group(1)] = desc
+    return result
+
+
+def describe_serial_ports(devices: list | None = None) -> list[dict]:
+    """The dropdown's data source: every present port enriched with chip family
+    and specific board (levels 2 and 3). `devices` is the active network's
+    device list (for the registry match); pass [] for path+chip only."""
+    usb = _read_usb_ports()
+    return [_resolve_port(p, usb.get(p, {}), devices or [])
+            for p in list_serial_ports()]
+
+
+# --- level 2/3 by active probe (opt-in — resets the board) -------------------
+#
+# The USB descriptor only reveals the chip for *native-USB* boards; a board
+# behind a CP210x/CH343 UART bridge hides its family. esptool's connect
+# handshake reads the chip's magic register and efuse MAC — the same thing the
+# web installer does — which fills both the chip (level 2) and, via the MAC, the
+# board (level 3). But the handshake RESETS the board (DTR/RTS into download
+# mode), so this is opt-in (an "Identify ports" button), never automatic. The
+# result is cached to the registry (usbSerial), so it's a one-time cost per board.
+
+def _normalize_chip(detected: str) -> str:
+    """esptool's chip name ('ESP32-S3', 'ESP32-S31', 'ESP32-P4', 'ESP32') → our
+    family style ('esp32-s3', 'esp32-p4', 'esp32 (classic)'). Pure."""
+    d = (detected or "").strip().lower()
+    if not d.startswith("esp32"):
+        return ""
+    for fam in ("esp32-p4", "esp32-s31", "esp32-s3", "esp32-s2",
+                "esp32-c6", "esp32-c5", "esp32-c3", "esp32-h2"):
+        if d.startswith(fam):
+            return "esp32-s3" if fam == "esp32-s31" else fam   # S31 is an S3 variant
+    return "esp32 (classic)"   # bare "esp32"
+
+
+def _parse_esptool_probe(text: str) -> dict:
+    """Extract {chip, mac} from esptool's `read-mac` output. Pure — the caller
+    runs esptool. `chip` is normalized to our family style; both "" if absent."""
+    import re
+    chip = mac = ""
+    m = re.search(r"Detecting chip type\.\.\.\s*(ESP32\S*)", text, re.I) \
+        or re.search(r"Chip is\s+(ESP32\S*)", text, re.I)
+    if m:
+        chip = _normalize_chip(m.group(1))
+    mm = re.search(r"MAC:\s*([0-9a-fA-F:]{17})", text)
+    if mm:
+        mac = mm.group(1).lower()
+    return {"chip": chip, "mac": mac}
+
+
+def probe_port_chip(path: str) -> dict:
+    """Run esptool against one port to read its chip + MAC. RESETS the board.
+    Returns {chip, mac} ("" fields on failure — a busy/monitored port, no chip,
+    or esptool unavailable). esptool comes via `uv run --with esptool` so it needs
+    no IDF toolchain (the project uv standard, see CLAUDE.md § Use uv)."""
+    try:
+        out = subprocess.run(
+            ["uv", "run", "--with", "esptool", "python", "-m", "esptool",
+             "--port", path, "--before", "default-reset", "read-mac"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return {"chip": "", "mac": ""}
+    return _parse_esptool_probe(out.stdout + out.stderr)
+
+
+def _apply_probe_results(devices: list, probed: dict) -> None:
+    """Cache probe results ({path: {chip, mac}}) onto the matched devices in
+    place. A probe reads the board ACTUALLY on the port, so it's authoritative:
+    the port-name serial is moved onto the probed board even if another device's
+    cache claimed it (the adapter-reused-for-another-board swap). Pure aside from
+    mutating `devices`; the caller runs it inside mutate_state. Unmatched probes
+    (no MAC, or a MAC no device reports) are ignored."""
+    for path, info in probed.items():
+        if not info.get("mac"):
+            continue
+        dev = next((d for d in devices
+                    if _mac_matches(info["mac"], d.get("mac", ""))), None)
+        if not dev:
+            continue
+        serial = _port_serial(path)
+        if serial:
+            # One port maps to one board: strip a stale claim off any other device.
+            for other in devices:
+                if other is not dev and other.get("usbSerial") == serial:
+                    other.pop("usbSerial", None)
+            dev["usbSerial"] = serial
+        if info.get("chip"):
+            dev["probedChip"] = info["chip"]
+
+
+# ---------------------------------------------------------------------------
 # Perf-table HTML (shared shape with docs/tests/scenario-tests.md)
 # ---------------------------------------------------------------------------
 
@@ -983,7 +1265,13 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"scripts": SCRIPTS, "firmwares": FIRMWARES})
 
         elif self.path == "/api/ports":
-            self._send_json({"ports": list_serial_ports()})
+            # Enrich each port with chip family + specific board (levels 2/3),
+            # resolved against the active network's registered devices.
+            state = load_state()
+            active = next((n for n in state.get("networks", [])
+                           if n.get("name") == state.get("active_network")), None)
+            devices = (active or {}).get("devices", [])
+            self._send_json({"ports": describe_serial_ports(devices)})
 
         elif self.path == "/api/scenarios":
             self._send_json({"scenarios": self._list_scenarios()})
@@ -1068,6 +1356,27 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 s.update(patch)
             result = mutate_state(_merge)
             self._send_json(result)
+
+        elif self.path == "/api/identify-ports":
+            # Opt-in chip probe (the "Identify ports" button). Body: {ports: [...]}
+            # — the ports the UI still shows as Level 1. esptool resets each board
+            # to read its chip + MAC, so we probe ONLY what was asked, never all.
+            # The probe (slow, network/serial I/O) runs BEFORE mutate_state per its
+            # contract; results are cached to the matched device (usbSerial +
+            # probedChip) so the label survives path drift and future refreshes.
+            body = self._read_body()
+            req = json.loads(body) if body else {}
+            probed = {p: probe_port_chip(p) for p in req.get("ports", [])}
+
+            def _apply(s):
+                active = next((n for n in s.get("networks", [])
+                               if n.get("name") == s.get("active_network")), None)
+                _apply_probe_results((active or {}).get("devices", []), probed)
+            state = mutate_state(_apply)
+            active = next((n for n in state.get("networks", [])
+                           if n.get("name") == state.get("active_network")), None)
+            self._send_json({"ports": describe_serial_ports((active or {}).get("devices", [])),
+                             "probed": probed})
 
         elif self.path == "/api/ota":
             # Wireless flash of a LOCAL build: MoonDeck serves build/esp32-<fw>/projectMM.bin over

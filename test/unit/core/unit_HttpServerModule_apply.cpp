@@ -25,7 +25,11 @@ namespace {
 // add, set, and clear-children without pulling in real light modules.
 struct Knob : public mm::MoonModule {
     uint8_t value = 10;
-    void defineControls() override { controls_.addUint8("value", value, 0, 100); }
+    bool showExtra = false;   // toggling this ADDS/REMOVES a control → a real schema change
+    void defineControls() override {
+        controls_.addUint8("value", value, 0, 100);
+        if (showExtra) controls_.addUint8("extra", value, 0, 100);
+    }
 };
 struct Box : public mm::MoonModule {
     // accepts any child (the HTTP role gate lives above the apply-core).
@@ -309,7 +313,7 @@ TEST_CASE("buildStatePatch: unchanged tree yields an empty patch") {
 // schema-changed hook. This is what carries a metadata-only change (WiFi addressing hides fields,
 // a preset Select gains an option) to connected clients. Pins the hook wiring + the subtraction of
 // the old per-call-site resyncs.
-TEST_CASE("schema-changed hook: rebuildControls() requests a full WS resync") {
+TEST_CASE("schema-changed hook: rebuildControls() resyncs ONLY on a real schema change") {
     registerTestTypes();
     mm::Scheduler s;
     auto* root = new Box(); root->setName("Root");
@@ -318,12 +322,28 @@ TEST_CASE("schema-changed hook: rebuildControls() requests a full WS resync") {
     s.addModule(root);
     s.setup();
     mm::HttpServerModule http; http.setScheduler(&s);
-    http.setup();                                   // installs the schema-changed hook
+    http.installSchemaHookForTest();                // hook only, no TCP listener (a port bind is flaky)
 
-    http.clearFullResyncForTest();                  // start from "no resync pending"
+    // A value-only rebuild (same control set) must NOT resync — that's the common slider-drag path,
+    // carried by the per-leaf value patch, not a full metadata resend.
+    http.clearFullResyncForTest();
     CHECK(!http.fullResyncPendingForTest());
-    k->rebuildControls();                           // a schema change on any module…
+    k->rebuildControls();                           // schema unchanged (showExtra still false)
+    CHECK(!http.fullResyncPendingForTest());        // …so the hook does NOT fire
+
+    // A real schema change (a control appears) MUST resync — the value patch can't carry it.
+    k->showExtra = true;
+    k->rebuildControls();
     CHECK(http.fullResyncPendingForTest());         // …flips the resync flag via the hook
+
+    // A CHILD's schema change caught by a rebuild on the PARENT — rebuildControls() rebuilds the
+    // whole subtree, so the signature must recurse into children or the resync is dropped (the
+    // preset-library case: adding a preset grows every child driver's Select while the parent's own
+    // controls are unchanged). Toggle the child, rebuild the parent, expect a resync.
+    http.clearFullResyncForTest();
+    k->showExtra = false;
+    root->rebuildControls();                        // parent rebuild cascades to the child
+    CHECK(http.fullResyncPendingForTest());         // child's control vanished → caught via recursion
 
     http.release();                                 // unwires the hook (clears instance_)
     s.deleteTree(root);

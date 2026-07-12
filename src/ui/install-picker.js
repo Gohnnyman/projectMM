@@ -827,6 +827,16 @@ export const installPicker = {
     },
 
     /**
+     * Forget the last Detect's chip — call when the user re-picks a port, so the
+     * port dropdown doesn't briefly show the previous port's chip before the
+     * fresh detect lands. runDetect() also clears it at its start; this covers
+     * the window before that runs.
+     */
+    clearDetectedChip() {
+        if (_lastState) _lastState.detectedChip = null;
+    },
+
+    /**
      * Detect the connected chip and narrow the board list to its family. Called
      * by the host's "Detect my board" button (under the port picker) and auto-
      * fired after a fresh port grant (the ESP Web Tools / ESPHome model: detect

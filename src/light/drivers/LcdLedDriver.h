@@ -51,7 +51,11 @@ public:
     /// The number of i80 lanes this chip provides (0 = not this chip); the base's
     /// inert-on-wrong-chip guards key off it.
     static constexpr uint8_t lanesAvailable() { return platform::lcdLanes; }
-    static constexpr bool kExactLaneCount = true;   // i80 needs all 8 data lanes
+    static constexpr bool kExactLaneCount = true;   // i80 needs exactly 8 or 16 data lanes
+    // The i80 loopback can't build a 1-lane private bus, so it rebuilds the FULL-WIDTH bus and
+    // carries the pattern on lane 0 — the loopback frame must be encoded at the operational bus
+    // width (16-bit for a 16-lane driver) to match. (Parlio can do a 1-lane unit, so it sets false.)
+    static constexpr bool kLoopbackFullWidth = true;
     static constexpr const char* kInitFailMsg = "LCD init failed — check pins / memory";
 
     /// Bind the i80-specific bus controls: the sacrificial WR (clockPin) and DC pins
@@ -72,13 +76,24 @@ public:
     /// the clock/DC waveform instead of pixel data (silent corruption — the strip on
     /// that lane shows garbage). Fail loud + idle instead, same shape as the other
     /// parse errors. (Hides the base's no-op default; the base calls this via CRTP.)
+    // Returns a WARNING string (not an error) if a data lane sits on clockPin (WR) or
+    // dcPin: that lane emits the bus-control waveform instead of pixel data. It's a
+    // warning because on a board that wires all 8/16 lanes but drives fewer strands,
+    // parking WR/DC on an unused data pin is a valid choice — only a lane driving a
+    // real strand shows garbage. The base routes this to setConfigWarn; the driver
+    // keeps running. null when the WR/DC pins are clear of the data set.
     const char* validateBusPins(const uint16_t* lanes, uint8_t n) const {
+        // WR and DC on the SAME GPIO is never valid — the i80 bus needs two distinct
+        // control lines, so this can't just corrupt one lane like a data collision; it
+        // breaks the bus. Check it up front, before the per-lane checks.
+        if (clockPin >= 0 && clockPin == dcPin)
+            return "clockPin (WR) and dcPin are the same GPIO — they must differ";
         for (uint8_t i = 0; i < n; i++) {
             // clockPin/dcPin are int8_t (-1 = unset); only a real GPIO can collide.
             if (clockPin >= 0 && lanes[i] == static_cast<uint16_t>(clockPin))
-                return "LED pin collides with clockPin (WR)";
+                return "a LED pin is on clockPin (WR) — that lane carries the clock, not pixels";
             if (dcPin >= 0 && lanes[i] == static_cast<uint16_t>(dcPin))
-                return "LED pin collides with dcPin";
+                return "a LED pin is on dcPin — that lane carries DC, not pixels";
         }
         return nullptr;
     }

@@ -204,16 +204,63 @@ public:
     /// changes (in HttpServerModule) and anywhere else the conditional control set needs
     /// re-evaluation.
     void rebuildControls() {
-        clearControlsRecursive();
-        defineControls();
         // rebuildControls() is the ONE chokepoint every schema change passes — a conditional-hidden
         // re-evaluation, an option-set rebuild (a driver's preset Select, a Hue room dropdown), from
-        // any trigger (a control set, a list mutation, an async WiFi/Hue callback). The WS state push
-        // value-hashes leaves, so a metadata-only change wouldn't reach connected clients on its own.
-        // Signal the WS layer here, once, so every schema-changing path resyncs without each module
-        // (or each call site) having to remember to — the Complexity-lives-in-core rule (mirrors the
-        // FilesystemModule::noteDirty static hook). Cold path only; no render-loop cost.
-        if (schemaChangedHook_) schemaChangedHook_();
+        // any trigger (a control set, a list mutation, an async WiFi/Hue callback). But it also runs
+        // on EVERY ordinary value patch (Scheduler::setControl calls it so defineControls re-evaluates
+        // conditional visibility) — and most of those don't change the schema at all (a slider drag).
+        // The WS state push already value-hashes leaves, so a value patch reaches clients on its own;
+        // a full metadata resync is only needed when the *schema* (control set / metadata / options)
+        // actually changed. So hash the schema before + after the rebuild and fire the resync hook
+        // ONLY on a real change — the common slider-drag case skips it. Mirrors the
+        // FilesystemModule::noteDirty static hook; the Complexity-lives-in-core rule. Cold path only.
+        const uint32_t before = schemaSignature();
+        clearControlsRecursive();
+        defineControls();
+        if (schemaChangedHook_ && schemaSignature() != before) schemaChangedHook_();
+    }
+
+    /// FNV-1a hash of the schema-relevant control fields (name, type, bounds, UI flags, option
+    /// strings) across this module's control list AND its whole subtree — the metadata the WS resync
+    /// would push. Used by rebuildControls() to fire the resync only when the schema actually changed,
+    /// not on every value patch. Value fields (the bound variables) are deliberately excluded: a value
+    /// change rides the per-leaf WS diff, not a full metadata resync.
+    ///
+    /// Recurses into children because rebuildControls() rebuilds the whole subtree (a parent's
+    /// defineControls() cascades to children), and a child's schema can change under an unchanged
+    /// parent — e.g. adding a light preset grows every driver's `preset` Select while the Drivers
+    /// container's own controls stay put. A node-only hash would miss that and drop the resync.
+    ///
+    /// For a Select, hashes the option STRINGS, not the array pointer: the stable-address bind pattern
+    /// (DriverBase::presetOptions_, HueDriver's room/light options) keeps a fixed member array whose
+    /// entries are rewritten in place on a rename — same pointer, same count, changed content — so the
+    /// pointer alone can't see a renamed option.
+    uint32_t schemaSignature() const {
+        uint32_t h = 2166136261u;
+        mixSchema(h);
+        return h;
+    }
+    void mixSchema(uint32_t& h) const {
+        auto mix = [&h](uint32_t v) { h = (h ^ v) * 16777619u; };
+        auto mixStr = [&mix](const char* s) { for (const char* p = s; p && *p; p++) mix(static_cast<uint8_t>(*p)); mix(0u); };
+        mix(controls_.count());
+        for (uint8_t i = 0; i < controls_.count(); i++) {
+            const ControlDescriptor& c = controls_[i];
+            mixStr(c.name);
+            mix(static_cast<uint32_t>(c.type));
+            mix(static_cast<uint32_t>(c.min));
+            mix(static_cast<uint32_t>(c.max));
+            mix((c.hidden ? 1u : 0u) | (c.readonly ? 2u : 0u) | (c.stepper ? 4u : 0u));
+            if (c.type == ControlType::Select && c.aux) {
+                // aux is the option array (const char* const*), max is its count — hash the strings so
+                // an in-place rename (same pointer) still changes the signature.
+                const char* const* opts = reinterpret_cast<const char* const*>(c.aux);
+                for (int32_t o = 0; o < c.max; o++) mixStr(opts[o]);
+            } else {
+                mix(static_cast<uint32_t>(c.aux));   // Progress total / other aux — a value change differs
+            }
+        }
+        for (uint8_t i = 0; i < childCount_; i++) children_[i]->mixSchema(h);
     }
 
     /// Install the schema-changed hook (HttpServerModule points it at requestFullResync). A static

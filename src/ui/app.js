@@ -55,19 +55,13 @@ const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
 
-// One-release migration for the old key from the pre-spec UI
-function lsRead(key, legacyKey, defaultVal) {
+function lsRead(key, defaultVal) {
     const v = localStorage.getItem(key);
-    if (v !== null) return v;
-    if (legacyKey) {
-        const legacy = localStorage.getItem(legacyKey);
-        if (legacy !== null) return legacy;
-    }
-    return defaultVal;
+    return v !== null ? v : defaultVal;
 }
 
-let timingMode = lsRead(LS_TIMING, null, "fps");
-let theme      = lsRead(LS_THEME, null, "dark");
+let timingMode = lsRead(LS_TIMING, "fps");
+let theme      = lsRead(LS_THEME, "dark");
 
 // ---------------------------------------------------------------------------
 // 2. WebSocket
@@ -164,7 +158,7 @@ async function init() {
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
-        const savedSel = lsRead(LS_SELECTED, "mm.selectedModule", null);
+        const savedSel = lsRead(LS_SELECTED, null);
         if (state.modules && state.modules.length > 0) {
             const exists = savedSel && state.modules.some(m => m.name === savedSel);
             selectedModule = exists ? savedSel : state.modules[0].name;

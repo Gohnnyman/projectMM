@@ -3,6 +3,8 @@
 #include "doctest.h"
 #include "core/MoonModule.h"
 
+#include <cstring>   // std::strcpy — the in-place option-rename schemaSignature tests
+
 namespace {
 
 class TestModule : public mm::MoonModule {
@@ -117,6 +119,50 @@ TEST_CASE("ControlList clear and rebuild") {
 
     mod.defineControls();
     CHECK(mod.controls().count() == 3);
+}
+
+// schemaSignature() drives the WS full-resync gate: it must change when the schema changes and hold
+// steady on a value-only change. These pin the two subtle cases a naive node-only-pointer hash misses.
+namespace {
+// A module with a Select whose option STRINGS live in a member array that can be rewritten in place
+// (the stable-address bind pattern DriverBase/HueDriver use for preset/room dropdowns).
+class SelectModule : public mm::MoonModule {
+public:
+    uint8_t value = 5;
+    uint8_t sel = 0;
+    char opt0[16] = "alpha";
+    char opt1[16] = "beta";
+    const char* options[2] = {opt0, opt1};
+    void defineControls() override {
+        controls_.addUint8("value", value, 0, 255);
+        controls_.addSelect("preset", sel, options, 2);
+    }
+};
+}  // namespace
+
+TEST_CASE("schemaSignature: value change is invisible, schema change is not") {
+    SelectModule m; m.defineControls();
+    const uint32_t base = m.schemaSignature();
+    // A bound-value change (the slider-drag path) must NOT move the signature — it rides the value patch.
+    m.value = 200;
+    CHECK(m.schemaSignature() == base);
+    // An in-place option RENAME (same array pointer, same count, changed string) MUST move it — the
+    // signature hashes the option strings, not the array pointer (F2: the stable-address bind pattern).
+    std::strcpy(m.opt0, "gamma");
+    CHECK(m.schemaSignature() != base);
+}
+
+TEST_CASE("schemaSignature: recurses into children (a child schema change is caught)") {
+    auto* parent = new mm::MoonModule();
+    auto* child = new SelectModule();
+    parent->addChild(child);
+    child->defineControls();
+    const uint32_t base = parent->schemaSignature();
+    // The parent's own controls are unchanged; only the CHILD's Select is renamed. The parent's
+    // signature must still change (F1: rebuildControls rebuilds the subtree, so the signature recurses).
+    std::strcpy(child->opt1, "delta");
+    CHECK(parent->schemaSignature() != base);
+    delete parent;   // deletes the child too (owns the subtree)
 }
 
 // addReadOnly binds a char buffer the UI can render; updating the buffer is visible through control.ptr.

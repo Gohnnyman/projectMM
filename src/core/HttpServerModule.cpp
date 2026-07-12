@@ -2152,20 +2152,25 @@ void HttpServerModule::pushStateToWebSockets() {
         // to drain in chunks on tick20ms, NOT a blocking write on the render tick. buildStateJson
         // serialises the WHOLE tree — the expensive path — but only when fullResyncPending_, not every
         // second.
-        // The shared send slot may hold an in-flight PREVIEW frame (a state frame can't be in flight
-        // here — it would have cleared fullResyncPending_ on start). Preview is a *view*; the full
-        // state is what makes a freshly-connected client usable at all. So the resync PREEMPTS the
-        // preview frame rather than deferring behind it — otherwise continuous preview from another
-        // client could keep the new client blank. Preview resumes on its next frame.
-        if (!bufferedSendIdle()) cancelBufferedSend();
+        // The shared send slot may hold an in-flight frame. A borrowed PREVIEW frame is a *view* — the
+        // full state is what makes a freshly-connected client usable at all, so the resync PREEMPTS a
+        // preview (otherwise continuous preview from another client could keep the new client blank;
+        // preview resumes on its next frame). An OWNED frame in flight is ITSELF a state drain from a
+        // prior push that hasn't finished — don't stomp it; let it complete and skip this push (the
+        // slot is single-occupancy, and a half-then-half state is worse than one whole one arriving a
+        // tick later). fullResyncPending_ stays TRUE until startBufferedTextSend actually accepts the
+        // new payload, so a rejected/failed start retries next tick rather than dropping the resync.
+        if (!bufferedSendIdle()) {
+            if (previewSend_.ownsBody) return;   // a state drain is already in flight — let it finish
+            cancelBufferedSend();                // preempt a borrowed preview
+        }
         JsonSink sink;
         buildStateJson(sink);
         const size_t len = sink.size();
         char* owned = sink.detach();   // move ownership to the sender (frees on drain-complete)
-        if (owned) {
-            startBufferedTextSend(owned, len);
+        if (owned && startBufferedTextSend(owned, len)) {
             baselineLeafHashes();       // the full state IS the new baseline — next tick patches from here
-            fullResyncPending_ = false;
+            fullResyncPending_ = false;   // cleared only on a confirmed accept; a failed start retries
         }
     } else {
         // PATCH — the steady-state path. buildStatePatch walks the tree, value-hashes each leaf, and

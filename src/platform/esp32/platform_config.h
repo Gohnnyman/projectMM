@@ -81,20 +81,23 @@ constexpr uint8_t rmtTxChannels = 0;
 // classic chip and hung its boot trying to init an esp_lcd i80 bus the chip
 // doesn't have. SOC_LCDCAM_I80_LCD_SUPPORTED is defined only on chips with the
 // real LCD_CAM (S3/P4), which is what esp_lcd's i80 driver actually needs.
+// The LCD_CAM i80 bus does 16 data lines. The driver derives the actual bus width
+// (8 or 16 — power-of-two only) from the configured pin count; this is the MAX it
+// may reach. LCD requires exactly 8 or 16 real pins (i80 rejects an NC data line).
 #ifdef CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED
-constexpr uint8_t lcdLanes = 8;
+constexpr uint8_t lcdLanes = 16;
 #else
 constexpr uint8_t lcdLanes = 0;
 #endif
 
 // Parallel WS2812 lanes over the Parlio (Parallel IO) TX peripheral — the
-// ESP32-P4's scale path. The unit does 16 data lines; capped at 8 here to
-// mirror lcdLanes (half the DMA footprint; widening is a constant change).
-// SOC-derived like the others, so a future Parlio-bearing chip works untouched.
-// Unlike i80, Parlio takes the data GPIOs directly (no sacrificial WR/DC) and
-// allows any lane count, so ParlioLedDriver has no exactly-8-pins rule.
+// ESP32-P4's scale path. The unit does 16 data lines; the driver derives the bus
+// width (8 or 16) from the pin count. SOC-derived like the others, so a future
+// Parlio-bearing chip works untouched. Unlike i80, Parlio takes the data GPIOs
+// directly (no sacrificial WR/DC) and accepts an NC unused lane, so it runs any
+// 1..16 count with no exactly-8-or-16 rule.
 #ifdef CONFIG_SOC_PARLIO_SUPPORTED
-constexpr uint8_t parlioLanes = 8;
+constexpr uint8_t parlioLanes = 16;
 #else
 constexpr uint8_t parlioLanes = 0;
 #endif

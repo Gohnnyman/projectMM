@@ -227,7 +227,11 @@ private:
         //   2. Otherwise the persisted NAME (survives reboot) resolves to an id.
         //   3. Else the current id, or the library default for a fresh driver.
         // Then sync all three so they agree.
-        if (presetSel_ < n && lib->idAt(presetSel_) != presetId_) {
+        // `presetId_ == 0` is the fresh-driver default (no real preset has id 0), NOT a user pick — a
+        // Select index at 0 whose preset has a nonzero id would otherwise look like a "pick" and shadow
+        // the persisted NAME (e.g. a constructor default like "GRB" stored in presetRef_). So only treat
+        // a nonzero presetId_'s mismatch as a user pick; a zero id falls through to the presetRef_ path.
+        if (presetSel_ < n && presetId_ != 0 && lib->idAt(presetSel_) != presetId_) {
             presetId_ = lib->idAt(presetSel_);                 // user picked a different preset
         } else if (presetRef_[0]) {
             for (uint8_t i = 0; i < n; i++)
@@ -246,14 +250,17 @@ protected:
     /// `[start_, start_+count_)`. This is how light distribution is made *explicit*
     /// and order-independent — a second driver on a different slice (such as an
     /// onboard status LED at index 0, the main strip from index 1) just sets its
-    /// own window, rather than the buffer being split by driver order. `count_`==0
-    /// means "the rest of the buffer from start_" (the common whole-buffer case).
+    /// own window, rather than the buffer being split by driver order. The default
+    /// `count_` is the uint16 max (65535), which `windowSlice` clamps to the buffer
+    /// length — so a fresh driver's window is "all lights" without a magic 0. A user
+    /// setting a real window types a real number; there's no confusing "0 = all".
     /// NetworkSendDriver's universe maps onto the same window; the LED drivers'
     /// pins/ledsPerPin distribute lights *within* the window. It is the alternative
     /// to a "split the buffer by sibling order" model some controllers use — here the
     /// user (or catalog) says which slice goes where.
+    static constexpr uint16_t kWindowAll = 65535;  ///< count default: clamped to buffer length = all lights
     uint16_t start_ = 0;   ///< First source-buffer light this driver outputs (default 0).
-    uint16_t count_ = 0;   ///< Lights to output from `start_`; 0 = to end of buffer.
+    uint16_t count_ = kWindowAll;   ///< Lights from start_; default kWindowAll (clamped to buffer = all).
 
     /// Add the two window controls — call from a driver's defineControls(). Kept a
     /// helper (not auto-added) so a driver opts in by calling it where its other
@@ -278,6 +285,9 @@ protected:
                      nrOfLightsType& outLen) const {
         outStart = start_ < bufN ? start_ : bufN;
         const nrOfLightsType avail = static_cast<nrOfLightsType>(bufN - outStart);
+        // Default count_ is kWindowAll (65535), clamped here to the buffer = all lights.
+        // 0 is also treated as "all" (a zero-length window would drive nothing, which is
+        // never the intent) so a code-wired setWindow(start, 0) still means "to the end".
         outLen = (count_ == 0 || count_ > avail) ? avail
                                                  : static_cast<nrOfLightsType>(count_);
     }
@@ -339,6 +349,19 @@ protected:
             if (status() == failBuf_) clearStatus();
             platform::free(failBuf_);
             failBuf_ = nullptr;
+        }
+    }
+
+    // Neutral "driving N of M lights" info status — the running-state readout the user reads to
+    // see what a driver actually consumes, instead of guessing from grid × pins. Formats into the
+    // owned failBuf_ (same buffer, same "clear only MY status" lifecycle) at Severity::Status, so an
+    // error/warning set elsewhere this parse still wins (callers set info LAST, only when there's
+    // nothing more urgent to show). No-op if the buffer can't allocate. The format literal lives here
+    // (not a caller-passed fmt) so the message is defined once and both drivers share it verbatim.
+    void setDrivingInfo(unsigned driven, unsigned total) {
+        if (char* buf = failBufEnsure()) {
+            std::snprintf(buf, kFailBufLen, "driving %u of %u lights", driven, total);
+            setStatus(buf, Severity::Status);
         }
     }
 };

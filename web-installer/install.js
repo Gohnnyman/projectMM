@@ -655,10 +655,14 @@ document.addEventListener('DOMContentLoaded', () => {
         portSelect.value = PICK_NEW;
         return;
       }
-      // Picked state: "Port selected" + "Pick another port…" sentinel.
+      // Picked state: name the selected port by the chip Detect read from it
+      // ("Port selected — ESP32-S3") instead of a bare "Port selected", so the
+      // user can see WHICH device is on the port. Empty until detect() lands (or
+      // if it failed); the separate detect-status line carries the matched board.
       const currentOpt = document.createElement("option");
       currentOpt.value = "current";
-      currentOpt.textContent = "Port selected";
+      const chip = installPicker.getDetectedChip();
+      currentOpt.textContent = chip ? `Port selected — ${chip}` : "Port selected";
       portSelect.appendChild(currentOpt);
       const pickOpt = document.createElement("option");
       pickOpt.value = PICK_NEW;
@@ -683,8 +687,11 @@ document.addEventListener('DOMContentLoaded', () => {
         pickedPort = await navigator.serial.requestPort({});
         granted = true;
         // A pending detect() handle is bound to the OLD port — drop it so the
-        // next Detect/Install opens the newly-picked port cleanly.
+        // next Detect/Install opens the newly-picked port cleanly. Also forget
+        // the old port's detected chip so the dropdown doesn't flash it before
+        // the fresh detect lands.
         await installer.clearDetected();
+        installPicker.clearDetectedChip();
       } catch (_) {
         // User cancelled the picker — keep whatever was picked before.
       }
@@ -696,7 +703,11 @@ document.addEventListener('DOMContentLoaded', () => {
       // the status line. Re-detect = pick another port (same path).
       if (granted) {
         const status = document.getElementById("detect-status");
-        installPicker.runDetect((text) => { status.textContent = text; });
+        // Rebuild the dropdown once detect lands so the option upgrades from
+        // "Port selected" to "Port selected — ESP32-S3" (getDetectedChip is set
+        // by then). runDetect resolves after the chip read completes.
+        installPicker.runDetect((text) => { status.textContent = text; })
+          .finally(() => rebuildPortSelect());
       }
     }
 

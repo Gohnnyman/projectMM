@@ -61,28 +61,51 @@ inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
     for (int c = 0; c < 8; c++) out[c] = static_cast<uint8_t>(x >> (8 * c));
 }
 
-// Encode one ROW (the same light index across all lanes) into 3-slot bytes.
+// Transpose 16 lane bytes into 8 bit-plane WORDS: out[b] bit L = in[L] bit b, for
+// the 16-lane (16-bit bus) drivers. A uint16 plane splits at the byte boundary —
+// its low byte is lanes 0..7, its high byte lanes 8..15 — and those two halves are
+// INDEPENDENT 8-lane transposes, so this reuses the (already bit-perfect pinned)
+// 8×8 SWAR core twice rather than a bespoke 128-bit trick: same textbook construct,
+// no new magic constants. (If profiling ever shows the two-pass combine is the
+// ceiling, a fused 128-bit SWAR is a drop-in behind this signature + the same test.)
+// Inactive lanes must be passed as 0 by the caller, as with transposeLanes8x8.
+inline void transposeLanes16x8(const uint8_t* in, uint16_t* out) {
+    uint8_t lo[8], hi[8];
+    transposeLanes8x8(in,     lo);   // lanes 0..7  → low byte of each plane
+    transposeLanes8x8(in + 8, hi);   // lanes 8..15 → high byte of each plane
+    for (int b = 0; b < 8; b++)
+        out[b] = static_cast<uint16_t>(lo[b]) | static_cast<uint16_t>(hi[b] << 8);
+}
+
+// Encode one ROW (the same light index across all lanes) into 3-slot bus words.
+//   Slot:       uint8_t for an 8-lane (8-bit) bus, uint16_t for a 16-lane (16-bit)
+//               bus — one bus word per slot, bit L = data line L, so the word width
+//               IS the lane count. Deduced from the call, so the 8-bit call sites
+//               (uint8_t mask + uint8_t* out) are source-unchanged.
 //   wire:       kMaxLanes × 4 corrected wire bytes, lane-major
 //               (wire[lane * 4 + channel]); only lanes set in activeMask are
 //               read — inactive lanes may hold garbage.
-//   activeMask: bit L set = lane L drives this row.
+//   activeMask: bit L set = lane L drives this row (8 or 16 bits wide = Slot).
 //   channels:   wire bytes per light (3 RGB / 4 RGBW).
-//   out:        channels * 8 * 3 bytes, fully written.
-inline void encodeWs2812LcdSlots(const uint8_t* wire, uint8_t activeMask,
-                                 uint8_t channels, uint8_t* out) {
+//   out:        channels * 8 * 3 SLOTS (Slot elements), fully written.
+template <class Slot>
+inline void encodeWs2812LcdSlots(const uint8_t* wire, Slot activeMask,
+                                 uint8_t channels, Slot* out) {
+    constexpr uint8_t kLanes = sizeof(Slot) * 8;   // 8 or 16
     for (uint8_t ch = 0; ch < channels; ch++) {
         // Gather this channel's byte from each lane, zeroing inactive lanes so
         // they contribute no set bit to any plane (the idle-LOW rule), then
-        // transpose all 8 bits × 8 lanes in one pass.
-        uint8_t lane8[8];
-        for (uint8_t lane = 0; lane < 8; lane++)
-            lane8[lane] = (activeMask & (1u << lane)) ? wire[lane * 4 + ch] : 0;
-        uint8_t plane[8];
-        transposeLanes8x8(lane8, plane);
+        // transpose all 8 bits × kLanes lanes in one pass.
+        uint8_t lanes[kLanes];
+        for (uint8_t lane = 0; lane < kLanes; lane++)
+            lanes[lane] = (activeMask & (Slot(1) << lane)) ? wire[lane * 4 + ch] : 0;
+        Slot plane[8];
+        if constexpr (sizeof(Slot) == 1) transposeLanes8x8(lanes, plane);
+        else                             transposeLanes16x8(lanes, plane);
         for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte
             *out++ = activeMask;    // slot 0: pulse start (active lanes HIGH)
             *out++ = plane[bit];    // slot 1: bit `bit` of every active lane
-            *out++ = 0x00;          // slot 2: pulse tail (all LOW)
+            *out++ = 0;             // slot 2: pulse tail (all LOW)
         }
     }
 }

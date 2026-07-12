@@ -33,7 +33,10 @@ public:
     /// The number of Parlio lanes this chip provides (0 = not this chip); the base's
     /// inert-on-wrong-chip guards key off it.
     static constexpr uint8_t lanesAvailable() { return platform::parlioLanes; }
-    static constexpr bool kExactLaneCount = false;   // 1..8 lanes all valid
+    static constexpr bool kExactLaneCount = false;   // 1..16 lanes all valid
+    // Parlio builds a 1-lane private unit for the loopback, so the loopback frame stays 8-bit
+    // regardless of the operational bus width (unlike i80, which needs a full-width bus).
+    static constexpr bool kLoopbackFullWidth = false;
     static constexpr const char* kInitFailMsg = "Parlio init failed — check pins / memory";
 
     // The WS2812 slot rate (375 ns @ 2.67 MHz) — identical to the LCD driver's;

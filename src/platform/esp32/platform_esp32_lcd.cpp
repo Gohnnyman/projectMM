@@ -97,11 +97,19 @@ LcdState* createState(const uint16_t* dataPins, uint8_t laneCount,
     busCfg.dc_gpio_num = static_cast<gpio_num_t>(dcGpio);
     busCfg.wr_gpio_num = static_cast<gpio_num_t>(wrGpio);
     busCfg.clk_src = LCD_CLK_SRC_DEFAULT;
-    busCfg.bus_width = 8;
+    // Bus width is power-of-two only (8 or 16), derived from the lane count: ≤8 → 8,
+    // 9..16 → 16. The domain driver already guarantees exactly 8 or 16 real data pins.
+    const size_t busWidth = laneCount <= 8 ? 8 : 16;
+    busCfg.bus_width = busWidth;
+    // The i80 layer REJECTS an NC data pin (unlike Parlio), so every data line up to
+    // bus_width must be a real GPIO. A board that drives fewer than bus_width lanes
+    // parks the unused ones on the WR "ghost pin" (hpwit's trick) — WR toggles on it
+    // harmlessly, and the domain driver clears those lanes' activeMask so they idle.
     for (size_t i = 0; i < ESP_LCD_I80_BUS_WIDTH_MAX; i++) {
-        busCfg.data_gpio_nums[i] = GPIO_NUM_NC;
+        busCfg.data_gpio_nums[i] = (i < busWidth) ? static_cast<gpio_num_t>(wrGpio)
+                                                  : GPIO_NUM_NC;
     }
-    for (uint8_t i = 0; i < laneCount && i < 8; i++) {
+    for (uint8_t i = 0; i < laneCount && i < busWidth; i++) {
         busCfg.data_gpio_nums[i] = static_cast<gpio_num_t>(dataPins[i]);
     }
     busCfg.max_transfer_bytes = bufferBytes;
@@ -131,14 +139,19 @@ LcdState* createState(const uint16_t* dataPins, uint8_t laneCount,
         return nullptr;
     }
 
-    // DMA-capable INTERNAL RAM with the bus's alignment — the esp_lcd helper
-    // handles both. Zeroed so the trailing latch pad (and any unwritten tail)
-    // holds the lines LOW. Internal (not PSRAM) for now: the i80 GDMA *can* burst
-    // from PSRAM (access_ext_mem), so moving big frames there to free scarce DRAM
-    // is a tracked follow-up (backlog § LCD/Parlio DMA frame buffer → PSRAM) — it
-    // needs the wider ext-mem alignment + on-hardware proof, so not done here.
+    // DMA-capable draw buffer. The i80 GDMA can burst straight from PSRAM
+    // (access_ext_mem), so allocate PSRAM-first to keep the large frame off scarce
+    // internal DRAM — a 16-lane frame is 16-bit-wide and doubles the footprint, so
+    // an S3 grid that overran internal SRAM at 8 lanes fits here. Fall back to
+    // internal if PSRAM is absent or full (allocate-and-degrade, like platform::alloc).
+    // esp_lcd_i80_alloc_draw_buffer applies the bus's DMA + ext-mem cache alignment
+    // for whichever region it lands in. Zeroed so the trailing latch pad holds the
+    // lines LOW.
     st->buf = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
-        st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+        st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+    if (!st->buf)
+        st->buf = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
+            st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
     if (!st->buf) {
         destroyState(st);
         return nullptr;

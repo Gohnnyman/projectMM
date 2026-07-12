@@ -42,11 +42,11 @@ namespace {
 
 static const char* PAR_TAG = "mm_parlio";
 
-// The Parlio bus is always 8 data lines wide so each encoded bus byte maps
-// byte→lane directly (the LcdSlots.h encoder writes 8-bit words, bit L = lane
-// L). data_width must be a power of two ≤ SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH;
-// 8 satisfies that. Unused lanes get GPIO -1.
-constexpr size_t kBusWidth = 8;
+// Parlio data_width is power-of-two only (≤ SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH),
+// derived from the lane count: ≤8 lanes → an 8-bit bus (uint8 encoder slots, bit
+// L = lane L), 9..16 → a 16-bit bus (uint16 slots). Unlike i80, Parlio accepts an
+// NC unused lane, so a sub-width lane count just leaves the extra data lines NC.
+constexpr size_t kMaxBusWidth = 16;   // both peripherals' physical ceiling
 
 // WS2812 slot rate (375 ns @ 2.67 MHz), same value the driver passes at init —
 // the loopback creates its own private unit and needs the constant directly.
@@ -89,9 +89,10 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     cfg.clk_src = PARLIO_CLK_SRC_DEFAULT;     // PLL_F160M → /60 = 2.67 MHz
     cfg.clk_in_gpio_num = GPIO_NUM_NC;        // internal clock, not external
     cfg.output_clk_freq_hz = pclkHz;
-    cfg.data_width = kBusWidth;
-    for (size_t i = 0; i < kBusWidth; i++) cfg.data_gpio_nums[i] = GPIO_NUM_NC;
-    for (uint8_t i = 0; i < laneCount && i < kBusWidth; i++)
+    const size_t busWidth = laneCount <= 8 ? 8 : 16;   // power-of-two, derived
+    cfg.data_width = busWidth;
+    for (size_t i = 0; i < kMaxBusWidth; i++) cfg.data_gpio_nums[i] = GPIO_NUM_NC;
+    for (uint8_t i = 0; i < laneCount && i < busWidth; i++)
         cfg.data_gpio_nums[i] = static_cast<gpio_num_t>(dataPins[i]);
     cfg.clk_out_gpio_num = GPIO_NUM_NC;       // WS2812 ignores the clock line
     cfg.valid_gpio_num = GPIO_NUM_NC;
@@ -115,15 +116,20 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     }
     if (parlio_tx_unit_enable(st->unit) != ESP_OK) { destroyState(st); return nullptr; }
 
-    // DMA-capable INTERNAL RAM: Parlio streams from internal SRAM at full rate
-    // (the same constraint as the LCD driver — platform::alloc prefers PSRAM and
-    // is wrong here). Zeroed so the trailing latch pad holds lines LOW. Internal
-    // for now even though the Parlio GDMA *can* burst from PSRAM (access_ext_mem):
-    // moving big frames there to free scarce DRAM is a tracked follow-up (backlog
-    // § LCD/Parlio DMA frame buffer → PSRAM), needing the wider ext-mem alignment
-    // (not this fixed 64) + on-hardware proof, so not done here.
-    st->buf = static_cast<uint8_t*>(heap_caps_aligned_alloc(
-        64, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    // DMA-capable draw buffer, PSRAM-first (with an internal fallback). The intent is to keep the
+    // large 16-bit-wide 16-lane frame off scarce internal DRAM. MALLOC_CAP_CACHE_ALIGNED lets the
+    // allocator apply the PSRAM cache-line alignment the ext-mem GDMA needs (wider than the fixed 64
+    // the internal path uses). **Measured reality (performance.md § Multi-pin):** on the P4 this
+    // SPIRAM request evidently doesn't satisfy — the fallback governs, so the frame lands in internal
+    // SRAM and the ~368 KB largest-contiguous-internal-block caps 16-lane at ~4096 lights (unlike the
+    // S3 LCD path, whose esp_lcd_i80 PSRAM buffer is proven to 16384). So this is allocate-and-degrade
+    // that currently degrades on P4; lifting it to a real PSRAM frame is the chunked-transfer backlog
+    // item. Zeroed so the trailing latch pad holds lines LOW.
+    st->buf = static_cast<uint8_t*>(heap_caps_malloc(
+        bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED));
+    if (!st->buf)
+        st->buf = static_cast<uint8_t*>(heap_caps_aligned_alloc(
+            64, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
     if (!st->buf) { destroyState(st); return nullptr; }
     std::memset(st->buf, 0, bufferBytes);
     st->cap = bufferBytes;
@@ -139,14 +145,16 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
 // created oversized then fails EVERY transmit (the check is on the unit's configured max, not the
 // payload), so output goes silently dark. We reject up front with a clear status instead.
 //
-// The limit is a BYTE limit per lane, and a light costs FAR more than its channel count in the DMA
-// buffer: the buffer holds the WS2812 *waveform*, not the colour bytes. One light = channels × 8 bits
-// × 3 slots (the encoder shapes each bit into 3 bus-byte slots to make the 800 kHz NRZ pulse) = 24
-// bytes per channel. So RGB = 3×24 = 72 bytes/light, RGBW = 96, RGBCCT = 120 — a 24× expansion of the
-// colour data. Plus a ~864-byte per-lane latch pad. Max lights/lane ≈ (65535 − 864) / (channels × 24):
-// 897 RGB (897×72 = 64584 + pad = 65472 ≤ 65535), ~673 RGBW, ~538 RGBCCT. More per lane needs the
-// chunked-transfer enhancement (backlog). Not a UI input guard — the driver surfaces it as a status.
-inline constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535
+// The limit is a total-BUFFER byte limit (0x7FFFF bits / 8 = 65535 bytes — buffer bits = bytes × 8
+// regardless of data_width, so this ceiling is the same at 8 or 16 lanes). A light costs FAR more
+// than its channel count in the DMA buffer: the buffer holds the WS2812 *waveform*, not the color
+// bytes. One light = channels × 8 bits × 3 slots (the encoder shapes each bit into 3 bus-word slots
+// for the 800 kHz NRZ pulse). On the 8-bit bus a slot is 1 byte → 24 bytes/channel: RGB = 72 B/light,
+// so max ≈ (65535 − 864 pad)/(3×24) = 897 RGB lights/lane. On the 16-BIT bus (>8 lanes) a slot is 2
+// bytes → 48 bytes/channel, so the byte cost per light DOUBLES and the lights/lane HALVES: ~448 RGB,
+// ~336 RGBW. Reaching the higher per-lane totals needs the chunked-transfer enhancement (backlog).
+// Not a UI input guard — the driver surfaces it as a status.
+inline constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535 (buffer bytes, width-invariant)
 
 bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
                       uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes) {

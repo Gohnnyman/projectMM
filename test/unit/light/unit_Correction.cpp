@@ -11,7 +11,7 @@
 // brightness/light-preset change, and hands it to each physical driver, which calls
 // apply() per light. These tests pin the transform so a regression in the LUT fill,
 // the preset→role-offset mapping, or the white math fails here. A light is a span of
-// outChannels bytes with a named offset per colour role (offRed/offGreen/offBlue, and
+// outChannels bytes with a named offset per color role (offRed/offGreen/offBlue, and
 // offWhite for the RGBW family; kAbsent = no white), so the checks read the observable
 // apply() output plus outChannels, not an internal permutation table.
 
@@ -131,7 +131,7 @@ TEST_CASE("Correction: rebuild switches output channel count RGB<->RGBW") {
 using mm::WhiteMode;
 
 // whiteMode = Min is the default and derives W = min(scaled R,G,B) leaving RGB intact —
-// this is the byte-identical behaviour the earlier RGBW tests already pin. whiteMode =
+// this is the byte-identical behavior the earlier RGBW tests already pin. whiteMode =
 // None forces the white channel to 0 each frame (for effects that drive W themselves) —
 // written, not skipped, so a reused buffer can't keep a stale value (see the assertion below).
 TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
@@ -144,7 +144,7 @@ TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
     CHECK(out[0] == 10);
     CHECK(out[1] == 20);
     CHECK(out[2] == 30);
-    // None synthesises no white, but MUST still write the channel to 0 each frame: the driver's
+    // None synthesizes no white, but MUST still write the channel to 0 each frame: the driver's
     // corrected_ buffer is reused frame-to-frame, so leaving W unwritten would keep the stale 77 and
     // stick the white LED on after a switch to None.
     CHECK(out[3] == 0);
@@ -167,7 +167,7 @@ TEST_CASE("Correction whiteMode Accurate: white subtracted from RGB") {
 
 using mm::ChannelRole;
 
-// A Custom wiring is described by a channel-role array; rebuild() derives the colour
+// A Custom wiring is described by a channel-role array; rebuild() derives the color
 // offsets from it. Here: white first, then B, G, R — a 4-channel arbitrary order that no
 // curated preset names, proving the role array reaches any wiring.
 TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offsets") {
@@ -191,8 +191,8 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
     CHECK(out[0] == 30);   // W = min at channel 0
 }
 
-// A colour role absent from the array stays kAbsent and apply() doesn't write it — a wiring
-// can carry any SUBSET of colour roles (e.g. a 2-channel R,B light with no green channel).
+// A color role absent from the array stays kAbsent and apply() doesn't write it — a wiring
+// can carry any SUBSET of color roles (e.g. a 2-channel R,B light with no green channel).
 TEST_CASE("Correction roles array: absent colour role is not emitted") {
     Correction c;
     const ChannelRole roles[2] = {ChannelRole::Red, ChannelRole::Blue};   // no green channel
@@ -208,7 +208,7 @@ TEST_CASE("Correction roles array: absent colour role is not emitted") {
     CHECK(out[1] == 30);   // B — green (20) simply not written
 }
 
-// A non-colour role (Pan) occupies a channel but apply()'s RGB path ignores it — the channel
+// A non-color role (Pan) occupies a channel but apply()'s RGB path ignores it — the channel
 // is left for the fixture role writer, and outChannels still counts it.
 TEST_CASE("Correction roles array: non-colour role reserves a channel apply() skips") {
     Correction c;
@@ -228,10 +228,10 @@ TEST_CASE("Correction roles array: non-colour role reserves a channel apply() sk
     CHECK(out[3] == 30);   // B
 }
 
-// WarmWhite / Yellow / UV are synthesised from RGB off the SAME whiteMode as White, so a fixture
-// carrying them lights up (best-effort approximations, not a colour model yet): WW ≈ min(RGB),
+// WarmWhite / Yellow / UV are synthesized from RGB off the SAME whiteMode as White, so a fixture
+// carrying them lights up (best-effort approximations, not a color model yet): WW ≈ min(RGB),
 // Yellow ≈ min(R,G), UV ≈ the blue-excess max(0, B-max(R,G)). This is the "all channels burn so
-// you can eyeball a fixture" behaviour the finding asked for; a real per-emitter model comes later.
+// you can eyeball a fixture" behavior the finding asked for; a real per-emitter model comes later.
 TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") {
     Correction c;
     const ChannelRole roles[6] = {ChannelRole::Red, ChannelRole::Green, ChannelRole::Blue,
@@ -251,21 +251,47 @@ TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") 
     CHECK(out[5] == 100);  // UV = B - max(R,G) = 200 - 100 (fires on the blue excess)
 }
 
-// UV stays dark on a warm colour (no blue excess), and every synthesised emitter is forced to 0
+// Under Accurate, White pulls its component OUT of RGB — but the additive stand-ins (WW/Yellow/UV)
+// must approximate from the RGB the effect produced, BEFORE that subtraction, or they collapse. This
+// pins the compute-stand-ins-before-White ordering (a regression would compute them post-subtraction).
+TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-White") {
+    Correction c;
+    // Fixture carries White AND Yellow AND UV, so all three synthesis paths run in one apply().
+    const ChannelRole roles[6] = {ChannelRole::Red, ChannelRole::Green, ChannelRole::Blue,
+                                  ChannelRole::White, ChannelRole::Yellow, ChannelRole::UV};
+    c.rebuild(255, roles, 6);
+    c.whiteMode = WhiteMode::Accurate;
+    const uint8_t src[3] = {40, 100, 200};   // R=40 G=100 B=200, so w = min = 40
+    uint8_t out[6] = {};
+    c.apply(src, out);
+    // White = min(R,G,B) = 40, subtracted from RGB → R=0, G=60, B=160.
+    CHECK(out[3] == 40);            // White
+    CHECK(out[0] == 0);            // R after subtraction
+    CHECK(out[1] == 60);           // G after subtraction
+    CHECK(out[2] == 160);          // B after subtraction
+    // Yellow is computed from the PRE-subtraction RGB. Yellow = min(R,G) = min(40,100) = 40. This is
+    // the case that catches the bug: computed AFTER the subtraction it would be min(0,60) = 0 — the
+    // stand-in would collapse to near-zero exactly when White is active. (UV = B-max(R,G) happens to
+    // be subtraction-invariant since w cancels, so it stays 100 either way — Yellow is the witness.)
+    CHECK(out[4] == 40);           // Yellow, from pre-subtraction RGB (post would be 0 — the regression)
+    CHECK(out[5] == 100);          // UV = 200 - max(40,100) = 100
+}
+
+// UV stays dark on a warm color (no blue excess), and every synthesized emitter is forced to 0
 // under whiteMode=None so none holds a stale value — the same reuse-safety the White channel has.
 TEST_CASE("Correction: UV dark on warm colours; whiteMode None zeroes WW/Y/UV") {
     Correction c;
     const ChannelRole roles[6] = {ChannelRole::Red, ChannelRole::Green, ChannelRole::Blue,
                                   ChannelRole::WarmWhite, ChannelRole::Yellow, ChannelRole::UV};
     c.rebuild(255, roles, 6);
-    {   // warm colour: R,G high, B low → UV = max(0, B-max(R,G)) = 0
+    {   // warm color: R,G high, B low → UV = max(0, B-max(R,G)) = 0
         const uint8_t src[3] = {200, 180, 20};
         uint8_t out[6] = {};
         c.apply(src, out);
         CHECK(out[5] == 0);            // UV dark: no blue excess
         CHECK(out[4] == 180);          // Yellow = min(200,180)
     }
-    {   // whiteMode None: every synthesised emitter forced to 0, even with stale pre-fill
+    {   // whiteMode None: every synthesized emitter forced to 0, even with stale pre-fill
         c.whiteMode = WhiteMode::None;
         const uint8_t src[3] = {40, 100, 200};
         uint8_t out[6] = {0, 0, 0, 55, 66, 77};   // stale WW/Y/UV

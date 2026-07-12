@@ -64,8 +64,10 @@ export function applyDetectedChip(state, boardEl) {
     const matches = state.boards.filter(b => b.chip === state.detectedChip);
     if (matches.length === 0) {
         // A chip we ship no board for: don't strand the user — leave the full
-        // list and report it. (selectedBoard unchanged.)
-        return `Detected ${state.detectedChip} — no matching device, pick manually`;
+        // list and report it. (selectedBoard unchanged.) The chip itself is
+        // shown in the port dropdown ("Port selected — ESP32-P4"), so the status
+        // line carries only the action, not a redundant chip echo.
+        return `No matching device for this chip — pick manually`;
     }
     fillBoardOptions(boardEl, matches, `Other / generic ${state.detectedChip}`);
     let autoName = "";   // a board we auto-selected (single match, or a generic default)
@@ -85,7 +87,10 @@ export function applyDetectedChip(state, boardEl) {
         autoName = state.selectedBoard;   // an in-family pick survives the detect
     }
     boardEl.value = state.selectedBoard || "";
+    // The chip is shown in the port dropdown; the status line adds only the
+    // outcome — which board was auto-selected, or a prompt to choose among the
+    // matches the chip narrowed to.
     return autoName
-        ? `Detected ${state.detectedChip} — selected ${autoName}`
-        : `Detected ${state.detectedChip} — pick your device (${matches.length} ${matches.length === 1 ? "match" : "matches"})`;
+        ? `Selected ${autoName}`
+        : `Pick your device (${matches.length} ${matches.length === 1 ? "match" : "matches"})`;
 }

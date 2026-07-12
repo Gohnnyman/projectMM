@@ -1,6 +1,6 @@
 #pragma once
 
-// Test-only convenience for building a Correction from a named colour order (RGB/GRB/BGR/RGBW/GRBW).
+// Test-only convenience for building a Correction from a named color order (RGB/GRB/BGR/RGBW/GRBW).
 // The PRODUCTION Correction has one rebuild — rebuild(brightness, ChannelRole* roles, nChannels) —
 // because the real wirings come from the LightPresets library as role arrays. The curated-order enum
 // + a rebuild(brightness, preset) overload used to live in Correction.h purely so tests could write

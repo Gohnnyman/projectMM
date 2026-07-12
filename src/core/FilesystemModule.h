@@ -149,7 +149,6 @@ private:
     void updateLastSavedStr();
     static void loadAllHookTrampoline_(Scheduler* s);
     void loadAll(Scheduler* s);
-    void migrateRenamedConfigs();
     void loadSubtree(MoonModule* m);
     void applyNode(MoonModule* m, const char* json, const char* prefix);
     void applyValue(const ControlDescriptor& c, const char* json, const char* key);

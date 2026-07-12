@@ -13,12 +13,12 @@ namespace mm {
 // as seeded rows in the library, not as a second hard-coded list in core.
 
 // White-derivation mode for RGBW lights. Effects write RGB only, so a driver feeding
-// an RGBW fixture must SYNTHESISE the white channel from RGB — and there is more than
+// an RGBW fixture must SYNTHESIZE the white channel from RGB — and there is more than
 // one accepted algorithm, so the method is a mode, not a fixed formula (the WLED
 // "auto white" feature: None / Brighter / Accurate). None leaves white at 0 (the
 // effect drives it, or the fixture's white is unused). Min takes the common white
 // component min(R,G,B) — cheap, slightly desaturating. Accurate also subtracts that
-// white back out of R/G/B so the total emitted colour matches the RGB target rather
+// white back out of R/G/B so the total emitted color matches the RGB target rather
 // than washing brighter. Applied only when the light carries a white channel
 // (offWhite != kAbsent); ignored otherwise.
 enum class WhiteMode : uint8_t { None, Min, Accurate };
@@ -37,48 +37,58 @@ inline constexpr uint8_t kWhiteModeCount =
 // Channel model: a light is a run of `channelsPerLight` channels, each with a role
 // (Red/Green/Blue/White/Pan/…). The canonical description is the driver's dynamic
 // ChannelRole array — sized to the fixture, no fixed cap — which rebuild() reads to
-// DERIVE the hot-path colour offsets (offRed/offGreen/offBlue/offWhite): the byte
-// position of each colour role, or kAbsent if the light doesn't carry it. That derive
+// DERIVE the hot-path color offsets (offRed/offGreen/offBlue/offWhite): the byte
+// position of each color role, or kAbsent if the light doesn't carry it. That derive
 // is cold-path (once per config change), so apply() stays a branchless indexed store
 // per channel — the same build-a-table-cold, read-it-hot shape as the brightness LUT.
-// Non-colour roles (pan/tilt/…) live in the role array for the fixture/preview to read;
-// apply() only writes the colour roles it derived offsets for.
+// Non-color roles (pan/tilt/…) live in the role array for the fixture/preview to read;
+// apply() only writes the color roles it derived offsets for.
 //
 // Brightness uses a single 256-entry LUT applied to every channel. Gamma /
 // white-balance (which need a per-channel R/G/B split) are deliberately not here
 // yet — when they land, briLut becomes three tables. The name stays brightness-
 // neutral (`briLut`) so the gamma addition is a fill-logic change, not a rename.
 struct Correction {
-    static constexpr uint8_t kAbsent = 255;   // colour role not carried by this light
+    static constexpr uint8_t kAbsent = 255;   // color role not carried by this light
 
     uint8_t briLut[256] = {};       // briLut[v] = (v * brightness) / 255 (scale8)
-    // Derived hot-path cache: the output-byte position of each colour role. Source is
+    // Derived hot-path cache: the output-byte position of each color role. Source is
     // always RGB (src[0]=R, src[1]=G, src[2]=B); the offset says where in `out` that
     // role's byte lands. Recomputed from the role array by rebuild(); GRB by default.
     uint8_t offRed = 1;
     uint8_t offGreen = 0;
     uint8_t offBlue = 2;
     uint8_t offWhite = kAbsent;     // derived white at this offset (kAbsent = light has no white)
-    // Extra synthesised-from-RGB emitters a fixture may carry beside cold white. There is no
-    // effect-side source for these yet (no CCT target, no UV channel in RGB), so apply() drives
-    // them off the SAME whiteMode as White with a best-effort approximation — the goal is "every
-    // channel lights up so a fixture can be eyeballed", not colorimetric accuracy (a real fixture
-    // model with per-emitter targets is the proper home; see the light backlog). warm white ≈ the
-    // white component (min RGB, same as cold white for a warm-white-only strip); yellow ≈ min(R,G)
-    // (the R+G component); UV reads to the eye as deep blue/violet, so it's driven from the blue
-    // excess `max(0, B - max(R,G))` (fires on blues/purples). All zeroed when whiteMode==None, so
-    // none can hold a stale value.
+    // Extra emitters a fixture may carry beside cold white. The theory (why each is derived the way
+    // it is; the honest limits) — a full fixture model with per-emitter spectral targets is the
+    // proper home, see the light backlog:
+    //   • WarmWhite is a BROADBAND ILLUMINATION emitter, like cold White — a low-CCT (~2700K)
+    //     phosphor white. Its achromatic basis is real, so `min(R,G,B)` (the white component) is a
+    //     sound approximation; warm vs cold differ only in phosphor CCT, which a byte value can't
+    //     express, so from an RGB target both get the same min(R,G,B). Rides `whiteMode` with White.
+    //   • Yellow/Amber is a SATURATED NARROW-BAND HUE (~590 nm real amber die, common in RGBA/RGBAW
+    //     PARs), NOT illumination. It has no honest RGB pre-image: `min(R,G)` (the R+G overlap) is a
+    //     crude stand-in that reads greener than a true amber AND fires on far too much (any red+green
+    //     content — yellows, whites, skin tones — muddying the fixture). So it's a "light it up to
+    //     eyeball the wiring" placeholder, not a correct render.
+    //   • UV (~400 nm) is OUT OF the RGB gamut entirely (no pre-image at all). It reads to the eye as
+    //     deep violet, so the blue excess `max(0, B - max(R,G))` (fires on blues/purples, dark on
+    //     warm colors) is a deliberate eyeball hack, honest about being one.
+    // apply() drives all three off the SAME `whiteMode` gate today (None zeroes them, else the
+    // approximation above). That's expedient, not right: White/WarmWhite belong under whiteMode (real
+    // achromatic extraction, subtraction-aware); Yellow/UV are targetable emitters an effect should
+    // drive DIRECTLY via the fixture model, not synthesize from RGB. See backlog-light § fixture model.
     uint8_t offWarmWhite = kAbsent;
     uint8_t offYellow = kAbsent;
     uint8_t offUV = kAbsent;
     uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
-    WhiteMode whiteMode = WhiteMode::Min;   // how white is synthesised from RGB (white lights only)
+    WhiteMode whiteMode = WhiteMode::Min;   // how white is synthesized from RGB (white lights only)
 
-    // Cold path: refresh the brightness LUT and DERIVE the colour-role offsets from the
+    // Cold path: refresh the brightness LUT and DERIVE the color-role offsets from the
     // light's channel-role array (`roles`, `nChannels` entries — the driver's dynamic
-    // array, canonical). A role appearing at channel i sets that colour's offset to i;
-    // a colour role not present stays kAbsent (apply() skips it). outChannels becomes the
-    // channel count. Non-colour roles (pan/tilt/…) are ignored here — they're written by
+    // array, canonical). A role appearing at channel i sets that color's offset to i;
+    // a color role not present stays kAbsent (apply() skips it). outChannels becomes the
+    // channel count. Non-color roles (pan/tilt/…) are ignored here — they're written by
     // the fixture role writers, not by apply()'s RGB path.
     // Refresh just the brightness LUT (briLut[v] = v * brightness / 255). Split out so a brightness-
     // only change re-scales the LUT without touching the channel offsets, and so a driver can apply
@@ -107,19 +117,19 @@ struct Correction {
     }
 
     // Hot path: transform one source light (3-channel RGB at `src`) into `out`
-    // (`outChannels` bytes). Brightness via LUT, then place each present colour role at
-    // its derived offset, then synthesise white per whiteMode. No allocation, integer-only.
-    // A colour role the light doesn't carry (offset == kAbsent) is simply not written — so
-    // a wiring that omits, say, red just doesn't emit it. Channels holding non-colour roles
+    // (`outChannels` bytes). Brightness via LUT, then place each present color role at
+    // its derived offset, then synthesize white per whiteMode. No allocation, integer-only.
+    // A color role the light doesn't carry (offset == kAbsent) is simply not written — so
+    // a wiring that omits, say, red just doesn't emit it. Channels holding non-color roles
     // (pan/tilt) are left for their own writers; apply() never touches them.
     inline void apply(const uint8_t* src, uint8_t* out) const {
         uint8_t r = briLut[src[0]];
         uint8_t g = briLut[src[1]];
         uint8_t b = briLut[src[2]];
-        // Every synthesised emitter (white + warm-white/yellow/UV) is gated by the ONE whiteMode:
+        // Every synthesized emitter (white + warm-white/yellow/UV) is gated by the ONE whiteMode:
         // None zeroes them (never a stale value — corrected_ is reused, not re-zeroed, frame to
         // frame), otherwise each is a best-effort approximation from RGB. Accurate additionally
-        // subtracts the WHITE component back out of RGB (the standard RGBW auto-white behaviour);
+        // subtracts the WHITE component back out of RGB (the standard RGBW auto-white behavior);
         // the other emitters are additive stand-ins only (no colorimetric model yet), so they don't
         // subtract. See the offWarmWhite/offYellow/offUV field comment for the approximation rationale.
         if (whiteMode == WhiteMode::None) {
@@ -129,20 +139,25 @@ struct Correction {
             if (offUV != kAbsent)        out[offUV] = 0;
         } else {
             const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b): the white component
-            if (offWhite != kAbsent) {
-                if (whiteMode == WhiteMode::Accurate) { r -= w; g -= w; b -= w; }  // pull white out of RGB
-                out[offWhite] = w;
-            }
+            // The additive stand-ins (warm-white/yellow/UV) approximate from the CORRECTED RGB — the
+            // values BEFORE Accurate pulls white out below. Compute them here, off the pre-subtraction
+            // r/g/b, so Accurate's `r -= w` (which only rebalances the RGB emitters) can't corrupt them.
             // warm white ≈ the white component (same as cold white for a warm-white-only strip).
             if (offWarmWhite != kAbsent) out[offWarmWhite] = w;
             // yellow ≈ min(R,G) (the shared red+green component).
             if (offYellow != kAbsent)    out[offYellow] = r < g ? r : g;
             // UV is out of gamut (no RGB pre-image), but it reads to the eye as deep blue/violet, so
             // drive it from the BLUE component that has no red/green to pair with — the violet-ish
-            // excess `max(0, B - max(R,G))`. So UV fires on blues/purples, stays dark on warm colours.
+            // excess `max(0, B - max(R,G))`. So UV fires on blues/purples, stays dark on warm colors.
             if (offUV != kAbsent) {
                 const uint8_t rg = r > g ? r : g;
                 out[offUV] = b > rg ? static_cast<uint8_t>(b - rg) : 0;
+            }
+            // White last: it's the only emitter that (in Accurate) rebalances RGB, so it must run
+            // after the stand-ins have read the pre-subtraction values.
+            if (offWhite != kAbsent) {
+                if (whiteMode == WhiteMode::Accurate) { r -= w; g -= w; b -= w; }  // pull white out of RGB
+                out[offWhite] = w;
             }
         }
         if (offRed != kAbsent)   out[offRed] = r;

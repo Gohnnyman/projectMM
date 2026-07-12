@@ -828,9 +828,23 @@
         }
       },
       {
-        "type": "RmtLedDriver",
-        "id": "RmtLed",
-        "parent_id": "Drivers"
+        "type": "GridLayout",
+        "id": "Grid",
+        "parent_id": "Layouts",
+        "controls": {
+          "width": 8,
+          "height": 8
+        }
+      },
+      {
+        "type": "LcdLedDriver",
+        "id": "LcdLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48",
+          "clockPin": 33,
+          "dcPin": 34
+        }
       },
       {
         "type": "NetworkModule",
@@ -882,9 +896,12 @@
         }
       },
       {
-        "type": "RmtLedDriver",
-        "id": "RmtLed",
-        "parent_id": "Drivers"
+        "type": "LcdLedDriver",
+        "id": "LcdLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1"
+        }
       },
       {
         "type": "NetworkModule",

@@ -95,12 +95,32 @@ TEST_CASE("assignCounts takes explicit per-pin counts") {
     CHECK(counts[2] == 50);
 }
 
-// A short list assigns what it names; unlisted pins share the remaining lights evenly.
-TEST_CASE("assignCounts splits the remainder evenly over unlisted pins") {
-    // 3 pins, only the first has an explicit count: the remaining 150 lights
-    // split evenly over the remaining 2 pins.
+// A SINGLE number broadcasts: that many on EVERY pin (the NumPy/CSS scalar idiom —
+// "one number = that many each"), NOT "on the first pin only, split the rest".
+TEST_CASE("assignCounts broadcasts a single value to every pin") {
+    mm::nrOfLightsType counts[8] = {};
+    CHECK(mm::assignCounts("100", 3, 1000, counts) == nullptr);
+    CHECK(counts[0] == 100);
+    CHECK(counts[1] == 100);
+    CHECK(counts[2] == 100);   // every pin, not just the first
+}
+
+// Broadcast is clamped so the running sum never reads past the buffer: with 250
+// lights and 100/pin, pins 0+1 take 100 each, pin 2 gets the last 50.
+TEST_CASE("assignCounts broadcast clamps to the remaining buffer") {
     mm::nrOfLightsType counts[8] = {};
     CHECK(mm::assignCounts("100", 3, 250, counts) == nullptr);
+    CHECK(counts[0] == 100);
+    CHECK(counts[1] == 100);
+    CHECK(counts[2] == 50);
+}
+
+// A LIST shorter than the pin count still maps what it names, then even-splits the
+// rest over the unlisted pins (distinguishes list-of-one-plus-comma from broadcast).
+TEST_CASE("assignCounts maps a short list, even-splits the unlisted remainder") {
+    // "100," is a list (has a comma) — pin0=100 explicit, pins 1+2 split the 150 left.
+    mm::nrOfLightsType counts[8] = {};
+    CHECK(mm::assignCounts("100,", 3, 250, counts) == nullptr);
     CHECK(counts[0] == 100);
     CHECK(counts[1] == 75);
     CHECK(counts[2] == 75);
@@ -153,15 +173,14 @@ TEST_CASE("assignCounts clamps a pin to the WS2812 ceiling and warns (drives 204
     CHECK(counts[0] == 100);
     CHECK(warn == nullptr);
 
-    // An explicit OVERSIZED count on pin 0 clamps + warns, while the unlisted pins still
-    // split the correct remainder. Buffer 6000 over 3 pins, "5000" explicit on pin 0:
-    // pin 0 wants 5000 → clamped to 2048 (warn); remaining 6000-5000=1000 splits over the
-    // 2 unlisted pins (500 each). The clamp does NOT redistribute the trimmed 2952 — the
-    // remainder is computed from the REQUESTED count, matching the driver's slice offsets.
+    // An oversized SINGLE value broadcasts then clamps: "5000" wants 5000 on every pin
+    // over a 6000-light buffer. Broadcast walks the buffer — pin0 takes 5000, pin1 the
+    // remaining 1000, pin2 gets 0 — then each is clamped to the WS2812 ceiling. So
+    // pin0 → 2048 (clamped from 5000, warn), pin1 → 1000 (under the ceiling), pin2 → 0.
     CHECK(mm::assignCounts("5000", 3, 6000, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
-    CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);   // clamped from 5000
-    CHECK(counts[1] == 500);                        // (6000 - 5000) / 2
-    CHECK(counts[2] == 500);
+    CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);   // 5000 → clamped to 2048
+    CHECK(counts[1] == 1000);                       // remaining buffer after pin0's 5000
+    CHECK(counts[2] == 0);                           // buffer already consumed
     CHECK(warn == mm::kClampedWarning);
 }
 
@@ -235,7 +254,9 @@ TEST_CASE("RmtLedDriver idles with a status error on a bad pin list") {
     std::strcpy(d.pins, "18");
     d.applyState();
     CHECK(d.pinCount() == 1);
-    CHECK(d.status() == nullptr);
+    // Config valid → the parse error is cleared and the neutral consumption info shows.
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+    CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
 TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assumed)") {
@@ -255,7 +276,9 @@ TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assume
     std::strcpy(d.pins, "18");
     d.applyState();
     CHECK(d.pinCount() == 1);
-    CHECK(d.status() == nullptr);
+    // Config valid → the parse error is cleared and the neutral consumption info shows.
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+    CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
 TEST_CASE("RmtLedDriver re-slices when the source buffer changes") {

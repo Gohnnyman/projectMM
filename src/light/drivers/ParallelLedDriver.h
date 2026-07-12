@@ -40,9 +40,11 @@ public:
     /// subclass) references the "GRB" preset by default. The user can pick any preset.
     ParallelLedDriver() { this->setDefaultPresetName("GRB"); }
 
-    /// Bus width this increment: 8 of the peripheral's 16 lanes (matches the platform's lane
-    /// constant; widening to 16 is a later constant change).
-    static constexpr uint8_t kMaxLanes = 8;
+    /// Max parallel lanes = the peripheral's full 16 data lines. The bus width the driver
+    /// actually builds is DERIVED from the configured pin count: ≤8 pins → an 8-bit bus (uint8
+    /// slots), 9..16 pins → a 16-bit bus (uint16 slots). Both peripherals do 16 data lines
+    /// (LCD_CAM `bus_width` 8|16; Parlio `data_width` 8|16 — powers of two only).
+    static constexpr uint8_t kMaxLanes = 16;
 
     /// Light count the loopback self-test drives (or `maxLaneLights_` if the strip is smaller).
     /// Small on purpose: the test verifies the peripheral emits *correct WS2812 bits*, which a few
@@ -59,13 +61,15 @@ public:
     /// SIMULTANEOUSLY, fed consecutive slices of this driver's window. Shared control shape with
     /// RmtLedDriver (parsers in PinList.h). Defaults live on the derived (chip-specific safe pins),
     /// so the derived sets them after construction; the base just declares them. i80 needs exactly
-    /// kMaxLanes pins (a partial bus is rejected); Parlio runs on 1..8.
-    char pins[24] = "";
+    /// 8 OR 16 real pins (a partial bus is rejected — a sub-16 board parks unused lanes + WR/DC on
+    /// spare GPIOs); Parlio runs on 1..16. Sized for 16 two-digit GPIOs + separators.
+    char pins[64] = "";
     /// Comma-separated lights-per-lane, matched to `pins` by position; the unassigned remainder
     /// splits evenly over the remaining lanes. Each lane is clamped to the WS2812 per-pin ceiling
     /// (`kMaxWs2812LedsPerPin`) with a Warning status — it drives that many rather than choking a
-    /// whole grid onto one line. Empty default splits this driver's window evenly.
-    char ledsPerPin[48] = "";
+    /// whole grid onto one line. Empty default splits this driver's window evenly. Sized for 16
+    /// per-lane counts + separators.
+    char ledsPerPin[96] = "";
 
     /// On-device loopback self-test — jumper a lane's TX to `loopbackRxPin`, tick to transmit a
     /// known WS2812 pattern and bit-verify the capture, proving the peripheral emits correct bytes
@@ -178,26 +182,13 @@ public:
         const uint8_t outCh = correction_.outChannels;
         if (outCh == 0 || frameBytes_ > derived()->busCapacity()) return;
 
-        // Fused per-ROW pass: correct the same light index of every active lane
-        // into the wire block, then transpose it into 3-slot bus bytes. No heap,
-        // integer math only.
-        const uint8_t* src = sourceBuffer_->data();
-        const uint8_t srcCh = sourceBuffer_->channelsPerLight();
-        uint8_t* out = dmaBuf_;
-        uint8_t wire[kMaxLanes * 4];
-        for (nrOfLightsType row = 0; row < maxLaneLights_; row++) {
-            uint8_t mask = 0;
-            for (uint8_t lane = 0; lane < laneCount_; lane++) {
-                if (row >= laneCounts_[lane]) continue;   // short strand: idle LOW
-                mask |= static_cast<uint8_t>(1u << lane);
-                // winStart_ shifts this driver's whole slice; laneStart_ is the
-                // per-lane offset within it.
-                correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
-                                   wire + lane * 4);
-            }
-            encodeWs2812LcdSlots(wire, mask, outCh, out);
-            out += static_cast<size_t>(outCh) * 8 * 3;
-        }
+        // Fused per-ROW pass, one runtime branch on the bus width: ≤8 lanes clock an
+        // 8-bit bus (uint8 slots, the transposeLanes8x8 core); 9..16 lanes clock a
+        // 16-bit bus (uint16 slots, transposeLanes16x8). The branch is OUTSIDE the
+        // row loop, so each width's inner loop stays branch-free.
+        if (laneCount_ <= 8) encodeRows<uint8_t>(outCh);
+        else                 encodeRows<uint16_t>(outCh);
+
         // The latch pad after the rows is zeroed at reinit and never written
         // here, so the transfer ends holding every lane LOW for >=300 µs. Wait
         // only when the transfer actually started: a failed transmit gives no
@@ -205,6 +196,45 @@ public:
         // timeout every tick. Drop the frame and retry next tick (self-heals).
         if (derived()->busTransmit(frameBytes_))
             derived()->busWait(1000 /* ms */);
+    }
+
+    // Encode every row into the DMA buffer as `Slot`-wide bus words (uint8_t for the
+    // 8-bit bus, uint16_t for the 16-bit bus). Correct the same light index of every
+    // active lane into the wire block, then transpose+emit its 3 slots. No heap,
+    // integer math only. `dmaBuf_` is raw bytes at the seam; a 16-bit frame views it
+    // as uint16 slots (the buffer was sized ×2 by frameBytesFor). Called from tick().
+    template <class Slot>
+    void encodeRows(uint8_t outCh) {
+        const uint8_t* src = sourceBuffer_->data();
+        const uint8_t srcCh = sourceBuffer_->channelsPerLight();
+        auto* out = reinterpret_cast<Slot*>(dmaBuf_);
+        uint8_t wire[kMaxLanes * 4];
+        for (nrOfLightsType row = 0; row < maxLaneLights_; row++) {
+            Slot mask = 0;
+            for (uint8_t lane = 0; lane < laneCount_; lane++) {
+                if (row >= laneCounts_[lane]) continue;   // short strand: idle LOW
+                mask |= static_cast<Slot>(Slot(1) << lane);
+                // winStart_ shifts this driver's whole slice; laneStart_ is the
+                // per-lane offset within it.
+                correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
+                                   wire + lane * 4);
+            }
+            encodeWs2812LcdSlots<Slot>(wire, mask, outCh, out);
+            out += static_cast<size_t>(outCh) * 8 * 3;   // 3 slots × 8 bits × channels, in Slot elements
+        }
+    }
+
+    // Encode the loopback test frame at `Slot` width: the same pattern on lane 0 in every
+    // row (activeMask = bit 0). Matches the private loopback bus's width so the DMA stride
+    // is right. `frame` is raw bytes; viewed as Slot elements.
+    template <class Slot>
+    void encodeLoopbackFrame(uint8_t* frame, const uint8_t* wire, uint8_t outCh,
+                             nrOfLightsType lights) {
+        auto* out = reinterpret_cast<Slot*>(frame);
+        for (nrOfLightsType row = 0; row < lights; row++) {
+            encodeWs2812LcdSlots<Slot>(wire, Slot(1), outCh, out);
+            out += static_cast<size_t>(outCh) * 8 * 3;
+        }
     }
 
     /// Test-only accessors — pin the lane slicing and frame-size arithmetic on the
@@ -252,20 +282,28 @@ protected:
 
     /// CRTP hook (default: no extra bus pins to validate). A derived driver whose
     /// peripheral commits its own GPIOs beyond the data lanes (the i80 bus's WR/DC)
-    /// HIDES this to reject a data lane that collides with them. Returns an error
-    /// string (idles the driver) or null when the data pins are clean. Parlio has no
+    /// HIDES this to flag a data lane that overlaps them. Returns a WARNING string
+    /// (the driver keeps running — see LcdLedDriver::validateBusPins for why it's a
+    /// warning, not a blocker) or null when the data pins are clean. Parlio has no
     /// such pins, so it uses this default.
     const char* validateBusPins(const uint16_t* /*lanes*/, uint8_t /*n*/) const { return nullptr; }
 
-    // Frame bytes: longest lane × channels × 24 slot bytes, plus a zeroed latch
-    // pad of >=300 µs at the slot rate (800 B) with clock-tolerance slack (64),
-    // rounded up to the bus's 64-byte alignment. 0 when there's nothing to send.
-    static size_t frameBytesFor(nrOfLightsType maxLights, uint8_t outCh) {
+    // Frame bytes: longest lane × channels × 24 slots, plus a zeroed latch pad of
+    // >=300 µs at the slot rate (800 slots) with clock-tolerance slack (64), each
+    // scaled by `slotBytes` (1 for an 8-bit bus, 2 for a 16-bit bus — a slot is one
+    // bus WORD, so a 16-lane frame is 2 bytes/slot), rounded up to the bus's 64-byte
+    // alignment. 0 when there's nothing to send. The pad scales too: it's a count of
+    // idle bus words, and its LOW duration is measured in slots, so an unscaled pad
+    // would be half the latch time on a 16-bit bus and could latch a strand mid-frame.
+    static size_t frameBytesFor(nrOfLightsType maxLights, uint8_t outCh, uint8_t slotBytes) {
         if (maxLights == 0 || outCh == 0) return 0;
-        const size_t latchPad = 800 + 64;
-        const size_t bytes = static_cast<size_t>(maxLights) * outCh * 24 + latchPad;
+        const size_t latchPad = static_cast<size_t>(800 + 64) * slotBytes;
+        const size_t bytes = static_cast<size_t>(maxLights) * outCh * 24 * slotBytes + latchPad;
         return (bytes + 63) & ~static_cast<size_t>(63);
     }
+
+    // Bytes per bus slot: 1 for the 8-bit bus (≤8 lanes), 2 for the 16-bit bus.
+    uint8_t slotBytes() const { return laneCount_ > 8 ? 2 : 1; }
 
     // Re-derive lanes/counts/starts/frame size from the controls and the wired
     // buffer/correction. Off the hot path; on error the driver idles with the
@@ -277,24 +315,31 @@ protected:
         uint8_t n = 0;
         const char* err = parsePinList(pins, laneList_, maxLanesForTarget(), n);
         // i80 (kExactLaneCount) requires a real GPIO on every data line up to the
-        // bus width — a partial bus is rejected at esp_lcd_new_i80_bus(). Parlio
-        // accepts 1..8, so it sets kExactLaneCount=false and skips this.
+        // bus width, and the bus width is power-of-two only (8 or 16) — a partial
+        // bus is rejected at esp_lcd_new_i80_bus(). So LCD accepts EXACTLY 8 or 16
+        // pins; a sub-16 board parks unused lanes on spare GPIOs. Parlio accepts
+        // 1..16 (unused lanes idle NC), so it sets kExactLaneCount=false and skips this.
         if constexpr (Derived::kExactLaneCount) {
-            if (!err && n != kMaxLanes) err = "LCD bus needs exactly 8 pins";
+            if (!err && n != 8 && n != 16) err = "LCD bus needs exactly 8 or 16 pins";
         }
-        // Peripheral-specific data-pin validation (i80 rejects a data lane that
-        // collides with its WR/DC control pins — the GPIO matrix would route two
-        // output signals to one pin and corrupt that lane; Parlio has no such pins
-        // and returns null). Kept a CRTP hook so the base stays peripheral-neutral.
-        if (!err) err = derived()->validateBusPins(laneList_, n);
-        const char* warn = nullptr;
+        // Peripheral-specific data-pin check (i80's WR/DC on a data lane routes two
+        // output signals to one pin, so that lane emits the clock/DC waveform, not
+        // pixel data). This is a WARNING, not a blocker: on a board that wires all
+        // 8/16 lanes but drives fewer strands, an unused data pin is a legitimate
+        // WR/DC candidate — only the lanes that actually drive a strand would show
+        // garbage, and the user opted into that. Parlio has no WR/DC and returns null.
+        // Kept a CRTP hook so the base stays peripheral-neutral.
+        const char* warn = err ? nullptr : derived()->validateBusPins(laneList_, n);
         if (!err) {
             // Distribute over this driver's window slice, not the whole buffer.
             // assignCounts clamps each lane to kMaxWs2812LedsPerPin (drives that many
-            // rather than choking a whole grid onto one WS2812 line).
+            // rather than choking a whole grid onto one WS2812 line). Its own warning
+            // (a clamped lane) wins over the WR/DC one only if it sets warn non-null.
             const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
             windowSlice(bufN, winStart_, winLen_);
-            err = assignCounts(ledsPerPin, n, winLen_, laneCounts_, kMaxWs2812LedsPerPin, &warn);
+            const char* clampWarn = nullptr;
+            err = assignCounts(ledsPerPin, n, winLen_, laneCounts_, kMaxWs2812LedsPerPin, &clampWarn);
+            if (clampWarn) warn = clampWarn;
         }
         if (err) {
             setConfigErr(err);
@@ -308,10 +353,17 @@ protected:
             if (laneCounts_[i] > maxLaneLights_) maxLaneLights_ = laneCounts_[i];
         }
         const uint8_t outCh = correction_.outChannels;
-        frameBytes_ = frameBytesFor(maxLaneLights_, outCh);
+        // laneCount_ is set above, so slotBytes() reflects the derived bus width (1 for
+        // ≤8 lanes, 2 for the 16-bit bus) — a 16-lane frame is twice the bytes.
+        frameBytes_ = frameBytesFor(maxLaneLights_, outCh, slotBytes());
         clearConfigErr();
         // A lane clamped to the WS2812 ceiling still drives — Warning, not error (see RmtLed).
         setConfigWarn(warn);
+        // With nothing more urgent to show AND lights actually driven, report how many
+        // this driver consumes (Σ laneCounts_ = `start`) of its window — so the user sees
+        // real consumption instead of guessing from grid × pins. A clamp warning wins; an
+        // idle driver (no pins / empty buffer) stays statusless, not "driving 0 of 0".
+        if (!warn && start > 0) setDrivingInfo(start, winLen_);
         return true;
     }
 
@@ -400,7 +452,12 @@ protected:
         // overruns the P4 Parlio transfer limit + the RMT-RX capture buffer).
         const nrOfLightsType lights =
             maxLaneLights_ < kLoopbackTestLights ? maxLaneLights_ : kLoopbackTestLights;
-        const size_t perLightBytes = static_cast<size_t>(outCh) * 8 * 3;   // 3 slots/bit, 1 bus byte/slot
+        // The loopback frame width is per-driver (kLoopbackFullWidth): the i80 loopback rebuilds
+        // the FULL-WIDTH private bus (it can't do a 1-lane bus), so a 16-lane driver's frame must
+        // be 16-bit slots to match — and this then genuinely exercises the 16-bit transpose+DMA on
+        // real silicon. Parlio builds a 1-lane private unit, so its loopback stays 8-bit regardless.
+        const uint8_t sb = Derived::kLoopbackFullWidth ? slotBytes() : 1;
+        const size_t perLightBytes = static_cast<size_t>(outCh) * 8 * 3 * sb;   // 3 slots/bit × slotBytes
         const size_t testFrameBytes = static_cast<size_t>(lights) * perLightBytes;
         // Build the REAL frame with the test pattern in every row on lane 0 only;
         // the platform transmits the genuine transfer (size, DMA chain, latch pad)
@@ -416,11 +473,17 @@ protected:
         std::memset(frame, 0, testFrameBytes);
         uint8_t wire[kMaxLanes * 4] = {};
         wire[0] = 0xA5; wire[1] = 0x00; wire[2] = 0xFF;   // wire[3] stays 0 (RGBW)
-        uint8_t* out = frame;
-        for (nrOfLightsType row = 0; row < lights; row++) {
-            encodeWs2812LcdSlots(wire, 0x01, outCh, out);
-            out += perLightBytes;
-        }
+        // Encode the pattern on lane 0 at the operational width. A wider bus adds only
+        // idle high lanes (activeMask = bit 0); the private bus + loopbackTxPin override
+        // carry lane 0's signal to the jumpered RX pin. Sized-per-slot so the 16-bit
+        // buffer stride matches the 16-bit private bus.
+        if (sb == 1) encodeLoopbackFrame<uint8_t>(frame, wire, outCh, lights);
+        else         encodeLoopbackFrame<uint16_t>(frame, wire, outCh, lights);
+        // dataBytes drives the RX capture's WS2812-bit count (kBits = dataBytes/3),
+        // which is the wire signal on lane 0's RX pin — the SAME bit count at any bus
+        // width. So it is width-INDEPENDENT (no ×slotBytes): a wider bus fattens each
+        // slot in the DMA buffer (that's testFrameBytes/frameBytes, ×sb) but clocks
+        // the same number of WS2812 bits out of lane 0.
         const size_t dataBytes = static_cast<size_t>(lights) * outCh * 24;
         deinit();   // free the live bus; the test builds its own on the data pins
         // TX override: the loopback drives lane 0 only, so when loopbackTxPin is

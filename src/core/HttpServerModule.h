@@ -15,10 +15,10 @@ class Scheduler;
 
 /// Embedded HTTP server plus WebSocket — serves the web UI and the REST API that backs it.
 /// Core infrastructure held to a **light-include-free** contract with one PO-accepted
-/// exception: the WLED-compatibility shim's colour path uses `light/Palette.h`'s pure
+/// exception: the WLED-compatibility shim's color path uses `light/Palette.h`'s pure
 /// hue/RGB↔palette-index conversions (`Palettes::nearestForRgb`, `Palettes::representativeRgb`),
 /// the same sanctioned exception `MqttModule` documents at its top-of-file — routing a HomeKit /
-/// HA WLED colour to a projectMM palette needs the palette set, which is inherently light-domain,
+/// HA WLED color to a projectMM palette needs the palette set, which is inherently light-domain,
 /// and a format conversion is the least-coupling way to bridge it (this module still drives the
 /// palette through `Scheduler::setControl`, not a light object). No other light-domain include
 /// is permitted here. Implementation lives in HttpServerModule.cpp; this header is the interface
@@ -37,7 +37,7 @@ class Scheduler;
 /// directory, `POST /api/dir?path=` creates a folder, `DELETE /api/dir?path=` removes a file or
 /// empty folder, `GET|POST /api/file?path=` reads / writes a file body (the path rides the query,
 /// so a filesystem op carries its target in the request, not a stored control). All JSON responses
-/// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serialises correctly.
+/// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serializes correctly.
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
 /// base64), up to 4 concurrent clients. Binary frames take two paths, both without a frame-sized
@@ -48,14 +48,14 @@ class Scheduler;
 /// message. One buffered send is in flight at a time (newest-wins backpressure: a new offer while
 /// one is active is dropped). Clients send nothing back over WS; mutations go through REST.
 ///
-/// **State push — diff on the wire (the recognisable snapshot-then-patch model, cf. Redux /
+/// **State push — diff on the wire (the recognizable snapshot-then-patch model, cf. Redux /
 /// Firestore sync, JSON Patch RFC 6902):** the state a client needs is the full module tree
-/// (~30 KB, mostly *unchanging* option/detail metadata), but re-serialising all of it every
+/// (~30 KB, mostly *unchanging* option/detail metadata), but re-serializing all of it every
 /// `tick1s()` — inline on the render thread — stole render budget and stuttered the LEDs at 1 Hz.
 /// Instead: a client gets the **full** `{modules:[…]}` state ONCE on connect (chunk-drained via
 /// the resumable sender, off the render tick), then each second a **patch** `{patch:[{path,value},
 /// …]}` of only the values that changed. Change is found by value-compare, not a dirty flag:
-/// `buildStatePatch` serialises each leaf's value, hashes it (FNV-1a), and compares to a cached
+/// `buildStatePatch` serializes each leaf's value, hashes it (FNV-1a), and compares to a cached
 /// hash — so a value the device mutates itself (telemetry `@tickTimeUs`, status, a driver) is
 /// caught the same as a `setControl` write, with no per-write instrumentation. A leaf path is
 /// `"<module>/<control>"` (or `"<module>/@<field>"` for live per-card header telemetry); module
@@ -68,7 +68,7 @@ class Scheduler;
 /// option sets. A pending resync is fast-pathed on `tick20ms` (not just `tick1s`) and **preempts**
 /// an in-flight preview frame, so a freshly-connected client gets its state — and therefore its
 /// preview — within a few tens of ms instead of up to a second. Net: the per-second push drops from
-/// ~34 KB to ~1–2 KB and the expensive full-tree serialise runs only on connect / schema change. The
+/// ~34 KB to ~1–2 KB and the expensive full-tree serialize runs only on connect / schema change. The
 /// UI applies a patch in place (no rebuild) and re-renders on a full frame. This is the "sub-hot path
 /// is a hot path" rule (CLAUDE.md) applied: a periodic tick shares the render thread, so its work
 /// must be cheap / skipped-when-unchanged.
@@ -89,7 +89,7 @@ class Scheduler;
 /// projectMM purple `[128,0,255]` when the first LED is off). Control is bidirectional over the
 /// same `/ws`: the app's slider/toggle send a `{on?, bri?}` frame, read by
 /// `pollWledStateFromWebSockets()` and applied to Drivers brightness through the shared
-/// apply-core (the same `applySetControl` path REST and Improv use). The colour read is the
+/// apply-core (the same `applySetControl` path REST and Improv use). The color read is the
 /// one place this core module reaches output state — `MoonModule::firstOutputRgb()` is a
 /// domain-neutral virtual the light-domain Drivers overrides — keeping this module free of any
 /// light-domain include.
@@ -137,11 +137,15 @@ public:
     // Drop the in-flight buffered send. Frees the body first when the frame OWNS it (a state frame
     // owns its ~30 KB JSON; a preview frame borrows its pixel buffer) — same rule as release(), so
     // this is self-safe for any caller, not only ones that know a borrowed frame is in flight.
+    // A cancelled OWNED frame is a state resync that was still draining (a preview-geometry rebuild
+    // can cancel mid-drain); re-arm fullResyncPending_ so the resync is retried on the next push
+    // rather than silently lost — a client that already saw a partial state must not be left stale.
     void cancelBufferedSend() override {
         if (previewSend_.ownsBody) {
             platform::free(const_cast<uint8_t*>(previewSend_.body));
             previewSend_.body = nullptr;
             previewSend_.ownsBody = false;
+            fullResyncPending_ = true;   // a state drain was interrupted → retry it
         }
         previewSend_.active = false;
     }
@@ -213,6 +217,13 @@ public:
     void requestFullResyncForTest() { requestFullResync(); }
     bool fullResyncPendingForTest() const { return fullResyncPending_; }
     void clearFullResyncForTest() { fullResyncPending_ = false; }
+    /// Install the schema-changed hook WITHOUT opening the TCP listener (setup() does both). A unit
+    /// test proving the hook fires the resync needs no socket, and binding a port under test is flaky
+    /// (a busy port fails the open). release() unwires it the same way as after a real setup().
+    void installSchemaHookForTest() {
+        instance_ = this;
+        MoonModule::setSchemaChangedHook(&HttpServerModule::onSchemaChanged);
+    }
 
 private:
     platform::TcpServer server_;
@@ -230,8 +241,8 @@ private:
     // current frame's all-sent result across the push calls.
     bool wsFrameAllSent_ = true;
     // Max TOTAL WouldBlock spins for one span in sendAllOrClose before a stuck client is closed.
-    // Used by the begin/push/end stream (coord table + downsampled colour frame); the full-res
-    // colour frame goes through the resumable sendBufferedFrame instead, which never spins.
+    // Used by the begin/push/end stream (coord table + downsampled color frame); the full-res
+    // color frame goes through the resumable sendBufferedFrame instead, which never spins.
     static constexpr int kDirectSendSpins = 2000;
 
     // Resumable full-frame send (BinaryBroadcaster::sendBufferedFrame). One WS message = a copied
@@ -274,10 +285,10 @@ private:
 
     // --- Diff-on-the-wire state push -----------------------------------------
     // The periodic WS push sends the FULL state once (on connect / after a structural change), then a
-    // PATCH of only the controls whose value changed — because a full re-serialise of the whole tree
+    // PATCH of only the controls whose value changed — because a full re-serialize of the whole tree
     // (~34 KB, mostly unchanging option/detail metadata) every second on the render thread is the 1 Hz
     // LED stutter (a periodic tick shares the render thread — see CLAUDE.md "sub-hot path"). Change is
-    // detected by value-compare, not a dirty flag: buildStatePatch serialises each control's VALUE,
+    // detected by value-compare, not a dirty flag: buildStatePatch serializes each control's VALUE,
     // hashes it, and compares to a cached hash — so a value changed by the device itself (telemetry,
     // status, a driver) is caught the same as a setControl write, with no per-write instrumentation.
     // The cache is a flat parallel array (path-hash → value-hash), 8 bytes per control; a global
@@ -369,7 +380,7 @@ private:
     // -----------------------------------------------------------------------
     void serveSystem(platform::TcpConnection& conn);
     /// WLED-compatibility shim — see the class comment + the /json/info route. /json/info
-    /// lists the device; /json/state + /json/si carry on/brightness/colour for the card;
+    /// lists the device; /json/state + /json/si carry on/brightness/color for the card;
     /// POST /json/state maps the app's toggle + slider onto Drivers brightness.
     void serveWledInfo(platform::TcpConnection& conn);
     void serveWledState(platform::TcpConnection& conn);

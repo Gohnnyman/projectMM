@@ -669,27 +669,36 @@ function updatePortDeviceHint(port) {
     hint.textContent = `last flashed: ${dev.deviceName || dev.ip}${model}`;
 }
 
-async function refreshPorts() {
-    const resp = await fetch("/api/ports");
-    const data = await resp.json();
+// Last port list from /api/ports, kept so the Identify button knows which
+// entries are still path-only (no board match) and worth probing.
+let lastPorts = [];
+
+function renderPortOptions(ports) {
+    lastPorts = ports;
     const select = document.getElementById("port-select");
-    // Port is now per-network — read and persist on the active network record.
-    // refreshPorts re-runs on every network switch so the dropdown's selected
-    // value follows the active network's last-used port.
+    // Port is per-network — read and persist on the active network record;
+    // renderPortOptions re-runs on every network switch so the dropdown's
+    // selected value follows the active network's last-used port.
     const current = getActiveNetwork()?.port || "";
     select.innerHTML = '<option value="">--</option>';
-    for (const port of data.ports) {
+    // Each entry is {path, chip, board, ip}: three levels of identity that
+    // degrade gracefully (path always; chip when the USB descriptor or registry
+    // knows it; board when a registry match exists). Show the richest we have.
+    for (const p of ports) {
         const opt = document.createElement("option");
-        opt.value = port;
-        opt.textContent = port;
-        if (port === current) opt.selected = true;
+        opt.value = p.path;
+        // Richest identity we have: board · chip, or the "not an ESP32" note for a
+        // known non-ESP device (e.g. a monitor) so it never reads as "unidentified".
+        const detail = [p.board, p.chip].filter(Boolean).join(" · ") || p.note;
+        opt.textContent = detail ? `${p.path} — ${detail}` : p.path;
+        if (p.path === current) opt.selected = true;
         select.appendChild(opt);
     }
     updatePortDeviceHint(current);
     // `.onchange = ...` (not addEventListener) so the handler is REPLACED on
-    // each refresh rather than stacking — refreshPorts re-runs on every
-    // network switch + every manual Refresh click, so addEventListener
-    // would queue up duplicate saveState calls per user change.
+    // each render rather than stacking — this re-runs on every network switch +
+    // every Refresh/Identify, so addEventListener would queue up duplicate
+    // saveState calls per user change.
     select.onchange = async () => {
         const active = getActiveNetwork();
         if (active) active.port = select.value;
@@ -698,7 +707,158 @@ async function refreshPorts() {
     };
 }
 
+async function refreshPorts() {
+    const resp = await fetch("/api/ports");
+    const data = await resp.json();
+    renderPortOptions(data.ports);
+}
+
 document.getElementById("refresh-ports").addEventListener("click", refreshPorts);
+
+// Identify: probe EVERY ESP-capable port with esptool to read chip + MAC. This
+// is a dev bench where boards move between ports constantly, so it always does a
+// full probe — including already-labeled ports — because a fresh read beats a
+// cache a swap may have staled. Non-ESP devices (a monitor) are skipped. Probing
+// RESETS each board, so it only runs on an explicit click.
+document.getElementById("identify-ports").addEventListener("click", async () => {
+    const btn = document.getElementById("identify-ports");
+    const targets = lastPorts.filter(p => p.probeable).map(p => p.path);
+    if (!targets.length) { appendLog("\nNo ESP32-capable ports to probe.\n"); return; }
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = "Probing…";
+    appendLog(`\n--- Identifying ${targets.length} port(s) (resets each board) ---\n`);
+    try {
+        const resp = await fetch("/api/identify-ports", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ports: targets }),
+        });
+        const data = await resp.json();
+        let matched = 0;
+        for (const [path, info] of Object.entries(data.probed || {})) {
+            const board = (data.ports.find(p => p.path === path) || {}).board;
+            if (board) matched++;
+            appendLog(`  ${path} → ${info.chip || "no chip"}${info.mac ? " (" + info.mac + ")" : ""}${board ? " = " + board : ""}\n`);
+        }
+        renderPortOptions(data.ports);
+        appendLog(`--- Identify done: ${matched}/${targets.length} matched to a board ---\n`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+    }
+});
+
+// Port watcher: a passive plug/unplug monitor. Polls /api/ports, diffs against
+// the last snapshot, and narrates each change with its 3-level identity (path →
+// chip → board). Read-only — the USB descriptor + registry cache carry the
+// identity, so it never probes/resets a board (that's the Identify button, which
+// the watcher points you to for an unidentified port). Toggles on/off.
+//
+// Flap detection: a cheap ESP32 dev board (e.g. a LOLIN D32) with a marginal
+// regulator or a bad cable browns out and re-enumerates every poll — a wall of
+// Add/Remove lines for one port. When a port crosses FLAP_LIMIT transitions in
+// FLAP_WINDOW_MS, it's collapsed to ONE warning and further churn is suppressed
+// until it goes quiet for FLAP_RECOVER_MS (then a "stabilized" line clears it).
+const FLAP_LIMIT = 4;            // transitions (add or remove) that trip the flap warning
+const FLAP_WINDOW_MS = 8000;     // ...within this rolling window
+const FLAP_RECOVER_MS = 6000;    // quiet this long → declare it stabilized
+// Auto-stop so a forgotten watcher doesn't poll /api/ports forever. You watch
+// while actively plugging things, then walk away — the timeout catches that.
+const WATCH_AUTO_STOP_MS = 60000;
+const _watch = { timer: null, autoStop: null, seen: null, hist: new Map(), flapping: new Map() };
+
+// One-line identity for the log: "path — Board · chip", "path — chip",
+// "path — Device Name" (non-ESP), or "path — ESP32? (click Identify)" when a
+// probeable port has no chip/board yet.
+function portLabel(p) {
+    const detail = [p.board, p.chip].filter(Boolean).join(" · ")
+        || p.note
+        || (p.probeable ? "ESP32? (click Identify)" : "");
+    return detail ? `${p.path} — ${detail}` : p.path;
+}
+
+// Record a transition for `path` at `t` and return true if it's now flapping
+// (>= FLAP_LIMIT transitions within FLAP_WINDOW_MS). Prunes old entries.
+function noteFlap(path, t) {
+    const times = (_watch.hist.get(path) || []).filter(ts => t - ts < FLAP_WINDOW_MS);
+    times.push(t);
+    _watch.hist.set(path, times);
+    return times.length >= FLAP_LIMIT;
+}
+
+async function pollWatch() {
+    let ports;
+    try {
+        ports = (await (await fetch("/api/ports")).json()).ports;
+    } catch (_) {
+        return;   // transient fetch error — try again next tick
+    }
+    const t = Date.now();
+    const now = new Map(ports.map(p => [p.path, p]));
+    if (_watch.seen === null) { _watch.seen = now; return; }   // first tick: baseline only
+    let changed = false;
+
+    // A transition is an add OR a remove; label a flap by whichever side we know.
+    const transitions = [];
+    for (const [path, p] of now) if (!_watch.seen.has(path)) transitions.push([path, p, "🔌 Added  "]);
+    for (const [path, p] of _watch.seen) if (!now.has(path)) transitions.push([path, p, "🔴 Removed"]);
+
+    for (const [path, p, verb] of transitions) {
+        changed = true;
+        if (_watch.flapping.has(path)) {                 // already flagged — stay quiet
+            _watch.flapping.set(path, t);                // refresh last-seen for recovery timer
+            noteFlap(path, t);
+            continue;
+        }
+        if (noteFlap(path, t)) {                          // just crossed the threshold
+            _watch.flapping.set(path, t);
+            appendLog(`⚠️  ${portLabel(p)} is flapping (re-enumerating) — check the USB cable / power; common on cheap ESP32 boards with a weak regulator. Suppressing further churn for this port.\n`);
+        } else {
+            appendLog(`${verb} ${portLabel(p)}\n`);
+        }
+    }
+
+    // Recovery: a flapping port quiet for FLAP_RECOVER_MS is declared stable.
+    for (const [path, last] of _watch.flapping) {
+        if (t - last >= FLAP_RECOVER_MS) {
+            _watch.flapping.delete(path);
+            _watch.hist.delete(path);
+            const p = now.get(path) || _watch.seen.get(path) || { path };
+            appendLog(`✅ ${portLabel(p)} stabilized.\n`);
+        }
+    }
+
+    _watch.seen = now;
+    if (changed) renderPortOptions(ports);   // keep the dropdown in sync with reality
+}
+
+document.getElementById("watch-ports").addEventListener("click", () => {
+    const btn = document.getElementById("watch-ports");
+    if (_watch.timer) { stopWatch("stopped"); return; }
+    _watch.seen = null;   // pollWatch's first tick sets the baseline (no false "added" burst)
+    _watch.hist.clear();
+    _watch.flapping.clear();
+    btn.textContent = "Watching…";
+    btn.classList.add("watching");
+    appendLog(`\n--- Port watcher started — plug or unplug a device (auto-stops after ${WATCH_AUTO_STOP_MS / 1000}s) ---\n`);
+    pollWatch();
+    _watch.timer = setInterval(pollWatch, 1500);
+    _watch.autoStop = setTimeout(() => stopWatch("auto-stopped after idle timeout"), WATCH_AUTO_STOP_MS);
+});
+
+// Tear down the watcher (manual toggle or the auto-stop timeout both land here).
+function stopWatch(reason) {
+    clearInterval(_watch.timer);
+    clearTimeout(_watch.autoStop);
+    _watch.timer = _watch.autoStop = _watch.seen = null;
+    _watch.hist.clear();
+    _watch.flapping.clear();
+    const btn = document.getElementById("watch-ports");
+    btn.textContent = "Watch";
+    btn.classList.remove("watching");
+    appendLog(`--- Port watcher ${reason} ---\n`);
+}
 
 // ---------------------------------------------------------------------------
 // Live tab

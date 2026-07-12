@@ -382,6 +382,10 @@ private:
         // (or null when nothing clamped) to setConfigWarn tracks the live state and retracts a
         // stale warning once the user drops back under the ceiling.
         setConfigWarn(warn);
+        // With nothing more urgent to show AND lights actually driven, report the lights
+        // this driver consumes (Σ pinCounts_) of the window — real consumption, not a
+        // grid×pins guess. An idle driver (no pins) stays statusless, not "driving 0 of 0".
+        if (!warn && txLightCount_ > 0) setDrivingInfo(txLightCount_, winLen_);
         return true;
     }
 

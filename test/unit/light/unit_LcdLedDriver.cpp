@@ -113,7 +113,9 @@ TEST_CASE("LcdLedDriver bad pins → status error → recovery") {
     std::strcpy(d.pins, "1,2,4,5,6,7,8,9");
     d.applyState();
     CHECK(d.laneCount() == 8);
-    CHECK(d.status() == nullptr);
+    // Recovered: parse error cleared, replaced by the neutral consumption info.
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+    CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
 // Pins now default UNSET (the "default only when it cannot do harm" rule — the
@@ -140,42 +142,76 @@ TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
 
 // IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than
 // 8 pins is a config error, not a narrower bus.
-TEST_CASE("LcdLedDriver requires exactly 8 pins") {
-    mm::LcdLedDriver d;
+// The i80 bus width is power-of-two only (8 or 16) and rejects NC data pins, so LCD
+// accepts EXACTLY 8 or 16 real pins; anything else (3, 10, 17) is a config error.
+TEST_CASE("LcdLedDriver requires exactly 8 or 16 pins") {
     mm::Buffer src;
     mm::Correction corr;
-    std::strcpy(d.pins, "1,2,4");
-    wire(d, src, corr, 64);
-
-    CHECK(d.laneCount() == 0);
-    CHECK(d.frameBytes() == 0);
-    REQUIRE(d.status() != nullptr);
-    CHECK(std::strcmp(d.status(), "LCD bus needs exactly 8 pins") == 0);
+    {   // 3 pins → error (not 8 or 16)
+        mm::LcdLedDriver d;
+        std::strcpy(d.pins, "1,2,4");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 0);
+        CHECK(d.frameBytes() == 0);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strcmp(d.status(), "LCD bus needs exactly 8 or 16 pins") == 0);
+    }
+    {   // 16 pins → valid (the 16-bit bus). clock/dc moved clear of the data set
+        // (defaults 10/11 would collide with data pins 10/11 → the collision guard).
+        mm::LcdLedDriver d;
+        d.clockPin = 20; d.dcPin = 21;
+        std::strcpy(d.pins, "1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 16);
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);   // 16 valid → info, not error
+    }
+    {   // 10 pins → error (between 8 and 16, not a valid bus width)
+        mm::LcdLedDriver d;
+        d.clockPin = 20; d.dcPin = 21;
+        std::strcpy(d.pins, "1,2,4,5,6,7,8,9,12,13");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 0);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strcmp(d.status(), "LCD bus needs exactly 8 or 16 pins") == 0);
+    }
 }
 
-// A data lane on the same GPIO as the WR (clockPin) or DC pin is rejected loud:
-// the i80 matrix would route two output signals to one pin and that lane would
-// emit the clock/DC waveform instead of pixel data (silent strip corruption).
-// IDF doesn't catch this, so the driver must. clockPin/dcPin default to 10/11.
-TEST_CASE("LcdLedDriver rejects a data pin that collides with clockPin/dcPin") {
+// A data lane on the same GPIO as the WR (clockPin) or DC pin is a WARNING, not a
+// blocker: that lane carries the clock/DC waveform instead of pixel data, but on a
+// board that wires all 8/16 lanes yet drives fewer strands, parking WR/DC on an
+// unused data pin is a valid choice — so the driver still runs and flags a warning.
+// clockPin/dcPin default to 10/11.
+TEST_CASE("LcdLedDriver warns (does not idle) when a data pin is on clockPin/dcPin") {
     mm::Buffer src;
     mm::Correction corr;
-    {   // lane on GPIO 10 == default clockPin
+    {   // lane on GPIO 10 == default clockPin → warns but still drives all 8 lanes
         mm::LcdLedDriver d;
         std::strcpy(d.pins, "18,5,6,7,8,9,10,11");   // 10 == clockPin, 11 == dcPin
         wire(d, src, corr, 64);
-        CHECK(d.laneCount() == 0);                    // idled, not built
-        REQUIRE(d.status() != nullptr);
-        CHECK(std::strcmp(d.status(), "LED pin collides with clockPin (WR)") == 0);
+        CHECK(d.laneCount() == 8);                    // still built + driving
+        REQUIRE(d.status() != nullptr);               // a warning is present
+        CHECK(std::strstr(d.status(), "clockPin") != nullptr);
     }
-    {   // move clock/dc clear of the data set → builds cleanly (the fix on the bench)
+    {   // move clock/dc clear of the data set → no warning
         mm::LcdLedDriver d;
         d.clockPin = 12;
         d.dcPin = 13;
         std::strcpy(d.pins, "18,5,6,7,8,9,10,11");
         wire(d, src, corr, 64);
         CHECK(d.laneCount() == 8);
-        CHECK(d.status() == nullptr);
+        // No collision warning → the neutral consumption info instead (not a null status).
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);
+        CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
+    }
+    {   // WR and DC on the SAME GPIO is caught up front — the i80 bus needs two distinct control
+        // lines, so this breaks the bus (unlike a data collision that only corrupts one lane).
+        mm::LcdLedDriver d;
+        d.clockPin = 20;
+        d.dcPin = 20;                                 // same as clockPin
+        std::strcpy(d.pins, "1,2,3,4,5,6,7,8");
+        wire(d, src, corr, 64);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strstr(d.status(), "same GPIO") != nullptr);
     }
 }
 

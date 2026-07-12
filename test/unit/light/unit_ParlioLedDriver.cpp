@@ -41,10 +41,11 @@ void wire(mm::ParlioLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     d.applyState();
 }
 
-// frameBytes = maxLaneLights × outCh × 24 + 864 latch pad, rounded up to 64.
-size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh) {
+// frameBytes = (maxLaneLights × outCh × 24 + 864 latch pad) × slotBytes, rounded up
+// to 64. slotBytes = 1 for the 8-bit bus (≤8 lanes), 2 for the 16-bit bus (9..16).
+size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotBytes = 1) {
     if (maxLights == 0) return 0;
-    const size_t raw = static_cast<size_t>(maxLights) * outCh * 24 + 800 + 64;
+    const size_t raw = (static_cast<size_t>(maxLights) * outCh * 24 + 800 + 64) * slotBytes;
     return (raw + 63) & ~static_cast<size_t>(63);
 }
 
@@ -99,19 +100,60 @@ TEST_CASE("ParlioLedDriver accepts any lane count from 1 to 8") {
         uint8_t expected = 1;
         for (const char* p = pinList; *p; p++) if (*p == ',') expected++;
         CHECK(d.laneCount() == expected);
-        CHECK(d.status() == nullptr);   // no error for any 1..8 count
+        // Success now carries a neutral info readout ("driving N of M lights"), not a null
+        // status — assert it's info (not an error) and names the consumption.
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);
+        CHECK(d.status() != nullptr);
+        CHECK(std::strstr(d.status(), "driving") != nullptr);
     }
 }
 
-// More than 8 pins is rejected (the chip's lane cap), like the other drivers.
-TEST_CASE("ParlioLedDriver rejects more than 8 pins") {
+// 9..16 pins are accepted (Parlio drives 1..16, the 16-bit bus); more than 16 is rejected.
+TEST_CASE("ParlioLedDriver accepts 9..16 pins, rejects more than 16") {
     mm::ParlioLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    std::strcpy(d.pins, "1,2,3,4,5,6,7,8,9");
-    wire(d, src, corr, 64);
-    CHECK(d.laneCount() == 0);
-    CHECK(d.status() != nullptr);
+    {   // 12 pins → 12 lanes, valid (the 16-bit bus)
+        std::strcpy(d.pins, "1,2,3,4,5,6,7,8,9,10,11,12");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 12);
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);   // valid → info, not error
+    }
+    {   // 17 pins → rejected (over the 16-lane cap)
+        mm::ParlioLedDriver d2;
+        std::strcpy(d2.pins, "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17");
+        wire(d2, src, corr, 64);
+        CHECK(d2.laneCount() == 0);
+        CHECK(d2.status() != nullptr);
+    }
+}
+
+// A 16-lane (>8) config uses the 16-bit bus, so each slot is 2 bytes: the frame is
+// DOUBLE the byte size of the same per-lane lights at ≤8 lanes. Pins the slotBytes
+// threading through frameBytesFor (including the doubled latch pad).
+TEST_CASE("ParlioLedDriver 16-lane frame doubles the byte size (16-bit bus)") {
+    mm::Buffer src;
+    mm::Correction corr;
+    {   // 8 lanes × 50 lights → 8-bit bus (slotBytes = 1)
+        mm::ParlioLedDriver d;
+        std::strcpy(d.pins, "1,2,3,4,5,6,7,8");
+        std::strcpy(d.ledsPerPin, "50,50,50,50,50,50,50,50");
+        wire(d, src, corr, 400);
+        REQUIRE(d.laneCount() == 8);
+        CHECK(d.maxLaneLights() == 50);
+        CHECK(d.frameBytes() == expectFrame(50, 3, 1));
+    }
+    {   // 16 lanes × 50 lights → 16-bit bus (slotBytes = 2), same per-lane lights, DOUBLE bytes
+        mm::ParlioLedDriver d;
+        std::strcpy(d.pins, "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16");
+        std::strcpy(d.ledsPerPin, "50,50,50,50,50,50,50,50,50,50,50,50,50,50,50,50");
+        wire(d, src, corr, 800);
+        REQUIRE(d.laneCount() == 16);
+        CHECK(d.maxLaneLights() == 50);
+        CHECK(d.frameBytes() == expectFrame(50, 3, 2));   // 16-bit slots → 2 bytes/slot
+        // Sanity: the 16-bit frame is ~double the 8-bit one (modulo the 64-byte rounding).
+        CHECK(d.frameBytes() > expectFrame(50, 3, 1));
+    }
 }
 
 // An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
@@ -175,7 +217,9 @@ TEST_CASE("ParlioLedDriver bad pins → status error → recovery") {
     std::strcpy(d.pins, "36,37");
     d.applyState();
     CHECK(d.laneCount() == 2);
-    CHECK(d.status() == nullptr);
+    // Recovered: the parse error is cleared, replaced by the neutral consumption info.
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+    CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
 // Pins now default UNSET (the "default only when it cannot do harm" rule — the
