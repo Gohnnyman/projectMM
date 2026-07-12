@@ -3,6 +3,7 @@
 
 #include "doctest.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 #include "light/drivers/LcdLedDriver.h"
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // shared conditional-control helpers
@@ -28,7 +29,7 @@ void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     // allocate succeeds exactly when lights > 0 (the zero-grid case wires an
     // empty buffer on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
-    corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
     d.correctionForTest() = corr;
@@ -92,7 +93,7 @@ TEST_CASE("LcdLedDriver frame grows on RGBW preset") {
     CHECK(d.frameBytes() == expectFrame(50, 3));
 
     // The driver owns its Correction, so mutate that copy (not the external one).
-    d.correctionForTest().rebuild(255, mm::LightPreset::GRBW);
+    mm::test::rebuildFromPreset(d.correctionForTest(), 255, mm::test::PresetOrder::GRBW);
     d.onCorrectionChanged();
     CHECK(d.frameBytes() == expectFrame(50, 4));
 }
@@ -125,7 +126,7 @@ TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
     mm::Correction corr;
     REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
     REQUIRE(src.allocate(64, 3));
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     d.defineControls();
     d.setSourceBuffer(&src);
     d.correctionForTest() = corr;
@@ -152,6 +153,32 @@ TEST_CASE("LcdLedDriver requires exactly 8 pins") {
     CHECK(std::strcmp(d.status(), "LCD bus needs exactly 8 pins") == 0);
 }
 
+// A data lane on the same GPIO as the WR (clockPin) or DC pin is rejected loud:
+// the i80 matrix would route two output signals to one pin and that lane would
+// emit the clock/DC waveform instead of pixel data (silent strip corruption).
+// IDF doesn't catch this, so the driver must. clockPin/dcPin default to 10/11.
+TEST_CASE("LcdLedDriver rejects a data pin that collides with clockPin/dcPin") {
+    mm::Buffer src;
+    mm::Correction corr;
+    {   // lane on GPIO 10 == default clockPin
+        mm::LcdLedDriver d;
+        std::strcpy(d.pins, "18,5,6,7,8,9,10,11");   // 10 == clockPin, 11 == dcPin
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 0);                    // idled, not built
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strcmp(d.status(), "LED pin collides with clockPin (WR)") == 0);
+    }
+    {   // move clock/dc clear of the data set → builds cleanly (the fix on the bench)
+        mm::LcdLedDriver d;
+        d.clockPin = 12;
+        d.dcPin = 13;
+        std::strcpy(d.pins, "18,5,6,7,8,9,10,11");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 8);
+        CHECK(d.status() == nullptr);
+    }
+}
+
 // A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
 TEST_CASE("LcdLedDriver tolerates a zero-light buffer") {
     mm::LcdLedDriver d;
@@ -172,7 +199,7 @@ TEST_CASE("LcdLedDriver setup/release is repeatable") {
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     std::strcpy(d.pins, "1,2,4,5,6,7,8,9");   // pins now default UNSET
     d.defineControls();
     for (int cycle = 0; cycle < 4; cycle++) {

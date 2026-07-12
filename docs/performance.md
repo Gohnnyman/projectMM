@@ -234,6 +234,22 @@ The tick cost is native-code speed — a `setRGB` is a bounds-guard + three byte
 
 ---
 
+## Multi-pin LED driving (all three peripherals, 128×128 grid)
+
+Each parallel LED driver run on real hardware at a 128×128 = 16384-light grid, 8 lanes (2026-07-12). The **GPIOs used are recorded** because they double as the seed for each board's usable-pin map (the per-model `deviceModels.json` pin defaults are built from proven-working sets, not datasheet guesses). Every listed pin drove WS2812 output on that board without conflict.
+
+| Peripheral | Board | Pins used (8 lanes) | Result | Ceiling / bound |
+|---|---|---|---|---|
+| **Parlio** | ESP32-P4 (Waveshare P4-NANO) | `20,21,22,23,24,25,26,27` | `Drivers` tick **35961 → ~30100 µs (−16%)**, fps 25→30 after the SWAR transpose landed (16384 lights) | 65535 bytes/lane single-shot = **897 RGB lights/lane**; over-limit now fails with a loud status |
+| **LCD_CAM i80** | ESP32-S3 N16R8 Dev | data `18,5,6,7,8,9,10,11` · WR(clock) `12` · DC `13` | Same encoder, healthy on real i80; encode scales ~6 µs/light (8×512 = 4096 → 23 ms; 8×1024 = 8192 → 50 ms) | **single-DMA init ceiling 8192–12288 lights** (8×1024 inits; 8×1536 → "LCD init failed — check pins/memory"). WR/DC **must be off the 8 data lanes** — the driver now rejects an overlap with a clear status (defaults 10/11 collide with a data set that includes 10/11). |
+| **RMT** | classic ESP32 (LOLIN D32 / WROOM) | `2,4,13,14,16,17,18,19` (pin 2 = a real 24-LED strand) | 8-pin RMT drives **8×256 = 2048 lights** (tick ~12.6 ms), scales to ~8192 before the tick plateaus; all lanes healthy, pin-2 strand verified lit | **silent alloc-fail:** the RMT symbol buffer sizes for the driver's `count` window, so `count=0` on a 16384-grid needs ~1.5 MB, fails on the ~90 KB heap, and `tick()` bails with **no status** (LEDs dark). Bound the driver with the start/count window; a status for this is [backlogged](backlog/backlog-light.md#led-drivers--deferred). |
+
+**LOLIN D32 (classic ESP32-WROOM) usable LED GPIOs:** `4,13,14,18,19,21,22,23,25,26,27,32,33` plus `16,17` (free on WROOM — they're the PSRAM bus only on WROVER). Avoid straps `0,2,12,15`, the onboard LED on `5`, and battery-sense on `35`; input-only `34–39` can't drive an LED. (Chip-level set: [gpio-usage.md](reference/gpio-usage.md).)
+
+**Diagnostic used:** RMT `tickTimeUs > 1000` = actively encoding (LEDs on); a tiny ~30 µs tick = the symbol alloc failed and `tick()` bailed (dark). `dynamicBytes` is not reported for RMT (plain-heap symbol buffer), so it always reads 0.
+
+The **acceptance floors** these establish for the parallel backends: RMT **8×256 = 2048** (verified above); the coming parallel-I2S driver **16×256 = 4096**; the virtual (shift-register) driver **48×256 = 12288** — each backend must clear its floor on real hardware.
+
 ## Incremental cost analysis (`scenario_perf_light` / `scenario_perf_full`)
 
 These two scenarios start from a clean canvas and add one subsystem at a time, measuring the tick/heap delta per step, so each module's cost is isolated. Measured live (2026-06-17, render-only, audio + discovery disabled) on all three boards:

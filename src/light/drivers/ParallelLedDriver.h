@@ -250,6 +250,13 @@ protected:
                    : kMaxLanes;
     }
 
+    /// CRTP hook (default: no extra bus pins to validate). A derived driver whose
+    /// peripheral commits its own GPIOs beyond the data lanes (the i80 bus's WR/DC)
+    /// HIDES this to reject a data lane that collides with them. Returns an error
+    /// string (idles the driver) or null when the data pins are clean. Parlio has no
+    /// such pins, so it uses this default.
+    const char* validateBusPins(const uint16_t* /*lanes*/, uint8_t /*n*/) const { return nullptr; }
+
     // Frame bytes: longest lane × channels × 24 slot bytes, plus a zeroed latch
     // pad of >=300 µs at the slot rate (800 B) with clock-tolerance slack (64),
     // rounded up to the bus's 64-byte alignment. 0 when there's nothing to send.
@@ -275,6 +282,11 @@ protected:
         if constexpr (Derived::kExactLaneCount) {
             if (!err && n != kMaxLanes) err = "LCD bus needs exactly 8 pins";
         }
+        // Peripheral-specific data-pin validation (i80 rejects a data lane that
+        // collides with its WR/DC control pins — the GPIO matrix would route two
+        // output signals to one pin and corrupt that lane; Parlio has no such pins
+        // and returns null). Kept a CRTP hook so the base stays peripheral-neutral.
+        if (!err) err = derived()->validateBusPins(laneList_, n);
         const char* warn = nullptr;
         if (!err) {
             // Distribute over this driver's window slice, not the whole buffer.
@@ -312,15 +324,17 @@ protected:
     void reinit() {
         if constexpr (Derived::lanesAvailable() == 0) return;
         if (laneCount_ == 0 || frameBytes_ == 0) { deinit(); return; }
-        if (inited_ && derived()->busCapacity() >= frameBytes_ && busPinsCurrent()
+        // Reuse the existing bus ONLY when the frame is the EXACT same size and on the same pins/lanes.
+        // Grow OR shrink both rebuild: a peripheral whose single-transfer size is fixed at bus creation
+        // (Parlio: max_transfer_size sets a hardware bit-length cap) becomes INVALID if the buffer is
+        // reused at a different size — a shrunk frame kept an oversized unit whose configured max
+        // exceeded the hardware frame limit, so every transmit silently failed (tx=0, no output, no
+        // error). Exact-match reuse (not `>=`) keeps the bus always valid-or-rebuilt. The pin check
+        // matters (a pin edit keeps the size but must move the GPIOs); the lane-count check matters for
+        // Parlio (8→4 keeps frameBytes but the bus was built for 8 lanes).
+        if (inited_ && derived()->busCapacity() == frameBytes_ && busPinsCurrent()
             && busLaneCount_ == laneCount_) {
-            // Existing bus + buffer still fit AND sit on the wanted pins AND drive
-            // the same lane count — just clear stale bytes so the (possibly
-            // relocated) latch pad is zero. The pin check matters: a pin edit keeps
-            // the frame size, and without it the bus would keep clocking out on the
-            // OLD GPIOs. The lane-count check matters for Parlio: 8→4 lanes can keep
-            // frameBytes_ and the surviving pins, but the bus was built for 8.
-            std::memset(dmaBuf_, 0, derived()->busCapacity());
+            std::memset(dmaBuf_, 0, derived()->busCapacity());   // clear stale latch-pad bytes
             return;
         }
         deinit();

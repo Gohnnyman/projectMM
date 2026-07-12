@@ -50,13 +50,13 @@ public:
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};
         const fonts::Font& f = fonts::kAll[font < fonts::kCount ? font : 0];
-        const RGB colour = colorFromPalette(*Palettes::active(), hue);
+        const RGB color = colorFromPalette(*Palettes::active(), hue);
 
         draw::fill(buf, {0, 0, 0});   // text is redrawn whole each frame; clear first
 
         if (!scroll) {
             // Static: top-left, newlines wrap down one font-height. draw::text handles '\n'.
-            draw::text(buf, dims, f, text_, 0, 0, colour);
+            draw::text(buf, dims, f, text_, 0, 0, color);
             return;
         }
 
@@ -68,7 +68,7 @@ public:
         const int off = span > 0 ? static_cast<int>((elapsed() * static_cast<uint32_t>(speed) / 1000u) % span) : 0;
         // startX runs from +w (just off the right edge) down to -blockW (fully scrolled off the left).
         const lengthType startX = static_cast<lengthType>(w - off);
-        draw::text(buf, dims, f, text_, startX, 0, colour);
+        draw::text(buf, dims, f, text_, startX, 0, color);
     }
 
 private:

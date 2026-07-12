@@ -3,6 +3,7 @@
 
 #include "doctest.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 #include "light/drivers/ParlioLedDriver.h"
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // shared conditional-control helpers
@@ -33,7 +34,7 @@ void wire(mm::ParlioLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     // allocate succeeds exactly when lights > 0 (zero-grid wires an empty buffer
     // on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
-    corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
     d.correctionForTest() = corr;
@@ -88,7 +89,7 @@ TEST_CASE("ParlioLedDriver even split over 8 lanes") {
 // The Parlio-vs-LCD difference: 1..8 pins are ALL valid (no exactly-8 rule).
 TEST_CASE("ParlioLedDriver accepts any lane count from 1 to 8") {
     mm::Correction corr;
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     for (const char* pinList : {"36", "36,37", "36,37,38,39,40", "36,37,38,39,40,41,42,43"}) {
         mm::ParlioLedDriver d;
         mm::Buffer src;
@@ -123,9 +124,40 @@ TEST_CASE("ParlioLedDriver frame grows on RGBW preset") {
     CHECK(d.frameBytes() == expectFrame(50, 3));
 
     // The driver owns its Correction, so mutate that copy (not the external one).
-    d.correctionForTest().rebuild(255, mm::LightPreset::GRBW);
+    mm::test::rebuildFromPreset(d.correctionForTest(), 255, mm::test::PresetOrder::GRBW);
     d.onCorrectionChanged();
     CHECK(d.frameBytes() == expectFrame(50, 4));
+}
+
+// Parlio single-transfer hardware ceiling (PARLIO_LL_TX_MAX_BITS_PER_FRAME = 0x7FFFF bits = 65535
+// bytes on P4/S3/most targets): the peripheral clocks the WHOLE frame out in one transaction, so a
+// per-lane strand whose frameBytes exceeds this is rejected by parlioWs2812Init (fixed — was a silent
+// tx failure). The ceiling is a **byte** limit (65535 bytes/lane), so the equivalent LIGHT count
+// depends on channels-per-light: WS2812 encodes 24 slot-bytes per channel, plus a ~864-byte per-lane
+// latch pad. So the max lights/lane is ~ (65535 − 864) / (channels × 24): **897 for RGB (3ch)**, ~673
+// for RGBW (4ch), ~538 for RGBCCT (5ch) — wider fixtures fit fewer lights per one-shot transfer. This
+// pins the boundary in host-visible frameBytes terms for the RGB and RGBW cases. The reject itself is
+// hardware-only (busInit is a desktop no-op), verified on the P4 (LEDs burn at 8×896 RGB/lane; the
+// driver reports a status error above the ceiling). Catches the ceiling shifting if the encoding
+// changes. Mirrors the platform constant.
+TEST_CASE("ParlioLedDriver frame at the Parlio single-transfer ceiling (byte limit, channel-relative)") {
+    constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535, matches platform_esp32_parlio.cpp
+    mm::ParlioLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    // 896 RGB lights/lane — the HW-tested config — FITS one transfer.
+    std::strcpy(d.pins, "20,21,22,23,24,25,26,27");
+    std::strcpy(d.ledsPerPin, "896,896,896,896,896,896,896,896");
+    wire(d, src, corr, 896 * 8);
+    CHECK(d.maxLaneLights() == 896);
+    CHECK(d.frameBytes() == expectFrame(896, 3));
+    CHECK(d.frameBytes() <= kParlioMaxTransferBytes);          // fits one Parlio transfer
+    // The exact RGB (3ch) boundary: 897 fits, 898 overflows.
+    CHECK(expectFrame(897, 3) <= kParlioMaxTransferBytes);
+    CHECK(expectFrame(898, 3) > kParlioMaxTransferBytes);
+    // RGBW (4ch) fits FEWER lights per one-shot transfer — the ceiling is bytes, not lights: ~673.
+    CHECK(expectFrame(673, 4) <= kParlioMaxTransferBytes);
+    CHECK(expectFrame(674, 4) > kParlioMaxTransferBytes);
 }
 
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
@@ -156,7 +188,7 @@ TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
     mm::Correction corr;
     REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
     REQUIRE(src.allocate(64, 3));
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     d.defineControls();
     d.setSourceBuffer(&src);
     d.correctionForTest() = corr;
@@ -186,7 +218,7 @@ TEST_CASE("ParlioLedDriver tolerates a zero-light buffer") {
 // transmit path is gated out on the host; this pins the reachable contract).
 TEST_CASE("ParlioLedDriver tick is crash-safe for every pin configuration") {
     mm::Correction corr;
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
 
     SUBCASE("single pin, populated grid") {
         mm::ParlioLedDriver d; mm::Buffer src;
@@ -215,7 +247,7 @@ TEST_CASE("ParlioLedDriver setup/release is repeatable") {
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     std::strcpy(d.pins, "20,21,22,23,24,25,26,27");   // pins now default UNSET
     d.defineControls();
     for (int cycle = 0; cycle < 4; cycle++) {

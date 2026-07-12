@@ -304,6 +304,31 @@ TEST_CASE("buildStatePatch: unchanged tree yields an empty patch") {
     s.deleteTree(root);
 }
 
+// A schema change (rebuildControls — hidden flags / option sets) can't be seen by the value-hash
+// patch, so any module's rebuildControls() flips the WS full-resync flag through the static
+// schema-changed hook. This is what carries a metadata-only change (WiFi addressing hides fields,
+// a preset Select gains an option) to connected clients. Pins the hook wiring + the subtraction of
+// the old per-call-site resyncs.
+TEST_CASE("schema-changed hook: rebuildControls() requests a full WS resync") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();
+    mm::HttpServerModule http; http.setScheduler(&s);
+    http.setup();                                   // installs the schema-changed hook
+
+    http.clearFullResyncForTest();                  // start from "no resync pending"
+    CHECK(!http.fullResyncPendingForTest());
+    k->rebuildControls();                           // a schema change on any module…
+    CHECK(http.fullResyncPendingForTest());         // …flips the resync flag via the hook
+
+    http.release();                                 // unwires the hook (clears instance_)
+    s.deleteTree(root);
+}
+
 TEST_CASE("buildStatePatch: a changed control value yields a one-entry patch") {
     registerTestTypes();
     mm::Scheduler s;

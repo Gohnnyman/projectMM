@@ -65,6 +65,24 @@ public:
         return std::strcmp(name, "clockPin") == 0 || std::strcmp(name, "dcPin") == 0;
     }
 
+    /// Reject a data lane that collides with the WR (clockPin) or DC pin. The i80
+    /// peripheral routes a distinct output signal to each of the 8 data lanes plus
+    /// WR + DC via the GPIO matrix; IDF does NOT check that they differ, so a data
+    /// pin equal to clockPin/dcPin gets two signals on one GPIO and that lane emits
+    /// the clock/DC waveform instead of pixel data (silent corruption — the strip on
+    /// that lane shows garbage). Fail loud + idle instead, same shape as the other
+    /// parse errors. (Hides the base's no-op default; the base calls this via CRTP.)
+    const char* validateBusPins(const uint16_t* lanes, uint8_t n) const {
+        for (uint8_t i = 0; i < n; i++) {
+            // clockPin/dcPin are int8_t (-1 = unset); only a real GPIO can collide.
+            if (clockPin >= 0 && lanes[i] == static_cast<uint16_t>(clockPin))
+                return "LED pin collides with clockPin (WR)";
+            if (dcPin >= 0 && lanes[i] == static_cast<uint16_t>(dcPin))
+                return "LED pin collides with dcPin";
+        }
+        return nullptr;
+    }
+
     /// Create the i80 bus + its DMA buffer sized for `frameBytes` on the current data
     /// lanes plus the WR/DC pins; returns whether init succeeded.
     bool busInit(size_t frameBytes) {

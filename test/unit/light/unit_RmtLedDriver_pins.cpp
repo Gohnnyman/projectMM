@@ -4,6 +4,7 @@
 #include "doctest.h"
 #include "light/drivers/RmtLedDriver.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 #include "light/layers/Buffer.h"
 
 #include <cstring>
@@ -20,7 +21,7 @@ namespace {
 void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
     REQUIRE(src.allocate(lights, 3));   // a masked alloc failure would fail cases downstream
-    corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
     d.correctionForTest() = corr;
@@ -352,7 +353,7 @@ TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slic
 // tick() is a safe no-op across single-pin, multi-pin and zero-grid configs.
 TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
     mm::Correction corr;
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
 
     SUBCASE("single pin, populated grid") {
         mm::RmtLedDriver d; mm::Buffer src;

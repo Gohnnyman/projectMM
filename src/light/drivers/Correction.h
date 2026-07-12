@@ -6,27 +6,11 @@
 
 namespace mm {
 
-// Light preset = the physical wire format a driver emits: channel order plus
-// whether the light has a white channel. The order in this enum is index-aligned
-// with kLightPresetOptions below (the Select control's option list), so the
-// control's uint8 value casts straight to LightPreset.
-//
-// This is a CURATED list of the wire orders real hardware actually ships — the
-// three-channel orders WS2812/APA-family strips and network sinks use (GRB is the
-// WS2812 default; RGB and BGR cover the rest), plus their RGBW counterparts. It is
-// deliberately NOT the full 24 white-position permutations: a preset is just a named
-// default channel-role layout, and any wiring the curated list doesn't name is reached
-// through the `Custom` entry (per-channel roles set in the UI), so enumerating
-// permutations nobody wires would add dropdown surface without adding capability.
-// `Custom` is the last entry: selecting it reveals the per-channel role pickers and
-// leaves the roles as the user set them. (Curated-list-plus-custom is the WLED
-// colour-order model.)
-enum class LightPreset : uint8_t { RGB, GRB, BGR, RGBW, GRBW, Custom };
-
-inline constexpr const char* kLightPresetOptions[] =
-    {"RGB", "GRB", "BGR", "RGBW", "GRBW", "Custom"};
-inline constexpr uint8_t kLightPresetCount =
-    sizeof(kLightPresetOptions) / sizeof(kLightPresetOptions[0]);
+// A light's wire format — its channel order and whether it carries a white channel — is described by
+// a ChannelRole array (roles[i] = what channel i emits), resolved from the LightPresets library into
+// this Correction at cold-path rebuild time (see LightPresetsModule). Correction has one rebuild that
+// takes that role array; there is no built-in preset enum here, because the curated wire orders live
+// as seeded rows in the library, not as a second hard-coded list in core.
 
 // White-derivation mode for RGBW lights. Effects write RGB only, so a driver feeding
 // an RGBW fixture must SYNTHESISE the white channel from RGB — and there is more than
@@ -43,23 +27,6 @@ inline constexpr const char* kWhiteModeOptions[] = {"None", "Min", "Accurate"};
 inline constexpr uint8_t kWhiteModeCount =
     sizeof(kWhiteModeOptions) / sizeof(kWhiteModeOptions[0]);
 
-// Fill `roles` (a caller-owned array of at least `cap` entries) with the channel-role
-// layout for a curated preset, and report the channel count in `nCh`. This is the one
-// place a preset name maps to a wiring: GRB → {Green, Red, Blue}. Custom is not handled
-// here — its roles are user-set and left as the caller has them. Returns silently doing
-// nothing if the preset is Custom or out of range (the caller keeps its current roles),
-// or if `cap` is too small for the preset (defensive; every curated preset needs ≤ 4).
-inline void fillRolesFromPreset(LightPreset preset, ChannelRole* roles, uint8_t cap, uint8_t& nCh) {
-    using R = ChannelRole;
-    switch (preset) {
-        case LightPreset::RGB:  if (cap >= 3) { roles[0]=R::Red; roles[1]=R::Green; roles[2]=R::Blue; nCh=3; } break;
-        case LightPreset::GRB:  if (cap >= 3) { roles[0]=R::Green; roles[1]=R::Red; roles[2]=R::Blue; nCh=3; } break;
-        case LightPreset::BGR:  if (cap >= 3) { roles[0]=R::Blue; roles[1]=R::Green; roles[2]=R::Red; nCh=3; } break;
-        case LightPreset::RGBW: if (cap >= 4) { roles[0]=R::Red; roles[1]=R::Green; roles[2]=R::Blue; roles[3]=R::White; nCh=4; } break;
-        case LightPreset::GRBW: if (cap >= 4) { roles[0]=R::Green; roles[1]=R::Red; roles[2]=R::Blue; roles[3]=R::White; nCh=4; } break;
-        case LightPreset::Custom: break;   // user-set roles, left as the caller has them
-    }
-}
 
 // Output correction applied per-light by each physical driver as it reads the shared
 // source buffer: brightness scale, channel reorder, and (for RGBW lights) white
@@ -92,6 +59,18 @@ struct Correction {
     uint8_t offGreen = 0;
     uint8_t offBlue = 2;
     uint8_t offWhite = kAbsent;     // derived white at this offset (kAbsent = light has no white)
+    // Extra synthesised-from-RGB emitters a fixture may carry beside cold white. There is no
+    // effect-side source for these yet (no CCT target, no UV channel in RGB), so apply() drives
+    // them off the SAME whiteMode as White with a best-effort approximation — the goal is "every
+    // channel lights up so a fixture can be eyeballed", not colorimetric accuracy (a real fixture
+    // model with per-emitter targets is the proper home; see the light backlog). warm white ≈ the
+    // white component (min RGB, same as cold white for a warm-white-only strip); yellow ≈ min(R,G)
+    // (the R+G component); UV reads to the eye as deep blue/violet, so it's driven from the blue
+    // excess `max(0, B - max(R,G))` (fires on blues/purples). All zeroed when whiteMode==None, so
+    // none can hold a stale value.
+    uint8_t offWarmWhite = kAbsent;
+    uint8_t offYellow = kAbsent;
+    uint8_t offUV = kAbsent;
     uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
     WhiteMode whiteMode = WhiteMode::Min;   // how white is synthesised from RGB (white lights only)
 
@@ -111,31 +90,20 @@ struct Correction {
     void rebuild(uint8_t brightness, const ChannelRole* roles, uint8_t nChannels) {
         rebuildBrightness(brightness);
         offRed = offGreen = offBlue = offWhite = kAbsent;
+        offWarmWhite = offYellow = offUV = kAbsent;
         for (uint8_t i = 0; i < nChannels; i++) {
             switch (roles[i]) {
-                case ChannelRole::Red:   offRed = i;   break;
-                case ChannelRole::Green: offGreen = i; break;
-                case ChannelRole::Blue:  offBlue = i;  break;
-                case ChannelRole::White: offWhite = i; break;
-                default: break;   // None or a fixture role — not part of the RGB(W) apply path
+                case ChannelRole::Red:       offRed = i;       break;
+                case ChannelRole::Green:     offGreen = i;     break;
+                case ChannelRole::Blue:      offBlue = i;      break;
+                case ChannelRole::White:     offWhite = i;     break;
+                case ChannelRole::WarmWhite: offWarmWhite = i; break;
+                case ChannelRole::Yellow:    offYellow = i;    break;
+                case ChannelRole::UV:        offUV = i;        break;
+                default: break;   // None or a fixture motion role (pan/tilt/…) — apply() ignores it
             }
         }
         outChannels = nChannels;
-    }
-
-    // Cold-path convenience: configure from a curated preset name. Fills a tiny stack role
-    // array from the preset, then derives the offsets — the same result as seeding a role array
-    // and calling rebuild(brightness, roles, n), for the curated (≤ 4-channel) case. The Custom
-    // and fixture paths use the roles overload with the driver's dynamic array; this overload is
-    // for the curated presets a strip/network sink uses and for tests.
-    void rebuild(uint8_t brightness, LightPreset preset) {
-        if (static_cast<uint8_t>(preset) >= kLightPresetCount || preset == LightPreset::Custom) {
-            preset = LightPreset::RGB;   // no roles to seed for Custom here — default to RGB
-        }
-        ChannelRole roles[4];
-        uint8_t nCh = 3;
-        fillRolesFromPreset(preset, roles, 4, nCh);
-        rebuild(brightness, roles, nCh);
     }
 
     // Hot path: transform one source light (3-channel RGB at `src`) into `out`
@@ -148,21 +116,33 @@ struct Correction {
         uint8_t r = briLut[src[0]];
         uint8_t g = briLut[src[1]];
         uint8_t b = briLut[src[2]];
-        if (offWhite != kAbsent) {
-            if (whiteMode == WhiteMode::None) {
-                // No white synthesis, but the channel MUST still be written each frame: corrected_ is
-                // reused frame-to-frame (not re-zeroed), so leaving it unwritten would hold the last
-                // synthesised value and stick the white LED on after a switch to None.
-                out[offWhite] = 0;
-            } else {
-                const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b)
-                if (whiteMode == WhiteMode::Accurate) {
-                    // Pull the shared white component out of RGB so the white LED carries
-                    // it instead of the colour channels — total emitted colour matches
-                    // the RGB target rather than washing brighter.
-                    r -= w; g -= w; b -= w;
-                }
+        // Every synthesised emitter (white + warm-white/yellow/UV) is gated by the ONE whiteMode:
+        // None zeroes them (never a stale value — corrected_ is reused, not re-zeroed, frame to
+        // frame), otherwise each is a best-effort approximation from RGB. Accurate additionally
+        // subtracts the WHITE component back out of RGB (the standard RGBW auto-white behaviour);
+        // the other emitters are additive stand-ins only (no colorimetric model yet), so they don't
+        // subtract. See the offWarmWhite/offYellow/offUV field comment for the approximation rationale.
+        if (whiteMode == WhiteMode::None) {
+            if (offWhite != kAbsent)     out[offWhite] = 0;
+            if (offWarmWhite != kAbsent) out[offWarmWhite] = 0;
+            if (offYellow != kAbsent)    out[offYellow] = 0;
+            if (offUV != kAbsent)        out[offUV] = 0;
+        } else {
+            const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b): the white component
+            if (offWhite != kAbsent) {
+                if (whiteMode == WhiteMode::Accurate) { r -= w; g -= w; b -= w; }  // pull white out of RGB
                 out[offWhite] = w;
+            }
+            // warm white ≈ the white component (same as cold white for a warm-white-only strip).
+            if (offWarmWhite != kAbsent) out[offWarmWhite] = w;
+            // yellow ≈ min(R,G) (the shared red+green component).
+            if (offYellow != kAbsent)    out[offYellow] = r < g ? r : g;
+            // UV is out of gamut (no RGB pre-image), but it reads to the eye as deep blue/violet, so
+            // drive it from the BLUE component that has no red/green to pair with — the violet-ish
+            // excess `max(0, B - max(R,G))`. So UV fires on blues/purples, stays dark on warm colours.
+            if (offUV != kAbsent) {
+                const uint8_t rg = r > g ? r : g;
+                out[offUV] = b > rg ? static_cast<uint8_t>(b - rg) : 0;
             }
         }
         if (offRed != kAbsent)   out[offRed] = r;

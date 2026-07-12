@@ -37,6 +37,29 @@ namespace mm {
 // Bits go MSB-first per byte; channel order (GRB, …) is already applied by
 // Correction before the encode, so the encoder is order-agnostic (same
 // contract as encodeWs2812Symbols).
+//
+// The data slot is an 8×8 BIT-MATRIX TRANSPOSE: 8 lane bytes (rows) → 8 bus
+// bytes (one per data bit, the columns), byte b bit L = lane L's bit b. This
+// is the measured render-loop hot spot (docs/backlog/multicore-analysis-*: the
+// transpose is ~85% of the driver frame at 16K lights), so it uses the
+// branch-free SWAR transpose (Warren, *Hacker's Delight* §7-3 "delta swap";
+// the same 3-step 64-bit trick FastLED's transpose8x1 uses) instead of a
+// per-bit-per-lane gather loop — same result, no table, ~an order fewer ops.
+// Studied, not copied; pinned bit-perfect by unit_LcdLedEncoder.cpp + the
+// on-device loopback self-test.
+
+// Transpose 8 lane bytes into 8 bit-plane bytes: out[b] bit L = in[L] bit b.
+// Inactive lanes must be passed as 0 (the caller masks them) so they contribute
+// no set bit to any plane. Three delta-swaps on the packed 64-bit matrix.
+inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
+    uint64_t x = 0;
+    for (int r = 0; r < 8; r++) x |= static_cast<uint64_t>(in[r]) << (8 * r);
+    uint64_t t;
+    t = (x ^ (x >> 7))  & 0x00AA00AA00AA00AAULL; x = x ^ t ^ (t << 7);
+    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL; x = x ^ t ^ (t << 14);
+    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL; x = x ^ t ^ (t << 28);
+    for (int c = 0; c < 8; c++) out[c] = static_cast<uint8_t>(x >> (8 * c));
+}
 
 // Encode one ROW (the same light index across all lanes) into 3-slot bytes.
 //   wire:       kMaxLanes × 4 corrected wire bytes, lane-major
@@ -48,15 +71,18 @@ namespace mm {
 inline void encodeWs2812LcdSlots(const uint8_t* wire, uint8_t activeMask,
                                  uint8_t channels, uint8_t* out) {
     for (uint8_t ch = 0; ch < channels; ch++) {
-        for (int bit = 7; bit >= 0; bit--) {
-            uint8_t data = 0;
-            for (uint8_t lane = 0; lane < 8; lane++) {
-                if (!(activeMask & (1u << lane))) continue;   // inactive: idle LOW
-                data |= static_cast<uint8_t>(((wire[lane * 4 + ch] >> bit) & 1u) << lane);
-            }
-            *out++ = activeMask;   // slot 0: pulse start
-            *out++ = data;         // slot 1: the bits
-            *out++ = 0x00;         // slot 2: pulse tail
+        // Gather this channel's byte from each lane, zeroing inactive lanes so
+        // they contribute no set bit to any plane (the idle-LOW rule), then
+        // transpose all 8 bits × 8 lanes in one pass.
+        uint8_t lane8[8];
+        for (uint8_t lane = 0; lane < 8; lane++)
+            lane8[lane] = (activeMask & (1u << lane)) ? wire[lane * 4 + ch] : 0;
+        uint8_t plane[8];
+        transposeLanes8x8(lane8, plane);
+        for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte
+            *out++ = activeMask;    // slot 0: pulse start (active lanes HIGH)
+            *out++ = plane[bit];    // slot 1: bit `bit` of every active lane
+            *out++ = 0x00;          // slot 2: pulse tail (all LOW)
         }
     }
 }

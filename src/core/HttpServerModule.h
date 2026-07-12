@@ -40,14 +40,38 @@ class Scheduler;
 /// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serialises correctly.
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
-/// base64), up to 4 concurrent clients. Server pushes full state JSON as text frames from
-/// `tick1s()`. Binary frames take two paths, both without a frame-sized buffer: a synchronous
-/// stream (`beginBinaryFrame` / `pushBinaryFrame` / `endBinaryFrame`) for a forward-only
-/// producer, and a resumable buffered send (`sendBufferedFrame`) that drains a memory-adaptive
-/// chunk per client per `tick20ms` from a stable caller-owned buffer — so a large frame is
-/// delivered over wall-clock ticks without spinning any loop, yet stays one atomic WS message.
-/// One buffered send is in flight at a time (newest-wins backpressure: a new offer while one
-/// is active is dropped). Clients send nothing back over WS; mutations go through REST.
+/// base64), up to 4 concurrent clients. Binary frames take two paths, both without a frame-sized
+/// buffer: a synchronous stream (`beginBinaryFrame` / `pushBinaryFrame` / `endBinaryFrame`) for a
+/// forward-only producer, and a resumable buffered send (`sendBufferedFrame`) that drains a
+/// memory-adaptive chunk per client per `tick20ms` from a stable caller-owned buffer — so a large
+/// frame is delivered over wall-clock ticks without spinning any loop, yet stays one atomic WS
+/// message. One buffered send is in flight at a time (newest-wins backpressure: a new offer while
+/// one is active is dropped). Clients send nothing back over WS; mutations go through REST.
+///
+/// **State push — diff on the wire (the recognisable snapshot-then-patch model, cf. Redux /
+/// Firestore sync, JSON Patch RFC 6902):** the state a client needs is the full module tree
+/// (~30 KB, mostly *unchanging* option/detail metadata), but re-serialising all of it every
+/// `tick1s()` — inline on the render thread — stole render budget and stuttered the LEDs at 1 Hz.
+/// Instead: a client gets the **full** `{modules:[…]}` state ONCE on connect (chunk-drained via
+/// the resumable sender, off the render tick), then each second a **patch** `{patch:[{path,value},
+/// …]}` of only the values that changed. Change is found by value-compare, not a dirty flag:
+/// `buildStatePatch` serialises each leaf's value, hashes it (FNV-1a), and compares to a cached
+/// hash — so a value the device mutates itself (telemetry `@tickTimeUs`, status, a driver) is
+/// caught the same as a `setControl` write, with no per-write instrumentation. A leaf path is
+/// `"<module>/<control>"` (or `"<module>/@<field>"` for live per-card header telemetry); module
+/// names are unique tree-wide, so the path is stable. The hash cache is one global baseline (not
+/// per-client) in a growable `ScratchBuffer<LeafHash>`; `requestFullResync()` re-sends the full
+/// state + re-baselines on connect and after any structural change (a value patch can't describe
+/// a reshaped tree). A **schema change** (a `rebuildControls()` from any trigger — a control set, a
+/// list mutation, an async WiFi/Hue callback) also forces a resync via a static schema-changed hook
+/// (`MoonModule::setSchemaChangedHook`), since the value patch can't carry changed hidden flags /
+/// option sets. A pending resync is fast-pathed on `tick20ms` (not just `tick1s`) and **preempts**
+/// an in-flight preview frame, so a freshly-connected client gets its state — and therefore its
+/// preview — within a few tens of ms instead of up to a second. Net: the per-second push drops from
+/// ~34 KB to ~1–2 KB and the expensive full-tree serialise runs only on connect / schema change. The
+/// UI applies a patch in place (no rebuild) and re-renders on a full frame. This is the "sub-hot path
+/// is a hot path" rule (CLAUDE.md) applied: a periodic tick shares the render thread, so its work
+/// must be cheap / skipped-when-unchanged.
 ///
 /// **Hot-path split:** the resumable drain runs on `tick20ms` (the 20 ms transport poll),
 /// deliberately NOT the per-render-tick `tick()`, so pushing preview bytes to the socket is
@@ -110,7 +134,17 @@ public:
     bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                            const uint8_t* body, size_t bodyLen) override;
     bool bufferedSendIdle() const override { return !previewSend_.active; }
-    void cancelBufferedSend() override { previewSend_.active = false; }
+    // Drop the in-flight buffered send. Frees the body first when the frame OWNS it (a state frame
+    // owns its ~30 KB JSON; a preview frame borrows its pixel buffer) — same rule as release(), so
+    // this is self-safe for any caller, not only ones that know a borrowed frame is in flight.
+    void cancelBufferedSend() override {
+        if (previewSend_.ownsBody) {
+            platform::free(const_cast<uint8_t*>(previewSend_.body));
+            previewSend_.body = nullptr;
+            previewSend_.ownsBody = false;
+        }
+        previewSend_.active = false;
+    }
     /// Bumped on each new WS client (see handleWebSocketUpgrade). PreviewDriver watches it to
     /// re-stream its coordinate table the moment a fresh page connects, so a refresh shows the
     /// preview immediately.
@@ -177,6 +211,8 @@ public:
     uint16_t buildStatePatchForTest(JsonSink& sink) { return buildStatePatch(sink); }
     void baselineLeafHashesForTest() { baselineLeafHashes(); }
     void requestFullResyncForTest() { requestFullResync(); }
+    bool fullResyncPendingForTest() const { return fullResyncPending_; }
+    void clearFullResyncForTest() { fullResyncPending_ = false; }
 
 private:
     platform::TcpServer server_;
@@ -270,6 +306,12 @@ private:
     // Mark that the next push must be a full state + fresh baseline (a client connected, or the tree
     // structure changed so a value patch can't describe it).
     void requestFullResync() { fullResyncPending_ = true; }
+
+    // Static sink for MoonModule::setSchemaChangedHook: routes any module's rebuildControls() (a
+    // schema change) to the live instance's requestFullResync(). instance_ mirrors the
+    // FilesystemModule::noteDirty singleton pattern — set in setup(), cleared in release().
+    static void onSchemaChanged();
+    static inline HttpServerModule* instance_ = nullptr;
 
     // XOR key for Password-control obfuscation in /api/state. NOT a secret — the
     // same value lives in src/ui/app.js (PW_XOR_KEY). This only stops the

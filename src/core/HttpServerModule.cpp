@@ -38,22 +38,29 @@ void HttpServerModule::defineControls() {
 }
 
 void HttpServerModule::setup() {
+    instance_ = this;
     if (!server_.open(port)) {
         std::printf("HTTP server failed to open port %u\n", port);
     }
+    // Any module's rebuildControls() (a schema change: hidden flags / option sets, from a control
+    // set, a list mutation, or an async WiFi/Hue callback) now flips the WS full-resync flag through
+    // this static hook, so a metadata change the value-patch can't carry still reaches every client.
+    MoonModule::setSchemaChangedHook(&HttpServerModule::onSchemaChanged);
+}
+
+// Static schema-changed sink (see setup): route a module's rebuildControls() signal to the one
+// live HttpServerModule's resync flag. instance_ mirrors the FilesystemModule::noteDirty pattern.
+void HttpServerModule::onSchemaChanged() {
+    if (instance_) instance_->requestFullResync();
 }
 
 void HttpServerModule::release() {
-    // Drop any in-flight send before the clients go. A preview frame borrows its body (nothing to
-    // free); a state frame owns its JSON buffer — free it here so a teardown mid-drain doesn't leak.
-    if (previewSend_.ownsBody) {
-        platform::free(const_cast<uint8_t*>(previewSend_.body));
-        previewSend_.body = nullptr;
-        previewSend_.ownsBody = false;
-    }
-    previewSend_.active = false;
+    // Drop any in-flight send before the clients go (frees an owned state-frame body; a preview frame
+    // borrows its buffer, nothing to free) — the same self-safe drop cancelBufferedSend() does.
+    cancelBufferedSend();
     for (auto& ws : wsClients_) ws.close();
     server_.close();
+    if (instance_ == this) { MoonModule::setSchemaChangedHook(nullptr); instance_ = nullptr; }
     MoonModule::release();   // chain: uniform override-and-chain (no buffers/children today, but the convention holds)
 }
 
@@ -67,6 +74,14 @@ void HttpServerModule::tick20ms() {
     // (architecture.md § Parallelism). Drain BEFORE accept so a connection burst can't starve an
     // active send. No-op when nothing is in flight.
     drainPreviewSend();
+    // Fast-path a PENDING FULL RESYNC on the 20 ms cadence instead of waiting for the 1 s tick: a
+    // fresh WS connect (or a structural change) sets fullResyncPending_, and the client shows NOTHING
+    // until the full state arrives — including no preview, since a preview frame can't take the shared
+    // send slot before the state does. Gated on the flag, so this is a rare event (a connect), not a
+    // per-20 ms serialize: the expensive buildStateJson runs only when a resync is actually pending,
+    // and the steady-state value patch stays on tick1s (unchanged). Cuts connect→first-preview latency
+    // from up to ~1 s + drain down to a few tens of ms. No-op in the common (no-resync) case.
+    if (fullResyncPending_) pushStateToWebSockets();
     // Read any inbound WS frames: the native WLED app SETS state (its on/off + brightness
     // slider) by SENDING a {on,bri} text frame over /ws, not by HTTP POST — so we must read
     // the socket, not only push to it. Cheap (non-blocking, usually nothing pending).
@@ -1035,6 +1050,9 @@ HttpServerModule::OpResult HttpServerModule::applySetControl(
     // only maps its result onto the HTTP OpResult so the response carries the right status code.
     if (!scheduler_) return OpResult::ModuleNotFound;
     switch (scheduler_->setControl(moduleName, controlName, valueJson)) {
+        // A schema change (hidden flags / option sets) from this set is handled centrally:
+        // Scheduler::setControl always calls the target's rebuildControls(), which fires the
+        // schema-changed hook → requestFullResync(). So no per-path resync is needed here.
         case Scheduler::SetControlResult::Ok:              return OpResult::Ok;
         case Scheduler::SetControlResult::ModuleNotFound:  return OpResult::ModuleNotFound;
         case Scheduler::SetControlResult::ControlNotFound: return OpResult::ControlNotFound;
@@ -1516,7 +1534,7 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     mod->setup();
     mod->applyState();
     if (scheduler_) scheduler_->prepareTree();
-    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
+    requestFullResync();   // structural change (see requestFullResync)
 
     // Persist the new tree shape (debounced save via noteDirty).
     parent->markDirty();
@@ -1574,7 +1592,7 @@ HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* pare
     }
     if (removedAny) {
         if (scheduler_) scheduler_->prepareTree();
-    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
+    requestFullResync();   // structural change (see requestFullResync)
         parent->markDirty();
         FilesystemModule::noteDirty();
     }
@@ -1657,7 +1675,7 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     Scheduler::deleteTree(mod);
 
     if (scheduler_) scheduler_->prepareTree();
-    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
+    requestFullResync();   // structural change (see requestFullResync)
 
     // Persist the new tree shape — marking the parent dirty rewrites its file
     // without the deleted child slot. The parent is guaranteed non-null by the
@@ -1751,7 +1769,7 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     // Re-run prepare across the tree so Layer LUT / Drivers buffer
     // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.
     if (scheduler_) scheduler_->prepareTree();
-    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
+    requestFullResync();   // structural change (see requestFullResync)
 
     // Persist: children are encoded positionally, so marking the parent dirty
     // rewrites "<index>.type" with the new typeName at the same slot.
@@ -1850,7 +1868,7 @@ void HttpServerModule::handleMoveModule(platform::TcpConnection& conn, const cha
     parent->markDirty();
     FilesystemModule::noteDirty();
     if (scheduler_) scheduler_->prepareTree();
-    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
+    requestFullResync();   // structural change (see requestFullResync)
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 
@@ -1882,7 +1900,17 @@ ListSource* HttpServerModule::resolveEditableList(platform::TcpConnection& conn,
     }
     std::memcpy(controlName, cStart, cLen);
     if (s2 && s2[1]) {   // an id segment follows the control
-        outId = static_cast<uint32_t>(std::strtoul(s2 + 1, nullptr, 10));
+        // Bounded parse (same rigour as the Content-Length parse above): require at least one digit,
+        // reject overflow and any trailing non-digit, so a malformed id ("/5abc", "/xyz", an overflow)
+        // is a clean 400 rather than a silently-truncated or zero id.
+        const char* idStart = s2 + 1;
+        char* idEnd = nullptr;
+        errno = 0;
+        const unsigned long parsed = std::strtoul(idStart, &idEnd, 10);
+        if (idEnd == idStart || *idEnd != '\0' || errno == ERANGE || parsed > 0xFFFFFFFFul) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"bad id\"}"); return nullptr;
+        }
+        outId = static_cast<uint32_t>(parsed);
         outHasId = true;
     }
 
@@ -1931,6 +1959,9 @@ void HttpServerModule::afterListMutation() {
         // the one container that owns driver corrections; core already couples to it (latestSummary).
         if (auto* drivers = static_cast<Drivers*>(findModuleByName("Drivers")))
             drivers->rebuildAllCorrections();
+        // The tree-wide rebuildControls() above changed visible SCHEMA (option sets, hidden flags);
+        // each of those rebuildControls() calls fires the schema-changed hook → requestFullResync(),
+        // so connected clients re-read the fresh schema. No explicit resync needed here.
     }
 }
 
@@ -1957,7 +1988,10 @@ void HttpServerModule::handleListPatchRow(platform::TcpConnection& conn, const c
     // A PATCH is either a reorder ({"to":N}) or a field edit ({"field":F,"value":V}).
     if (mm::json::hasKey(jsonBody, "to")) {
         int to = mm::json::parseInt(jsonBody, "to");
-        if (to < 0 || !src->moveListRow(id, static_cast<uint8_t>(to))) {
+        // Bound before the uint8_t cast: a value > 255 would wrap (300 → 44) into a valid-looking
+        // but wrong target index. Reject anything outside 0..255 up front; moveListRow validates the
+        // remaining range against the actual row count.
+        if (to < 0 || to > 255 || !src->moveListRow(id, static_cast<uint8_t>(to))) {
             sendResponse(conn, 400, "application/json", "{\"error\":\"move failed\"}");
             return;
         }
@@ -2115,10 +2149,15 @@ void HttpServerModule::pushStateToWebSockets() {
     if (fullResyncPending_) {
         // FULL STATE — sent on connect and after a structural change (a value patch can't describe a
         // reshaped tree). It's the one large frame (~30 KB), so route it through the resumable sender
-        // to drain in chunks on tick20ms, NOT a blocking write on the render tick. Skip if a frame is
-        // still draining (one slot); retry next second. buildStateJson serialises the WHOLE tree — the
-        // expensive path — but only here, not every second.
-        if (!bufferedSendIdle()) { pushWledStateToWebSockets(); return; }
+        // to drain in chunks on tick20ms, NOT a blocking write on the render tick. buildStateJson
+        // serialises the WHOLE tree — the expensive path — but only when fullResyncPending_, not every
+        // second.
+        // The shared send slot may hold an in-flight PREVIEW frame (a state frame can't be in flight
+        // here — it would have cleared fullResyncPending_ on start). Preview is a *view*; the full
+        // state is what makes a freshly-connected client usable at all. So the resync PREEMPTS the
+        // preview frame rather than deferring behind it — otherwise continuous preview from another
+        // client could keep the new client blank. Preview resumes on its next frame.
+        if (!bufferedSendIdle()) cancelBufferedSend();
         JsonSink sink;
         buildStateJson(sink);
         const size_t len = sink.size();

@@ -151,7 +151,7 @@ public:
     void parseLightsForTest(const char* json) { parseLights(json); rebuildDriven(); }
     uint8_t lightCountForTest() const { return lightCount_; }    // kept colour+reachable lights
     uint16_t hueIdForTest(uint8_t i) const { return i < kMaxLights ? hueId_[i] : 0; }
-    int8_t colourCountForTest() const { return colourCount_; }
+    int8_t colorCountForTest() const { return colorCount_; }
 
     // Test seam: parse a real /groups JSON body through fetchGroups' Room extractor. Call
     // parseLightsForTest FIRST — room membership resolves against the known colour lights (hueId_),
@@ -215,7 +215,7 @@ private:
     // dimmable-only white or an on/off plug is skipped, so every window pixel maps to a bulb
     // that can show the effect's full colour. lightCount_ is that filtered count.
     uint8_t  lightCount_ = 0;                         // number of colour-capable lights
-    int8_t   colourCount_ = 0;                        // same, as the read-only control / bridge field
+    int8_t   colorCount_ = 0;                        // same, as the read-only control / bridge field
     bool     sawLights_ = false;                      // fetchLights ran → the list is trustworthy
     // Friendly names for the dropdowns. Heap, NOT inline: a fixed [kMaxLights][kNameLen] array
     // would reserve 768 B whether the bridge has 4 lights or 32 (and cap at 32). Instead one
@@ -356,7 +356,7 @@ private:
     // Drop the learned light list + room list + push cache so tick1s re-fetches (bridge/key change).
     void resetLightCache() {
         lightCount_ = 0;
-        colourCount_ = 0;
+        colorCount_ = 0;
         sawLights_ = false;
         roomCount_ = 0;
         sawGroups_ = false;
@@ -431,7 +431,7 @@ private:
         char cfg[1024], name[24] = {};
         if (platform::httpRequest("GET", host, 80, "/api/0/config", "", kSlowTimeoutMs, cfg, sizeof(cfg)) == 200)
             mm::json::parseString(cfg, "name", name, sizeof(name));   // the bridge's friendly name
-        dev->upsertHueBridge(bridgeIp, name, static_cast<uint8_t>(colourCount_));
+        dev->upsertHueBridge(bridgeIp, name, static_cast<uint8_t>(colorCount_));
     }
 
     // Extract the COLOUR-capable, REACHABLE light ids from a /lights JSON body:
@@ -476,7 +476,7 @@ private:
         }
         commit(resp + std::strlen(resp));                   // the last light runs to the end
         sawLights_ = true;
-        colourCount_ = static_cast<int8_t>(lightCount_ > 127 ? 127 : lightCount_);
+        colorCount_ = static_cast<int8_t>(lightCount_ > 127 ? 127 : lightCount_);
         rebuildDriven();   // the colour-light set changed → re-derive the filtered driven subset
     }
 

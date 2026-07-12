@@ -85,13 +85,23 @@ public:
     /// a preset's roles become a driver's flat `Correction` cache — the render path never sees a role.
     /// Does the preset carry a White channel? A driver uses this to hide its whiteMode control when
     /// the referenced preset has no white to synthesise (an RGB/GRB strip). Missing id → false.
-    bool presetHasWhite(uint32_t id) const {
+    // True when the preset carries any channel apply() SYNTHESISES from RGB via whiteMode —
+    // White, WarmWhite, Yellow, or UV. Drives the whiteMode control's visibility: the control
+    // governs all four, so it shows whenever any is present (not just White). A motion/fixture
+    // role (Pan/Tilt/…) is not synthesised, so it doesn't count.
+    bool presetHasSynthChannel(uint32_t id) const {
         const Preset* p = find(id);
         if (!p) return false;
         const uint8_t* r = roleAt(*p);
         for (uint8_t c = 0; c < p->channelCount; c++) {
-            const ChannelRole role = static_cast<ChannelRole>(r[c]);
-            if (role == ChannelRole::White || role == ChannelRole::WarmWhite) return true;
+            switch (static_cast<ChannelRole>(r[c])) {
+                case ChannelRole::White:
+                case ChannelRole::WarmWhite:
+                case ChannelRole::Yellow:
+                case ChannelRole::UV:
+                    return true;
+                default: break;
+            }
         }
         return false;
     }

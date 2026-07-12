@@ -206,7 +206,21 @@ public:
     void rebuildControls() {
         clearControlsRecursive();
         defineControls();
+        // rebuildControls() is the ONE chokepoint every schema change passes — a conditional-hidden
+        // re-evaluation, an option-set rebuild (a driver's preset Select, a Hue room dropdown), from
+        // any trigger (a control set, a list mutation, an async WiFi/Hue callback). The WS state push
+        // value-hashes leaves, so a metadata-only change wouldn't reach connected clients on its own.
+        // Signal the WS layer here, once, so every schema-changing path resyncs without each module
+        // (or each call site) having to remember to — the Complexity-lives-in-core rule (mirrors the
+        // FilesystemModule::noteDirty static hook). Cold path only; no render-loop cost.
+        if (schemaChangedHook_) schemaChangedHook_();
     }
+
+    /// Install the schema-changed hook (HttpServerModule points it at requestFullResync). A static
+    /// function pointer, same decoupling as the Scheduler's noteDirty hook: MoonModule signals a
+    /// schema change without depending on the WS layer. Null until wired (unit tests run without it).
+    using SchemaChangedFn = void (*)();
+    static void setSchemaChangedHook(SchemaChangedFn fn) { schemaChangedHook_ = fn; }
     void clearControlsRecursive() {
         controls_.clear();
         for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
@@ -581,6 +595,10 @@ private:
     Severity severity_ = Severity::Status;
     uint32_t tickTimeUs_ = 0;
     uint32_t accumUs_ = 0;
+
+    // Schema-changed hook: one function pointer for the whole process (like the persistence
+    // noteDirty hook), poked by rebuildControls() so the WS layer resyncs on any schema change.
+    static inline SchemaChangedFn schemaChangedHook_ = nullptr;
 };
 
 } // namespace mm

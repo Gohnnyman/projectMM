@@ -132,9 +132,29 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
 
 }  // namespace
 
+// Parlio clocks the WHOLE buffer out in ONE transaction (unlike RMT's streaming ping-pong or i80's
+// chained DMA), so a frame must fit the peripheral's single-transfer register: PARLIO_LL_TX_MAX_BITS_
+// PER_FRAME = 0x7FFFF (524287) bits = 65535 bytes on every current Parlio-capable target (P4/C6/H2/…).
+// The IDF rejects an over-limit unit with ESP_ERR_INVALID_ARG, and — the trap this guards — a unit
+// created oversized then fails EVERY transmit (the check is on the unit's configured max, not the
+// payload), so output goes silently dark. We reject up front with a clear status instead.
+//
+// The limit is a BYTE limit per lane, and a light costs FAR more than its channel count in the DMA
+// buffer: the buffer holds the WS2812 *waveform*, not the colour bytes. One light = channels × 8 bits
+// × 3 slots (the encoder shapes each bit into 3 bus-byte slots to make the 800 kHz NRZ pulse) = 24
+// bytes per channel. So RGB = 3×24 = 72 bytes/light, RGBW = 96, RGBCCT = 120 — a 24× expansion of the
+// colour data. Plus a ~864-byte per-lane latch pad. Max lights/lane ≈ (65535 − 864) / (channels × 24):
+// 897 RGB (897×72 = 64584 + pad = 65472 ≤ 65535), ~673 RGBW, ~538 RGBCCT. More per lane needs the
+// chunked-transfer enhancement (backlog). Not a UI input guard — the driver surfaces it as a status.
+inline constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535
+
 bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
                       uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes) {
     if (!dataPins || laneCount == 0 || bufferBytes == 0) return false;
+    // Reject a frame larger than the peripheral can clock out in one transaction — else the created
+    // unit would fail every transmit silently (see kParlioMaxTransferBytes). The driver reports the
+    // init failure as a status; the fix for the user is fewer lights/lane or the start/count window.
+    if (bufferBytes > kParlioMaxTransferBytes) return false;
     // Keep the platform memory reserve intact — degrade (init failure → driver
     // idles with a status error) rather than starve the system of internal RAM.
     if (heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)

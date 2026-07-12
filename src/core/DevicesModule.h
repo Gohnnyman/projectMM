@@ -103,7 +103,7 @@ public:
         sink.append("{\"name\":");
         sink.writeJsonString(d.name[0] ? d.name : ip);
         sink.appendf(",\"ip\":\"%s\",\"type\":\"%s\"", ip, devTypeStr(d.type));
-        if (d.type == DevType::Hue) sink.appendf(",\"colour\":%u", d.colourCount);
+        if (d.type == DevType::Hue) sink.appendf(",\"color\":%u", d.colorCount);
         if (d.self) sink.append(",\"self\":true");
         sink.append("}");
     }
@@ -117,7 +117,7 @@ public:
         sink.writeJsonString(d.name[0] ? d.name : ip);
         sink.appendf(",\"ip\":\"%s\",\"url\":\"http://%s/\",\"type\":\"%s\"",
                      ip, ip, devTypeStr(d.type));
-        if (d.type == DevType::Hue) sink.appendf(",\"colour\":%u", d.colourCount);
+        if (d.type == DevType::Hue) sink.appendf(",\"color\":%u", d.colorCount);
         if (d.self) {
             sink.append(",\"self\":true");   // self is always "now" — no meaningful age
         } else if (d.cached) {
@@ -160,10 +160,10 @@ public:
                        : (std::strcmp(typeStr, "Hue bridge") == 0) ? DevType::Hue
                                                                    : DevType::Generic;
                 // Clamp the persisted count to the valid range (0..127, the HueDriver's
-                // colourCount_ range) so a corrupt or hand-edited entry can't wrap into a bogus
+                // colorCount_ range) so a corrupt or hand-edited entry can't wrap into a bogus
                 // value when narrowed. 0 for non-bridge rows (the key is absent → readInt = 0).
-                const long colour = mm::json::readInt(mm::json::member(doc, el, "colour"));
-                d.colourCount = static_cast<uint8_t>(colour < 0 ? 0 : (colour > 127 ? 127 : colour));
+                const long color = mm::json::readInt(mm::json::member(doc, el, "color"));
+                d.colorCount = static_cast<uint8_t>(color < 0 ? 0 : (color > 127 ? 127 : color));
                 d.self = false;
                 d.cached = true;  // restored, not re-heard live → UI shows "cached", not a time
                 // Stamp "now" so the cached entry gets its kCachedGraceMs PROBATION window
@@ -193,7 +193,7 @@ public:
     /// app key — so this is the explicit entry point for that. Idempotent: updates the name +
     /// colour count of the existing row, or inserts one. `colour` is how many of the bridge's
     /// lights are colour-capable, the figure for sizing a layout. Persisted like any device row.
-    void upsertHueBridge(const uint8_t ip[4], const char* name, uint8_t colour) {
+    void upsertHueBridge(const uint8_t ip[4], const char* name, uint8_t color) {
         Device* d = findByIp(ip);
         bool persistChanged = false;
         if (!d) {
@@ -208,7 +208,7 @@ public:
             persistChanged = true;
         }
         if (!d->name[0]) { formatDottedQuad(d->name, ip); persistChanged = true; }
-        if (d->colourCount != colour) { d->colourCount = colour; persistChanged = true; }
+        if (d->colorCount != color) { d->colorCount = color; persistChanged = true; }
         d->lastSeenMs = platform::millis();   // transient — keeps the bridge from ageing out
         // A cached row coming (back) online is a status change even with no persisted field edit —
         // refresh on that transition too, else a re-announced bridge stays greyed-out in the UI.
@@ -306,7 +306,7 @@ private:
                                  ///< session. Cleared on the first live sighting.
         uint32_t lastSeenMs = 0; ///< platform::millis() at the most recent presence sighting.
                                  ///< Age-out drops a non-self device unheard for kStaleMs.
-        uint8_t  colourCount = 0; ///< Hue bridge only: how many of its lights are colour-capable
+        uint8_t  colorCount = 0; ///< Hue bridge only: how many of its lights are colour-capable
                                     ///< (the figure for sizing a layout). 0 for non-bridge rows.
     };
 

@@ -3,6 +3,7 @@
 
 #include "doctest.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 #include "light/drivers/LcdSlots.h"
 
 #include <cstring>
@@ -83,7 +84,7 @@ TEST_CASE("LCD encoder: empty mask emits all-zero slots") {
 // Channel order comes from Correction (logical red → GRB wire {0,255,0}); the encoder is order-agnostic.
 TEST_CASE("LCD encoder: GRB ordering via Correction") {
     mm::Correction corr;
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     const uint8_t rgb[3] = {255, 0, 0};   // logical red
     uint8_t wire[8 * 4] = {};
     corr.apply(rgb, wire);                 // lane 0 wire = {0, 255, 0}
@@ -100,7 +101,7 @@ TEST_CASE("LCD encoder: GRB ordering via Correction") {
 // RGBW rows emit 4 channels × 8 bits × 3 slots = 96 bytes.
 TEST_CASE("LCD encoder: RGBW row is 96 slot bytes") {
     mm::Correction corr;
-    corr.rebuild(255, mm::LightPreset::GRBW);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRBW);
     const uint8_t rgb[3] = {10, 10, 10};
     uint8_t wire[8 * 4] = {};
     corr.apply(rgb, wire);
@@ -110,4 +111,29 @@ TEST_CASE("LCD encoder: RGBW row is 96 slot bytes") {
     mm::encodeWs2812LcdSlots(wire, 0x01, 4, out);
     // The last triplet was written (its tail slot is 0, not the 0xEE poison).
     CHECK(out[4 * 8 * 3 - 1] == 0x00);
+}
+
+// The branch-free SWAR transpose must equal the naive per-bit-per-lane gather
+// it replaced, for EVERY lane pattern and mask — the whole point is a
+// behaviour-identical speedup. Pin it directly (not just via a few golden rows)
+// so a future edit to the delta-swap constants can't silently corrupt a plane.
+TEST_CASE("LCD encoder: SWAR transpose equals the naive gather for all patterns") {
+    auto naiveData = [](const uint8_t* lane8, uint8_t mask, int bit) -> uint8_t {
+        uint8_t data = 0;
+        for (uint8_t lane = 0; lane < 8; lane++)
+            if (mask & (1u << lane))
+                data |= static_cast<uint8_t>(((lane8[lane] >> bit) & 1u) << lane);
+        return data;
+    };
+    uint8_t lanes[8];
+    for (int trial = 0; trial < 4096; trial++) {
+        uint32_t s = static_cast<uint32_t>(trial) * 2654435761u + 1u;
+        for (int i = 0; i < 8; i++) { s ^= s << 13; s ^= s >> 17; s ^= s << 5; lanes[i] = s & 0xFF; }
+        const uint8_t mask = static_cast<uint8_t>((trial * 40503u) & 0xFF);
+        uint8_t masked[8];
+        for (int i = 0; i < 8; i++) masked[i] = (mask & (1u << i)) ? lanes[i] : 0;
+        uint8_t plane[8];
+        mm::transposeLanes8x8(masked, plane);
+        for (int bit = 0; bit < 8; bit++) CHECK(plane[bit] == naiveData(lanes, mask, bit));
+    }
 }

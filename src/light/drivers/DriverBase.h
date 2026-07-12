@@ -141,8 +141,8 @@ public:
         MoonModule::release();
     }
 
-    /// Test-only: the driver's own Correction, mutable so a test can set a preset directly
-    /// (`drv.correctionForTest().rebuild(255, LightPreset::GRBW)`) instead of going through the
+    /// Test-only: the driver's own Correction, mutable so a test can set a wiring directly (via the
+    /// `mm::test::rebuildFromPreset` helper, or `rebuild(255, roles, n)`) instead of going through the
     /// container. Production wiring rebuilds via rebuildCorrection(); this is the injection
     /// point the encoder/packet tests use in place of the removed shared-pointer setter.
     Correction& correctionForTest() { return correction_; }
@@ -179,11 +179,12 @@ protected:
         buildPresetOptions();                        // fill presetOptions_ from the library, sync id/sel/ref
         controls_.addSelect("preset", presetSel_, presetOptions_, presetOptionCount_);
         controls_.addSelect("whiteMode", whiteMode_, kWhiteModeOptions, kWhiteModeCount);
-        // whiteMode only applies when the REFERENCED preset carries a white channel (there's nothing
-        // to synthesise on an RGB/GRB strip) — hide it otherwise. defineControls re-runs on a preset
-        // change, so this tracks the live reference.
+        // whiteMode only applies when the REFERENCED preset carries a channel apply() synthesises
+        // from RGB (White / WarmWhite / Yellow / UV) — there's nothing to synthesise on a plain
+        // RGB/GRB strip, so hide it otherwise. defineControls re-runs on a preset change, so this
+        // tracks the live reference.
         auto* lib = LightPresetsModule::active();
-        controls_.setHidden(controls_.count() - 1, !(lib && lib->presetHasWhite(presetId_)));
+        controls_.setHidden(controls_.count() - 1, !(lib && lib->presetHasSynthChannel(presetId_)));
         // The durable reference (the preset NAME) persists but isn't shown — the preset Select above
         // is the user-facing control; presetRef_ just carries the reference across a reboot.
         controls_.addText("presetRef", presetRef_, sizeof(presetRef_));

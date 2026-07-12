@@ -1791,7 +1791,15 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             inp.addEventListener("input", () => { dragTs[dragKey] = Date.now(); });
             inp.addEventListener("change", () => {
                 dragTs[dragKey] = Date.now();
-                listSetField(moduleName, ctrlName, id, f.name, parseInt(inp.value));
+                // Guard against empty/invalid entry (parseInt → NaN) and clamp to the control's
+                // range — the HTML min/max attributes don't enforce a hand-typed value, so a stray
+                // "" or out-of-range number would otherwise reach the device as NaN / an overflow.
+                let v = parseInt(inp.value, 10);
+                if (!Number.isFinite(v)) v = f.min ?? 0;
+                if (f.min !== undefined) v = Math.max(v, f.min);
+                if (f.max !== undefined) v = Math.min(v, f.max);
+                inp.value = v;   // reflect the clamped value back into the field
+                listSetField(moduleName, ctrlName, id, f.name, v);
             });
             vEl.appendChild(inp);
         } else {   // "text" and any unknown type render as a text input

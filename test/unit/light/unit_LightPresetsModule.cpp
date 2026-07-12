@@ -396,7 +396,7 @@ TEST_CASE("Built-in RGBCCT has white (WarmWhite counts) and resolves 5 channels"
     m.setup();
     const uint32_t id = builtinId(m, "RGBCCT");
     REQUIRE(id != 0);
-    CHECK(m.presetHasWhite(id));          // W at ch3 — and WarmWhite at ch4 would also satisfy this
+    CHECK(m.presetHasSynthChannel(id));   // W at ch3 (WarmWhite at ch4 / Yellow / UV would also satisfy)
     Correction c;
     REQUIRE(m.deriveCorrection(id, 255, c));
     CHECK(c.outChannels == 5);

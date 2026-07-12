@@ -4,6 +4,7 @@
 #include "doctest.h"
 #include "light/drivers/RmtSymbol.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 
 #include <cstdint>
 
@@ -73,7 +74,7 @@ TEST_CASE("encoder: GRB ordering comes from Correction, encoder is order-agnosti
     // green byte first. So the FIRST 8 symbols (wire byte 0 = G = 0x00) are all 0s,
     // and the SECOND 8 (wire byte 1 = R = 0xFF) are all 1s.
     mm::Correction c;
-    c.rebuild(255, mm::LightPreset::GRB);   // full brightness, GRB
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::GRB);   // full brightness, GRB
     const uint8_t logicalRed[3] = {255, 0, 0};
     uint8_t wire[4] = {};
     c.apply(logicalRed, wire);              // -> GRB: {0, 255, 0}
@@ -88,7 +89,7 @@ TEST_CASE("encoder: GRB ordering comes from Correction, encoder is order-agnosti
 
 TEST_CASE("encoder: RGBW preset yields 32 symbols per light") {
     mm::Correction c;
-    c.rebuild(255, mm::LightPreset::GRBW);  // 4 output channels
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::GRBW);  // 4 output channels
     CHECK(c.outChannels == 4);
     const uint8_t logical[3] = {10, 20, 30};
     uint8_t wire[4] = {};
