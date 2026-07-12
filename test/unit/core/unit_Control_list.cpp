@@ -176,7 +176,11 @@ TEST_CASE("ControlType::List metadata carries a parallel detail array") {
 
     mm::JsonSink sink;
     mm::writeControlMetadata(sink, controls[0]);
+    // optionSets is emitted once per list (empty {} here — the devices list has no repeated selects),
+    // then the parallel detail array. A list with a repeated select (preset channel roles) fills
+    // optionSets with the shared option arrays so rows reference them by name instead of re-inlining.
     CHECK(std::strcmp(sink.data(),
+        ",\"optionSets\":{}"
         ",\"detail\":["
         "{\"name\":\"self\",\"ip\":\"192.168.1.10\",\"type\":\"projectMM\",\"self\":true},"
         "{\"name\":\"WLED-1\",\"ip\":\"192.168.1.50\",\"type\":\"WLED\"}]") == 0);

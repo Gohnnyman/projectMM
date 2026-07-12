@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cerrno>
 #include <cstring>
 
 namespace mm {
@@ -155,6 +156,16 @@ public:
     /// (built-in) row still emits its fields; the row's `locked` flag makes the UI render them
     /// read-only. (A sparse editor — showing only mapped channels + an add-channel affordance — is a
     /// future refinement; kept dense here so it's straightforward and reliable.)
+    // The 14 channel-role option strings, emitted ONCE per list (referenced by every ch<N> select via
+    // "optionsRef" below) instead of inlined per channel per row — a 32-channel fixture × 13 rows would
+    // otherwise repeat this identical array 400+ times, the bulk of the periodic state push.
+    void writeListOptionSets(JsonSink& sink) const override {
+        sink.append("\"channelRole\":[");
+        for (uint8_t o = 0; o < kChannelRoleCount; o++)
+            sink.appendf("%s\"%s\"", o ? "," : "", kChannelRoleOptions[o]);
+        sink.append("]");
+    }
+
     void writeListRowDetail(JsonSink& sink, uint8_t row) const override {
         const Preset& p = presets_[row];
         const uint8_t* roles = roleAt(p);
@@ -163,11 +174,10 @@ public:
         sink.appendf("{\"name\":\"channels\",\"type\":\"uint8\",\"value\":%u,\"min\":1,\"max\":255}",
                      static_cast<unsigned>(p.channelCount));
         for (uint8_t c = 0; c < p.channelCount; c++) {
-            sink.appendf(",{\"name\":\"ch%u\",\"type\":\"select\",\"value\":%u,\"options\":[",
+            // Reference the shared "channelRole" option set (writeListOptionSets) instead of inlining
+            // the 14 strings — the whole point of the hoist.
+            sink.appendf(",{\"name\":\"ch%u\",\"type\":\"select\",\"value\":%u,\"optionsRef\":\"channelRole\"}",
                          static_cast<unsigned>(c), static_cast<unsigned>(roles[c]));
-            for (uint8_t o = 0; o < kChannelRoleCount; o++)
-                sink.appendf("%s\"%s\"", o ? "," : "", kChannelRoleOptions[o]);
-            sink.append("]}");
         }
         sink.append("]}");
     }
@@ -236,11 +246,17 @@ public:
             return true;
         }
         if (field[0] == 'c' && field[1] == 'h' && field[2] >= '0' && field[2] <= '9') {
-            const int c = std::atoi(field + 2);
-            if (c < 0 || c >= p.channelCount) return false;
+            // Parse the channel index from the "ch<N>" suffix with strtol, not atoi: reject a
+            // malformed suffix ("ch3x") or an out-of-range value instead of atoi silently coercing it
+            // to 0 and writing the role to channel 0. Require the suffix to be fully numeric (end
+            // points at the terminating NUL) and in range.
+            char* end = nullptr;
+            errno = 0;
+            const long c = std::strtol(field + 2, &end, 10);
+            if (errno != 0 || *end != '\0' || c < 0 || c >= p.channelCount) return false;
             int v = mm::json::parseInt(valueJson, "value");
             if (v < 0 || v >= kChannelRoleCount) return false;
-            roleAtMut(p)[c] = static_cast<uint8_t>(v);
+            roleAtMut(p)[static_cast<uint8_t>(c)] = static_cast<uint8_t>(v);
             return true;
         }
         return false;

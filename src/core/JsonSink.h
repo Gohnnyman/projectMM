@@ -189,6 +189,19 @@ public:
     }
     size_t size() const { return fixed_ ? fixedLen_ : heapLen_; }
 
+    // Hand the heap buffer to the caller (buffer mode only), giving up ownership: the sink nulls its
+    // pointer so its destructor frees nothing, and the caller owns the (NUL-terminated) block. Free it
+    // with platform::free — the same allocator ensureHeap used. Returns nullptr in socket/fixed mode
+    // or if nothing was allocated. A move-out idiom (like unique_ptr::release): avoids copying a large
+    // built buffer out when the caller wants to keep it (the resumable state-frame send).
+    char* detach() {
+        if (conn_ || fixed_) return nullptr;
+        char* out = heap_;
+        heap_ = nullptr;
+        heapCap_ = heapLen_ = 0;
+        return out;
+    }
+
     // Fixed-buffer mode only: did any append run out of capacity?
     bool overflowed() const { return overflowed_; }
 

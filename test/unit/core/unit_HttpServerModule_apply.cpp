@@ -5,6 +5,7 @@
 #include "core/Scheduler.h"
 #include "core/ModuleFactory.h"
 #include "core/MoonModule.h"
+#include "core/JsonSink.h"
 
 #include <cstring>
 
@@ -277,4 +278,55 @@ TEST_CASE("apply-core: applyWledState sets on + bri independently (no brightness
 
     s.deleteTree(root);
     s.deleteTree(drivers);
+}
+
+// Diff-on-the-wire (the 1 Hz-stutter fix): the periodic WS push sends only CHANGED control values,
+// not the whole ~34 KB tree every second. buildStatePatch value-hashes each leaf against a baseline
+// and emits only the ones that differ. These pin the core guarantees: an unchanged tree → EMPTY patch
+// (the whole point — no per-second re-serialise of static config), and a single value change → a
+// one-entry patch addressed by "<module>/<control>".
+TEST_CASE("buildStatePatch: unchanged tree yields an empty patch") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();                                  // defineControls so K has its "value" control
+    mm::HttpServerModule http; http.setScheduler(&s);
+
+    http.baselineLeafHashesForTest();           // snapshot current values as the baseline
+    mm::JsonSink sink;
+    const uint16_t changed = http.buildStatePatchForTest(sink);
+    CHECK(changed == 0);                         // nothing changed since baseline → empty
+    CHECK(std::strcmp(sink.data(), "{\"patch\":[]}") == 0);
+
+    s.deleteTree(root);
+}
+
+TEST_CASE("buildStatePatch: a changed control value yields a one-entry patch") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();
+    mm::HttpServerModule http; http.setScheduler(&s);
+
+    http.baselineLeafHashesForTest();
+    k->value = 77;                               // a device-side value change (no setControl) — the
+                                                 // value-compare catches it, which a dirty flag wouldn't
+    mm::JsonSink sink;
+    const uint16_t changed = http.buildStatePatchForTest(sink);
+    CHECK(changed == 1);                          // exactly the one changed control
+    // The entry addresses it by "<module>/<control>" and carries the new value.
+    CHECK(std::strstr(sink.data(), "\"path\":\"K/value\"") != nullptr);
+    CHECK(std::strstr(sink.data(), "\"value\":77") != nullptr);
+
+    // Building again with nothing further changed → empty (the cache updated on the first emit).
+    mm::JsonSink sink2;
+    CHECK(http.buildStatePatchForTest(sink2) == 0);
+
+    s.deleteTree(root);
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/ScratchBuffer.h"   // leafHashes_ — the growable diff-on-the-wire value-hash cache
 #include "core/BinaryBroadcaster.h"
 #include "platform/platform.h"
 
@@ -171,6 +172,12 @@ public:
     /// free entry the HTTP `POST /json/state`, the inbound-`/ws` path, and the unit tests all drive.
     void applyWledState(const char* body);
 
+    /// Test seams for the diff-on-the-wire patch: drive buildStatePatch / baseline / resync directly
+    /// (they're otherwise private, called from tick1s). A unit test needs no socket to prove the diff.
+    uint16_t buildStatePatchForTest(JsonSink& sink) { return buildStatePatch(sink); }
+    void baselineLeafHashesForTest() { baselineLeafHashes(); }
+    void requestFullResyncForTest() { requestFullResync(); }
+
 private:
     platform::TcpServer server_;
     Scheduler* scheduler_ = nullptr;
@@ -201,14 +208,26 @@ private:
     struct PreviewSend {
         uint8_t hdr[16] = {};                 // WS + app header, copied (caller's may be a stack local)
         size_t hdrLen = 0;
-        const uint8_t* body = nullptr;        // caller-owned, stable until done/cancelled — NOT copied
+        const uint8_t* body = nullptr;        // the frame body — see ownsBody for lifetime
         size_t bodyLen = 0;
         size_t sent[MAX_WS_CLIENTS] = {};     // per-client cursor over [hdr ++ body]; a slow client lags
         bool active = false;
+        // Body lifetime: the preview path BORROWS body (PreviewDriver keeps its pixel buffer alive),
+        // so ownsBody is false and the drain frees nothing. The state push builds a fresh JSON buffer
+        // per second that must outlive the chunked drain, so it hands OWNERSHIP (ownsBody true) and the
+        // drain frees it on completion / on release. One slot serves both large-frame producers.
+        bool ownsBody = false;
     };
     PreviewSend previewSend_;
+    // Queue a TEXT frame (opcode 0x81) whose body this module OWNS, through the same resumable slot the
+    // preview binary send uses — so the (20 KB) state JSON drains in chunks on tick20ms instead of a
+    // blocking write on the render tick. Takes ownership of `ownedBody` (freed on drain-complete /
+    // release). Returns false (and frees ownedBody) if a send is already in flight — drop-new, the next
+    // second's state is fresher. Internal (not the BinaryBroadcaster interface, which stays binary).
+    bool startBufferedTextSend(char* ownedBody, size_t bodyLen);
     // Drain one memory-adaptive chunk per client of the in-flight resumable send; mark it done when
-    // every live client has the whole frame. Called from tick20ms. No-op when none is active.
+    // every live client has the whole frame, freeing an owned body then. Called from tick20ms. No-op
+    // when none is active.
     void drainPreviewSend();
     // Largest chunk to push per client per drain tick, derived from free contiguous memory so a
     // tight board takes small bites (bounded tick occupancy) and a roomy board drains fast.
@@ -216,6 +235,41 @@ private:
 
     // All JSON API responses (/api/state, /api/types, /api/system) and the WS
     // state push stream through a JsonSink — no shared fixed-size buffer.
+
+    // --- Diff-on-the-wire state push -----------------------------------------
+    // The periodic WS push sends the FULL state once (on connect / after a structural change), then a
+    // PATCH of only the controls whose value changed — because a full re-serialise of the whole tree
+    // (~34 KB, mostly unchanging option/detail metadata) every second on the render thread is the 1 Hz
+    // LED stutter (a periodic tick shares the render thread — see CLAUDE.md "sub-hot path"). Change is
+    // detected by value-compare, not a dirty flag: buildStatePatch serialises each control's VALUE,
+    // hashes it, and compares to a cached hash — so a value changed by the device itself (telemetry,
+    // status, a driver) is caught the same as a setControl write, with no per-write instrumentation.
+    // The cache is a flat parallel array (path-hash → value-hash), 8 bytes per control; a global
+    // (not per-client) baseline, reset by requestFullResync() on any connect or structural change.
+    struct LeafHash { uint32_t path = 0; uint32_t value = 0; };
+    // A growable heap array (no fixed MAX — CLAUDE.md "nothing is fixed"): sized to the exact leaf
+    // count on each full-state baseline, so a small tree costs ~1 KB and it grows with the tree, never
+    // silently dropping a leaf from the cache. The resize is off the hot path (baseline runs on resync,
+    // not per tick); the per-tick patch build only reads it. 8 bytes/leaf (path-hash + value-hash).
+    ScratchBuffer<LeafHash> leafHashes_{*this};
+    uint16_t leafHashCount_ = 0;
+    bool fullResyncPending_ = true;    // send a full state next push (set on connect / structural change)
+    // Build a patch of changed control values into `sink` as {"patch":[{"path":"<mod>/<ctrl>","value":V},…]};
+    // returns the number of changed leaves (0 → nothing to send). Walks the tree, value-hashes each
+    // control, updates the cache. Emits a control ONLY when its value-hash differs from the cache.
+    uint16_t buildStatePatch(JsonSink& sink);
+    // Recompute + store every control's value-hash WITHOUT emitting (baseline the cache to "just sent a
+    // full state"), so the next buildStatePatch reports only changes since the full state.
+    void baselineLeafHashes();
+    // Visit every UI leaf (per-module live telemetry + each control's value) in buildStateJson order,
+    // calling fn(pathHash, valueHash, path, valueSink). Templated so the lambda inlines; defined in the
+    // .cpp (only used there). findLeaf looks a cached leaf up by path-hash (linear over the flat cache).
+    template <class Fn> void forEachStateLeaf(Fn&& fn);
+    template <class Fn> void visitModuleLeaves(MoonModule* mod, Fn&& fn);
+    LeafHash* findLeaf(uint32_t pathHash);
+    // Mark that the next push must be a full state + fresh baseline (a client connected, or the tree
+    // structure changed so a value patch can't describe it).
+    void requestFullResync() { fullResyncPending_ = true; }
 
     // XOR key for Password-control obfuscation in /api/state. NOT a secret — the
     // same value lives in src/ui/app.js (PW_XOR_KEY). This only stops the

@@ -134,17 +134,20 @@ using mm::WhiteMode;
 // whiteMode = Min is the default and derives W = min(scaled R,G,B) leaving RGB intact —
 // this is the byte-identical behaviour the earlier RGBW tests already pin. whiteMode =
 // None leaves the white channel untouched (0 here), for effects that drive W themselves.
-TEST_CASE("Correction whiteMode None: no white synthesised") {
+TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
     Correction c;
     c.rebuild(255, LightPreset::RGBW);
     c.whiteMode = WhiteMode::None;
     const uint8_t src[3] = {10, 20, 30};
-    uint8_t out[4] = {0, 0, 0, 77};   // pre-fill W to prove it's left untouched
+    uint8_t out[4] = {0, 0, 0, 77};   // pre-fill W with a stale value from a prior frame
     c.apply(src, out);
     CHECK(out[0] == 10);
     CHECK(out[1] == 20);
     CHECK(out[2] == 30);
-    CHECK(out[3] == 77);   // untouched — None writes no white
+    // None synthesises no white, but MUST still write the channel to 0 each frame: the driver's
+    // corrected_ buffer is reused frame-to-frame, so leaving W unwritten would keep the stale 77 and
+    // stick the white LED on after a switch to None.
+    CHECK(out[3] == 0);
 }
 
 // whiteMode = Accurate pulls the common white component OUT of RGB (so the white LED

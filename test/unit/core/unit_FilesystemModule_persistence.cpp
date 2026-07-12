@@ -327,7 +327,7 @@ TEST_CASE("FilesystemModule round-trips a config larger than the old 2 KB cap") 
         lp->setTypeName("LightPresetsModule");
         scheduler.addModule(fs);
         scheduler.addModule(lp);
-        scheduler.setup();   // seeds the 5 built-ins
+        scheduler.setup();   // seeds the 13 built-ins
 
         // Add 15 wide (24-channel) custom presets — the serialized array is well over 2 KB. (15,
         // not 20: the seeded built-ins now number 13, and 13 + 20 would exceed kMaxPresets=32; 13 +

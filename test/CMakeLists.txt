@@ -31,6 +31,7 @@ add_executable(mm_tests
     unit/core/unit_ImprovFrame.cpp
     unit/core/unit_ImprovOpReassembler.cpp
     unit/core/unit_JsonUtil_parse.cpp
+    unit/core/unit_JsonSink_detach.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
     unit/core/unit_moonlive_fill.cpp

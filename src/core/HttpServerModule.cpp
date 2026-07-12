@@ -44,7 +44,14 @@ void HttpServerModule::setup() {
 }
 
 void HttpServerModule::release() {
-    previewSend_.active = false;   // drop any in-flight send before the clients go (body is borrowed)
+    // Drop any in-flight send before the clients go. A preview frame borrows its body (nothing to
+    // free); a state frame owns its JSON buffer — free it here so a teardown mid-drain doesn't leak.
+    if (previewSend_.ownsBody) {
+        platform::free(const_cast<uint8_t*>(previewSend_.body));
+        previewSend_.body = nullptr;
+        previewSend_.ownsBody = false;
+    }
+    previewSend_.active = false;
     for (auto& ws : wsClients_) ws.close();
     server_.close();
     MoonModule::release();   // chain: uniform override-and-chain (no buffers/children today, but the convention holds)
@@ -819,6 +826,104 @@ void HttpServerModule::buildStateJson(JsonSink& sink) {
     sink.append("]}");
 }
 
+// FNV-1a 32-bit — a small, fast, recognisable string hash. Used to digest a control's serialised
+// value (and the leaf's path) for the diff-on-the-wire cache, so the cache holds an 8-byte
+// {path,value} hash per leaf rather than the value string. Not cryptographic; a hash collision (two
+// different values, same 32-bit digest) at worst skips ONE update and self-heals on the next change.
+static uint32_t fnv1a(const char* s, size_t len) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) { h ^= static_cast<uint8_t>(s[i]); h *= 16777619u; }
+    return h;
+}
+
+// The diff-on-the-wire core. Visit every UI leaf the periodic push would send — each module's live
+// header telemetry (tickTimeUs / dynamicBytes, which the UI shows per card) and each control's value —
+// in the SAME order buildStateJson emits, so a leaf's path "<module>/<name>" is stable across ticks.
+// For each leaf: build its path-hash + a hash of its serialised value; `fn(pathHash, valueHash, path,
+// valueSink)` decides what to do (emit a patch entry, or just (re)baseline the cache). Names are unique
+// tree-wide (deduplicateNamesInTree at setup/load + ensureUniqueName on every runtime add/replace,
+// both before the resync that re-baselines), so "<module>/<name>" uniquely identifies a leaf.
+template <class Fn>
+void HttpServerModule::forEachStateLeaf(Fn&& fn) {
+    if (!scheduler_) return;
+    for (uint8_t m = 0; m < scheduler_->moduleCount(); m++)
+        if (auto* mod = scheduler_->module(m))
+            if (mod->appearsInUi()) visitModuleLeaves(mod, std::forward<Fn>(fn));
+}
+
+template <class Fn>
+void HttpServerModule::visitModuleLeaves(MoonModule* mod, Fn&& fn) {
+    char path[80];
+    // Module-header telemetry leaves the UI shows live per card. `@` prefixes a header field so it can't
+    // collide with a control name. Only the fields that actually change per tick (timing/memory) — role,
+    // classSize, enabled are static and ride the full state.
+    auto leaf = [&](const char* fieldPath, const char* valueJson) {
+        JsonSink vs; vs.append(valueJson);
+        fn(fnv1a(fieldPath, std::strlen(fieldPath)), fnv1a(vs.data(), vs.size()), fieldPath, vs);
+    };
+    char num[24];
+    std::snprintf(path, sizeof(path), "%s/@tickTimeUs", mod->name());
+    std::snprintf(num, sizeof(num), "%u", static_cast<unsigned>(mod->tickTimeUs())); leaf(path, num);
+    std::snprintf(path, sizeof(path), "%s/@dynamicBytes", mod->name());
+    std::snprintf(num, sizeof(num), "%u", static_cast<unsigned>(mod->dynamicBytes())); leaf(path, num);
+    // Each control's value.
+    auto& ctrls = mod->controls();
+    for (uint8_t i = 0; i < ctrls.count(); i++) {
+        auto& c = ctrls[i];
+        std::snprintf(path, sizeof(path), "%s/%s", mod->name(), c.name);
+        JsonSink vs; writeControlValue(vs, c);
+        fn(fnv1a(path, std::strlen(path)), fnv1a(vs.data(), vs.size()), path, vs);
+    }
+    for (uint8_t i = 0; i < mod->childCount(); i++)
+        if (auto* ch = mod->child(i)) visitModuleLeaves(ch, std::forward<Fn>(fn));
+}
+
+// Look up a leaf's cached value-hash by path-hash; returns nullptr if not yet seen. Linear over the
+// flat cache — the tree is ~92 leaves, so this is a handful of int compares per leaf (cheap, no map).
+HttpServerModule::LeafHash* HttpServerModule::findLeaf(uint32_t pathHash) {
+    for (uint16_t i = 0; i < leafHashCount_; i++)
+        if (leafHashes_[i].path == pathHash) return &leafHashes_[i];
+    return nullptr;
+}
+
+void HttpServerModule::baselineLeafHashes() {
+    // Count the leaves, size the buffer to fit exactly, then fill from scratch. resize is
+    // non-preserving (frees + reallocs on a size change), which is fine BECAUSE we re-fill completely
+    // right after. Off the hot path (runs on a full-state resync, not per tick).
+    uint16_t n = 0;
+    forEachStateLeaf([&](uint32_t, uint32_t, const char*, JsonSink&) { n++; });
+    leafHashes_.resize(n);
+    leafHashCount_ = 0;
+    forEachStateLeaf([&](uint32_t ph, uint32_t vh, const char*, JsonSink&) {
+        if (leafHashCount_ < leafHashes_.count()) leafHashes_[leafHashCount_++] = {ph, vh};
+    });
+}
+
+uint16_t HttpServerModule::buildStatePatch(JsonSink& sink) {
+    sink.append("{\"patch\":[");
+    uint16_t changed = 0;
+    forEachStateLeaf([&](uint32_t ph, uint32_t vh, const char* path, JsonSink& vs) {
+        LeafHash* h = findLeaf(ph);
+        if (h && h->value == vh) return;              // unchanged — the common case, emit nothing
+        if (h) h->value = vh;                          // known leaf, value changed → update cache
+        // A leaf NOT in the baseline means the tree grew without a re-baseline — which can't happen on
+        // any real path: every structural mutation calls requestFullResync() → baselineLeafHashes()
+        // before the next patch, so the baseline always covers the current tree. We therefore do NOT
+        // try to grow the cache here: ScratchBuffer::resize is non-preserving (frees + reallocs), so a
+        // mid-patch grow would discard every existing hash and corrupt the cache. Instead just EMIT the
+        // leaf (the UI still gets it) and leave the cache untouched; the next structural resync
+        // re-baselines cleanly. In practice this branch is never taken.
+        if (changed++) sink.append(",");
+        sink.append("{\"path\":\"");
+        sink.append(path);
+        sink.append("\",\"value\":");
+        sink.append(vs.data());                        // the already-serialised value
+        sink.append("}");
+    });
+    sink.append("]}");
+    return changed;
+}
+
 void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
     // Per-module header: name, role, enabled, tickTimeUs (fps/ms display),
     // classSize (static C++ object bytes) + dynamicBytes (heap), controls
@@ -1411,6 +1516,7 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     mod->setup();
     mod->applyState();
     if (scheduler_) scheduler_->prepareTree();
+    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
 
     // Persist the new tree shape (debounced save via noteDirty).
     parent->markDirty();
@@ -1468,6 +1574,7 @@ HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* pare
     }
     if (removedAny) {
         if (scheduler_) scheduler_->prepareTree();
+    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
         parent->markDirty();
         FilesystemModule::noteDirty();
     }
@@ -1550,6 +1657,7 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     Scheduler::deleteTree(mod);
 
     if (scheduler_) scheduler_->prepareTree();
+    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
 
     // Persist the new tree shape — marking the parent dirty rewrites its file
     // without the deleted child slot. The parent is guaranteed non-null by the
@@ -1643,6 +1751,7 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     // Re-run prepare across the tree so Layer LUT / Drivers buffer
     // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.
     if (scheduler_) scheduler_->prepareTree();
+    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
 
     // Persist: children are encoded positionally, so marking the parent dirty
     // rewrites "<index>.type" with the new typeName at the same slot.
@@ -1741,6 +1850,7 @@ void HttpServerModule::handleMoveModule(platform::TcpConnection& conn, const cha
     parent->markDirty();
     FilesystemModule::noteDirty();
     if (scheduler_) scheduler_->prepareTree();
+    requestFullResync();   // tree reshaped — the next WS push must be a full state, not a value patch
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 
@@ -1985,6 +2095,9 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
             // clean for every client. The generation bump re-streams the coord table first.
             previewSend_.active = false;
             wsClientGeneration_++;
+            // A new client needs the FULL state, not a patch against a baseline it never received.
+            // Global cache → resync everyone (cheap, connects are rare); the next push sends full state.
+            requestFullResync();
             return;
         }
     }
@@ -1999,16 +2112,37 @@ void HttpServerModule::pushStateToWebSockets() {
     }
     if (!hasClients) return;
 
-    // Buffer-mode sink: the WS frame header needs the total length up front,
-    // so the JSON is collected into a growable heap buffer (no size ceiling).
-    JsonSink sink;
-    buildStateJson(sink);
-
-    for (auto& ws : wsClients_) {
-        if (!ws.valid()) continue;
-        if (!sendWsTextFrame(ws, sink.data(), static_cast<int>(sink.size()))) {
-            ws.close();
+    if (fullResyncPending_) {
+        // FULL STATE — sent on connect and after a structural change (a value patch can't describe a
+        // reshaped tree). It's the one large frame (~30 KB), so route it through the resumable sender
+        // to drain in chunks on tick20ms, NOT a blocking write on the render tick. Skip if a frame is
+        // still draining (one slot); retry next second. buildStateJson serialises the WHOLE tree — the
+        // expensive path — but only here, not every second.
+        if (!bufferedSendIdle()) { pushWledStateToWebSockets(); return; }
+        JsonSink sink;
+        buildStateJson(sink);
+        const size_t len = sink.size();
+        char* owned = sink.detach();   // move ownership to the sender (frees on drain-complete)
+        if (owned) {
+            startBufferedTextSend(owned, len);
+            baselineLeafHashes();       // the full state IS the new baseline — next tick patches from here
+            fullResyncPending_ = false;
         }
+    } else {
+        // PATCH — the steady-state path. buildStatePatch walks the tree, value-hashes each leaf, and
+        // emits ONLY the ones whose value changed since the last push (typically a handful of telemetry
+        // leaves, ~1–2 KB). This is the whole fix: the 30 KB of unchanging option/detail metadata is
+        // NEVER serialised or sent here, so tick1s no longer spikes the render thread. The patch is
+        // small, so it sends inline (no resumable drain) — a non-blocking per-client write of ~2 KB.
+        JsonSink sink;
+        const uint16_t changed = buildStatePatch(sink);
+        if (changed > 0) {
+            for (auto& ws : wsClients_) {
+                if (!ws.valid()) continue;
+                if (!sendWsTextFrame(ws, sink.data(), static_cast<int>(sink.size()))) ws.close();
+            }
+        }
+        // changed == 0 → nothing to send this second (an idle device); the common quiet case.
     }
 
     // Also push a WLED-shaped {state, info} frame. The native WLED app connects to this
@@ -2169,6 +2303,22 @@ bool HttpServerModule::endBinaryFrame() { return wsFrameAllSent_; }
 // Resumable full-frame send. One WS message = WS framing header + the caller's app header (both
 // copied into previewSend_.hdr) + the caller's `body` (a pointer, NOT copied). Each client's
 // cursor walks the logical stream [hdr ++ body], drained a chunk at a time in drainPreviewSend.
+// Build a WS frame header (FIN + `opcode`, unmasked; 7/16/64-bit length form) for a `payloadLen`-byte
+// payload into previewSend_.hdr[0..]. Returns the header length. Shared by the binary (preview) and
+// text (state) buffered sends so the length-form logic lives once.
+static size_t writeWsFrameHeader(uint8_t* h, uint8_t opcode, size_t payloadLen) {
+    h[0] = opcode;
+    if (payloadLen < 126) { h[1] = static_cast<uint8_t>(payloadLen); return 2; }
+    if (payloadLen < 65536) {
+        h[1] = 126; h[2] = static_cast<uint8_t>((payloadLen >> 8) & 0xFF);
+        h[3] = static_cast<uint8_t>(payloadLen & 0xFF); return 4;
+    }
+    h[1] = 127;
+    for (int i = 0; i < 8; i++)
+        h[2 + i] = static_cast<uint8_t>((static_cast<uint64_t>(payloadLen) >> (56 - 8 * i)) & 0xFF);
+    return 10;
+}
+
 bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen,
                                          const uint8_t* body, size_t bodyLen) {
     // Drop-new backpressure: one frame in flight at a time. A caller that asks while a send is active
@@ -2177,21 +2327,9 @@ bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen
     if (previewSend_.active) return false;
 
     const size_t totalLen = headerLen + bodyLen;   // WS payload length = app header + body
-    // Build the WS frame header (FIN + binary opcode, unmasked; 7/16/64-bit length form) directly
-    // into previewSend_.hdr, followed by the app header — so the cursor streams them as one span.
-    uint8_t* h = previewSend_.hdr;
-    size_t wsLen;
-    h[0] = 0x82;
-    if (totalLen < 126) { h[1] = static_cast<uint8_t>(totalLen); wsLen = 2; }
-    else if (totalLen < 65536) {
-        h[1] = 126; h[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
-        h[3] = static_cast<uint8_t>(totalLen & 0xFF); wsLen = 4;
-    } else {
-        h[1] = 127;
-        for (int i = 0; i < 8; i++)
-            h[2 + i] = static_cast<uint8_t>((static_cast<uint64_t>(totalLen) >> (56 - 8 * i)) & 0xFF);
-        wsLen = 10;
-    }
+    // Build the WS frame header (binary opcode) directly into previewSend_.hdr, followed by the app
+    // header — so the cursor streams them as one span.
+    const size_t wsLen = writeWsFrameHeader(previewSend_.hdr, 0x82, totalLen);
     // The app header follows the WS header in the same buffer. sizeof(hdr)=16 holds the 10-byte WS
     // form + the preview app headers (≤10 bytes); guard so a future larger header can't overrun.
     if (wsLen + headerLen > sizeof(previewSend_.hdr)) return false;
@@ -2200,6 +2338,7 @@ bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen
     previewSend_.hdrLen = wsLen + headerLen;
     previewSend_.body = body;
     previewSend_.bodyLen = bodyLen;
+    previewSend_.ownsBody = false;   // preview borrows its pixel buffer (kept alive by PreviewDriver)
     for (int i = 0; i < MAX_WS_CLIENTS; i++) previewSend_.sent[i] = 0;
     previewSend_.active = true;
     // Deliberately do NOT drain here. sendBufferedFrame is called from PreviewDriver's tick() on the
@@ -2208,6 +2347,22 @@ bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen
     // header, point at the body) and let drainPreviewSend() push bytes purely on tick20ms, off the
     // render hot path. The frame starts draining within one transport poll (≤20 ms).
     return true;
+}
+
+// Queue a TEXT frame whose body this module OWNS, through the same resumable slot. Used by the state
+// push so the 20 KB JSON drains in chunks on tick20ms rather than a blocking write on the render tick.
+bool HttpServerModule::startBufferedTextSend(char* ownedBody, size_t bodyLen) {
+    // A send already in flight: drop this one and free its buffer — the next second's state is fresher.
+    if (previewSend_.active) { platform::free(ownedBody); return false; }
+    // No app header for the state frame (the JSON is the whole payload), just the WS text header.
+    const size_t wsLen = writeWsFrameHeader(previewSend_.hdr, 0x81, bodyLen);
+    previewSend_.hdrLen = wsLen;
+    previewSend_.body = reinterpret_cast<const uint8_t*>(ownedBody);
+    previewSend_.bodyLen = bodyLen;
+    previewSend_.ownsBody = true;    // we allocated this JSON buffer; the drain frees it when done
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) previewSend_.sent[i] = 0;
+    previewSend_.active = true;
+    return true;   // drained on tick20ms, same as preview — never a blocking write on the render tick
 }
 
 // Per-client cursor over the logical [hdr ++ body] stream: write whatever the socket takes now (up
@@ -2242,7 +2397,14 @@ void HttpServerModule::drainPreviewSend() {
         if (ws.valid() && cur < total) allDone = false;
     }
     // Done when every live client finished, or no client remains to send to.
-    if (!anyLiveClient || allDone) previewSend_.active = false;
+    if (!anyLiveClient || allDone) {
+        if (previewSend_.ownsBody) {   // free the state JSON buffer we allocated for this frame
+            platform::free(const_cast<uint8_t*>(previewSend_.body));
+            previewSend_.body = nullptr;
+            previewSend_.ownsBody = false;
+        }
+        previewSend_.active = false;
+    }
 }
 
 // Per-tick per-client chunk cap, derived from free contiguous memory: a tight board takes small

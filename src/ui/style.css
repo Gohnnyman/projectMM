@@ -581,6 +581,10 @@ body {
     border-radius: 6px;
     overflow: hidden;
 }
+/* The rows scroll box: caps a long editable list (fixture presets) at ~5 rows so it doesn't eat the
+   whole card, and scrolls past that. The "+ Add" button sits outside it and stays pinned below.
+   5 rows × ~35px (8px padding ×2 + 13px line + 1px border) ≈ 176px; a partial 6th row cues scroll. */
+.list-scroll { max-height: 176px; overflow-y: auto; }
 .list-empty { padding: 8px 10px; font-size: 12px; color: var(--fg-muted); }
 .list-entry { border-top: 1px solid var(--border); }
 .list-entry:first-child { border-top: 0; }

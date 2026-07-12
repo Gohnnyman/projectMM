@@ -148,15 +148,22 @@ struct Correction {
         uint8_t r = briLut[src[0]];
         uint8_t g = briLut[src[1]];
         uint8_t b = briLut[src[2]];
-        if (offWhite != kAbsent && whiteMode != WhiteMode::None) {
-            const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b)
-            if (whiteMode == WhiteMode::Accurate) {
-                // Pull the shared white component out of RGB so the white LED carries
-                // it instead of the colour channels — total emitted colour matches
-                // the RGB target rather than washing brighter.
-                r -= w; g -= w; b -= w;
+        if (offWhite != kAbsent) {
+            if (whiteMode == WhiteMode::None) {
+                // No white synthesis, but the channel MUST still be written each frame: corrected_ is
+                // reused frame-to-frame (not re-zeroed), so leaving it unwritten would hold the last
+                // synthesised value and stick the white LED on after a switch to None.
+                out[offWhite] = 0;
+            } else {
+                const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b)
+                if (whiteMode == WhiteMode::Accurate) {
+                    // Pull the shared white component out of RGB so the white LED carries
+                    // it instead of the colour channels — total emitted colour matches
+                    // the RGB target rather than washing brighter.
+                    r -= w; g -= w; b -= w;
+                }
+                out[offWhite] = w;
             }
-            out[offWhite] = w;
         }
         if (offRed != kAbsent)   out[offRed] = r;
         if (offGreen != kAbsent) out[offGreen] = g;

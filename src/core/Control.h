@@ -171,6 +171,13 @@ struct ListSource {
     virtual void writeListRowDetail(JsonSink& sink, uint8_t row) const {
         writeListRow(sink, row);
     }
+    // Append SHARED option sets for this list as a JSON object, emitted ONCE per list (not per row)
+    // so a select field repeated across many rows references the set by name (`"optionsRef":"<name>"`)
+    // instead of inlining the identical options array in every row — a preset list with N channel
+    // selects × M rows would otherwise serialise the same role-name array N×M times (the 1 Hz push's
+    // bulk). Default: no shared sets (`{}`), so a plain list is unchanged. A source with a repeated
+    // select overrides to emit `{"<name>":["opt0","opt1",...]}` and its rows emit `optionsRef`.
+    virtual void writeListOptionSets(JsonSink& /*sink*/) const {}
     // Rebuild the list from persisted JSON. `json` is the full object FilesystemModule
     // loaded; `key` is this control's name — the source parses `json` with the
     // recursive mm::json reader, navigates to `key` (a JSON array of the same

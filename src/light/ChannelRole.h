@@ -37,4 +37,11 @@ inline constexpr const char* kChannelRoleOptions[] = {
 inline constexpr uint8_t kChannelRoleCount =
     sizeof(kChannelRoleOptions) / sizeof(kChannelRoleOptions[0]);
 
+// The option array is index-aligned with the enum (a control's uint8 casts straight to a
+// ChannelRole and indexes this array), so their lengths MUST match. Dimmer is the last enum value,
+// so its index + 1 is the enum count; a missed string (or a missed enum entry) breaks the build
+// here rather than silently mis-labelling a role at runtime. Update both together.
+static_assert(kChannelRoleCount == static_cast<uint8_t>(ChannelRole::Dimmer) + 1,
+              "kChannelRoleOptions must have one string per ChannelRole value (index-aligned)");
+
 } // namespace mm

@@ -100,12 +100,23 @@ function connectWs() {
         }
         try {
             const data = JSON.parse(e.data);
-            // The same /ws also carries WLED-compatibility {state,info} frames for the
-            // native WLED app (see HttpServerModule's WLED shim). Those are not our
-            // module-state shape — ignore anything without a `modules` array, or it would
-            // clobber `state` and blank the module view until the next module frame.
-            if (!data || !Array.isArray(data.modules)) return;
+            if (!data) return;
+            // The device sends a FULL {modules:[...]} state on connect / after a structural change,
+            // then a {patch:[...]} of only-changed leaves each second (diff-on-the-wire — the whole
+            // module tree is ~34 KB of mostly-unchanging metadata that must NOT be re-serialised every
+            // second on the render thread; see HttpServerModule buildStatePatch). Apply a patch onto
+            // the existing `state` in place, then refresh the DOM. A patch before any full state is
+            // ignored (we have nothing to patch); the device resyncs on connect so this self-corrects.
+            if (Array.isArray(data.patch)) {
+                if (state && Array.isArray(state.modules)) { applyStatePatch(data.patch); updateValues(); }
+                return;
+            }
+            // The same /ws also carries WLED-compatibility {state,info} frames for the native WLED app
+            // (see HttpServerModule's WLED shim). Those aren't our module-state shape — ignore anything
+            // without a `modules` array, or it would clobber `state` and blank the module view.
+            if (!Array.isArray(data.modules)) return;
             state = data;
+            renderCards();     // a full state may add/remove/reshape cards (structural resync) — full render
             updateValues();
         } catch {
             // ignore malformed messages
@@ -1545,7 +1556,8 @@ function createControl(moduleName, moduleType, ctrl) {
             // to before). The flag flows through to both render paths via the opts object.
             if (ctrl.editable) list.dataset.editable = "true";
             buildListEntries(list, rows, details, new Set(),   // initial: nothing expanded
-                {editable: ctrl.editable, moduleName: moduleName, ctrlName: ctrl.name});
+                {editable: ctrl.editable, moduleName: moduleName, ctrlName: ctrl.name,
+                 optionSets: ctrl.optionSets || {}});
             row.appendChild(list);
             break;
         }
@@ -1582,6 +1594,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
     const editable = !!(opts && opts.editable);
     const moduleName = opts && opts.moduleName;
     const ctrlName = opts && opts.ctrlName;
+    const optionSets = (opts && opts.optionSets) || {};   // shared option arrays, keyed by name (optionsRef)
     container.replaceChildren();
     if (rows.length === 0 && !editable) {
         const empty = document.createElement("div");
@@ -1590,6 +1603,13 @@ function buildListEntries(container, rows, details, openSet, opts) {
         container.appendChild(empty);
         return;
     }
+    // Rows live in their own scroll box so a long list (e.g. the seeded fixture presets) caps its
+    // height (~5 rows, see .list-scroll in the CSS) and scrolls, instead of eating the whole card.
+    // The "+ Add" button stays OUTSIDE this box, pinned below the scroll area — the standard
+    // scrollable-list-with-fixed-footer pattern.
+    const scroll = document.createElement("div");
+    scroll.className = "list-scroll";
+    container.appendChild(scroll);
     rows.forEach((item, i) => {
         const entry = document.createElement("div");
         // Row classes: the `self` marker + a generic `severity` marker (rowSeverityClass) — both are
@@ -1688,7 +1708,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
             // Editable detail: render each field descriptor as an inline control, unless
             // the row is locked (then fall back to the read-only key/value render).
             if (locked) fillListDetail(detailPanel, details[i] ?? item);
-            else fillEditableListDetail(detailPanel, details[i] ?? item, moduleName, ctrlName, item.id);
+            else fillEditableListDetail(detailPanel, details[i] ?? item, moduleName, ctrlName, item.id, optionSets);
         } else {
             fillListDetail(detailPanel, details[i] ?? item);
         }
@@ -1701,7 +1721,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
         });
         entry.append(summary, detailPanel);
-        container.appendChild(entry);
+        scroll.appendChild(entry);
     });
     if (editable) {
         // "+ Add" appends a new row (server assigns the id, then state refreshes).
@@ -1720,8 +1740,9 @@ function buildListEntries(container, rows, details, openSet, opts) {
 // local mutation. A field with `readonly:true` renders as a plain read-only value (same look
 // as fillListDetail). Fields carry a dragTs cooldown so a WS state push mid-edit can't revert
 // what's being typed/picked, mirroring the select/text guards in createControl.
-function fillEditableListDetail(panel, detail, moduleName, ctrlName, id) {
+function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionSets) {
     panel.replaceChildren();
+    optionSets = optionSets || {};
     const fields = detail && Array.isArray(detail.fields) ? detail.fields : [];
     for (const f of fields) {
         const r = document.createElement("div");
@@ -1740,7 +1761,11 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id) {
             const sel = document.createElement("select");
             sel.className = "list-field-input";
             sel.dataset.dragkey = dragKey;
-            (f.options || []).forEach((opt, idx) => {
+            // Options come from the field's inline `options`, or (the common case for a repeated select
+            // like the channel-role pickers) from the list's shared `optionSets` via `optionsRef` — so
+            // the option array is sent once per list, not re-inlined in every row (see writeListOptionSets).
+            const fieldOptions = f.options || (f.optionsRef ? optionSets[f.optionsRef] : null) || [];
+            fieldOptions.forEach((opt, idx) => {
                 const o = document.createElement("option");
                 o.value = idx;
                 o.textContent = opt;
@@ -1992,6 +2017,32 @@ function fmtDisplayInt(ctrl) {
 // ---------------------------------------------------------------------------
 // 5. State patching (no-rebuild contract)
 // ---------------------------------------------------------------------------
+
+// Apply a diff-on-the-wire patch onto the in-memory `state`. Each entry is {path,value} where path is
+// "<module>/<control>" for a control value, or "<module>/@<field>" for a live module-header field
+// (tickTimeUs / dynamicBytes — shown per card). Module names are unique tree-wide (the device dedups
+// them), so the first path segment identifies the module. Mutates `state` in place; the caller then
+// calls updateValues() to refresh the DOM without a rebuild. An unknown path is skipped (a resync will
+// reconcile). List controls: the value is the full summary array (the device sends a changed list's
+// whole value — see the plan), so we replace it wholesale, which updateModuleControls/renderCards read.
+function applyStatePatch(patch) {
+    const byName = new Map(allModules().map(m => [m.name, m]));
+    for (const entry of patch) {
+        if (!entry || typeof entry.path !== "string") continue;
+        const slash = entry.path.indexOf("/");
+        if (slash < 0) continue;
+        const modName = entry.path.slice(0, slash);
+        const leaf = entry.path.slice(slash + 1);
+        const mod = byName.get(modName);
+        if (!mod) continue;
+        if (leaf[0] === "@") {
+            mod[leaf.slice(1)] = entry.value;   // header field, e.g. @tickTimeUs -> mod.tickTimeUs
+        } else if (Array.isArray(mod.controls)) {
+            const c = mod.controls.find(c => c.name === leaf);
+            if (c) c.value = entry.value;
+        }
+    }
+}
 
 function updateValues() {
     if (!state || !state.modules) return;
@@ -2300,8 +2351,14 @@ function updateModuleControls(mod) {
                         .map(e => e.dataset.rowId != null
                             ? "#" + e.dataset.rowId
                             : e.querySelector(".list-summary-label")?.textContent));
+                // Preserve scroll position too: a rebuild recreates .list-scroll (scrollTop 0), which
+                // would jump a long list back to the top mid-edit of a row further down.
+                const prevScroll = list.querySelector(".list-scroll")?.scrollTop ?? 0;
                 buildListEntries(list, rows, details, open,
-                    {editable: ctrl.editable, moduleName: mod.name, ctrlName: ctrl.name});
+                    {editable: ctrl.editable, moduleName: mod.name, ctrlName: ctrl.name,
+                     optionSets: ctrl.optionSets || {}});
+                const newScroll = list.querySelector(".list-scroll");
+                if (newScroll) newScroll.scrollTop = prevScroll;
                 break;
             }
         }

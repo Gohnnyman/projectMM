@@ -50,6 +50,37 @@ TEST_CASE("LightPresets seeds the curated built-ins as locked rows") {
     CHECK(c.offRed == 0); CHECK(c.offGreen == 1); CHECK(c.offBlue == 2);   // RGB order
 }
 
+// Option-array hoist (the 1 Hz-push efficiency fix): the 14 channel-role option strings are emitted
+// ONCE per list in optionSets["channelRole"], and each ch<N> select references it via optionsRef —
+// NOT re-inlined per channel per row. A 32-channel fixture × 13 rows would otherwise repeat that array
+// 400+ times in every state push. Pins that the row detail carries optionsRef, never inline options.
+TEST_CASE("LightPresets serialises the channel-role options ONCE, rows reference by optionsRef") {
+    LightPresetsModule m;
+    m.setup();
+    m.defineControls();
+    // The optionSets + detail ride the metadata block (writeControlMetadata), not the value.
+    std::string json;
+    for (uint8_t i = 0; i < m.controls().count(); i++) {
+        if (std::strcmp(m.controls()[i].name, "presets") == 0) {
+            mm::JsonSink sink;
+            mm::writeControlMetadata(sink, m.controls()[i]);
+            json = std::string(sink.data());
+            break;
+        }
+    }
+    // The shared set is present once, with the role names.
+    CHECK(json.find("\"optionSets\":{\"channelRole\":[") != std::string::npos);
+    CHECK(json.find("\"Pan\"") != std::string::npos);      // a role name appears (in the shared set)
+    // Rows reference the set; they do NOT inline a per-channel options array.
+    CHECK(json.find("\"optionsRef\":\"channelRole\"") != std::string::npos);
+    CHECK(json.find("\"type\":\"select\",\"value\":") != std::string::npos);   // channel selects present
+    // The role-name array must appear ONCE (the shared set), not once per channel: count "Rotate"
+    // (a distinctive role) — it should be exactly one occurrence across the whole serialisation.
+    size_t count = 0, pos = 0;
+    while ((pos = json.find("\"Rotate\"", pos)) != std::string::npos) { count++; pos += 8; }
+    CHECK(count == 1);   // one shared set, not 13 rows × N channels of inlined options
+}
+
 TEST_CASE("LightPresets add / edit / resolve a custom preset") {
     LightPresetsModule m;
     m.setup();
@@ -72,6 +103,25 @@ TEST_CASE("LightPresets add / edit / resolve a custom preset") {
     CHECK(c.offRed == 1);     // R at channel 1
     CHECK(c.offBlue == 2);    // B at channel 2
     CHECK(c.offWhite == 3);   // W at channel 3
+}
+
+// setListRowField parses the "ch<N>" channel index with strtol, not atoi — a malformed suffix must
+// be REJECTED, not silently coerced to channel 0 (atoi("ch3x")→0 would misroute the write). Pins
+// that a trailing-garbage or out-of-range channel name returns false and leaves the roles unchanged.
+TEST_CASE("LightPresets: a malformed ch<N> field name is rejected, not coerced to 0") {
+    LightPresetsModule m;
+    m.setup();
+    uint32_t id = 0;
+    REQUIRE(m.addListRow(id));                                  // 3 channels, R,G,B by default
+    CHECK(m.setListRowField(id, "ch0", "{\"value\":6}"));       // valid: ch0 → Yellow(6), succeeds
+    CHECK_FALSE(m.setListRowField(id, "ch3x", "{\"value\":1}")); // trailing garbage → rejected
+    CHECK_FALSE(m.setListRowField(id, "ch9",  "{\"value\":1}")); // out of range (only 3 channels) → rejected
+    Correction c;
+    REQUIRE(m.deriveCorrection(id, 255, c));
+    CHECK(c.outChannels == 3);   // unchanged by the rejected writes
+    // ch0 took the valid Yellow write; ch1/ch2 still G/B — the rejected "ch3x"/"ch9" wrote nothing.
+    CHECK(c.offGreen == 1);
+    CHECK(c.offBlue == 2);
 }
 
 // Regression (live bug): growing a preset's channel count must PRESERVE the roles already set on
