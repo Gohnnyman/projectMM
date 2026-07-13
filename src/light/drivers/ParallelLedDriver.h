@@ -1,7 +1,7 @@
 #pragma once
 
 #include "light/drivers/DriverBase.h"        // DriverBase, Correction
-#include "light/drivers/LcdSlots.h"        // encodeWs2812LcdSlots (shared encoder)
+#include "light/drivers/ParallelSlots.h"        // encodeWs2812ParallelSlots (shared encoder)
 #include "light/drivers/LedDriverConfig.h"
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared)
 #include "platform/platform.h"
@@ -10,12 +10,12 @@
 namespace mm {
 
 template <class Derived>
-/// Base for the parallel WS2812B LED-output drivers — the S3's LCD_CAM i80 bus (LcdLedDriver) and
+/// Base for the parallel WS2812B LED-output drivers — the S3's LCD_CAM i80 bus (I80LedDriver) and
 /// the P4's Parlio peripheral (ParlioLedDriver). Both drive up to 8 strands that clock out
 /// SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of the source buffer.
 ///
 /// **Single-shot autonomous DMA:** both pre-encode the whole frame (a per-ROW fused
-/// correct+transpose, the SAME LcdSlots.h encoder — a Parlio bus byte and an i80 bus byte are
+/// correct+transpose, the SAME ParallelSlots.h encoder — a Parlio bus byte and an i80 bus byte are
 /// identical: one word per slot, bit L = data line L) plus a zeroed ≥300 µs latch pad into a
 /// platform-owned DMA buffer, then ship it as one autonomous transfer. So there's NO CPU deadline
 /// during transmission — the WiFi-induced bit-slip of refill-based drivers cannot occur by
@@ -36,7 +36,7 @@ template <class Derived>
 /// configErr_/failBuf_ come from DriverBase (shared with RmtLedDriver too).
 class ParallelLedDriver : public DriverBase {
 public:
-    /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its LcdLedDriver
+    /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its I80LedDriver
     /// subclass) references the "GRB" preset by default. The user can pick any preset.
     ParallelLedDriver() { this->setDefaultPresetName("GRB"); }
 
@@ -308,7 +308,7 @@ public:
                 correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
                                    wire_ + lane * stride);
             }
-            encodeWs2812LcdSlots<Slot>(wire_, mask, outCh, out);
+            encodeWs2812ParallelSlots<Slot>(wire_, mask, outCh, out);
             out += static_cast<size_t>(outCh) * 8 * 3;   // 3 slots × 8 bits × channels, in Slot elements
         }
     }
@@ -321,13 +321,13 @@ public:
                              nrOfLightsType lights) {
         auto* out = reinterpret_cast<Slot*>(frame);
         for (nrOfLightsType row = 0; row < lights; row++) {
-            encodeWs2812LcdSlots<Slot>(wire, Slot(1), outCh, out);
+            encodeWs2812ParallelSlots<Slot>(wire, Slot(1), outCh, out);
             out += static_cast<size_t>(outCh) * 8 * 3;
         }
     }
 
     /// Test-only accessors — pin the lane slicing and frame-size arithmetic on the
-    /// host (unit_{Lcd,Parlio}LedDriver.cpp); the hardware half is proven on device.
+    /// host (unit_{I80,Parlio}LedDriver.cpp); the hardware half is proven on device.
     uint8_t laneCount() const { return laneCount_; }
     /// Lights on lane `i` (0 if out of range). Test-only.
     nrOfLightsType laneLightCount(uint8_t i) const { return i < laneCount_ ? laneCounts_[i] : 0; }
@@ -386,13 +386,13 @@ protected:
     /// CRTP hook (default: no extra bus pins to validate). A derived driver whose
     /// peripheral commits its own GPIOs beyond the data lanes (the i80 bus's WR/DC)
     /// HIDES this to flag a data lane that overlaps them. Returns a WARNING string
-    /// (the driver keeps running — see LcdLedDriver::validateBusPins for why it's a
+    /// (the driver keeps running — see I80LedDriver::validateBusPins for why it's a
     /// warning, not a blocker) or null when the data pins are clean. Parlio has no
     /// such pins, so it uses this default.
     const char* validateBusPins(const uint16_t* /*lanes*/, uint8_t /*n*/) const { return nullptr; }
 
     /// FATAL bus-pin check → the ERROR path (idles the driver), for a bus-pin misconfig the peripheral
-    /// can't init at all (LcdLedDriver's clockPin==dcPin). Distinct from validateBusPins' per-lane
+    /// can't init at all (I80LedDriver's clockPin==dcPin). Distinct from validateBusPins' per-lane
     /// warnings. Default null; a peripheral with bus control pins overrides it. Parlio has none.
     const char* validateBusFatal() const { return nullptr; }
 
@@ -442,9 +442,9 @@ protected:
         // pins; a sub-16 board parks unused lanes on spare GPIOs. Parlio accepts
         // 1..16 (unused lanes idle NC), so it sets kExactLaneCount=false and skips this.
         if constexpr (Derived::kExactLaneCount) {
-            if (!err && n != 8 && n != 16) err = "LCD bus needs exactly 8 or 16 pins";
+            if (!err && n != 8 && n != 16) err = "i80 bus needs exactly 8 or 16 pins";
         }
-        // Fatal bus-pin misconfig (LcdLedDriver's clockPin==dcPin — the i80 bus can't init) → the
+        // Fatal bus-pin misconfig (I80LedDriver's clockPin==dcPin — the i80 bus can't init) → the
         // error path below, which idles the driver. Checked before the per-lane WARNINGS: a broken
         // bus is worse than a garbled lane, so it wins the status.
         if (!err) err = derived()->validateBusFatal();

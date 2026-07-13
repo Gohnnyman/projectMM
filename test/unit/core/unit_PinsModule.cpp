@@ -295,12 +295,15 @@ TEST_CASE("PinsModule: a claim survives its owning module being destroyed (no us
     CHECK(std::string(d0.data()).find("Doomed \xC2\xB7 BCLK") != std::string::npos);
 }
 
-TEST_CASE("PinsModule: an out-of-range CSV pin is skipped, not wrapped to a false GPIO") {
-    // parsePinList accepts up to 65535; a typo like "300" must not truncate to GPIO 44 in the map.
+TEST_CASE("PinsModule: a CSV with an out-of-range pin claims nothing, and never a false GPIO") {
+    // parsePinList rejects any entry past the chip's MM_MAX_GPIO ceiling (the crash guard — a value
+    // like 300 parses as an integer but is not a GPIO, and handing it to IDF faults). So a lane list
+    // containing one bad pin is malformed as a whole: the map shows no lane claims for it, and — the
+    // point of this test — 300 never truncates to a real GPIO (300 & 0xFF = 44) in the pin map.
     Scheduler scheduler;
     FakePinModule driver("RmtLed");
     driver.withPinsCsv = true;
-    std::strcpy(driver.pins, "18,300,19");   // 300 is past MM_MAX_GPIO — dropped
+    std::strcpy(driver.pins, "18,300,19");   // 300 is past MM_MAX_GPIO — the whole list is rejected
     PinsModule pins;
     scheduler.addModule(&driver);
     scheduler.addModule(&pins);
@@ -310,10 +313,8 @@ TEST_CASE("PinsModule: an out-of-range CSV pin is skipped, not wrapped to a fals
     const ListSource* src = pinsSource(pins);
     REQUIRE(src != nullptr);
     const std::string rows = allRows(*src);
-    CHECK(rows.find("\"gpio\":18") != std::string::npos);
-    CHECK(rows.find("\"gpio\":19") != std::string::npos);
-    CHECK(rows.find("\"gpio\":44") == std::string::npos);   // 300 & 0xFF = 44 — must NOT appear
-    CHECK(src->listRowCount() == 2);                        // only the two valid pins
+    CHECK(rows.find("\"gpio\":44") == std::string::npos);   // 300 & 0xFF = 44 — must NEVER appear
+    CHECK(src->listRowCount() == 0);                        // malformed list → no lane claims
 }
 
 // --- severity flagging (increment #2) ---------------------------------------------------------

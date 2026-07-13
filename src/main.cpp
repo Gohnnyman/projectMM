@@ -89,8 +89,8 @@
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
 #include "light/drivers/RmtLedDriver.h"
 #endif
-#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-#include "light/drivers/LcdLedDriver.h"
+#if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
+#include "light/drivers/I80LedDriver.h"
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
 #include "light/drivers/ParlioLedDriver.h"
@@ -204,13 +204,15 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers.md#networksend");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers.md#preview");
     // Register only the LED drivers this chip's silicon can run (see the gated
-    // includes above) — keeps the type picker honest (no LcdLedDriver offered on a
-    // chip without LCD_CAM) and the binary lean.
+    // includes above) — keeps the type picker honest (no I80LedDriver offered on a
+    // chip without an i80 bus) and the binary lean.
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers.md#rmtled");
 #endif
-#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-    mm::ModuleFactory::registerType<mm::LcdLedDriver>("LcdLedDriver", "light/drivers.md#lcdled");
+    // I80LedDriver — the esp_lcd i80 bus (LCD_CAM on S3/P4, I2S-i80 on classic ESP32); IDF picks
+    // the backend by chip, so ONE driver serves all i80-capable silicon under SOC_LCD_I80_SUPPORTED.
+#if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
+    mm::ModuleFactory::registerType<mm::I80LedDriver>("I80LedDriver", "light/drivers.md#i80led");
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers.md#parlioled");

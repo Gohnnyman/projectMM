@@ -23,8 +23,9 @@ namespace mm {
 ///   (largest contiguous allocatable block).
 /// - *Configurable:* `deviceName` (default `MM-XXXX`, XXXX = last 4 hex of the MAC) and
 ///   `deviceModel` (display-only in the UI, pushed by tooling).
-/// - *Static (set at boot):* `chip`, `sdk`, `flash`, `bootReason`, and `wifiCoproc`.
-///   On desktop the hardware-specific fields read "desktop" / "N/A".
+/// - *Static (set at boot):* `chip`, `sdk`, `flash`, `bootReason`, `wifiCoproc`, and
+///   `psramType` (quad / octal, shown only on a PSRAM board — the interface mode the firmware
+///   drives the PSRAM in). On desktop the hardware-specific fields read "desktop" / "N/A".
 ///
 /// **`wifiCoproc`:** shown only on boards whose radio is a separate chip (the ESP32-P4
 /// with its on-board ESP32-C6 over esp_hosted); absent on native-radio targets (the
@@ -157,6 +158,11 @@ public:
         // disabled in sdkconfig) skip this control naturally.
         if (totalHeapVal_ > totalInternalVal_) {
             controls_.addProgress("psram", psramUsedVal_, totalHeapVal_ - totalInternalVal_);
+            // The PSRAM interface type (quad / octal) alongside the usage — a static per-build string
+            // (compile-time CONFIG_SPIRAM_MODE), so bind it read-only like chip/mac. Shown only with the
+            // usage row and only when non-empty, so a non-PSRAM board adds nothing.
+            if (const char* pt = platform::psramType(); pt && pt[0])
+                controls_.addReadOnly("psramType", const_cast<char*>(pt));
         }
         controls_.addReadOnly("maxBlock", maxBlockStr_, sizeof(maxBlockStr_));
 

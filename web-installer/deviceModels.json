@@ -102,6 +102,37 @@
     ]
   },
   {
+    "name": "ESP32-WROVER",
+    "chip": "ESP32",
+    "firmwares": [
+      "esp32-wrover"
+    ],
+    "url": "https://www.espboards.dev/esp32/esp32wrover/",
+    "image": "assets/deviceModels/esp32-wrover.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "ESP32-WROVER"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "2"
+        }
+      }
+    ]
+  },
+  {
     "name": "QuinLED Dig-2-Go",
     "chip": "ESP32",
     "firmwares": [
@@ -836,8 +867,8 @@
         }
       },
       {
-        "type": "LcdLedDriver",
-        "id": "LcdLed",
+        "type": "I80LedDriver",
+        "id": "I80Led",
         "parent_id": "Drivers",
         "controls": {
           "pins": "47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48",
@@ -894,8 +925,8 @@
         }
       },
       {
-        "type": "LcdLedDriver",
-        "id": "LcdLed",
+        "type": "I80LedDriver",
+        "id": "I80Led",
         "parent_id": "Drivers",
         "controls": {
           "pins": "47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1",

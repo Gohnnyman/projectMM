@@ -1,34 +1,36 @@
-// LCD_CAM parallel WS2812 output — the peripheral half of the LCD LED driver
-// (ESP32-S3). The driver (src/light/drivers/LcdLedDriver.h) does all the
-// domain work: applies Correction and 3-slot-encodes every light into the DMA
-// frame buffer (LcdSlots.h). This file owns only the peripheral — the esp_lcd
-// i80 bus, the IO device, the DMA-capable frame buffer, transmit + wait, and
-// the loopback test's TX side. No domain logic here.
+// Parallel WS2812 output over the ESP-IDF esp_lcd i80 bus — the peripheral half of I80LedDriver
+// (src/light/drivers/I80LedDriver.h), which does all the domain work: applies Correction and
+// 3-slot-encodes every light into the DMA frame buffer (ParallelSlots.h). This file owns only the
+// peripheral — the esp_lcd i80 bus, the IO device, the DMA-capable frame buffer, transmit + wait,
+// and the loopback test's TX side. No domain logic here.
 //
-// Design: the whole frame is pre-encoded into ONE buffer and sent as ONE
-// gapless GDMA stream (tx_color with lcd_cmd = -1 → pure data phase). Once
-// started, no CPU work remains until the done callback — there is no refill
-// deadline for WiFi to miss, which is the deliberate difference from the
-// ISR-refilled rings in the hpwit/FastLED LCD drivers this design studied.
+// Design: the whole frame is pre-encoded into ONE buffer and sent as ONE gapless GDMA stream
+// (tx_color with lcd_cmd = -1 → pure data phase). Once started, no CPU work remains until the done
+// callback — there is no refill deadline for WiFi to miss, the deliberate difference from the
+// ISR-refilled rings in the hpwit/FastLED I2S lineage this design studied.
 //
-// The file compiles on every ESP32 chip: everything is under
-// SOC_LCDCAM_I80_LCD_SUPPORTED with inert stubs otherwise (classic ESP32 builds
-// it too; the driver never calls in thanks to platform::lcdLanes == 0). Gate on
-// SOC_LCDCAM_I80_LCD_SUPPORTED, NOT SOC_LCD_I80_SUPPORTED: the classic ESP32 sets
-// the latter for its unrelated I2S-LCD peripheral, so keying on it wires this driver
-// onto a chip with no LCD_CAM and hangs its boot (see platform_config.h + lessons.md).
+// **One seam, two silicon backends.** IDF's esp_lcd component exposes ONE public i80 API
+// (esp_lcd_new_i80_bus / esp_lcd_panel_io_tx_color / esp_lcd_i80_alloc_draw_buffer) and routes it,
+// via its own CMake, to whichever peripheral the chip has: **LCD_CAM** on the S3/P4
+// (esp_lcd_panel_io_i80.c) or the **I2S peripheral in i80/LCD mode** on the classic ESP32
+// (esp_lcd_panel_io_i2s.c). Both do WHOLE-FRAME chained DMA with WR/DC + 8/16 bus width, so this
+// file's body is 100% generic i80 and serves both — the single I80LedDriver runs on all three.
+//
+// Gated on SOC_LCD_I80_SUPPORTED (true on classic + S3 + P4) with inert stubs otherwise. This is the
+// BROAD macro on purpose (not the narrower SOC_LCDCAM_I80_LCD_SUPPORTED), precisely so the classic
+// I2S backend compiles here too. (An earlier note warned against the broad macro — that was before
+// an i2s-backed driver existed, so compiling this onto classic init'd a bus with no consumer; now
+// I80LedDriver is that consumer on every i80 chip.)
 
 #include "platform/platform.h"
 
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
-// SOC_LCDCAM_I80_LCD_SUPPORTED, not SOC_LCD_I80_SUPPORTED: the classic ESP32
-// sets the latter for its I2S-LCD peripheral, which is NOT the LCD_CAM i80 bus
-// esp_lcd drives here — compiling this body for the classic chip wired the
-// driver onto it and hung its boot. Mirror the lcdLanes gate in
-// platform_config.h. (esp_lcd headers below only exist where LCD_CAM does.)
-#if SOC_LCDCAM_I80_LCD_SUPPORTED
+// SOC_LCD_I80_SUPPORTED: the generic esp_lcd i80 API, backed by LCD_CAM on the S3/P4 and by
+// the I2S peripheral on the classic ESP32 — both selected by IDF's own CMake. The body below
+// is backend-agnostic. (esp_lcd i80 headers exist wherever SOC_LCD_I80_SUPPORTED is set.)
+#if SOC_LCD_I80_SUPPORTED
 
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_io_i80.h"
@@ -52,9 +54,19 @@ namespace detail { bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio); }
 
 namespace {
 
-static const char* LCD_TAG = "mm_lcd";
+static const char* I80_TAG = "mm_i80";
 
-// 3 slots per WS2812 bit (the LcdSlots.h contract): 2.67 MHz pclk = 375 ns
+// The lcd_cmd passed to esp_lcd_panel_io_tx_color. LCD_CAM (S3/P4) takes -1 = "no command phase"
+// (pure data). The classic I2S backend has an UNCONDITIONAL command phase (see the lcd_cmd_bits note
+// in createState), so it needs a real 8-bit command: 0 is a benign no-op byte that completes the
+// backend's command poll before the WS2812 data frame.
+#if SOC_LCDCAM_I80_LCD_SUPPORTED
+constexpr int kI80Cmd = -1;
+#else
+constexpr int kI80Cmd = 0;
+#endif
+
+// 3 slots per WS2812 bit (the ParallelSlots.h contract): 2.67 MHz pclk = 375 ns
 // slots, "0" = 1 slot HIGH, "1" = 2 slots HIGH. 375 ns and not the lineage's
 // usual 416 ns: newer WS2812B revisions spec T0H max ≈ 380 ns, and on a
 // direct 3.3 V data line (no level shifter) a longer "0" pulse gets misread
@@ -73,7 +85,7 @@ constexpr uint32_t kPclkHz = 2'666'666;
 // routes each done-signal to the buffer that actually finished. (This is the textbook completion-
 // FIFO for an in-order DMA queue; the depth is 2 because at most two transfers — one per buffer —
 // are ever outstanding.)
-struct LcdState {
+struct I80State {
     esp_lcd_i80_bus_handle_t bus = nullptr;
     esp_lcd_panel_io_handle_t io = nullptr;
     SemaphoreHandle_t done[2] = {nullptr, nullptr};
@@ -93,8 +105,14 @@ struct LcdState {
 // Done-callback: the GDMA stream finished — pop the oldest enqueued buffer index (transfers
 // complete in enqueue order), record the wire duration (now − that transfer's start), and release
 // THAT buffer's waiter. esp_timer_get_time() is ISR-safe (it reads a hardware counter).
-bool lcdDoneCb(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* user) {
-    auto* st = static_cast<LcdState*>(user);
+//
+// IRAM_ATTR: the DMA-done ISR calls this from interrupt context, so keeping it out of flash is the
+// correct, defensive choice (matches the sibling Parlio done-cb) — everything it touches is IRAM-safe
+// (esp_timer_get_time reads a hardware counter, xSemaphoreGiveFromISR, plain member stores). The
+// classic I2S backend's extra quirk (an unconditional command phase that busy-waits) is handled by
+// the kI80Cmd / lcd_cmd_bits split above, not here.
+bool IRAM_ATTR i80DoneCb(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* user) {
+    auto* st = static_cast<I80State*>(user);
     const uint8_t slot = st->fifoTail;
     const uint8_t b = st->fifo[slot] & 1u;
     st->lastTransmitUs = static_cast<uint32_t>(esp_timer_get_time() - st->txStartUs[slot]);
@@ -104,7 +122,7 @@ bool lcdDoneCb(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* 
     return high == pdTRUE;
 }
 
-void destroyState(LcdState* st) {
+void destroyState(I80State* st) {
     if (!st) return;
     if (st->io) esp_lcd_panel_io_del(st->io);
     if (st->bus) esp_lcd_del_i80_bus(st->bus);
@@ -116,9 +134,9 @@ void destroyState(LcdState* st) {
 // One bus + IO device + DMA buffer(s). `wantSecond` allocates the async double-buffer's second
 // frame buffer (best-effort — null if it won't fit); false allocates buffer 0 only. Shared by the
 // runtime init and the loopback's private bus (which passes false — one transfer).
-LcdState* createState(const uint16_t* dataPins, uint8_t laneCount,
+I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
                       uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes, bool wantSecond) {
-    auto* st = new (std::nothrow) LcdState();
+    auto* st = new (std::nothrow) I80State();
     if (!st) return nullptr;
 
     esp_lcd_i80_bus_config_t busCfg = {};
@@ -162,9 +180,20 @@ LcdState* createState(const uint16_t* dataPins, uint8_t laneCount,
     // waits before REUSING a buffer, so at most two transfers (one per buffer) are ever
     // outstanding. Single-buffer boards allocate only buf[0] but the depth is harmless.
     ioCfg.trans_queue_depth = 2;
-    ioCfg.on_color_trans_done = lcdDoneCb;
+    ioCfg.on_color_trans_done = i80DoneCb;
     ioCfg.user_ctx = st;
-    ioCfg.lcd_cmd_bits = 0;             // no command phase ever (tx_color cmd = -1)
+    // LCD_CAM backend (S3/P4): no command phase — tx_color(cmd = -1) skips it, so cmd_bits = 0.
+    // Classic I2S backend: its tx_color has an UNCONDITIONAL command phase that busy-waits for the
+    // command DMA's TX_EOF. With cmd_bits = 0 that command buffer is zero-length, the DMA never
+    // asserts EOF, and the poll loop hangs → interrupt-watchdog reset (WROVER bench, 2026-07-13). So
+    // give the i2s backend a real 8-bit command phase: one benign byte clocks out (completing the
+    // poll) before the WS2812 data frame. It rides in the inter-frame idle-LOW gap, within the strand
+    // latch window, so the strands ignore it. (See the classic-only cmd value at each tx_color call.)
+#if SOC_LCDCAM_I80_LCD_SUPPORTED
+    ioCfg.lcd_cmd_bits = 0;
+#else
+    ioCfg.lcd_cmd_bits = 8;
+#endif
     ioCfg.lcd_param_bits = 0;
     ioCfg.flags.pclk_idle_low = 1;      // WR rests LOW like the data lines
     if (esp_lcd_new_panel_io_i80(st->bus, &ioCfg, &st->io) != ESP_OK) {
@@ -172,17 +201,19 @@ LcdState* createState(const uint16_t* dataPins, uint8_t laneCount,
         return nullptr;
     }
 
-    // DMA-capable draw buffer. The i80 GDMA can burst straight from PSRAM
-    // (access_ext_mem), so allocate PSRAM-first to keep the large frame off scarce
-    // internal DRAM — a 16-lane frame is 16-bit-wide and doubles the footprint, so
-    // an S3 grid that overran internal SRAM at 8 lanes fits here. Fall back to
-    // internal if PSRAM is absent or full (allocate-and-degrade, like platform::alloc).
-    // esp_lcd_i80_alloc_draw_buffer applies the bus's DMA + ext-mem cache alignment
-    // for whichever region it lands in. Zeroed so the trailing latch pad holds the
-    // lines LOW.
+    // DMA-capable draw buffer. On the LCD_CAM backend (S3/P4) the i80 GDMA can burst straight from
+    // PSRAM (access_ext_mem), so allocate PSRAM-first to keep the large 16-bit frame off scarce
+    // internal DRAM. But the classic ESP32's I2S-i80 backend CANNOT DMA from PSRAM —
+    // esp_lcd_i80_alloc_draw_buffer rejects MALLOC_CAP_SPIRAM there with "external memory is not
+    // supported" (bench-confirmed on the WROVER, 2026-07-13). So the PSRAM attempt is compiled in
+    // ONLY on the LCD_CAM chips; the classic backend goes straight to internal DMA RAM. IDF also does
+    // its own DMA/ext-mem cache alignment for whichever region it lands in. Zeroed so the trailing
+    // latch pad holds the lines LOW.
+#if SOC_LCDCAM_I80_LCD_SUPPORTED
     st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
         st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
     if (!st->buf[0])
+#endif
         st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
             st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
     if (!st->buf[0]) {
@@ -200,9 +231,12 @@ LcdState* createState(const uint16_t* dataPins, uint8_t laneCount,
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinary();
         if (st->done[1]) {
-            // PSRAM first (doesn't touch the scarce internal DMA heap, so no reserve check needed).
+            // PSRAM first (LCD_CAM only — the classic I2S backend can't DMA from PSRAM, see buf[0]).
+            // PSRAM doesn't touch the scarce internal DMA heap, so no reserve check needed there.
+#if SOC_LCDCAM_I80_LCD_SUPPORTED
             st->buf[1] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
                 st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+#endif
             // Internal fallback ONLY if it leaves HEAP_RESERVE intact — the second buffer is a nice-to-
             // have (allocate-and-degrade), so it must never eat the WiFi/HTTP reserve. Without this guard
             // a default-ON async board whose frame lands internal (e.g. a big moving-head frame, or the
@@ -228,7 +262,7 @@ LcdState* createState(const uint16_t* dataPins, uint8_t laneCount,
 
 } // namespace
 
-bool lcdWs2812Init(LcdWs2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
+bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                    uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
                    bool wantSecondBuffer) {
     if (!dataPins || laneCount == 0 || bufferBytes == 0) return false;
@@ -244,24 +278,24 @@ bool lcdWs2812Init(LcdWs2812Handle& h, const uint16_t* dataPins, uint8_t laneCou
     const bool fitsPsram =
         heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM) >= bufferBytes;
     if (!fitsInternal && !fitsPsram) return false;
-    LcdState* st = createState(dataPins, laneCount, wrGpio, dcGpio, bufferBytes, wantSecondBuffer);
+    I80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, bufferBytes, wantSecondBuffer);
     if (!st) return false;
     h.impl = st;
     return true;
 }
 
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& h, uint8_t buffer) {
-    auto* st = static_cast<LcdState*>(h.impl);
+uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& h, uint8_t buffer) {
+    auto* st = static_cast<I80State*>(h.impl);
     return (st && buffer < 2) ? st->buf[buffer] : nullptr;
 }
 
-size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& h) {
-    auto* st = static_cast<LcdState*>(h.impl);
+size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& h) {
+    auto* st = static_cast<I80State*>(h.impl);
     return st ? st->cap : 0;
 }
 
-bool lcdWs2812Transmit(LcdWs2812Handle& h, uint8_t buffer, size_t bytes) {
-    auto* st = static_cast<LcdState*>(h.impl);
+bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes) {
+    auto* st = static_cast<I80State*>(h.impl);
     if (!st || !st->io || buffer >= 2 || !st->buf[buffer] || bytes == 0 || bytes > st->cap) return false;
     // Push this buffer onto the completion FIFO BEFORE enqueuing the transfer, so a fast done-callback
     // (which pops the FIFO) can never fire before its slot is populated. The push is the only thing the
@@ -277,7 +311,7 @@ bool lcdWs2812Transmit(LcdWs2812Handle& h, uint8_t buffer, size_t bytes) {
     st->fifoHead = (st->fifoHead + 1u) & 1u;
     // lcd_cmd = -1: no command phase — the transfer is one continuous GDMA data stream, gapless
     // at the pclk rate.
-    const esp_err_t err = esp_lcd_panel_io_tx_color(st->io, -1, st->buf[buffer], bytes);
+    const esp_err_t err = esp_lcd_panel_io_tx_color(st->io, kI80Cmd, st->buf[buffer], bytes);
     if (err != ESP_OK) {
         // Enqueue failed — unwind the FIFO push so the ISR count stays balanced. Safe: a failed
         // enqueue produced no transfer, so no done-callback will pop this slot.
@@ -286,21 +320,21 @@ bool lcdWs2812Transmit(LcdWs2812Handle& h, uint8_t buffer, size_t bytes) {
     return err == ESP_OK;
 }
 
-void lcdWs2812Wait(LcdWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
-    auto* st = static_cast<LcdState*>(h.impl);
+void i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
+    auto* st = static_cast<I80State*>(h.impl);
     if (!st || buffer >= 2 || !st->done[buffer]) return;
     // Finite timeout, same self-healing stance as rmtWs2812Wait: a timed-out
     // frame is dropped and the driver re-encodes the whole frame next tick.
     xSemaphoreTake(st->done[buffer], pdMS_TO_TICKS(timeoutMs));
 }
 
-uint32_t lcdWs2812LastTransmitUs(const LcdWs2812Handle& h) {
-    auto* st = static_cast<LcdState*>(h.impl);
+uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& h) {
+    auto* st = static_cast<I80State*>(h.impl);
     return st ? st->lastTransmitUs : 0;
 }
 
-void lcdWs2812Deinit(LcdWs2812Handle& h) {
-    auto* st = static_cast<LcdState*>(h.impl);
+void i80Ws2812Deinit(I80Ws2812Handle& h) {
+    auto* st = static_cast<I80State*>(h.impl);
     if (!st) return;
     destroyState(st);
     h.impl = nullptr;
@@ -328,7 +362,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            RmtLoopbackResult& r);
 }
 
-RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                     uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
                                     const uint8_t* frame, size_t frameBytes,
                                     size_t dataBytes, uint8_t rowBits) {
@@ -344,10 +378,10 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 
     // The continuity check above reset txGpio's GPIO matrix route; bus
     // creation re-claims it.
-    LcdState* st = createState(dataPins, laneCount, wrGpio, dcGpio, frameBytes,
+    I80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, frameBytes,
                                /*wantSecond=*/false);   // one transfer — single buffer
     if (!st) {
-        ESP_LOGE(LCD_TAG, "loopback: private bus creation failed");
+        ESP_LOGE(I80_TAG, "loopback: private bus creation failed");
         return r;
     }
     std::memcpy(st->buf[0], frame, frameBytes);   // loopback uses buffer 0 only (single transfer)
@@ -361,42 +395,42 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
         // a later capture mismatch (same handling as the Parlio sibling).
         st->fifo[st->fifoHead] = 0;
         st->fifoHead = (st->fifoHead + 1u) & 1u;
-        const esp_err_t err = esp_lcd_panel_io_tx_color(st->io, -1, st->buf[0], frameBytes);
+        const esp_err_t err = esp_lcd_panel_io_tx_color(st->io, kI80Cmd, st->buf[0], frameBytes);
         if (err != ESP_OK) {
             st->fifoHead = (st->fifoHead + 1u) & 1u;   // unwind the push
-            ESP_LOGE(LCD_TAG, "loopback: tx enqueue failed (%s)", esp_err_to_name(err));
+            ESP_LOGE(I80_TAG, "loopback: tx enqueue failed (%s)", esp_err_to_name(err));
             return;
         }
         if (xSemaphoreTake(st->done[0], pdMS_TO_TICKS(1000)) != pdTRUE)
-            ESP_LOGE(LCD_TAG, "loopback: tx done-callback timed out");
+            ESP_LOGE(I80_TAG, "loopback: tx done-callback timed out");
     };
     detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz,
-                                  LCD_TAG, transmitOnce, r);
+                                  I80_TAG, transmitOnce, r);
     destroyState(st);
     return r;
 }
 
 } // namespace mm::platform
 
-#else  // !SOC_LCDCAM_I80_LCD_SUPPORTED — inert stubs so classic ESP32 links
+#else  // !SOC_LCD_I80_SUPPORTED — inert stubs so a chip with no i80 (LCD_CAM or I2S) links
 
 namespace mm::platform {
 
-bool lcdWs2812Init(LcdWs2812Handle&, const uint16_t*, uint8_t, uint16_t, uint16_t,
+bool i80Ws2812Init(I80Ws2812Handle&, const uint16_t*, uint8_t, uint16_t, uint16_t,
                    size_t, bool) {
     return false;
 }
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle&, uint8_t) { return nullptr; }
-size_t lcdWs2812BufferCapacity(const LcdWs2812Handle&) { return 0; }
-bool lcdWs2812Transmit(LcdWs2812Handle&, uint8_t, size_t) { return false; }
-void lcdWs2812Wait(LcdWs2812Handle&, uint8_t, uint32_t) {}
-uint32_t lcdWs2812LastTransmitUs(const LcdWs2812Handle&) { return 0; }
-void lcdWs2812Deinit(LcdWs2812Handle&) {}
-RmtLoopbackResult lcdWs2812Loopback(const uint16_t*, uint8_t, uint16_t, uint16_t,
+uint8_t* i80Ws2812Buffer(const I80Ws2812Handle&, uint8_t) { return nullptr; }
+size_t i80Ws2812BufferCapacity(const I80Ws2812Handle&) { return 0; }
+bool i80Ws2812Transmit(I80Ws2812Handle&, uint8_t, size_t) { return false; }
+void i80Ws2812Wait(I80Ws2812Handle&, uint8_t, uint32_t) {}
+uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle&) { return 0; }
+void i80Ws2812Deinit(I80Ws2812Handle&) {}
+RmtLoopbackResult i80Ws2812Loopback(const uint16_t*, uint8_t, uint16_t, uint16_t,
                                     uint16_t, const uint8_t*, size_t, size_t, uint8_t) {
     return {};
 }
 
 } // namespace mm::platform
 
-#endif  // SOC_LCDCAM_I80_LCD_SUPPORTED
+#endif  // SOC_LCD_I80_SUPPORTED

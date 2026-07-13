@@ -145,6 +145,13 @@ const char* macString();
 const char* chipModel();
 const char* sdkVersion();
 
+// PSRAM interface type as a short static string: "quad" (1-line SPI, classic ESP32 / WROVER) or
+// "octal" (8-line, the S3/S2 -R8 parts). Derived from the compile-time CONFIG_SPIRAM_MODE (there is no
+// runtime IDF query for the mode), so it reflects how the firmware drives the PSRAM. Empty "" when
+// PSRAM is not enabled in this build. SystemModule shows it beside the psram usage so the type is
+// visible (an S3 board reads "octal", a WROVER "quad"). Desktop returns "".
+const char* psramType();
+
 // WiFi co-processor status, for boards whose radio lives on a separate chip (the
 // ESP32-P4 + on-board ESP32-C6 over esp_hosted). Returns a short status string:
 // the detected co-processor firmware version when the link is up (e.g.
@@ -547,9 +554,10 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
                                          uint16_t lights, uint8_t channels);
 
 // ---------------------------------------------------------------------------
-// LCD_CAM parallel WS2812 output (ESP32-S3). The driver
-// (src/light/drivers/LcdLedDriver.h) pre-encodes the WHOLE frame into one
-// DMA buffer (3-slot encode in LcdSlots.h, domain code); the platform owns
+// i80-bus parallel WS2812 output — the LCD_CAM peripheral on the ESP32-S3/P4, the
+// I2S peripheral on the classic ESP32 (IDF's esp_lcd i80 API picks the backend per
+// chip). The driver (src/light/drivers/I80LedDriver.h) pre-encodes the WHOLE frame into one
+// DMA buffer (3-slot encode in ParallelSlots.h, domain code); the platform owns
 // only the i80 bus/peripheral AND the DMA buffer itself — the buffer must be
 // DMA-capable internal RAM (platform::alloc prefers PSRAM, which the
 // peripheral can't stream from at full rate), so the platform allocates it at
@@ -559,7 +567,7 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
 // ---------------------------------------------------------------------------
 
 // Opaque handle to one configured i80 bus + IO device + one or TWO DMA frame buffers.
-struct LcdWs2812Handle { void* impl = nullptr; };
+struct I80Ws2812Handle { void* impl = nullptr; };
 
 // Create the 8-lane bus on `dataPins[0..laneCount)` plus the two peripheral-
 // mandated lines WS2812 strands ignore: `wrGpio` (the pixel clock) and
@@ -571,38 +579,38 @@ struct LcdWs2812Handle { void* impl = nullptr; };
 // is never *required*). When `wantSecondBuffer` is false (default), NO second
 // buffer is allocated at all — the off path costs exactly one buffer. Returns
 // false only when buffer 0 (or the bus) can't be created (bad pins, DMA pressure).
-bool lcdWs2812Init(LcdWs2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
+bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                    uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
                    bool wantSecondBuffer);
 
 // DMA frame buffer `buffer` (0 or 1) the driver encodes into (zero-copy).
 // Buffer 0 always exists once init succeeded; buffer 1 is null when the second
 // allocation didn't fit — the driver reads that null as "run single-buffer".
-// `lcdWs2812BufferCapacity` is the shared per-buffer capacity (both buffers are
+// `i80Ws2812BufferCapacity` is the shared per-buffer capacity (both buffers are
 // the same size) — the driver's grow-only check. nullptr / 0 when not initialised.
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& h, uint8_t buffer);
-size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& h);
+uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& h, uint8_t buffer);
+size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& h);
 
 // Start the autonomous DMA transfer of buffer `buffer`'s first `bytes` and
-// return; pair with lcdWs2812Wait on the SAME buffer. Once started no CPU work
+// return; pair with i80Ws2812Wait on the SAME buffer. Once started no CPU work
 // remains — there is no refill deadline for WiFi to miss (the design difference
 // vs the ISR-refilled rings in the hpwit/FastLED lineage). The deferred-wait
 // tick encodes into the other buffer while this one clocks out.
-bool lcdWs2812Transmit(LcdWs2812Handle& h, uint8_t buffer, size_t bytes);
+bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes);
 
 // Block until buffer `buffer`'s in-flight transfer finishes, bounded by
 // `timeoutMs`; a timed-out frame is dropped and re-encoded next tick
 // (self-heals, same stance as rmtWs2812Wait).
-void lcdWs2812Wait(LcdWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
+void i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
 
 // Duration in microseconds of the most recent completed DMA transfer — measured start-of-transmit
 // to done-callback, so it is the PURE wire/DMA time (independent of CPU / render load), i.e. the
 // hard WS2812 output floor (256 lights × 30 µs ≈ 7680 µs → the 130 fps ceiling). The driver surfaces
 // it as a read-only KPI so the actual output rate is visible as the pipeline improves (and if a
 // future build overclocks the slot rate, this reflects it directly). 0 until the first transfer completes.
-uint32_t lcdWs2812LastTransmitUs(const LcdWs2812Handle& h);
+uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& h);
 
-void lcdWs2812Deinit(LcdWs2812Handle& h);
+void i80Ws2812Deinit(I80Ws2812Handle& h);
 
 // LCD loopback self-test: build a private FULL-WIDTH bus on the driver's
 // real pins (the i80 peripheral configures all 8 data lines — a partial bus
@@ -616,7 +624,7 @@ void lcdWs2812Deinit(LcdWs2812Handle& h);
 // short synthetic burst misses exactly the real-transfer failures (DMA
 // descriptor boundaries, sustained-rate stalls). Same result shape as the
 // RMT test; got[] holds the first mismatching row. No-op off the S3.
-RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                     uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
                                     const uint8_t* frame, size_t frameBytes,
                                     size_t dataBytes, uint8_t rowBits);
@@ -627,7 +635,7 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 // shape, but Parlio is simpler: it takes the data GPIOs directly (no
 // sacrificial WR/DC lines — Parlio generates the pixel clock itself from
 // `pclkHz`) and allows ANY lane count (1..8 here), so there is no all-8-pins
-// rule. The same encoder feeds it (LcdSlots.h — one bus word per slot, bit L =
+// rule. The same encoder feeds it (ParallelSlots.h — one bus word per slot, bit L =
 // data line L). All inert on targets without Parlio, guarded by
 // `if constexpr (platform::parlioLanes == 0)` in the driver.
 // ---------------------------------------------------------------------------
@@ -638,7 +646,7 @@ struct ParlioWs2812Handle { void* impl = nullptr; };
 // Create a Parlio TX unit on `dataPins[0..laneCount)` clocked at `pclkHz` (the
 // WS2812 slot rate), with a zeroed DMA-capable buffer 0 of `bufferBytes`. When
 // `wantSecondBuffer` is true, also TRY a second buffer for the async double-buffer
-// (same allocate-and-degrade contract as lcdWs2812Init); when false (default) no
+// (same allocate-and-degrade contract as i80Ws2812Init); when false (default) no
 // second buffer is allocated. No WR/DC pins — Parlio drives the clock internally.
 // Returns false when buffer 0 (or the unit) fails.
 bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
@@ -646,7 +654,7 @@ bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
                       bool wantSecondBuffer);
 
 // DMA frame buffer `buffer` (0 or 1; buffer 1 is null when it didn't fit) + the
-// shared per-buffer capacity. See lcdWs2812Buffer for the single-buffer-degrade contract.
+// shared per-buffer capacity. See i80Ws2812Buffer for the single-buffer-degrade contract.
 uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer);
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
 
@@ -660,7 +668,7 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes);
 void parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
 
 // Duration in microseconds of the most recent completed DMA transfer — the pure wire/DMA output
-// time (the WS2812 floor / fps ceiling). See lcdWs2812LastTransmitUs. 0 until the first completes.
+// time (the WS2812 floor / fps ceiling). See i80Ws2812LastTransmitUs. 0 until the first completes.
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& h);
 
 void parlioWs2812Deinit(ParlioWs2812Handle& h);
@@ -668,7 +676,7 @@ void parlioWs2812Deinit(ParlioWs2812Handle& h);
 // Parlio loopback self-test — same contract + result shape as the LCD/RMT
 // loopbacks: a private Parlio TX unit transmits the caller's real frame back to
 // back while rmtWs2812RxCapture reads it off `rxGpio` (lane 0 carries the
-// pattern) and every bit is verified. `dataBytes`/`rowBits` as in lcdWs2812Loopback.
+// pattern) and every bit is verified. `dataBytes`/`rowBits` as in i80Ws2812Loopback.
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                        uint16_t rxGpio, const uint8_t* frame,
                                        size_t frameBytes, size_t dataBytes,

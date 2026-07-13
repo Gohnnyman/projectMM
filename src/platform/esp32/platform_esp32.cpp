@@ -278,6 +278,19 @@ const char* sdkVersion() {
     return esp_get_idf_version();
 }
 
+const char* psramType() {
+    // The PSRAM interface mode is a compile-time choice (IDF has no runtime getter). CONFIG_SPIRAM_MODE_OCT
+    // is set only for octal parts (S3/S2 -R8); classic-ESP32 quad PSRAM (WROVER) leaves it unset. Report ""
+    // when PSRAM isn't compiled in at all, so a non-PSRAM board naturally shows nothing.
+#if !defined(CONFIG_SPIRAM)
+    return "";
+#elif defined(CONFIG_SPIRAM_MODE_OCT)
+    return "octal";
+#else
+    return "quad";
+#endif
+}
+
 const char* coprocessorWifi() {
 #if defined(CONFIG_IDF_TARGET_ESP32P4) && !defined(MM_NO_WIFI)
     // The P4's WiFi runs on the on-board ESP32-C6 via esp_hosted. Ask the host API

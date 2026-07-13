@@ -10,7 +10,7 @@
 #include <cstring>
 
 // These tests pin the MULTI-PIN surface: the `pins` / `ledsPerPin` text-control
-// parsing (shared free functions in PinList.h, used by RmtLedDriver and LcdLedDriver
+// parsing (shared free functions in PinList.h, used by RmtLedDriver and I80LedDriver
 // precedent) and the slice arithmetic down to per-pin symbol offsets. All pure
 // host logic — the RMT peripheral is never touched; on desktop the channel init
 // is inert but parsing and slicing must behave identically, which is exactly
@@ -82,6 +82,20 @@ TEST_CASE("parsePinList rejects duplicate pins") {
     uint16_t pins[8] = {};
     uint8_t n = 0;
     CHECK(mm::parsePinList("18,17,18", pins, 8, n) != nullptr);
+}
+
+// The crash guard (WROVER bench 2026-07-13): a value like 999 parses as a valid integer but is not a
+// GPIO — handing it to IDF's gpio_func_sel() faults ("GPIO number error" → reset). parsePinList rejects
+// the WHOLE list when any entry exceeds the chip's MM_MAX_GPIO ceiling, so a garbage pin never reaches
+// hardware; the driver idles with "pin out of range for this chip" in its status. On the host,
+// MM_MAX_GPIO defaults to 63, so 999 (and 64) are out of range, 63 is the last accepted pin.
+TEST_CASE("parsePinList rejects an out-of-range pin (the gpio_func_sel crash guard)") {
+    uint16_t pins[8] = {};
+    uint8_t n = 0;
+    CHECK(mm::parsePinList("2,4,999,14", pins, 8, n) != nullptr);   // 999 → reject the whole list
+    CHECK(mm::parsePinList("18,64", pins, 8, n) != nullptr);        // one past the host ceiling (63)
+    CHECK(mm::parsePinList("63", pins, 8, n) == nullptr);           // the ceiling itself is valid
+    CHECK(n == 1);
 }
 
 // --- assignCounts -----------------------------------------------------------
@@ -383,7 +397,7 @@ TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slic
 //
 // tick()'s transmit-all/wait-all concurrency body is gated out on the desktop
 // (platform::rmtTxChannels == 0 → it returns at the top), exactly as
-// LcdLedDriver::tick() is. So the host can pin only the reachable contract:
+// I80LedDriver::tick() is. So the host can pin only the reachable contract:
 // tick() must never crash or overrun for any pin configuration, grid size, or
 // uninitialised state. The concurrency path itself (parallel transmit, longest-
 // strand cost) is proven on hardware by the real-frame loopback self-test —

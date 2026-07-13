@@ -1,7 +1,7 @@
 // Parlio (Parallel IO) WS2812 output — the peripheral half of the Parlio LED
 // driver (ESP32-P4). The driver (src/light/drivers/ParlioLedDriver.h) does all
 // the domain work: applies Correction and 3-slot-encodes every light into the
-// DMA frame buffer (LcdSlots.h, the SAME encoder the LCD_CAM driver uses — one
+// DMA frame buffer (ParallelSlots.h, the SAME encoder the LCD_CAM driver uses — one
 // bus byte per slot, bit L = data line L). This file owns only the peripheral:
 // the Parlio TX unit, the DMA frame buffer, transmit + wait. No domain logic.
 //
@@ -53,8 +53,8 @@ constexpr size_t kMaxBusWidth = 16;   // both peripherals' physical ceiling
 // the loopback creates its own private unit and needs the constant directly.
 constexpr uint32_t kPclkHz = 2'666'666;
 
-// Two DMA frame buffers for the async deferred-wait double-buffer (same shape as the LCD driver —
-// see platform_esp32_lcd.cpp for the rationale). buf[1] is null when the second allocation didn't
+// Two DMA frame buffers for the async deferred-wait double-buffer (same shape as the i80 driver —
+// see platform_esp32_i80.cpp for the rationale). buf[1] is null when the second allocation didn't
 // fit (single-buffer mode). Parlio completes queued transfers in enqueue order, and its done-event
 // carries no per-transfer token, so the same 2-slot completion FIFO routes each done-signal to the
 // buffer that finished.
@@ -66,7 +66,7 @@ struct ParlioState {
     volatile uint8_t fifo[2] = {0, 0};
     volatile uint8_t fifoHead = 0;
     volatile uint8_t fifoTail = 0;
-    // Wire-time KPI (see the LCD driver): start stamp per in-flight transfer + last measured duration.
+    // Wire-time KPI (see the i80 driver): start stamp per in-flight transfer + last measured duration.
     volatile int64_t txStartUs[2] = {0, 0};
     volatile uint32_t lastTransmitUs = 0;
 };
@@ -158,14 +158,14 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     st->cap = bufferBytes;
 
     // Second buffer for the async double-buffer — ONLY when asked (wantSecond); off by default, so the
-    // common path allocates exactly one buffer. Same allocate-and-degrade as the LCD driver: buf[1]
+    // common path allocates exactly one buffer. Same allocate-and-degrade as the i80 driver: buf[1]
     // null (won't-fit or not-wanted) means single-buffer mode.
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinary();
         if (st->done[1]) {
             // PSRAM first (no internal-heap impact). Internal fallback ONLY if it leaves HEAP_RESERVE
             // intact — the second buffer is a nice-to-have, so it must never eat the WiFi/HTTP reserve
-            // (see the LCD driver). Degrade to single-buffer otherwise.
+            // (see the i80 driver). Degrade to single-buffer otherwise.
             st->buf[1] = static_cast<uint8_t*>(heap_caps_malloc(
                 bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED));
             if (!st->buf[1]
@@ -240,7 +240,7 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     if (!st || buffer >= 2 || !st->buf[buffer] || bytes == 0 || bytes > st->cap) return false;
     parlio_transmit_config_t xcfg = {};
     xcfg.idle_value = 0;   // lines rest LOW between/after the frame (the latch)
-    // Push this buffer onto the completion FIFO BEFORE enqueuing (see the LCD driver for the full
+    // Push this buffer onto the completion FIFO BEFORE enqueuing (see the i80 driver for the full
     // rationale): the ISR only reads slot `fifoTail`, the push writes slot `fifoHead`, and head != tail
     // while a transfer is in flight, so they touch different slots — safe without a lock. **Do NOT wrap
     // parlio_tx_unit_transmit in a critical section:** it blocks on an internal FreeRTOS queue, and a
@@ -281,7 +281,7 @@ void parlioWs2812Deinit(ParlioWs2812Handle& h) {
 // pad — back to back like the render loop, while an RMT RX channel
 // (rmtWs2812RxCapture with the DMA backend — transmitter-agnostic, reused from
 // the RMT/LCD rigs) captures the WHOLE frame off the jumpered rxGpio and
-// verifies every bit. This is the LCD loopback (platform_esp32_lcd.cpp) with
+// verifies every bit. This is the LCD loopback (platform_esp32_i80.cpp) with
 // the i80 transmit swapped for Parlio's: no WR/DC pins, and the payload goes
 // out via parlio_tx_unit_transmit (length in BITS) instead of
 // esp_lcd_panel_io_tx_color. The RX capture half is byte-for-byte identical —

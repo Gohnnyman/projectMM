@@ -7,11 +7,11 @@ namespace mm {
 // WS2812 encode for parallel WS2812 buses — the contract between a parallel
 // driver (domain) and a parallel peripheral, named for the wire unit it builds
 // (one pixel-clock SLOT = one byte on the 8-bit bus), the RmtSymbol.h sibling.
-// Used by BOTH the LCD_CAM i80 driver (ESP32-S3, LcdLedDriver) and the Parlio
+// Used by BOTH the LCD_CAM i80 driver (ESP32-S3, I80LedDriver) and the Parlio
 // driver (ESP32-P4, ParlioLedDriver) — a Parlio bus byte and an i80 bus byte
 // are identical (one word per slot, bit L = data line L), so one encoder
 // serves both. Pure data transform, no platform include — the host CI encoder
-// test (unit_LcdLedEncoder.cpp) pins it with no ESP32.
+// test (unit_ParallelSlots.cpp) pins it with no ESP32.
 //
 // Technique (hpwit / Adafruit "ESP32uesday" / FastLED S3 lineage — studied,
 // not copied): every WS2812 data bit becomes THREE bus slots clocked at
@@ -24,7 +24,7 @@ namespace mm {
 // so a "1" bit is HIGH for 2 slots (750 ns ≈ t1h 700 ns) and a "0" bit for
 // 1 slot (375 ns ≈ t0h 350 ns). The LedDriverConfig nanosecond fields are
 // APPROXIMATED by the slot clock — timing is fixed by the pclk (chosen in
-// platform_esp32_lcd.cpp; 375 ns keeps T0H inside even the newest WS2812B
+// platform_esp32_i80.cpp; 375 ns keeps T0H inside even the newest WS2812B
 // revisions' ~380 ns max — longer "0" pulses wash strips out white on a
 // direct 3.3 V data line).
 //
@@ -45,7 +45,7 @@ namespace mm {
 // branch-free SWAR transpose (Warren, *Hacker's Delight* §7-3 "delta swap";
 // the same 3-step 64-bit trick FastLED's transpose8x1 uses) instead of a
 // per-bit-per-lane gather loop — same result, no table, ~an order fewer ops.
-// Studied, not copied; pinned bit-perfect by unit_LcdLedEncoder.cpp + the
+// Studied, not copied; pinned bit-perfect by unit_ParallelSlots.cpp + the
 // on-device loopback self-test.
 
 // Transpose 8 lane bytes into 8 bit-plane bytes: out[b] bit L = in[L] bit b.
@@ -92,7 +92,7 @@ inline void transposeLanes16x8(const uint8_t* in, uint16_t* out) {
 //   channels:   wire bytes per light (3 RGB / 4 RGBW / 5 RGBCCT / …), also the lane stride.
 //   out:        channels * 8 * 3 SLOTS (Slot elements), fully written.
 template <class Slot>
-inline void encodeWs2812LcdSlots(const uint8_t* wire, Slot activeMask,
+inline void encodeWs2812ParallelSlots(const uint8_t* wire, Slot activeMask,
                                  uint8_t channels, Slot* out) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;   // 8 or 16
     for (uint8_t ch = 0; ch < channels; ch++) {

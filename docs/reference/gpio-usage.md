@@ -37,6 +37,12 @@ For **LED output** specifically — the pins a WS2812-class strand data line can
 
 **Clear for output I/O:** 4, 13, 14, 18, 19, 21-23, 25-27, 32, 33 (plus 16/17 on non-PSRAM). Input-only 34-39 suit mic data lines.
 
+**i80 parallel LED lanes (classic ESP32 = I2S backend).** The classic ESP32 runs the parallel LED driver over the **I2S peripheral in i80 mode** (the S3/P4 use LCD_CAM for the same i80 API; one driver, chip-picked backend). Like every i80 board it needs **exactly 8 or 16 data pins plus two bus-control pins** (`clockPin` = WR, `dcPin` = DC — the LEDs ignore both). Bench-verified default on the ESP32-WROVER (`/dev/cu.usbserial-0001`):
+
+- **8 lanes:** data `2,4,13,14,18,19,21,22` · `clockPin` (WR) `32` · `dcPin` (DC) `33`. (Pin 2 is a boot strap — it drives an LED fine and idles LOW, so it's benign here, but the Pins UI flags it; swap it for `23` to silence the warning.)
+- **16 lanes: not cleanly reachable on the WROVER.** Only 13 non-strap output pins exist, and WR/DC consume 2 more, so a 16-lane set must borrow strap pins (0, 12, 15) — and **GPIO 12 is the flash-voltage strap: driving it at reset can brick the boot**, so don't. Use a board with more free GPIOs (an S3/P4) for 16 lanes; the classic ESP32 is an 8-lane i80 board in practice.
+- **Memory ceiling ≈ 4096 lights.** The I2S backend can't DMA from PSRAM, so its frame buffer is internal-RAM-only — an over-ceiling config degrades with `i80 bus init failed — check pins / memory`, it does not crash. See [performance.md § Multi-pin LED driving](../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid).
+
 ## ESP32-S3
 
 [Datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-s3_datasheet_en.pdf). 45 GPIOs. The reserved set **depends on the module's PSRAM**, which is the trap.

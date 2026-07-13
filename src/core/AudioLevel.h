@@ -65,7 +65,7 @@ struct DcBlocker {
 // Sound-level (loudness) analysis for one block of I2S microphone samples — pure
 // domain math, no platform header, so it is host-tested without an ESP32 (the
 // platform owns only the I2S read that produces these samples; see platform.h
-// audioMic*). The same host-testable shape as RmtSymbol.h / LcdSlots.h.
+// audioMic*). The same host-testable shape as RmtSymbol.h / ParallelSlots.h.
 //
 // Two facts about an I2S MEMS microphone drive the math here, both straight from
 // how the part behaves (e.g. the INMP441 datasheet), not from any tuning recipe:

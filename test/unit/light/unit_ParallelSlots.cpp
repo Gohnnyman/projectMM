@@ -1,10 +1,10 @@
-// @module LcdLedDriver
+// @module I80LedDriver
 // @also Correction
 
 #include "doctest.h"
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
-#include "light/drivers/LcdSlots.h"
+#include "light/drivers/ParallelSlots.h"
 
 #include <cstring>
 
@@ -29,7 +29,7 @@ TEST_CASE("LCD encoder: one lane, MSB-first, 3 slots per bit") {
     uint8_t wire[8 * 4] = {};
     wire[0] = 0xA5;   // lane 0, channel 0: 1010 0101
     Slots s{};
-    mm::encodeWs2812LcdSlots(wire, static_cast<uint8_t>(0x01), 1, s.bytes);
+    mm::encodeWs2812ParallelSlots(wire, static_cast<uint8_t>(0x01), 1, s.bytes);
 
     const uint8_t expectBits[8] = {1, 0, 1, 0, 0, 1, 0, 1};
     for (int bit = 0; bit < 8; bit++) {
@@ -46,7 +46,7 @@ TEST_CASE("LCD encoder: transpose across two lanes") {
     wire[0 * 1 + 0] = 0xFF;   // lane 0: all ones
     wire[1 * 1 + 0] = 0x00;   // lane 1: all zeros
     Slots s{};
-    mm::encodeWs2812LcdSlots(wire, static_cast<uint8_t>(0x03), 1, s.bytes);
+    mm::encodeWs2812ParallelSlots(wire, static_cast<uint8_t>(0x03), 1, s.bytes);
 
     for (int bit = 0; bit < 8; bit++) {
         const uint8_t* t = s.triplet(bit);
@@ -61,7 +61,7 @@ TEST_CASE("LCD encoder: inactive lanes stay LOW regardless of wire content") {
     uint8_t wire[8 * 4];
     std::memset(wire, 0xFF, sizeof(wire));   // garbage everywhere
     Slots s{};
-    mm::encodeWs2812LcdSlots(wire, static_cast<uint8_t>(0x01), 1, s.bytes);   // only lane 0 active
+    mm::encodeWs2812ParallelSlots(wire, static_cast<uint8_t>(0x01), 1, s.bytes);   // only lane 0 active
 
     for (int bit = 0; bit < 8; bit++) {
         const uint8_t* t = s.triplet(bit);
@@ -77,7 +77,7 @@ TEST_CASE("LCD encoder: empty mask emits all-zero slots") {
     std::memset(wire, 0xFF, sizeof(wire));
     Slots s{};
     std::memset(s.bytes, 0xEE, sizeof(s.bytes));
-    mm::encodeWs2812LcdSlots(wire, static_cast<uint8_t>(0x00), 1, s.bytes);
+    mm::encodeWs2812ParallelSlots(wire, static_cast<uint8_t>(0x00), 1, s.bytes);
     for (int i = 0; i < 8 * 3; i++) CHECK(s.bytes[i] == 0x00);
 }
 
@@ -90,7 +90,7 @@ TEST_CASE("LCD encoder: GRB ordering via Correction") {
     corr.apply(rgb, wire);                 // lane 0 wire = {0, 255, 0}
 
     Slots s{};
-    mm::encodeWs2812LcdSlots(wire, static_cast<uint8_t>(0x01), 3, s.bytes);
+    mm::encodeWs2812ParallelSlots(wire, static_cast<uint8_t>(0x01), 3, s.bytes);
     for (int bit = 0; bit < 8; bit++) {
         CHECK(s.triplet(bit)[1] == 0x00);        // G byte: all zero data
         CHECK(s.triplet(8 + bit)[1] == 0x01);    // R byte: all ones data
@@ -108,7 +108,7 @@ TEST_CASE("LCD encoder: RGBW row is 96 slot bytes") {
 
     uint8_t out[4 * 8 * 3];
     std::memset(out, 0xEE, sizeof(out));
-    mm::encodeWs2812LcdSlots(wire, static_cast<uint8_t>(0x01), 4, out);
+    mm::encodeWs2812ParallelSlots(wire, static_cast<uint8_t>(0x01), 4, out);
     // The last triplet was written (its tail slot is 0, not the 0xEE poison).
     CHECK(out[4 * 8 * 3 - 1] == 0x00);
 }
@@ -174,7 +174,7 @@ TEST_CASE("LCD encoder 16-lane: high lane and byte-boundary transpose") {
     {   // lane 15 all-ones → data slot has bit 15 set on every bit (stride = channels = 1)
         uint8_t wire[16 * 1] = {};
         wire[15 * 1] = 0xFF;
-        mm::encodeWs2812LcdSlots<uint16_t>(wire, static_cast<uint16_t>(1u << 15), 1, out);
+        mm::encodeWs2812ParallelSlots<uint16_t>(wire, static_cast<uint16_t>(1u << 15), 1, out);
         for (int bit = 0; bit < 8; bit++) {
             CHECK(out[bit * 3 + 0] == (1u << 15));   // slot0: active mask (lane 15)
             CHECK(out[bit * 3 + 1] == (1u << 15));   // slot1: lane 15's bit
@@ -185,7 +185,7 @@ TEST_CASE("LCD encoder 16-lane: high lane and byte-boundary transpose") {
         uint8_t wire[16 * 1] = {};
         wire[7 * 1] = 0xFF; wire[8 * 1] = 0xFF;
         const uint16_t mask = static_cast<uint16_t>((1u << 7) | (1u << 8));
-        mm::encodeWs2812LcdSlots<uint16_t>(wire, mask, 1, out);
+        mm::encodeWs2812ParallelSlots<uint16_t>(wire, mask, 1, out);
         for (int bit = 0; bit < 8; bit++)
             CHECK(out[bit * 3 + 1] == mask);         // both lanes carry a 1 on every bit
     }
@@ -197,6 +197,6 @@ TEST_CASE("LCD encoder 16-lane: RGBW row is 96 uint16 slots, all written") {
     wire[0] = 10; wire[1] = 10; wire[2] = 10; wire[3] = 10;   // lane 0 RGBW
     uint16_t out[4 * 8 * 3];
     for (auto& v : out) v = 0xEEEE;   // poison
-    mm::encodeWs2812LcdSlots<uint16_t>(wire, static_cast<uint16_t>(0x0001), 4, out);
+    mm::encodeWs2812ParallelSlots<uint16_t>(wire, static_cast<uint16_t>(0x0001), 4, out);
     CHECK(out[4 * 8 * 3 - 1] == 0);   // last tail slot written (not the poison)
 }

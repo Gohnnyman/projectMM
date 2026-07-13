@@ -340,6 +340,10 @@ const char* coprocessorWifi() {
     return "";   // desktop has no WiFi co-processor
 }
 
+const char* psramType() {
+    return "";   // desktop has no PSRAM
+}
+
 const char* resetReason() {
     // Desktop has no reset-reason concept; report a benign value the UI treats as "not crashed".
     return "OK";
@@ -1074,18 +1078,18 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
 // driver guards every call with `if constexpr (platform::lcdLanes == 0)`
 // (0 here), so these exist only to satisfy the linker.
 // ---------------------------------------------------------------------------
-bool lcdWs2812Init(LcdWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+bool i80Ws2812Init(I80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                    uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
                    size_t /*bufferBytes*/, bool /*wantSecondBuffer*/) {
     return false;
 }
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
-size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& /*h*/) { return 0; }
-bool lcdWs2812Transmit(LcdWs2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
-void lcdWs2812Wait(LcdWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) {}
-uint32_t lcdWs2812LastTransmitUs(const LcdWs2812Handle& /*h*/) { return 0; }
-void lcdWs2812Deinit(LcdWs2812Handle& /*h*/) {}
-RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
+size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& /*h*/) { return 0; }
+bool i80Ws2812Transmit(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+void i80Ws2812Wait(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) {}
+uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& /*h*/) { return 0; }
+void i80Ws2812Deinit(I80Ws2812Handle& /*h*/) {}
+RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                     uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
                                     uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                     size_t /*frameBytes*/, size_t /*dataBytes*/,

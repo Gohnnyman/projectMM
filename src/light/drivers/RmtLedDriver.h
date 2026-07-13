@@ -3,7 +3,7 @@
 #include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
 
 #include "light/drivers/LedDriverConfig.h"
-#include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with LcdLedDriver)
+#include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with I80LedDriver)
 #include "light/drivers/RmtSymbol.h"       // encodeWs2812Symbols (host-testable)
 #include "platform/platform.h"
 
@@ -100,7 +100,7 @@ public:
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
     // The pin/count list parsing (parsePinList / assignCounts) lives in
-    // PinList.h, shared with LcdLedDriver — both drivers slice the source
+    // PinList.h, shared with I80LedDriver — both drivers slice the source
     // buffer from the same two text controls.
 
     /// Bind the driver's controls: the window (start/count), the `pins` and

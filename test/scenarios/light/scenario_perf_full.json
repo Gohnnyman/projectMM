@@ -9,7 +9,7 @@
     "PreviewDriver",
     "NetworkSendDriver",
     "RmtLedDriver",
-    "LcdLedDriver",
+    "I80LedDriver",
     "ParlioLedDriver",
     "MultiplyModifier",
     "SpiralEffect",
@@ -835,11 +835,11 @@
       "optional": true
     },
     {
-      "name": "add-lcd-driver",
-      "description": "+LcdLedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). Optional — S3 only. Diff = the LCD_CAM per-frame cost.",
+      "name": "add-i80-driver",
+      "description": "+I80LedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). Optional — S3 only. Diff = the i80 per-frame cost.",
       "op": "add_module",
-      "id": "Lcd",
-      "type": "LcdLedDriver",
+      "id": "I80",
+      "type": "I80LedDriver",
       "parent_id": "Drivers",
       "props": {
         "pins": "1,2,3,4,5,6,7,8",
@@ -848,7 +848,7 @@
       "optional": true
     },
     {
-      "name": "measure-lcd",
+      "name": "measure-i80",
       "op": "measure",
       "measure": true,
       "optional": true,
@@ -946,9 +946,9 @@
       }
     },
     {
-      "name": "remove-lcd-driver",
+      "name": "remove-i80-driver",
       "op": "remove_module",
-      "id": "Lcd",
+      "id": "I80",
       "optional": true
     },
     {

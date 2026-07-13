@@ -15,7 +15,7 @@
 // growth), and the parse-error/recovery shape. The hardware half (TX unit init,
 // DMA transmit) is inert on the host — desktop stubs return false/nullptr — and
 // is proven on the P4. The encoder itself is shared with the LCD driver and is
-// covered by unit_LcdLedEncoder.cpp, so it isn't re-tested here.
+// covered by unit_ParallelSlots.cpp, so it isn't re-tested here.
 //
 // The one behavioural difference from the LCD driver pinned below: Parlio has
 // NO exactly-8-pins rule — 1..8 lanes are all valid (it takes the data GPIOs

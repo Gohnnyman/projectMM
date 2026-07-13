@@ -102,6 +102,23 @@ constexpr uint8_t parlioLanes = 16;
 constexpr uint8_t parlioLanes = 0;
 #endif
 
+// Parallel WS2812 lanes over the classic ESP32's I2S peripheral in LCD/i80 mode — the
+// classic chip's ONLY >8-lane route (it has neither LCD_CAM nor Parlio). IDF's esp_lcd
+// component backs the SAME esp_lcd i80 API (esp_lcd_new_i80_bus / tx_color, 8-or-16 bus
+// width, WR/DC) with the I2S peripheral on the classic ESP32 (esp_lcd_panel_io_i2s.c),
+// using WHOLE-FRAME chained DMA — so I80LedDriver reuses the I80LedDriver code path and
+// the i80Ws2812* seam, not a bespoke ISR ring. Gate CLASSIC-ONLY: SOC_LCD_I80_SUPPORTED
+// is set on the classic chip (I2S backend) AND the S3/P4 (LCD_CAM backend), so exclude
+// the LCD_CAM chips — otherwise both this and lcdLanes would be non-zero on the S3/P4 and
+// the chip would register both drivers. The `defined(A) && !defined(B)` shape mirrors
+// hasEthW5500 below. The i80 bus does 16 data lines; the driver derives 8 or 16 from the
+// pin count and requires exactly that many real pins (i80 rejects an NC data line).
+#if defined(CONFIG_SOC_LCD_I80_SUPPORTED) && !defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
+constexpr uint8_t i2sLanes = 16;
+#else
+constexpr uint8_t i2sLanes = 0;
+#endif
+
 // I2S audio input (an INMP441-class digital MEMS microphone). SOC-derived like
 // the LED-peripheral flags: every current ESP32 has I2S, so this is true on all
 // of them, but the gate keeps AudioService + the I2S platform seam inert on any

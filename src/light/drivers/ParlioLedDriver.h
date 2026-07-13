@@ -7,7 +7,7 @@
 namespace mm {
 
 /// Output driver: parallel WS2812B over the ESP32-P4 Parlio (Parallel IO) TX peripheral — the P4's
-/// scale path, sibling of LcdLedDriver. The shared body (slicing, encode, single-shot DMA, loopback)
+/// scale path, sibling of I80LedDriver. The shared body (slicing, encode, single-shot DMA, loopback)
 /// lives in ParallelLedDriver; Parlio is the SIMPLER peripheral, so this class adds LESS than the
 /// i80 driver:
 ///  - NO clockPin/dcPin: Parlio generates the pixel clock itself (kClockHz), so there are no

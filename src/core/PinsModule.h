@@ -236,15 +236,13 @@ private:
                     if (v >= 0) addPinClaim(static_cast<uint8_t>(v), m->name(), roleFor(d.name));
                 } else if (d.type == ControlType::Text && std::strcmp(d.name, "pins") == 0) {
                     // The LED-driver lane CSV ("18,19,20"): one claim per pin, role "LED lane N". parsePinList
-                    // dedups within the one string, so a lane list never self-collides here.
+                    // dedups within the one string, so a lane list never self-collides here — and it rejects
+                    // any out-of-range pin (> MM_MAX_GPIO) outright, so every returned pin is a real GPIO.
                     uint16_t pins[kMaxClaims];
                     uint8_t n = 0;
                     if (!parsePinList(static_cast<const char*>(d.ptr), pins, kMaxClaims, n))
                         for (uint8_t p = 0; p < n; p++)
-                            // parsePinList accepts up to 65535 (a typo like "300"); skip anything past the
-                            // chip's GPIO ceiling so a bad entry never wraps to a real GPIO in the map.
-                            if (pins[p] <= MM_MAX_GPIO)
-                                addLaneClaim(static_cast<uint8_t>(pins[p]), m->name(), p);
+                            addLaneClaim(static_cast<uint8_t>(pins[p]), m->name(), p);
                 }
             }
             // Always recurse children regardless of this module's flag — a child is judged on its own

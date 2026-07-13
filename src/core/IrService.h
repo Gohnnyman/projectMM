@@ -218,7 +218,11 @@ private:
     //   channel won't open → error, so a genuinely-broken pin is visible, not masked as ready.
     // Called from prepare() (cold path) and on a pin change, so the open cost isn't on the hot path.
     void reportReady() {
-        if (pin_ < 0) { setStatus("set pin to receive", Severity::Warning); return; }
+        // Unset pin: release any channel still bound to the OLD pin, else it leaks (stays armed on a
+        // pin the user just cleared). The valid→valid change is already handled — irChannelReady →
+        // ensureChannel closes the old channel when currentPin_ differs — but the valid→-1 path never
+        // reaches ensureChannel, so release it here.
+        if (pin_ < 0) { platform::irStop(); setStatus("set pin to receive", Severity::Warning); return; }
         if (platform::irChannelReady(static_cast<uint16_t>(pin_))) setStatus("ready");
         else setStatus("IR channel failed to open — pin busy or invalid?", Severity::Error);
     }
