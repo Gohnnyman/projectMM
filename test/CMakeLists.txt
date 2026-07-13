@@ -48,6 +48,7 @@ add_executable(mm_tests
     unit/core/unit_sanitizeHostname.cpp
     unit/core/unit_platform_clock.cpp
     unit/core/unit_platform_worker.cpp
+    unit/core/unit_IpList.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp
     unit/core/unit_Services.cpp

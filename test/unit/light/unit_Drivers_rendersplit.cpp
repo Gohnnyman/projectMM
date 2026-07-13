@@ -17,6 +17,8 @@
 
 #include <atomic>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <chrono>
 
 using namespace std::chrono_literals;
@@ -39,19 +41,42 @@ public:
     std::atomic<bool> sawTear{false};
 };
 
-// A driver that is SLOW inside tick() — it holds the worker inside its own tick() for ~40 ms, the way a
-// real 16K-light encode holds core 1 for tens of ms. `inTick` is true exactly while the worker is
-// executing this object's tick(); that is the window in which deleting it is a use-after-free.
+// A driver the test can PARK inside its own tick(), standing in for a real 16K-light encode that holds
+// core 1 for tens of ms. The handshake is a condition variable, not a sleep: `entered` fires the moment
+// the worker is inside tick(), and the worker then blocks until the test releases it. So the test drives
+// the race window deterministically instead of hoping a 40 ms sleep is long enough — no timing luck, and
+// no unbounded spin that could hang the suite forever.
 class SlowDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer*) override {}
     void tick() override {
-        inTick.store(true);
-        std::this_thread::sleep_for(40ms);   // stand-in for the encode: the worker is INSIDE this object
+        {
+            std::unique_lock<std::mutex> lk(m);
+            inTick = true;
+            entered.notify_all();            // "core 1 is now INSIDE this object"
+            // Hold here until the test says go. This is the use-after-free window, held open on demand.
+            release.wait_for(lk, 5s, [this] { return released; });
+        }
         touched = 0xABCD;                    // ASan traps here if core 0 freed us mid-tick
-        inTick.store(false);
+        std::lock_guard<std::mutex> lk(m);
+        inTick = false;
+        exited.notify_all();
     }
-    std::atomic<bool> inTick{false};
+    // Block until the worker is provably inside tick(). Bounded: a false return means it never got
+    // there, which the caller asserts on rather than spinning forever.
+    bool waitEntered() {
+        std::unique_lock<std::mutex> lk(m);
+        return entered.wait_for(lk, 5s, [this] { return inTick; });
+    }
+    void letGo() {
+        { std::lock_guard<std::mutex> lk(m); released = true; }
+        release.notify_all();
+    }
+    bool isInTick() { std::lock_guard<std::mutex> lk(m); return inTick; }
+
+    std::mutex m;
+    std::condition_variable entered, release, exited;
+    bool inTick = false, released = false;
     uint16_t touched = 0;
 };
 
@@ -143,16 +168,15 @@ TEST_CASE("render-split: live disengage stops the worker when the last driver le
     r.drivers.release();
 }
 
-// The delete-mid-encode race (Reviewer finding 1). The structural path — removeChild → release →
-// deleteTree — used to run with NO quiesce: only prepare() waited for core 1, and it ran AFTER the
-// child was already freed. So a UI delete landing while core 1 was inside that driver's tick() freed the
-// object (and its DMA buffers) out from under the worker → LoadProhibited on ESP32.
+// THE INVARIANT: core quiesces the worker before any structural mutation of a container's children.
+// MoonModule::removeChild() calls quiesce() — a no-op for a module with no worker, overridden by Drivers
+// to wait out the in-flight encode — so a mutation cannot begin while core 1 is inside a child's tick().
+// Violate it and the sequence removeChild → release → deleteTree frees the driver (and its DMA buffers)
+// out from under the worker mid-encode: a use-after-free, LoadProhibited on ESP32.
 //
-// The fix is in core: MoonModule::removeChild() calls quiesce() (a no-op for a module with no worker,
-// overridden by Drivers to wait the encode out), so the mutation cannot begin until core 1 is out.
-// NOTE there is deliberately NO sleep before removeChild here — the whole point is to delete WHILE the
-// worker is provably inside tick(). Under ASan a regression is a heap-use-after-free; without it, the
-// assert below still catches the ordering.
+// The test deletes the driver at the one instant that is unsafe: while the worker is provably inside its
+// tick(). Under ASan a regression is a heap-use-after-free; without ASan, the ordering assert still
+// catches it (removeChild must not return until the worker is out).
 TEST_CASE("render-split: deleting a driver WHILE core 1 is inside its tick() is safe (no use-after-free)") {
     Rig r(64);
     auto* slow = new SlowDriver();            // heap: so ASan can see a use-after-free if we regress
@@ -163,13 +187,30 @@ TEST_CASE("render-split: deleting a driver WHILE core 1 is inside its tick() is 
 
     r.drivers.tick();                         // notifies core 1 → the worker enters slow->tick()
 
-    // Wait only until the worker is provably INSIDE tick() — then mutate. This is the race window.
-    while (!slow->inTick.load()) std::this_thread::yield();
-    CHECK(slow->inTick.load());               // the worker is mid-encode, right now
+    // Park the worker INSIDE tick() — a latch, not a sleep, so the race window is opened on demand
+    // rather than by timing luck, and a worker that never starts fails here instead of spinning forever.
+    REQUIRE(slow->waitEntered());
+    CHECK(slow->isInTick());                  // the worker is mid-encode, right now
 
-    r.drivers.removeChild(slow);              // core's quiesce() must block here until the worker exits
+    // A releaser lets the parked encode finish shortly AFTER the delete is under way — the real
+    // sequence, where the encode completes on its own while core 0 is already mutating the tree.
+    // `releasedAt` records WHEN, so the assertion below can prove removeChild() actually waited for it.
+    std::atomic<bool> releaseFired{false};
+    std::thread releaser([&] {
+        std::this_thread::sleep_for(30ms);    // long enough that a non-waiting removeChild returns first
+        releaseFired.store(true);
+        slow->letGo();
+    });
 
-    CHECK_FALSE(slow->inTick.load());         // removeChild returned only after the encode finished
+    r.drivers.removeChild(slow);              // core's quiesce() blocks here until the worker is out
+
+    // THE ASSERTION, checked the instant removeChild returns — not after the join, or a non-waiting
+    // removeChild would look correct once the worker later finished on its own. With quiesce(),
+    // removeChild cannot return until the worker exited, which cannot happen before letGo() fired.
+    CHECK(releaseFired.load());               // it waited for the encode (fails without quiesce)
+    CHECK_FALSE(slow->isInTick());            // and the worker is provably out of tick()
+
+    releaser.join();
     delete slow;                              // now safe — the worker is provably not inside it
 
     r.drivers.prepare();                      // last driver gone → disengage

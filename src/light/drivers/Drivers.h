@@ -327,6 +327,14 @@ public:
         if (shouldSplit && !renderSplitActive_) {
             renderSplitActive_ = true;
             startEncodeTask();                 // spawns the task (at boot it just parks in waitNotify)
+            // The task couldn't be created (startEncodeTask cleared the flag): drop the handoff buffer
+            // too. It exists ONLY to be read by core 1 — keeping it would leave passBufferToDrivers()
+            // pointing every driver at a buffer nothing composites into, so they'd render the last
+            // frame forever. Freeing it re-selects the layer buffer (the inline zero-copy path).
+            if (!renderSplitActive_ && !needOutput) {
+                outputBuffer_.free();
+                setDynamicBytes(outputBuffer_.bytes());
+            }
         } else if (!shouldSplit && renderSplitActive_) {
             stopEncodeTask();                  // drains core 1 before we leave split mode
             renderSplitActive_ = false;

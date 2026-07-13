@@ -144,6 +144,7 @@ public:
     /// recurse. A driver that overrides release() for its own peripheral cleanup chains to this
     /// afterwards: `deinit(); DriverBase::release();`.
     void release() override {
+        freeWire();          // the shared correction scratch — owned here, so no driver re-frees it
         clearFailBuf();
         clearConfigErr();
         setConfigWarn(nullptr);

@@ -28,6 +28,20 @@ The **classic ESP32 has 8 RMT TX channels**, so `RmtLedDriver` covers ≤8 paral
 
 Still future: the **virtual (shift-register) driver** — fan one i80 lane out to 8+ physical strands via 74HC595-class latches (hpwit's I2SClocklessVirtual lineage, ~120 outputs), **acceptance floor 48×256 = 12288 lights**. Triggered when a ≥17-output board arrives. **Build it on the shipped i80/Parlio base, S3/P4-first:** there the DMA buffer comes from PSRAM (the SE16 already drives 16,384 lights), so the 12288 floor is reachable on the *existing* whole-frame model with no new memory model. On the **classic** chip that floor is out of reach (internal-RAM-bound at 2048) — a documented limit of that chip, and the only thing that would lift it is the parked ring above. So the virtual driver is **not** blocked on the ring; do not sequence them that way.
 
+### ArtPoll discovery — know which tubes are alive (next increment on NetworkSendDriver)
+
+`NetworkSendDriver` now unicasts to a list of receivers (`ips` + `lightsPerIp`), which is the Art-Net-4-conformant model. What it cannot do is **tell whether a receiver is actually there**: UDP is fire-and-forget, so a dead tube is invisible to the sender. The spec's own answer is discovery — *"The transmitting device must regularly ArtPoll the network to detect any change in devices which are subscribed"* — and it is the natural next increment.
+
+**Why it earns its place (product-owner experience, 2026-07-13):** a dead tube in a prior setup *made the other tubes hiccup*. The mechanism is that a send to an unresolvable address stalls or errors **inside the frame loop**, delaying the packets for every destination after it — so one dark tube degrades the live ones, every frame. The send loop is now written to tolerate that (a failed `sendToAddr` drops that packet and moves on, and under `multicore` the whole send is off the render core), but tolerating is not the same as **knowing**: with discovery we can simply **skip destinations that haven't answered**, which removes the stall at its source rather than absorbing it.
+
+**Scope (~130–150 lines + tests; the receive half already exists).** `ArtNetPacket.h` already builds+parses, `UdpSocket` already binds and reports the sender's IP:
+- **ArtPoll send** — broadcast a 14-byte poll every ~3 s (this is the one packet Art-Net *does* broadcast, by design).
+- **ArtPollReply parse** — fixed-layout 239-byte reply: node name, IP, and its subscribed universes.
+- **A node table** — IP → last-seen; mark offline after ~9 s of silence (3 missed polls, the spec's own cadence).
+- **Use it:** skip offline destinations in the send loop; surface the live/dead list as a read-only status. **Bonus, and arguably the real prize: auto-populate `ips`** — the user stops typing addresses at all, which is how a professional controller behaves.
+
+Do it as its own increment, after the multi-destination unicast lands.
+
 ### RS-485 / DMX-512 wired output (future) — the physical-DMX driver
 
 projectMM already speaks DMX **over the network** (Art-Net / sACN via `NetworkReceiveEffect`). The missing half is **wired DMX-512 out**: driving DMX fixtures (moving heads, par cans, wired pixel controllers) directly over an RS-485 differential pair, which is what the RS-485 hardware on carrier boards like the [MHC-WLED ESP32-P4 shield](../../reference/mhc-wled-esp32-p4-shield.md) is *for*. DMX-512 is a 250 kbps async serial frame (a break + mark-after-break + 513 bytes: start code + 512 channels) shipped over RS-485 — the textbook fixture-control transport. A DMX driver would map the light buffer (or a fixture/attribute model — see the [Fixture model — moving heads, beams](#fixture-model--moving-heads-beams-long-term) item below) to DMX channels and clock the frame out a UART in RS-485 mode.

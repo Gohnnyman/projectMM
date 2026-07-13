@@ -421,6 +421,77 @@ body {
     display: none;
 }
 
+/* Tab strip — a container of interchangeable peers (Drivers, Layers, Layouts, Services) shows one
+   child at a time, so the card stays short however many exist. The strip scrolls sideways rather
+   than wrapping: a row of tabs that reflows to two lines shifts every card below it on each add.
+   (A Layer's effect+modifier chain is NOT tabbed — that stack is ordered and meant to be seen.) */
+.tab-strip {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;              /* the strip is short; a scrollbar under it is noise */
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+}
+.tab-strip::-webkit-scrollbar { display: none; }
+
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;                     /* never squeeze a name to fit — scroll instead */
+    padding: 6px 12px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tab:hover { color: var(--fg); }
+.tab-active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* A fault on a BACKGROUND tab has to be visible from the strip — a tab that can hide an error is
+   worse than no tab. Same two severity colors the status row uses. */
+.tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+.tab-dot-error   { background: #e94560; }
+.tab-dot-warning { background: #f5a623; }
+
+.tab-add {
+    color: var(--accent);
+    font-weight: 600;
+    padding-inline: 10px;
+}
+.tab-add:active { cursor: pointer; }
+
+/* Drag-to-reorder: the strip IS the child list, so dragging a tab reorders the modules. Same visual
+   language as the card drag (.dragging / .drag-over) so the two read as one gesture. */
+.tab[draggable="true"] { cursor: grab; }
+.tab.dragging {
+    opacity: 0.4;
+    cursor: grabbing;
+}
+.tab.drag-over {
+    /* the dropped tab takes this one's slot — mark the landing edge, not the whole tab */
+    box-shadow: inset 2px 0 0 0 var(--accent);
+}
+
+.tab-panel { min-width: 0; }            /* let a wide child scroll inside, not blow out the card */
+
 /* Collapsible "settings" wrapper for a container module's own controls.
    Native <details>/<summary> — defaults to collapsed; children of the
    container are visible without a click, parent settings open on demand. */
@@ -1096,7 +1167,7 @@ body {
 
 /* ---------------------------------------------------------------------------
    File Manager — breadcrumb + entry list + inline editor (FileManagerModule).
-   Theme-aware via the shared --vars; no hardcoded colours.
+   Theme-aware via the shared --vars; no hardcoded colors.
    --------------------------------------------------------------------------- */
 .fm-panel { margin-top: 8px; }
 

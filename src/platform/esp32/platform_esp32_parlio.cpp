@@ -155,9 +155,17 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     // item. Zeroed so the trailing latch pad holds lines LOW.
     st->buf[0] = static_cast<uint8_t*>(heap_caps_malloc(
         bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED));
-    if (!st->buf[0])
+    // Internal fallback — guarded by the SAME reserve rule buf[1] uses below. Without the guard this
+    // is the hole the init gate can't see: the gate admits the config because PSRAM reports room, the
+    // SPIRAM malloc then fails anyway (the measured P4 reality above), and an unguarded fallback drops
+    // internal RAM below HEAP_RESERVE — starving WiFi/HTTP. Failing here instead degrades honestly:
+    // createState returns null and the driver reports the init failure as a status.
+    if (!st->buf[0]
+        && heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+               >= bufferBytes + HEAP_RESERVE) {
         st->buf[0] = static_cast<uint8_t*>(heap_caps_aligned_alloc(
             64, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    }
     if (!st->buf[0]) { destroyState(st); return nullptr; }
     std::memset(st->buf[0], 0, bufferBytes);
     st->cap = bufferBytes;
@@ -218,12 +226,15 @@ bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
     // unit would fail every transmit silently (see kParlioMaxTransferBytes). The driver reports the
     // init failure as a status; the fix for the user is fewer lights/lane or the start/count window.
     if (bufferBytes > kParlioMaxTransferBytes) return false;
-    // Keep the platform memory reserve intact — degrade (init failure → driver
-    // idles with a status error) rather than starve the system of internal RAM.
-    if (heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
-        < bufferBytes + HEAP_RESERVE) {
-        return false;
-    }
+    // Can the frame be placed AT ALL? Mirror what createState actually does: it allocates PSRAM-first
+    // (the P4's GDMA reaches external RAM) and only falls back to internal. Gating on internal alone
+    // rejected frames PSRAM could hold — a real capacity loss, since PSRAM is where the big frames go.
+    // The HEAP_RESERVE condition applies only to the INTERNAL path: an internal frame must not eat the
+    // WiFi/HTTP reserve (degrade with a status instead), while a PSRAM frame never touches it.
+    const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM) >= bufferBytes;
+    const bool fitsInternal = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+                              >= bufferBytes + HEAP_RESERVE;
+    if (!fitsPsram && !fitsInternal) return false;
     ParlioState* st = createState(dataPins, laneCount, pclkHz, bufferBytes, wantSecondBuffer);
     if (!st) return false;
     h.impl = st;

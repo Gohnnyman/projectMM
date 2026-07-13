@@ -69,7 +69,7 @@ inline const char* assignCounts(const char* s, uint8_t nPins,
         if (*p) {
             char* end = nullptr;
             const long v = std::strtol(p, &end, 10);
-            if (end == p || v < 0) return "invalid ledsPerPin list";
+            if (end == p || v < 0) return "invalid count list";
             while (*end == ' ') end++;
             if (*end == '\0') {   // exactly one number → broadcast it
                 nrOfLightsType remaining = totalLights;
@@ -95,7 +95,7 @@ inline const char* assignCounts(const char* s, uint8_t nPins,
     while (p && *p && nExplicit < nPins) {
         char* end = nullptr;
         const long v = std::strtol(p, &end, 10);
-        if (end == p || v < 0) return "invalid ledsPerPin list";
+        if (end == p || v < 0) return "invalid count list";
         while (*end == ' ') end++;
         const nrOfLightsType c =
             (v > static_cast<long>(remaining)) ? remaining
@@ -103,7 +103,7 @@ inline const char* assignCounts(const char* s, uint8_t nPins,
         counts[nExplicit++] = c;
         remaining = static_cast<nrOfLightsType>(remaining - c);
         if (*end == '\0') break;
-        if (*end != ',') return "invalid ledsPerPin list";
+        if (*end != ',') return "invalid count list";
         p = end + 1;
     }
     const uint8_t nRemaining = static_cast<uint8_t>(nPins - nExplicit);

@@ -49,12 +49,15 @@ Detail: [RMT](moxygen/RmtLedDriver.md) · [i80](moxygen/I80LedDriver.md) · [Par
 
 <img src="../../assets/light/drivers/NetworkSendDriver.png" width="300" alt="NetworkSend controls">
 
-Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one burst per frame, compatible with Falcon/Advatek controllers, xLights, and LedFx.
+Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one burst per frame, compatible with Falcon/Advatek controllers, xLights, and LedFx. Feeds **one or more receivers** from a single driver: each gets its own slice of the window, unicast to its own address.
 
 - `protocol` — Art-Net / E1.31 / DDP (default Art-Net); the destination port follows automatically.
-- `ip` — destination (default `255.255.255.255` broadcast reaches every LAN receiver; set a unicast address to target one).
-- `universe_start` — first universe for Art-Net / E1.31 (DDP is byte-addressed, ignores it).
+- `ips` — the receivers. **Blank by default — the driver idles until set**, so it never sends uninvited traffic. Type the full address once, then a range or a list: `192.168.1.70-74` (five tubes, ends inclusive) or `192.168.1.60,61,62,65`; both mix, and a further full address switches subnet.
+- `lightsPerIp` — lights per receiver, same idiom as an LED driver's `ledsPerPin`: **blank** = split the window evenly; **one number** = that many each; **a list** `150,100,50` = one per receiver by position.
+- `universe_start` — first universe for Art-Net / E1.31 (DDP ignores it). Restarts per receiver — each is an independent node addressing its own strip.
 - `fps` — frame-rate limit (default 50, 1–120).
+
+Unicast is the default because Art-Net 4 requires it and because broadcast makes *every* host on the LAN parse *every* packet; a broadcast address still works if you type one. The full addressing rationale (and the one case where broadcast is the better tool) is on the [detail page](moxygen/NetworkSendDriver.md).
 
 Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 

@@ -54,6 +54,11 @@ const TIMING_MODES = ["fps", "ms"];
 const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
+const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
+
+// The open tab per container, persisted so a reload doesn't dump you back on the first child.
+let selectedTabs = {};
+try { selectedTabs = JSON.parse(lsRead(LS_TABS, "{}")) || {}; } catch { selectedTabs = {}; }
 
 function lsRead(key, defaultVal) {
     const v = localStorage.getItem(key);
@@ -489,11 +494,142 @@ function renderModuleTree(mod, parentEl, depth) {
     parentEl.appendChild(card);
     // Children render inside this card's .card-children wrapper, not as flat
     // siblings. childrenEl is null for modules that don't accept children.
-    if (childrenEl && mod.children && mod.children.length > 0) {
-        for (const child of mod.children) {
-            renderModuleTree(child, childrenEl, depth + 1);
-        }
+    if (!childrenEl || !mod.children || mod.children.length === 0) return;
+
+    // One rule: a TOP-LEVEL module shows its children one at a time behind a tab strip, so its card
+    // stays short however many children it has. Deeper levels stack as before. The tabs are derived
+    // from mod.children on every render, so adding a layer adds its tab — there is no tab registry
+    // to keep in sync, which is the whole of the "dynamic" requirement.
+    if (depth === 0) {
+        // The "+" tab takes over the add affordance, so hide the footer's duplicate button — but keep
+        // the footer element itself, because openTypePicker renders the picker into it.
+        const addBtn = card.querySelector(".card-footer > .add-btn");
+        if (addBtn) addBtn.style.display = "none";
+        renderChildTabs(mod, childrenEl, depth);
+        return;
     }
+    for (const child of mod.children) {
+        renderModuleTree(child, childrenEl, depth + 1);
+    }
+}
+
+// Drag a tab onto another to reorder — the tab strip IS the child list, so reordering tabs reorders
+// the modules. Deliberately the same insert-semantics + moveModuleTo() call the card drag uses
+// (attachDragHandlers): one reorder path, so a tab drag and a card drag can't drift apart.
+function attachTabDragHandlers(tab, child, parent) {
+    tab.draggable = true;
+
+    tab.addEventListener("dragstart", (e) => {
+        e.stopPropagation();                       // don't let the enclosing card's dragstart claim it
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", child.name);
+        tab.classList.add("dragging");
+    });
+    tab.addEventListener("dragend", () => {
+        tab.classList.remove("dragging");
+        document.querySelectorAll(".tab.drag-over").forEach(t => t.classList.remove("drag-over"));
+    });
+    tab.addEventListener("dragover", (e) => {
+        const src = document.querySelector(".tab.dragging");
+        if (!src || src === tab) return;
+        if (src.parentElement !== tab.parentElement) return;   // same strip only — not another container's
+        e.preventDefault();
+        tab.classList.add("drag-over");
+    });
+    tab.addEventListener("dragleave", () => tab.classList.remove("drag-over"));
+    tab.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        tab.classList.remove("drag-over");
+        const srcName = e.dataTransfer.getData("text/plain");
+        if (!srcName || srcName === child.name) return;
+        // Re-find the index by NAME, not from the captured render-time object: state is replaced on
+        // every WS push, so `parent` here would be stale within ~1 s (same trap the card drag notes).
+        const live = findModule(parent.name);
+        const targetIdx = ((live && live.children) || []).findIndex(c => c.name === child.name);
+        if (targetIdx < 0) return;
+        moveModuleTo(srcName, targetIdx);
+    });
+}
+
+// A tab carries its module's fault severity as a dot, because a tab that can HIDE an error is worse
+// than no tab: a driver failing on a background tab must still be visible from the strip.
+function applyTabDot(tab, mod) {
+    const old = tab.querySelector(".tab-dot");
+    if (old) old.remove();
+    if (mod.severity !== "error" && mod.severity !== "warning") return;
+    const dot = document.createElement("span");
+    dot.className = "tab-dot tab-dot-" + mod.severity;
+    tab.appendChild(dot);
+}
+
+// Patch-path twin of applyTabDot: the tab strip is built in renderCards(), which the WS value patch
+// deliberately never re-runs — so without this a fault appearing on a background tab would stay
+// invisible until the next full render. (The UI has two render paths; a rule must live in both.)
+function updateTabDot(mod) {
+    const tab = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
+    if (tab) applyTabDot(tab, mod);
+}
+
+// Tab strip + the one selected child. `active` falls back to the first child whenever the remembered
+// tab is gone (the driver was deleted) or was never set, so the selection can never dangle.
+function renderChildTabs(mod, childrenEl, depth) {
+    const names = mod.children.map(c => c.name);
+    let active = selectedTabs[mod.name];
+    if (!names.includes(active)) active = names[0];
+
+    const strip = document.createElement("div");
+    strip.className = "tab-strip";
+    strip.setAttribute("role", "tablist");
+
+    for (const child of mod.children) {
+        const tab = document.createElement("button");
+        tab.className = "tab" + (child.name === active ? " tab-active" : "");
+        tab.type = "button";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", child.name === active ? "true" : "false");
+        // Name + the module's own status dot, so a driver erroring on a background tab is still
+        // visible without opening it — a tab that can hide a fault is worse than no tab.
+        tab.dataset.tabMid = child.name;   // so updateTabDot can find it on the WS patch path
+        tab.textContent = child.name;
+        applyTabDot(tab, child);
+        attachTabDragHandlers(tab, child, mod);
+        tab.addEventListener("click", () => {
+            selectedTabs[mod.name] = child.name;
+            localStorage.setItem(LS_TABS, JSON.stringify(selectedTabs));
+            renderCards();
+        });
+        strip.appendChild(tab);
+    }
+
+    // "+" lives at the END OF THE STRIP, where a new tab appears — not in the card footer below the
+    // panel, which would read as "add something to the open driver" rather than "add a driver".
+    // createCard still renders the footer button for non-tabbed containers; here we hide it and put
+    // the affordance where the tabs are.
+    if (acceptsNewChildren(mod)) {
+        const addTab = document.createElement("button");
+        addTab.className = "tab tab-add";
+        addTab.type = "button";
+        addTab.textContent = "+";
+        addTab.title = "add " + rolesAcceptedBy(mod).join(" / ");
+        addTab.addEventListener("click", () => {
+            // THIS card's own footer — a plain querySelector would match the first .card-footer in the
+            // subtree, which belongs to a nested child's card (Layers would then offer the Layer's
+            // effects instead of another layer). Scope to direct children of this card.
+            const card = childrenEl.parentElement;
+            const footer = [...card.children].find(el => el.classList.contains("card-footer"));
+            if (footer) openTypePicker(mod, footer);
+        });
+        strip.appendChild(addTab);
+    }
+    childrenEl.appendChild(strip);
+
+    const panel = document.createElement("div");
+    panel.className = "tab-panel";
+    panel.setAttribute("role", "tabpanel");
+    childrenEl.appendChild(panel);
+    const child = mod.children.find(c => c.name === active);
+    if (child) renderModuleTree(child, panel, depth + 1);
 }
 
 function createCard(mod, depth) {
@@ -2050,6 +2186,7 @@ function updateValues() {
     if (!state || !state.modules) return;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
     for (const mod of allModules()) {
+        updateTabDot(mod);   // a fault on a BACKGROUND tab must surface without opening it
         updateModuleControls(mod);
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
@@ -2458,8 +2595,17 @@ function emojiTagsFor(t) {
 // They differ only in the role filter and the commit action; the search box,
 // list, and keyboard nav are shared.
 function openTypePicker(parentMod, anchorEl) {
+    const roles = rolesAcceptedBy(parentMod);
+    // One candidate = no choice to make, so don't stage a picker to ask a question with one answer:
+    // "+" on Layers just adds a Layer. (Same filter openPicker uses, so the two can't disagree about
+    // what the candidates are.)
+    const candidates = availableTypes.filter(t => roles.includes(t.role));
+    if (candidates.length === 1) {
+        addModule(candidates[0].name, parentMod.name);
+        return;
+    }
     openPicker(anchorEl, {
-        roles: rolesAcceptedBy(parentMod),
+        roles,
         actionLabel: "create",
         commit: (type) => addModule(type, parentMod.name)
     });

@@ -144,3 +144,63 @@ TEST_CASE("DDP packet header format") {
     mm::buildDdpPacket(pkt, 0, /*push=*/true, data, 3);
     CHECK(pkt[0] == 0x41);                    // push set on the frame's last packet
 }
+
+// The destination list is EMPTY by default, so an unconfigured driver idles instead of falling back
+// to the 255.255.255.255 broadcast. Broadcast does not scale and its failure lands on the NETWORK,
+// not the device: an ArtNet universe id sits in the payload, so every host on the segment must
+// receive and parse every packet before it can discard it (~4,850 pkt/s on a 128x128 grid — measured
+// starving an ESP32 until its HTTP stopped answering). Art-Net 4 forbids broadcast ArtDmx outright.
+TEST_CASE("NetworkSendDriver: no destination by default — it idles, and says why") {
+    mm::NetworkSendDriver d;
+    CHECK(d.ips[0] == '\0');            // blank, NOT an inherited broadcast address
+    d.defineControls();
+    d.prepare();
+    CHECK(d.status() != nullptr);        // explains itself rather than idling silently
+}
+
+// The multi-destination fan-out: ONE driver feeds N tubes, each with its own IP and its own
+// contiguous run of the window. This is the Art-Net-conformant shape (ArtDmx must be unicast to the
+// node owning each universe), and it costs the same total packets as a single broadcast stream while
+// keeping every packet off the other nodes' NICs.
+TEST_CASE("NetworkSendDriver: a range fans the window out over its tubes, one slice each") {
+    mm::Buffer src;
+    src.allocate(300, 3);                     // 300 lights to spread over the tubes
+    mm::NetworkSendDriver d;
+    d.defineControls();
+    std::strcpy(d.ips, "192.168.1.70-74");    // 5 tubes: .70 .71 .72 .73 .74
+    d.setSourceBuffer(&src);
+    d.prepare();
+
+    REQUIRE(d.destinationCount() == 5);
+    CHECK(d.destinationAt(0)[3] == 70);
+    CHECK(d.destinationAt(4)[3] == 74);       // inclusive at BOTH ends — 70-74 is five tubes
+    CHECK(d.destinationAt(2)[0] == 192);      // the typed-once subnet carries across the range
+    CHECK(d.destinationAt(2)[2] == 1);
+
+    // Blank lightsPerIp → the window splits evenly across the tubes (the ledsPerPin idiom).
+    for (uint8_t i = 0; i < 5; i++) CHECK(d.lightsAt(i) == 60);   // 300 / 5
+}
+
+TEST_CASE("NetworkSendDriver: lightsPerIp follows the ledsPerPin idiom") {
+    mm::Buffer src;
+    src.allocate(300, 3);
+    mm::NetworkSendDriver d;
+    d.defineControls();
+    std::strcpy(d.ips, "192.168.1.70,71,72");
+    d.setSourceBuffer(&src);
+
+    SUBCASE("one number = that many to EVERY tube") {
+        std::strcpy(d.lightsPerIp, "100");
+        d.prepare();
+        CHECK(d.lightsAt(0) == 100);
+        CHECK(d.lightsAt(1) == 100);
+        CHECK(d.lightsAt(2) == 100);
+    }
+    SUBCASE("a list = one per tube, by position") {
+        std::strcpy(d.lightsPerIp, "150,100,50");
+        d.prepare();
+        CHECK(d.lightsAt(0) == 150);          // tubes may differ in length
+        CHECK(d.lightsAt(1) == 100);
+        CHECK(d.lightsAt(2) == 50);
+    }
+}

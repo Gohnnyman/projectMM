@@ -183,8 +183,7 @@ public:
     /// (DriverBase::release()).
     void release() override {
         deinit();
-        freeWire();              // the correction scratch — freed on the true teardown (not on reinit)
-        DriverBase::release();   // clears failBuf_ + configErr_
+        DriverBase::release();   // frees the correction scratch, clears failBuf_ + configErr_
     }
 
     /// Pure build (see MoonModule::prepare): re-parse the lanes and (re)init the bus off the

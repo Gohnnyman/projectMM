@@ -63,3 +63,34 @@ jobs:
       # form is required: a bare directory arg is treated as a module to execute.
       - name: node --test
         run: node --test "test/js/**/*.test.mjs"
+
+  # Sanitizers — the safety net for the multicore render/encode split. A second thread now sits
+  # beside code that was single-threaded for its whole life: a shared output buffer handed between
+  # cores, an atomic stop flag, a try-lock over the WebSocket sender, and a child array that can be
+  # reallocated while the worker walks it. Hand-written tests prove the races we THOUGHT of; ASan
+  # (use-after-free) and TSan (data races) find the ones we didn't — ASan is what would have caught
+  # the delete-a-driver-mid-encode bug automatically.
+  #
+  # Linux-only, and that is not laziness: on macOS/arm64 Apple's ASan runtime HANGS at startup and
+  # TSan SEGFAULTS on a hello-world (both reproduced with minimal programs — toolchain bugs, not our
+  # code). Linux is the only place TSan runs at all, which makes this job the sole race gate.
+  # Locally: `uv run moondeck/check/check_sanitizers.py` (uses Homebrew LLVM, ASan only on macOS).
+  sanitizers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # a TSan race and an ASan UAF are independent signals — report both
+      matrix:
+        kind: [address, thread]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: build + run unit tests under ${{ matrix.kind }}sanitizer
+        run: |
+          cmake -S . -B build/san -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.kind }} -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=${{ matrix.kind }}"
+          cmake --build build/san --target mm_tests -j"$(nproc)"
+          # Leak detection is a different concern from the races/UAF this gate hunts, and it fires on
+          # third-party static init; keep the signal on what we're actually looking for.
+          ASAN_OPTIONS=detect_leaks=0 TSAN_OPTIONS=halt_on_error=1 ./build/san/test/mm_tests

@@ -39,7 +39,7 @@ namespace mm {
 class RmtLedDriver : public DriverBase {
 public:
     /// WS2812/SK6812 strips are physically GRB-wired, so a fresh RMT driver references the "GRB"
-    /// preset by default (a strip attached to a freshly-flashed board shows correct colours). The
+    /// preset by default (a strip attached to a freshly-flashed board shows correct colors). The
     /// user can pick any preset from the library.
     RmtLedDriver() { setDefaultPresetName("GRB"); }
 
@@ -188,8 +188,7 @@ public:
     void release() override {
         deinitAll();
         freeSymbols();
-        freeWire();
-        DriverBase::release();   // clears failBuf_ + configErr_
+        DriverBase::release();   // frees the correction scratch, clears failBuf_ + configErr_
     }
 
     /// Pure build (see MoonModule::prepare): re-parse, resize the symbol buffer, and (re)init the
