@@ -106,8 +106,7 @@ public:
     void setup() override {
         // Copy the file-scope globals into the bound buffers on boot so the
         // first WS state push surfaces a coherent "idle" / 0 pair.
-        std::strncpy(statusStr_, g_otaStatus, sizeof(statusStr_) - 1);
-        statusStr_[sizeof(statusStr_) - 1] = '\0';
+        std::snprintf(statusStr_, sizeof(statusStr_), "%s", g_otaStatus);   // always NUL-terminates
         publishStatus();
         bytesRead_ = g_otaBytesRead;
         totalSnap_ = g_otaBytesTotal;
@@ -153,8 +152,7 @@ public:
         // Poll the OTA task's progress + status. No locks: the writer is
         // a single task, reads are atomic at this granularity, and a torn
         // read shows as a brief mid-update glimpse — visually harmless.
-        std::strncpy(statusStr_, g_otaStatus, sizeof(statusStr_) - 1);
-        statusStr_[sizeof(statusStr_) - 1] = '\0';
+        std::snprintf(statusStr_, sizeof(statusStr_), "%s", g_otaStatus);   // always NUL-terminates
         publishStatus();
         bytesRead_ = g_otaBytesRead;
         // Re-bind on total transition. Only fires once per OTA (and once on

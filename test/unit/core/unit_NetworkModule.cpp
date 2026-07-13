@@ -58,9 +58,14 @@ TEST_CASE("NetworkModule::setWifiCredentials accepts long SSID without crash") {
     // ssid_ so we can't assert the exact truncated value here — adding one
     // for test purposes only is rejected (see CLAUDE.md "Concrete first").
     mm::NetworkModule net;
+    // The `volatile` length keeps the compiler from constant-folding this into a known 99-char
+    // source: with it folded, GCC inlines setWifiCredentials, sees 99 bytes going into the 33-byte
+    // ssid_, and warns that the copy truncates — which is exactly the behaviour this test ASSERTS is
+    // handled safely. The over-long input is the point; truncating it is the expected outcome.
+    volatile size_t len = 99;
     char longSsid[100];
-    std::memset(longSsid, 'A', sizeof(longSsid) - 1);
-    longSsid[sizeof(longSsid) - 1] = 0;
+    std::memset(longSsid, 'A', len);
+    longSsid[len] = 0;
     net.setWifiCredentials(longSsid, "pw");
     CHECK(net.dirty());
 }

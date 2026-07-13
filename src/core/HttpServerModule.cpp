@@ -2397,7 +2397,11 @@ bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen
     // The app header follows the WS header in the same buffer. sizeof(hdr)=16 holds the 10-byte WS
     // form + the preview app headers (≤10 bytes); guard so a future larger header can't overrun.
     if (wsLen + headerLen > sizeof(previewSend_.hdr)) return false;
-    for (size_t i = 0; i < headerLen; i++) previewSend_.hdr[wsLen + i] = header[i];
+    // memcpy, not a hand-rolled byte loop: the loop indexed hdr[wsLen + i], and the compiler cannot
+    // see through writeWsFrameHeader that wsLen is at most 10 — so it must assume the index could be
+    // anywhere and warns on the write (-Wstringop-overflow). memcpy states the same intent with the
+    // destination and length in one expression, which it CAN check against the guard above.
+    std::memcpy(previewSend_.hdr + wsLen, header, headerLen);
 
     previewSend_.hdrLen = wsLen + headerLen;
     previewSend_.body = body;

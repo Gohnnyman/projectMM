@@ -146,7 +146,12 @@ private:
     // external integrations stay pinned (the WLED/Tasmota/HA convention). The friendly display name
     // is a separate concern, published on the retained `name` topic (publishName). buildTopic writes
     // <prefix>/<suffix>.
-    const char* prefixRoot_ = "projectMM";
+    // constexpr, not a `const char*` member: the compiler can then prove the topic-buffer bounds
+    // downstream (GCC otherwise warns that "%s/%s" *may* truncate, because a runtime pointer could
+    // point at anything). The root never varies at runtime, so saying so costs nothing.
+    static constexpr const char* kPrefixRoot = "projectMM";
+    // "projectMM" + '/' + 6 hex + NUL. Sized from the parts, so a longer root cannot silently truncate.
+    static constexpr size_t kPrefixLen = 9 + 1 + 6 + 1;
     void topicPrefix(char* out, size_t cap) const;
     void buildTopic(char* out, size_t cap, const char* suffix) const;
 

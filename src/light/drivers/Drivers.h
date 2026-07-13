@@ -382,6 +382,12 @@ public:
         // or a single layer with a LUT — see prepare). A null data_ means
         // prepare couldn't claim a block (heap fragmentation): skip the blend;
         // drivers then read the raw Layer buffer / send nothing.
+        //
+        // The single-layer source, resolved ONCE: both single-layer branches below need the same
+        // value, and declaring it per-branch in an if-init shadowed the outer one (MSVC C4456 —
+        // legitimately: two `Layer* out` in one chain reads as a bug even when it isn't).
+        Layer* srcLayer = layers_ ? layers_->firstEnabledLayer() : layer_;
+
         if (outputBuffer_.data() && layers_ && layers_->enabledLayerCount() > 1) {
             // Multi-layer composite: blend each enabled layer in container order.
             // The first (bottom) layer clears + overwrites; each subsequent layer
@@ -396,21 +402,19 @@ public:
                 blendMap(L->buffer(), outputBuffer_, L->lut(), L->channelsPerLight(),
                          op, op_opacity, /*clearFirst=*/first);
             });
-        } else if (Layer* out = layers_ ? layers_->firstEnabledLayer() : layer_;
-                   outputBuffer_.data() && out && out->lut().hasLUT()) {
+        } else if (outputBuffer_.data() && srcLayer && srcLayer->lut().hasLUT()) {
             // Single layer with a LUT (the only enabled one, or a pinned setLayer):
             // map its logical buffer into physical space. The original fast path.
-            // `out` is the enabled source, never activeLayer()'s disabled fallback;
+            // `srcLayer` is the enabled source, never activeLayer()'s disabled fallback;
             // the outputBuffer_.data() guard already excludes the all-disabled case
             // (needOutput is false then), this keeps the source choice explicit.
-            blendMap(out->buffer(), outputBuffer_, out->lut(), out->channelsPerLight());
-        } else if (Layer* out = layers_ ? layers_->firstEnabledLayer() : layer_;
-                   renderSplitActive_ && outputBuffer_.data() && out) {
+            blendMap(srcLayer->buffer(), outputBuffer_, srcLayer->lut(), srcLayer->channelsPerLight());
+        } else if (renderSplitActive_ && outputBuffer_.data() && srcLayer) {
             // Split active + the identity case (a lone no-LUT layer): normally drivers would read the
             // layer's buffer directly (zero-copy), but core 1 must NOT read a buffer core 0's effects
             // are mutating — so copy the frame into the split-owned outputBuffer_ (a 1:1 map through
             // an identity LUT). This is why prepare() forces outputBuffer_ in split mode even here.
-            blendMap(out->buffer(), outputBuffer_, out->lut(), out->channelsPerLight());
+            blendMap(srcLayer->buffer(), outputBuffer_, srcLayer->lut(), srcLayer->channelsPerLight());
         }
         // (Split OFF + a lone no-LUT layer: outputBuffer_ is null, drivers read the logical buffer
         // directly — the zero-copy path set in passBufferToDrivers, unchanged.)

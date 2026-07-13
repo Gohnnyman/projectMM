@@ -304,8 +304,12 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
                 char scratch[kScratch];
                 mm::json::parseString(json, key, scratch, maxLen);
                 if (!c.validate(scratch)) return ApplyResult::Malformed;
-                std::strncpy(static_cast<char*>(c.ptr), scratch, maxLen - 1);
-                static_cast<char*>(c.ptr)[maxLen - 1] = 0;
+                // snprintf, not strncpy: strncpy does NOT NUL-terminate when the source fills the
+                // buffer, so it needs the manual terminator that followed — a pattern GCC flags
+                // (-Wstringop-truncation) precisely because forgetting that line is a classic bug.
+                // snprintf always terminates and truncates identically. parseString already bounded
+                // the value to maxLen, so nothing is lost here.
+                std::snprintf(static_cast<char*>(c.ptr), maxLen, "%s", scratch);
                 return ApplyResult::Ok;
             }
             mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);

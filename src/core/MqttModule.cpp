@@ -37,12 +37,12 @@ constexpr size_t kSendBufLen = 256;
 void MqttModule::topicPrefix(char* out, size_t cap) const {
     uint8_t mac[6] = {};
     platform::getMacAddress(mac);
-    std::snprintf(out, cap, "%s/%02x%02x%02x", prefixRoot_, mac[3], mac[4], mac[5]);
+    std::snprintf(out, cap, "%s/%02x%02x%02x", kPrefixRoot, mac[3], mac[4], mac[5]);
 }
 
 // A full topic: <prefix>/<suffix>, e.g. projectMM/563cfe/on/set.
 void MqttModule::buildTopic(char* out, size_t cap, const char* suffix) const {
-    char prefix[96];
+    char prefix[kPrefixLen];              // exactly what topicPrefix can produce — no slack to truncate into
     topicPrefix(prefix, sizeof(prefix));
     std::snprintf(out, cap, "%s/%s", prefix, suffix);
 }
@@ -54,7 +54,7 @@ void MqttModule::buildDiscoveryTopic(char* out, size_t cap) const {
     uint8_t mac[6] = {};
     platform::getMacAddress(mac);
     std::snprintf(out, cap, "homeassistant/light/%s_%02x%02x%02x/config",
-                  prefixRoot_, mac[3], mac[4], mac[5]);
+                  kPrefixRoot, mac[3], mac[4], mac[5]);
 }
 
 // The availability (LWT) topic: <prefix>/status. The broker publishes the retained "offline" Will
@@ -120,7 +120,7 @@ void MqttModule::publishDiscovery(bool announce) {
     uint8_t mac[6] = {};
     platform::getMacAddress(mac);
     char id[24];
-    std::snprintf(id, sizeof(id), "%s_%02x%02x%02x", prefixRoot_, mac[3], mac[4], mac[5]);
+    std::snprintf(id, sizeof(id), "%s_%02x%02x%02x", kPrefixRoot, mac[3], mac[4], mac[5]);
     const char* dn = systemModule_ ? systemModule_->deviceName() : nullptr;
     if (!dn || !dn[0]) dn = id;
     // The deviceName is user-editable: a quote/backslash in it would produce invalid JSON. Escape it
@@ -180,7 +180,7 @@ void MqttModule::buildUpdateDiscoveryTopic(char* out, size_t cap) const {
     uint8_t mac[6] = {};
     platform::getMacAddress(mac);
     std::snprintf(out, cap, "homeassistant/update/%s_%02x%02x%02x/config",
-                  prefixRoot_, mac[3], mac[4], mac[5]);
+                  kPrefixRoot, mac[3], mac[4], mac[5]);
 }
 
 // Announce/retract the update entity. The announcement payload is ~300 bytes (short id +
@@ -211,7 +211,7 @@ void MqttModule::publishUpdateDiscovery(bool announce) {
     uint8_t mac[6] = {};
     platform::getMacAddress(mac);
     char id[24];
-    std::snprintf(id, sizeof(id), "%s_%02x%02x%02x", prefixRoot_, mac[3], mac[4], mac[5]);
+    std::snprintf(id, sizeof(id), "%s_%02x%02x%02x", kPrefixRoot, mac[3], mac[4], mac[5]);
     const char* dn = systemModule_ ? systemModule_->deviceName() : nullptr;
     if (!dn || !dn[0]) dn = id;
     char dnEsc[72];
@@ -604,7 +604,7 @@ void MqttModule::handleInboundByte(uint8_t byte) {
 void MqttModule::routePublish(const char* topic, const uint8_t* payload, size_t payloadLen) {
     // Match the topic suffix after our (derived) prefix. A short fixed payload is copied
     // NUL-terminated so the parsers below (strcmp / atoi) are safe on the non-terminated socket slice.
-    char prefix[96];
+    char prefix[kPrefixLen];              // exactly what topicPrefix can produce — no slack to truncate into
     topicPrefix(prefix, sizeof(prefix));
     const size_t prefixLen = std::strlen(prefix);
     if (std::strncmp(topic, prefix, prefixLen) != 0 || topic[prefixLen] != '/') return;

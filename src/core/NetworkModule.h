@@ -136,10 +136,13 @@ public:
 
     void setWifiCredentials(const char* ssid, const char* password) {
         if (!ssid) return;
-        std::strncpy(ssid_, ssid, sizeof(ssid_) - 1);
-        ssid_[sizeof(ssid_) - 1] = 0;
-        std::strncpy(password_, password ? password : "", sizeof(password_) - 1);
-        password_[sizeof(password_) - 1] = 0;
+        // snprintf, not strncpy+manual-NUL: strncpy does not terminate when the source fills the
+        // buffer, so it always needs that second line — and forgetting it is a classic bug, which is
+        // why GCC flags the pattern. snprintf terminates and truncates identically. (A 99-char SSID
+        // into a 32-byte buffer DOES truncate — but an over-long SSID is invalid anyway, and a
+        // truncated-but-terminated string is what the old code already produced.)
+        std::snprintf(ssid_, sizeof(ssid_), "%s", ssid);
+        std::snprintf(password_, sizeof(password_), "%s", password ? password : "");
         markDirty();
         FilesystemModule::noteDirty();   // start the debounce so the change actually flushes
                                          // (markDirty alone only sets the bit; the save scheduler

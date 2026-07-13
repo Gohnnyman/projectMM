@@ -260,8 +260,7 @@ private:
             c.severity = nullptr;
             c.reason = nullptr;
             c.live = platform::gpioLiveState(gpio);   // sample the live pad now (tick1s, off the hot path)
-            std::strncpy(c.owner, owner ? owner : "", sizeof(c.owner) - 1);
-            c.owner[sizeof(c.owner) - 1] = '\0';
+            std::snprintf(c.owner, sizeof(c.owner), "%s", owner ? owner : "");   // always NUL-terminates
             return &c;
         }
         void addPinClaim(uint8_t gpio, const char* owner, const char* role) {

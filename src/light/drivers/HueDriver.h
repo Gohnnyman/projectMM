@@ -568,14 +568,19 @@ private:
     // id appears in that Room's member list. Writes up to kMaxLights indices into `out`, returns
     // the count. The single source of truth both the light-dropdown options and the driven set
     // derive from, so the dropdown and the driven subset can never disagree.
-    uint8_t roomColourLights(uint8_t* out) const {
+    // `out` is a reference-to-array, not a bare pointer: the bound then lives in the TYPE, so the
+    // compiler checks it (a wrong-sized caller is a compile error) instead of trusting the comment.
+    // With a bare uint8_t* the callee cannot see the caller's size at all, and GCC must assume the
+    // worst — it warned that these writes could run past the end (-Wstringop-overflow). lightCount_
+    // is itself capped at kMaxLights when the lights are parsed, so n never exceeds the array.
+    uint8_t roomColourLights(uint8_t (&out)[kMaxLights]) const {
         uint8_t n = 0;
         if (room_ == 0 || room_ > roomCount_) {              // "All" (or a stale index) → every colour light
-            for (uint8_t i = 0; i < lightCount_; i++) out[n++] = i;
+            for (uint8_t i = 0; i < lightCount_ && n < kMaxLights; i++) out[n++] = i;
             return n;
         }
         const uint32_t mask = roomMask_[room_ - 1];
-        for (uint8_t i = 0; i < lightCount_; i++)            // keep colour lights in this Room's bitmask
+        for (uint8_t i = 0; i < lightCount_ && n < kMaxLights; i++)   // keep colour lights in this Room's bitmask
             if (mask & (1u << i)) out[n++] = i;
         return n;
     }

@@ -26,13 +26,32 @@
 
 namespace mm::json {
 
+// The longest `"<key>"<sep>` search pattern these readers build. Sized from the parts rather than a
+// round number, so the bound is provable: 2 quotes + a colon + an optional space + NUL = 5 bytes of
+// fixture around the key.
+inline constexpr size_t kMaxKeyLen = 58;
+inline constexpr size_t kSearchLen = kMaxKeyLen + 5;
+
+// Build `"<key>"<sep>` into `buf` — the pattern the readers below strstr for. Returns false when the
+// key is too long to fit, which the caller MUST treat as "not found".
+//
+// Why it returns a bool rather than truncating: a truncated pattern still strstr's, and it matches
+// the WRONG thing (or nothing) — so an over-long key would silently read as absent, and an absent key
+// takes the default. That is the same silent-default failure mode that once reset a control to 0 on
+// every reboot. Failing the lookup loudly-in-code (and leaving the value untouched) beats guessing.
+// The single helper also removes the four copies of this snprintf that GCC flagged as truncating.
+inline bool buildKeyPattern(char (&buf)[kSearchLen], const char* key, const char* sep) {
+    const int n = std::snprintf(buf, sizeof(buf), "\"%s\"%s", key, sep);
+    return n > 0 && static_cast<size_t>(n) < sizeof(buf);
+}
+
 inline void parseString(const char* json, const char* key, char* out, size_t maxLen) {
     if (!json || !key || !out || maxLen == 0) return;
-    char search[48];
-    std::snprintf(search, sizeof(search), "\"%s\":\"", key);
+    char search[kSearchLen];
+    if (!buildKeyPattern(search, key, ":\"")) return;      // key too long → treat as absent
     const char* start = std::strstr(json, search);
     if (!start) {
-        std::snprintf(search, sizeof(search), "\"%s\": \"", key);
+        if (!buildKeyPattern(search, key, ": \"")) return;
         start = std::strstr(json, search);
     }
     if (!start) return;
@@ -85,18 +104,18 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
 // control's non-zero default (e.g. eth phyType=2) with 0 on a partial/older save.
 inline bool hasKey(const char* json, const char* key) {
     if (!json || !key) return false;
-    char search[48];
-    std::snprintf(search, sizeof(search), "\"%s\":", key);
+    char search[kSearchLen];
+    if (!buildKeyPattern(search, key, ":")) return false;   // key too long → treat as absent
     return std::strstr(json, search) != nullptr;
 }
 
 inline int parseInt(const char* json, const char* key) {
     if (!json || !key) return 0;
-    char search[48];
-    std::snprintf(search, sizeof(search), "\"%s\":", key);
+    char search[kSearchLen];
+    if (!buildKeyPattern(search, key, ":")) return 0;       // key too long → treat as absent
     const char* start = std::strstr(json, search);
     if (!start) {
-        std::snprintf(search, sizeof(search), "\"%s\": ", key);
+        if (!buildKeyPattern(search, key, ": ")) return 0;
         start = std::strstr(json, search);
     }
     if (!start) return 0;
@@ -105,11 +124,11 @@ inline int parseInt(const char* json, const char* key) {
 
 inline bool parseBool(const char* json, const char* key) {
     if (!json || !key) return false;
-    char search[48];
-    std::snprintf(search, sizeof(search), "\"%s\":", key);
+    char search[kSearchLen];
+    if (!buildKeyPattern(search, key, ":")) return false;   // key too long → treat as absent
     const char* start = std::strstr(json, search);
     if (!start) {
-        std::snprintf(search, sizeof(search), "\"%s\": ", key);
+        if (!buildKeyPattern(search, key, ": ")) return false;
         start = std::strstr(json, search);
     }
     if (!start) return false;
