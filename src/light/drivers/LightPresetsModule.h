@@ -200,7 +200,11 @@ public:
         p = Preset{};
         p.id = nextId_++;
         p.channelCount = 3;
-        std::snprintf(p.name, sizeof(p.name), "preset %lu", static_cast<unsigned long>(p.id));
+        // %u on a uint32 could in principle print 10 digits, which "preset " + name[16] cannot hold —
+        // GCC flags the truncation even though nextId_ never gets near it. Print the id modulo 10^5:
+        // the default name is a placeholder the user renames, and 5 digits provably fits.
+        std::snprintf(p.name, sizeof(p.name), "preset %u",
+                      static_cast<unsigned>(p.id % 100000u));
         count_++;
         rebuildPool();                       // give the new preset its slice (defaults R,G,B)
         uint8_t* r = roleAtMut(p);

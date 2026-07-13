@@ -48,8 +48,7 @@ TEST_CASE("FilesystemModule round-trip") {
         for (uint8_t i = 0; i < sys->controls().count(); i++) {
             auto& c = sys->controls()[i];
             if (std::strcmp(c.name, "deviceName") == 0) {
-                std::strncpy(static_cast<char*>(c.ptr), "MM-ROUND", 8);
-                static_cast<char*>(c.ptr)[8] = 0;
+                std::snprintf(static_cast<char*>(c.ptr), 9, "%s", "MM-ROUND");
                 sys->markDirty();
                 mm::FilesystemModule::noteDirty();
                 break;
@@ -60,7 +59,7 @@ TEST_CASE("FilesystemModule round-trip") {
         // synchronously — used here to keep the test deterministic without wall-clock waits.
         fs->flush();
 
-        char path[256];
+        char path[512];
         std::snprintf(path, sizeof(path), "%s/.config/SystemModule.json", tmpRoot);
         CHECK(std::filesystem::exists(path));
 
