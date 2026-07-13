@@ -76,7 +76,13 @@ public:
         calls.push_back({Call::Transmit, i});
         return true;   // the mock transfer always "starts"
     }
-    void busWait(uint8_t i, uint32_t) { calls.push_back({Call::Wait, i}); }
+    // Returns whether the transfer completed. `waitTimesOut` makes every wait report a TIMEOUT, so a
+    // test can prove the driver refuses to re-encode into a buffer the DMA may still be reading.
+    bool busWait(uint8_t i, uint32_t) {
+        calls.push_back({Call::Wait, i});
+        return !waitTimesOut;
+    }
+    bool waitTimesOut = false;
     uint32_t busLastTransmitUs() const { return lastTransmitUs; }   // mock wire-time KPI
     uint32_t lastTransmitUs = 0;   // a test can set this to check the wireUs string formatting
     void busDeinit() { cap_ = 0; buf_[0].clear(); buf_[1].clear(); inited_ = false; }
@@ -307,4 +313,39 @@ TEST_CASE("ParallelLedDriver reinit drains both in-flight buffers") {
     CHECK(d.inFlightForTest(0) == false);
     CHECK(d.inFlightForTest(1) == false);
     CHECK(d.activeForTest() == 0);
+}
+
+// A wait that TIMES OUT means the DMA may still be reading that buffer. Encoding into it anyway would
+// hand a live transfer a half-rewritten frame — the exact corruption the timeout exists to prevent.
+// (The seam used to return void, so the driver couldn't tell a completion from a timeout and cleared
+// inFlight_ either way; 🐇 CodeRabbit caught it.) The contract now: on timeout the buffer STAYS
+// in-flight, the frame is skipped, and the driver re-waits next tick — self-healing, never corrupting.
+TEST_CASE("ParallelLedDriver: a timed-out wait never re-encodes into the live buffer") {
+    MockParallelDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 64, /*async=*/true);
+
+    d.tick();   // encode+transmit buffer 0 → in flight
+    d.tick();   // encode+transmit buffer 1 → in flight; next tick must reuse buffer 0
+    REQUIRE(d.inFlightForTest(0) == true);
+
+    d.waitTimesOut = true;          // buffer 0's transfer is wedged (the DMA never completes)
+    const size_t before = d.calls.size();
+    d.tick();                       // must NOT encode/transmit into buffer 0
+
+    // It waited on 0 and then gave up — no Encode, no Transmit followed.
+    bool transmitted = false;
+    for (size_t i = before; i < d.calls.size(); i++)
+        if (d.calls[i].kind == Call::Transmit) transmitted = true;
+    CHECK_FALSE(transmitted);            // the live buffer was NOT reused
+    CHECK(d.inFlightForTest(0) == true); // still marked in flight, so the next tick re-waits
+
+    // The DMA completes: the very next tick proceeds normally — it self-heals, no reinit needed.
+    d.waitTimesOut = false;
+    d.tick();
+    bool transmittedNow = false;
+    for (size_t i = before; i < d.calls.size(); i++)
+        if (d.calls[i].kind == Call::Transmit) transmittedNow = true;
+    CHECK(transmittedNow);
 }

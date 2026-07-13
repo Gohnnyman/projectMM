@@ -80,6 +80,69 @@ const char* renderTaskName();
 // JSON + nesting predicate are testable on the host (no RTOS otherwise). `tasks` must outlive the use.
 void setTestTaskSnapshot(const TaskInfo* tasks, size_t count, const char* renderTask);
 
+// --- Pinned worker task + wake notification (render/encode multicore split) ------------------
+// A minimal own-a-thread seam: spawn one function on a named task pinned to `core`, plus a
+// single-slot wake notification. This is FreeRTOS's textbook lock-free pairing —
+// xTaskCreatePinnedToCore + a direct-to-task notification (xTaskNotifyGive / ulTaskNotifyTake),
+// which the RTOS documents as the lightweight replacement for a binary semaphore in a
+// single-producer/single-consumer wake. The multicore pipeline (Drivers render↔encode split)
+// is the first user; the async-ArtNet send wants the same primitive, so it lives in core.
+// No FreeRTOS type escapes the header (opaque handle, same rule as RmtWs2812Handle). Desktop
+// backs it with std::thread + a condition_variable so the handoff invariants are host-testable,
+// even though the core-split itself is an ESP32-only capability.
+struct WorkerTask { void* impl = nullptr; };
+using WorkerFn = void(*)(void* user);
+// Spawn `fn(user)` on a task named `name` with `stackBytes` stack, at `priority`, pinned to
+// `core` (0 or 1; -1 = no affinity). Returns false if the task couldn't be created — the caller
+// then runs the work inline (the allocate-and-degrade fallback). The spawned fn owns its loop and
+// returns only after stopPinnedTask signals it.
+bool spawnPinnedTask(WorkerTask& t, const char* name, WorkerFn fn, void* user,
+                     size_t stackBytes, uint8_t priority, int core);
+// Wake the task blocked in waitNotify (producer side; safe from any task on any core).
+void notifyTask(WorkerTask& t);
+// Block the spawned task until notifyTask fires or `timeoutMs` elapses; false on timeout (so the
+// worker can service its own watchdog and re-check its stop flag). Called ONLY from inside the fn.
+bool waitNotify(WorkerTask& t, uint32_t timeoutMs);
+// Signal stop + wake, then block until the worker fn has returned and the task is torn down.
+void stopPinnedTask(WorkerTask& t);
+// A non-blocking mutual-exclusion latch guarding a resource two tasks reach (the WS sender, which
+// core 0 drains on tick20ms while core 1's offloaded PreviewDriver arms and streams into it).
+//
+// ONLY try-acquire is offered, never a blocking lock: the hot-path rule forbids a render/encode
+// thread blocking on a peer (CLAUDE.md § Hot path — "no blocking … use try_lock"), so a caller that
+// loses the race SKIPS its slot rather than waiting. That single constraint is what lets this be an
+// `std::atomic_flag` test-and-set — the textbook lock-free try-lock — instead of an OS mutex: with
+// no waiting there is nothing to sleep on, nothing to wake, and no priority to inherit. So it costs
+// ONE atomic read-modify-write (tens of ns) with no RTOS call, needs no init/destroy lifecycle, and
+// is the same code on every platform — hence no platform backing at all, and it is safe to touch
+// from the render or encode thread. `std::atomic_flag` is guaranteed lock-free by the standard.
+//
+// NOT recursive: a task that already holds it must not re-acquire (test_and_set would refuse).
+class TryLock {
+public:
+    bool tryAcquire() { return !flag_.test_and_set(std::memory_order_acquire); }
+    void release() { flag_.clear(std::memory_order_release); }
+private:
+    std::atomic_flag flag_ = ATOMIC_FLAG_INIT;
+};
+// RAII scope guard: `if (LockGuard g{lk}; g) { …exclusive… }` — releases on scope exit, no-ops when
+// the latch was busy. The standard scoped_lock/unique_lock(try_to_lock) shape.
+class LockGuard {
+public:
+    explicit LockGuard(TryLock& l) : lock_(l), held_(l.tryAcquire()) {}
+    ~LockGuard() { if (held_) lock_.release(); }
+    explicit operator bool() const { return held_; }
+    LockGuard(const LockGuard&) = delete;
+    LockGuard& operator=(const LockGuard&) = delete;
+private:
+    TryLock& lock_;
+    bool held_;
+};
+
+// Reset THIS task's watchdog (esp_task_wdt_reset) from inside a worker doing a long encode. No-op
+// on desktop. Keeps the vTaskDelay(1)/WDT discipline the single render loop has today.
+void taskWdtReset();
+
 // --- GPIO capability introspection (PinsModule) ---------------------------------------------
 // Static per-pin capability for one GPIO, so the pin ownership map can flag a claim that lands on
 // an unsafe pin — an output role driven onto an input-only pin or a boot strap, or any role on a
@@ -598,10 +661,11 @@ size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& h);
 // tick encodes into the other buffer while this one clocks out.
 bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes);
 
-// Block until buffer `buffer`'s in-flight transfer finishes, bounded by
-// `timeoutMs`; a timed-out frame is dropped and re-encoded next tick
-// (self-heals, same stance as rmtWs2812Wait).
-void i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
+// Block until buffer `buffer`'s in-flight transfer finishes, bounded by `timeoutMs`.
+// Returns TRUE only when the transfer actually completed. FALSE on timeout — the DMA may still be
+// reading that buffer, so the caller must NOT re-encode into it (see ParallelLedDriver::busWaitIfBusy,
+// which keeps it marked in-flight and re-waits next tick rather than corrupting a live transfer).
+bool i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
 
 // Duration in microseconds of the most recent completed DMA transfer — measured start-of-transmit
 // to done-callback, so it is the PURE wire/DMA time (independent of CPU / render load), i.e. the
@@ -663,9 +727,10 @@ size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
 // (single-shot, not the loop-transmission mode Parlio also offers).
 bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes);
 
-// Block until buffer `buffer`'s in-flight transfer finishes, bounded by
-// `timeoutMs`; a timed-out frame is dropped and re-encoded next tick (self-heals).
-void parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
+// Block until buffer `buffer`'s in-flight transfer finishes, bounded by `timeoutMs`.
+// Returns TRUE only when the transfer actually completed; FALSE on timeout — see i80Ws2812Wait for
+// why the caller must not reuse the buffer then.
+bool parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
 
 // Duration in microseconds of the most recent completed DMA transfer — the pure wire/DMA output
 // time (the WS2812 floor / fps ceiling). See i80Ws2812LastTransmitUs. 0 until the first completes.

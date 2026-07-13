@@ -1,10 +1,24 @@
 # Multicore & driver scaling — landscape analysis
 
+> **⚠️ DATED SURVEY (2026-07-12) — several conclusions have since been SUPERSEDED by shipped work. Read this header before trusting any number below.**
+>
+> What still holds: the Parlio 65535-byte/lane single-transfer ceiling and its bytes-per-light math; the two driver bugs found + fixed; MoonLight's model as read; the frame-pacing decision (Appendix A). What has been overturned:
+>
+> | This doc says | Reality (shipped since) |
+> |---|---|
+> | "the DMA transmit-wait is ~0 µs — the driver does **not** block on the transmit" | **False.** The transmit *did* block. Step 1.5 (async double-buffer, `asyncTransmit`) shipped to overlap it, worth P4 48 → 76 fps. The measurement below missed it because the instrumented build sampled the wait in the wrong place. |
+> | 8 lanes; `LcdLedDriver` is S3-only | **16 lanes** shipped for both parallel drivers; the driver is `I80LedDriver` and runs on **classic ESP32 (I2S) + S3/P4 (LCD_CAM)**. |
+> | a parallel-I2S driver is future work | **Shipped** (classic ESP32, I2S i80). Its ceiling is internal-RAM, not a transfer cap: 2048 lights at 8 lanes. |
+> | "multicore last, gated on need" | **Step 2a shipped** — the whole output stage runs on core 1 (`multicore` on Drivers): +44 % fps, 85 % of the output off the render core. |
+> | Parlio must use a refill ring | It uses the **same whole-frame double-buffer** as i80; the ring is unneeded and deferred indefinitely. |
+>
+> Current, present-tense numbers live in [performance.md § Multi-pin LED driving](../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid) and [§ Multicore](../performance.md#multicore-the-whole-output-stage-on-core-1-multicore-step-2). The build plan and its outcome are in the [top-down](multicore-analysis-top-down.md). This document is kept as the **design-intent record of how we got there** — including the wrong turn, which is the point.
+
 > **Forward-looking research document — exception to CLAUDE.md present-tense rule.** A Stage-1 bottom-up survey of *scaling the render pipeline* for projectMM: how large a display each driver can drive, where the time actually goes at scale, and whether a second core (à la MoonLight) earns its place. It combines a read of **MoonLight's documented dual-core architecture** ([moonmodules.org/MoonLight/develop/architecture](https://moonmodules.org/MoonLight/develop/architecture/), read **2026-07-12**) with **hardware measurement on the ESP32-P4 at 128×128 = 16384 lights** the same day, and the [frame-pacing decision](#appendix-a--frame-pacing-decided-against) settled with the product owner. Per *[Industry standards, our own code](../../CLAUDE.md#principles)*: study the reference, measure our own, write our own recommendation. Consolidates the multicore threads scattered across the backlog (see [§ Existing backlog](#existing-backlog-this-consolidates)). Citations use `file:line` against projectMM `HEAD`; the ESP-IDF ceilings cite the IDF HAL; MoonLight claims cite the architecture page.
 
 ## TL;DR
 
-- **The headline capability question — "how many LEDs can each driver drive?" — has a measured answer, and it surprised us.** The bound is *not* DMA bandwidth or lane count; it is (1) a per-peripheral single-transfer ceiling and (2) the CPU **encode** cost. Measured on the P4: rendering 16384 lights takes ~2.5 ms; the driver's per-frame **WS2812 transpose encode takes ~24 ms** (85% of it) and the DMA transmit-wait is **~0 µs**. The old assumption "the driver blocks waiting on the transmit" is *false* — the wait is negligible; the CPU is busy *encoding*.
+- **The headline capability question — "how many LEDs can each driver drive?" — has a measured answer, and it surprised us.** The bound is *not* DMA bandwidth or lane count; it is (1) a per-peripheral single-transfer ceiling and (2) the CPU **encode** cost. Measured on the P4: rendering 16384 lights takes ~2.5 ms and the driver's per-frame **WS2812 transpose encode takes ~24 ms** (85% of it). **The "and the DMA wait is ~0" reading below was WRONG** — the transmit really did block; Step 1.5's async double-buffer later recovered it (P4 48 → 76 fps). The durable half of the finding stands: the encode is CPU-bound and dominates.
 - **Per-driver maximum lights per pin (the number the product owner asked to pin down):**
 
   | Driver | Chips | Lanes/pins | **Hard per-pin ceiling** | Practical per-pin | Bound by |
@@ -33,9 +47,9 @@ Grid set to 128×128 on the P4 (`MM-P4`, `esp32p4-eth`), ParlioLed driver, instr
 | Effect render (`Layer`, BouncingBalls) | ~2.5 ms | scales with grid, cheap |
 | Driver `correction.apply` (brightness LUT + reorder + white) | **~4.4 ms** | 15% of the encode |
 | Driver `encodeWs2812LcdSlots` (RGB byte → 3-slot bus bytes × lanes) | **~24 ms** | **85% of the encode — the bottleneck** |
-| `busWait` (DMA clock-out) | **~0 µs / absent** | the transmit is fire-and-forget; the wait is negligible |
+| `busWait` (DMA clock-out) | ~0 µs *(MIS-MEASURED — see the header)* | The instrumented build sampled the wait where it could not land. The transmit **did** block (~7.5 ms/frame at 16×256), which Step 1.5's async double-buffer later hid. |
 
-So the driver's per-frame cost is ~28 ms of **CPU encode**, dominated 5.4:1 by the WS2812 transpose, with the DMA wait contributing essentially nothing. This is the single most important correction to the earlier (unmeasured) assumption that drivers block on the transmit.
+So the driver's per-frame cost is dominated by the **CPU encode** (the WS2812 transpose, 5.4:1 over `correction.apply`) — that part held up and drove the SWAR work. **The "DMA wait contributes nothing" half did not**: the transmit blocked, and hiding it behind a double-buffer (Step 1.5) was worth 48 → 76 fps on the P4. Both stages were real; this survey only saw one of them.
 
 The measured multi-pin driving results across all three peripherals (Parlio/LCD/RMT at 128×128, with the bench pins used) are recorded permanently in [performance.md § Multi-pin LED driving](../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid) — present-tense, so they outlive this forward-looking analysis. The SWAR win headline: the Parlio `Drivers` tick dropped 35961 µs → ~30100 µs (−16%) at 16384 lights.
 
@@ -44,7 +58,7 @@ The measured multi-pin driving results across all three peripherals (Parlio/LCD/
 Driving the P4 at 8 lanes surfaced two real defects (both fixed in this change; both HW-verified with LEDs burning at 8×896 = 7168 lights):
 
 1. **Parlio single-transfer hardware ceiling was hit silently.** 8 lanes × 2048 lights = a 148 352-byte frame = 1 186 816 bits, over the P4 Parlio `PARLIO_LL_TX_MAX_BITS_PER_FRAME` = 0x7FFFF = **524 287-bit** single-transfer limit. `parlio_tx_unit_transmit` returned `ESP_ERR_INVALID_ARG` and **nothing lit, with no error surfaced**. This ceiling is **Parlio-specific**: LCD i80 *chains* DMA descriptors (no frame cap), RMT *streams* through a ping-pong buffer (no frame cap) — verified against the IDF HAL. **Fix:** Parlio's `busInit` now rejects a frame over `kParlioMaxTransferBytes` (65535) up front and reports the init failure as a driver status, instead of creating a unit that fails every transmit ([platform_esp32_parlio.cpp](../../src/platform/esp32/platform_esp32_parlio.cpp)). Per the product owner: **document the 65535-byte/lane (897 RGB) ceiling, don't guard the UI input** — the driver surfaces a clear status; the user's remedy is fewer lights/lane, the start/count window, or (future) chunked transfer.
-2. **The parallel-driver bus was reused when the frame SHRANK, keeping an invalid unit.** `reinit()` reused the bus whenever `busCapacity() >= frameBytes_` (grow-only). A shrink (2048 → 896 lights) kept the *oversized* unit whose configured `max_transfer_size` still exceeded the hardware limit — so every transmit kept failing silently even at the smaller, valid size. **Fix:** the shared `ParallelLedDriver::reinit()` now reuses the bus only on an **exact** size match (`==`, not `>=`); any grow or shrink rebuilds, so the bus is always valid-or-rebuilt ([ParallelLedDriver.h](../../src/light/drivers/ParallelLedDriver.h)). This is a **shared-base fix** — LCD, Parlio, and the coming parallel-I2S driver all inherit it.
+2. **The parallel-driver bus was reused when the frame SHRANK, keeping an invalid unit.** `reinit()` reused the bus whenever `busCapacity() >= frameBytes_` (grow-only). A shrink (2048 → 896 lights) kept the *oversized* unit whose configured `max_transfer_size` still exceeded the hardware limit — so every transmit kept failing silently even at the smaller, valid size. **Fix:** the shared `ParallelLedDriver::reinit()` now reuses the bus only on an **exact** size match (`==`, not `>=`); any grow or shrink rebuilds, so the bus is always valid-or-rebuilt ([ParallelLedDriver.h](../../src/light/drivers/ParallelLedDriver.h)). This is a **shared-base fix** — every `ParallelLedDriver` inherits it: the i80 driver (LCD_CAM on S3/P4, I2S on the classic ESP32) and Parlio.
 
 ## MoonLight's model, as read (2026-07-12)
 

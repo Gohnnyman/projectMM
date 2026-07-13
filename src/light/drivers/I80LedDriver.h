@@ -135,7 +135,7 @@ public:
     /// returns whether it started.
     bool  busTransmit(uint8_t i, size_t bytes) { return platform::i80Ws2812Transmit(i80_, i, bytes); }
     /// Block up to `ms` for buffer `i`'s in-flight transfer to complete.
-    void  busWait(uint8_t i, uint32_t ms)      { platform::i80Ws2812Wait(i80_, i, ms); }
+    bool  busWait(uint8_t i, uint32_t ms)      { return platform::i80Ws2812Wait(i80_, i, ms); }
     /// The most recent DMA transfer's wire time (µs) — the WS2812 output floor.
     uint32_t busLastTransmitUs() const         { return platform::i80Ws2812LastTransmitUs(i80_); }
     /// Tear down the i80 bus and its DMA buffer.

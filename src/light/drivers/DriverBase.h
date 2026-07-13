@@ -159,6 +159,31 @@ public:
 protected:
     Layer* layer_ = nullptr;
 
+    // --- Shared per-row correction scratch (the buffer `correction_.apply()` writes into) ---
+    // Every physical driver needs a small heap buffer to hold one light's (or one row's) corrected
+    // wire bytes before it encodes them for its peripheral. The SIZE differs per driver — RmtLedDriver
+    // needs `outChannels` (one light), ParallelLedDriver needs `kMaxLanes × outChannels` (one row across
+    // every lane) — so the caller passes the byte count; the grow-only allocate/free lifecycle is the
+    // same, and lives here once. Grow-only: a shrink keeps the larger block rather than churning the
+    // heap on a channel-count flip. Allocation failure leaves `wire_` null and `wireCap_` 0, which each
+    // driver's tick() already treats as "not ready" and idles — never a null deref (the robustness rule).
+    // Cold path only (prepare / a preset channel-count change), never the render loop.
+    uint8_t* wire_ = nullptr;
+    size_t   wireCap_ = 0;   // bytes actually allocated (0 when the allocation failed)
+
+    /// Grow `wire_` to at least `bytes`. Keeps the existing block when it is already big enough.
+    /// Leaves `wire_` null on allocation failure (the caller's tick() then idles).
+    void ensureWire(size_t bytes) {
+        if (wire_ && wireCap_ >= bytes) return;
+        freeWire();
+        wire_ = static_cast<uint8_t*>(platform::alloc(bytes));
+        wireCap_ = wire_ ? bytes : 0;
+    }
+    /// Release the scratch (on the true teardown — release(), not a mid-life reinit).
+    void freeWire() {
+        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; }
+    }
+
     // --- Per-driver output correction (references a shared preset; brightness + white are local) ---
     // Each physical driver owns its Correction — the flat hot-path cache apply() reads — but the
     // channel-role WIRING comes from a NAMED PRESET in the LightPresets library, referenced by a

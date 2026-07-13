@@ -9,6 +9,9 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 #include <cerrno>
 
 #ifdef _WIN32
@@ -232,6 +235,61 @@ size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
 }
 void currentTaskOnCore(int, char* out, size_t cap) { if (out && cap) out[0] = '\0'; }
 const char* renderTaskName() { return g_testRenderTask; }
+
+// Worker-task seam — std::thread + condition_variable backing. The `core` pin is ignored (the host
+// has no core-affinity story; the core-split is ESP32-only), but the spawn/notify/wait/stop handoff
+// is real, so the render↔encode invariants are host-testable on an actual second thread. The wake is
+// a single-slot latch (`pending`): notifyTask sets it, waitNotify consumes it — matching the FreeRTOS
+// direct-to-task notification's "one pending count" semantics so a host test sees the same behavior.
+namespace {
+struct DesktopWorker {
+    std::thread thread;
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool pending = false;   // a notify is waiting to be consumed (the single-slot latch)
+    bool stop = false;
+};
+}  // namespace
+
+bool spawnPinnedTask(WorkerTask& t, const char* /*name*/, WorkerFn fn, void* user,
+                     size_t /*stackBytes*/, uint8_t /*priority*/, int /*core*/) {
+    auto* w = new (std::nothrow) DesktopWorker();
+    if (!w) return false;
+    t.impl = w;
+    w->thread = std::thread([fn, user] { fn(user); });   // the fn owns its loop until stop
+    return true;
+}
+
+void notifyTask(WorkerTask& t) {
+    auto* w = static_cast<DesktopWorker*>(t.impl);
+    if (!w) return;
+    { std::lock_guard<std::mutex> lk(w->mtx); w->pending = true; }
+    w->cv.notify_one();
+}
+
+bool waitNotify(WorkerTask& t, uint32_t timeoutMs) {
+    auto* w = static_cast<DesktopWorker*>(t.impl);
+    if (!w) return false;
+    std::unique_lock<std::mutex> lk(w->mtx);
+    const bool got = w->cv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
+                                    [w] { return w->pending || w->stop; });
+    if (!got) return false;         // timed out with no notify/stop
+    w->pending = false;             // consume the single-slot latch
+    return true;                    // woken by a notify OR stop; the fn re-checks its stop flag
+}
+
+void stopPinnedTask(WorkerTask& t) {
+    auto* w = static_cast<DesktopWorker*>(t.impl);
+    if (!w) return;
+    { std::lock_guard<std::mutex> lk(w->mtx); w->stop = true; }
+    w->cv.notify_one();
+    if (w->thread.joinable()) w->thread.join();
+    delete w;
+    t.impl = nullptr;
+}
+
+void taskWdtReset() {}   // no watchdog on the host
+
 
 // A host build has no real GPIOs to protect — every pin is valid, output-capable, and free of
 // straps/reserved roles. So the pin map on desktop flags nothing (which is correct: there's no
@@ -1086,7 +1144,7 @@ bool i80Ws2812Init(I80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
 uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
 size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& /*h*/) { return 0; }
 bool i80Ws2812Transmit(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
-void i80Ws2812Wait(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) {}
+bool i80Ws2812Wait(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
 uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& /*h*/) { return 0; }
 void i80Ws2812Deinit(I80Ws2812Handle& /*h*/) {}
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
@@ -1107,7 +1165,7 @@ bool parlioWs2812Init(ParlioWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
 uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& /*h*/) { return 0; }
 bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
-void parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) {}
+bool parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& /*h*/) { return 0; }
 void parlioWs2812Deinit(ParlioWs2812Handle& /*h*/) {}
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,

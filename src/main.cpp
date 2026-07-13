@@ -541,6 +541,14 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                             static_cast<unsigned>(heap),
                             static_cast<unsigned>(mm::platform::maxInternalAllocBlock()));
             }
+            // Render↔encode split KPI: the WORST core-0 wait at the frame boundary in the last second
+            // (the same number the `stall` control shows — a single frame's value lands wherever this
+            // once-a-second log happens to fall and reads ~0 even when the core idles most frames).
+            // Shown only when the split is engaged. It's the Step 2b (ping-pong 2nd buffer) trigger:
+            // ~0 = render ≈ output, a 2nd buffer would gain nothing; large = the effect is far cheaper
+            // than the output work, so core 0 idles and 2b would recover it.
+            if (drivers->renderSplitActive())
+                std::printf("  stall: %uus", static_cast<unsigned>(drivers->stallPeakUs()));
             // Stable MM_IP=<ip> token for the web installer's post-flash serial
             // read. It rides this already-periodic line (zero extra printf, re-emits
             // every second so the installer catches it whenever it reopens the port).

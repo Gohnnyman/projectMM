@@ -37,6 +37,13 @@ private:
 
 // Simulate Scheduler::prepareTree() + one tick: walk the top-level modules calling
 // applyState() then tick().
+//
+// The quiesce is what makes this synchronous. With the multicore render↔encode split engaged,
+// Drivers::tick() hands the frame to the core-1 task and RETURNS — the drivers run there, so a caller
+// that reads a driver's result straight after tick() would race the worker. On the device that is the
+// point (core 0 goes back to rendering; the next frame's boundary waits). Here the test wants the
+// frame observable, so it waits the worker out — the same wait Drivers itself does at the next
+// boundary. Off the split this is a no-op and the ticks were already synchronous.
 void rebuildAndTick(mm::Layouts& layouts, mm::Layers& layersC, mm::Drivers& driversC) {
     layouts.applyState();
     layersC.applyState();
@@ -44,6 +51,7 @@ void rebuildAndTick(mm::Layouts& layouts, mm::Layers& layersC, mm::Drivers& driv
     driversC.applyState();
     layersC.tick();
     driversC.tick();
+    driversC.quiesce();   // let the core-1 drivers finish before we assert on their output
 }
 
 } // namespace

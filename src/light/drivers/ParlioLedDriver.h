@@ -12,7 +12,7 @@ namespace mm {
 /// i80 driver:
 ///  - NO clockPin/dcPin: Parlio generates the pixel clock itself (kClockHz), so there are no
 ///    sacrificial WR/DC lines (addBusControls is empty).
-///  - kExactLaneCount = false: i80 rejects a partial bus; Parlio runs on 1..8 lanes — whatever
+///  - kExactLaneCount = false: i80 rejects a partial bus; Parlio runs on 1..16 lanes (kMaxLanes) — whatever
 ///    `pins` names.
 ///
 /// Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812 lineage —
@@ -69,7 +69,7 @@ public:
     /// returns whether it started.
     bool  busTransmit(uint8_t i, size_t bytes) { return platform::parlioWs2812Transmit(parlio_, i, bytes); }
     /// Block up to `ms` for buffer `i`'s in-flight transfer to complete.
-    void  busWait(uint8_t i, uint32_t ms)      { platform::parlioWs2812Wait(parlio_, i, ms); }
+    bool  busWait(uint8_t i, uint32_t ms)      { return platform::parlioWs2812Wait(parlio_, i, ms); }
     /// The most recent DMA transfer's wire time (µs) — the WS2812 output floor.
     uint32_t busLastTransmitUs() const         { return platform::parlioWs2812LastTransmitUs(parlio_); }
     /// Tear down the Parlio bus and its DMA buffer.

@@ -154,6 +154,12 @@ public:
     /// preview immediately.
     uint32_t clientGeneration() const override { return wsClientGeneration_; }
 
+    // The cross-core sender lease (see BinaryBroadcaster). Guards previewSend_ + the wsClients_ socket
+    // writes against this module's own core-0 drain / state push while an offloaded PreviewDriver
+    // streams from core 1. try_lock: a busy transport returns false and the producer skips its frame.
+    bool tryAcquireSend() override { return wsLock_.tryAcquire(); }
+    void releaseSend() override { wsLock_.release(); }
+
     /// Keep running even when "disabled" via the UI — otherwise the user has no way
     /// to re-enable themselves through the same UI.
     bool respectsEnabled() const override { return false; }
@@ -266,6 +272,16 @@ private:
         bool ownsBody = false;
     };
     PreviewSend previewSend_;
+    // Guards the WS sender — previewSend_ AND the wsClients_ socket writes — because it has TWO
+    // producers on TWO cores once the multicore split engages: core 0 (this module's tick20ms drain,
+    // the 1 Hz state push, connect/disconnect) and core 1 (the offloaded PreviewDriver's tick, which
+    // arms a frame and directly streams the coordinate table). Without it, core 1's partial-write
+    // stream interleaves with core 0's drain inside one WS frame (corrupt framing) or observes a torn
+    // previewSend_. try_lock only, never a blocking lock: whichever core loses the race SKIPS its
+    // slot (the hot-path rule, CLAUDE.md § Hot path). Preview already has that skip path — it is the
+    // same back-off its adaptive frame rate takes when the link is busy — so a lost race costs one
+    // preview frame, never a stalled render or encode.
+    mutable platform::TryLock wsLock_;
     // Queue a TEXT frame (opcode 0x81) whose body this module OWNS, through the same resumable slot the
     // preview binary send uses — so the (20 KB) state JSON drains in chunks on tick20ms instead of a
     // blocking write on the render tick. Takes ownership of `ownedBody` (freed on drain-complete /

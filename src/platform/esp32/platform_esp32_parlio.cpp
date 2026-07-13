@@ -79,8 +79,13 @@ bool IRAM_ATTR parlioDoneCb(parlio_tx_unit_handle_t, const parlio_tx_done_event_
     auto* st = static_cast<ParlioState*>(user);
     const uint8_t slot = st->fifoTail;
     const uint8_t b = st->fifo[slot] & 1u;
-    st->lastTransmitUs = static_cast<uint32_t>(esp_timer_get_time() - st->txStartUs[slot]);
+    const int64_t now = esp_timer_get_time();
+    st->lastTransmitUs = static_cast<uint32_t>(now - st->txStartUs[slot]);
     st->fifoTail = (st->fifoTail + 1u) & 1u;
+    // In-order queue: if another buffer is already queued behind this one, the hardware starts it the
+    // instant this transfer ends — stamp its true start here, since parlioWs2812Transmit deliberately
+    // skipped stamping it (the wire was busy). This is what keeps the second buffer's wireUs honest.
+    if (st->fifoTail != st->fifoHead) st->txStartUs[st->fifoTail] = now;
     BaseType_t high = pdFALSE;
     xSemaphoreGiveFromISR(st->done[b], &high);
     return high == pdTRUE;
@@ -246,8 +251,14 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     // parlio_tx_unit_transmit in a critical section:** it blocks on an internal FreeRTOS queue, and a
     // blocking RTOS call inside taskENTER_CRITICAL panics. Push, then enqueue outside any CS.
     const uint8_t slot = st->fifoHead;
+    const bool wireIdle = (st->fifoHead == st->fifoTail);   // nothing in flight → this one starts NOW
     st->fifo[slot] = buffer;
-    st->txStartUs[slot] = esp_timer_get_time();   // wire-time start stamp for this transfer
+    // Stamp the wire-time start only when the wire is IDLE — then enqueue == hardware-start. When a
+    // transfer is already clocking out, this one does not start until that one finishes, so stamping
+    // here would fold the predecessor's remaining wire time into this buffer's measured duration
+    // (inflating wireUs for the second buffer of the double-buffer pair). In that case the done-callback
+    // stamps this slot's start as it completes the predecessor — the moment the hardware really starts it.
+    if (wireIdle) st->txStartUs[slot] = esp_timer_get_time();
     st->fifoHead = (st->fifoHead + 1u) & 1u;
     // payload length is in BITS; the buffer is bytes × 8 lanes-worth of slots.
     const esp_err_t err = parlio_tx_unit_transmit(st->unit, st->buf[buffer], bytes * 8, &xcfg);
@@ -255,12 +266,13 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     return err == ESP_OK;
 }
 
-void parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
+bool parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
     auto* st = static_cast<ParlioState*>(h.impl);
-    if (!st || buffer >= 2 || !st->done[buffer]) return;
-    // Wait on the specific buffer's done-semaphore (the ISR gives it via the completion FIFO).
-    // Finite timeout, self-healing: a timed-out frame is dropped and re-encoded next tick.
-    xSemaphoreTake(st->done[buffer], pdMS_TO_TICKS(timeoutMs));
+    if (!st || buffer >= 2 || !st->done[buffer]) return true;   // nothing to wait on = not in flight
+    // Wait on the specific buffer's done-semaphore (the ISR gives it via the completion FIFO) and
+    // REPORT the outcome: on a timeout the DMA may still be reading this buffer, so the caller must
+    // not re-encode into it (see i80Ws2812Wait).
+    return xSemaphoreTake(st->done[buffer], pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& h) {
@@ -362,7 +374,7 @@ bool parlioWs2812Init(ParlioWs2812Handle&, const uint16_t*, uint8_t, uint32_t, s
 uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle&, uint8_t) { return nullptr; }
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle&) { return 0; }
 bool parlioWs2812Transmit(ParlioWs2812Handle&, uint8_t, size_t) { return false; }
-void parlioWs2812Wait(ParlioWs2812Handle&, uint8_t, uint32_t) {}
+bool parlioWs2812Wait(ParlioWs2812Handle&, uint8_t, uint32_t) { return true; }
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle&) { return 0; }
 void parlioWs2812Deinit(ParlioWs2812Handle&) {}
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t*, uint8_t, uint16_t,

@@ -47,6 +47,7 @@ add_executable(mm_tests
     unit/core/unit_Sort.cpp
     unit/core/unit_sanitizeHostname.cpp
     unit/core/unit_platform_clock.cpp
+    unit/core/unit_platform_worker.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp
     unit/core/unit_Services.cpp
@@ -69,6 +70,7 @@ add_executable(mm_tests
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
+    unit/light/unit_Drivers_rendersplit.cpp
     unit/light/unit_LightPresetsModule.cpp
     unit/light/unit_Drivers_firstOutputRgb.cpp
     unit/light/unit_HueDriver.cpp

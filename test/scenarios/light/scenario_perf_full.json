@@ -836,7 +836,7 @@
     },
     {
       "name": "add-i80-driver",
-      "description": "+I80LedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). Optional — S3 only. Diff = the i80 per-frame cost.",
+      "description": "+I80LedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. I80LedDriver also registers on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
       "op": "add_module",
       "id": "I80",
       "type": "I80LedDriver",
@@ -889,42 +889,6 @@
             "2026-06-25"
           ]
         },
-        "esp32": {
-          "tick_us": [
-            101,
-            119
-          ],
-          "free_heap": [
-            128832,
-            150112
-          ],
-          "max_alloc_block": [
-            110592,
-            110592
-          ],
-          "at": [
-            "2026-06-17",
-            "2026-06-25"
-          ]
-        },
-        "esp32p4-eth": {
-          "tick_us": [
-            56,
-            63
-          ],
-          "free_heap": [
-            34022847,
-            34042483
-          ],
-          "max_alloc_block": [
-            385024,
-            385024
-          ],
-          "at": [
-            "2026-06-17",
-            "2026-06-25"
-          ]
-        },
         "desktop-windows": {
           "tick_us": [
             3,
@@ -943,7 +907,8 @@
             "2026-07-08"
           ]
         }
-      }
+      },
+      "description": "The i80 per-frame cost. Only meaningful where add-i80-driver's pins are valid (S3; desktop is inert but exercises the code path) — the classic/P4 blocks were removed: they recorded a driver that had failed to init, so the tiny tick was the bail-out path, not an encode."
     },
     {
       "name": "remove-i80-driver",

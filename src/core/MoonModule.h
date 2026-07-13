@@ -460,9 +460,27 @@ public:
     /// can be added (acceptsChildRoles). Surfaced per-instance in /api/state.
     virtual bool userEditable() const { return true; }
 
+    /// Stop any async worker this module owns that could be reading its child array or its
+    /// children's state, and return only once that worker is idle. Default: no-op (a module with no
+    /// worker has nothing to quiesce). A module that hands work to another thread (Drivers, whose
+    /// core-1 task ticks its Driver children) overrides this to join/park that thread.
+    ///
+    /// Core calls it on the PARENT before every structural mutation of its child array (addChild /
+    /// removeChild below), because a mutation frees or reallocates memory a worker may be walking:
+    /// addChild delete[]s the child array out from under an iterating worker; removeChild is followed
+    /// by the caller's release() + deleteTree(), which frees the very module the worker may be inside
+    /// tick() on. The enabled/control path already funnels through applyState()/prepareTree(), where
+    /// the owner quiesces itself; this hook is the same rule extended to the STRUCTURAL path, kept in
+    /// core so no handler has to remember it (CLAUDE.md § when core already owns a mechanism for one
+    /// path, extend it to the sibling path).
+    ///
+    /// Idempotent and safe to call when no worker is running.
+    virtual void quiesce() {}
+
     /// Generic children — grows on demand, only allocates during setup.
     bool addChild(MoonModule* child) {
         if (!child) return false;
+        quiesce();   // a worker may be iterating children_; the realloc below would pull it out from under it
         if (childCount_ == childCapacity_) {
             uint8_t newCap = childCapacity_ == 0 ? 4 : childCapacity_ * 2;
             auto** newArr = new MoonModule*[newCap];
@@ -477,6 +495,7 @@ public:
     }
 
     bool removeChild(MoonModule* child) {
+        quiesce();   // the caller release()s + deleteTree()s `child` next; a worker must not be inside its tick()
         for (uint8_t i = 0; i < childCount_; i++) {
             if (children_[i] == child) {
                 child->setParent(nullptr);
@@ -493,6 +512,7 @@ public:
     /// Used by FilesystemModule at load time to swap a child whose type differs from
     /// the persisted JSON; the caller tears down + Scheduler::deleteTree's the old child.
     MoonModule* replaceChildAt(uint8_t i, MoonModule* fresh) {
+        quiesce();   // same hazard as removeChild: the caller tears down + deletes the child we swap out
         if (i >= childCount_ || !fresh) return nullptr;
         MoonModule* old = children_[i];
         if (old) old->setParent(nullptr);
@@ -608,9 +628,19 @@ protected:
     /// gate keep ticking; the rest tick only when enabled), dispatches the same
     /// callback, and accumulates per-child timing. Pulled out so the three base
     /// defaults stay one-liners and the gating + timing rule lives in one place.
-    void tickChildren(void (MoonModule::*fn)()) {
+    /// Tick children through the one enabled-gate + timing loop core owns. `roleFilter` selects
+    /// WHICH children: RoleFilter::All (the default) is every child; RoleFilter::Only /
+    /// RoleFilter::Except restrict to (or exclude) one role. The filter exists because a container
+    /// that splits its children across threads (Drivers, whose Driver children tick on a core-1
+    /// worker while the rest tick on the render core) must not re-implement the gate and the timing
+    /// per side — that rule is core's, not the module's (CLAUDE.md § Complexity lives in core).
+    enum class RoleFilter : uint8_t { All, Only, Except };
+    void tickChildren(void (MoonModule::*fn)(), RoleFilter filter = RoleFilter::All,
+                      ModuleRole role = ModuleRole::Generic) {
         for (uint8_t i = 0; i < childCount_; i++) {
             MoonModule* c = children_[i];
+            if (filter == RoleFilter::Only   && c->role() != role) continue;
+            if (filter == RoleFilter::Except && c->role() == role) continue;
             if (!c->respectsEnabled() || c->enabled()) {
                 uint32_t start = platform::micros();
                 (c->*fn)();

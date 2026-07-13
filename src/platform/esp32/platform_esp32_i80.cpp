@@ -115,8 +115,13 @@ bool IRAM_ATTR i80DoneCb(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_
     auto* st = static_cast<I80State*>(user);
     const uint8_t slot = st->fifoTail;
     const uint8_t b = st->fifo[slot] & 1u;
-    st->lastTransmitUs = static_cast<uint32_t>(esp_timer_get_time() - st->txStartUs[slot]);
+    const int64_t now = esp_timer_get_time();
+    st->lastTransmitUs = static_cast<uint32_t>(now - st->txStartUs[slot]);
     st->fifoTail = (st->fifoTail + 1u) & 1u;
+    // In-order queue: a buffer already queued behind this one starts the instant this transfer ends —
+    // stamp its true start here, since the transmit call deliberately skipped stamping it (the wire was
+    // busy). Without this the second buffer's wireUs would include this one's remaining wire time.
+    if (st->fifoTail != st->fifoHead) st->txStartUs[st->fifoTail] = now;
     BaseType_t high = pdFALSE;
     xSemaphoreGiveFromISR(st->done[b], &high);
     return high == pdTRUE;
@@ -306,8 +311,13 @@ bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes) {
     // blocks on an internal FreeRTOS queue (xQueueSend/Receive), and calling a blocking RTOS API from
     // inside taskENTER_CRITICAL panics (spinlock held + interrupts off). Push, then enqueue outside any CS.
     const uint8_t slot = st->fifoHead;
+    const bool wireIdle = (st->fifoHead == st->fifoTail);   // nothing in flight → this one starts NOW
     st->fifo[slot] = buffer;
-    st->txStartUs[slot] = esp_timer_get_time();   // wire-time start stamp for this transfer
+    // Stamp the wire-time start only when the wire is IDLE (enqueue == hardware-start). If a transfer is
+    // already clocking out, this one does not begin until that one ends, so stamping here would fold the
+    // predecessor's remaining wire time into this buffer's measured duration. The done-callback stamps it
+    // instead, at the moment the hardware actually starts it.
+    if (wireIdle) st->txStartUs[slot] = esp_timer_get_time();
     st->fifoHead = (st->fifoHead + 1u) & 1u;
     // lcd_cmd = -1: no command phase — the transfer is one continuous GDMA data stream, gapless
     // at the pclk rate.
@@ -320,12 +330,13 @@ bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes) {
     return err == ESP_OK;
 }
 
-void i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
+bool i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
     auto* st = static_cast<I80State*>(h.impl);
-    if (!st || buffer >= 2 || !st->done[buffer]) return;
-    // Finite timeout, same self-healing stance as rmtWs2812Wait: a timed-out
-    // frame is dropped and the driver re-encodes the whole frame next tick.
-    xSemaphoreTake(st->done[buffer], pdMS_TO_TICKS(timeoutMs));
+    if (!st || buffer >= 2 || !st->done[buffer]) return true;   // nothing to wait on = not in flight
+    // Report whether the transfer actually completed. On a timeout the DMA may still be reading this
+    // buffer, so the caller must keep it marked in-flight rather than re-encoding into it — handing a
+    // live DMA a half-rewritten buffer is exactly the frame corruption the timeout is meant to avoid.
+    return xSemaphoreTake(st->done[buffer], pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
 uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& h) {
@@ -423,7 +434,7 @@ bool i80Ws2812Init(I80Ws2812Handle&, const uint16_t*, uint8_t, uint16_t, uint16_
 uint8_t* i80Ws2812Buffer(const I80Ws2812Handle&, uint8_t) { return nullptr; }
 size_t i80Ws2812BufferCapacity(const I80Ws2812Handle&) { return 0; }
 bool i80Ws2812Transmit(I80Ws2812Handle&, uint8_t, size_t) { return false; }
-void i80Ws2812Wait(I80Ws2812Handle&, uint8_t, uint32_t) {}
+bool i80Ws2812Wait(I80Ws2812Handle&, uint8_t, uint32_t) { return true; }
 uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle&) { return 0; }
 void i80Ws2812Deinit(I80Ws2812Handle&) {}
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t*, uint8_t, uint16_t, uint16_t,

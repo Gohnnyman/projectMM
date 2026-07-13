@@ -58,8 +58,40 @@ struct BinaryBroadcaster {
     // the producer re-broadcasts to everyone, idempotent on existing clients.
     virtual uint32_t clientGeneration() const = 0;
 
+    // Exclusive access to the sender, for a producer that does NOT run on the transport's own thread.
+    // The multicore split (Drivers `multicore`) ticks the offloaded PreviewDriver on core 1 while this
+    // transport drains and pushes state on core 0 — two producers, two cores, one socket set and one
+    // resumable send slot. A producer therefore brackets its whole message in tryAcquire/releaseSend:
+    // a multi-call stream (begin/push/end) must not have another core's write land between its parts,
+    // and a frame arm must not race the drain that is reading the slot.
+    //
+    // TRY-acquire, never block: the caller may be on the render or encode thread, where blocking is a
+    // hot-path violation (CLAUDE.md § Hot path). false = the transport is busy this instant → SKIP the
+    // message, don't wait. Skipping is already the producer's back-off path (PreviewDriver's adaptive
+    // frame rate drops a slot whenever the link is behind), so a lost race costs one frame at most.
+    //
+    // Single-threaded transports may return true unconditionally: with one producer thread there is no
+    // race to prevent, and the pair is then free.
+    virtual bool tryAcquireSend() = 0;
+    virtual void releaseSend() = 0;
+
 protected:
     ~BinaryBroadcaster() = default;  // not owned through this interface
+};
+
+/// RAII bracket for the pair above: `if (SendLease s{bc}; s) { …one whole message… }`.
+/// Releases on scope exit; no-ops when the transport was busy. Same shape as platform::LockGuard.
+class SendLease {
+public:
+    explicit SendLease(BinaryBroadcaster* bc)
+        : bc_(bc), held_(bc && bc->tryAcquireSend()) {}
+    ~SendLease() { if (held_) bc_->releaseSend(); }
+    explicit operator bool() const { return held_; }
+    SendLease(const SendLease&) = delete;
+    SendLease& operator=(const SendLease&) = delete;
+private:
+    BinaryBroadcaster* bc_;
+    bool held_;
 };
 
 } // namespace mm

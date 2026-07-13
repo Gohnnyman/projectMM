@@ -321,8 +321,8 @@ private:
     // RGBCCT=5, or an N-channel fixture; the only limit is memory). Allocated off the hot path in
     // resizeSymbols(), reused every tick (tick() never allocates). A fixed stack array here overflowed
     // for >4-channel corrections and corrupted the stack — the SE16 bootloop, 2026-07-13.
-    uint8_t* wire_ = nullptr;
-    uint8_t  wireCap_ = 0;          // bytes allocated (= the outChannels it was sized for)
+    // (wire_ / wireCap_ live on DriverBase — the grow-only scratch lifecycle is shared with
+    //  ParallelLedDriver; this driver sizes it to ONE light's outChannels.)
 
     // The parse-error literal currently shown in the status slot (nullptr when
     // configErr_, failBuf_, kFailBufLen and the clearConfigErr/clearFailBuf/
@@ -414,11 +414,7 @@ private:
         if (n == 0 || ch == 0) return;
         // Per-light correction scratch: grow to `ch` bytes when the channel count grows (off the hot
         // path). Sized to outChannels so a >4-channel correction (RGBCCT, a fixture) can't overflow it.
-        if (wireCap_ < ch) {
-            freeWire();
-            wire_ = static_cast<uint8_t*>(platform::alloc(ch));
-            wireCap_ = wire_ ? ch : 0;
-        }
+        ensureWire(ch);   // DriverBase owns the grow-only allocate/free
         const size_t need = symbolsFor(n, ch);
         if (symbols_ && symbolCap_ >= need) return;
         freeSymbols();
@@ -428,9 +424,6 @@ private:
 
     void freeSymbols() {
         if (symbols_) { platform::free(symbols_); symbols_ = nullptr; symbolCap_ = 0; }
-    }
-    void freeWire() {
-        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; }
     }
 
     // --- loopback self-test (control-driven) ---

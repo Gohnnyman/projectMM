@@ -2414,6 +2414,13 @@ bool HttpServerModule::startBufferedTextSend(char* ownedBody, size_t bodyLen) {
 // socket error closes that client (its WS message ends incomplete → the browser discards it). The
 // send completes when every live client has the whole frame, or when no client is left.
 void HttpServerModule::drainPreviewSend() {
+    // Core-0 side of the sender lease. The offloaded PreviewDriver (core 1) holds this while it arms a
+    // frame or streams the coordinate table; taking it here keeps this drain's socket writes from
+    // interleaving with that stream inside one WS frame, and keeps us off a half-armed previewSend_.
+    // try_lock, not a wait: this runs on the render thread's tick20ms, where blocking is forbidden —
+    // core 1 releases within one message, so we simply drain on the next 20 ms tick instead.
+    platform::LockGuard lease{wsLock_};
+    if (!lease) return;
     if (!previewSend_.active) return;
     const size_t total = previewSend_.hdrLen + previewSend_.bodyLen;
     const size_t chunk = previewChunkBytes();
