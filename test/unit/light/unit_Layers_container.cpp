@@ -162,8 +162,13 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     layersContainer.addChild(&top);
     layersContainer.setLayouts(&layouts);
 
-    mm::Drivers drivers;
+    // The driver is declared BEFORE its container ON PURPOSE: stack objects destruct in reverse
+    // declaration order, so this puts ~Drivers() (which stops the core-1 encode worker) ahead of
+    // ~CaptureDriver(). The other way round, the worker can still be inside the driver's tick() when
+    // its vtable is torn down — a vptr race TSan flags. Production is safe by a different route
+    // (release()/removeChild() quiesce before any delete); a stack test has only declaration order.
     CaptureDriver cap;
+    mm::Drivers drivers;
     drivers.addChild(&cap);
     drivers.setLayers(&layersContainer);
 
@@ -211,8 +216,13 @@ TEST_CASE("Drivers composition drops to single layer when one is disabled") {
     layersContainer.addChild(&top);
     layersContainer.setLayouts(&layouts);
 
-    mm::Drivers drivers;
+    // The driver is declared BEFORE its container ON PURPOSE: stack objects destruct in reverse
+    // declaration order, so this puts ~Drivers() (which stops the core-1 encode worker) ahead of
+    // ~CaptureDriver(). The other way round, the worker can still be inside the driver's tick() when
+    // its vtable is torn down — a vptr race TSan flags. Production is safe by a different route
+    // (release()/removeChild() quiesce before any delete); a stack test has only declaration order.
     CaptureDriver cap;
+    mm::Drivers drivers;
     drivers.addChild(&cap);
     drivers.setLayers(&layersContainer);
 
@@ -250,7 +260,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         mm::SpiralEffect eff; only.addChild(&eff);
         layers.addChild(&only);
         layers.setLayouts(&layouts);
-        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        CaptureDriver cap; mm::Drivers drivers; drivers.addChild(&cap);   // driver first: ~Drivers stops the worker before ~CaptureDriver
         drivers.multicore = false;                   // single-core: the memory-lean zero-copy profile
         drivers.setLayers(&layers);
         layers.applyState(); drivers.applyState();
@@ -272,7 +282,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         mm::SpiralEffect eff; only.addChild(&eff);
         layers.addChild(&only);
         layers.setLayouts(&layouts);
-        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        CaptureDriver cap; mm::Drivers drivers; drivers.addChild(&cap);   // driver first: ~Drivers stops the worker before ~CaptureDriver
         drivers.multicore = true;                    // the split needs a stable frame for core 1
         drivers.setLayers(&layers);
         layers.applyState(); drivers.applyState();
@@ -294,7 +304,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         mm::Layer b; b.setChannelsPerLight(3); mm::RainbowEffect eb; b.addChild(&eb);
         layers.addChild(&a); layers.addChild(&b);
         layers.setLayouts(&layouts);
-        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        CaptureDriver cap; mm::Drivers drivers; drivers.addChild(&cap);   // driver first: ~Drivers stops the worker before ~CaptureDriver
         drivers.setLayers(&layers);
         layers.applyState(); drivers.applyState();
 
@@ -315,7 +325,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);
         layers.addChild(&only);
         layers.setLayouts(&layouts);
-        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        CaptureDriver cap; mm::Drivers drivers; drivers.addChild(&cap);   // driver first: ~Drivers stops the worker before ~CaptureDriver
         drivers.setLayers(&layers);
         layers.applyState(); drivers.applyState();
 
@@ -344,7 +354,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);
         layers.addChild(&only);
         layers.setLayouts(&layouts);
-        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        CaptureDriver cap; mm::Drivers drivers; drivers.addChild(&cap);   // driver first: ~Drivers stops the worker before ~CaptureDriver
         drivers.setLayers(&layers);
 
         // Enabled first: the driver has a valid source buffer (a real frame).

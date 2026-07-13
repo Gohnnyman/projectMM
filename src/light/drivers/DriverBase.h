@@ -22,22 +22,14 @@ namespace mm {
 /// zero-state role for drivers that EffectBase does for effects.
 class DriverBase : public MoonModule {
 public:
-    /// Park the parent's worker before this driver's vtable is torn down.
-    ///
-    /// The container ticks its Driver children on a worker thread (Drivers' core-1 encode task), so a
-    /// driver being DESTROYED while that worker is inside its tick() is a vptr race: the destructor
-    /// rewrites the vtable pointer while the worker dereferences it — undefined behaviour, and on an
-    /// ESP32 a jump through a half-written vtable. `~Drivers()` stops the worker, but that is too late
-    /// whenever the driver outlives... rather, is destroyed BEFORE its container: stack objects destruct
-    /// in reverse declaration order, so a driver declared after its Drivers dies first. TSan caught
-    /// exactly this (a test's stack-declared driver, the worker mid-tickChildren).
-    ///
-    /// quiesce() is a no-op for a container with no worker, so this costs nothing in the common case.
-    /// It cannot live in ~MoonModule: by then this object's Driver-ness is already gone.
-    ~DriverBase() override {
-        if (MoonModule* p = parent()) p->quiesce();
-    }
-
+    /// A driver must not be destroyed while its container's worker thread might still tick it — that
+    /// is a vptr race (the destructor rewrites the vtable while the worker calls through it). A base
+    /// destructor CANNOT prevent it: C++ destroys derived-before-base, so by the time ~DriverBase runs
+    /// the derived vptr is already gone. The guarantee therefore lives with the OWNER, which must
+    /// release()/removeChild() before destroying — production always does (the HTTP delete path calls
+    /// release() then deleteTree; removeChild() quiesces). A stack-declared driver in a test must be
+    /// declared BEFORE its Drivers, so reverse-declaration order destroys the container (and stops its
+    /// worker) first. TSan enforces this.
     ModuleRole role() const override { return ModuleRole::Driver; }
     virtual void setSourceBuffer(Buffer* buf) = 0;
 
