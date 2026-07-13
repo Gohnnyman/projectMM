@@ -82,12 +82,18 @@ public:
     // parking WR/DC on an unused data pin is a valid choice — only a lane driving a
     // real strand shows garbage. The base routes this to setConfigWarn; the driver
     // keeps running. null when the WR/DC pins are clear of the data set.
-    const char* validateBusPins(const uint16_t* lanes, uint8_t n) const {
-        // WR and DC on the SAME GPIO is never valid — the i80 bus needs two distinct
-        // control lines, so this can't just corrupt one lane like a data collision; it
-        // breaks the bus. Check it up front, before the per-lane checks.
+    /// FATAL bus-pin check → routed to the ERROR path (idles the driver), unlike validateBusPins'
+    /// per-lane WARNINGS. WR and DC on the SAME GPIO breaks the i80 bus outright (it needs two
+    /// distinct control lines — the bus won't init), so it can't be a warn-and-run like a data-lane
+    /// collision (which only corrupts that one lane). null = no fatal condition. (CRTP hook; the
+    /// base's default returns null, Parlio has no WR/DC and keeps the default.)
+    const char* validateBusFatal() const {
         if (clockPin >= 0 && clockPin == dcPin)
             return "clockPin (WR) and dcPin are the same GPIO — they must differ";
+        return nullptr;
+    }
+
+    const char* validateBusPins(const uint16_t* lanes, uint8_t n) const {
         for (uint8_t i = 0; i < n; i++) {
             // clockPin/dcPin are int8_t (-1 = unset); only a real GPIO can collide.
             if (clockPin >= 0 && lanes[i] == static_cast<uint16_t>(clockPin))
@@ -98,22 +104,26 @@ public:
         return nullptr;
     }
 
-    /// Create the i80 bus + its DMA buffer sized for `frameBytes` on the current data
-    /// lanes plus the WR/DC pins; returns whether init succeeded.
-    bool busInit(size_t frameBytes) {
+    /// Create the i80 bus + its DMA buffer(s) sized for `frameBytes` on the current data lanes plus
+    /// the WR/DC pins; `wantSecondBuffer` requests the async double-buffer's second frame buffer
+    /// (allocated only if it fits — else single-buffer). Returns whether init succeeded.
+    bool busInit(size_t frameBytes, bool wantSecondBuffer) {
         return platform::lcdWs2812Init(lcd_, laneList_, laneCount_,
                                        static_cast<uint16_t>(clockPin),
-                                       static_cast<uint16_t>(dcPin), frameBytes);
+                                       static_cast<uint16_t>(dcPin), frameBytes, wantSecondBuffer);
     }
-    /// The bus's DMA buffer the base encodes into.
-    uint8_t* busBuffer()                 { return platform::lcdWs2812Buffer(lcd_); }
-    /// The DMA buffer's byte capacity (fixed at bus creation).
+    /// DMA buffer `i` (0/1) the base encodes into; buffer 1 is null when the second
+    /// buffer didn't fit (single-buffer mode). Both are the same size (busCapacity).
+    uint8_t* busBuffer(uint8_t i)        { return platform::lcdWs2812Buffer(lcd_, i); }
+    /// The per-buffer byte capacity (fixed at bus creation; both buffers equal).
     size_t   busCapacity() const         { return platform::lcdWs2812BufferCapacity(lcd_); }
-    /// Kick off the autonomous transfer of the first `bytes` of the DMA buffer;
+    /// Kick off the autonomous transfer of the first `bytes` of DMA buffer `i`;
     /// returns whether it started.
-    bool     busTransmit(size_t bytes)   { return platform::lcdWs2812Transmit(lcd_, bytes); }
-    /// Block up to `ms` for the in-flight transfer to complete.
-    void     busWait(uint32_t ms)        { platform::lcdWs2812Wait(lcd_, ms); }
+    bool  busTransmit(uint8_t i, size_t bytes) { return platform::lcdWs2812Transmit(lcd_, i, bytes); }
+    /// Block up to `ms` for buffer `i`'s in-flight transfer to complete.
+    void  busWait(uint8_t i, uint32_t ms)      { platform::lcdWs2812Wait(lcd_, i, ms); }
+    /// The most recent DMA transfer's wire time (µs) — the WS2812 output floor.
+    uint32_t busLastTransmitUs() const         { return platform::lcdWs2812LastTransmitUs(lcd_); }
     /// Tear down the i80 bus and its DMA buffer.
     void     busDeinit()                 { platform::lcdWs2812Deinit(lcd_); }
 

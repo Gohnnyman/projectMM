@@ -193,7 +193,7 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
 
 // A color role absent from the array stays kAbsent and apply() doesn't write it — a wiring
 // can carry any SUBSET of color roles (e.g. a 2-channel R,B light with no green channel).
-TEST_CASE("Correction roles array: absent colour role is not emitted") {
+TEST_CASE("Correction roles array: absent color role is not emitted") {
     Correction c;
     const ChannelRole roles[2] = {ChannelRole::Red, ChannelRole::Blue};   // no green channel
     c.rebuild(255, roles, 2);
@@ -210,7 +210,7 @@ TEST_CASE("Correction roles array: absent colour role is not emitted") {
 
 // A non-color role (Pan) occupies a channel but apply()'s RGB path ignores it — the channel
 // is left for the fixture role writer, and outChannels still counts it.
-TEST_CASE("Correction roles array: non-colour role reserves a channel apply() skips") {
+TEST_CASE("Correction roles array: non-color role reserves a channel apply() skips") {
     Correction c;
     const ChannelRole roles[4] = {ChannelRole::Pan, ChannelRole::Red,
                                   ChannelRole::Green, ChannelRole::Blue};
@@ -279,7 +279,7 @@ TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-Whit
 
 // UV stays dark on a warm color (no blue excess), and every synthesized emitter is forced to 0
 // under whiteMode=None so none holds a stale value — the same reuse-safety the White channel has.
-TEST_CASE("Correction: UV dark on warm colours; whiteMode None zeroes WW/Y/UV") {
+TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
     Correction c;
     const ChannelRole roles[6] = {ChannelRole::Red, ChannelRole::Green, ChannelRole::Blue,
                                   ChannelRole::WarmWhite, ChannelRole::Yellow, ChannelRole::UV};

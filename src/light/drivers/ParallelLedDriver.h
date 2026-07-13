@@ -71,6 +71,18 @@ public:
     /// per-lane counts + separators.
     char ledsPerPin[96] = "";
 
+    /// Async double-buffer transmit (default ON). When ON, the driver encodes the next frame into a
+    /// SECOND DMA buffer while the current one clocks out (deferred-wait — per-tick wall-clock
+    /// `max(encode, wire)` instead of `encode + wire`), so the blocking WS2812 wire wait no longer
+    /// stalls the render thread. Measured on the P4 at 16×256 lights: it lifts the whole board from
+    /// ~48 to ~76 fps (the driver tick drops from ~10.8 ms to ~3.8 ms of CPU — the ~7.7 ms wire moves
+    /// into background DMA). It costs one extra DMA buffer + one frame of output latency (~8 ms), so
+    /// turn it OFF for a latency-critical sound-reactive setup that wants sample→photons in the same
+    /// tick (the synchronous encode→transmit→wait path, provably the pre-double-buffer timing).
+    /// Toggling rebuilds the bus (via affectsPrepare) to add or free the second buffer — so OFF costs
+    /// exactly one buffer, no async memory. If the second buffer won't fit (memory-tight board) it
+    /// degrades to the synchronous path rather than failing. See docs/history/lessons.md.
+    bool asyncTransmit = true;
     /// On-device loopback self-test — jumper a lane's TX to `loopbackRxPin`, tick to transmit a
     /// known WS2812 pattern and bit-verify the capture, proving the peripheral emits correct bytes
     /// on real silicon. A persistent on/off mode (see onControlChanged): while on it re-runs on every
@@ -96,6 +108,11 @@ public:
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
         derived()->addBusControls();   // i80 adds clockPin/dcPin here; Parlio none
+        controls_.addBool("asyncTransmit", asyncTransmit);   // double-buffer on/off (latency opt-out)
+        // Read-only KPI: the measured DMA wire time + the fps ceiling it implies. The pure output
+        // floor (independent of render load), so it shows how much headroom remains as the pipeline
+        // improves — and it reflects an overclocked slot rate directly. Refreshed in tick1s().
+        controls_.addReadOnly("wireUs", wireStr_, sizeof(wireStr_));
         controls_.addBool("loopbackTest", loopbackTest);
         // Always bound, shown only in test mode — the conditional-control shape.
         controls_.addPin("loopbackTxPin", loopbackTxPin);
@@ -104,11 +121,14 @@ public:
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
-    /// A change to the pins, per-lane counts, the window, or a derived bus control
-    /// (clockPin/dcPin on i80) re-parses and re-inits the bus live via the
-    /// prepare sweep.
+    /// A change to the pins, per-lane counts, the window, a derived bus control (clockPin/dcPin on
+    /// i80), or `asyncTransmit` re-parses and re-inits the bus live via the prepare sweep.
+    /// asyncTransmit is a prepare trigger because it drives ALLOCATION: OFF allocates one DMA buffer,
+    /// ON (the default) allocates a second for the double-buffer — so toggling it must rebuild the bus
+    /// to add or free that buffer (a board that turns it off pays no second-buffer memory).
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
+            || std::strcmp(name, "asyncTransmit") == 0
             || isWindowControl(name)
             || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80
     }
@@ -152,6 +172,7 @@ public:
     /// (DriverBase::release()).
     void release() override {
         deinit();
+        freeWire();              // the correction scratch — freed on the true teardown (not on reinit)
         DriverBase::release();   // clears failBuf_ + configErr_
     }
 
@@ -171,44 +192,112 @@ public:
     /// Point the driver at the source frame buffer and re-parse the lane config.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; parseConfig(); }
 
-    /// Per-tick output: a fused per-ROW pass corrects the same light index of every
-    /// active lane and transposes it into 3-slot bus bytes in the platform-owned DMA
-    /// buffer, then ships the frame as one autonomous transfer. Inert off this chip
-    /// and idle until inited with a source buffer + correction.
+    /// Per-tick output (deferred-wait double-buffer): a fused per-ROW pass corrects the same
+    /// light index of every active lane and transposes it into 3-slot bus words in the DMA buffer,
+    /// then ships it as one autonomous transfer. Two paths, chosen by whether a second DMA buffer is
+    /// allocated (which `asyncTransmit` drives at init): SYNCHRONOUS (default, one buffer — the
+    /// original encode→transmit→wait, 0 added latency, provably no regression) or DEFERRED-WAIT
+    /// DOUBLE-BUFFER (asyncTransmit ON — encode N+1 while N clocks out, `max(encode, wire)` per tick,
+    /// +1 frame latency, +1 DMA buffer). Inert off this chip and idle until inited with a source
+    /// buffer + correction. (The double-buffer defaults ON — it overlaps the blocking wire wait and
+    /// lifted the P4 whole-board rate 48→76 fps; OFF is the sound-reactive 0-latency opt-out and pays
+    /// for exactly one buffer — see the asyncTransmit control + docs/history/lessons.md.)
     void tick() override {
         if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
         if (!inited_ || !dmaBuf_ || !sourceBuffer_ || !sourceBuffer_->data()
             || laneCount_ == 0 || maxLaneLights_ == 0) return;
         const uint8_t outCh = correction_.outChannels;
         if (outCh == 0 || frameBytes_ > derived()->busCapacity()) return;
+        // The per-row scratch must be allocated and sized for this channel count (prepareWire, off the
+        // hot path). If it isn't (alloc failed / a shrunk realloc pending), idle rather than overrun.
+        if (!wire_ || wireCap_ < static_cast<size_t>(kMaxLanes) * outCh) return;
 
-        // Fused per-ROW pass, one runtime branch on the bus width: ≤8 lanes clock an
-        // 8-bit bus (uint8 slots, the transposeLanes8x8 core); 9..16 lanes clock a
-        // 16-bit bus (uint16 slots, transposeLanes16x8). The branch is OUTSIDE the
-        // row loop, so each width's inner loop stays branch-free.
-        if (laneCount_ <= 8) encodeRows<uint8_t>(outCh);
-        else                 encodeRows<uint16_t>(outCh);
-
-        // The latch pad after the rows is zeroed at reinit and never written
-        // here, so the transfer ends holding every lane LOW for >=300 µs. Wait
-        // only when the transfer actually started: a failed transmit gives no
-        // done-callback, so an unconditional wait would block the full 1000 ms
-        // timeout every tick. Drop the frame and retry next tick (self-heals).
-        if (derived()->busTransmit(frameBytes_))
-            derived()->busWait(1000 /* ms */);
+        // Two explicitly-separate paths so the OFF path is PROVABLY the pre-Step-1.5 behavior (no
+        // regression) and pays nothing for the double-buffer it isn't using. The mode is fixed by
+        // whether the second buffer was allocated (busInit(async) — ON allocs it, OFF doesn't), so a
+        // stale flag can't route a single-buffer bus down the async path.
+        if (derived()->busBuffer(1)) tickAsync(outCh);   // double-buffer (asyncTransmit ON)
+        else                         tickSync(outCh);    // synchronous (asyncTransmit OFF / no 2nd buf)
     }
 
-    // Encode every row into the DMA buffer as `Slot`-wide bus words (uint8_t for the
-    // 8-bit bus, uint16_t for the 16-bit bus). Correct the same light index of every
-    // active lane into the wire block, then transpose+emit its 3 slots. No heap,
-    // integer math only. `dmaBuf_` is raw bytes at the seam; a 16-bit frame views it
-    // as uint16 slots (the buffer was sized ×2 by frameBytesFor). Called from tick().
+    // Synchronous single-buffer path — the ORIGINAL tick, verbatim: encode buffer 0, transmit, wait
+    // right here. One DMA buffer, no alternation, no deferred-wait bookkeeping, 0 added latency. This
+    // is the default (asyncTransmit OFF) and its timing is exactly the pre-double-buffer driver's.
+    void tickSync(uint8_t outCh) {
+        uint8_t* buf = derived()->busBuffer(0);
+        if (!buf) return;
+        if (laneCount_ <= 8) encodeRows<uint8_t>(outCh, buf);
+        else                 encodeRows<uint16_t>(outCh, buf);
+        // The latch pad (zeroed at reinit, never written here) ends the transfer holding every lane
+        // LOW >=300 µs. Wait only when the transfer started — a failed transmit gives no done-callback,
+        // so an unconditional wait would block the full timeout. Drop + retry next tick (self-heals).
+        if (derived()->busTransmit(0, frameBytes_))
+            derived()->busWait(0, 1000 /* ms */);
+    }
+
+    // Deferred-wait double-buffer path (asyncTransmit ON) — encode frame N+1 into the back buffer
+    // while frame N clocks out of the front, so the per-tick wall-clock is max(encode, wire) instead
+    // of encode + wire. Costs the second DMA buffer + 1 frame of output latency. See the class doc.
+    void tickAsync(uint8_t outCh) {
+        // 1. Finish the transfer that last used the buffer we're about to encode into, so the encode
+        //    never overwrites a frame still clocking out (no-op on the first tick).
+        busWaitIfBusy(active_);
+        // 2. Fused per-ROW encode into buffer `active_`, one branch on the bus width (see encodeRows).
+        uint8_t* buf = derived()->busBuffer(active_);
+        if (!buf) return;
+        if (laneCount_ <= 8) encodeRows<uint8_t>(outCh, buf);
+        else                 encodeRows<uint16_t>(outCh, buf);
+        // 3. Kick this buffer's DMA and return WITHOUT waiting; flip to the other buffer for next tick.
+        if (derived()->busTransmit(active_, frameBytes_)) {
+            inFlight_[active_] = true;
+            active_ ^= 1;
+        }
+    }
+
+    /// Refresh the read-only `wireUs` KPI once a second (off the hot path): the last measured DMA
+    /// wire time and the fps ceiling it implies (1e6 / wireUs). This is the pure WS2812 output floor —
+    /// the render loop can never beat it, so it's the target the multicore work drives the system tick
+    /// toward, and it tracks an overclocked slot rate directly. "—" until the first transfer completes.
+    void tick1s() override {
+        const uint32_t us = derived()->busLastTransmitUs();
+        if (us == 0) { std::snprintf(wireStr_, sizeof(wireStr_), "—"); return; }
+        std::snprintf(wireStr_, sizeof(wireStr_), "%u µs (%u fps max)",
+                      static_cast<unsigned>(us), static_cast<unsigned>(1000000u / us));
+    }
+
+    // Wait for buffer `i`'s in-flight transfer to finish, then clear its flag. No-op when nothing is
+    // outstanding on `i` (first tick, or a frame whose transmit failed to start) — so an unconditional
+    // wait can't block the full timeout. Used only by tickAsync (the deferred-wait double-buffer path):
+    // it waits on the buffer it's about to REUSE. A wait timeout drops that frame (the encode
+    // overwrites it). The synchronous path (tickSync) waits inline and never uses this.
+    void busWaitIfBusy(uint8_t i) {
+        if (!inFlight_[i]) return;
+        derived()->busWait(i, 1000 /* ms */);
+        inFlight_[i] = false;
+    }
+
+    // Drain BOTH buffers' in-flight transfers before a reinit/release frees them — a live DMA
+    // reading a buffer that's about to be freed is a use-after-free. Safe to call any time
+    // (busWaitIfBusy is a no-op on an idle buffer).
+    void drainInFlight() { busWaitIfBusy(0); busWaitIfBusy(1); }
+
+    // Encode every row into `dst` as `Slot`-wide bus words (uint8_t for the 8-bit bus,
+    // uint16_t for the 16-bit bus). Correct the same light index of every active lane
+    // into the wire block, then transpose+emit its 3 slots. No heap, integer math only.
+    // `dst` is the raw-byte DMA buffer this tick owns; a 16-bit frame views it as uint16
+    // slots (the buffer was sized ×2 by frameBytesFor). Called from tick().
     template <class Slot>
-    void encodeRows(uint8_t outCh) {
+    void encodeRows(uint8_t outCh, uint8_t* dst) {
         const uint8_t* src = sourceBuffer_->data();
         const uint8_t srcCh = sourceBuffer_->channelsPerLight();
-        auto* out = reinterpret_cast<Slot*>(dmaBuf_);
-        uint8_t wire[kMaxLanes * 4];
+        auto* out = reinterpret_cast<Slot*>(dst);
+        // Per-lane wire slots, lane-major with stride `outCh` (wire_[lane * outCh + ch]). Sized to the
+        // channel count off the hot path (prepareWire), so a light of any channel count (RGB / RGBW /
+        // RGBCCT / an N-channel fixture) is laid out without overrun. Zeroed each frame so a
+        // short-strand lane's slot (skipped below) contributes no set bit (the activeMask rule already
+        // gates it, but this removes the read-of-uninitialised footgun).
+        std::memset(wire_, 0, wireCap_);
+        const size_t stride = outCh;
         for (nrOfLightsType row = 0; row < maxLaneLights_; row++) {
             Slot mask = 0;
             for (uint8_t lane = 0; lane < laneCount_; lane++) {
@@ -217,9 +306,9 @@ public:
                 // winStart_ shifts this driver's whole slice; laneStart_ is the
                 // per-lane offset within it.
                 correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
-                                   wire + lane * 4);
+                                   wire_ + lane * stride);
             }
-            encodeWs2812LcdSlots<Slot>(wire, mask, outCh, out);
+            encodeWs2812LcdSlots<Slot>(wire_, mask, outCh, out);
             out += static_cast<size_t>(outCh) * 8 * 3;   // 3 slots × 8 bits × channels, in Slot elements
         }
     }
@@ -257,7 +346,21 @@ protected:
 
     LedDriverConfig cfg_;
     bool inited_ = false;
-    uint8_t* dmaBuf_ = nullptr;          // platform-owned; cached for the encode
+    uint8_t* dmaBuf_ = nullptr;          // platform-owned buffer 0; cached as the "inited" flag
+                                         // for tick()'s guard (the per-tick encode target is
+                                         // busBuffer(active_), which alternates 0/1)
+    uint8_t active_ = 0;                 // which DMA buffer this tick encodes into (0/1); stays 0
+                                         // in single-buffer mode (no second buffer allocated)
+    bool inFlight_[2] = {};              // is buffer i's DMA transfer outstanding (awaiting its wait)
+    // Per-row correction scratch: kMaxLanes × outChannels bytes, lane-major (wire_[lane*outCh+ch]).
+    // Heap, sized to the channel count off the hot path (prepareWire) — no fixed cap, so a light of
+    // any channel count fits (RGB=3, RGBW=4, RGBCCT=5, an N-channel fixture; limit is memory). A fixed
+    // 4-byte-stride stack array here overflowed for >4-channel corrections → the SE16 bootloop.
+    uint8_t* wire_ = nullptr;
+    size_t   wireCap_ = 0;               // bytes allocated (= kMaxLanes × the outChannels it was sized for)
+    char wireStr_[40] = "—";             // read-only `wireUs` KPI text (refreshed in tick1s); sized
+                                         // for the worst case "<us> µs (<fps> fps max)" + the 3-byte
+                                         // UTF-8 µ, so the snprintf never truncates (-Wformat-truncation)
     uint16_t laneList_[kMaxLanes] = {};
     nrOfLightsType laneCounts_[kMaxLanes] = {};
     nrOfLightsType laneStart_[kMaxLanes] = {};
@@ -288,6 +391,11 @@ protected:
     /// such pins, so it uses this default.
     const char* validateBusPins(const uint16_t* /*lanes*/, uint8_t /*n*/) const { return nullptr; }
 
+    /// FATAL bus-pin check → the ERROR path (idles the driver), for a bus-pin misconfig the peripheral
+    /// can't init at all (LcdLedDriver's clockPin==dcPin). Distinct from validateBusPins' per-lane
+    /// warnings. Default null; a peripheral with bus control pins overrides it. Parlio has none.
+    const char* validateBusFatal() const { return nullptr; }
+
     // Frame bytes: longest lane × channels × 24 slots, plus a zeroed latch pad of
     // >=300 µs at the slot rate (800 slots) with clock-tolerance slack (64), each
     // scaled by `slotBytes` (1 for an 8-bit bus, 2 for a 16-bit bus — a slot is one
@@ -304,6 +412,20 @@ protected:
 
     // Bytes per bus slot: 1 for the 8-bit bus (≤8 lanes), 2 for the 16-bit bus.
     uint8_t slotBytes() const { return laneCount_ > 8 ? 2 : 1; }
+
+    // (Re)size the per-row correction scratch to kMaxLanes × outCh bytes. Grows-only, off the hot
+    // path (called from parseConfig). Sizing to outCh — not a fixed 4 — is what lets encodeRows lay
+    // out any channel count without overrun. Failure leaves wire_ null; tick() then idles.
+    void prepareWire(uint8_t outCh) {
+        const size_t need = static_cast<size_t>(kMaxLanes) * (outCh ? outCh : 1);
+        if (wire_ && wireCap_ >= need) return;
+        freeWire();
+        wire_ = static_cast<uint8_t*>(platform::alloc(need));
+        wireCap_ = wire_ ? need : 0;
+    }
+    void freeWire() {
+        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; }
+    }
 
     // Re-derive lanes/counts/starts/frame size from the controls and the wired
     // buffer/correction. Off the hot path; on error the driver idles with the
@@ -322,6 +444,10 @@ protected:
         if constexpr (Derived::kExactLaneCount) {
             if (!err && n != 8 && n != 16) err = "LCD bus needs exactly 8 or 16 pins";
         }
+        // Fatal bus-pin misconfig (LcdLedDriver's clockPin==dcPin — the i80 bus can't init) → the
+        // error path below, which idles the driver. Checked before the per-lane WARNINGS: a broken
+        // bus is worse than a garbled lane, so it wins the status.
+        if (!err) err = derived()->validateBusFatal();
         // Peripheral-specific data-pin check (i80's WR/DC on a data lane routes two
         // output signals to one pin, so that lane emits the clock/DC waveform, not
         // pixel data). This is a WARNING, not a blocker: on a board that wires all
@@ -356,6 +482,9 @@ protected:
         // laneCount_ is set above, so slotBytes() reflects the derived bus width (1 for
         // ≤8 lanes, 2 for the 16-bit bus) — a 16-lane frame is twice the bytes.
         frameBytes_ = frameBytesFor(maxLaneLights_, outCh, slotBytes());
+        // Size the per-row correction scratch to kMaxLanes × outCh (grows-only, off the hot path).
+        // Stride outCh, so any channel count fits without the old fixed-4-byte overflow.
+        prepareWire(outCh);
         clearConfigErr();
         // A lane clamped to the WS2812 ceiling still drives — Warning, not error (see RmtLed).
         setConfigWarn(warn);
@@ -363,7 +492,7 @@ protected:
         // this driver consumes (Σ laneCounts_ = `start`) of its window — so the user sees
         // real consumption instead of guessing from grid × pins. A clamp warning wins; an
         // idle driver (no pins / empty buffer) stays statusless, not "driving 0 of 0".
-        if (!warn && start > 0) setDrivingInfo(start, winLen_);
+        if (!warn && start > 0) setDrivingInfo(start, winLen_, outCh);
         return true;
     }
 
@@ -375,6 +504,9 @@ protected:
 
     void reinit() {
         if constexpr (Derived::lanesAvailable() == 0) return;
+        // Drain any in-flight DMA before touching the buffers: a rebuild (or the exact-match
+        // re-zero below) must not race a transfer still reading the old buffer. No-op when idle.
+        drainInFlight();
         if (laneCount_ == 0 || frameBytes_ == 0) { deinit(); return; }
         // Reuse the existing bus ONLY when the frame is the EXACT same size and on the same pins/lanes.
         // Grow OR shrink both rebuild: a peripheral whose single-transfer size is fixed at bus creation
@@ -384,14 +516,23 @@ protected:
         // error). Exact-match reuse (not `>=`) keeps the bus always valid-or-rebuilt. The pin check
         // matters (a pin edit keeps the size but must move the GPIOs); the lane-count check matters for
         // Parlio (8→4 keeps frameBytes but the bus was built for 8 lanes).
+        // Also rebuild when the second-buffer PRESENCE no longer matches asyncTransmit: toggling the
+        // flag adds (ON) or frees (OFF) buffer 1, which only busInit/deinit can do. `haveSecond`
+        // reflects what's currently allocated; `wantSecond` what the flag now asks for.
+        const bool haveSecond = derived()->busBuffer(1) != nullptr;
+        const bool wantSecond = asyncTransmit;
         if (inited_ && derived()->busCapacity() == frameBytes_ && busPinsCurrent()
-            && busLaneCount_ == laneCount_) {
-            std::memset(dmaBuf_, 0, derived()->busCapacity());   // clear stale latch-pad bytes
+            && busLaneCount_ == laneCount_ && haveSecond == wantSecond) {
+            // Clear stale latch-pad bytes in BOTH buffers (buffer 1 is null in single-buffer mode).
+            std::memset(dmaBuf_, 0, derived()->busCapacity());
+            if (uint8_t* b1 = derived()->busBuffer(1)) std::memset(b1, 0, derived()->busCapacity());
             return;
         }
         deinit();
-        inited_ = derived()->busInit(frameBytes_);
-        dmaBuf_ = inited_ ? derived()->busBuffer() : nullptr;
+        // Pass asyncTransmit so busInit allocates the second buffer only when the double-buffer is
+        // wanted — OFF (default) costs exactly one DMA buffer, no async overhead, no second alloc.
+        inited_ = derived()->busInit(frameBytes_, asyncTransmit);
+        dmaBuf_ = inited_ ? derived()->busBuffer(0) : nullptr;
         if (inited_) {
             for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
             busLaneCount_ = laneCount_;
@@ -407,10 +548,19 @@ protected:
 
     void deinit() {
         if constexpr (Derived::lanesAvailable() == 0) return;
+        // Free is a use-after-free if a transfer is still reading the buffer — drain first.
+        // (reinit already drains before calling here; release()/onCorrectionChanged reach
+        // deinit directly, so the guard belongs here too. Idempotent no-op when idle.)
+        drainInFlight();
         if (inited_) derived()->busDeinit();
         inited_ = false;
         dmaBuf_ = nullptr;
+        active_ = 0;              // next init starts on buffer 0
+        inFlight_[0] = inFlight_[1] = false;
         busLaneCount_ = 0;
+        // NOTE: wire_ is NOT freed here — deinit() runs inside reinit()'s rebuild path (before busInit),
+        // and parseConfig (which sized wire_) already ran, so freeing it would strand the encode. It is
+        // freed in release() (the true teardown), and grows-only across reinits.
     }
 
     bool busPinsCurrent() const {
@@ -471,14 +621,20 @@ protected:
             return;
         }
         std::memset(frame, 0, testFrameBytes);
-        uint8_t wire[kMaxLanes * 4] = {};
-        wire[0] = 0xA5; wire[1] = 0x00; wire[2] = 0xFF;   // wire[3] stays 0 (RGBW)
+        // One light's wire bytes for lane 0 only (the loopback drives lane 0). The encoder reads
+        // wire[lane * outCh + ch] gated by activeMask = bit 0, so only wire[0..outCh) is read — size to
+        // outCh (no fixed 4-byte cap, matching the runtime encode). Off the hot path (control-driven).
+        auto* wire = static_cast<uint8_t*>(platform::alloc(outCh));
+        if (!wire) { platform::free(frame); clearFailBuf(); setStatus("loopback: out of memory", Severity::Error); return; }
+        std::memset(wire, 0, outCh);
+        wire[0] = 0xA5; if (outCh > 1) wire[1] = 0x00; if (outCh > 2) wire[2] = 0xFF;   // R/G/B pattern
         // Encode the pattern on lane 0 at the operational width. A wider bus adds only
         // idle high lanes (activeMask = bit 0); the private bus + loopbackTxPin override
         // carry lane 0's signal to the jumpered RX pin. Sized-per-slot so the 16-bit
         // buffer stride matches the 16-bit private bus.
         if (sb == 1) encodeLoopbackFrame<uint8_t>(frame, wire, outCh, lights);
         else         encodeLoopbackFrame<uint16_t>(frame, wire, outCh, lights);
+        platform::free(wire);
         // dataBytes drives the RX capture's WS2812-bit count (kBits = dataBytes/3),
         // which is the wire signal on lane 0's RX pin — the SAME bit count at any bus
         // width. So it is width-INDEPENDENT (no ×slotBytes): a wider bus fattens each

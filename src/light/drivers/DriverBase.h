@@ -63,6 +63,15 @@ public:
     /// for code-wiring a driver's slice and for tests). Takes effect on the next config
     /// parse / loop, like a control edit.
     void setWindow(uint16_t start, uint16_t count) { start_ = start; count_ = count; }
+    /// Resolve the window against a buffer of `bufN` lights → its length (0 if it starts past the
+    /// end). Public thin wrapper over the protected windowSlice, so a test can pin the slice math
+    /// directly (e.g. the default kWindowAll drives ALL lights on a >65535 buffer). Same public-for-
+    /// tests convention as windowStart()/windowCount().
+    nrOfLightsType resolveWindowLenForTest(nrOfLightsType bufN) const {
+        nrOfLightsType outStart = 0, outLen = 0;
+        windowSlice(bufN, outStart, outLen);
+        return outLen;
+    }
     /// The active Layer this driver reads dimensions from — null when no Layer is wired
     /// (such as after the last Layer was deleted). Drivers must tolerate null here.
     Layer* layer() const { return layer_; }
@@ -285,11 +294,15 @@ protected:
                      nrOfLightsType& outLen) const {
         outStart = start_ < bufN ? start_ : bufN;
         const nrOfLightsType avail = static_cast<nrOfLightsType>(bufN - outStart);
-        // Default count_ is kWindowAll (65535), clamped here to the buffer = all lights.
-        // 0 is also treated as "all" (a zero-length window would drive nothing, which is
-        // never the intent) so a code-wired setWindow(start, 0) still means "to the end".
-        outLen = (count_ == 0 || count_ > avail) ? avail
-                                                 : static_cast<nrOfLightsType>(count_);
+        // "All lights" is either sentinel: the default kWindowAll (65535), OR 0 (a zero-length
+        // window would drive nothing, never the intent — so setWindow(start, 0) still means "to
+        // the end"). kWindowAll must be matched EXPLICITLY, not via `count_ > avail`: on a PSRAM
+        // board nrOfLightsType is uint32, so a buffer can exceed 65535 lights, and treating the
+        // default as a literal 65535 count would silently cap output there. An explicit real count
+        // (< kWindowAll) always clamps to the buffer, unchanged.
+        outLen = (count_ == 0 || count_ == kWindowAll || count_ > avail)
+                     ? avail
+                     : static_cast<nrOfLightsType>(count_);
     }
 
     // --- Shared status-string lifecycle for the physical LED drivers (RMT / LCD /
@@ -353,14 +366,22 @@ protected:
     }
 
     // Neutral "driving N of M lights" info status — the running-state readout the user reads to
-    // see what a driver actually consumes, instead of guessing from grid × pins. Formats into the
-    // owned failBuf_ (same buffer, same "clear only MY status" lifecycle) at Severity::Status, so an
-    // error/warning set elsewhere this parse still wins (callers set info LAST, only when there's
-    // nothing more urgent to show). No-op if the buffer can't allocate. The format literal lives here
-    // (not a caller-passed fmt) so the message is defined once and both drivers share it verbatim.
-    void setDrivingInfo(unsigned driven, unsigned total) {
+    // see what a driver actually consumes, instead of guessing from grid × pins. `channels` is the
+    // bytes-per-light (correction outChannels); when > 1 the message also reports the total channel
+    // count (driven × channels) — the number that matters for a multi-channel fixture (a 15-channel
+    // moving head drives far more channels than lights, and that's the real footprint the user sizes
+    // a DMX universe against). Formats into the owned failBuf_ (same buffer, same "clear only MY
+    // status" lifecycle) at Severity::Status, so an error/warning set elsewhere this parse still wins
+    // (callers set info LAST, only when there's nothing more urgent to show). No-op if the buffer
+    // can't allocate. The format literal lives here (not a caller-passed fmt) so the message is
+    // defined once and both drivers share it verbatim.
+    void setDrivingInfo(unsigned driven, unsigned total, unsigned channels = 1) {
         if (char* buf = failBufEnsure()) {
-            std::snprintf(buf, kFailBufLen, "driving %u of %u lights", driven, total);
+            if (channels > 1)
+                std::snprintf(buf, kFailBufLen, "driving %u of %u lights (%u channels)",
+                              driven, total, driven * channels);
+            else
+                std::snprintf(buf, kFailBufLen, "driving %u of %u lights", driven, total);
             setStatus(buf, Severity::Status);
         }
     }

@@ -188,6 +188,7 @@ public:
     void release() override {
         deinitAll();
         freeSymbols();
+        freeWire();
         DriverBase::release();   // clears failBuf_ + configErr_
     }
 
@@ -235,7 +236,8 @@ public:
         // Same defensive guard ArtNet uses: skip rather than overrun if the
         // symbol buffer is stale (e.g. correction swapped without a resize).
         if (n == 0 || outCh == 0 || pinCount_ == 0
-            || !symbols_ || symbolCap_ < symbolsFor(n, outCh)) return;
+            || !symbols_ || symbolCap_ < symbolsFor(n, outCh)
+            || !wire_ || wireCap_ < outCh) return;   // wire_ sized to outChannels — skip if not ready
 
         // Fused single pass: correct one light into wire bytes, encode those
         // bytes straight into the symbol buffer. No second sweep over encoded
@@ -246,11 +248,11 @@ public:
         const uint16_t t1h = nsToTicks(cfg_.t1h_ns);
         const uint16_t period = nsToTicks(cfg_.period_ns);
         size_t s = 0;
-        uint8_t wire[4];
         for (nrOfLightsType i = 0; i < n; i++) {
-            // Read the windowed light: this driver's slice starts at winStart_.
-            correction_.apply(src + (winStart_ + i) * srcCh, wire);
-            encodeWs2812Symbols(wire, outCh, t0h, t1h, period, symbols_ + s);
+            // Read the windowed light: this driver's slice starts at winStart_. wire_ is sized to
+            // outChannels off the hot path (resizeSymbols), so apply() can't overflow it.
+            correction_.apply(src + (winStart_ + i) * srcCh, wire_);
+            encodeWs2812Symbols(wire_, outCh, t0h, t1h, period, symbols_ + s);
             s += static_cast<size_t>(outCh) * 8;
         }
         // Start every pin's slice before waiting on any — the channels clock out
@@ -314,6 +316,13 @@ private:
     bool inited_ = false;                      // all-or-nothing across the pins
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
     size_t symbolCap_ = 0;          // words allocated
+    // Per-light scratch for correction_.apply(): `outChannels` bytes, one light at a time. Heap, sized
+    // to the channel count (no fixed cap — a light may carry any number of channels, RGB=3, RGBW=4,
+    // RGBCCT=5, or an N-channel fixture; the only limit is memory). Allocated off the hot path in
+    // resizeSymbols(), reused every tick (tick() never allocates). A fixed stack array here overflowed
+    // for >4-channel corrections and corrupted the stack — the SE16 bootloop, 2026-07-13.
+    uint8_t* wire_ = nullptr;
+    uint8_t  wireCap_ = 0;          // bytes allocated (= the outChannels it was sized for)
 
     // The parse-error literal currently shown in the status slot (nullptr when
     // configErr_, failBuf_, kFailBufLen and the clearConfigErr/clearFailBuf/
@@ -385,7 +394,7 @@ private:
         // With nothing more urgent to show AND lights actually driven, report the lights
         // this driver consumes (Σ pinCounts_) of the window — real consumption, not a
         // grid×pins guess. An idle driver (no pins) stays statusless, not "driving 0 of 0".
-        if (!warn && txLightCount_ > 0) setDrivingInfo(txLightCount_, winLen_);
+        if (!warn && txLightCount_ > 0) setDrivingInfo(txLightCount_, winLen_, outCh);
         return true;
     }
 
@@ -403,6 +412,13 @@ private:
         windowSlice(sourceBuffer_->count(), winStart, n);
         const uint8_t ch = correction_.outChannels;
         if (n == 0 || ch == 0) return;
+        // Per-light correction scratch: grow to `ch` bytes when the channel count grows (off the hot
+        // path). Sized to outChannels so a >4-channel correction (RGBCCT, a fixture) can't overflow it.
+        if (wireCap_ < ch) {
+            freeWire();
+            wire_ = static_cast<uint8_t*>(platform::alloc(ch));
+            wireCap_ = wire_ ? ch : 0;
+        }
         const size_t need = symbolsFor(n, ch);
         if (symbols_ && symbolCap_ >= need) return;
         freeSymbols();
@@ -412,6 +428,9 @@ private:
 
     void freeSymbols() {
         if (symbols_) { platform::free(symbols_); symbols_ = nullptr; symbolCap_ = 0; }
+    }
+    void freeWire() {
+        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; }
     }
 
     // --- loopback self-test (control-driven) ---

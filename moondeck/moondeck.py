@@ -1366,7 +1366,10 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # probedChip) so the label survives path drift and future refreshes.
             body = self._read_body()
             req = json.loads(body) if body else {}
-            probed = {p: probe_port_chip(p) for p in req.get("ports", [])}
+            # Probe ONLY paths that are currently-present serial ports — never an arbitrary client
+            # string reaching esptool's --port. A drifted/removed port silently drops from the set.
+            known = set(list_serial_ports())
+            probed = {p: probe_port_chip(p) for p in req.get("ports", []) if p in known}
 
             def _apply(s):
                 active = next((n for n in s.get("networks", [])

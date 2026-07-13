@@ -558,31 +558,49 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
 // `if constexpr (platform::lcdLanes == 0)` in the driver.
 // ---------------------------------------------------------------------------
 
-// Opaque handle to one configured i80 bus + IO device + DMA frame buffer.
+// Opaque handle to one configured i80 bus + IO device + one or TWO DMA frame buffers.
 struct LcdWs2812Handle { void* impl = nullptr; };
 
 // Create the 8-lane bus on `dataPins[0..laneCount)` plus the two peripheral-
 // mandated lines WS2812 strands ignore: `wrGpio` (the pixel clock) and
-// `dcGpio` (data/command). Allocates a zeroed DMA-capable frame buffer of
-// `bufferBytes`. Returns false on any failure (bad pins, DMA memory pressure).
+// `dcGpio` (data/command). Allocates buffer 0 (a zeroed DMA-capable frame of
+// `bufferBytes`). When `wantSecondBuffer` is true (the async double-buffer is
+// on), it also TRIES a second identical buffer and, if it fits, arms
+// double-buffer mode; if it won't fit (memory-tight board), buffer 1 stays null
+// and the driver runs single-buffer (allocate-and-degrade — the double-buffer
+// is never *required*). When `wantSecondBuffer` is false (default), NO second
+// buffer is allocated at all — the off path costs exactly one buffer. Returns
+// false only when buffer 0 (or the bus) can't be created (bad pins, DMA pressure).
 bool lcdWs2812Init(LcdWs2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
-                   uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes);
+                   uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
+                   bool wantSecondBuffer);
 
-// The DMA frame buffer the driver encodes into (zero-copy), and its capacity
-// — the driver's grow-only check. nullptr / 0 when not initialised.
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& h);
+// DMA frame buffer `buffer` (0 or 1) the driver encodes into (zero-copy).
+// Buffer 0 always exists once init succeeded; buffer 1 is null when the second
+// allocation didn't fit — the driver reads that null as "run single-buffer".
+// `lcdWs2812BufferCapacity` is the shared per-buffer capacity (both buffers are
+// the same size) — the driver's grow-only check. nullptr / 0 when not initialised.
+uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& h, uint8_t buffer);
 size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& h);
 
-// Start the autonomous DMA transfer of the buffer's first `bytes` and return;
-// pair with lcdWs2812Wait. Once started no CPU work remains — there is no
-// refill deadline for WiFi to miss (the design difference vs the ISR-refilled
-// rings in the hpwit/FastLED lineage).
-bool lcdWs2812Transmit(LcdWs2812Handle& h, size_t bytes);
+// Start the autonomous DMA transfer of buffer `buffer`'s first `bytes` and
+// return; pair with lcdWs2812Wait on the SAME buffer. Once started no CPU work
+// remains — there is no refill deadline for WiFi to miss (the design difference
+// vs the ISR-refilled rings in the hpwit/FastLED lineage). The deferred-wait
+// tick encodes into the other buffer while this one clocks out.
+bool lcdWs2812Transmit(LcdWs2812Handle& h, uint8_t buffer, size_t bytes);
 
-// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
-// timed-out frame is dropped and re-encoded next tick (self-heals, same
-// stance as rmtWs2812Wait).
-void lcdWs2812Wait(LcdWs2812Handle& h, uint32_t timeoutMs);
+// Block until buffer `buffer`'s in-flight transfer finishes, bounded by
+// `timeoutMs`; a timed-out frame is dropped and re-encoded next tick
+// (self-heals, same stance as rmtWs2812Wait).
+void lcdWs2812Wait(LcdWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
+
+// Duration in microseconds of the most recent completed DMA transfer — measured start-of-transmit
+// to done-callback, so it is the PURE wire/DMA time (independent of CPU / render load), i.e. the
+// hard WS2812 output floor (256 lights × 30 µs ≈ 7680 µs → the 130 fps ceiling). The driver surfaces
+// it as a read-only KPI so the actual output rate is visible as the pipeline improves (and if a
+// future build overclocks the slot rate, this reflects it directly). 0 until the first transfer completes.
+uint32_t lcdWs2812LastTransmitUs(const LcdWs2812Handle& h);
 
 void lcdWs2812Deinit(LcdWs2812Handle& h);
 
@@ -614,27 +632,36 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 // `if constexpr (platform::parlioLanes == 0)` in the driver.
 // ---------------------------------------------------------------------------
 
-// Opaque handle to one configured Parlio TX unit + DMA frame buffer.
+// Opaque handle to one configured Parlio TX unit + one or TWO DMA frame buffers.
 struct ParlioWs2812Handle { void* impl = nullptr; };
 
 // Create a Parlio TX unit on `dataPins[0..laneCount)` clocked at `pclkHz` (the
-// WS2812 slot rate), with a zeroed DMA-capable frame buffer of `bufferBytes`.
-// No WR/DC pins — Parlio drives the clock internally. Returns false on failure.
+// WS2812 slot rate), with a zeroed DMA-capable buffer 0 of `bufferBytes`. When
+// `wantSecondBuffer` is true, also TRY a second buffer for the async double-buffer
+// (same allocate-and-degrade contract as lcdWs2812Init); when false (default) no
+// second buffer is allocated. No WR/DC pins — Parlio drives the clock internally.
+// Returns false when buffer 0 (or the unit) fails.
 bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
-                      uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes);
+                      uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes,
+                      bool wantSecondBuffer);
 
-// The DMA frame buffer the driver encodes into (zero-copy) + its capacity.
-uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h);
+// DMA frame buffer `buffer` (0 or 1; buffer 1 is null when it didn't fit) + the
+// shared per-buffer capacity. See lcdWs2812Buffer for the single-buffer-degrade contract.
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer);
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
 
-// Start the autonomous DMA transfer of the buffer's first `bytes`; pair with
-// parlioWs2812Wait. No refill deadline once started (single-shot, not the
-// loop-transmission mode Parlio also offers).
-bool parlioWs2812Transmit(ParlioWs2812Handle& h, size_t bytes);
+// Start the autonomous DMA transfer of buffer `buffer`'s first `bytes`; pair
+// with parlioWs2812Wait on the SAME buffer. No refill deadline once started
+// (single-shot, not the loop-transmission mode Parlio also offers).
+bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes);
 
-// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
-// timed-out frame is dropped and re-encoded next tick (self-heals).
-void parlioWs2812Wait(ParlioWs2812Handle& h, uint32_t timeoutMs);
+// Block until buffer `buffer`'s in-flight transfer finishes, bounded by
+// `timeoutMs`; a timed-out frame is dropped and re-encoded next tick (self-heals).
+void parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
+
+// Duration in microseconds of the most recent completed DMA transfer — the pure wire/DMA output
+// time (the WS2812 floor / fps ceiling). See lcdWs2812LastTransmitUs. 0 until the first completes.
+uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& h);
 
 void parlioWs2812Deinit(ParlioWs2812Handle& h);
 
@@ -735,5 +762,13 @@ bool irRead(uint16_t pin, uint32_t& codeOut);
 // then shows as freed in the pin map, and is genuinely reusable). No-op if no channel is open, and
 // on desktop (no IR hardware).
 void irStop();
+
+// Open (or confirm) the IR RX channel on `pin` and report whether it's live — the difference between
+// "a pin is configured" (which irRead can't distinguish from "no code this tick") and "the RMT-RX
+// channel actually bound and is armed". IrService calls this to give a truthful status: a busy pin or
+// a bad GPIO fails to open, and the user must see that, not a stale "ready". Idempotent for an
+// unchanged pin (reuses the open channel). Returns true on ESP32 when the channel is live; desktop
+// has no IR hardware, so it returns true (no channel to fail — the desktop status stays "ready").
+bool irChannelReady(uint16_t pin);
 
 } // namespace mm::platform

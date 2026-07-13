@@ -203,8 +203,10 @@ TEST_CASE("LcdLedDriver warns (does not idle) when a data pin is on clockPin/dcP
         CHECK(d.severity() != mm::MoonModule::Severity::Error);
         CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
     }
-    {   // WR and DC on the SAME GPIO is caught up front — the i80 bus needs two distinct control
-        // lines, so this breaks the bus (unlike a data collision that only corrupts one lane).
+    {   // WR and DC on the SAME GPIO is a FATAL config error that IDLES the driver — the i80 bus
+        // needs two distinct control lines, so this breaks the bus outright (unlike a data-lane
+        // collision, which only corrupts that one lane and is a warn-and-run). Routed through the
+        // error path (validateBusFatal), so the driver idles: laneCount 0, error severity.
         mm::LcdLedDriver d;
         d.clockPin = 20;
         d.dcPin = 20;                                 // same as clockPin
@@ -212,6 +214,8 @@ TEST_CASE("LcdLedDriver warns (does not idle) when a data pin is on clockPin/dcP
         wire(d, src, corr, 64);
         REQUIRE(d.status() != nullptr);
         CHECK(std::strstr(d.status(), "same GPIO") != nullptr);
+        CHECK(d.severity() == mm::MoonModule::Severity::Error);   // idles, not warn-and-run
+        CHECK(d.laneCount() == 0);                                // driver did NOT build the bus
     }
 }
 

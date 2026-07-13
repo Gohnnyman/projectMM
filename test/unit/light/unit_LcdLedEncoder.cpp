@@ -42,9 +42,9 @@ TEST_CASE("LCD encoder: one lane, MSB-first, 3 slots per bit") {
 
 // Two lanes 0xFF/0x00 in one row: the data slot carries lane 0's bit only — the transpose itself.
 TEST_CASE("LCD encoder: transpose across two lanes") {
-    uint8_t wire[8 * 4] = {};
-    wire[0 * 4 + 0] = 0xFF;   // lane 0: all ones
-    wire[1 * 4 + 0] = 0x00;   // lane 1: all zeros
+    uint8_t wire[8 * 1] = {};   // stride = channels = 1
+    wire[0 * 1 + 0] = 0xFF;   // lane 0: all ones
+    wire[1 * 1 + 0] = 0x00;   // lane 1: all zeros
     Slots s{};
     mm::encodeWs2812LcdSlots(wire, static_cast<uint8_t>(0x03), 1, s.bytes);
 
@@ -168,11 +168,12 @@ TEST_CASE("LCD encoder: SWAR 16-lane transpose equals the naive gather") {
 
 // 16-lane golden encoder cases: the uint16 slot carries 16 data lines. Prove a
 // high lane (15) lands in the plane's high byte, and a boundary pair (7 + 8).
+// The wire lane stride is `channels` (here 1), so lane L's byte 0 is wire[L * channels].
 TEST_CASE("LCD encoder 16-lane: high lane and byte-boundary transpose") {
     uint16_t out[3 * 8];   // 1 channel × 8 bits × 3 slots, uint16 slots
-    {   // lane 15 all-ones → data slot has bit 15 set on every bit
-        uint8_t wire[16 * 4] = {};
-        wire[15 * 4] = 0xFF;
+    {   // lane 15 all-ones → data slot has bit 15 set on every bit (stride = channels = 1)
+        uint8_t wire[16 * 1] = {};
+        wire[15 * 1] = 0xFF;
         mm::encodeWs2812LcdSlots<uint16_t>(wire, static_cast<uint16_t>(1u << 15), 1, out);
         for (int bit = 0; bit < 8; bit++) {
             CHECK(out[bit * 3 + 0] == (1u << 15));   // slot0: active mask (lane 15)
@@ -181,8 +182,8 @@ TEST_CASE("LCD encoder 16-lane: high lane and byte-boundary transpose") {
         }
     }
     {   // lane 7 = 0xFF, lane 8 = 0xFF → data slot has bits 7 AND 8 (across the byte split)
-        uint8_t wire[16 * 4] = {};
-        wire[7 * 4] = 0xFF; wire[8 * 4] = 0xFF;
+        uint8_t wire[16 * 1] = {};
+        wire[7 * 1] = 0xFF; wire[8 * 1] = 0xFF;
         const uint16_t mask = static_cast<uint16_t>((1u << 7) | (1u << 8));
         mm::encodeWs2812LcdSlots<uint16_t>(wire, mask, 1, out);
         for (int bit = 0; bit < 8; bit++)

@@ -224,6 +224,13 @@ private:
             const ControlList& cl = m->controls();
             for (uint8_t i = 0; active && i < cl.count(); i++) {
                 const ControlDescriptor& d = cl[i];
+                // A HIDDEN pin control means the peripheral isn't using that GPIO right now — the
+                // control still exists (its value/struct layout is unconditional for persistence),
+                // but a conditional `setHidden` gated it off: the W5500 SPI pins when ethType != SPI,
+                // the loopback Tx/Rx pins when loopbackTest is off. Its pin is genuinely free, so it
+                // must NOT count as a claim, or e.g. setting Ethernet to None would still show its
+                // MISO pin conflicting with a real user (an IR receiver on the same GPIO). Skip it.
+                if (d.hidden) continue;
                 if (d.type == ControlType::Pin) {
                     const int8_t v = *static_cast<int8_t*>(d.ptr);
                     if (v >= 0) addPinClaim(static_cast<uint8_t>(v), m->name(), roleFor(d.name));

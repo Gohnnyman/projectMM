@@ -694,7 +694,10 @@ function renderPortOptions(ports) {
         if (p.path === current) opt.selected = true;
         select.appendChild(opt);
     }
-    updatePortDeviceHint(current);
+    // Hint the port the dropdown ACTUALLY shows: `current` only when it's still a present port,
+    // else the blank selection (the "--" the select falls back to when the stored port is gone).
+    const effective = ports.some(p => p.path === current) ? current : "";
+    updatePortDeviceHint(effective);
     // `.onchange = ...` (not addEventListener) so the handler is REPLACED on
     // each render rather than stacking — this re-runs on every network switch +
     // every Refresh/Identify, so addEventListener would queue up duplicate
@@ -708,9 +711,15 @@ function renderPortOptions(ports) {
 }
 
 async function refreshPorts() {
-    const resp = await fetch("/api/ports");
-    const data = await resp.json();
-    renderPortOptions(data.ports);
+    try {
+        const resp = await fetch("/api/ports");
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!data || !Array.isArray(data.ports)) throw new Error("malformed response");
+        renderPortOptions(data.ports);
+    } catch (e) {
+        appendLog(`\nCouldn't list ports: ${e.message || e}\n`);
+    }
 }
 
 document.getElementById("refresh-ports").addEventListener("click", refreshPorts);
@@ -734,7 +743,9 @@ document.getElementById("identify-ports").addEventListener("click", async () => 
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ports: targets }),
         });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
+        if (!data || !Array.isArray(data.ports)) throw new Error("malformed response");
         let matched = 0;
         for (const [path, info] of Object.entries(data.probed || {})) {
             const board = (data.ports.find(p => p.path === path) || {}).board;
@@ -743,6 +754,8 @@ document.getElementById("identify-ports").addEventListener("click", async () => 
         }
         renderPortOptions(data.ports);
         appendLog(`--- Identify done: ${matched}/${targets.length} matched to a board ---\n`);
+    } catch (e) {
+        appendLog(`\nIdentify failed: ${e.message || e}\n`);
     } finally {
         btn.disabled = false;
         btn.textContent = orig;

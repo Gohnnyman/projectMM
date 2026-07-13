@@ -82,11 +82,14 @@ inline void transposeLanes16x8(const uint8_t* in, uint16_t* out) {
 //               bus — one bus word per slot, bit L = data line L, so the word width
 //               IS the lane count. Deduced from the call, so the 8-bit call sites
 //               (uint8_t mask + uint8_t* out) are source-unchanged.
-//   wire:       kMaxLanes × 4 corrected wire bytes, lane-major
-//               (wire[lane * 4 + channel]); only lanes set in activeMask are
-//               read — inactive lanes may hold garbage.
+//   wire:       kMaxLanes × `channels` corrected wire bytes, lane-major
+//               (wire[lane * channels + channel]); only lanes set in activeMask are
+//               read — inactive lanes may hold garbage. The lane stride IS `channels`
+//               (not a fixed 4), so a light of any channel count (RGB / RGBW / RGBCCT /
+//               an N-channel fixture) is laid out without overrun — the caller sizes
+//               wire to kMaxLanes × channels.
 //   activeMask: bit L set = lane L drives this row (8 or 16 bits wide = Slot).
-//   channels:   wire bytes per light (3 RGB / 4 RGBW).
+//   channels:   wire bytes per light (3 RGB / 4 RGBW / 5 RGBCCT / …), also the lane stride.
 //   out:        channels * 8 * 3 SLOTS (Slot elements), fully written.
 template <class Slot>
 inline void encodeWs2812LcdSlots(const uint8_t* wire, Slot activeMask,
@@ -95,10 +98,11 @@ inline void encodeWs2812LcdSlots(const uint8_t* wire, Slot activeMask,
     for (uint8_t ch = 0; ch < channels; ch++) {
         // Gather this channel's byte from each lane, zeroing inactive lanes so
         // they contribute no set bit to any plane (the idle-LOW rule), then
-        // transpose all 8 bits × kLanes lanes in one pass.
+        // transpose all 8 bits × kLanes lanes in one pass. The lane stride is
+        // `channels` (the wire is laid out kLanes × channels), so any channel count fits.
         uint8_t lanes[kLanes];
         for (uint8_t lane = 0; lane < kLanes; lane++)
-            lanes[lane] = (activeMask & (Slot(1) << lane)) ? wire[lane * 4 + ch] : 0;
+            lanes[lane] = (activeMask & (Slot(1) << lane)) ? wire[lane * channels + ch] : 0;
         Slot plane[8];
         if constexpr (sizeof(Slot) == 1) transposeLanes8x8(lanes, plane);
         else                             transposeLanes16x8(lanes, plane);

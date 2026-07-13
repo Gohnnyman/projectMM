@@ -69,6 +69,42 @@ Quoted where specific:
 | Fixed 60 fps | uncapped + time-aware effects | 🔀 deliberate divergence — Appendix A |
 | Blocks on transmit | **does NOT — encode dominates, wait ~0** | 🔬 our measurement; multicore targets the *encode* |
 
+## Buffering models compared (2026-07-12)
+
+Before adding buffers (Step 1.5 double-buffer, Step 2 cross-core, Step 4 chunked), we surveyed the buffering techniques the field uses, so our choice is *Industry standards, our own code* and not a guess. **There are THREE distinct buffering models, and which one a peripheral needs is forced by its DMA hardware — not a free choice.** Studied under [*Industry standards, our own code*](../../CLAUDE.md#principles): the models below are the recognized techniques; the source links are where to study each; we carry the technique and write our own code against our architecture, not trace any implementation's structure.
+
+| Model | Where the technique appears | How it works | WiFi-flicker risk | Buffers |
+|---|---|---|---|---|
+| **Whole-frame → one burst** | **projectMM (LCD + Parlio today)** | encode the WHOLE frame into a DMA buffer, then fire ONE autonomous transfer | **ZERO mid-frame risk** — the buffer is complete before the DMA starts; nothing races it | 1 big |
+| **Whole-frame ping-pong** | the standard double-buffer / deferred-wait pipeline (e.g. FastLED's LCD_CAM path) | two whole-frame buffers; encode N+1 into the back while DMA drains N from the front; wait-at-*start*-of-next-`show()` | zero mid-frame; adds **1 frame latency** | 2 big |
+| **Chunk-streaming ring** | the standard DMA-ring / transpose-on-the-fly technique (e.g. FastLED's Parlio path, the I2S-clockless family with a tunable `nbDmaBuffer`) | the frame does NOT fit one DMA transfer, so it's split; a small ring of chunk buffers is **refilled on-the-fly by an ISR** as each drains (transpose-on-the-fly) | **HIGH** — a late refill ISR underruns mid-frame → a glitch pulse latches the strand early → **flicker** | 3–**75** small |
+
+**The key finding — why whole-frame buys flicker-immunity for free.** The chunk-streaming model has a conveyor-belt property: the DMA reads while an ISR refills behind it, so **if WiFi preempts the refill ISR for tens of µs, the DMA drains an unfilled chunk → underrun → flicker.** The standard mitigation is a *timing cushion* — a deep DMA ring (a large `nbDmaBuffer`); we ran one at **75** on the S3 in the StarLight era (75 LED-rows of pre-filled runway so a WiFi interrupt burst can't catch the DMA up to an empty slot). **projectMM's whole-frame-then-burst model doesn't hit this at all**: the DMA reads a *finished, self-contained* buffer, so no ISR races it and WiFi cannot underrun a frame mid-transfer. That is why we never needed — and never discuss — a large `nbDmaBuffer`: our peripheral choice (LCD_CAM chains DMA descriptors, Parlio does one autonomous transfer) sidesteps the case a deep ring exists to cover.
+
+**Two DISTINCT WiFi-vs-LED failure modes — don't conflate them:**
+- **DMA underrun** (the deep-ring case): WiFi preempts the *refill ISR* mid-frame → glitch. **Only affects chunk-streaming.** Whole-frame is immune.
+- **Core-0 starvation** (the LC16 finding, [this doc's measurement + top-down § Step 2](multicore-analysis-top-down.md)): a heavy *encode* hogs core 0 so the *network stack* (also core 0) starves → HTTP dies, and on a device whose LED timing shares core 0, the render can hitch. **Affects whole-frame too** — it's the encode, not the DMA. The fix is the multicore pipeline (encode on core 1), a *different* fix than more buffers.
+
+**Buffer count is not pipeline depth.** A driver can hold several buffers yet still serialize if it waits on the previous transfer at the *top* of each frame (`wait_all_done(portMAX_DELAY)` before encoding) — the buffers exist but encode↔transmit never overlap (frame latency = encode + transmit, not `max`). The overlap comes from wait-*placement*, not buffer count: our Step 1.5 waits at the *start* of the next `show()` and encodes into the back buffer, which is what produces the overlap. (Reference to study for the ring machinery: [troyhacks/MoonLight parlio.cpp](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/parlio.cpp).)
+
+**Latency vs throughput — the sound-reactive tradeoff (measured).** Buffering trades latency for throughput. One frame is imperceptible for animation (so it's rarely called out), but projectMM's **sound-reactive** priority makes it worth stating:
+
+| Pipeline | Added latency | Frame @125 fps | Sound-reactive impact |
+|---|---|---|---|
+| **current (single-buffer, synchronous)** | **0 frames** — sample→photons in the same tick | — | ✅ best possible |
+| **+ Step 1.5 (double-buffer DMA)** | +1 frame (DMA of N finishes during tick N+1) | ~8 ms | negligible (beat ≈ 500 ms; A/V sync tolerance ≈ 50–80 ms) |
+| **+ Step 2 (render↔encode across cores)** | +1 more frame | ~8–22 ms | small |
+
+So 1–2 frames (~16–30 ms) is well under human A/V-sync tolerance — but it is a real cost. **Consequence for the design: keep the double-buffer OPT-OUT** (a driver/global flag), so a latency-critical sound-reactive setup can keep the 0-latency synchronous path. This opt-out is *our* choice, driven by the sound-reactive requirement.
+
+**What this means per step (folds into [top-down](multicore-analysis-top-down.md)):**
+- **LCD (S3): whole-frame ping-pong** (Step 1.5) — the standard double-buffer pipeline; validated as correct.
+- **Parlio (P4): a chunk-streaming ring, NOT a full-frame ping-pong** — two full 16-lane frames don't even fit the 65535-byte cap, so the ring is *forced*, and it merges Step 1.5 + Step 4 into one structure (a small ring + underrun counter, refilled by a worker ISR).
+- **Classic-I2S (backlog, below): inherits the underrun/flicker problem** — it's chunk-streaming by nature (no LCD_CAM/Parlio on classic), so it needs the ring **and** the `nbDmaBuffer` flicker-cushion tuning the I2S-clockless family carries. Written into that backlog item so we don't rediscover it.
+- **Encode buffer stays SINGLE** in every model — only the DMA target is doubled/ringed. Our plan already does this.
+
+Sources (technique study, not code to trace): [FastLED LCD_CAM engine](https://github.com/FastLED/FastLED/tree/master/src/platforms/esp/32/drivers/lcd_cam), [FastLED Parlio engine](https://github.com/FastLED/FastLED/tree/master/src/platforms/esp/32/drivers/parlio), [hpwit I2SClocklessLedDriver](https://github.com/hpwit/I2SClocklessLedDriver/blob/main/src/I2SClocklessLedDriver.h), [troyhacks/MoonLight parlio.cpp](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/parlio.cpp).
+
 ## Existing backlog this consolidates
 
 | Note | Where | Now |

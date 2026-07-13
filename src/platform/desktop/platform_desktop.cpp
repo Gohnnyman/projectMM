@@ -1076,13 +1076,14 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
 // ---------------------------------------------------------------------------
 bool lcdWs2812Init(LcdWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                    uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
-                   size_t /*bufferBytes*/) {
+                   size_t /*bufferBytes*/, bool /*wantSecondBuffer*/) {
     return false;
 }
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& /*h*/) { return nullptr; }
+uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
 size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& /*h*/) { return 0; }
-bool lcdWs2812Transmit(LcdWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
-void lcdWs2812Wait(LcdWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+bool lcdWs2812Transmit(LcdWs2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+void lcdWs2812Wait(LcdWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) {}
+uint32_t lcdWs2812LastTransmitUs(const LcdWs2812Handle& /*h*/) { return 0; }
 void lcdWs2812Deinit(LcdWs2812Handle& /*h*/) {}
 RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                     uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
@@ -1095,13 +1096,15 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
 // Parlio WS2812 — no-op stubs. Desktop has no Parlio peripheral; the driver
 // idles (parlioLanes == 0). Sizing/slicing is host-pinned by the driver tests.
 bool parlioWs2812Init(ParlioWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
-                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t /*bufferBytes*/) {
+                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t /*bufferBytes*/,
+                      bool /*wantSecondBuffer*/) {
     return false;
 }
-uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/) { return nullptr; }
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& /*h*/) { return 0; }
-bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
-void parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+void parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) {}
+uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& /*h*/) { return 0; }
 void parlioWs2812Deinit(ParlioWs2812Handle& /*h*/) {}
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                        uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
@@ -1157,5 +1160,6 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
 // through Scheduler::setControl); reception is ESP32-only.
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop
+bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail on desktop
 
 } // namespace mm::platform

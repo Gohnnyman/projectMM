@@ -13,9 +13,9 @@ The measured bottleneck is the **CPU encode** (the WS2812 bit→slot transpose, 
 ```text
 Step 0  Driver correctness ─── DONE (bottom-up § bugs)
                 │
-Step 1  Encode optimisation (1 core) ── SWAR transpose DONE ──► MEASURE ──► if still short: Step 2 (multicore)
+Step 1  Encode optimization (1 core) ── SWAR transpose DONE ──► MEASURE ──► if still short: Step 2 (multicore)
                 │                                                    │
-                ├── Step 1.5  Async transmit + double-buffer (1 core) ─► recovers the wire-ceiling fps (93→125)
+                ├── Step 1.5  Async transmit + double-buffer (1 core) ─► SHIPPED: P4 48→76 fps (asyncTransmit)
                 │                                                    │
                 └── the fast transpose feeds ────────────────────────┴──► Step 3 (16-lane widening)
                                                                      │
@@ -23,8 +23,8 @@ Step 1  Encode optimisation (1 core) ── SWAR transpose DONE ──► MEASUR
 ```
 
 - **Step 1 unblocks Step 3**: 16 lanes doubles the transpose cost, so it *needs* the fast transpose first — now shipped (the SWAR transpose), so Step 3's 16-lane widening is unblocked.
-- **Step 1.5 is the cheapest fps lever and is NOT Step 2**: the transmit currently blocks (measured — see the thesis correction), so ~26% of the frame at 256/pin is idle-CPU-during-wire. Overlapping encode(N+1) with transmit(N) via one double-buffer recovers the wire ceiling on **one core**, distinct from Step 2's render/encode split. Do it before Step 2 (smaller, and it changes what Step 2 measures).
-- **Step 1 did NOT obviate Step 2**: the re-measure (post-SWAR) shows the encode is still ~22 ms at 16384 lights and a heavy effect adds ~17 ms of render, so `render+encode` on one core is 25–41 fps — a second core still buys a real ~45 fps floor. Step 2 overlaps *render↔encode* (a different pair than Step 1.5's *encode↔transmit*); its shape is the pipeline (render on c0, encode on c1), not split-encode. See Step 2.
+- **Step 1.5 SHIPPED (2026-07-13): the double-buffer overlaps the blocking wire wait, one core.** Confirmed on both peripherals (P4/Parlio 48→76 fps, S3/LCD driver −32%); the `asyncTransmit` control (default ON) is the knob, the sync path is a provable non-regression, and a new `wireUs` KPI measures the wire floor explicitly. It changed what Step 2 measures: with the wire hidden, the P4 tick is now **effect ~7.3 ms + driver ~3.8 ms serial → 76 fps**, so the *effect render* is the bottleneck Step 2 attacks. See § Step 1.5 for the full result + the `tickTimeUs`-is-not-frame-time trap.
+- **Step 1 did NOT obviate Step 2, and Step 1.5 confirms it's the real lever**: with Step 1.5 shipped, the driver is only ~3.8 ms of the P4's ~13 ms tick — the rest is effect render (~7.3 ms) + services. Step 2 puts the driver on core 1 so it overlaps the effect on core 0: system tick → `max(effect 7.3 ms, driver 3.8 ms + wire) ≈ 7.3 ms ≈ the wireUs 133 fps ceiling`. Step 2 overlaps *render↔encode/transmit* (a different pair than Step 1.5's *encode↔transmit*); its shape is the pipeline (render on c0, driver on c1). See Step 2.
 - **Step 4 (chunked transfer) is independent**: it raises the *per-frame light ceiling* (Parlio caps a single DMA transfer at ~4096 lights on the P4 — a contiguous-block limit — so 16K needs the frame split across bursts). It's about *how many lights*, not fps; orthogonal to Steps 1.5/2.
 - So **Step 1's core (the transpose) is done and re-measured**; Step 1.5 and Step 4 are unblocked one-core levers; Step 2's *shape is decided* (the pipeline) but its *build* is still gated on a measured need; Step 3 is independently unblocked.
 
@@ -53,17 +53,20 @@ The two bugs the P4 investigation surfaced are fixed + HW-verified (details in t
 
 **Verification:** re-run the 128×128 P4 measurement (the bottom-up's instrumented method); the transpose ms is the KPI. Loopback self-test stays bit-perfect after every change.
 
-## Step 1.5 — Async transmit + double-buffer (one core) — recovers the wire-ceiling fps
+## Step 1.5 — Async transmit + double-buffer (one core) — SHIPPED (2026-07-13)
 
-**Target:** the ~26% of the frame the CPU wastes *waiting* on the DMA transmit. Measured on the Parlio 16-lane sweep (2026-07-12, [performance.md § Multi-pin](../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid)): at 256 LEDs/lane the tick is `10787 µs = 2807 µs encode + 7980 µs WS2812 wire`, run **serially**. The wire time is fixed physics (24 bits × 1.25 µs/light + a 300 µs latch); it can't be shortened. But the CPU sits **idle** during it, then the wire sits idle during the next encode. That serialisation is why the driver hits **93 fps against a 125 fps wire ceiling**.
+**Shipped** as the `asyncTransmit` control on both parallel peripherals, default ON. Measured, same board + config, only the toggle flipped:
 
-**The fix — one double-buffer + a non-blocking transmit.** Encode frame N+1 into buffer B *while* the DMA clocks frame N out of buffer A; swap at the frame boundary. The tick becomes `max(encode, wire) = max(2807, 7980) = 7980 µs = 125 fps` — the encode is now hidden under the wire, for free, on **one core**. This is a driver-local change (two DMA buffers + kick-the-transfer-and-return instead of transfer-and-wait), no cross-core machinery.
+| board / peripheral | driver tick OFF → ON | system fps OFF → ON |
+|---|---|---|
+| P4 / Parlio (16×256) | 10,820 → 3,790 µs | **48 → 76 fps** |
+| S3 / LCD_CAM (16×144) | 17,200 → 11,700 µs | ~15 → ~16 (masked) |
 
-**Why this is NOT Step 2, and why it comes first.** Step 2 (the multicore pipeline) overlaps a *different* pair — `render(N+1) ↔ encode(N)` — to hide effect-render cost. Step 1.5 overlaps `encode(N+1) ↔ transmit(N)` to hide the encode under the wire. They stack (Step 1.5 recovers the wire ceiling; Step 2 then keeps that ceiling steady when a heavy effect would otherwise dominate), but neither replaces the other. Step 1.5 is smaller (one core, one buffer) and it **changes what Step 2 measures** — do it first so Step 2's "is a second core needed?" gate is decided against an already-overlapped baseline, not a serial one.
+**What was confirmed, and the thesis correction that mattered.** The double-buffer *does* work — it overlaps the WS2812 wire wait, dropping the driver's CPU tick on both peripherals (P4 −65%, S3 −32%), each matching the measured wire time. The whole-board win is clean on the P4 (48→76 fps, +58%); on the SE16 the driver gain is real but *masked* by ~50 ms of other per-tick render overhead. **The trap this step nearly died on:** `tickTimeUs` measures CPU-in-the-call (a *blocking* wait is inside it, a *deferred* wait is not), so async-ON's ~3,790 µs driver tick reads as "264 fps" — physically impossible past the wire ceiling. The real rate is the *system* tick; the driver number is CPU headroom. Full write-up + the git-worktree baseline that killed the false-regression scare: [lessons.md](../history/lessons.md).
 
-**Applies to every LED driver.** RMT, LCD i80, and Parlio all currently block on the transmit; the double-buffer belongs in the shared `ParallelLedDriver` base (RMT has its own symbol-buffer shape but the same block-on-done pattern). One implementation, all three benefit — the same *build-it-once* rule as the shared reinit.
+**The reframed bottleneck (this is what Step 2 now attacks).** With the wire wait overlapped, the P4 tick decomposes as **effect render ~7.3 ms + driver ~3.8 ms**, serial on one core → ~76 fps. The effect (a DistortionWaves at 128×128) is now the dominant cost, not the driver. The measured wire floor is **`wireUs` = ~7,474 µs (133 fps)** on the P4 — a new read-only KPI (the DMA transfer duration, start→done) that makes the ceiling explicit and tracks an overclocked slot rate directly.
 
-**Verification:** re-run the 256/pin Parlio sweep; the tick should drop from ~10787 µs toward ~8000 µs (the wire floor) and fps rise 93 → ~125. The loopback self-test stays bit-perfect (double-buffering must not corrupt the swapped frame). Its own `/plan` when built.
+**The design as shipped** (differs from the plan below in three ways): (1) `tick()` is two explicit branches — `tickSync` (the literal original encode→transmit→wait, provably no regression) and `tickAsync` (deferred-wait) — so OFF is byte-for-byte the old timing; (2) allocation follows the flag — OFF allocates ONE DMA buffer, ON requests the second and degrades to sync if it won't fit — so OFF costs nothing; (3) Parlio uses the **same whole-frame double-buffer as LCD**, not a ring: the KPI 4096-light frame fits one transfer, so the ring (Step 4) is unneeded for the fps goal and, per the "beyond ~65K lights is a network-distribution problem, not a single-chip one" call, is deferred indefinitely. **RMT stayed deferred** (its shared per-pin symbol buffer isn't a small double-buffer delta). Latency opt-out: OFF is the sound-reactive path (0 added latency; ON adds ~1 frame). Full record: [Plan-20260712 - Step 1.5 async transmit double-buffer (shipped)](../history/plans/Plan-20260712%20-%20Step%201.5%20async%20transmit%20double-buffer%20(shipped).md).
 
 ## Step 2 — Multicore: effects on core 0, encode+transmit on core 1 (the pipeline) — SHAPE DECIDED
 
