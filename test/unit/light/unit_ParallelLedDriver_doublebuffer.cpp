@@ -8,6 +8,7 @@
 #include "light/layers/Buffer.h"
 
 #include <cstring>
+#include <string>   // std::string — clang gets it transitively, GCC does not
 #include <vector>
 
 // Host test of the deferred-wait DOUBLE-BUFFER logic in ParallelLedDriver::tick()

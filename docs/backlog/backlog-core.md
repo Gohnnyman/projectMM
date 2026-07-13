@@ -473,3 +473,11 @@ Legend: **Adopt-1.0** (small, high value) · **Defer-1.x** (needs engine work or
 | Tiny (< 30 lines, no backend) | category emoji badge on the card header |
 | Medium (minor backend change) | help-link mapping (needs docs site); richer `category()` than role()-derived |
 | Large (separate plan) | health panel + `/api/test`; log panel + WS log channel; OTA + GitHub-update badge; full multi-layer UI; presets UI |
+
+### GCC Release-mode truncation warnings (17, non-blocking)
+
+`uv run moondeck/build/build_desktop.py --gcc` reproduces CI's compiler (CI builds **Debug**, and that is clean). Building the same tree **Release** with GCC surfaces **17 further `-Wformat-truncation` / `-Wstringop-truncation` / `-Wstringop-overflow` warnings** in `Control.cpp`, `HttpServerModule.cpp`, `JsonUtil.h`, `MqttModule.cpp` — Release inlines more, so GCC can prove more about buffer sizes and gets stricter.
+
+They are **not** CI failures (CI is Debug) and each one inspected so far is a false positive of the same shape: a bounds check exists, but GCC cannot prove the degenerate case (e.g. `HttpServerModule.cpp:2400` warns "writing 1 byte into a region of size 0" on a line *guarded* by `if (wsLen + headerLen > sizeof(hdr)) return false;`). Still worth clearing: each is either a genuinely unprovable bound (fix the code) or a bound the code knows but does not state (make it explicit). Doing it in one pass beats letting them mask a real one later.
+
+Not done with the multi-destination/tab-UI merge because 17 warnings across four core files is its own change, not a tail on someone else's.

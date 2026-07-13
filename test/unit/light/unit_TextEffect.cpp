@@ -44,7 +44,8 @@ TEST_CASE("TextEffect: static text draws glyph pixels, empty draws nothing") {
     s.layer.tick();
     CHECK(s.litPixels() > 0);        // "AB" drew something
 
-    std::snprintf(s.text.text_, sizeof(s.text.text_), "");   // empty string → blank frame
+    s.text.text_[0] = '\0';          // empty string → blank frame (snprintf with "" is a zero-length
+                                     // format, which GCC rejects; clearing the buffer says it plainly)
     s.layer.tick();
     CHECK(s.litPixels() == 0);
 }

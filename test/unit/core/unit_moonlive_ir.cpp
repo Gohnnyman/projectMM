@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <cstdio>    // std::snprintf — clang gets it transitively, GCC does not
 #include <vector>
 #include <algorithm>
 
