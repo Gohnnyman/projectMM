@@ -133,10 +133,13 @@ TEST_CASE("AudioService sync=Receive: a localhost WLED packet drives frame_, the
 
 TEST_CASE("AudioService sync=Receive: a failed bind backs off instead of retrying every tick") {
     FrozenClock clk(1);
-    // Hold the port with an external socket so the module's bind() fails.
-    platform::UdpSocket hog;
-    REQUIRE(hog.open());
-    REQUIRE(hog.bind(kTestSyncPort));
+    // Force the bind to fail deterministically. The obvious approach — hog the port with a second
+    // socket — is NOT portable: on Linux, SO_REUSEADDR on a UDP socket bound to INADDR_ANY permits
+    // the overlapping bind, so the hog succeeds and the failure never happens. (That silently broke
+    // this test on Linux for as long as it existed; nothing caught it because CI did not compile the
+    // C++ tests until the sanitizer job.) A privileged port is no better — modern macOS lets a
+    // non-root process bind port 80.
+    platform::setTestBindFails(true);
 
     AudioService a;
     a.sync = 2;
@@ -154,8 +157,8 @@ TEST_CASE("AudioService sync=Receive: a failed bind backs off instead of retryin
     CHECK_FALSE(a.syncOpenForTest());
     CHECK(std::strcmp(a.syncStatusForTest(), "receive: bind failed") == 0);
 
-    // Release the port and advance past the backoff — the next tick retries and succeeds.
-    hog.close();
+    // Let the bind succeed and advance past the backoff — the next tick retries and succeeds.
+    platform::setTestBindFails(false);
     clk.advance(AudioService::syncOpenRetryMsForTest() + 5);
     a.tick();
     CHECK(a.syncOpenForTest());

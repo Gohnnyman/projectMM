@@ -18,6 +18,16 @@ uint32_t micros();
 // scenario-tests run on real hardware can still freeze time if needed.
 void setTestNowMs(uint32_t ms);
 
+// Force the next UdpSocket::bind() calls to fail, so a test can exercise a bind-failure path without
+// depending on the OS to refuse a port. Production code never calls this. The alternative — hog the
+// port with a second socket — is NOT portable: on Linux, SO_REUSEADDR on a UDP socket bound to
+// INADDR_ANY *permits* the overlapping bind, so the hog succeeds and the failure never happens (this
+// silently broke unit_AudioService_sync on Linux for as long as it existed; nothing caught it because
+// CI did not compile the C++ tests until the sanitizer job). Nor is a privileged port reliable —
+// modern macOS lets a non-root process bind port 80. Pass false to restore; tests must reset in
+// release so cases stay independent, same contract as setTestNowMs.
+void setTestBindFails(bool fail);
+
 void* alloc(size_t bytes);
 void free(void* ptr);
 

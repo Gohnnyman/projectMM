@@ -85,6 +85,9 @@ static std::atomic<uint32_t> testNowMs{0};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
 
+// Host-test hook (see platform.h); no ESP32 test drives a bind failure, so it is inert here.
+void setTestBindFails(bool) {}
+
 uint32_t millis() {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
     if (override_) return override_;

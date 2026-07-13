@@ -168,7 +168,11 @@ TEST_CASE("assignCounts clamps a pin to the WS2812 ceiling and warns (drives 204
     const char* warn = nullptr;
     CHECK(mm::assignCounts("", 1, 16384, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
     CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);
-    CHECK(warn == mm::kClampedWarning);           // warned, but not an error
+    CHECK(warn != nullptr);
+    CHECK(std::strcmp(warn, mm::kClampedWarning) == 0);   // warned, but not an error. Compare CONTENTS:
+                                                         // the literal is inline constexpr, so its ADDRESS
+                                                         // need not be unique across translation units —
+                                                         // clang merges them, GCC does not.
 
     // Without a cap (a clocked-SPI type), the same 16384 passes unclamped, no warning.
     warn = mm::kClampedWarning;  // ensure it's reset to null on the no-clamp path
@@ -195,7 +199,8 @@ TEST_CASE("assignCounts clamps a pin to the WS2812 ceiling and warns (drives 204
     CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);   // 5000 → clamped to 2048
     CHECK(counts[1] == 1000);                       // remaining buffer after pin0's 5000
     CHECK(counts[2] == 0);                           // buffer already consumed
-    CHECK(warn == mm::kClampedWarning);
+    CHECK(warn != nullptr);
+    CHECK(std::strcmp(warn, mm::kClampedWarning) == 0);
 }
 
 TEST_CASE("assignCounts handles a zero-light buffer (0×0×0 grid) as all-zero") {

@@ -869,16 +869,26 @@ bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
     return ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0) >= 0;
 }
 
+// Test override (see platform.h): forces bind() to fail so a test can drive the failure path without
+// relying on the OS to refuse a port — which is not portable (Linux permits the overlapping UDP bind).
+static std::atomic<bool> testBindFails{false};
+void setTestBindFails(bool fail) { testBindFails.store(fail, std::memory_order_relaxed); }
+
 bool UdpSocket::bind(uint16_t port) {
     if (fd_ < 0) return false;
+    if (testBindFails.load(std::memory_order_relaxed)) return false;
     // SO_REUSEADDR semantic split: on POSIX it lets a fresh socket claim a port left in
     // TIME_WAIT (never allows two live binds to overlap). On Winsock its meaning is the
     // opposite of POSIX — two live sockets can bind the same port, so a second bind()
     // returns success instead of the EADDRINUSE the audio-sync retry-backoff logic reads
     // as "port owned by someone else" (unit_AudioService_sync's hog-then-module scenario
     // exercises exactly that). Windows' equivalent-to-POSIX behaviour is the *default*,
-    // so on Windows we skip the setsockopt and let a second bind fail naturally. Same
-    // observable outcome on both platforms: overlapping binds are refused.
+    // so on Windows we skip the setsockopt and let a second bind fail naturally.
+    //
+    // NOTE the outcome is NOT the same on every platform, contrary to what this comment used to
+    // claim: on LINUX, SO_REUSEADDR on a UDP socket bound to INADDR_ANY permits an overlapping bind,
+    // so a second bind SUCCEEDS. A test that needs a bind to fail must use setTestBindFails(), not a
+    // port hog.
 #ifndef _WIN32
     int reuse = 1;
     ::setsockopt(sock(fd_), SOL_SOCKET, SO_REUSEADDR,
