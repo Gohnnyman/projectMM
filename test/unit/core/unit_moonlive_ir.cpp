@@ -22,6 +22,14 @@ using namespace mm;
 
 static moonlive::BuiltinTable kT = moonlive::lightBuiltins();
 
+// Every compile-through-run test in this file needs a working host JIT. The tiny-buffer
+// degrade test lower down (which asserts !ok) is left unguarded — it passes for the right
+// reason on arm64 (bytes exceed cap) and a compatible reason on x86_64 (no codegen).
+#if MM_MOONLIVE_HAS_HOST_JIT
+
+// Inside the guard because its only callers are: without a host JIT (CI's x86_64 Linux) the tests
+// below vanish and `place` becomes unused — which GCC treats as an error under -Werror, while clang
+// stays quiet. Defining a helper outside the guard that only guarded code uses is the bug.
 namespace {
 using FillFn = void (*)(uint8_t*, uint32_t, uint8_t);
 FillFn place(const uint8_t* code, size_t n, void*& blkOut, size_t cap = 256) {
@@ -33,10 +41,6 @@ FillFn place(const uint8_t* code, size_t n, void*& blkOut, size_t cap = 256) {
 }
 }
 
-// Every compile-through-run test in this file needs a working host JIT. The tiny-buffer
-// degrade test lower down (which asserts !ok) is left unguarded — it passes for the right
-// reason on arm64 (bytes exceed cap) and a compatible reason on x86_64 (no codegen).
-#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("MoonLive compiled fill is BEHAVIORALLY identical to the hand-encoded emitFill (golden)") {
     const uint8_t cases[][3] = {{0, 0, 255}, {10, 20, 200}, {255, 255, 255}, {0, 0, 0}, {1, 2, 3}};
     for (auto& c : cases) {
