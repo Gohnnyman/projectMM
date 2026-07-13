@@ -9,7 +9,7 @@
     "PreviewDriver",
     "NetworkSendDriver",
     "RmtLedDriver",
-    "LcdLedDriver",
+    "I80LedDriver",
     "ParlioLedDriver",
     "MultiplyModifier",
     "SpiralEffect",
@@ -835,11 +835,11 @@
       "optional": true
     },
     {
-      "name": "add-lcd-driver",
-      "description": "+LcdLedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). Optional — S3 only. Diff = the LCD_CAM per-frame cost.",
+      "name": "add-i80-driver",
+      "description": "+I80LedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. I80LedDriver also registers on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
       "op": "add_module",
-      "id": "Lcd",
-      "type": "LcdLedDriver",
+      "id": "I80",
+      "type": "I80LedDriver",
       "parent_id": "Drivers",
       "props": {
         "pins": "1,2,3,4,5,6,7,8",
@@ -848,7 +848,7 @@
       "optional": true
     },
     {
-      "name": "measure-lcd",
+      "name": "measure-i80",
       "op": "measure",
       "measure": true,
       "optional": true,
@@ -889,42 +889,6 @@
             "2026-06-25"
           ]
         },
-        "esp32": {
-          "tick_us": [
-            101,
-            119
-          ],
-          "free_heap": [
-            128832,
-            150112
-          ],
-          "max_alloc_block": [
-            110592,
-            110592
-          ],
-          "at": [
-            "2026-06-17",
-            "2026-06-25"
-          ]
-        },
-        "esp32p4-eth": {
-          "tick_us": [
-            56,
-            63
-          ],
-          "free_heap": [
-            34022847,
-            34042483
-          ],
-          "max_alloc_block": [
-            385024,
-            385024
-          ],
-          "at": [
-            "2026-06-17",
-            "2026-06-25"
-          ]
-        },
         "desktop-windows": {
           "tick_us": [
             3,
@@ -943,12 +907,13 @@
             "2026-07-08"
           ]
         }
-      }
+      },
+      "description": "The i80 per-frame cost. Only meaningful where add-i80-driver's pins are valid (S3; desktop is inert but exercises the code path) — the classic/P4 blocks were removed: they recorded a driver that had failed to init, so the tiny tick was the bail-out path, not an encode."
     },
     {
-      "name": "remove-lcd-driver",
+      "name": "remove-i80-driver",
       "op": "remove_module",
-      "id": "Lcd",
+      "id": "I80",
       "optional": true
     },
     {
@@ -1885,7 +1850,7 @@
         "desktop-macos": {
           "tick_us": [
             271,
-            2452
+            8982
           ],
           "free_heap": [
             0,
@@ -1897,7 +1862,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-07-04"
+            "2026-07-13"
           ]
         },
         "esp32s3-n16r8": {

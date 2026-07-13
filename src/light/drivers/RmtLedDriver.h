@@ -3,7 +3,7 @@
 #include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
 
 #include "light/drivers/LedDriverConfig.h"
-#include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with LcdLedDriver)
+#include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with I80LedDriver)
 #include "light/drivers/RmtSymbol.h"       // encodeWs2812Symbols (host-testable)
 #include "platform/platform.h"
 
@@ -14,7 +14,7 @@ namespace mm {
 /// peripheral — one GPIO and one RMT TX channel per strand, fed consecutive slices of the source
 /// buffer (8-bit, GRB). The default LED driver for classic-ESP32 and S3 board entries, and the
 /// readable EXAMPLE future LED drivers copy: a sibling of NetworkSendDriver (same DriverBase hooks,
-/// same per-light `correction_->apply()` guard, same once-allocated owned buffer sized off the hot
+/// same per-light `correction_.apply()` guard, same once-allocated owned buffer sized off the hot
 /// path); only the emit differs — this fuses the correction + WS2812 symbol-encode into one pass
 /// (the encode is `RmtSymbol.h`, host-tested) then hands per-pin slices to the platform.
 ///
@@ -38,6 +38,11 @@ namespace mm {
 /// @card RmtLedDriver.png
 class RmtLedDriver : public DriverBase {
 public:
+    /// WS2812/SK6812 strips are physically GRB-wired, so a fresh RMT driver references the "GRB"
+    /// preset by default (a strip attached to a freshly-flashed board shows correct colors). The
+    /// user can pick any preset from the library.
+    RmtLedDriver() { setDefaultPresetName("GRB"); }
+
     /// Hard cap on the pin arrays: the largest RMT TX group of any supported chip (8 on
     /// classic ESP32; the S3 has 4 — enforced per target via maxPinsForTarget()). A fixed
     /// array bounded by a hardware constant, not a dynamic list: the bound can't grow at runtime.
@@ -95,13 +100,13 @@ public:
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
     // The pin/count list parsing (parsePinList / assignCounts) lives in
-    // PinList.h, shared with LcdLedDriver — both drivers slice the source
+    // PinList.h, shared with I80LedDriver — both drivers slice the source
     // buffer from the same two text controls.
 
     /// Bind the driver's controls: the window (start/count), the `pins` and
     /// `ledsPerPin` text lists, and the loopback self-test controls (the TX/RX pin
     /// overrides and frame-stress flag are always bound but shown only in test mode).
-    void defineControls() override {
+    void defineDriverControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
@@ -157,6 +162,10 @@ public:
             if (std::strcmp(name, "pins") == 0) { parseConfig(); reinit(); }
             runLoopbackSelfTest();
         }
+        // Chain to the base so a correction-control edit (localBrightness / preset / whiteMode)
+        // rebuilds this driver's correction LUT — without this the LED driver's brightness/preset
+        // controls were dead (only the global-brightness push reached the LUT).
+        DriverBase::onControlChanged(name);
     }
 
     /// Parse the config and (re)init the RMT channels. Lifecycle has two
@@ -179,7 +188,7 @@ public:
     void release() override {
         deinitAll();
         freeSymbols();
-        DriverBase::release();   // clears failBuf_ + configErr_
+        DriverBase::release();   // frees the correction scratch, clears failBuf_ + configErr_
     }
 
     /// Pure build (see MoonModule::prepare): re-parse, resize the symbol buffer, and (re)init the
@@ -205,13 +214,6 @@ public:
         parseConfig();      // counts derive from the buffer's light count
         if (effectivelyEnabled()) resizeSymbols();
     }
-    /// Point the driver at the shared correction; re-parse (per-pin symbol offsets derive from
-    /// outChannels) and resize the symbol buffer to match. Skipped while (effectively) disabled.
-    void setCorrection(const Correction* c) override {
-        correction_ = c;
-        parseConfig();      // offsets derive from outChannels
-        if (effectivelyEnabled()) resizeSymbols();
-    }
 
     /// Per-tick output: fuse the correction and WS2812 symbol-encode in one pass
     /// over this driver's window, then start every pin's transmit before waiting on
@@ -219,7 +221,7 @@ public:
     /// chips and idle until inited with a source buffer + correction.
     void tick() override {
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
-        if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data() || !correction_) return;
+        if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data()) return;
 
         // Encode only the lights the pins actually transmit (Σ pinCounts_), NOT the whole source
         // buffer: a strand config of e.g. 64 leds/pin on a 16K-light grid drives 64, so encoding
@@ -229,11 +231,12 @@ public:
         // txLightCount_ (Σ pinCounts_) is what the pins clock out — n is the min,
         // so a window smaller than the configured pin total never reads past it.
         const nrOfLightsType n = txLightCount_ < winLen_ ? txLightCount_ : winLen_;
-        const uint8_t outCh = correction_->outChannels;
+        const uint8_t outCh = correction_.outChannels;
         // Same defensive guard ArtNet uses: skip rather than overrun if the
         // symbol buffer is stale (e.g. correction swapped without a resize).
         if (n == 0 || outCh == 0 || pinCount_ == 0
-            || !symbols_ || symbolCap_ < symbolsFor(n, outCh)) return;
+            || !symbols_ || symbolCap_ < symbolsFor(n, outCh)
+            || !wire_ || wireCap_ < outCh) return;   // wire_ sized to outChannels — skip if not ready
 
         // Fused single pass: correct one light into wire bytes, encode those
         // bytes straight into the symbol buffer. No second sweep over encoded
@@ -244,11 +247,11 @@ public:
         const uint16_t t1h = nsToTicks(cfg_.t1h_ns);
         const uint16_t period = nsToTicks(cfg_.period_ns);
         size_t s = 0;
-        uint8_t wire[4];
         for (nrOfLightsType i = 0; i < n; i++) {
-            // Read the windowed light: this driver's slice starts at winStart_.
-            correction_->apply(src + (winStart_ + i) * srcCh, wire);
-            encodeWs2812Symbols(wire, outCh, t0h, t1h, period, symbols_ + s);
+            // Read the windowed light: this driver's slice starts at winStart_. wire_ is sized to
+            // outChannels off the hot path (resizeSymbols), so apply() can't overflow it.
+            correction_.apply(src + (winStart_ + i) * srcCh, wire_);
+            encodeWs2812Symbols(wire_, outCh, t0h, t1h, period, symbols_ + s);
             s += static_cast<size_t>(outCh) * 8;
         }
         // Start every pin's slice before waiting on any — the channels clock out
@@ -296,11 +299,9 @@ public:
     size_t pinSymbolOffsetWords(uint8_t i) const { return i < pinCount_ ? pinOffsets_[i] : 0; }
 
 private:
-    // Source frame + shared correction — each physical driver owns these (the
-    // contract shares Correction::apply(), not the member storage); same shape
-    // as NetworkSendDriver.
+    // Source frame. The output correction (channel order + white + brightness) lives on
+    // DriverBase, applied per-light via correction_.apply(); same shape as NetworkSendDriver.
     Buffer* sourceBuffer_ = nullptr;
-    const Correction* correction_ = nullptr;
 
     LedDriverConfig cfg_;
     platform::RmtWs2812Handle rmt_[kMaxPins];
@@ -314,6 +315,13 @@ private:
     bool inited_ = false;                      // all-or-nothing across the pins
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
     size_t symbolCap_ = 0;          // words allocated
+    // Per-light scratch for correction_.apply(): `outChannels` bytes, one light at a time. Heap, sized
+    // to the channel count (no fixed cap — a light may carry any number of channels, RGB=3, RGBW=4,
+    // RGBCCT=5, or an N-channel fixture; the only limit is memory). Allocated off the hot path in
+    // resizeSymbols(), reused every tick (tick() never allocates). A fixed stack array here overflowed
+    // for >4-channel corrections and corrupted the stack — the SE16 bootloop, 2026-07-13.
+    // (wire_ / wireCap_ live on DriverBase — the grow-only scratch lifecycle is shared with
+    //  ParallelLedDriver; this driver sizes it to ONE light's outChannels.)
 
     // The parse-error literal currently shown in the status slot (nullptr when
     // configErr_, failBuf_, kFailBufLen and the clearConfigErr/clearFailBuf/
@@ -368,7 +376,7 @@ private:
             return false;
         }
         pinCount_ = n;
-        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
+        const uint8_t outCh = correction_.outChannels;
         size_t off = 0;
         txLightCount_ = 0;
         for (uint8_t i = 0; i < pinCount_; i++) {
@@ -382,6 +390,10 @@ private:
         // (or null when nothing clamped) to setConfigWarn tracks the live state and retracts a
         // stale warning once the user drops back under the ceiling.
         setConfigWarn(warn);
+        // With nothing more urgent to show AND lights actually driven, report the lights
+        // this driver consumes (Σ pinCounts_) of the window — real consumption, not a
+        // grid×pins guess. An idle driver (no pins) stays statusless, not "driving 0 of 0".
+        if (!warn && txLightCount_ > 0) setDrivingInfo(txLightCount_, winLen_, outCh);
         return true;
     }
 
@@ -390,15 +402,18 @@ private:
     // (Re)allocate the symbol buffer for the current source + correction. Off the
     // hot path. Grows only — keeps a big-enough existing allocation.
     void resizeSymbols() {
-        if (!sourceBuffer_ || !correction_) return;
+        if (!sourceBuffer_) return;
         // Size for this driver's window slice, not the whole source buffer — an
         // onboard-LED slice of 1 reserves 1 light's worth of symbols, not the full
         // grid's. Derive the window length directly (windowSlice is independent of
         // the pin parse, so the buffer sizes correctly even before pins are set).
         nrOfLightsType winStart, n;
         windowSlice(sourceBuffer_->count(), winStart, n);
-        const uint8_t ch = correction_->outChannels;
+        const uint8_t ch = correction_.outChannels;
         if (n == 0 || ch == 0) return;
+        // Per-light correction scratch: grow to `ch` bytes when the channel count grows (off the hot
+        // path). Sized to outChannels so a >4-channel correction (RGBCCT, a fixture) can't overflow it.
+        ensureWire(ch);   // DriverBase owns the grow-only allocate/free
         const size_t need = symbolsFor(n, ch);
         if (symbols_ && symbolCap_ >= need) return;
         freeSymbols();
@@ -456,7 +471,7 @@ private:
             // frame-rate / RF corruption.
             const uint16_t lights = pinCounts_[0] > 0
                 ? static_cast<uint16_t>(pinCounts_[0]) : 64;
-            const uint8_t ch = correction_ ? correction_->outChannels : 3;
+            const uint8_t ch = correction_.outChannels ? correction_.outChannels : 3;
             r = platform::rmtWs2812LoopbackFrame(txPin, rxPin, lights, ch);
         } else {
             r = platform::rmtWs2812Loopback(txPin, rxPin);
@@ -480,7 +495,7 @@ private:
                 // the same channel count the frame was built with, not a
                 // hardcoded /24, so the light index is right for RGBW too.
                 const unsigned bitsPerLight =
-                    (correction_ ? correction_->outChannels : 3u) * 8u;
+                    (correction_.outChannels ? correction_.outChannels : 3u) * 8u;
                 std::snprintf(failBuf_, kFailBufLen,
                               "loopback FAIL: bad bit %u/%u (light %u)",
                               static_cast<unsigned>(r.firstBadBit),

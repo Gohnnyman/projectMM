@@ -171,6 +171,13 @@ struct ListSource {
     virtual void writeListRowDetail(JsonSink& sink, uint8_t row) const {
         writeListRow(sink, row);
     }
+    // Append SHARED option sets for this list as a JSON object, emitted ONCE per list (not per row)
+    // so a select field repeated across many rows references the set by name (`"optionsRef":"<name>"`)
+    // instead of inlining the identical options array in every row — a preset list with N channel
+    // selects × M rows would otherwise serialise the same role-name array N×M times (the 1 Hz push's
+    // bulk). Default: no shared sets (`{}`), so a plain list is unchanged. A source with a repeated
+    // select overrides to emit `{"<name>":["opt0","opt1",...]}` and its rows emit `optionsRef`.
+    virtual void writeListOptionSets(JsonSink& /*sink*/) const {}
     // Rebuild the list from persisted JSON. `json` is the full object FilesystemModule
     // loaded; `key` is this control's name — the source parses `json` with the
     // recursive mm::json reader, navigates to `key` (a JSON array of the same
@@ -179,6 +186,42 @@ struct ListSource {
     // owns its (de)serialization — Control.h stays free of the JsonUtil include, and
     // the control system stays generic. Returns true if it took.
     virtual bool restoreList(const char* /*json*/, const char* /*key*/) { return false; }
+
+    // --- Editable list (the CRUD extension) -----------------------------------------
+    // A ListSource that supports adding / removing / reordering / editing rows. This is
+    // the editable-data-grid primitive (the write half of the same data-source/adapter
+    // shape UITableView-editing / QAbstractItemModel-with-setData use) — a module that
+    // owns a library of named things (light presets, and later custom palettes) mixes it
+    // in and gets a full editable list in the UI for free, reused rather than re-built.
+    //
+    // Rows are addressed by a STABLE id (writeListRow emits it as "id"), NOT the row
+    // index: a consumer that references a row (a driver pointing at a preset) survives an
+    // add / delete / reorder because the id is invariant. isEditableList() reports whether
+    // this source is editable (so the generic serializer/UI know to show the affordances);
+    // a plain ListSource stays read-only. Each op returns whether it took, so the API layer
+    // maps the result onto an HTTP status.
+    virtual bool isEditableList() const { return false; }
+
+    // Append a new row with default values; write the new row's stable id into `outId`.
+    // Returns false if the list is full or otherwise refuses (e.g. a read-only source).
+    virtual bool addListRow(uint32_t& /*outId*/) { return false; }
+
+    // Remove the row with this stable id. Returns false if no such id, or the row is
+    // protected (a seeded read-only entry). A referenced-elsewhere row may still be
+    // removed — the reference side degrades (id no longer resolves), it does not block.
+    virtual bool deleteListRow(uint32_t /*id*/) { return false; }
+
+    // Move the row with this stable id to position `to` (clamped). Returns false on a
+    // bad id. Reorder never changes an id, so references are unaffected.
+    virtual bool moveListRow(uint32_t /*id*/, uint8_t /*to*/) { return false; }
+
+    // Set one field of the row with this stable id from a JSON value. `field` is the row
+    // field name (e.g. "name", "channels", "ch3"); `valueJson` is the request body the
+    // source parses for "value" (same convention as applyControlValue). Returns false on
+    // a bad id / unknown field / protected row / malformed value. The source owns which
+    // fields are editable and their validation — the primitive stays domain-neutral.
+    virtual bool setListRowField(uint32_t /*id*/, const char* /*field*/,
+                                 const char* /*valueJson*/) { return false; }
 };
 
 struct ControlDescriptor {

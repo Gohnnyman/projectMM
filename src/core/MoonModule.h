@@ -204,9 +204,70 @@ public:
     /// changes (in HttpServerModule) and anywhere else the conditional control set needs
     /// re-evaluation.
     void rebuildControls() {
+        // rebuildControls() is the ONE chokepoint every schema change passes — a conditional-hidden
+        // re-evaluation, an option-set rebuild (a driver's preset Select, a Hue room dropdown), from
+        // any trigger (a control set, a list mutation, an async WiFi/Hue callback). But it also runs
+        // on EVERY ordinary value patch (Scheduler::setControl calls it so defineControls re-evaluates
+        // conditional visibility) — and most of those don't change the schema at all (a slider drag).
+        // The WS state push already value-hashes leaves, so a value patch reaches clients on its own;
+        // a full metadata resync is only needed when the *schema* (control set / metadata / options)
+        // actually changed. So hash the schema before + after the rebuild and fire the resync hook
+        // ONLY on a real change — the common slider-drag case skips it. Mirrors the
+        // FilesystemModule::noteDirty static hook; the Complexity-lives-in-core rule. Cold path only.
+        const uint32_t before = schemaSignature();
         clearControlsRecursive();
         defineControls();
+        if (schemaChangedHook_ && schemaSignature() != before) schemaChangedHook_();
     }
+
+    /// FNV-1a hash of the schema-relevant control fields (name, type, bounds, UI flags, option
+    /// strings) across this module's control list AND its whole subtree — the metadata the WS resync
+    /// would push. Used by rebuildControls() to fire the resync only when the schema actually changed,
+    /// not on every value patch. Value fields (the bound variables) are deliberately excluded: a value
+    /// change rides the per-leaf WS diff, not a full metadata resync.
+    ///
+    /// Recurses into children because rebuildControls() rebuilds the whole subtree (a parent's
+    /// defineControls() cascades to children), and a child's schema can change under an unchanged
+    /// parent — e.g. adding a light preset grows every driver's `preset` Select while the Drivers
+    /// container's own controls stay put. A node-only hash would miss that and drop the resync.
+    ///
+    /// For a Select, hashes the option STRINGS, not the array pointer: the stable-address bind pattern
+    /// (DriverBase::presetOptions_, HueDriver's room/light options) keeps a fixed member array whose
+    /// entries are rewritten in place on a rename — same pointer, same count, changed content — so the
+    /// pointer alone can't see a renamed option.
+    uint32_t schemaSignature() const {
+        uint32_t h = 2166136261u;
+        mixSchema(h);
+        return h;
+    }
+    void mixSchema(uint32_t& h) const {
+        auto mix = [&h](uint32_t v) { h = (h ^ v) * 16777619u; };
+        auto mixStr = [&mix](const char* s) { for (const char* p = s; p && *p; p++) mix(static_cast<uint8_t>(*p)); mix(0u); };
+        mix(controls_.count());
+        for (uint8_t i = 0; i < controls_.count(); i++) {
+            const ControlDescriptor& c = controls_[i];
+            mixStr(c.name);
+            mix(static_cast<uint32_t>(c.type));
+            mix(static_cast<uint32_t>(c.min));
+            mix(static_cast<uint32_t>(c.max));
+            mix((c.hidden ? 1u : 0u) | (c.readonly ? 2u : 0u));
+            if (c.type == ControlType::Select && c.aux) {
+                // aux is the option array (const char* const*), max is its count — hash the strings so
+                // an in-place rename (same pointer) still changes the signature.
+                const char* const* opts = reinterpret_cast<const char* const*>(c.aux);
+                for (int32_t o = 0; o < c.max; o++) mixStr(opts[o]);
+            } else {
+                mix(static_cast<uint32_t>(c.aux));   // Progress total / other aux — a value change differs
+            }
+        }
+        for (uint8_t i = 0; i < childCount_; i++) children_[i]->mixSchema(h);
+    }
+
+    /// Install the schema-changed hook (HttpServerModule points it at requestFullResync). A static
+    /// function pointer, same decoupling as the Scheduler's noteDirty hook: MoonModule signals a
+    /// schema change without depending on the WS layer. Null until wired (unit tests run without it).
+    using SchemaChangedFn = void (*)();
+    static void setSchemaChangedHook(SchemaChangedFn fn) { schemaChangedHook_ = fn; }
     void clearControlsRecursive() {
         controls_.clear();
         for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
@@ -399,9 +460,27 @@ public:
     /// can be added (acceptsChildRoles). Surfaced per-instance in /api/state.
     virtual bool userEditable() const { return true; }
 
+    /// Stop any async worker this module owns that could be reading its child array or its
+    /// children's state, and return only once that worker is idle. Default: no-op (a module with no
+    /// worker has nothing to quiesce). A module that hands work to another thread (Drivers, whose
+    /// core-1 task ticks its Driver children) overrides this to join/park that thread.
+    ///
+    /// Core calls it on the PARENT before every structural mutation of its child array (addChild /
+    /// removeChild below), because a mutation frees or reallocates memory a worker may be walking:
+    /// addChild delete[]s the child array out from under an iterating worker; removeChild is followed
+    /// by the caller's release() + deleteTree(), which frees the very module the worker may be inside
+    /// tick() on. The enabled/control path already funnels through applyState()/prepareTree(), where
+    /// the owner quiesces itself; this hook is the same rule extended to the STRUCTURAL path, kept in
+    /// core so no handler has to remember it (CLAUDE.md § when core already owns a mechanism for one
+    /// path, extend it to the sibling path).
+    ///
+    /// Idempotent and safe to call when no worker is running.
+    virtual void quiesce() {}
+
     /// Generic children — grows on demand, only allocates during setup.
     bool addChild(MoonModule* child) {
         if (!child) return false;
+        quiesce();   // a worker may be iterating children_; the realloc below would pull it out from under it
         if (childCount_ == childCapacity_) {
             uint8_t newCap = childCapacity_ == 0 ? 4 : childCapacity_ * 2;
             auto** newArr = new MoonModule*[newCap];
@@ -416,6 +495,7 @@ public:
     }
 
     bool removeChild(MoonModule* child) {
+        quiesce();   // the caller release()s + deleteTree()s `child` next; a worker must not be inside its tick()
         for (uint8_t i = 0; i < childCount_; i++) {
             if (children_[i] == child) {
                 child->setParent(nullptr);
@@ -432,6 +512,7 @@ public:
     /// Used by FilesystemModule at load time to swap a child whose type differs from
     /// the persisted JSON; the caller tears down + Scheduler::deleteTree's the old child.
     MoonModule* replaceChildAt(uint8_t i, MoonModule* fresh) {
+        quiesce();   // same hazard as removeChild: the caller tears down + deletes the child we swap out
         if (i >= childCount_ || !fresh) return nullptr;
         MoonModule* old = children_[i];
         if (old) old->setParent(nullptr);
@@ -547,9 +628,19 @@ protected:
     /// gate keep ticking; the rest tick only when enabled), dispatches the same
     /// callback, and accumulates per-child timing. Pulled out so the three base
     /// defaults stay one-liners and the gating + timing rule lives in one place.
-    void tickChildren(void (MoonModule::*fn)()) {
+    /// Tick children through the one enabled-gate + timing loop core owns. `roleFilter` selects
+    /// WHICH children: RoleFilter::All (the default) is every child; RoleFilter::Only /
+    /// RoleFilter::Except restrict to (or exclude) one role. The filter exists because a container
+    /// that splits its children across threads (Drivers, whose Driver children tick on a core-1
+    /// worker while the rest tick on the render core) must not re-implement the gate and the timing
+    /// per side — that rule is core's, not the module's (CLAUDE.md § Complexity lives in core).
+    enum class RoleFilter : uint8_t { All, Only, Except };
+    void tickChildren(void (MoonModule::*fn)(), RoleFilter filter = RoleFilter::All,
+                      ModuleRole role = ModuleRole::Generic) {
         for (uint8_t i = 0; i < childCount_; i++) {
             MoonModule* c = children_[i];
+            if (filter == RoleFilter::Only   && c->role() != role) continue;
+            if (filter == RoleFilter::Except && c->role() == role) continue;
             if (!c->respectsEnabled() || c->enabled()) {
                 uint32_t start = platform::micros();
                 (c->*fn)();
@@ -581,6 +672,10 @@ private:
     Severity severity_ = Severity::Status;
     uint32_t tickTimeUs_ = 0;
     uint32_t accumUs_ = 0;
+
+    // Schema-changed hook: one function pointer for the whole process (like the persistence
+    // noteDirty hook), poked by rebuildControls() so the WS layer resyncs on any schema change.
+    static inline SchemaChangedFn schemaChangedHook_ = nullptr;
 };
 
 } // namespace mm

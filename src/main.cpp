@@ -67,6 +67,7 @@
 #include "light/modifiers/PinwheelModifier.h"
 #include "light/modifiers/RippleXZModifier.h"
 #include "light/drivers/Drivers.h"   // the Drivers container (registered + wired below); driver subclasses include DriverBase.h directly
+#include "light/drivers/LightPresetsModule.h"  // the reusable light-preset library (Drivers submodule)
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
@@ -88,8 +89,8 @@
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
 #include "light/drivers/RmtLedDriver.h"
 #endif
-#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-#include "light/drivers/LcdLedDriver.h"
+#if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
+#include "light/drivers/I80LedDriver.h"
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
 #include "light/drivers/ParlioLedDriver.h"
@@ -125,6 +126,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Layers>("Layers", "light/supporting.md#layers");
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/supporting.md#layer");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/supporting.md#drivers");
+    mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule", "light/supporting.md#lightpresets");
     // Concrete modules. registerType<T> captures the type's dimensions() via
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
@@ -202,13 +204,15 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers.md#networksend");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers.md#preview");
     // Register only the LED drivers this chip's silicon can run (see the gated
-    // includes above) — keeps the type picker honest (no LcdLedDriver offered on a
-    // chip without LCD_CAM) and the binary lean.
+    // includes above) — keeps the type picker honest (no I80LedDriver offered on a
+    // chip without an i80 bus) and the binary lean.
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers.md#rmtled");
 #endif
-#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-    mm::ModuleFactory::registerType<mm::LcdLedDriver>("LcdLedDriver", "light/drivers.md#lcdled");
+    // I80LedDriver — the esp_lcd i80 bus (LCD_CAM on S3/P4, I2S-i80 on classic ESP32); IDF picks
+    // the backend by chip, so ONE driver serves all i80-capable silicon under SOC_LCD_I80_SUPPORTED.
+#if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
+    mm::ModuleFactory::registerType<mm::I80LedDriver>("I80LedDriver", "light/drivers.md#i80led");
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers.md#parlioled");
@@ -421,6 +425,15 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // main.cpp has and the catalog can't supply. It reads the active Layer (resolved
     // by the Drivers container's setLayers above) for the light positions and the
     // sparse buffer it streams; it owns its own scratch buffers.
+    // The light-preset library: a boot-wired singleton under Drivers (child role `preset`). It owns
+    // the named channel-role wirings every driver references by id; exactly one exists, so drivers
+    // resolve it via its ActiveInstance seat. Wired-by-code so a persistence load keeps the seeded
+    // built-ins + the singleton, like preview below.
+    auto* lightPresets =
+        static_cast<mm::LightPresetsModule*>(mm::ModuleFactory::create("LightPresetsModule"));
+    drivers->addChild(lightPresets);
+    lightPresets->markWiredByCode();
+
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
     drivers->addChild(preview);
     // Marked wired-by-code so a persistence load can't replace the wired instance
@@ -528,6 +541,14 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                             static_cast<unsigned>(heap),
                             static_cast<unsigned>(mm::platform::maxInternalAllocBlock()));
             }
+            // Render↔encode split KPI: the WORST core-0 wait at the frame boundary in the last second
+            // (the same number the `stall` control shows — a single frame's value lands wherever this
+            // once-a-second log happens to fall and reads ~0 even when the core idles most frames).
+            // Shown only when the split is engaged. It's the Step 2b (ping-pong 2nd buffer) trigger:
+            // ~0 = render ≈ output, a 2nd buffer would gain nothing; large = the effect is far cheaper
+            // than the output work, so core 0 idles and 2b would recover it.
+            if (drivers->renderSplitActive())
+                std::printf("  stall: %uus", static_cast<unsigned>(drivers->stallPeakUs()));
             // Stable MM_IP=<ip> token for the web installer's post-flash serial
             // read. It rides this already-periodic line (zero extra printf, re-emits
             // every second so the installer catches it whenever it reopens the port).

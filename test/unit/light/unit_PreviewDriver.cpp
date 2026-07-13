@@ -52,6 +52,10 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
         return true;
     }
     uint32_t clientGeneration() const override { return generation; }
+    // Single-threaded test transport: one producer thread, so there is no race to exclude — grant
+    // unconditionally (the "may return true unconditionally" case in BinaryBroadcaster).
+    bool tryAcquireSend() override { return true; }
+    void releaseSend() override {}
 
     // Resumable buffered send — the colour-frame path (coord table uses begin/push/end). The mock
     // captures it as a 0x02 frame (header ++ body). `bufferedDrains` models a slow link: the send
@@ -112,6 +116,11 @@ struct PreviewRig {
         preview = new mm::PreviewDriver();
         preview->setBroadcaster(&cap);
         drivers.addChild(preview);
+        // Single-core: these cases pin PreviewDriver's own behavior (its downsample + the zero-copy
+        // source), so keep the render↔encode split out of it — with multicore ON Drivers would own a
+        // handoff buffer and preview would read THAT, not the layer's buffer, which is a different
+        // (and separately tested) contract. See unit_Drivers_rendersplit.cpp.
+        drivers.multicore = false;
         drivers.setLayer(&layer);          // passBufferToDrivers wires preview's source + layer
         drivers.defineControls();
         drivers.applyState();

@@ -60,7 +60,16 @@
                 <div class="esp32-controls">
                     <div class="port-header">
                         <span>Port:</span>
-                        <button id="refresh-ports" title="Refresh">&#x21bb;</button>
+                        <button type="button" id="refresh-ports" title="Refresh">&#x21bb;</button>
+                        <!-- Probes ports still shown as path-only (no board match) with esptool
+                             to read chip + MAC. RESETS each probed board, so it's opt-in, never
+                             automatic; results cache to moondeck.json so it's a one-time cost. -->
+                        <button type="button" id="identify-ports" title="Identify unlabeled ports (probes the chip — resets the board)">Identify</button>
+                        <!-- Passive plug/unplug watcher: polls the port list and narrates what
+                             was added/removed with its 3-level identity. Read-only (USB descriptor
+                             + cache) — never probes/resets a board; click Identify to confirm an
+                             unidentified one. Toggles on/off. -->
+                        <button type="button" id="watch-ports" title="Watch for plugged/unplugged devices">Watch</button>
                     </div>
                     <select id="port-select"><option value="">--</option></select>
                     <!-- Names the device MoonDeck last flashed on the selected port (from

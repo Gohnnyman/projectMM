@@ -55,8 +55,11 @@ public:
     /// interface, not the concrete HTTP server.
     void setBroadcaster(BinaryBroadcaster* b) { broadcaster_ = b; }
 
+    /// Preview shows the raw logical buffer, no correction.
+    bool hasCorrectionControls() const override { return false; }
+
     /// Bind the one control, `fps` (1-60).
-    void defineControls() override {
+    void defineDriverControls() override {
         controls_.addUint8("fps", fps, 1, 60);
     }
 
@@ -91,7 +94,19 @@ public:
         uint32_t now = platform::millis();
         uint32_t interval = 1000 / fps;
         if (now - lastSendTime_ < interval) return;  // fps CEILING (max rate); link may be slower
-        lastSendTime_ = now;
+
+        // Hold the sender for this WHOLE tick, because under the multicore split this runs on core 1
+        // while the transport drains and pushes state on core 0. The bracket must span the entire
+        // message set below — a coordinate table streams as begin/push/end, and another core's write
+        // landing between those parts would corrupt the WS frame; arming a frame likewise must not
+        // race the drain reading the slot. TRY-acquire (never block: we are on the encode thread) —
+        // busy means the transport is mid-drain, so we SKIP this slot, which is exactly the back-off
+        // the adaptive frame rate already takes when the link is behind. A skipped preview frame is
+        // invisible; a blocked encode thread would stall the LEDs.
+        SendLease lease{broadcaster_};
+        if (!lease) return;
+
+        lastSendTime_ = now;   // only after we own the sender — a skipped slot must retry next tick
 
         // The coordinate table is (re)streamed only when the geometry changes (prepare — a
         // resize / LUT rebuild), when a new client connects (clientGeneration bump, so a page

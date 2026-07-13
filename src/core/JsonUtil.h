@@ -10,12 +10,14 @@
 //      strstr-based scan (HttpServerModule, FilesystemModule, scenario_runner, Control).
 //
 //   2. Recursive reader (JsonDoc/parse + the read/get accessors below): a standard
-//      recursive-descent parser into a fixed node arena, the recognizable shape for
-//      walking nested structure — needed for the persisted device list, an array of
-//      small objects. Bounded by design for the ESP32 task stack: a compile-time node
-//      pool (kMaxNodes) and a recursion depth guard (kMaxDepth) mean no heap and no
-//      unbounded recursion; any malformed, truncated, or oversized input fails cleanly
-//      (parse() returns false, accessors return safe defaults) and never reads OOB.
+//      recursive-descent parser, the recognizable shape for walking nested structure —
+//      needed for the persisted device / preset lists, arrays of small objects. The text
+//      arena and node pool are HEAP-allocated per parse, sized to the input and grown as
+//      needed (nodes are referenced by index, so a realloc never dangles), then freed when
+//      the JsonDoc is destroyed — so there is no node-count or length cap and no large
+//      standing buffer; only recursion is bounded (kMaxDepth, for the ESP32 task stack).
+//      Any malformed / truncated input fails cleanly (parse() returns false, accessors
+//      return safe defaults) and never reads OOB. Off the hot path (boot load, control writes).
 
 #include <cstdint>
 #include <cstdio>
@@ -125,14 +127,12 @@ inline bool parseBool(const char* json, const char* key) {
 // input into the document's own buffer (so strings can be NUL-terminated in place,
 // un-escaped) and links nodes by index — no pointers into caller memory, no heap.
 
-// kMaxNodes: every value (object, array, string, number, bool, null) is one node, plus
-// one node per object member key. 128 covers our actual use: a ~32-element array of
-// small objects (the persisted device list — each device is one object node + a few
-// field nodes). kMaxDepth bounds recursion for the ESP32 task stack (~3.5-8 KB); 16 is
-// far deeper than anything we emit (array -> object -> value is depth 3).
-inline constexpr int kMaxNodes = 128;
-inline constexpr int kMaxDepth = 16;
-inline constexpr int kMaxJsonLen = 4096;  // arena for the copied/un-escaped input text
+// kMaxDepth bounds recursion for the ESP32 task stack (~3.5-8 KB); a deeply-nested document can't
+// blow the stack. 64 is far deeper than anything we emit (array -> object -> value is depth 3) yet
+// still a hard guard against a pathological input. There is NO node-count or text-length cap: the
+// text arena and node pool are heap-allocated per parse, sized to the input, and freed when the
+// JsonDoc goes out of scope — so a config of any size (many light presets, a wide fixture) parses.
+inline constexpr int kMaxDepth = 64;
 
 enum class JsonType : uint8_t { Null, Bool, Int, String, Object, Array };
 
@@ -149,18 +149,38 @@ struct JsonNode {
     int next = -1;                // index of next sibling, or -1
 };
 
-// The parsed document: owns the text buffer and node arena. Returned by reference from
-// parse(); the caller keeps it alive while walking. No heap — sized for kMaxJsonLen /
-// kMaxNodes, which is ~5 KB; fine for a boot-time persistence load, not the hot path.
+// The parsed document: owns the text buffer and node arena, both HEAP-allocated by parse() and
+// freed here. `buf` is sized to the input; `nodes` grows (realloc-doubling) as the parser allocates
+// — nodes are addressed by INDEX (firstChild/next are ints), so a realloc that moves the block never
+// dangles. No node-count or length cap. Non-copyable (it owns two heap blocks); a caller keeps it
+// alive while walking. Off the hot path (boot load / control writes), so a transient alloc is fine.
 struct JsonDoc {
-    char buf[kMaxJsonLen];
-    JsonNode nodes[kMaxNodes];
-    int count = 0;
-    int root = -1;
+    char*     buf = nullptr;     // heap copy of the input (mutable — un-escaping rewrites in place)
+    JsonNode* nodes = nullptr;   // heap node pool, grown by ensureNode()
+    int       cap = 0;           // allocated node slots
+    int       count = 0;         // used node slots
+    int       root = -1;
+
+    JsonDoc() = default;
+    ~JsonDoc() { std::free(buf); std::free(nodes); }
+    JsonDoc(const JsonDoc&) = delete;
+    JsonDoc& operator=(const JsonDoc&) = delete;
 
     bool valid() const { return root >= 0; }
     const JsonNode* node(int i) const { return (i >= 0 && i < count) ? &nodes[i] : nullptr; }
     const JsonNode* rootNode() const { return node(root); }
+
+    // Grow the node pool if full; returns false on allocation failure. Called by the parser's
+    // alloc(). Doubling keeps total reallocations logarithmic. Indices stay valid across the move.
+    bool ensureNode() {
+        if (count < cap) return true;
+        int newCap = cap ? cap * 2 : 32;
+        auto* grown = static_cast<JsonNode*>(std::realloc(nodes, static_cast<size_t>(newCap) * sizeof(JsonNode)));
+        if (!grown) return false;
+        nodes = grown;
+        cap = newCap;
+        return true;
+    }
 };
 
 namespace detail {
@@ -178,8 +198,10 @@ struct JsonParser {
     void skipWs() { while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++; }
 
     int alloc() {
-        if (doc.count >= kMaxNodes) { ok = false; return -1; }
-        return doc.count++;
+        if (!doc.ensureNode()) { ok = false; return -1; }   // grows the heap pool; false = OOM
+        const int i = doc.count++;
+        doc.nodes[i] = JsonNode{};   // realloc doesn't construct — reset the freshly-used slot
+        return i;
     }
 
     // Parse a JSON string literal: assumes *p == '"'. Un-escapes in place and NUL-terminates,
@@ -343,7 +365,12 @@ inline bool parse(const char* json, JsonDoc& out) {
     out.root = -1;
     if (!json) return false;
     size_t len = std::strlen(json);
-    if (len == 0 || len + 1 > sizeof(out.buf)) return false;
+    if (len == 0) return false;
+    // Heap-copy the input, sized exactly to it — no length cap. The parser un-escapes strings in
+    // place, so this mutable copy doubles as the string arena; freed by ~JsonDoc.
+    std::free(out.buf);
+    out.buf = static_cast<char*>(std::malloc(len + 1));
+    if (!out.buf) return false;
     std::memcpy(out.buf, json, len + 1);
 
     detail::JsonParser parser(out);

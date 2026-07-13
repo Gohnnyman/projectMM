@@ -18,6 +18,16 @@ uint32_t micros();
 // scenario-tests run on real hardware can still freeze time if needed.
 void setTestNowMs(uint32_t ms);
 
+// Force the next UdpSocket::bind() calls to fail, so a test can exercise a bind-failure path without
+// depending on the OS to refuse a port. Production code never calls this. The alternative — hog the
+// port with a second socket — is NOT portable: on Linux, SO_REUSEADDR on a UDP socket bound to
+// INADDR_ANY *permits* the overlapping bind, so the hog succeeds and the failure never happens (this
+// silently broke unit_AudioService_sync on Linux for as long as it existed; nothing caught it because
+// CI did not compile the C++ tests until the sanitizer job). Nor is a privileged port reliable —
+// modern macOS lets a non-root process bind port 80. Pass false to restore; tests must reset in
+// release so cases stay independent, same contract as setTestNowMs.
+void setTestBindFails(bool fail);
+
 void* alloc(size_t bytes);
 void free(void* ptr);
 
@@ -79,6 +89,35 @@ const char* renderTaskName();
 // Test-only (desktop): inject a canned task snapshot + render-task name so TasksModule's row/detail
 // JSON + nesting predicate are testable on the host (no RTOS otherwise). `tasks` must outlive the use.
 void setTestTaskSnapshot(const TaskInfo* tasks, size_t count, const char* renderTask);
+
+// --- Pinned worker task + wake notification (render/encode multicore split) ------------------
+// A minimal own-a-thread seam: spawn one function on a named task pinned to `core`, plus a
+// single-slot wake notification. This is FreeRTOS's textbook lock-free pairing —
+// xTaskCreatePinnedToCore + a direct-to-task notification (xTaskNotifyGive / ulTaskNotifyTake),
+// which the RTOS documents as the lightweight replacement for a binary semaphore in a
+// single-producer/single-consumer wake. The multicore pipeline (Drivers render↔encode split)
+// is the first user; the async-ArtNet send wants the same primitive, so it lives in core.
+// No FreeRTOS type escapes the header (opaque handle, same rule as RmtWs2812Handle). Desktop
+// backs it with std::thread + a condition_variable so the handoff invariants are host-testable,
+// even though the core-split itself is an ESP32-only capability.
+struct WorkerTask { void* impl = nullptr; };
+using WorkerFn = void(*)(void* user);
+// Spawn `fn(user)` on a task named `name` with `stackBytes` stack, at `priority`, pinned to
+// `core` (0 or 1; -1 = no affinity). Returns false if the task couldn't be created — the caller
+// then runs the work inline (the allocate-and-degrade fallback). The spawned fn owns its loop and
+// returns only after stopPinnedTask signals it.
+bool spawnPinnedTask(WorkerTask& t, const char* name, WorkerFn fn, void* user,
+                     size_t stackBytes, uint8_t priority, int core);
+// Wake the task blocked in waitNotify (producer side; safe from any task on any core).
+void notifyTask(WorkerTask& t);
+// Block the spawned task until notifyTask fires or `timeoutMs` elapses; false on timeout (so the
+// worker can service its own watchdog and re-check its stop flag). Called ONLY from inside the fn.
+bool waitNotify(WorkerTask& t, uint32_t timeoutMs);
+// Signal stop + wake, then block until the worker fn has returned and the task is torn down.
+void stopPinnedTask(WorkerTask& t);
+// Reset THIS task's watchdog (esp_task_wdt_reset) from inside a worker doing a long encode. No-op
+// on desktop. Keeps the vTaskDelay(1)/WDT discipline the single render loop has today.
+void taskWdtReset();
 
 // --- GPIO capability introspection (PinsModule) ---------------------------------------------
 // Static per-pin capability for one GPIO, so the pin ownership map can flag a claim that lands on
@@ -144,6 +183,13 @@ void getMacAddress(uint8_t mac[6]);
 const char* macString();
 const char* chipModel();
 const char* sdkVersion();
+
+// PSRAM interface type as a short static string: "quad" (1-line SPI, classic ESP32 / WROVER) or
+// "octal" (8-line, the S3/S2 -R8 parts). Derived from the compile-time CONFIG_SPIRAM_MODE (there is no
+// runtime IDF query for the mode), so it reflects how the firmware drives the PSRAM. Empty "" when
+// PSRAM is not enabled in this build. SystemModule shows it beside the psram usage so the type is
+// visible (an S3 board reads "octal", a WROVER "quad"). Desktop returns "".
+const char* psramType();
 
 // WiFi co-processor status, for boards whose radio lives on a separate chip (the
 // ESP32-P4 + on-board ESP32-C6 over esp_hosted). Returns a short status string:
@@ -547,9 +593,10 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
                                          uint16_t lights, uint8_t channels);
 
 // ---------------------------------------------------------------------------
-// LCD_CAM parallel WS2812 output (ESP32-S3). The driver
-// (src/light/drivers/LcdLedDriver.h) pre-encodes the WHOLE frame into one
-// DMA buffer (3-slot encode in LcdSlots.h, domain code); the platform owns
+// i80-bus parallel WS2812 output — the LCD_CAM peripheral on the ESP32-S3/P4, the
+// I2S peripheral on the classic ESP32 (IDF's esp_lcd i80 API picks the backend per
+// chip). The driver (src/light/drivers/I80LedDriver.h) pre-encodes the WHOLE frame into one
+// DMA buffer (3-slot encode in ParallelSlots.h, domain code); the platform owns
 // only the i80 bus/peripheral AND the DMA buffer itself — the buffer must be
 // DMA-capable internal RAM (platform::alloc prefers PSRAM, which the
 // peripheral can't stream from at full rate), so the platform allocates it at
@@ -558,33 +605,52 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
 // `if constexpr (platform::lcdLanes == 0)` in the driver.
 // ---------------------------------------------------------------------------
 
-// Opaque handle to one configured i80 bus + IO device + DMA frame buffer.
-struct LcdWs2812Handle { void* impl = nullptr; };
+// Opaque handle to one configured i80 bus + IO device + one or TWO DMA frame buffers.
+struct I80Ws2812Handle { void* impl = nullptr; };
 
 // Create the 8-lane bus on `dataPins[0..laneCount)` plus the two peripheral-
 // mandated lines WS2812 strands ignore: `wrGpio` (the pixel clock) and
-// `dcGpio` (data/command). Allocates a zeroed DMA-capable frame buffer of
-// `bufferBytes`. Returns false on any failure (bad pins, DMA memory pressure).
-bool lcdWs2812Init(LcdWs2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
-                   uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes);
+// `dcGpio` (data/command). Allocates buffer 0 (a zeroed DMA-capable frame of
+// `bufferBytes`). When `wantSecondBuffer` is true (the async double-buffer is
+// on), it also TRIES a second identical buffer and, if it fits, arms
+// double-buffer mode; if it won't fit (memory-tight board), buffer 1 stays null
+// and the driver runs single-buffer (allocate-and-degrade — the double-buffer
+// is never *required*). When `wantSecondBuffer` is false (default), NO second
+// buffer is allocated at all — the off path costs exactly one buffer. Returns
+// false only when buffer 0 (or the bus) can't be created (bad pins, DMA pressure).
+bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
+                   uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
+                   bool wantSecondBuffer);
 
-// The DMA frame buffer the driver encodes into (zero-copy), and its capacity
-// — the driver's grow-only check. nullptr / 0 when not initialised.
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& h);
-size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& h);
+// DMA frame buffer `buffer` (0 or 1) the driver encodes into (zero-copy).
+// Buffer 0 always exists once init succeeded; buffer 1 is null when the second
+// allocation didn't fit — the driver reads that null as "run single-buffer".
+// `i80Ws2812BufferCapacity` is the shared per-buffer capacity (both buffers are
+// the same size) — the driver's grow-only check. nullptr / 0 when not initialised.
+uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& h, uint8_t buffer);
+size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& h);
 
-// Start the autonomous DMA transfer of the buffer's first `bytes` and return;
-// pair with lcdWs2812Wait. Once started no CPU work remains — there is no
-// refill deadline for WiFi to miss (the design difference vs the ISR-refilled
-// rings in the hpwit/FastLED lineage).
-bool lcdWs2812Transmit(LcdWs2812Handle& h, size_t bytes);
+// Start the autonomous DMA transfer of buffer `buffer`'s first `bytes` and
+// return; pair with i80Ws2812Wait on the SAME buffer. Once started no CPU work
+// remains — there is no refill deadline for WiFi to miss (the design difference
+// vs the ISR-refilled rings in the hpwit/FastLED lineage). The deferred-wait
+// tick encodes into the other buffer while this one clocks out.
+bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes);
 
-// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
-// timed-out frame is dropped and re-encoded next tick (self-heals, same
-// stance as rmtWs2812Wait).
-void lcdWs2812Wait(LcdWs2812Handle& h, uint32_t timeoutMs);
+// Block until buffer `buffer`'s in-flight transfer finishes, bounded by `timeoutMs`.
+// Returns TRUE only when the transfer actually completed. FALSE on timeout — the DMA may still be
+// reading that buffer, so the caller must NOT re-encode into it (see ParallelLedDriver::busWaitIfBusy,
+// which keeps it marked in-flight and re-waits next tick rather than corrupting a live transfer).
+bool i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
 
-void lcdWs2812Deinit(LcdWs2812Handle& h);
+// Duration in microseconds of the most recent completed DMA transfer — measured start-of-transmit
+// to done-callback, so it is the PURE wire/DMA time (independent of CPU / render load), i.e. the
+// hard WS2812 output floor (256 lights × 30 µs ≈ 7680 µs → the 130 fps ceiling). The driver surfaces
+// it as a read-only KPI so the actual output rate is visible as the pipeline improves (and if a
+// future build overclocks the slot rate, this reflects it directly). 0 until the first transfer completes.
+uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& h);
+
+void i80Ws2812Deinit(I80Ws2812Handle& h);
 
 // LCD loopback self-test: build a private FULL-WIDTH bus on the driver's
 // real pins (the i80 peripheral configures all 8 data lines — a partial bus
@@ -598,7 +664,7 @@ void lcdWs2812Deinit(LcdWs2812Handle& h);
 // short synthetic burst misses exactly the real-transfer failures (DMA
 // descriptor boundaries, sustained-rate stalls). Same result shape as the
 // RMT test; got[] holds the first mismatching row. No-op off the S3.
-RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                     uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
                                     const uint8_t* frame, size_t frameBytes,
                                     size_t dataBytes, uint8_t rowBits);
@@ -609,39 +675,49 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 // shape, but Parlio is simpler: it takes the data GPIOs directly (no
 // sacrificial WR/DC lines — Parlio generates the pixel clock itself from
 // `pclkHz`) and allows ANY lane count (1..8 here), so there is no all-8-pins
-// rule. The same encoder feeds it (LcdSlots.h — one bus word per slot, bit L =
+// rule. The same encoder feeds it (ParallelSlots.h — one bus word per slot, bit L =
 // data line L). All inert on targets without Parlio, guarded by
 // `if constexpr (platform::parlioLanes == 0)` in the driver.
 // ---------------------------------------------------------------------------
 
-// Opaque handle to one configured Parlio TX unit + DMA frame buffer.
+// Opaque handle to one configured Parlio TX unit + one or TWO DMA frame buffers.
 struct ParlioWs2812Handle { void* impl = nullptr; };
 
 // Create a Parlio TX unit on `dataPins[0..laneCount)` clocked at `pclkHz` (the
-// WS2812 slot rate), with a zeroed DMA-capable frame buffer of `bufferBytes`.
-// No WR/DC pins — Parlio drives the clock internally. Returns false on failure.
+// WS2812 slot rate), with a zeroed DMA-capable buffer 0 of `bufferBytes`. When
+// `wantSecondBuffer` is true, also TRY a second buffer for the async double-buffer
+// (same allocate-and-degrade contract as i80Ws2812Init); when false (default) no
+// second buffer is allocated. No WR/DC pins — Parlio drives the clock internally.
+// Returns false when buffer 0 (or the unit) fails.
 bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
-                      uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes);
+                      uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes,
+                      bool wantSecondBuffer);
 
-// The DMA frame buffer the driver encodes into (zero-copy) + its capacity.
-uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h);
+// DMA frame buffer `buffer` (0 or 1; buffer 1 is null when it didn't fit) + the
+// shared per-buffer capacity. See i80Ws2812Buffer for the single-buffer-degrade contract.
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer);
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
 
-// Start the autonomous DMA transfer of the buffer's first `bytes`; pair with
-// parlioWs2812Wait. No refill deadline once started (single-shot, not the
-// loop-transmission mode Parlio also offers).
-bool parlioWs2812Transmit(ParlioWs2812Handle& h, size_t bytes);
+// Start the autonomous DMA transfer of buffer `buffer`'s first `bytes`; pair
+// with parlioWs2812Wait on the SAME buffer. No refill deadline once started
+// (single-shot, not the loop-transmission mode Parlio also offers).
+bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes);
 
-// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
-// timed-out frame is dropped and re-encoded next tick (self-heals).
-void parlioWs2812Wait(ParlioWs2812Handle& h, uint32_t timeoutMs);
+// Block until buffer `buffer`'s in-flight transfer finishes, bounded by `timeoutMs`.
+// Returns TRUE only when the transfer actually completed; FALSE on timeout — see i80Ws2812Wait for
+// why the caller must not reuse the buffer then.
+bool parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
+
+// Duration in microseconds of the most recent completed DMA transfer — the pure wire/DMA output
+// time (the WS2812 floor / fps ceiling). See i80Ws2812LastTransmitUs. 0 until the first completes.
+uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& h);
 
 void parlioWs2812Deinit(ParlioWs2812Handle& h);
 
 // Parlio loopback self-test — same contract + result shape as the LCD/RMT
 // loopbacks: a private Parlio TX unit transmits the caller's real frame back to
 // back while rmtWs2812RxCapture reads it off `rxGpio` (lane 0 carries the
-// pattern) and every bit is verified. `dataBytes`/`rowBits` as in lcdWs2812Loopback.
+// pattern) and every bit is verified. `dataBytes`/`rowBits` as in i80Ws2812Loopback.
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                        uint16_t rxGpio, const uint8_t* frame,
                                        size_t frameBytes, size_t dataBytes,
@@ -735,5 +811,13 @@ bool irRead(uint16_t pin, uint32_t& codeOut);
 // then shows as freed in the pin map, and is genuinely reusable). No-op if no channel is open, and
 // on desktop (no IR hardware).
 void irStop();
+
+// Open (or confirm) the IR RX channel on `pin` and report whether it's live — the difference between
+// "a pin is configured" (which irRead can't distinguish from "no code this tick") and "the RMT-RX
+// channel actually bound and is armed". IrService calls this to give a truthful status: a busy pin or
+// a bad GPIO fails to open, and the user must see that, not a stale "ready". Idempotent for an
+// unchanged pin (reuses the open channel). Returns true on ESP32 when the channel is live; desktop
+// has no IR hardware, so it returns true (no channel to fail — the desktop status stays "ready").
+bool irChannelReady(uint16_t pin);
 
 } // namespace mm::platform

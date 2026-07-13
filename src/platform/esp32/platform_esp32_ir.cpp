@@ -102,8 +102,14 @@ bool ensureChannel(int pin) {
     cbs.on_recv_done = rxDoneCb;
     rmt_rx_register_event_callbacks(rxChan_, &cbs, nullptr);
 
-    rxCfg_.signal_range_min_ns = 200;         // shorter than a 560 µs mark — filters glitches
-    rxCfg_.signal_range_max_ns = 12000000;    // longer than the 9 ms lead — ends the frame
+    // A pulse SHORTER than min_ns is filtered as a glitch; a pulse LONGER than max_ns ends the frame
+    // (the inter-frame idle). The IDF ir_nec_transceiver reference uses 1250 ns / 12 ms; the previous
+    // 200 ns min was too aggressive (sub-µs ringing on the receiver's rising edge registered as a real
+    // pulse, so the RMT split the lead burst and completed the frame after ONE symbol — the debug
+    // capture showed lastSyms=1, which decodeNec rejects). 1250 ns is well under a 560 µs NEC mark yet
+    // above the receiver's edge ringing.
+    rxCfg_.signal_range_min_ns = 1250;        // glitch filter — below a 560 µs NEC mark, above edge ring
+    rxCfg_.signal_range_max_ns = 12000000;    // > the 9 ms lead — the inter-frame idle ends the frame
     if (rmt_enable(rxChan_) != ESP_OK || !arm()) {
         closeChannel();
         return false;
@@ -135,5 +141,10 @@ bool irRead(uint16_t pin, uint32_t& codeOut) {
 }
 
 void irStop() { closeChannel(); }   // release the RX channel + its pin; irRead reopens it lazily
+
+// Open-or-confirm the RX channel and report whether it's live — same lazy open irRead uses, exposed
+// so IrService can tell "pin set" from "channel actually bound + armed". Fails when the RMT channel
+// can't be created (a busy pin, a bad GPIO, no free RMT block).
+bool irChannelReady(uint16_t pin) { return ensureChannel(static_cast<int>(pin)); }
 
 }  // namespace mm::platform

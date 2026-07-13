@@ -35,6 +35,13 @@ namespace mm {
 /// @card HueDriver.png
 class HueDriver : public DriverBase {
 public:
+    /// HueDriver reads apply()'s output back as R,G,B to convert to HSV for the bridge, so it
+    /// references the "RGB" preset (a GRB reorder would corrupt the hue). It opts out of the
+    /// correction controls (hasCorrectionControls() → false), so the order stays RGB — only the
+    /// global × local brightness varies. (A future refinement guards against a non-RGB wiring being
+    /// pointed at a Hue light; today it's the vanilla RGB passthrough.)
+    HueDriver() { setDefaultPresetName("RGB"); }
+
     /// The bridge's LAN IP, entered in the UI (4 octets).
     uint8_t  bridgeIp[4] = {};
     /// The Hue username/app key — filled by the Pair button, then persisted.
@@ -43,7 +50,10 @@ public:
     /// Register the controls: bridge IP, the persisted app key, the Pair link-button, the room +
     /// light filter dropdowns (both default to index 0 = "All", rebuilt in place from the parsed
     /// bridge data on every control change), the shared window, then refresh the status line.
-    void defineControls() override {
+    /// Hue converts to HSV, RGB-fixed, no correction UI.
+    bool hasCorrectionControls() const override { return false; }
+
+    void defineDriverControls() override {
         controls_.addIPv4("bridgeIp", bridgeIp);
         controls_.addText("appKey", appKey, sizeof(appKey));   // persisted credential
         controls_.addButton("pair");                            // link-button pairing
@@ -62,12 +72,6 @@ public:
 
     /// Take the shared source buffer this driver reads its window from.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; }
-
-    /// Take the shared output Correction (global brightness LUT + channel order), same as the
-    /// physical LED / network drivers — so the brightness slider and a swapped colour order reach
-    /// the Hue lights too. Applied per pixel before RGB→HSV; the RGBW/white part is irrelevant here
-    /// (Hue takes hue/sat), we use the RGB result.
-    void setCorrection(const Correction* c) override { correction_ = c; }
 
     /// A control click. "pair" starts the link-button pairing poll; changing the bridge IP or app
     /// key points the driver at a (possibly) different bridge, so the learned light list + push
@@ -147,7 +151,7 @@ public:
     void parseLightsForTest(const char* json) { parseLights(json); rebuildDriven(); }
     uint8_t lightCountForTest() const { return lightCount_; }    // kept colour+reachable lights
     uint16_t hueIdForTest(uint8_t i) const { return i < kMaxLights ? hueId_[i] : 0; }
-    int8_t colourCountForTest() const { return colourCount_; }
+    int8_t colorCountForTest() const { return colorCount_; }
 
     // Test seam: parse a real /groups JSON body through fetchGroups' Room extractor. Call
     // parseLightsForTest FIRST — room membership resolves against the known colour lights (hueId_),
@@ -201,7 +205,6 @@ private:
     static constexpr uint32_t kSlowTimeoutMs = 400;
 
     Buffer* sourceBuffer_ = nullptr;
-    const Correction* correction_ = nullptr;   // shared brightness LUT + channel order (may be null)
 
     // Per-light Hue id + the last RGB we pushed (the changed-only filter). hueId maps a window
     // index → the bridge's light id, learned from GET /api/<key>/lights.
@@ -212,7 +215,7 @@ private:
     // dimmable-only white or an on/off plug is skipped, so every window pixel maps to a bulb
     // that can show the effect's full colour. lightCount_ is that filtered count.
     uint8_t  lightCount_ = 0;                         // number of colour-capable lights
-    int8_t   colourCount_ = 0;                        // same, as the read-only control / bridge field
+    int8_t   colorCount_ = 0;                        // same, as the read-only control / bridge field
     bool     sawLights_ = false;                      // fetchLights ran → the list is trustworthy
     // Friendly names for the dropdowns. Heap, NOT inline: a fixed [kMaxLights][kNameLen] array
     // would reserve 768 B whether the bridge has 4 lights or 32 (and cap at 32). Instead one
@@ -353,7 +356,7 @@ private:
     // Drop the learned light list + room list + push cache so tick1s re-fetches (bridge/key change).
     void resetLightCache() {
         lightCount_ = 0;
-        colourCount_ = 0;
+        colorCount_ = 0;
         sawLights_ = false;
         roomCount_ = 0;
         sawGroups_ = false;
@@ -428,7 +431,7 @@ private:
         char cfg[1024], name[24] = {};
         if (platform::httpRequest("GET", host, 80, "/api/0/config", "", kSlowTimeoutMs, cfg, sizeof(cfg)) == 200)
             mm::json::parseString(cfg, "name", name, sizeof(name));   // the bridge's friendly name
-        dev->upsertHueBridge(bridgeIp, name, static_cast<uint8_t>(colourCount_));
+        dev->upsertHueBridge(bridgeIp, name, static_cast<uint8_t>(colorCount_));
     }
 
     // Extract the COLOUR-capable, REACHABLE light ids from a /lights JSON body:
@@ -473,7 +476,7 @@ private:
         }
         commit(resp + std::strlen(resp));                   // the last light runs to the end
         sawLights_ = true;
-        colourCount_ = static_cast<int8_t>(lightCount_ > 127 ? 127 : lightCount_);
+        colorCount_ = static_cast<int8_t>(lightCount_ > 127 ? 127 : lightCount_);
         rebuildDriven();   // the colour-light set changed → re-derive the filtered driven subset
     }
 
@@ -638,7 +641,7 @@ private:
             // brightness slider and a swapped colour order reach Hue too — same as the physical
             // drivers. apply() writes outChannels bytes; we read the first three (RGB) for HSV.
             uint8_t rgb[4] = { px[0], px[1], px[2], 0 };
-            if (correction_) correction_->apply(px, rgb);
+            correction_.apply(px, rgb);
             char body[80];
             if (diffAndFormat(li, rgb[0], rgb[1], rgb[2], body, sizeof(body))) {
                 char host[16]; bridgeStr(host);

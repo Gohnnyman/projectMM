@@ -1,9 +1,10 @@
-// @module LcdLedDriver
+// @module I80LedDriver
 // @also Drivers, Correction
 
 #include "doctest.h"
 #include "light/drivers/Correction.h"
-#include "light/drivers/LcdLedDriver.h"
+#include "correction_presets.h"
+#include "light/drivers/I80LedDriver.h"
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // shared conditional-control helpers
 
@@ -17,7 +18,7 @@
 
 namespace {
 
-void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
+void wire(mm::I80LedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
     // Pins default to UNSET now (the "default only when it cannot do harm" rule —
     // a user solders the strand to its own GPIOs), so a fresh driver idles until
@@ -28,10 +29,10 @@ void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     // allocate succeeds exactly when lights > 0 (the zero-grid case wires an
     // empty buffer on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
-    corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 }
 
@@ -48,8 +49,8 @@ size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh) {
 // Explicit counts slice the buffer consecutively; the frame is sized by the
 // LONGEST lane. The bus always has all 8 lanes — unused strands take the
 // 0-light remainder and idle LOW.
-TEST_CASE("LcdLedDriver slices lanes and sizes the frame by the longest") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver slices lanes and sizes the frame by the longest") {
+    mm::I80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.ledsPerPin, "50,20,20");   // lanes 3..7 share the remainder: 0
@@ -69,8 +70,8 @@ TEST_CASE("LcdLedDriver slices lanes and sizes the frame by the longest") {
 }
 
 // Empty ledsPerPin splits evenly — same PinList semantics the RMT driver uses.
-TEST_CASE("LcdLedDriver even split over the default 8 lanes") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver even split over the default 8 lanes") {
+    mm::I80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     wire(d, src, corr, 256);   // default pins: 8 lanes
@@ -83,22 +84,23 @@ TEST_CASE("LcdLedDriver even split over the default 8 lanes") {
 }
 
 // An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
-TEST_CASE("LcdLedDriver frame grows on RGBW preset") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver frame grows on RGBW preset") {
+    mm::I80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.ledsPerPin, "50,50");   // lanes 2..7 idle
     wire(d, src, corr, 100);
     CHECK(d.frameBytes() == expectFrame(50, 3));
 
-    corr.rebuild(255, mm::LightPreset::GRBW);
+    // The driver owns its Correction, so mutate that copy (not the external one).
+    mm::test::rebuildFromPreset(d.correctionForTest(), 255, mm::test::PresetOrder::GRBW);
     d.onCorrectionChanged();
     CHECK(d.frameBytes() == expectFrame(50, 4));
 }
 
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
-TEST_CASE("LcdLedDriver bad pins → status error → recovery") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver bad pins → status error → recovery") {
+    mm::I80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.pins, "1,nope");
@@ -111,23 +113,25 @@ TEST_CASE("LcdLedDriver bad pins → status error → recovery") {
     std::strcpy(d.pins, "1,2,4,5,6,7,8,9");
     d.applyState();
     CHECK(d.laneCount() == 8);
-    CHECK(d.status() == nullptr);
+    // Recovered: parse error cleared, replaced by the neutral consumption info.
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+    CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
 // Pins now default UNSET (the "default only when it cannot do harm" rule — the
 // strand is user-soldered). A fresh, unconfigured driver idles, never grabbing
 // the 8 data GPIOs on its own. (wire() back-fills empty pins for the slicing
 // cases, so this one wires the buffer directly to keep pins empty.)
-TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver with the empty default pins idles cleanly") {
+    mm::I80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
     REQUIRE(src.allocate(64, 3));
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 
     CHECK(d.laneCount() == 0);            // no lanes claimed
@@ -138,22 +142,86 @@ TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
 
 // IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than
 // 8 pins is a config error, not a narrower bus.
-TEST_CASE("LcdLedDriver requires exactly 8 pins") {
-    mm::LcdLedDriver d;
+// The i80 bus width is power-of-two only (8 or 16) and rejects NC data pins, so LCD
+// accepts EXACTLY 8 or 16 real pins; anything else (3, 10, 17) is a config error.
+TEST_CASE("I80LedDriver requires exactly 8 or 16 pins") {
     mm::Buffer src;
     mm::Correction corr;
-    std::strcpy(d.pins, "1,2,4");
-    wire(d, src, corr, 64);
+    {   // 3 pins → error (not 8 or 16)
+        mm::I80LedDriver d;
+        std::strcpy(d.pins, "1,2,4");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 0);
+        CHECK(d.frameBytes() == 0);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strcmp(d.status(), "i80 bus needs exactly 8 or 16 pins") == 0);
+    }
+    {   // 16 pins → valid (the 16-bit bus). clock/dc moved clear of the data set
+        // (defaults 10/11 would collide with data pins 10/11 → the collision guard).
+        mm::I80LedDriver d;
+        d.clockPin = 20; d.dcPin = 21;
+        std::strcpy(d.pins, "1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 16);
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);   // 16 valid → info, not error
+    }
+    {   // 10 pins → error (between 8 and 16, not a valid bus width)
+        mm::I80LedDriver d;
+        d.clockPin = 20; d.dcPin = 21;
+        std::strcpy(d.pins, "1,2,4,5,6,7,8,9,12,13");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 0);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strcmp(d.status(), "i80 bus needs exactly 8 or 16 pins") == 0);
+    }
+}
 
-    CHECK(d.laneCount() == 0);
-    CHECK(d.frameBytes() == 0);
-    REQUIRE(d.status() != nullptr);
-    CHECK(std::strcmp(d.status(), "LCD bus needs exactly 8 pins") == 0);
+// A data lane on the same GPIO as the WR (clockPin) or DC pin is a WARNING, not a
+// blocker: that lane carries the clock/DC waveform instead of pixel data, but on a
+// board that wires all 8/16 lanes yet drives fewer strands, parking WR/DC on an
+// unused data pin is a valid choice — so the driver still runs and flags a warning.
+// clockPin/dcPin default to 10/11.
+TEST_CASE("I80LedDriver warns (does not idle) when a data pin is on clockPin/dcPin") {
+    mm::Buffer src;
+    mm::Correction corr;
+    {   // lane on GPIO 10 == default clockPin → warns but still drives all 8 lanes
+        mm::I80LedDriver d;
+        std::strcpy(d.pins, "18,5,6,7,8,9,10,11");   // 10 == clockPin, 11 == dcPin
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 8);                    // still built + driving
+        REQUIRE(d.status() != nullptr);               // a warning is present
+        CHECK(std::strstr(d.status(), "clockPin") != nullptr);
+    }
+    {   // move clock/dc clear of the data set → no warning
+        mm::I80LedDriver d;
+        d.clockPin = 12;
+        d.dcPin = 13;
+        std::strcpy(d.pins, "18,5,6,7,8,9,10,11");
+        wire(d, src, corr, 64);
+        CHECK(d.laneCount() == 8);
+        // No collision warning → the neutral consumption info instead (not a null status).
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);
+        CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
+    }
+    {   // WR and DC on the SAME GPIO is a FATAL config error that IDLES the driver — the i80 bus
+        // needs two distinct control lines, so this breaks the bus outright (unlike a data-lane
+        // collision, which only corrupts that one lane and is a warn-and-run). Routed through the
+        // error path (validateBusFatal), so the driver idles: laneCount 0, error severity.
+        mm::I80LedDriver d;
+        d.clockPin = 20;
+        d.dcPin = 20;                                 // same as clockPin
+        std::strcpy(d.pins, "1,2,3,4,5,6,7,8");
+        wire(d, src, corr, 64);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strstr(d.status(), "same GPIO") != nullptr);
+        CHECK(d.severity() == mm::MoonModule::Severity::Error);   // idles, not warn-and-run
+        CHECK(d.laneCount() == 0);                                // driver did NOT build the bus
+    }
 }
 
 // A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
-TEST_CASE("LcdLedDriver tolerates a zero-light buffer") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver tolerates a zero-light buffer") {
+    mm::I80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     wire(d, src, corr, 0);
@@ -166,18 +234,18 @@ TEST_CASE("LcdLedDriver tolerates a zero-light buffer") {
 }
 
 // setup/release cycles leave no residue (status clean, ASAN-checked heap).
-TEST_CASE("LcdLedDriver setup/release is repeatable") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver setup/release is repeatable") {
+    mm::I80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     std::strcpy(d.pins, "1,2,4,5,6,7,8,9");   // pins now default UNSET
     d.defineControls();
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();
         d.setSourceBuffer(&src);
-        d.setCorrection(&corr);
+        d.correctionForTest() = corr;
         d.applyState();
         REQUIRE(d.laneCount() == 8);
         d.release();
@@ -186,8 +254,8 @@ TEST_CASE("LcdLedDriver setup/release is repeatable") {
 }
 
 // loopbackRxPin is bound always, visible only while loopbackTest is on.
-TEST_CASE("LcdLedDriver loopbackRxPin tracks the loopbackTest toggle") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver loopbackRxPin tracks the loopbackTest toggle") {
+    mm::I80LedDriver d;
     d.defineControls();
     bool found = false;
     for (uint8_t i = 0; i < d.controls().count(); i++) {
@@ -204,8 +272,8 @@ TEST_CASE("LcdLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // lane-0 substitution is hardware-only (lcdLanes==0 on desktop); the visibility
 // contract is host-testable here via the shared helper (toggles loopbackTest both
 // ways and asserts the control stays bound while flipping visibility).
-TEST_CASE("LcdLedDriver loopbackTxPin tracks the loopbackTest toggle") {
-    mm::LcdLedDriver d;
+TEST_CASE("I80LedDriver loopbackTxPin tracks the loopbackTest toggle") {
+    mm::I80LedDriver d;
     d.defineControls();
     auto setTest = [&](bool on) {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);

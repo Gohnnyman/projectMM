@@ -102,6 +102,37 @@
     ]
   },
   {
+    "name": "ESP32-WROVER",
+    "chip": "ESP32",
+    "firmwares": [
+      "esp32-wrover"
+    ],
+    "url": "https://www.espboards.dev/esp32/esp32wrover/",
+    "image": "assets/deviceModels/esp32-wrover.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "ESP32-WROVER"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "2"
+        }
+      }
+    ]
+  },
+  {
     "name": "QuinLED Dig-2-Go",
     "chip": "ESP32",
     "firmwares": [
@@ -298,7 +329,7 @@
       "esp32-16mb"
     ],
     "image": "assets/deviceModels/serg-unishield-v5.jpg",
-    "url": "https://www.tindie.com/stores/serg74/",
+    "url": "https://www.tindie.com/products/serg74/wled-shield-board-for-addressable-leds/",
     "supported": [
       "LEDs",
       "WiFi"
@@ -507,7 +538,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "18"
+        }
       },
       {
         "type": "NetworkModule",
@@ -813,7 +847,6 @@
       "IR"
     ],
     "planned": [
-      "16-ch parallel LEDs (I2S, not yet)",
       "Power monitoring"
     ],
     "modules": [
@@ -825,9 +858,23 @@
         }
       },
       {
-        "type": "RmtLedDriver",
-        "id": "RmtLed",
-        "parent_id": "Drivers"
+        "type": "GridLayout",
+        "id": "Grid",
+        "parent_id": "Layouts",
+        "controls": {
+          "width": 8,
+          "height": 8
+        }
+      },
+      {
+        "type": "I80LedDriver",
+        "id": "I80Led",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48",
+          "clockPin": 5,
+          "dcPin": 6
+        }
       },
       {
         "type": "NetworkModule",
@@ -867,7 +914,6 @@
       "IR"
     ],
     "planned": [
-      "16-ch parallel LEDs (I2S, not yet)",
       "Power monitoring"
     ],
     "modules": [
@@ -879,9 +925,14 @@
         }
       },
       {
-        "type": "RmtLedDriver",
-        "id": "RmtLed",
-        "parent_id": "Drivers"
+        "type": "I80LedDriver",
+        "id": "I80Led",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1",
+          "clockPin": 8,
+          "dcPin": 9
+        }
       },
       {
         "type": "NetworkModule",

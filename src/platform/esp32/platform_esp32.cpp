@@ -85,6 +85,9 @@ static std::atomic<uint32_t> testNowMs{0};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
 
+// Host-test hook (see platform.h); no ESP32 test drives a bind failure, so it is inert here.
+void setTestBindFails(bool) {}
+
 uint32_t millis() {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
     if (override_) return override_;
@@ -276,6 +279,19 @@ static void netifIPv4(esp_netif_t* netif, uint8_t out[4]) {
 
 const char* sdkVersion() {
     return esp_get_idf_version();
+}
+
+const char* psramType() {
+    // The PSRAM interface mode is a compile-time choice (IDF has no runtime getter). CONFIG_SPIRAM_MODE_OCT
+    // is set only for octal parts (S3/S2 -R8); classic-ESP32 quad PSRAM (WROVER) leaves it unset. Report ""
+    // when PSRAM isn't compiled in at all, so a non-PSRAM board naturally shows nothing.
+#if !defined(CONFIG_SPIRAM)
+    return "";
+#elif defined(CONFIG_SPIRAM_MODE_OCT)
+    return "octal";
+#else
+    return "quad";
+#endif
 }
 
 const char* coprocessorWifi() {

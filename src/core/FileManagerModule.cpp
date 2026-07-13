@@ -16,9 +16,14 @@ void FileManagerModule::defineControls() {
     // Filesystem-usage gauge (used / total bytes), read from the platform. Shown below the tree in
     // the panel — the File Manager is where filesystem space is relevant, so it owns the control.
     // Bound only when the platform reports a real partition (desktop / a no-data-partition chip
-    // reports 0). tick1s refreshes the used value; the total is fixed.
-    totalBytes_ = static_cast<uint32_t>(platform::filesystemTotal());
-    usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
+    // reports 0). Read the total ONCE (it's fixed) the first time controls are built; the used value
+    // is refreshed only on the throttled tick1s. defineControls() is re-runnable (a Select can rebuild
+    // the control set on any control write), so it must NOT re-scan the filesystem here — a LittleFS
+    // usage scan walks blocks and isn't free. Rebuild from the cached values instead.
+    if (totalBytes_ == 0) {
+        totalBytes_ = static_cast<uint32_t>(platform::filesystemTotal());
+        usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
+    }
     if (totalBytes_ > 0) {
         controls_.addProgress("filesystem", usedBytes_, totalBytes_);
         controls_.setHidden(controls_.count() - 1, true);   // renders as the usage bar in the panel, not generically

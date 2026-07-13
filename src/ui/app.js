@@ -41,11 +41,11 @@ let wsHeartbeat = null;
 let wsPaused = false;            // gated by document.visibilityState
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
-const dragTs = {};               // per-control last-touched timestamp (ms)
+const dragTs = {};               // per-control last-touched timestamp (ms) — a short post-interaction cooldown
 // Control types whose value the user can edit — updateModuleControls suppresses a
-// WS state push for one of these while the user is mid-edit (see dragTs). The
-// read-only types (display/display-int/time/progress) and the composite `list`
-// are absent on purpose: they always reflect the latest push.
+// WS state push for one of these while the user is mid-edit. The read-only types
+// (display/display-int/time/progress) and the composite `list` are absent on
+// purpose: they always reflect the latest push.
 const EDITABLE_CONTROL_TYPES = new Set(
     ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "password", "select", "palette", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
@@ -54,20 +54,19 @@ const TIMING_MODES = ["fps", "ms"];
 const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
+const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
 
-// One-release migration for the old key from the pre-spec UI
-function lsRead(key, legacyKey, defaultVal) {
+// The open tab per container, persisted so a reload doesn't dump you back on the first child.
+let selectedTabs = {};
+try { selectedTabs = JSON.parse(lsRead(LS_TABS, "{}")) || {}; } catch { selectedTabs = {}; }
+
+function lsRead(key, defaultVal) {
     const v = localStorage.getItem(key);
-    if (v !== null) return v;
-    if (legacyKey) {
-        const legacy = localStorage.getItem(legacyKey);
-        if (legacy !== null) return legacy;
-    }
-    return defaultVal;
+    return v !== null ? v : defaultVal;
 }
 
-let timingMode = lsRead(LS_TIMING, null, "fps");
-let theme      = lsRead(LS_THEME, null, "dark");
+let timingMode = lsRead(LS_TIMING, "fps");
+let theme      = lsRead(LS_THEME, "dark");
 
 // ---------------------------------------------------------------------------
 // 2. WebSocket
@@ -100,12 +99,23 @@ function connectWs() {
         }
         try {
             const data = JSON.parse(e.data);
-            // The same /ws also carries WLED-compatibility {state,info} frames for the
-            // native WLED app (see HttpServerModule's WLED shim). Those are not our
-            // module-state shape — ignore anything without a `modules` array, or it would
-            // clobber `state` and blank the module view until the next module frame.
-            if (!data || !Array.isArray(data.modules)) return;
+            if (!data) return;
+            // The device sends a FULL {modules:[...]} state on connect / after a structural change,
+            // then a {patch:[...]} of only-changed leaves each second (diff-on-the-wire — the whole
+            // module tree is ~34 KB of mostly-unchanging metadata that must NOT be re-serialised every
+            // second on the render thread; see HttpServerModule buildStatePatch). Apply a patch onto
+            // the existing `state` in place, then refresh the DOM. A patch before any full state is
+            // ignored (we have nothing to patch); the device resyncs on connect so this self-corrects.
+            if (Array.isArray(data.patch)) {
+                if (state && Array.isArray(state.modules)) { applyStatePatch(data.patch); updateValues(); }
+                return;
+            }
+            // The same /ws also carries WLED-compatibility {state,info} frames for the native WLED app
+            // (see HttpServerModule's WLED shim). Those aren't our module-state shape — ignore anything
+            // without a `modules` array, or it would clobber `state` and blank the module view.
+            if (!Array.isArray(data.modules)) return;
             state = data;
+            renderCards();     // a full state may add/remove/reshape cards (structural resync) — full render
             updateValues();
         } catch {
             // ignore malformed messages
@@ -153,7 +163,7 @@ async function init() {
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
-        const savedSel = lsRead(LS_SELECTED, "mm.selectedModule", null);
+        const savedSel = lsRead(LS_SELECTED, null);
         if (state.modules && state.modules.length > 0) {
             const exists = savedSel && state.modules.some(m => m.name === savedSel);
             selectedModule = exists ? savedSel : state.modules[0].name;
@@ -211,6 +221,73 @@ async function refetchState() {
         renderNav();
         renderCards();
     } catch {}
+}
+
+// --- Editable-list row ops (the client half of the editable List primitive) ---
+// Same best-effort fetch style as sendControl: non-ok + network errors are logged,
+// not retried. After a successful mutation the server persists + re-runs prepare and
+// pushes fresh state over the WS; we also refetchState() to match the module add/
+// delete/move ops (which don't wait for the WS push either). The row `id` is a number;
+// it goes into the URL path as-is. `c` (control name) may contain any chars, so encode.
+async function listAddRow(moduleName, ctrlName) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: "{}"
+        });
+        if (!res.ok) { console.warn(`[list] add ${moduleName}.${ctrlName} failed (status=${res.status})`); return null; }
+        const j = await res.json();
+        refetchState();
+        return j && typeof j.id === "number" ? j.id : null;
+    } catch (e) {
+        console.warn(`[list] add ${moduleName}.${ctrlName} failed (error=${e && e.message ? e.message : e})`);
+        return null;
+    }
+}
+
+async function listDeleteRow(moduleName, ctrlName, id) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}/${id}`, {method: "DELETE"});
+        if (!res.ok) { console.warn(`[list] delete ${moduleName}.${ctrlName}#${id} failed (status=${res.status})`); return; }
+        refetchState();
+    } catch (e) {
+        console.warn(`[list] delete ${moduleName}.${ctrlName}#${id} failed (error=${e && e.message ? e.message : e})`);
+    }
+}
+
+async function listMoveRow(moduleName, ctrlName, id, to) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}/${id}`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({to: to})
+        });
+        if (!res.ok) { console.warn(`[list] move ${moduleName}.${ctrlName}#${id}→${to} failed (status=${res.status})`); return; }
+        refetchState();
+    } catch (e) {
+        console.warn(`[list] move ${moduleName}.${ctrlName}#${id} failed (error=${e && e.message ? e.message : e})`);
+    }
+}
+
+async function listSetField(moduleName, ctrlName, id, field, value) {
+    try {
+        const res = await fetch(`/api/list/${encodeURIComponent(moduleName)}/${encodeURIComponent(ctrlName)}/${id}`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({field: field, value: value})
+        });
+        if (!res.ok) { console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (status=${res.status})`); return false; }
+        // A FIELD edit does NOT refetch: the value is already applied server-side and the WS push
+        // reconciles it, so rebuilding here would collapse the open row and snap an in-progress edit
+        // back (a `channels` change also reshapes the row's fields — that structural update rides the
+        // WS push, guarded by the dragTs cooldown, not a rebuild-on-every-keystroke). Structural ops
+        // (add/delete/move) DO refetch — they change the row set. Return true so the caller can decide.
+        return true;
+    } catch (e) {
+        console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (error=${e && e.message ? e.message : e})`);
+        return false;
+    }
 }
 
 async function addModule(type, parentName) {
@@ -417,11 +494,142 @@ function renderModuleTree(mod, parentEl, depth) {
     parentEl.appendChild(card);
     // Children render inside this card's .card-children wrapper, not as flat
     // siblings. childrenEl is null for modules that don't accept children.
-    if (childrenEl && mod.children && mod.children.length > 0) {
-        for (const child of mod.children) {
-            renderModuleTree(child, childrenEl, depth + 1);
-        }
+    if (!childrenEl || !mod.children || mod.children.length === 0) return;
+
+    // One rule: a TOP-LEVEL module shows its children one at a time behind a tab strip, so its card
+    // stays short however many children it has. Deeper levels stack as before. The tabs are derived
+    // from mod.children on every render, so adding a layer adds its tab — there is no tab registry
+    // to keep in sync, which is the whole of the "dynamic" requirement.
+    if (depth === 0) {
+        // The "+" tab takes over the add affordance, so hide the footer's duplicate button — but keep
+        // the footer element itself, because openTypePicker renders the picker into it.
+        const addBtn = card.querySelector(".card-footer > .add-btn");
+        if (addBtn) addBtn.style.display = "none";
+        renderChildTabs(mod, childrenEl, depth);
+        return;
     }
+    for (const child of mod.children) {
+        renderModuleTree(child, childrenEl, depth + 1);
+    }
+}
+
+// Drag a tab onto another to reorder — the tab strip IS the child list, so reordering tabs reorders
+// the modules. Deliberately the same insert-semantics + moveModuleTo() call the card drag uses
+// (attachDragHandlers): one reorder path, so a tab drag and a card drag can't drift apart.
+function attachTabDragHandlers(tab, child, parent) {
+    tab.draggable = true;
+
+    tab.addEventListener("dragstart", (e) => {
+        e.stopPropagation();                       // don't let the enclosing card's dragstart claim it
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", child.name);
+        tab.classList.add("dragging");
+    });
+    tab.addEventListener("dragend", () => {
+        tab.classList.remove("dragging");
+        document.querySelectorAll(".tab.drag-over").forEach(t => t.classList.remove("drag-over"));
+    });
+    tab.addEventListener("dragover", (e) => {
+        const src = document.querySelector(".tab.dragging");
+        if (!src || src === tab) return;
+        if (src.parentElement !== tab.parentElement) return;   // same strip only — not another container's
+        e.preventDefault();
+        tab.classList.add("drag-over");
+    });
+    tab.addEventListener("dragleave", () => tab.classList.remove("drag-over"));
+    tab.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        tab.classList.remove("drag-over");
+        const srcName = e.dataTransfer.getData("text/plain");
+        if (!srcName || srcName === child.name) return;
+        // Re-find the index by NAME, not from the captured render-time object: state is replaced on
+        // every WS push, so `parent` here would be stale within ~1 s (same trap the card drag notes).
+        const live = findModule(parent.name);
+        const targetIdx = ((live && live.children) || []).findIndex(c => c.name === child.name);
+        if (targetIdx < 0) return;
+        moveModuleTo(srcName, targetIdx);
+    });
+}
+
+// A tab carries its module's fault severity as a dot, because a tab that can HIDE an error is worse
+// than no tab: a driver failing on a background tab must still be visible from the strip.
+function applyTabDot(tab, mod) {
+    const old = tab.querySelector(".tab-dot");
+    if (old) old.remove();
+    if (mod.severity !== "error" && mod.severity !== "warning") return;
+    const dot = document.createElement("span");
+    dot.className = "tab-dot tab-dot-" + mod.severity;
+    tab.appendChild(dot);
+}
+
+// Patch-path twin of applyTabDot: the tab strip is built in renderCards(), which the WS value patch
+// deliberately never re-runs — so without this a fault appearing on a background tab would stay
+// invisible until the next full render. (The UI has two render paths; a rule must live in both.)
+function updateTabDot(mod) {
+    const tab = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
+    if (tab) applyTabDot(tab, mod);
+}
+
+// Tab strip + the one selected child. `active` falls back to the first child whenever the remembered
+// tab is gone (the driver was deleted) or was never set, so the selection can never dangle.
+function renderChildTabs(mod, childrenEl, depth) {
+    const names = mod.children.map(c => c.name);
+    let active = selectedTabs[mod.name];
+    if (!names.includes(active)) active = names[0];
+
+    const strip = document.createElement("div");
+    strip.className = "tab-strip";
+    strip.setAttribute("role", "tablist");
+
+    for (const child of mod.children) {
+        const tab = document.createElement("button");
+        tab.className = "tab" + (child.name === active ? " tab-active" : "");
+        tab.type = "button";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", child.name === active ? "true" : "false");
+        // Name + the module's own status dot, so a driver erroring on a background tab is still
+        // visible without opening it — a tab that can hide a fault is worse than no tab.
+        tab.dataset.tabMid = child.name;   // so updateTabDot can find it on the WS patch path
+        tab.textContent = child.name;
+        applyTabDot(tab, child);
+        attachTabDragHandlers(tab, child, mod);
+        tab.addEventListener("click", () => {
+            selectedTabs[mod.name] = child.name;
+            localStorage.setItem(LS_TABS, JSON.stringify(selectedTabs));
+            renderCards();
+        });
+        strip.appendChild(tab);
+    }
+
+    // "+" lives at the END OF THE STRIP, where a new tab appears — not in the card footer below the
+    // panel, which would read as "add something to the open driver" rather than "add a driver".
+    // createCard still renders the footer button for non-tabbed containers; here we hide it and put
+    // the affordance where the tabs are.
+    if (acceptsNewChildren(mod)) {
+        const addTab = document.createElement("button");
+        addTab.className = "tab tab-add";
+        addTab.type = "button";
+        addTab.textContent = "+";
+        addTab.title = "add " + rolesAcceptedBy(mod).join(" / ");
+        addTab.addEventListener("click", () => {
+            // THIS card's own footer — a plain querySelector would match the first .card-footer in the
+            // subtree, which belongs to a nested child's card (Layers would then offer the Layer's
+            // effects instead of another layer). Scope to direct children of this card.
+            const card = childrenEl.parentElement;
+            const footer = [...card.children].find(el => el.classList.contains("card-footer"));
+            if (footer) openTypePicker(mod, footer);
+        });
+        strip.appendChild(addTab);
+    }
+    childrenEl.appendChild(strip);
+
+    const panel = document.createElement("div");
+    panel.className = "tab-panel";
+    panel.setAttribute("role", "tabpanel");
+    childrenEl.appendChild(panel);
+    const child = mod.children.find(c => c.name === active);
+    if (child) renderModuleTree(child, panel, depth + 1);
 }
 
 function createCard(mod, depth) {
@@ -1452,7 +1660,13 @@ function createControl(moduleName, moduleType, ctrl) {
             list.className = "list-control";
             list.dataset.mid = moduleName;
             list.dataset.key = ctrl.name;
-            buildListEntries(list, rows, details, new Set());   // initial: nothing expanded
+            // When ctrl.editable is set, the list gains add/delete/reorder + inline field
+            // editing (the editable-List primitive); otherwise it stays read-only (identical
+            // to before). The flag flows through to both render paths via the opts object.
+            if (ctrl.editable) list.dataset.editable = "true";
+            buildListEntries(list, rows, details, new Set(),   // initial: nothing expanded
+                {editable: ctrl.editable, moduleName: moduleName, ctrlName: ctrl.name,
+                 optionSets: ctrl.optionSets || {}});
             row.appendChild(list);
             break;
         }
@@ -1470,15 +1684,41 @@ function createControl(moduleName, moduleType, ctrl) {
 // texts whose detail panels start expanded — pass `new Set()` for a fresh build, or
 // the currently-open set on a live re-render so an expanded row stays open. Shared by
 // createControl (initial) and updateModuleControls (WS live patch) so the two can't drift.
-function buildListEntries(container, rows, details, openSet) {
+//
+// `opts` optionally carries {editable, moduleName, ctrlName}. When editable is true the
+// list gains row add/delete/reorder + inline field editing (the editable-List primitive);
+// each row must then carry a numeric `id`, and each detail an array `fields[]` of field
+// descriptors. When editable is falsy the render is exactly the read-only path (unchanged).
+// Stable key for the open-detail set. An editable row carries a durable `id` (survives
+// field edits: renaming a preset or changing its channel count doesn't change the id), so
+// key on it — otherwise changing a field that shows in the summary label would fold the
+// open row shut (the label-text key no longer matches after the rebuild). A read-only row
+// (e.g. a discovered device) has no `id`; fall back to the summary label, which is stable
+// enough there (identity by display text, the previous behaviour, unchanged for devices).
+function listRowKey(item, labelText) {
+    return (item && item.id != null) ? "#" + item.id : labelText;
+}
+
+function buildListEntries(container, rows, details, openSet, opts) {
+    const editable = !!(opts && opts.editable);
+    const moduleName = opts && opts.moduleName;
+    const ctrlName = opts && opts.ctrlName;
+    const optionSets = (opts && opts.optionSets) || {};   // shared option arrays, keyed by name (optionsRef)
     container.replaceChildren();
-    if (rows.length === 0) {
+    if (rows.length === 0 && !editable) {
         const empty = document.createElement("div");
         empty.className = "list-empty";
         empty.textContent = "(none)";
         container.appendChild(empty);
         return;
     }
+    // Rows live in their own scroll box so a long list (e.g. the seeded fixture presets) caps its
+    // height (~5 rows, see .list-scroll in the CSS) and scrolls, instead of eating the whole card.
+    // The "+ Add" button stays OUTSIDE this box, pinned below the scroll area — the standard
+    // scrollable-list-with-fixed-footer pattern.
+    const scroll = document.createElement("div");
+    scroll.className = "list-scroll";
+    container.appendChild(scroll);
     rows.forEach((item, i) => {
         const entry = document.createElement("div");
         // Row classes: the `self` marker + a generic `severity` marker (rowSeverityClass) — both are
@@ -1503,13 +1743,84 @@ function buildListEntries(container, rows, details, openSet) {
             summary.appendChild(dot);
         }
         const label = document.createElement("span");
+        label.className = "list-summary-label";
         label.textContent = listSummaryText(item);
         summary.appendChild(label);
         const detailPanel = document.createElement("div");
         detailPanel.className = "list-detail";
-        detailPanel.hidden = !openSet.has(summary.textContent);
+        // Keyed via listRowKey (stable `id` for editable rows, else the label text — see the
+        // helper) so an expanded row stays expanded across a live re-render, even when the field
+        // that changed is shown in the summary label (e.g. a preset's channel count).
+        detailPanel.hidden = !openSet.has(listRowKey(item, label.textContent));
         summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
-        fillListDetail(detailPanel, details[i] ?? item);
+        const locked = !!(item && item.locked);
+        if (editable) {
+            // Right-side row actions: delete (✕) then a `⠿` drag-to-reorder handle, in that order —
+            // handles on the RIGHT, after delete, keep every row's controls aligned in one column
+            // (the common data-grid layout). A `locked` (seeded) row isn't draggable and has no
+            // delete — the server refuses both, so the UI shows neither, and locked rows have an
+            // empty actions area that still aligns. The buttons stop click propagation so they don't
+            // toggle the detail panel. entry carries the row id so a drop knows what moved where.
+            entry.dataset.rowId = item.id;
+            entry.dataset.rowIndex = i;
+            const actions = document.createElement("span");
+            actions.className = "list-actions";
+            if (!locked) {
+                const del = document.createElement("button");
+                del.type = "button";
+                del.className = "list-action-btn";
+                del.textContent = "✕";
+                del.title = "Delete";
+                del.addEventListener("click", (e) => { e.stopPropagation(); listDeleteRow(moduleName, ctrlName, item.id); });
+                actions.appendChild(del);
+
+                const handle = document.createElement("span");
+                handle.className = "list-drag-handle";
+                handle.textContent = "⠿";                 // a braille-dots grab affordance (the ::: idiom)
+                handle.title = "Drag to reorder";
+                handle.setAttribute("aria-hidden", "true");
+                handle.addEventListener("click", (e) => e.stopPropagation());
+                // The entry is draggable, gated by the SAME mechanism the module-card drag uses
+                // (attachDragHandlers): a capture-phase MOUSEDOWN handler sets `draggable` based on where
+                // the grab landed. HTML5 drag initiates from mousedown, so the flag must be set there —
+                // a pointerdown handler runs too late (the browser has already read draggable at
+                // mousedown) and dragstart never fires. Here the row drags ONLY when the grab is on the
+                // handle (a click elsewhere expands the row); the touchstart mirror arms mobile drag.
+                const dragGate = (e) => { entry.draggable = !!e.target.closest(".list-drag-handle"); };
+                entry.addEventListener("mousedown", dragGate, true);
+                entry.addEventListener("touchstart", dragGate, {capture: true, passive: true});
+                entry.addEventListener("dragstart", (e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(item.id));
+                    entry.classList.add("list-dragging");
+                });
+                entry.addEventListener("dragend", () => {
+                    entry.draggable = false;
+                    entry.classList.remove("list-dragging");
+                    container.querySelectorAll(".list-drop-target").forEach(el => el.classList.remove("list-drop-target"));
+                });
+                actions.appendChild(handle);
+            }
+            summary.appendChild(actions);
+            // Every editable row is a drop TARGET (drop a dragged row onto it to move there). A drop
+            // onto a locked row is clamped server-side to the first custom slot, so it's harmless.
+            entry.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; entry.classList.add("list-drop-target"); });
+            entry.addEventListener("dragleave", () => entry.classList.remove("list-drop-target"));
+            entry.addEventListener("drop", (e) => {
+                e.preventDefault();
+                entry.classList.remove("list-drop-target");
+                const draggedId = parseInt(e.dataTransfer.getData("text/plain"));
+                if (!Number.isNaN(draggedId) && draggedId !== item.id) {
+                    listMoveRow(moduleName, ctrlName, draggedId, i);   // move the dragged row to THIS row's index
+                }
+            });
+            // Editable detail: render each field descriptor as an inline control, unless
+            // the row is locked (then fall back to the read-only key/value render).
+            if (locked) fillListDetail(detailPanel, details[i] ?? item);
+            else fillEditableListDetail(detailPanel, details[i] ?? item, moduleName, ctrlName, item.id, optionSets);
+        } else {
+            fillListDetail(detailPanel, details[i] ?? item);
+        }
         const toggle = () => {
             detailPanel.hidden = !detailPanel.hidden;
             summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
@@ -1519,8 +1830,103 @@ function buildListEntries(container, rows, details, openSet) {
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
         });
         entry.append(summary, detailPanel);
-        container.appendChild(entry);
+        scroll.appendChild(entry);
     });
+    if (editable) {
+        // "+ Add" appends a new row (server assigns the id, then state refreshes).
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "list-add-btn";
+        addBtn.textContent = "+ Add";
+        addBtn.addEventListener("click", () => listAddRow(moduleName, ctrlName));
+        container.appendChild(addBtn);
+    }
+}
+
+// Render an editable row's detail: each descriptor in `detail.fields[]` becomes an inline
+// control (text→<input>, uint8→<input type=number>, select→<select>). On change we call
+// listSetField(...) and let the normal refresh reflect the persisted state — no optimistic
+// local mutation. A field with `readonly:true` renders as a plain read-only value (same look
+// as fillListDetail). Fields carry a dragTs cooldown so a WS state push mid-edit can't revert
+// what's being typed/picked, mirroring the select/text guards in createControl.
+function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionSets) {
+    panel.replaceChildren();
+    optionSets = optionSets || {};
+    const fields = detail && Array.isArray(detail.fields) ? detail.fields : [];
+    for (const f of fields) {
+        const r = document.createElement("div");
+        r.className = "list-detail-row";
+        const kEl = document.createElement("span");
+        kEl.className = "list-detail-key";
+        kEl.textContent = f.name;
+        const vEl = document.createElement("span");
+        vEl.className = "list-detail-val";
+        // Per-field cooldown key: unique per module/control/row/field so edits don't collide.
+        const dragKey = `list:${moduleName}:${ctrlName}:${id}:${f.name}`;
+        if (f.readonly) {
+            vEl.textContent = String(f.value ?? "");
+            vEl.classList.add("list-detail-muted");
+        } else if (f.type === "select") {
+            const sel = document.createElement("select");
+            sel.className = "list-field-input";
+            sel.dataset.dragkey = dragKey;
+            // Options come from the field's inline `options`, or (the common case for a repeated select
+            // like the channel-role pickers) from the list's shared `optionSets` via `optionsRef` — so
+            // the option array is sent once per list, not re-inlined in every row (see writeListOptionSets).
+            const fieldOptions = f.options || (f.optionsRef ? optionSets[f.optionsRef] : null) || [];
+            fieldOptions.forEach((opt, idx) => {
+                const o = document.createElement("option");
+                o.value = idx;
+                o.textContent = opt;
+                if (idx === f.value) o.selected = true;
+                sel.appendChild(o);
+            });
+            const mark = () => { dragTs[dragKey] = Date.now(); };
+            sel.addEventListener("pointerdown", mark);
+            sel.addEventListener("focus", mark);
+            sel.addEventListener("change", () => {
+                dragTs[dragKey] = Date.now();
+                listSetField(moduleName, ctrlName, id, f.name, parseInt(sel.value));
+            });
+            vEl.appendChild(sel);
+        } else if (f.type === "uint8") {
+            const inp = document.createElement("input");
+            inp.type = "number";
+            inp.className = "list-field-input";
+            inp.dataset.dragkey = dragKey;
+            if (f.min !== undefined) inp.min = f.min;
+            if (f.max !== undefined) inp.max = f.max;
+            inp.value = f.value ?? 0;
+            inp.addEventListener("input", () => { dragTs[dragKey] = Date.now(); });
+            inp.addEventListener("change", () => {
+                dragTs[dragKey] = Date.now();
+                // Guard against empty/invalid entry (parseInt → NaN) and clamp to the control's
+                // range — the HTML min/max attributes don't enforce a hand-typed value, so a stray
+                // "" or out-of-range number would otherwise reach the device as NaN / an overflow.
+                let v = parseInt(inp.value, 10);
+                if (!Number.isFinite(v)) v = f.min ?? 0;
+                if (f.min !== undefined) v = Math.max(v, f.min);
+                if (f.max !== undefined) v = Math.min(v, f.max);
+                inp.value = v;   // reflect the clamped value back into the field
+                listSetField(moduleName, ctrlName, id, f.name, v);
+            });
+            vEl.appendChild(inp);
+        } else {   // "text" and any unknown type render as a text input
+            const inp = document.createElement("input");
+            inp.type = "text";
+            inp.className = "list-field-input";
+            inp.dataset.dragkey = dragKey;
+            inp.value = f.value ?? "";
+            inp.addEventListener("input", () => { dragTs[dragKey] = Date.now(); });
+            inp.addEventListener("change", () => {
+                dragTs[dragKey] = Date.now();
+                listSetField(moduleName, ctrlName, id, f.name, inp.value);
+            });
+            vEl.appendChild(inp);
+        }
+        r.append(kEl, vEl);
+        panel.appendChild(r);
+    }
 }
 
 // Join a list row's scalar fields into a one-line summary (skips marker fields — `self`, `severity`
@@ -1729,10 +2135,37 @@ function fmtDisplayInt(ctrl) {
 // 5. State patching (no-rebuild contract)
 // ---------------------------------------------------------------------------
 
+// Apply a diff-on-the-wire patch onto the in-memory `state`. Each entry is {path,value} where path is
+// "<module>/<control>" for a control value, or "<module>/@<field>" for a live module-header field
+// (tickTimeUs / dynamicBytes — shown per card). Module names are unique tree-wide (the device dedups
+// them), so the first path segment identifies the module. Mutates `state` in place; the caller then
+// calls updateValues() to refresh the DOM without a rebuild. An unknown path is skipped (a resync will
+// reconcile). List controls: the value is the full summary array (the device sends a changed list's
+// whole value — see the plan), so we replace it wholesale, which updateModuleControls/renderCards read.
+function applyStatePatch(patch) {
+    const byName = new Map(allModules().map(m => [m.name, m]));
+    for (const entry of patch) {
+        if (!entry || typeof entry.path !== "string") continue;
+        const slash = entry.path.indexOf("/");
+        if (slash < 0) continue;
+        const modName = entry.path.slice(0, slash);
+        const leaf = entry.path.slice(slash + 1);
+        const mod = byName.get(modName);
+        if (!mod) continue;
+        if (leaf[0] === "@") {
+            mod[leaf.slice(1)] = entry.value;   // header field, e.g. @tickTimeUs -> mod.tickTimeUs
+        } else if (Array.isArray(mod.controls)) {
+            const c = mod.controls.find(c => c.name === leaf);
+            if (c) c.value = entry.value;
+        }
+    }
+}
+
 function updateValues() {
     if (!state || !state.modules) return;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
     for (const mod of allModules()) {
+        updateTabDot(mod);   // a fault on a BACKGROUND tab must surface without opening it
         updateModuleControls(mod);
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
@@ -1826,8 +2259,11 @@ function syncVisibleControls(mod) {
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
     const haveNames = haveRows.map(r => r.dataset.key);
     if (wantNames.length === haveNames.length && wantNames.every((n, i) => n === haveNames[i])) {
-        return false;  // unchanged — the common case
+        return false;  // unchanged — the common case, so an idle WS push rebuilds nothing
     }
+    // The visible-control set genuinely drifted (a hidden flag flipped — e.g. whiteMode appearing when
+    // the preset changes). Rebuild to reflect it; latest state wins. We don't defer for an in-progress
+    // edit: the drift is a consequence of a real change, and suppressing it would hide that change.
 
     // Remove rows whose control is no longer visible.
     const wantSet = new Set(wantNames);
@@ -2008,21 +2444,39 @@ function updateModuleControls(mod) {
                 break;
             }
             case "list": {
-                // Rows change wholesale between scans, so rebuild the list's entries
-                // in place rather than patching individual fields. Preserves which
-                // detail panels were open by summary text (best-effort) so a live
-                // refresh doesn't collapse a row the user just expanded.
                 const list = document.querySelector(`div.list-control[data-mid="${mid}"][data-key="${k}"]`);
                 if (!list) break;
-                // Preserve which detail panels are currently open (by summary text) so
-                // a live refresh doesn't collapse a row the user just expanded.
+                const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
+                const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
+                // ONLY REBUILD IF THE LIST ACTUALLY CHANGED. The device pushes full state ~1/sec, so an
+                // unconditional rebuild destroyed + recreated every row (and its inline dropdowns / drag
+                // handlers) every second — collapsing an open dropdown and breaking a drag. Compare the
+                // incoming rows+details against the last rendered snapshot cached on the element; if
+                // identical, do nothing (the common case, and the whole fix). Only a GENUINE change
+                // (someone edited the list) rebuilds — latest state wins, no attempt to protect a stale
+                // in-progress view (that would suppress the user's own edit from re-rendering). A
+                // rebuild on a real change is momentary and a direct consequence of that change.
+                const sig = JSON.stringify([rows, details]);
+                if (list.dataset.sig === sig) break;   // unchanged — leave the DOM (and any open edit) alone
+                list.dataset.sig = sig;
+                // Preserve which detail panels are open across the rebuild. Capture the SAME key
+                // listRowKey emits: the row's stable `id` (on entry.dataset.rowId for editable
+                // rows) when present, else the summary label text. Keying on id means changing a
+                // field shown in the label (a preset's channel count) keeps the row expanded.
                 const open = new Set(
                     [...list.querySelectorAll(".list-entry")]
                         .filter(e => { const d = e.querySelector(".list-detail"); return d && !d.hidden; })
-                        .map(e => e.querySelector(".list-summary")?.textContent));
-                const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
-                const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
-                buildListEntries(list, rows, details, open);
+                        .map(e => e.dataset.rowId != null
+                            ? "#" + e.dataset.rowId
+                            : e.querySelector(".list-summary-label")?.textContent));
+                // Preserve scroll position too: a rebuild recreates .list-scroll (scrollTop 0), which
+                // would jump a long list back to the top mid-edit of a row further down.
+                const prevScroll = list.querySelector(".list-scroll")?.scrollTop ?? 0;
+                buildListEntries(list, rows, details, open,
+                    {editable: ctrl.editable, moduleName: mod.name, ctrlName: ctrl.name,
+                     optionSets: ctrl.optionSets || {}});
+                const newScroll = list.querySelector(".list-scroll");
+                if (newScroll) newScroll.scrollTop = prevScroll;
                 break;
             }
         }
@@ -2120,8 +2574,17 @@ function emojiTagsFor(t) {
 // They differ only in the role filter and the commit action; the search box,
 // list, and keyboard nav are shared.
 function openTypePicker(parentMod, anchorEl) {
+    const roles = rolesAcceptedBy(parentMod);
+    // One candidate = no choice to make, so don't stage a picker to ask a question with one answer:
+    // "+" on Layers just adds a Layer. (Same filter openPicker uses, so the two can't disagree about
+    // what the candidates are.)
+    const candidates = availableTypes.filter(t => roles.includes(t.role));
+    if (candidates.length === 1) {
+        addModule(candidates[0].name, parentMod.name);
+        return;
+    }
     openPicker(anchorEl, {
-        roles: rolesAcceptedBy(parentMod),
+        roles,
         actionLabel: "create",
         commit: (type) => addModule(type, parentMod.name)
     });

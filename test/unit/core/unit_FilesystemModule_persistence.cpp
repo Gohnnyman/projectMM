@@ -11,6 +11,7 @@
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/RegionModifier.h"
 #include "light/layers/Layer.h"
+#include "light/drivers/LightPresetsModule.h"
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -47,8 +48,7 @@ TEST_CASE("FilesystemModule round-trip") {
         for (uint8_t i = 0; i < sys->controls().count(); i++) {
             auto& c = sys->controls()[i];
             if (std::strcmp(c.name, "deviceName") == 0) {
-                std::strncpy(static_cast<char*>(c.ptr), "MM-ROUND", 8);
-                static_cast<char*>(c.ptr)[8] = 0;
+                std::snprintf(static_cast<char*>(c.ptr), 9, "%s", "MM-ROUND");
                 sys->markDirty();
                 mm::FilesystemModule::noteDirty();
                 break;
@@ -59,7 +59,7 @@ TEST_CASE("FilesystemModule round-trip") {
         // synchronously — used here to keep the test deterministic without wall-clock waits.
         fs->flush();
 
-        char path[256];
+        char path[512];
         std::snprintf(path, sizeof(path), "%s/.config/SystemModule.json", tmpRoot);
         CHECK(std::filesystem::exists(path));
 
@@ -298,6 +298,78 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
     CHECK(content.find("\"\"") == std::string::npos);
 
     scheduler.release();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// No size cap: a config LARGER than the old fixed 2 KB save buffer round-trips in full. The save
+// serializes into a growable JsonSink and the load reads a file-sized heap buffer, so neither side
+// truncates. Built from a LightPresetsModule with many custom presets — its persisted array of
+// role wirings comfortably exceeds 2048 bytes, which the old fixed buffer would have silently
+// dropped (returning false → nothing written → config lost on reboot).
+TEST_CASE("FilesystemModule round-trips a config larger than the old 2 KB cap") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_bigcfg_test_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+    mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule");
+
+    uint32_t markerId = 0;
+    {
+        mm::Scheduler scheduler;
+        auto* fs = new mm::FilesystemModule();
+        fs->setTypeName("FilesystemModule");
+        fs->setScheduler(&scheduler);
+        auto* lp = new mm::LightPresetsModule();
+        lp->setTypeName("LightPresetsModule");
+        scheduler.addModule(fs);
+        scheduler.addModule(lp);
+        scheduler.setup();   // seeds the 13 built-ins
+
+        // Add 15 wide (24-channel) custom presets — the serialized array is well over 2 KB. (15,
+        // not 20: the seeded built-ins now number 13, and 13 + 20 would exceed kMaxPresets=32; 13 +
+        // 15 = 28 fits, and 15 wide presets still serialise far past the old 2 KB cap being tested.)
+        for (int k = 0; k < 15; k++) {
+            uint32_t id = 0;
+            REQUIRE(lp->addListRow(id));
+            lp->setListRowField(id, "channels", "{\"value\":24}");
+            if (k == 0) {
+                markerId = id;
+                lp->setListRowField(id, "name", "{\"value\":\"MARKER\"}");
+                lp->setListRowField(id, "ch5", "{\"value\":5}");   // Pan at ch5 — a distinctive pick
+            }
+        }
+        lp->markDirty();
+        mm::FilesystemModule::noteDirty();
+        fs->flush();
+
+        // The saved file must exist AND be larger than the old 2048 cap (proving the cap is gone).
+        const std::string path = std::string(tmpRoot) + "/.config/LightPresetsModule.json";
+        REQUIRE(std::filesystem::exists(path));
+        CHECK(std::filesystem::file_size(path) > 2048u);
+        scheduler.release();
+    }
+    {
+        // Fresh boot: load the big file (file-sized heap read) and confirm the wiring survived.
+        mm::Scheduler scheduler;
+        auto* fs = new mm::FilesystemModule();
+        fs->setTypeName("FilesystemModule");
+        fs->setScheduler(&scheduler);
+        auto* lp = new mm::LightPresetsModule();
+        lp->setTypeName("LightPresetsModule");
+        scheduler.addModule(fs);
+        scheduler.addModule(lp);
+        scheduler.setup();
+
+        CHECK(lp->listRowCount() == 28);   // 13 built-ins + 15 custom, all restored
+        mm::Correction c;
+        REQUIRE(lp->deriveCorrection(markerId, 255, c));   // the marker preset resolves after reload
+        CHECK(c.outChannels == 24);                        // its 24-channel width survived
+        scheduler.release();
+    }
+
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }

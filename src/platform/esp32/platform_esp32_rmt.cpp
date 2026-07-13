@@ -250,7 +250,7 @@ namespace detail {
 
 // Plain-GPIO continuity check: drive tx, read rx. Separates "wire wrong" from
 // "RMT/LCD wrong" so a failed jumper is reported clearly. Shared with the LCD
-// loopback in platform_esp32_lcd.cpp (declared there), hence not anonymous.
+// loopback in platform_esp32_i80.cpp (declared there), hence not anonymous.
 bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     gpio_set_direction(static_cast<gpio_num_t>(txGpio), GPIO_MODE_OUTPUT);
     gpio_set_direction(static_cast<gpio_num_t>(rxGpio), GPIO_MODE_INPUT);

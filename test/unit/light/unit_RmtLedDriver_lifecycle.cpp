@@ -4,6 +4,7 @@
 #include "doctest.h"
 #include "light/drivers/RmtLedDriver.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // shared conditional-control helpers
 
@@ -25,10 +26,10 @@ namespace {
 void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights = 64) {
     REQUIRE(src.allocate(lights, 3));   // a masked alloc failure would fail cases downstream
-    corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 }
 
@@ -145,11 +146,11 @@ TEST_CASE("RmtLedDriver: a DISABLED driver does not acquire through the boot swe
     mm::Buffer src;
     mm::Correction corr;
     REQUIRE(src.allocate(64, 3));
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     d.defineControls();
     d.setEnabled(false);          // persisted-disabled at boot
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
 
     d.setup();                    // Phase 3: pure wiring, no acquire
     d.applyState();               // Phase 4: disabled → routes to release, no acquire
@@ -169,13 +170,13 @@ TEST_CASE("RmtLedDriver setup/release is repeatable with no residual state") {
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     d.defineControls();
 
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();                       // (re)init the channel
         d.setSourceBuffer(&src);         // resizeSymbols allocates the buffer
-        d.setCorrection(&corr);
+        d.correctionForTest() = corr;
         d.applyState();                // size buffer + reinit, as the Scheduler does
         REQUIRE(d.symbolBuffer() != nullptr);
 
@@ -225,11 +226,11 @@ TEST_CASE("RmtLedDriver loopback re-parses pins before testing (no stale-pin ver
     mm::Buffer src;
     mm::Correction corr;
     src.allocate(64, 3);
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     std::strcpy(d.pins, "18");
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
     REQUIRE(d.pinCount() == 1);
 

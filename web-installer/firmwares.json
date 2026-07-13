@@ -15,6 +15,13 @@
       "description": "ESP32 classic with 16 MB flash — WiFi + Ethernet. Same silicon as `esp32`; this variant uses the extra flash for bigger OTA slots + filesystem (Serg boards, QuinLED Dig-Octa)."
     },
     {
+      "name": "esp32-wrover",
+      "chip": "esp32",
+      "eth_only": false,
+      "ships": true,
+      "description": "ESP32-WROVER (classic ESP32, 4 MB flash + 4 MB quad PSRAM) — WiFi + Ethernet. Same silicon as `esp32`; this variant enables PSRAM for the larger buffers (big grids, preview) the WROVER's extra RAM allows."
+    },
+    {
       "name": "esp32-eth",
       "chip": "esp32",
       "eth_only": true,

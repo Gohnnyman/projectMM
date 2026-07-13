@@ -131,23 +131,26 @@ TEST_CASE("malformed inputs fail cleanly without crashing") {
     CHECK(json::arraySize(doc, doc.rootNode()) == 0);
 }
 
-TEST_CASE("overflow safety: too many nodes fails cleanly") {
-    // An array of more elements than kMaxNodes can hold (the array node itself plus one
-    // node per element). Build it dynamically; parse must fail, not overrun the arena.
+TEST_CASE("no node cap: a large array parses (heap-grown node pool)") {
+    // The node pool is heap-allocated and grows as needed — there is NO fixed node cap. An array
+    // far larger than the old 128-node limit must PARSE, not fail. The pool grows via realloc, and
+    // nodes are index-addressed so the growth never dangles a child/next reference.
+    const int N = 5000;
     std::string big = "[";
-    for (int i = 0; i < json::kMaxNodes + 50; i++) {
-        if (i) big += ",";
-        big += "1";
-    }
+    for (int i = 0; i < N; i++) { if (i) big += ","; big += "1"; }
     big += "]";
-    REQUIRE(big.size() + 1 <= json::kMaxJsonLen);  // stays inside the text buffer
 
     json::JsonDoc doc;
-    CHECK_FALSE(json::parse(big.c_str(), doc));
-    CHECK_FALSE(doc.valid());
+    REQUIRE(json::parse(big.c_str(), doc));
+    CHECK(doc.valid());
+    CHECK(json::arraySize(doc, doc.rootNode()) == N);   // every element present, none dropped
+    // Spot-check a late element to prove the index links survived the realloc growth.
+    CHECK(json::readInt(json::element(doc, doc.rootNode(), N - 1), -1) == 1);
 }
 
 TEST_CASE("overflow safety: nesting deeper than kMaxDepth fails cleanly") {
+    // Depth is STILL bounded (the one remaining cap — it guards the ESP32 task stack against a
+    // pathologically-nested input). Nesting past kMaxDepth fails cleanly, no stack blow.
     std::string deep;
     for (int i = 0; i < json::kMaxDepth + 5; i++) deep += "[";
     for (int i = 0; i < json::kMaxDepth + 5; i++) deep += "]";
@@ -157,12 +160,15 @@ TEST_CASE("overflow safety: nesting deeper than kMaxDepth fails cleanly") {
     CHECK_FALSE(doc.valid());
 }
 
-TEST_CASE("input longer than the text buffer fails cleanly") {
-    std::string huge(json::kMaxJsonLen + 100, 'x');
-    huge[0] = '"';
+TEST_CASE("no length cap: a long input parses (heap-sized text arena)") {
+    // The text arena is heap-allocated sized to the input — no fixed length cap. A long string
+    // value (well past the old 4096-byte buffer) must parse. Build a valid ~10 KB JSON string.
+    std::string huge = "\"";
+    huge.append(10000, 'x');
+    huge += "\"";
     json::JsonDoc doc;
-    CHECK_FALSE(json::parse(huge.c_str(), doc));
-    CHECK_FALSE(doc.valid());
+    REQUIRE(json::parse(huge.c_str(), doc));
+    CHECK(doc.valid());
 }
 
 // parseString must DECODE the JSON string escapes our own writer emits (JsonSink/writeJsonString)

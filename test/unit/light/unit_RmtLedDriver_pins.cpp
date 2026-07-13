@@ -4,12 +4,13 @@
 #include "doctest.h"
 #include "light/drivers/RmtLedDriver.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 #include "light/layers/Buffer.h"
 
 #include <cstring>
 
 // These tests pin the MULTI-PIN surface: the `pins` / `ledsPerPin` text-control
-// parsing (shared free functions in PinList.h, used by RmtLedDriver and LcdLedDriver
+// parsing (shared free functions in PinList.h, used by RmtLedDriver and I80LedDriver
 // precedent) and the slice arithmetic down to per-pin symbol offsets. All pure
 // host logic — the RMT peripheral is never touched; on desktop the channel init
 // is inert but parsing and slicing must behave identically, which is exactly
@@ -20,10 +21,10 @@ namespace {
 void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
     REQUIRE(src.allocate(lights, 3));   // a masked alloc failure would fail cases downstream
-    corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);   // 3 out-channels
     d.defineControls();
     d.setSourceBuffer(&src);
-    d.setCorrection(&corr);
+    d.correctionForTest() = corr;
     d.applyState();
 }
 
@@ -83,6 +84,20 @@ TEST_CASE("parsePinList rejects duplicate pins") {
     CHECK(mm::parsePinList("18,17,18", pins, 8, n) != nullptr);
 }
 
+// The crash guard (WROVER bench 2026-07-13): a value like 999 parses as a valid integer but is not a
+// GPIO — handing it to IDF's gpio_func_sel() faults ("GPIO number error" → reset). parsePinList rejects
+// the WHOLE list when any entry exceeds the chip's MM_MAX_GPIO ceiling, so a garbage pin never reaches
+// hardware; the driver idles with "pin out of range for this chip" in its status. On the host,
+// MM_MAX_GPIO defaults to 63, so 999 (and 64) are out of range, 63 is the last accepted pin.
+TEST_CASE("parsePinList rejects an out-of-range pin (the gpio_func_sel crash guard)") {
+    uint16_t pins[8] = {};
+    uint8_t n = 0;
+    CHECK(mm::parsePinList("2,4,999,14", pins, 8, n) != nullptr);   // 999 → reject the whole list
+    CHECK(mm::parsePinList("18,64", pins, 8, n) != nullptr);        // one past the host ceiling (63)
+    CHECK(mm::parsePinList("63", pins, 8, n) == nullptr);           // the ceiling itself is valid
+    CHECK(n == 1);
+}
+
 // --- assignCounts -----------------------------------------------------------
 
 // Explicit "100,100,50" maps one count to each pin by position.
@@ -94,12 +109,32 @@ TEST_CASE("assignCounts takes explicit per-pin counts") {
     CHECK(counts[2] == 50);
 }
 
-// A short list assigns what it names; unlisted pins share the remaining lights evenly.
-TEST_CASE("assignCounts splits the remainder evenly over unlisted pins") {
-    // 3 pins, only the first has an explicit count: the remaining 150 lights
-    // split evenly over the remaining 2 pins.
+// A SINGLE number broadcasts: that many on EVERY pin (the NumPy/CSS scalar idiom —
+// "one number = that many each"), NOT "on the first pin only, split the rest".
+TEST_CASE("assignCounts broadcasts a single value to every pin") {
+    mm::nrOfLightsType counts[8] = {};
+    CHECK(mm::assignCounts("100", 3, 1000, counts) == nullptr);
+    CHECK(counts[0] == 100);
+    CHECK(counts[1] == 100);
+    CHECK(counts[2] == 100);   // every pin, not just the first
+}
+
+// Broadcast is clamped so the running sum never reads past the buffer: with 250
+// lights and 100/pin, pins 0+1 take 100 each, pin 2 gets the last 50.
+TEST_CASE("assignCounts broadcast clamps to the remaining buffer") {
     mm::nrOfLightsType counts[8] = {};
     CHECK(mm::assignCounts("100", 3, 250, counts) == nullptr);
+    CHECK(counts[0] == 100);
+    CHECK(counts[1] == 100);
+    CHECK(counts[2] == 50);
+}
+
+// A LIST shorter than the pin count still maps what it names, then even-splits the
+// rest over the unlisted pins (distinguishes list-of-one-plus-comma from broadcast).
+TEST_CASE("assignCounts maps a short list, even-splits the unlisted remainder") {
+    // "100," is a list (has a comma) — pin0=100 explicit, pins 1+2 split the 150 left.
+    mm::nrOfLightsType counts[8] = {};
+    CHECK(mm::assignCounts("100,", 3, 250, counts) == nullptr);
     CHECK(counts[0] == 100);
     CHECK(counts[1] == 75);
     CHECK(counts[2] == 75);
@@ -133,7 +168,11 @@ TEST_CASE("assignCounts clamps a pin to the WS2812 ceiling and warns (drives 204
     const char* warn = nullptr;
     CHECK(mm::assignCounts("", 1, 16384, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
     CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);
-    CHECK(warn == mm::kClampedWarning);           // warned, but not an error
+    CHECK(warn != nullptr);
+    CHECK(std::strcmp(warn, mm::kClampedWarning) == 0);   // warned, but not an error. Compare CONTENTS:
+                                                         // the literal is inline constexpr, so its ADDRESS
+                                                         // need not be unique across translation units —
+                                                         // clang merges them, GCC does not.
 
     // Without a cap (a clocked-SPI type), the same 16384 passes unclamped, no warning.
     warn = mm::kClampedWarning;  // ensure it's reset to null on the no-clamp path
@@ -152,16 +191,16 @@ TEST_CASE("assignCounts clamps a pin to the WS2812 ceiling and warns (drives 204
     CHECK(counts[0] == 100);
     CHECK(warn == nullptr);
 
-    // An explicit OVERSIZED count on pin 0 clamps + warns, while the unlisted pins still
-    // split the correct remainder. Buffer 6000 over 3 pins, "5000" explicit on pin 0:
-    // pin 0 wants 5000 → clamped to 2048 (warn); remaining 6000-5000=1000 splits over the
-    // 2 unlisted pins (500 each). The clamp does NOT redistribute the trimmed 2952 — the
-    // remainder is computed from the REQUESTED count, matching the driver's slice offsets.
+    // An oversized SINGLE value broadcasts then clamps: "5000" wants 5000 on every pin
+    // over a 6000-light buffer. Broadcast walks the buffer — pin0 takes 5000, pin1 the
+    // remaining 1000, pin2 gets 0 — then each is clamped to the WS2812 ceiling. So
+    // pin0 → 2048 (clamped from 5000, warn), pin1 → 1000 (under the ceiling), pin2 → 0.
     CHECK(mm::assignCounts("5000", 3, 6000, counts, mm::kMaxWs2812LedsPerPin, &warn) == nullptr);
-    CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);   // clamped from 5000
-    CHECK(counts[1] == 500);                        // (6000 - 5000) / 2
-    CHECK(counts[2] == 500);
-    CHECK(warn == mm::kClampedWarning);
+    CHECK(counts[0] == mm::kMaxWs2812LedsPerPin);   // 5000 → clamped to 2048
+    CHECK(counts[1] == 1000);                       // remaining buffer after pin0's 5000
+    CHECK(counts[2] == 0);                           // buffer already consumed
+    CHECK(warn != nullptr);
+    CHECK(std::strcmp(warn, mm::kClampedWarning) == 0);
 }
 
 TEST_CASE("assignCounts handles a zero-light buffer (0×0×0 grid) as all-zero") {
@@ -234,7 +273,9 @@ TEST_CASE("RmtLedDriver idles with a status error on a bad pin list") {
     std::strcpy(d.pins, "18");
     d.applyState();
     CHECK(d.pinCount() == 1);
-    CHECK(d.status() == nullptr);
+    // Config valid → the parse error is cleared and the neutral consumption info shows.
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+    CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
 TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assumed)") {
@@ -254,7 +295,9 @@ TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assume
     std::strcpy(d.pins, "18");
     d.applyState();
     CHECK(d.pinCount() == 1);
-    CHECK(d.status() == nullptr);
+    // Config valid → the parse error is cleared and the neutral consumption info shows.
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+    CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
 TEST_CASE("RmtLedDriver re-slices when the source buffer changes") {
@@ -310,6 +353,22 @@ TEST_CASE("RmtLedDriver window: count 0 means the rest of the buffer from start"
     CHECK(d.pinLightCount(0) == 64);          // 65 - 1 = 64
 }
 
+// The DEFAULT window (count_ = kWindowAll = 65535) must mean "all lights", even on a buffer LARGER
+// than 65535. nrOfLightsType is uint32 on a PSRAM board (the desktop test target), so a big grid can
+// exceed 65535 — treating the default as a literal 65535 count would silently cap output there.
+// Tested on the window slice directly (a driver's per-pin WS2812 cap would otherwise mask it).
+TEST_CASE("window: default kWindowAll resolves to ALL lights on a >65535 buffer") {
+    mm::RmtLedDriver d;   // any concrete DriverBase — the window math lives on the base
+    // Fresh driver: start_ = 0, count_ = kWindowAll (no setWindow). A 70000-light buffer exceeds 65535.
+    CHECK(d.resolveWindowLenForTest(70000) == 70000);   // ALL of it, not capped at 65535
+    // An explicit real count still clamps to the buffer, unchanged.
+    d.setWindow(/*start=*/0, /*count=*/1000);
+    CHECK(d.resolveWindowLenForTest(70000) == 1000);
+    // Explicit 0 still means "to the end" (the belt-and-braces sentinel), even past 65535.
+    d.setWindow(/*start=*/0, /*count=*/0);
+    CHECK(d.resolveWindowLenForTest(70000) == 70000);
+}
+
 TEST_CASE("RmtLedDriver window: a size-1 window at 0 is the onboard-LED case") {
     // The pairing that drove this feature: one driver renders ONLY light 0 (an
     // onboard status LED), a second renders the strip from light 1 on. Here we
@@ -343,7 +402,7 @@ TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slic
 //
 // tick()'s transmit-all/wait-all concurrency body is gated out on the desktop
 // (platform::rmtTxChannels == 0 → it returns at the top), exactly as
-// LcdLedDriver::tick() is. So the host can pin only the reachable contract:
+// I80LedDriver::tick() is. So the host can pin only the reachable contract:
 // tick() must never crash or overrun for any pin configuration, grid size, or
 // uninitialised state. The concurrency path itself (parallel transmit, longest-
 // strand cost) is proven on hardware by the real-frame loopback self-test —
@@ -352,7 +411,7 @@ TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slic
 // tick() is a safe no-op across single-pin, multi-pin and zero-grid configs.
 TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
     mm::Correction corr;
-    corr.rebuild(255, mm::LightPreset::GRB);
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
 
     SUBCASE("single pin, populated grid") {
         mm::RmtLedDriver d; mm::Buffer src;
@@ -376,7 +435,7 @@ TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
         CHECK_FALSE(src.allocate(0, 3));
         d.defineControls();
         d.setSourceBuffer(&src);
-        d.setCorrection(&corr);
+        d.correctionForTest() = corr;
         d.applyState();
         d.tick();                       // 0×0×0 must be a clean no-op
     }

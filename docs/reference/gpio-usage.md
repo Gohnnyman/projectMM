@@ -11,6 +11,19 @@ Everything else is free for user I/O. Since the ESP32 I²S / RMT / LED periphera
 
 **Sources:** the per-chip Espressif datasheet (linked in each section). When picking defaults for a new chip, read its strapping-pin and flash/PSRAM tables from the datasheet first, not from a tutorial.
 
+## Usable LED-output GPIOs per MCU (quick reference)
+
+For **LED output** specifically — the pins a WS2812-class strand data line can attach to, which the parallel drivers (RMT / LCD_CAM / Parlio, moving to 1..16 lanes) draw their lanes from. This is stricter than "any free I/O" in one way: **an LED output needs a real output driver, so input-only pins are excluded** (a mic input line can use them, an LED cannot). It excludes flash/PSRAM (reserved), input-only, and — for a clean *default* — the strapping pins (usable, but a wrong reset level is a boot hazard). The per-chip tables below give the full reasoning; this is the distilled "safe to drive an LED here" set.
+
+| MCU | Usable LED-output GPIOs (avoid straps for defaults) | Count | Notes |
+|-----|------|-------|-------|
+| **ESP32 (classic)** | 4, 13, 14, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33 | 13 | +16, 17 on **non-PSRAM** WROOM (they're PSRAM bus on WROVER). Input-only 34-39 are mic-input only, not LED. |
+| **ESP32-S3 (N16R8 / octal-PSRAM)** | 1-18, 21, 47, 48 → the clean 16 for LED lanes: **4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,21** | 16 | Excludes octal-PSRAM (33-37), USB (19,20), UART0 (43,44), onboard RGB LED (38 on rev v1.0 / 48 on rev v1.1 — avoid whichever your board uses), straps (0,3,45,46). Quad-PSRAM (N8R2) / no-PSRAM parts free 33-37 too. |
+| **ESP32-P4 (P4-NANO)** | 20, 21, 22, 23, 24, 25, 26, 27, 32, 33, 39-48 | 20 | Board-specific: the NANO commits eth-RMII (28-31/49-52), C6-SDIO (14-19/54), I2C (7-8), UART0 (37-38). A carrier board changes the exposed set — the MHC-WLED shield routes through transceivers (no bare GPIO). |
+| **ESP32-S31 (coreboard)** | take from the [coreboard reference](esp32-s31-coreboard.md) free set | — | Most of the header is committed to on-board RGMII eth + ES8311 codec + SD + USB-host; don't guess. |
+
+**Mapping these to actual device-model defaults** (which of a board's usable pins to pre-fill in `deviceModels.json`) is a separate, per-board step — the catalog defaults one strip for a bare dev board (the user wires the rest), or the exact wired set for a purpose-built board (QuinLED Dig-Octa: `0,1,2,3,4,5,12,13`). That per-model work is tracked in [backlog-core § LED output pins](../backlog/backlog-core.md).
+
 ## ESP32 (classic)
 
 [Datasheet](https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf). 34 GPIOs, but several are input-only or strapping.
@@ -23,6 +36,12 @@ Everything else is free for user I/O. Since the ESP32 I²S / RMT / LED periphera
 | Input-only | **34, 35, 36, 39** | No output driver and no internal pull-ups. Fine for a mic **SD/SCK/WS input**, useless for an LED output. |
 
 **Clear for output I/O:** 4, 13, 14, 18, 19, 21-23, 25-27, 32, 33 (plus 16/17 on non-PSRAM). Input-only 34-39 suit mic data lines.
+
+**i80 parallel LED lanes (classic ESP32 = I2S backend).** The classic ESP32 runs the parallel LED driver over the **I2S peripheral in i80 mode** (the S3/P4 use LCD_CAM for the same i80 API; one driver, chip-picked backend). Like every i80 board it needs **exactly 8 or 16 data pins plus two bus-control pins** (`clockPin` = WR, `dcPin` = DC — the LEDs ignore both). Bench-verified default on the ESP32-WROVER (`/dev/cu.usbserial-0001`):
+
+- **8 lanes:** data `2,4,13,14,18,19,21,22` · `clockPin` (WR) `32` · `dcPin` (DC) `33`. (Pin 2 is a boot strap — it drives an LED fine and idles LOW, so it's benign here, but the Pins UI flags it; swap it for `23` to silence the warning.)
+- **16 lanes: not cleanly reachable on the WROVER.** Only 13 non-strap output pins exist, and WR/DC consume 2 more, so a 16-lane set must borrow strap pins (0, 12, 15) — and **GPIO 12 is the flash-voltage strap: driving it at reset can brick the boot**, so don't. Use a board with more free GPIOs (an S3/P4) for 16 lanes; the classic ESP32 is an 8-lane i80 board in practice.
+- **Memory ceiling: 2048 lights at 8 lanes** (measured on the WROVER, 2026-07-13; 8×256 drives, 8×384 already fails). The I2S backend can't DMA from PSRAM, so its frame buffer is internal-RAM-only (~76 KB largest block) — an over-ceiling config degrades with `i80 bus init failed — check pins / memory`, it does not crash. Neither shrinking the grid (that memory is PSRAM) nor turning `asyncTransmit` off (one DMA buffer instead of two) raises it. See [performance.md § Multi-pin LED driving](../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid).
 
 ## ESP32-S3
 

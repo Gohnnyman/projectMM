@@ -31,6 +31,7 @@ add_executable(mm_tests
     unit/core/unit_ImprovFrame.cpp
     unit/core/unit_ImprovOpReassembler.cpp
     unit/core/unit_JsonUtil_parse.cpp
+    unit/core/unit_JsonSink_detach.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
     unit/core/unit_moonlive_fill.cpp
@@ -46,6 +47,8 @@ add_executable(mm_tests
     unit/core/unit_Sort.cpp
     unit/core/unit_sanitizeHostname.cpp
     unit/core/unit_platform_clock.cpp
+    unit/core/unit_platform_worker.cpp
+    unit/core/unit_IpList.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp
     unit/core/unit_Services.cpp
@@ -68,6 +71,8 @@ add_executable(mm_tests
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
+    unit/light/unit_Drivers_rendersplit.cpp
+    unit/light/unit_LightPresetsModule.cpp
     unit/light/unit_Drivers_firstOutputRgb.cpp
     unit/light/unit_HueDriver.cpp
     unit/light/unit_Palette.cpp
@@ -101,9 +106,10 @@ add_executable(mm_tests
     unit/light/unit_RainbowEffect.cpp
     unit/light/unit_NetworkReceiveEffect.cpp
     unit/light/unit_NetworkReceiveEffect_protocols.cpp
-    unit/light/unit_LcdLedDriver.cpp
-    unit/light/unit_LcdLedEncoder.cpp
+    unit/light/unit_I80LedDriver.cpp
+    unit/light/unit_ParallelSlots.cpp
     unit/light/unit_ParlioLedDriver.cpp
+    unit/light/unit_ParallelLedDriver_doublebuffer.cpp
     unit/light/unit_RmtLedEncoder.cpp
     unit/light/unit_RmtLedDriver_lifecycle.cpp
     unit/light/unit_RmtLedDriver_pins.cpp

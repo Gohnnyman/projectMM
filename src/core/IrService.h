@@ -210,9 +210,21 @@ private:
     }
 
     // Report setup readiness (static messages → no format buffer needed).
+    // Report the TRUE receive state, not just "a pin is set": a pin can be set while the RX channel
+    // can't bind (a busy pin, a bad GPIO), so "pin set" alone would say ready on a dead peripheral.
+    // So open-or-confirm the channel and report what actually happened:
+    //   pin unset        → warn "set pin to receive"
+    //   channel bound    → "ready" (channel armed; a keypress then shows "received 0x…")
+    //   channel won't open → error, so a genuinely-broken pin is visible, not masked as ready.
+    // Called from prepare() (cold path) and on a pin change, so the open cost isn't on the hot path.
     void reportReady() {
-        if (pin_ < 0) setStatus("set pin to receive", Severity::Warning);
-        else          setStatus("ready");
+        // Unset pin: release any channel still bound to the OLD pin, else it leaks (stays armed on a
+        // pin the user just cleared). The valid→valid change is already handled — irChannelReady →
+        // ensureChannel closes the old channel when currentPin_ differs — but the valid→-1 path never
+        // reaches ensureChannel, so release it here.
+        if (pin_ < 0) { platform::irStop(); setStatus("set pin to receive", Severity::Warning); return; }
+        if (platform::irChannelReady(static_cast<uint16_t>(pin_))) setStatus("ready");
+        else setStatus("IR channel failed to open — pin busy or invalid?", Severity::Error);
     }
 
     // A 1-byte control (Uint8 / Select / Bool) read as int via its descriptor pointer — covers every

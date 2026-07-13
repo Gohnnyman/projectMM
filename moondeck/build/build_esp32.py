@@ -147,6 +147,16 @@ FIRMWARES: dict[str, dict] = {
                        "slots + filesystem (Serg boards, QuinLED Dig-Octa).",
         "ships": True,
     },
+    "esp32-wrover": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth",
+                      "sdkconfig.defaults.wrover"],
+        "eth_only": False,
+        "description": "ESP32-WROVER (classic ESP32, 4 MB flash + 4 MB quad PSRAM) — WiFi + "
+                       "Ethernet. Same silicon as `esp32`; this variant enables PSRAM for "
+                       "the larger buffers (big grids, preview) the WROVER's extra RAM allows.",
+        "ships": True,
+    },
     "esp32-eth": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],

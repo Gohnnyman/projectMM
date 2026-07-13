@@ -5,6 +5,7 @@
 #include "core/Scheduler.h"
 #include "core/ModuleFactory.h"
 #include "core/MoonModule.h"
+#include "core/JsonSink.h"
 
 #include <cstring>
 
@@ -24,7 +25,11 @@ namespace {
 // add, set, and clear-children without pulling in real light modules.
 struct Knob : public mm::MoonModule {
     uint8_t value = 10;
-    void defineControls() override { controls_.addUint8("value", value, 0, 100); }
+    bool showExtra = false;   // toggling this ADDS/REMOVES a control → a real schema change
+    void defineControls() override {
+        controls_.addUint8("value", value, 0, 100);
+        if (showExtra) controls_.addUint8("extra", value, 0, 100);
+    }
 };
 struct Box : public mm::MoonModule {
     // accepts any child (the HTTP role gate lives above the apply-core).
@@ -277,4 +282,131 @@ TEST_CASE("apply-core: applyWledState sets on + bri independently (no brightness
 
     s.deleteTree(root);
     s.deleteTree(drivers);
+}
+
+// Diff-on-the-wire (the 1 Hz-stutter fix): the periodic WS push sends only CHANGED control values,
+// not the whole ~34 KB tree every second. buildStatePatch value-hashes each leaf against a baseline
+// and emits only the ones that differ. These pin the core guarantees: an unchanged tree → EMPTY patch
+// (the whole point — no per-second re-serialise of static config), and a single value change → a
+// one-entry patch addressed by "<module>/<control>".
+TEST_CASE("buildStatePatch: unchanged tree yields an empty patch") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();                                  // defineControls so K has its "value" control
+    mm::HttpServerModule http; http.setScheduler(&s);
+
+    http.baselineLeafHashesForTest();           // snapshot current values as the baseline
+    mm::JsonSink sink;
+    const uint16_t changed = http.buildStatePatchForTest(sink);
+    CHECK(changed == 0);                         // nothing changed since baseline → empty
+    CHECK(std::strcmp(sink.data(), "{\"patch\":[]}") == 0);
+
+    s.deleteTree(root);
+}
+
+// A schema change (rebuildControls — hidden flags / option sets) can't be seen by the value-hash
+// patch, so any module's rebuildControls() flips the WS full-resync flag through the static
+// schema-changed hook. This is what carries a metadata-only change (WiFi addressing hides fields,
+// a preset Select gains an option) to connected clients. Pins the hook wiring + the subtraction of
+// the old per-call-site resyncs.
+TEST_CASE("schema-changed hook: rebuildControls() resyncs ONLY on a real schema change") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();
+    mm::HttpServerModule http; http.setScheduler(&s);
+    http.installSchemaHookForTest();                // hook only, no TCP listener (a port bind is flaky)
+
+    // A value-only rebuild (same control set) must NOT resync — that's the common slider-drag path,
+    // carried by the per-leaf value patch, not a full metadata resend.
+    http.clearFullResyncForTest();
+    CHECK(!http.fullResyncPendingForTest());
+    k->rebuildControls();                           // schema unchanged (showExtra still false)
+    CHECK(!http.fullResyncPendingForTest());        // …so the hook does NOT fire
+
+    // A real schema change (a control appears) MUST resync — the value patch can't carry it.
+    k->showExtra = true;
+    k->rebuildControls();
+    CHECK(http.fullResyncPendingForTest());         // …flips the resync flag via the hook
+
+    // A CHILD's schema change caught by a rebuild on the PARENT — rebuildControls() rebuilds the
+    // whole subtree, so the signature must recurse into children or the resync is dropped (the
+    // preset-library case: adding a preset grows every child driver's Select while the parent's own
+    // controls are unchanged). Toggle the child, rebuild the parent, expect a resync.
+    http.clearFullResyncForTest();
+    k->showExtra = false;
+    root->rebuildControls();                        // parent rebuild cascades to the child
+    CHECK(http.fullResyncPendingForTest());         // child's control vanished → caught via recursion
+
+    http.release();                                 // unwires the hook (clears instance_)
+    s.deleteTree(root);
+}
+
+TEST_CASE("buildStatePatch: a changed control value yields a one-entry patch") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();
+    mm::HttpServerModule http; http.setScheduler(&s);
+
+    http.baselineLeafHashesForTest();
+    k->value = 77;                               // a device-side value change (no setControl) — the
+                                                 // value-compare catches it, which a dirty flag wouldn't
+    mm::JsonSink sink;
+    const uint16_t changed = http.buildStatePatchForTest(sink);
+    CHECK(changed == 1);                          // exactly the one changed control
+    // The entry addresses it by "<module>/<control>" and carries the new value.
+    CHECK(std::strstr(sink.data(), "\"path\":\"K/value\"") != nullptr);
+    CHECK(std::strstr(sink.data(), "\"value\":77") != nullptr);
+
+    // Building again with nothing further changed → empty (the cache updated on the first emit).
+    mm::JsonSink sink2;
+    CHECK(http.buildStatePatchForTest(sink2) == 0);
+
+    s.deleteTree(root);
+}
+
+// A module's STATUS must ride the 1 Hz value-diff, not the full state alone. A driver can fault at any
+// moment (a bus that won't init, a loopback verdict, a Hue pairing result) with no schema change and no
+// structural change — so nothing triggers a resync, and a status carried only by the full state would
+// sit stale indefinitely. It is worse with the tabbed UI: a module whose card is behind a collapsed tab
+// would surface no fault at all. This pins @status/@severity as patch leaves.
+TEST_CASE("buildStatePatch: a status change rides the patch (no resync needed)") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();
+    mm::HttpServerModule http; http.setScheduler(&s);
+
+    http.baselineLeafHashesForTest();            // baseline: K has no status
+    {
+        mm::JsonSink sink;
+        CHECK(http.buildStatePatchForTest(sink) == 0);   // quiet tree → empty patch
+    }
+
+    // A fault appears — no control changed, no schema change, no structural change.
+    k->setStatus("bus init failed", mm::MoonModule::Severity::Error);
+
+    mm::JsonSink sink;
+    const uint16_t changed = http.buildStatePatchForTest(sink);
+    CHECK(changed > 0);                                          // it must reach the client…
+    CHECK(std::strstr(sink.data(), "\"K/@status\"") != nullptr); // …addressed as a header leaf
+    CHECK(std::strstr(sink.data(), "bus init failed") != nullptr);
+    CHECK(std::strstr(sink.data(), "\"K/@severity\"") != nullptr);
+    CHECK(std::strstr(sink.data(), "error") != nullptr);
+
+    s.deleteTree(root);
 }

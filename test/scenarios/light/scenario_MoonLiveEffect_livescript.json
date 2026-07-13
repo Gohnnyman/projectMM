@@ -2,7 +2,10 @@
   "name": "scenario_MoonLiveEffect_livescript",
   "module": "MoonLiveEffect",
   "mode": "mutate",
-  "skip_on": ["desktop-windows", "desktop-linux"],
+  "skip_on": [
+    "desktop-windows",
+    "desktop-linux"
+  ],
   "also": [
     "Layouts",
     "GridLayout",
@@ -339,7 +342,7 @@
         "desktop-macos": {
           "tick_us": [
             0,
-            1
+            13
           ],
           "free_heap": [
             0,
@@ -351,7 +354,7 @@
           ],
           "at": [
             "2026-06-26",
-            "2026-06-27"
+            "2026-07-13"
           ]
         },
         "esp32s3-n16r8": {
@@ -404,7 +407,7 @@
         "desktop-macos": {
           "tick_us": [
             0,
-            14
+            23
           ],
           "free_heap": [
             0,
@@ -416,7 +419,7 @@
           ],
           "at": [
             "2026-06-26",
-            "2026-06-27"
+            "2026-07-13"
           ]
         },
         "esp32s3-n16r8": {
@@ -467,7 +470,7 @@
         "desktop-macos": {
           "tick_us": [
             0,
-            10
+            14
           ],
           "free_heap": [
             0,
@@ -479,7 +482,7 @@
           ],
           "at": [
             "2026-06-26",
-            "2026-06-27"
+            "2026-07-13"
           ]
         },
         "esp32s3-n16r8": {

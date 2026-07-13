@@ -9,6 +9,9 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 #include <cerrno>
 
 #ifdef _WIN32
@@ -179,8 +182,11 @@ void writeExec(void* dst, const void* src, size_t len) {
 }
 
 void yield() {
-    // No-op on desktop — OS scheduler handles threading.
-    // Socket reads use SO_RCVTIMEO for blocking with timeout.
+    // Hand the CPU to another runnable thread — the desktop twin of the ESP32's vTaskDelay(1).
+    // It must actually yield, not no-op: the multicore split's frame boundary polls this while it
+    // waits for the encode worker, and a no-op turns that into a busy-spin that pins a core and
+    // starves the very worker it is waiting for. std::this_thread::yield() is the portable form.
+    std::this_thread::yield();
 }
 
 void delayMs(uint32_t ms) {
@@ -232,6 +238,61 @@ size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
 }
 void currentTaskOnCore(int, char* out, size_t cap) { if (out && cap) out[0] = '\0'; }
 const char* renderTaskName() { return g_testRenderTask; }
+
+// Worker-task seam — std::thread + condition_variable backing. The `core` pin is ignored (the host
+// has no core-affinity story; the core-split is ESP32-only), but the spawn/notify/wait/stop handoff
+// is real, so the render↔encode invariants are host-testable on an actual second thread. The wake is
+// a single-slot latch (`pending`): notifyTask sets it, waitNotify consumes it — matching the FreeRTOS
+// direct-to-task notification's "one pending count" semantics so a host test sees the same behavior.
+namespace {
+struct DesktopWorker {
+    std::thread thread;
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool pending = false;   // a notify is waiting to be consumed (the single-slot latch)
+    bool stop = false;
+};
+}  // namespace
+
+bool spawnPinnedTask(WorkerTask& t, const char* /*name*/, WorkerFn fn, void* user,
+                     size_t /*stackBytes*/, uint8_t /*priority*/, int /*core*/) {
+    auto* w = new (std::nothrow) DesktopWorker();
+    if (!w) return false;
+    t.impl = w;
+    w->thread = std::thread([fn, user] { fn(user); });   // the fn owns its loop until stop
+    return true;
+}
+
+void notifyTask(WorkerTask& t) {
+    auto* w = static_cast<DesktopWorker*>(t.impl);
+    if (!w) return;
+    { std::lock_guard<std::mutex> lk(w->mtx); w->pending = true; }
+    w->cv.notify_one();
+}
+
+bool waitNotify(WorkerTask& t, uint32_t timeoutMs) {
+    auto* w = static_cast<DesktopWorker*>(t.impl);
+    if (!w) return false;
+    std::unique_lock<std::mutex> lk(w->mtx);
+    const bool got = w->cv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
+                                    [w] { return w->pending || w->stop; });
+    if (!got) return false;         // timed out with no notify/stop
+    w->pending = false;             // consume the single-slot latch
+    return true;                    // woken by a notify OR stop; the fn re-checks its stop flag
+}
+
+void stopPinnedTask(WorkerTask& t) {
+    auto* w = static_cast<DesktopWorker*>(t.impl);
+    if (!w) return;
+    { std::lock_guard<std::mutex> lk(w->mtx); w->stop = true; }
+    w->cv.notify_one();
+    if (w->thread.joinable()) w->thread.join();
+    delete w;
+    t.impl = nullptr;
+}
+
+void taskWdtReset() {}   // no watchdog on the host
+
 
 // A host build has no real GPIOs to protect — every pin is valid, output-capable, and free of
 // straps/reserved roles. So the pin map on desktop flags nothing (which is correct: there's no
@@ -338,6 +399,10 @@ const char* sdkVersion() {
 
 const char* coprocessorWifi() {
     return "";   // desktop has no WiFi co-processor
+}
+
+const char* psramType() {
+    return "";   // desktop has no PSRAM
 }
 
 const char* resetReason() {
@@ -804,16 +869,26 @@ bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
     return ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0) >= 0;
 }
 
+// Test override (see platform.h): forces bind() to fail so a test can drive the failure path without
+// relying on the OS to refuse a port — which is not portable (Linux permits the overlapping UDP bind).
+static std::atomic<bool> testBindFails{false};
+void setTestBindFails(bool fail) { testBindFails.store(fail, std::memory_order_relaxed); }
+
 bool UdpSocket::bind(uint16_t port) {
     if (fd_ < 0) return false;
+    if (testBindFails.load(std::memory_order_relaxed)) return false;
     // SO_REUSEADDR semantic split: on POSIX it lets a fresh socket claim a port left in
     // TIME_WAIT (never allows two live binds to overlap). On Winsock its meaning is the
     // opposite of POSIX — two live sockets can bind the same port, so a second bind()
     // returns success instead of the EADDRINUSE the audio-sync retry-backoff logic reads
     // as "port owned by someone else" (unit_AudioService_sync's hog-then-module scenario
     // exercises exactly that). Windows' equivalent-to-POSIX behaviour is the *default*,
-    // so on Windows we skip the setsockopt and let a second bind fail naturally. Same
-    // observable outcome on both platforms: overlapping binds are refused.
+    // so on Windows we skip the setsockopt and let a second bind fail naturally.
+    //
+    // NOTE the outcome is NOT the same on every platform, contrary to what this comment used to
+    // claim: on LINUX, SO_REUSEADDR on a UDP socket bound to INADDR_ANY permits an overlapping bind,
+    // so a second bind SUCCEEDS. A test that needs a bind to fail must use setTestBindFails(), not a
+    // port hog.
 #ifndef _WIN32
     int reuse = 1;
     ::setsockopt(sock(fd_), SOL_SOCKET, SO_REUSEADDR,
@@ -1074,17 +1149,18 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
 // driver guards every call with `if constexpr (platform::lcdLanes == 0)`
 // (0 here), so these exist only to satisfy the linker.
 // ---------------------------------------------------------------------------
-bool lcdWs2812Init(LcdWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+bool i80Ws2812Init(I80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                    uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
-                   size_t /*bufferBytes*/) {
+                   size_t /*bufferBytes*/, bool /*wantSecondBuffer*/) {
     return false;
 }
-uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& /*h*/) { return nullptr; }
-size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& /*h*/) { return 0; }
-bool lcdWs2812Transmit(LcdWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
-void lcdWs2812Wait(LcdWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
-void lcdWs2812Deinit(LcdWs2812Handle& /*h*/) {}
-RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
+size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& /*h*/) { return 0; }
+bool i80Ws2812Transmit(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+bool i80Ws2812Wait(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
+uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& /*h*/) { return 0; }
+void i80Ws2812Deinit(I80Ws2812Handle& /*h*/) {}
+RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                     uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
                                     uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                     size_t /*frameBytes*/, size_t /*dataBytes*/,
@@ -1095,13 +1171,15 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
 // Parlio WS2812 — no-op stubs. Desktop has no Parlio peripheral; the driver
 // idles (parlioLanes == 0). Sizing/slicing is host-pinned by the driver tests.
 bool parlioWs2812Init(ParlioWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
-                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t /*bufferBytes*/) {
+                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t /*bufferBytes*/,
+                      bool /*wantSecondBuffer*/) {
     return false;
 }
-uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/) { return nullptr; }
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& /*h*/) { return 0; }
-bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
-void parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+bool parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
+uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& /*h*/) { return 0; }
 void parlioWs2812Deinit(ParlioWs2812Handle& /*h*/) {}
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                        uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
@@ -1157,5 +1235,6 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
 // through Scheduler::setControl); reception is ESP32-only.
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop
+bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail on desktop
 
 } // namespace mm::platform

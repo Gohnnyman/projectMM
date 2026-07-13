@@ -7,7 +7,9 @@ flavours without one wiping the other, and so the layout matches the
 ESP32 side (``build/esp32-<board>/``, one dir per target).
 """
 
+import argparse
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,15 +31,48 @@ def host_build_dir() -> str:
     }.get(sys_name, f"build/{sys_name.lower()}")
 
 
+def gcc_pair():
+    """(cc, cxx) for a real GCC, or exit with how to get one.
+
+    WHY THIS MODE EXISTS: CI compiles with GCC, every local gate compiles with clang, and the two
+    disagree — GCC emits -Wstringop-truncation / -Wformat-truncation / -Wformat-zero-length /
+    -Wunused-function where clang stays silent, and clang leaks standard headers transitively where
+    GCC does not. With -Werror a hard rule, every divergence is a CI failure you cannot see locally.
+    That cost four push-and-discover cycles once; this flag is so it costs zero.
+    """
+    for cxx in ("g++-16", "g++-15", "g++-14", "g++-13"):
+        if shutil.which(cxx):
+            return cxx.replace("g++", "gcc"), cxx
+    sys.exit("no GCC found — `brew install gcc` (macOS) or `apt install g++` (Linux).\n"
+             "Note /usr/bin/g++ on macOS is clang in disguise; it will NOT catch these.")
+
+
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--gcc", action="store_true",
+                    help="build with GCC instead of the default compiler — the toolchain CI uses. "
+                         "Catches the warnings clang does not emit.")
+    args = ap.parse_args()
+
     bdir = host_build_dir()
     is_windows = platform.system() == "Windows"
+    extra = []
+    build_type = "Release"
+    if args.gcc:
+        cc, cxx = gcc_pair()
+        bdir = "build/gcc"          # its own dir — do not clobber the clang build's cache
+        # DEBUG, because that is what CI's job builds. Release turns on more inlining, which lets GCC
+        # prove more about buffer sizes and emit ~17 further -Wformat-truncation/-Wstringop-* warnings
+        # that CI never sees — real, but a separate cleanup, not a merge gate. Match CI, not more.
+        build_type = "Debug"
+        extra = [f"-DCMAKE_C_COMPILER={cc}", f"-DCMAKE_CXX_COMPILER={cxx}"]
+        print(f"Using GCC ({cxx}) in Debug — the exact toolchain + build type CI uses.")
     print(f"Building desktop target into {bdir}/ ...")
     # CMAKE_BUILD_TYPE is honoured by single-config generators (Ninja, Make).
     # Visual Studio is multi-config and ignores it — we pass --config Release at
     # build time below. Setting CMAKE_BUILD_TYPE on multi-config is harmless.
     r = subprocess.run(
-        ["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"],
+        ["cmake", "-B", bdir, f"-DCMAKE_BUILD_TYPE={build_type}", *extra],
         cwd=ROOT,
     )
     if r.returncode != 0:

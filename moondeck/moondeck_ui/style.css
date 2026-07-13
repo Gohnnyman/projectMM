@@ -486,7 +486,8 @@ select {
     background: #fff;
 }
 
-button#discover-btn, button#refresh-ports, button#refresh-devices-btn {
+button#discover-btn, button#refresh-ports, button#refresh-devices-btn,
+button#identify-ports, button#watch-ports {
     background: #0f3460;
     border: 1px solid #0f3460;
     color: #e0e0e0;
@@ -495,8 +496,16 @@ button#discover-btn, button#refresh-ports, button#refresh-devices-btn {
     cursor: pointer;
     font-size: 11px;
 }
-button#discover-btn:hover, button#refresh-ports:hover, button#refresh-devices-btn:hover {
+button#discover-btn:hover, button#refresh-ports:hover, button#refresh-devices-btn:hover,
+button#identify-ports:hover, button#watch-ports:hover {
     border-color: #e94560;
     color: #e94560;
 }
 button#refresh-ports { padding: 3px 6px; font-size: 12px; }
+/* Watcher is live: green while polling so its on-state reads at a glance. */
+button#watch-ports.watching {
+    background: #1b5e3a;
+    border-color: #2e9e63;
+    color: #d6ffe6;
+}
+button#watch-ports.watching:hover { border-color: #2e9e63; color: #d6ffe6; }

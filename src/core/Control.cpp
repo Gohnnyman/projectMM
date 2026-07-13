@@ -190,6 +190,11 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
             // array, same length and order. Keeping detail out of `value` keeps the
             // collapsed-list payload small when details are richer than summaries.
             const auto* src = static_cast<const ListSource*>(c.ptr);
+            // Shared option sets, emitted once per list (rows reference them by name via optionsRef).
+            // The contract lives on ListSource::writeListOptionSets (Control.h). Default {}.
+            sink.append(",\"optionSets\":{");
+            if (src) src->writeListOptionSets(sink);
+            sink.append("}");
             sink.append(",\"detail\":[");
             if (src) {
                 const uint8_t n = src->listRowCount();

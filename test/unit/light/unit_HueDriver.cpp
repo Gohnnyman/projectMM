@@ -62,7 +62,7 @@ TEST_CASE("HueDriver: parseLights keeps only colour-capable, reachable lights") 
     hue.parseLightsForTest(json);
     REQUIRE(hue.lightCountForTest() == 1);     // only id 5 qualifies
     CHECK(hue.hueIdForTest(0) == 5);
-    CHECK(hue.colourCountForTest() == 1);
+    CHECK(hue.colorCountForTest() == 1);
 }
 
 // Room + light selection filters which colour lights the driver actually drives. Both dropdowns

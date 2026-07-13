@@ -120,7 +120,6 @@ void FilesystemModule::loadAll(Scheduler* s) {
         mounted_ = true;
         platform::fsMkdir(CONFIG_DIR);
     }
-    migrateRenamedConfigs();
     for (uint8_t i = 0; i < s->moduleCount(); i++) {
         MoonModule* m = s->module(i);
         if (!m || m == this) continue;
@@ -128,46 +127,23 @@ void FilesystemModule::loadAll(Scheduler* s) {
     }
 }
 
-// One-time cleanup of files whose owning type was renamed. Each migration is
-// delete-and-warn — per-container controls today are limited to `enabled`
-// (near-zero loss). A future rename can either grow this list or, if the
-// settings volume gets non-trivial, become a rename-the-file step.
-//
-// **Domain-boundary trade-off (intentional, time-bounded).** The strings
-// below are light-domain type names embedded in a core module, which
-// CLAUDE.md's "domain-neutral core" rule discourages. We accept the leak
-// because (a) the alternative — a `MoonModule::registerRenamedConfig()`
-// API the light domain calls into — is more abstraction than two entries
-// justify, and (b) this code's natural lifetime is one or two release
-// cycles (after that everyone's `.config` is fresh and the entries become
-// dead code). **Remove these entries** the next time the `next-iteration`
-// branch is merged to `main` and a release is cut. If the list grows
-// beyond ~5 entries before then, reach for option (a) instead.
-void FilesystemModule::migrateRenamedConfigs() {
-    struct Renamed { const char* oldFile; const char* newType; };
-    static constexpr Renamed kRenamed[] = {
-        {"/.config/LayoutGroup.json", "Layouts"},
-        {"/.config/DriverGroup.json", "Drivers"},
-    };
-    for (const auto& r : kRenamed) {
-        if (platform::fsExists(r.oldFile)) {
-            std::printf("FilesystemModule: removing stale %s "
-                        "(type was renamed to %s) — its previous values are lost\n",
-                        r.oldFile, r.newType);
-            platform::fsRemove(r.oldFile);
-        }
-    }
-}
-
 // ---- Load ----
 void FilesystemModule::loadSubtree(MoonModule* m) {
     char path[MAX_PATH];
     if (!pathFor(m, path, sizeof(path))) return;
-    int n = platform::fsRead(path, fileBuf_, sizeof(fileBuf_));
-    if (n <= 0) return;
-    // fsRead doesn't NUL-terminate; applyNode parses fileBuf_ as a C-string.
-    fileBuf_[n < static_cast<int>(sizeof(fileBuf_)) ? n : static_cast<int>(sizeof(fileBuf_)) - 1] = '\0';
-    applyNode(m, fileBuf_, "");
+    // Read the WHOLE file into a heap buffer sized to it — no fixed ceiling, so a large saved config
+    // (many light presets, a wide fixture) loads in full instead of being truncated to a fixed buffer
+    // and failing to parse. Mirrors the streaming save (saveSubtree): both sides are cap-free.
+    const long size = platform::fsSize(path);
+    if (size <= 0) return;
+    char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+    if (!buf) { std::printf("FilesystemModule: out of memory loading %s (%ld bytes)\n", path, size); return; }
+    const int n = platform::fsRead(path, buf, static_cast<size_t>(size) + 1);
+    if (n > 0) {
+        buf[n] = '\0';                   // applyNode parses buf as a C-string
+        applyNode(m, buf, "");
+    }
+    platform::free(buf);
 }
 
 void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
@@ -275,70 +251,52 @@ void FilesystemModule::applyValue(const ControlDescriptor& c, const char* json, 
 bool FilesystemModule::saveSubtree(MoonModule* m) {
     char path[MAX_PATH];
     if (!pathFor(m, path, sizeof(path))) return false;
-    int pos = std::snprintf(fileBuf_, sizeof(fileBuf_), "{");
-    if (pos < 0) return false;
-    if (!writeNode(m, fileBuf_, sizeof(fileBuf_), pos, "")) {
-        std::printf("FilesystemModule: subtree too large for %s\n", path);
+    // Serialize the whole subtree into a buffer-mode JsonSink — a growable heap buffer with NO
+    // fixed ceiling (the same primitive /api/state streams through), so a large config (many light
+    // presets, a wide fixture wiring) persists in full instead of silently truncating. Written
+    // atomically once complete.
+    JsonSink sink;                       // heap/buffer mode: grows as needed, no cap
+    sink.append("{");
+    writeNode(m, sink, "", /*firstField=*/true);
+    sink.append("}");
+    if (sink.overflowed()) {             // only trips on an allocation failure now, not a size cap
+        std::printf("FilesystemModule: out of memory serializing %s\n", path);
         return false;
     }
-    int n = std::snprintf(fileBuf_ + pos, sizeof(fileBuf_) - pos, "}");
-    if (n < 0 || static_cast<size_t>(pos + n) >= sizeof(fileBuf_)) return false;
-    pos += n;
-    if (platform::fsWriteAtomic(path, fileBuf_, static_cast<size_t>(pos))) {
-        std::printf("FilesystemModule: saved %s (%d bytes)\n", path, pos);
+    if (platform::fsWriteAtomic(path, sink.data(), sink.size())) {
+        std::printf("FilesystemModule: saved %s (%zu bytes)\n", path, sink.size());
         return true;
     }
     std::printf("FilesystemModule: write failed for %s\n", path);
     return false;
 }
 
-// Returns false on overflow. `firstField` is true when this writeNode is the first
-// field-emitter inside its containing `{` — the top-level call passes true, the
-// recursive child call passes false because the parent already emitted its `"N.type"`
-// field and the child must therefore prefix a comma before its first control.
-bool FilesystemModule::writeNode(MoonModule* m, char* buf, size_t bufLen, int& pos, const char* prefix,
-                                 bool firstField) {
+// Append this module's persistable controls, its enabled flag, and (recursively) its children to
+// `sink`. `firstField` is true when this is the first field-emitter inside its containing `{` — the
+// top-level call passes true; a recursive child call passes false because the parent already emitted
+// its `"N.type"` field, so the child must prefix a comma before its first control. No size limit:
+// the sink grows; the old overflow-returns-bool plumbing is gone (an allocation failure surfaces via
+// sink.overflowed() at the top level).
+void FilesystemModule::writeNode(MoonModule* m, JsonSink& sink, const char* prefix, bool firstField) {
     bool first = firstField;
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
         if (!isPersistable(c.type)) continue;
-        int n = std::snprintf(buf + pos, bufLen - pos, "%s\"%s%s\":", first ? "" : ",", prefix, c.name);
-        if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
-        pos += n;
-        if (!writeValue(c, buf, bufLen, pos)) return false;
+        sink.appendf("%s\"%s%s\":", first ? "" : ",", prefix, c.name);
+        writeControlValue(sink, c);      // the shared value serializer (same as /api/state)
         first = false;
     }
-    int n = std::snprintf(buf + pos, bufLen - pos, "%s\"%senabled\":%s",
-                          first ? "" : ",", prefix, m->enabled() ? "true" : "false");
-    if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
-    pos += n;
+    sink.appendf("%s\"%senabled\":%s", first ? "" : ",", prefix, m->enabled() ? "true" : "false");
     for (uint8_t i = 0; i < m->childCount(); i++) {
         MoonModule* child = m->child(i);
         if (!child) continue;  // addChild rejects nullptr today; defend against future invariants
         char childPrefix[MAX_KEY];
         std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
         // Emit "0.type":"NoiseEffect" so the reader can detect tree-shape mismatches.
-        n = std::snprintf(buf + pos, bufLen - pos, ",\"%stype\":\"%s\"",
-                          childPrefix, child->typeName());
-        if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
-        pos += n;
-        if (!writeNode(child, buf, bufLen, pos, childPrefix, /*firstField=*/false)) return false;
+        sink.appendf(",\"%stype\":\"%s\"", childPrefix, child->typeName());
+        writeNode(child, sink, childPrefix, /*firstField=*/false);
     }
-    return true;
-}
-
-bool FilesystemModule::writeValue(const ControlDescriptor& c, char* buf, size_t bufLen, int& pos) {
-    // Bridge into the shared serializer via JsonSink's fixed-buffer mode:
-    // writeControlValue (in Control.cpp) writes through the JsonSink API,
-    // which writes into our slice and flips overflowed_ if we run out of
-    // capacity. Matches the prior overflow-returns-false contract.
-    if (pos < 0 || static_cast<size_t>(pos) >= bufLen) return false;
-    JsonSink local(buf + pos, bufLen - static_cast<size_t>(pos));
-    writeControlValue(local, c);
-    if (local.overflowed()) return false;
-    pos += static_cast<int>(local.size());
-    return true;
 }
 
 // ---- Dirty walking ----

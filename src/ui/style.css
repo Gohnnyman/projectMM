@@ -421,6 +421,77 @@ body {
     display: none;
 }
 
+/* Tab strip — a container of interchangeable peers (Drivers, Layers, Layouts, Services) shows one
+   child at a time, so the card stays short however many exist. The strip scrolls sideways rather
+   than wrapping: a row of tabs that reflows to two lines shifts every card below it on each add.
+   (A Layer's effect+modifier chain is NOT tabbed — that stack is ordered and meant to be seen.) */
+.tab-strip {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;              /* the strip is short; a scrollbar under it is noise */
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+}
+.tab-strip::-webkit-scrollbar { display: none; }
+
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;                     /* never squeeze a name to fit — scroll instead */
+    padding: 6px 12px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tab:hover { color: var(--fg); }
+.tab-active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* A fault on a BACKGROUND tab has to be visible from the strip — a tab that can hide an error is
+   worse than no tab. Same two severity colors the status row uses. */
+.tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+.tab-dot-error   { background: #e94560; }
+.tab-dot-warning { background: #f5a623; }
+
+.tab-add {
+    color: var(--accent);
+    font-weight: 600;
+    padding-inline: 10px;
+}
+.tab-add:active { cursor: pointer; }
+
+/* Drag-to-reorder: the strip IS the child list, so dragging a tab reorders the modules. Same visual
+   language as the card drag (.dragging / .drag-over) so the two read as one gesture. */
+.tab[draggable="true"] { cursor: grab; }
+.tab.dragging {
+    opacity: 0.4;
+    cursor: grabbing;
+}
+.tab.drag-over {
+    /* the dropped tab takes this one's slot — mark the landing edge, not the whole tab */
+    box-shadow: inset 2px 0 0 0 var(--accent);
+}
+
+.tab-panel { min-width: 0; }            /* let a wide child scroll inside, not blow out the card */
+
 /* Collapsible "settings" wrapper for a container module's own controls.
    Native <details>/<summary> — defaults to collapsed; children of the
    container are visible without a click, parent settings open on demand. */
@@ -448,7 +519,7 @@ body {
 
 /* Enable/disable toggle: styled <button> matching .card-btn's 26×26 frame.
    Always transparent (no fill) — visual state is conveyed by the glyph alone:
-   ⏻ accent-coloured when on, muted when off. Same weight as the other
+   ⏻ accent-colored when on, muted when off. Same weight as the other
    action buttons in the cluster. */
 .card-title .module-enabled {
     background: transparent;
@@ -581,6 +652,10 @@ body {
     border-radius: 6px;
     overflow: hidden;
 }
+/* The rows scroll box: caps a long editable list (fixture presets) at ~5 rows so it doesn't eat the
+   whole card, and scrolls past that. The "+ Add" button sits outside it and stays pinned below.
+   5 rows × ~35px (8px padding ×2 + 13px line + 1px border) ≈ 176px; a partial 6th row cues scroll. */
+.list-scroll { max-height: 176px; overflow-y: auto; }
 .list-empty { padding: 8px 10px; font-size: 12px; color: var(--fg-muted); }
 .list-entry { border-top: 1px solid var(--border); }
 .list-entry:first-child { border-top: 0; }
@@ -591,7 +666,7 @@ body {
 }
 .list-summary:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .list-self { box-shadow: inset 3px 0 0 var(--accent); }   /* this device, marked */
-/* Generic per-row severity marker — a coloured left edge + a faint row tint, driven by a `severity`
+/* Generic per-row severity marker — a colored left edge + a faint row tint, driven by a `severity`
    field ("error"/"warn", set in app.js's rowSeverityClass). Same left-edge idiom as .list-self, in
    the same red/yellow palette as the age dots. Not pins-specific: any ListSource emitting `severity`
    gets it. PinsModule is the first user (a claim on a reserved/strap/input-only GPIO). */
@@ -628,6 +703,61 @@ body {
 /* A URL detail value (e.g. a device's `url`) rendered as a link opening in a new tab. */
 .list-detail-link { color: var(--accent); text-decoration: underline; }
 .list-detail-link:hover { text-decoration: none; }
+
+/* Editable-list affordances (the editable List primitive). Read-only lists never
+   get these classes, so the DevicesModule list is unchanged. */
+.list-summary-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }   /* label takes the row; actions sit at the right */
+.list-summary { display: flex; align-items: center; gap: 6px; }
+.list-actions { display: flex; gap: 2px; flex: 0 0 auto; }
+.list-action-btn {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    border-radius: 4px;
+    width: 22px; height: 22px;
+    font-size: 12px; line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+.list-action-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.list-action-btn:disabled { opacity: 0.35; cursor: default; }
+/* Drag-to-reorder: a grab handle in the row's right-side actions, plus drag/drop feedback. */
+.list-drag-handle {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;                 /* match .list-action-btn so the actions column aligns */
+    cursor: grab;
+    color: color-mix(in srgb, var(--fg) 40%, transparent);
+    font-size: 14px; line-height: 1;
+    user-select: none;
+}
+.list-drag-handle:hover { color: var(--fg); }
+.list-drag-handle:active { cursor: grabbing; }
+/* The row being dragged: a subtle lift (faint accent tint + slight fade), NOT a heavy grey-out. */
+.list-entry.list-dragging { opacity: 0.85; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.list-entry.list-drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Inline field editors in an editable row's detail panel. */
+.list-field-input {
+    flex: 1; min-width: 0;
+    padding: 3px 6px;
+    font-size: 12px;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+.list-add-btn {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
+}
+.list-add-btn:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 
 .control-row input[type="range"] {
     flex: 1;
@@ -1037,7 +1167,7 @@ body {
 
 /* ---------------------------------------------------------------------------
    File Manager — breadcrumb + entry list + inline editor (FileManagerModule).
-   Theme-aware via the shared --vars; no hardcoded colours.
+   Theme-aware via the shared --vars; no hardcoded colors.
    --------------------------------------------------------------------------- */
 .fm-panel { margin-top: 8px; }
 

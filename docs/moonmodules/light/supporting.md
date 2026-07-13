@@ -52,10 +52,22 @@ The container of driver modules — owns the shared driver buffer and the per-li
 - `brightness` — global output brightness (0–255).
 - `lightPreset` — the output-correction preset (colour order, gamma, brightness) every driver applies.
 - `palette` — the active palette effects sample from.
+- `multicore` — run the whole output stage on the second core (default on). Every driver's per-frame work — the LED encode, the ArtNet packet build, the preview frame build — moves to a core-1 task while the render loop draws the next frame on core 0, so a frame costs `max(render, output)` instead of `render + output`. The encode alone is ~3 µs/light (≈50 ms at 16K lights), so this both lifts fps and stops the output work starving the network stack, which shares core 0. It costs one frame buffer (the stable frame core 1 reads while core 0 renders the next); if that buffer doesn't fit, the split simply doesn't engage and everything runs on one core exactly as before — the switch stays on, and the split re-engages by itself when the memory is there. **On is simply the better configuration** — the switch is there to A/B it (and as an escape hatch), not because some setups should run it off. Turning it off forces the single-core path. A driver that writes a socket still hands the bytes to lwIP on core 0 (that's where the network stack is pinned) — the CPU half offloads, the send doesn't move.
+- `stall` — read-only, shown only while `multicore` is on (with no split there is no boundary to wait at, so the number would be meaningless). How long core 0 waited at the frame boundary for core 1 to finish. Near zero means render and output overlap well (the split is paying off fully); a large value means the effect is far cheaper than the output work, so core 0 idles.
 
 Detail: [technical](moxygen/Drivers.md)
 
 [Tests](../../tests/unit-tests.md#drivers)
+
+<a id="lightpresets"></a>
+
+### LightPresets
+
+The reusable light-preset library — a Drivers submodule that owns the named channel-role wirings drivers reference. A light preset is a channel layout (which channel carries Red, Green, Blue, White, WarmWhite, Yellow, UV, or a fixture role like Pan/Tilt); a curated set of real fixtures is seeded as read-only entries — the colour orders (RGB, GRB, BGR, RGBW, GRBW, WRGB), multi-channel LED/par fixtures (Curtain GRB6, Lightbar RGBWYP, RGBCCT, IRGB), and moving heads (MH BeeEyes 15, MH BeTopper 32, MH 19x15W-24) — and a user adds custom named wirings alongside them. A driver stores only a preset's stable id and resolves it here at rebuild time, so one wiring is reusable across every driver and reordering/deleting other presets never disturbs a reference. Built on the editable-list control primitive (add/delete/reorder/edit rows), which custom palettes reuse later.
+
+- `presets` — the editable list of preset definitions. Each row: a name, a channel count, and one role picker per channel. Built-in rows are read-only; custom rows are fully editable and persist across reboot.
+
+Detail: [technical](moxygen/LightPresetsModule.md)
 
 ### Buffer
 

@@ -7,12 +7,12 @@
 namespace mm {
 
 /// Output driver: parallel WS2812B over the ESP32-P4 Parlio (Parallel IO) TX peripheral — the P4's
-/// scale path, sibling of LcdLedDriver. The shared body (slicing, encode, single-shot DMA, loopback)
+/// scale path, sibling of I80LedDriver. The shared body (slicing, encode, single-shot DMA, loopback)
 /// lives in ParallelLedDriver; Parlio is the SIMPLER peripheral, so this class adds LESS than the
 /// i80 driver:
 ///  - NO clockPin/dcPin: Parlio generates the pixel clock itself (kClockHz), so there are no
 ///    sacrificial WR/DC lines (addBusControls is empty).
-///  - kExactLaneCount = false: i80 rejects a partial bus; Parlio runs on 1..8 lanes — whatever
+///  - kExactLaneCount = false: i80 rejects a partial bus; Parlio runs on 1..16 lanes (kMaxLanes) — whatever
 ///    `pins` names.
 ///
 /// Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812 lineage —
@@ -33,7 +33,10 @@ public:
     /// The number of Parlio lanes this chip provides (0 = not this chip); the base's
     /// inert-on-wrong-chip guards key off it.
     static constexpr uint8_t lanesAvailable() { return platform::parlioLanes; }
-    static constexpr bool kExactLaneCount = false;   // 1..8 lanes all valid
+    static constexpr bool kExactLaneCount = false;   // 1..16 lanes all valid
+    // Parlio builds a 1-lane private unit for the loopback, so the loopback frame stays 8-bit
+    // regardless of the operational bus width (unlike i80, which needs a full-width bus).
+    static constexpr bool kLoopbackFullWidth = false;
     static constexpr const char* kInitFailMsg = "Parlio init failed — check pins / memory";
 
     // The WS2812 slot rate (375 ns @ 2.67 MHz) — identical to the LCD driver's;
@@ -50,21 +53,25 @@ public:
     /// No extra pins to track, so they are always current.
     bool extraBusPinsCurrent() const { return true; }
 
-    /// Create the Parlio bus + its DMA buffer sized for `frameBytes` on the current
-    /// lanes, driving the pixel clock at kClockHz; returns whether init succeeded.
-    bool busInit(size_t frameBytes) {
+    /// Create the Parlio bus + its DMA buffer(s) sized for `frameBytes` on the current lanes, driving
+    /// the pixel clock at kClockHz; `wantSecondBuffer` requests the async double-buffer's second frame
+    /// buffer (allocated only if it fits). Returns whether init succeeded.
+    bool busInit(size_t frameBytes, bool wantSecondBuffer) {
         return platform::parlioWs2812Init(parlio_, laneList_, laneCount_,
-                                          kClockHz, frameBytes);
+                                          kClockHz, frameBytes, wantSecondBuffer);
     }
-    /// The bus's DMA buffer the base encodes into.
-    uint8_t* busBuffer()                 { return platform::parlioWs2812Buffer(parlio_); }
-    /// The DMA buffer's byte capacity (fixed at bus creation).
+    /// DMA buffer `i` (0/1) the base encodes into; buffer 1 is null when the second
+    /// buffer didn't fit (single-buffer mode). Both are the same size (busCapacity).
+    uint8_t* busBuffer(uint8_t i)        { return platform::parlioWs2812Buffer(parlio_, i); }
+    /// The per-buffer byte capacity (fixed at bus creation; both buffers equal).
     size_t   busCapacity() const         { return platform::parlioWs2812BufferCapacity(parlio_); }
-    /// Kick off the autonomous transfer of the first `bytes` of the DMA buffer;
+    /// Kick off the autonomous transfer of the first `bytes` of DMA buffer `i`;
     /// returns whether it started.
-    bool     busTransmit(size_t bytes)   { return platform::parlioWs2812Transmit(parlio_, bytes); }
-    /// Block up to `ms` for the in-flight transfer to complete.
-    void     busWait(uint32_t ms)        { platform::parlioWs2812Wait(parlio_, ms); }
+    bool  busTransmit(uint8_t i, size_t bytes) { return platform::parlioWs2812Transmit(parlio_, i, bytes); }
+    /// Block up to `ms` for buffer `i`'s in-flight transfer to complete.
+    bool  busWait(uint8_t i, uint32_t ms)      { return platform::parlioWs2812Wait(parlio_, i, ms); }
+    /// The most recent DMA transfer's wire time (µs) — the WS2812 output floor.
+    uint32_t busLastTransmitUs() const         { return platform::parlioWs2812LastTransmitUs(parlio_); }
     /// Tear down the Parlio bus and its DMA buffer.
     void     busDeinit()                 { platform::parlioWs2812Deinit(parlio_); }
 

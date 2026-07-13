@@ -13,6 +13,7 @@
 #include "doctest.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/Correction.h"
+#include "correction_presets.h"
 #include "light/drivers/Drivers.h"
 #include "light/layers/Buffer.h"
 
@@ -24,11 +25,11 @@ TEST_CASE("NetworkSendDriver sizes corrected_ in prepare, not in tick") {
     REQUIRE(source.allocate(64, 3));
 
     mm::Correction correction;
-    correction.rebuild(255, mm::LightPreset::RGB);
+    mm::test::rebuildFromPreset(correction, 255, mm::test::PresetOrder::RGB);
 
     mm::NetworkSendDriver driver;
     driver.setSourceBuffer(&source);
-    driver.setCorrection(&correction);
+    driver.correctionForTest() = correction;
     driver.applyState();
 
     // After prepare the resized buffer is already in place.
@@ -59,17 +60,18 @@ TEST_CASE("NetworkSendDriver grows corrected_ in onCorrectionChanged on RGB → 
     REQUIRE(source.allocate(32, 3));
 
     mm::Correction correction;
-    correction.rebuild(255, mm::LightPreset::RGB);
+    mm::test::rebuildFromPreset(correction, 255, mm::test::PresetOrder::RGB);
 
     mm::NetworkSendDriver driver;
     driver.setSourceBuffer(&source);
-    driver.setCorrection(&correction);
+    driver.correctionForTest() = correction;
     driver.applyState();
 
     REQUIRE(driver.correctedBuffer().channelsPerLight() == 3);
 
     // Simulate a preset change. Drivers normally drives this; we call directly.
-    correction.rebuild(255, mm::LightPreset::RGBW);
+    // The driver owns its Correction, so mutate that copy (not the external one).
+    mm::test::rebuildFromPreset(driver.correctionForTest(), 255, mm::test::PresetOrder::RGBW);
     driver.onCorrectionChanged();
 
     CHECK(driver.correctedBuffer().count() == 32);
@@ -83,18 +85,19 @@ TEST_CASE("NetworkSendDriver onCorrectionChanged is a no-op when outChannels unc
     REQUIRE(source.allocate(48, 3));
 
     mm::Correction correction;
-    correction.rebuild(255, mm::LightPreset::RGB);
+    mm::test::rebuildFromPreset(correction, 255, mm::test::PresetOrder::RGB);
 
     mm::NetworkSendDriver driver;
     driver.setSourceBuffer(&source);
-    driver.setCorrection(&correction);
+    driver.correctionForTest() = correction;
     driver.applyState();
 
     const uint8_t* dataBefore = driver.correctedBuffer().data();
     REQUIRE(dataBefore != nullptr);
 
     // Brightness change: outChannels stays 3, so the existing allocation fits.
-    correction.rebuild(128, mm::LightPreset::RGB);
+    // The driver owns its Correction, so mutate that copy (not the external one).
+    mm::test::rebuildFromPreset(driver.correctionForTest(), 128, mm::test::PresetOrder::RGB);
     driver.onCorrectionChanged();
 
     // Same backing allocation — the resize short-circuited.

@@ -4,6 +4,7 @@
 #include "light/drivers/NetworkSendDriver.h"
 
 #include <cstring>
+#include <cstdio>
 
 // The built packet contains the exact header layout the Art-Net spec mandates: ID, OpCode, version, sequence, physical, universe, length, data.
 TEST_CASE("ArtNet packet header format") {
@@ -143,4 +144,124 @@ TEST_CASE("DDP packet header format") {
 
     mm::buildDdpPacket(pkt, 0, /*push=*/true, data, 3);
     CHECK(pkt[0] == 0x41);                    // push set on the frame's last packet
+}
+
+// The destination list is EMPTY by default, so an unconfigured driver idles instead of falling back
+// to the 255.255.255.255 broadcast. Broadcast does not scale and its failure lands on the NETWORK,
+// not the device: an ArtNet universe id sits in the payload, so every host on the segment must
+// receive and parse every packet before it can discard it (~4,850 pkt/s on a 128x128 grid — measured
+// starving an ESP32 until its HTTP stopped answering). Art-Net 4 forbids broadcast ArtDmx outright.
+TEST_CASE("NetworkSendDriver: no destination by default — it idles, and says why") {
+    mm::NetworkSendDriver d;
+    CHECK(d.ips[0] == '\0');            // blank, NOT an inherited broadcast address
+    d.defineControls();
+    d.prepare();
+    CHECK(d.status() != nullptr);        // explains itself rather than idling silently
+}
+
+// The multi-destination fan-out: ONE driver feeds N tubes, each with its own IP and its own
+// contiguous run of the window. This is the Art-Net-conformant shape (ArtDmx must be unicast to the
+// node owning each universe), and it costs the same total packets as a single broadcast stream while
+// keeping every packet off the other nodes' NICs.
+TEST_CASE("NetworkSendDriver: a range fans the window out over its tubes, one slice each") {
+    mm::Buffer src;
+    src.allocate(300, 3);                     // 300 lights to spread over the tubes
+    mm::NetworkSendDriver d;
+    d.defineControls();
+    std::snprintf(d.ips, sizeof(d.ips), "%s", "192.168.1.70-74");    // 5 tubes: .70 .71 .72 .73 .74
+    d.setSourceBuffer(&src);
+    d.prepare();
+
+    REQUIRE(d.destinationCount() == 5);
+    CHECK(d.destinationAt(0)[3] == 70);
+    CHECK(d.destinationAt(4)[3] == 74);       // inclusive at BOTH ends — 70-74 is five tubes
+    CHECK(d.destinationAt(2)[0] == 192);      // the typed-once subnet carries across the range
+    CHECK(d.destinationAt(2)[2] == 1);
+
+    // Blank lightsPerIp → the window splits evenly across the tubes (the ledsPerPin idiom).
+    for (uint8_t i = 0; i < 5; i++) CHECK(d.lightsAt(i) == 60);   // 300 / 5
+}
+
+TEST_CASE("NetworkSendDriver: lightsPerIp follows the ledsPerPin idiom") {
+    mm::Buffer src;
+    src.allocate(300, 3);
+    mm::NetworkSendDriver d;
+    d.defineControls();
+    std::snprintf(d.ips, sizeof(d.ips), "%s", "192.168.1.70,71,72");
+    d.setSourceBuffer(&src);
+
+    SUBCASE("one number = that many to EVERY tube") {
+        std::snprintf(d.lightsPerIp, sizeof(d.lightsPerIp), "%s", "100");
+        d.prepare();
+        CHECK(d.lightsAt(0) == 100);
+        CHECK(d.lightsAt(1) == 100);
+        CHECK(d.lightsAt(2) == 100);
+    }
+    SUBCASE("a list = one per tube, by position") {
+        std::snprintf(d.lightsPerIp, sizeof(d.lightsPerIp), "%s", "150,100,50");
+        d.prepare();
+        CHECK(d.lightsAt(0) == 150);          // tubes may differ in length
+        CHECK(d.lightsAt(1) == 100);
+        CHECK(d.lightsAt(2) == 50);
+    }
+}
+
+// A malformed entry must leave the driver IDLE, not half-configured. parseIpList fills its output as
+// it goes, so a bad address AFTER good ones (a typo in tube 3 of 5) yields a partial list; publishing
+// that would send real packets to a real subset of hosts while the card shows an error. Wrong output is
+// worse than no output — so prepare() parses into locals and publishes only when everything validates.
+TEST_CASE("NetworkSendDriver: a malformed ips entry idles the driver — no partial destination list") {
+    mm::Buffer src;
+    src.allocate(300, 3);
+    mm::NetworkSendDriver d;
+    d.defineControls();
+    d.setSourceBuffer(&src);
+
+    // A good run, so there IS prior state to leak.
+    std::snprintf(d.ips, sizeof(d.ips), "%s", "192.168.1.70-74");
+    d.prepare();
+    REQUIRE(d.destinationCount() == 5);
+
+    SUBCASE("a bad address after good ones publishes NOTHING") {
+        std::snprintf(d.ips, sizeof(d.ips), "%s", "192.168.1.70,71,999,73");
+        d.prepare();
+        CHECK(d.destinationCount() == 0);          // not 2 — the valid prefix must not go live
+        CHECK(d.status() != nullptr);              // and the user is told
+    }
+    SUBCASE("a bad lightsPerIp publishes NOTHING either") {
+        std::snprintf(d.ips, sizeof(d.ips), "%s", "192.168.1.70-74");
+        std::snprintf(d.lightsPerIp, sizeof(d.lightsPerIp), "%s", "abc");
+        d.prepare();
+        CHECK(d.destinationCount() == 0);          // the ips parsed fine, but the split didn't
+        CHECK(d.status() != nullptr);
+    }
+}
+
+// A hand-typed lightsPerIp list will sometimes not match the destination count — the likeliest real
+// typo. It must not silently mis-slice: a SHORT list even-splits the remainder across the rest (the
+// documented ledsPerPin broadcasting rule), and a LONG list simply ignores the extras.
+TEST_CASE("NetworkSendDriver: a lightsPerIp list that doesn't match the tube count still slices sanely") {
+    mm::Buffer src;
+    src.allocate(300, 3);
+    mm::NetworkSendDriver d;
+    d.defineControls();
+    d.setSourceBuffer(&src);
+    std::snprintf(d.ips, sizeof(d.ips), "%s", "192.168.1.70,71,72");   // 3 tubes
+
+    SUBCASE("a SHORT list: the named tubes take their counts, the rest split the remainder") {
+        std::snprintf(d.lightsPerIp, sizeof(d.lightsPerIp), "%s", "150");   // one value = every tube
+        d.prepare();
+        REQUIRE(d.destinationCount() == 3);
+        CHECK(d.lightsAt(0) == 150);
+        CHECK(d.lightsAt(1) == 150);
+        CHECK(d.lightsAt(2) == 0);     // the 300-light window is exhausted — clamped, not wrapped
+    }
+    SUBCASE("a LONGER list than there are tubes: the extras are ignored, no overrun") {
+        std::snprintf(d.lightsPerIp, sizeof(d.lightsPerIp), "%s", "50,60,70,80,90");
+        d.prepare();
+        REQUIRE(d.destinationCount() == 3);   // still 3 tubes — the list doesn't invent destinations
+        CHECK(d.lightsAt(0) == 50);
+        CHECK(d.lightsAt(1) == 60);
+        CHECK(d.lightsAt(2) == 70);
+    }
 }
