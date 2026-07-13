@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,16 +56,17 @@ def runtime_works(kind: str, cxx: str) -> bool:
     person hunting a race that isn't there — which is exactly what happened before this check
     existed. A gate you can't trust is worse than no gate.
     """
-    src = Path("/tmp") / f"_san_probe_{kind}.cpp"
-    src.write_text("int main() { return 0; }\n")
-    exe = Path("/tmp") / f"_san_probe_{kind}"
-    try:
-        subprocess.run([cxx, f"-fsanitize={kind}", "-g", str(src), "-o", str(exe)],
-                       check=True, capture_output=True)
-        r = subprocess.run([str(exe)], capture_output=True, timeout=20)
-        return r.returncode == 0
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return False   # timeout = the runtime hung; non-zero = it crashed
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "probe.cpp"
+        src.write_text("int main() { return 0; }\n")
+        exe = Path(tmp) / "probe"
+        try:
+            subprocess.run([cxx, f"-fsanitize={kind}", "-g", str(src), "-o", str(exe)],
+                           check=True, capture_output=True)
+            r = subprocess.run([str(exe)], capture_output=True, timeout=20)
+            return r.returncode == 0
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return False   # timeout = the runtime hung; non-zero = it crashed
 
 
 def run_one(kind: str, filt: str | None) -> bool:
@@ -72,9 +74,18 @@ def run_one(kind: str, filt: str | None) -> bool:
     cc, cxx = compiler()
     if not runtime_works(kind, cxx):
         print(f"\n=== {kind.upper()} ===")
-        print(f"  SKIPPED — the {kind} runtime is broken on this host (hello-world hangs/crashes).")
-        print("  This is a toolchain bug, not a finding. Run it on Linux (CI or a container).")
-        return True   # not a failure of OUR code; don't red-light the gate over a broken runtime
+        # Skip ONLY the one runtime we have positively identified as broken-by-toolchain: TSan on
+        # macOS/arm64 (segfaults on hello-world under both Apple and Homebrew clang). Anything else —
+        # notably ANY probe failure on Linux, where CI runs — is a real problem with the toolchain or
+        # the build, and must FAIL. A gate that turns every unexpected failure into a green skip is
+        # worse than no gate: it would have quietly stopped guarding the multicore code.
+        if kind == "thread" and sys.platform == "darwin":
+            print("  SKIPPED — TSan's runtime is broken on macOS/arm64 (hello-world segfaults; a")
+            print("  toolchain bug, not a finding). Thread races are gated by Linux CI.")
+            return True
+        print(f"  FAIL — the {kind} runtime does not run a hello-world on this host.")
+        print("  That is a broken toolchain or build, not a skippable condition. Investigate.")
+        return False
     build = ROOT / "build" / f"san-{kind}"
     flags = f"-fsanitize={kind} -fno-omit-frame-pointer -g"
 
@@ -115,7 +126,10 @@ def main() -> int:
         sys.exit("cmake not found")
 
     kinds = ["address", "thread"] if args.kind == "both" else [args.kind]
-    ok = all(run_one(k, args.filter or None) for k in kinds)
+    # Run BOTH, then aggregate — `all(generator)` short-circuits, so an ASan failure would skip TSan
+    # entirely and hide a race behind a use-after-free. They are independent signals; report both.
+    results = [run_one(k, args.filter or None) for k in kinds]
+    ok = all(results)
     print("\nSanitizers:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

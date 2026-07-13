@@ -105,40 +105,6 @@ void notifyTask(WorkerTask& t);
 bool waitNotify(WorkerTask& t, uint32_t timeoutMs);
 // Signal stop + wake, then block until the worker fn has returned and the task is torn down.
 void stopPinnedTask(WorkerTask& t);
-// A non-blocking mutual-exclusion latch guarding a resource two tasks reach (the WS sender, which
-// core 0 drains on tick20ms while core 1's offloaded PreviewDriver arms and streams into it).
-//
-// ONLY try-acquire is offered, never a blocking lock: the hot-path rule forbids a render/encode
-// thread blocking on a peer (CLAUDE.md § Hot path — "no blocking … use try_lock"), so a caller that
-// loses the race SKIPS its slot rather than waiting. That single constraint is what lets this be an
-// `std::atomic_flag` test-and-set — the textbook lock-free try-lock — instead of an OS mutex: with
-// no waiting there is nothing to sleep on, nothing to wake, and no priority to inherit. So it costs
-// ONE atomic read-modify-write (tens of ns) with no RTOS call, needs no init/destroy lifecycle, and
-// is the same code on every platform — hence no platform backing at all, and it is safe to touch
-// from the render or encode thread. `std::atomic_flag` is guaranteed lock-free by the standard.
-//
-// NOT recursive: a task that already holds it must not re-acquire (test_and_set would refuse).
-class TryLock {
-public:
-    bool tryAcquire() { return !flag_.test_and_set(std::memory_order_acquire); }
-    void release() { flag_.clear(std::memory_order_release); }
-private:
-    std::atomic_flag flag_ = ATOMIC_FLAG_INIT;
-};
-// RAII scope guard: `if (LockGuard g{lk}; g) { …exclusive… }` — releases on scope exit, no-ops when
-// the latch was busy. The standard scoped_lock/unique_lock(try_to_lock) shape.
-class LockGuard {
-public:
-    explicit LockGuard(TryLock& l) : lock_(l), held_(l.tryAcquire()) {}
-    ~LockGuard() { if (held_) lock_.release(); }
-    explicit operator bool() const { return held_; }
-    LockGuard(const LockGuard&) = delete;
-    LockGuard& operator=(const LockGuard&) = delete;
-private:
-    TryLock& lock_;
-    bool held_;
-};
-
 // Reset THIS task's watchdog (esp_task_wdt_reset) from inside a worker doing a long encode. No-op
 // on desktop. Keeps the vTaskDelay(1)/WDT discipline the single render loop has today.
 void taskWdtReset();

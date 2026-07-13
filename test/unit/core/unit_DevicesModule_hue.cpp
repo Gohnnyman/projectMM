@@ -2,7 +2,7 @@
 
 // Pins the Hue-bridge listing: a HueDriver registers a bridge through upsertHueBridge() (the
 // explicit, out-of-band entry — a bridge isn't a UDP-presence device), and DevicesModule lists
-// it like any peer, carrying its colour-light count for layout sizing. Also pins the round
+// it like any peer, carrying its color-light count for layout sizing. Also pins the round
 // trip through writeListRow / restoreList so a persisted bridge comes back as a Hue row.
 
 #include "doctest.h"
@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <cstring>
 
-TEST_CASE("DevicesModule: a Hue bridge is listed with its colour count") {
+TEST_CASE("DevicesModule: a Hue bridge is listed with its color count") {
     mm::DevicesModule dev;
     const uint8_t ip[4] = {192, 168, 1, 143};
     dev.upsertHueBridge(ip, "Hue Ewoud", 7);
@@ -51,7 +51,7 @@ TEST_CASE("DevicesModule: a persisted Hue bridge restores as a Hue row with its 
     CHECK(std::strstr(sink.data(), "\"color\":7") != nullptr);
 }
 
-TEST_CASE("DevicesModule: a corrupt persisted colour clamps to the valid range, row still restores") {
+TEST_CASE("DevicesModule: a corrupt persisted color clamps to the valid range, row still restores") {
     // A negative count and an over-127 count (corrupt / hand-edited file) must clamp to 0..127
     // before narrowing to uint8_t — never wrap into a bogus value. The row otherwise restores.
     struct Case { const char* color; const char* want; };
@@ -73,3 +73,4 @@ TEST_CASE("DevicesModule: a corrupt persisted colour clamps to the valid range, 
         CHECK(std::strstr(sink.data(), c.want) != nullptr);
     }
 }
+

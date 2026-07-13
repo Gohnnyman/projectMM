@@ -1168,27 +1168,6 @@ function createControl(moduleName, moduleType, ctrl) {
 
     switch (ctrl.type) {
         case "uint8": {
-            // A `stepper` control is a count set exactly, not a magnitude dragged — render it as a
-            // plain number+spinner (no slider), the same number-only affordance uint16-unbounded uses.
-            if (ctrl.stepper) {
-                const nMin = Number(ctrl.min ?? 0);
-                const nMax = Number(ctrl.max ?? 255);
-                const input = document.createElement("input");
-                input.type = "number";
-                input.min = nMin;
-                input.max = nMax;
-                input.value = Math.max(nMin, Math.min(nMax, Number(ctrl.value ?? 0)));
-                input.dataset.mid = moduleName;
-                input.dataset.key = ctrl.name;
-                input.addEventListener("input", () => {
-                    dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
-                    const v = Math.max(nMin, Math.min(nMax, parseInt(input.value) || nMin));
-                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
-                });
-                row.appendChild(input);
-                appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
-                break;
-            }
             const input = document.createElement("input");
             input.type = "range";
             input.min = ctrl.min ?? 0;

@@ -40,7 +40,7 @@ Still future: the **virtual (shift-register) driver** — fan one i80 lane out t
 - **A node table** — IP → last-seen; mark offline after ~9 s of silence (3 missed polls, the spec's own cadence).
 - **Use it:** skip offline destinations in the send loop; surface the live/dead list as a read-only status. **Bonus, and arguably the real prize: auto-populate `ips`** — the user stops typing addresses at all, which is how a professional controller behaves.
 
-Do it as its own increment, after the multi-destination unicast lands.
+Do it as its own increment. The multi-destination unicast it builds on has shipped.
 
 ### RS-485 / DMX-512 wired output (future) — the physical-DMX driver
 

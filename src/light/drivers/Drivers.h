@@ -302,7 +302,11 @@ public:
         const bool wantOutput = (needOutput && haveLights) || splitWanted;
 
         // Core 1 may be mid-encode from the current outputBuffer_ — wait it out before free/realloc.
-        quiesceEncode();
+        // If it does NOT come back (a wedged worker), do NOT then free the buffer it may still be
+        // reading: tear the task down first. stopEncodeTask() joins, so once it returns nothing can
+        // touch outputBuffer_ and the realloc below is safe. This is the cold path, so a blocking join
+        // is allowed here — unlike the tick() boundary, which must never block indefinitely.
+        if (!quiesceEncode()) stopEncodeTask();
         if (wantOutput) {
             if (!outputBuffer_.allocate(out->physicalLightCount(), out->channelsPerLight())) {
                 std::printf("  DEGRADE  Drivers::outputBuffer_ allocate failed for %u lights\n",
@@ -441,7 +445,11 @@ public:
     // encodeDone_, and the next notify can't come until core 0 returns to tick() — same thread as the
     // mutation), so the task stays alive and the split survives the mutation; prepare() re-evaluates
     // right after and stops the task if the last driver just left.
-    void quiesce() override { quiesceEncode(); }
+    //
+    // If the worker does NOT come back within the timeout, the caller is about to DELETE the very
+    // object it may still be inside — so tear the task down (a join) before returning. Letting a
+    // timed-out quiesce return is the use-after-free this whole hook exists to prevent.
+    void quiesce() override { if (!quiesceEncode()) stopEncodeTask(); }
 
 private:
     Layers* layers_ = nullptr;  // bound container; layer_ re-resolved from it at prepareTree
@@ -492,11 +500,30 @@ private:
     static void encodeTrampoline(void* self) { static_cast<Drivers*>(self)->runEncodeLoop(); }
 
     // Wait for core 1 to finish the in-flight encode, so core 0 can safely overwrite / free
-    // outputBuffer_. Bounded by one encode; polled off the hot path with a yield. No-op when the
-    // split is off. This is the render-side analog of ParallelLedDriver::drainInFlight.
-    void quiesceEncode() {
-        if (!renderSplitActive_) return;
-        while (!encodeDone_.load(std::memory_order_acquire)) platform::yield();
+    // outputBuffer_. Normally bounded by ONE encode (the `stall` KPI measures exactly this wait);
+    // polled with a yield. No-op when the split is off. The render-side analog of
+    // ParallelLedDriver::drainInFlight.
+    //
+    // The timeout is the robustness floor, not the expected path: a wedged core-1 task, a starved
+    // worker, or a lost notify would otherwise spin the RENDER loop forever — and a permanent wedge
+    // ranks below "degraded" in the robustness rule (a device must keep running, even poorly). So
+    // give up after kQuiesceTimeoutMs and DISENGAGE the split: every driver falls back to ticking
+    // inline on core 0, which is the same single-core path a memory-tight board already takes. Slower,
+    // still lit. Returns false when it timed out, so a caller that was about to free the handoff buffer
+    // knows core 1 might still be reading it and can leave it alone.
+    static constexpr uint32_t kQuiesceTimeoutMs = 500;   // ≫ any real encode (~50 ms at 16K lights)
+    bool quiesceEncode() {
+        if (!renderSplitActive_) return true;
+        const uint32_t deadline = platform::millis() + kQuiesceTimeoutMs;
+        while (!encodeDone_.load(std::memory_order_acquire)) {
+            if (platform::millis() > deadline) {
+                setStatus("encode worker stalled — running single-core", Severity::Warning);
+                renderSplitActive_ = false;   // stop notifying it; drivers tick inline from here
+                return false;
+            }
+            platform::yield();
+        }
+        return true;
     }
 
     // Is there an enabled driver child at all? The split only engages when there's output work to move
@@ -522,9 +549,18 @@ public:
     /// the Step 2b (ping-pong 2nd buffer) trigger: ~0 = render ≈ output, a 2nd buffer gains nothing;
     /// large = the effect is far cheaper than the output work, so core 0 idles and 2b would recover it.
     uint32_t stallPeakUs() const { return stallPeakUs_; }
-    /// Spawn the core-1 encode task. Called from prepare() when the split newly engages (and safe to
-    /// call again — guards on encodeTask_.impl). Degrades to inline if the task can't be created:
-    /// renderSplitActive_ is cleared so tick() runs every child on core 0.
+    /// Test-only: the frame-boundary wait in isolation (false = it timed out and disengaged the split).
+    /// tick() reaches it inline; a test needs it separately to time the boundary WITHOUT also running
+    /// the fallback inline tick that follows a timeout. Same public-for-tests convention as
+    /// renderSplitActive() / stallPeakUs().
+    bool quiesceEncodeForTest() { return quiesceEncode(); }
+
+private:
+    // Spawn the core-1 encode task. PRIVATE: the task's lifetime is owned by the engage predicate in
+    // prepare(), and renderSplitActive_ is the single source of truth for "is the split on". An outside
+    // caller could desync the two — stop the task while the flag stays true, and tick() would notify a
+    // dead task while quiesceEncode() waited on an encodeDone_ nobody will ever set. Safe to call again
+    // (guards on encodeTask_.impl). Degrades to inline if the task can't be created.
     void startEncodeTask() {
         if (!renderSplitActive_ || encodeTask_.impl) return;
         encodeStop_.store(false, std::memory_order_release);
@@ -534,15 +570,14 @@ public:
         if (!platform::spawnPinnedTask(encodeTask_, "mmEncode", &encodeTrampoline, this, 8192, 5, 1))
             renderSplitActive_ = false;   // couldn't create the task → inline path
     }
-    /// Stop + join the core-1 task, draining its in-flight encode before buffers free (called from
-    /// main before scheduler.release(), and on disengage). Safe to call when no task is running.
+    // Stop + join the core-1 task, draining its in-flight encode before any buffer it reads is freed.
+    // Reached from release(), the destructor, disengage, and a timed-out quiesce. Safe when idle.
     void stopEncodeTask() {
         if (!encodeTask_.impl) return;
         encodeStop_.store(true, std::memory_order_release);
         platform::stopPinnedTask(encodeTask_);   // signals + wakes + joins (worker exits its loop)
     }
 
-private:
     void passBufferToDrivers() {
         // No active Layer (e.g. the last Layer was just deleted): clear every
         // driver's Layer + source-buffer pointers rather than leaving them at

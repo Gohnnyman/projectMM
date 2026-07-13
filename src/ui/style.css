@@ -519,7 +519,7 @@ body {
 
 /* Enable/disable toggle: styled <button> matching .card-btn's 26×26 frame.
    Always transparent (no fill) — visual state is conveyed by the glyph alone:
-   ⏻ accent-coloured when on, muted when off. Same weight as the other
+   ⏻ accent-colored when on, muted when off. Same weight as the other
    action buttons in the cluster. */
 .card-title .module-enabled {
     background: transparent;
@@ -666,7 +666,7 @@ body {
 }
 .list-summary:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .list-self { box-shadow: inset 3px 0 0 var(--accent); }   /* this device, marked */
-/* Generic per-row severity marker — a coloured left edge + a faint row tint, driven by a `severity`
+/* Generic per-row severity marker — a colored left edge + a faint row tint, driven by a `severity`
    field ("error"/"warn", set in app.js's rowSeverityClass). Same left-edge idiom as .list-self, in
    the same red/yellow palette as the age dots. Not pins-specific: any ListSource emitting `severity`
    gets it. PinsModule is the first user (a claim on a reserved/strap/input-only GPIO). */

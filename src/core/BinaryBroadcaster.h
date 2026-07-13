@@ -80,7 +80,7 @@ protected:
 };
 
 /// RAII bracket for the pair above: `if (SendLease s{bc}; s) { …one whole message… }`.
-/// Releases on scope exit; no-ops when the transport was busy. Same shape as platform::LockGuard.
+/// Releases on scope exit; no-ops when the transport was busy. Same shape as mm::LockGuard.
 class SendLease {
 public:
     explicit SendLease(BinaryBroadcaster* bc)

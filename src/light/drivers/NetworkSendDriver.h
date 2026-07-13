@@ -163,12 +163,19 @@ public:
         socket_.open();          // idempotent: no-op if already open
         resizeCorrected();
 
-        nDest_ = 0;
-        const char* err = parseIpList(ips, dest_, kMaxDestinations, nDest_);
-        if (err) { setStatus(err, Severity::Error); return; }
-        if (nDest_ == 0) {
+        // Parse into LOCALS and publish only once EVERYTHING validates. `nDest_` is what tick() reads,
+        // so writing it before the parse is fully checked would leave the driver sending to a partially
+        // parsed list with stale per-destination counts — real packets to real hosts, despite an error
+        // status on the card. On any error the driver idles instead (nDest_ = 0): wrong output is worse
+        // than no output. Same all-or-nothing publish an LED driver's lane parse makes.
+        uint8_t dest[kMaxDestinations][4] = {};
+        uint8_t n = 0;
+        const char* err = parseIpList(ips, dest, kMaxDestinations, n);
+        if (err) { nDest_ = 0; setStatus(err, Severity::Error); return; }
+        if (n == 0) {
             // Say WHY nothing is going out rather than idling silently — the driver looks broken
             // otherwise. Warning, not Error: an unset destination is an unfinished config, not a fault.
+            nDest_ = 0;
             setStatus("set a destination ip", Severity::Warning);
             return;
         }
@@ -178,9 +185,15 @@ public:
         // an LED driver uses to split its window across pins.
         nrOfLightsType winStart = 0, winLen = 0;
         if (sourceBuffer_) windowSlice(sourceBuffer_->count(), winStart, winLen);
+        nrOfLightsType counts[kMaxDestinations] = {};
         const char* warn = nullptr;
-        err = assignCounts(lightsPerIp, nDest_, winLen, destCounts_, 0, &warn);
-        if (err) { setStatus(err, Severity::Error); return; }
+        err = assignCounts(lightsPerIp, n, winLen, counts, 0, &warn);
+        if (err) { nDest_ = 0; setStatus(err, Severity::Error); return; }
+
+        // Everything validated — publish as one unit.
+        std::memcpy(dest_, dest, sizeof(uint8_t) * 4 * n);
+        std::memcpy(destCounts_, counts, sizeof(nrOfLightsType) * n);
+        nDest_ = n;
         setStatus(warn, warn ? Severity::Warning : Severity::Status);
     }
 

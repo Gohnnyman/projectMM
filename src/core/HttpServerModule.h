@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/TryLock.h"   // the cross-thread sender latch (wsLock_)
 #include "core/ScratchBuffer.h"   // leafHashes_ — the growable diff-on-the-wire value-hash cache
 #include "core/BinaryBroadcaster.h"
 #include "platform/platform.h"
@@ -281,7 +282,7 @@ private:
     // slot (the hot-path rule, CLAUDE.md § Hot path). Preview already has that skip path — it is the
     // same back-off its adaptive frame rate takes when the link is busy — so a lost race costs one
     // preview frame, never a stalled render or encode.
-    mutable platform::TryLock wsLock_;
+    mutable TryLock wsLock_;
     // Queue a TEXT frame (opcode 0x81) whose body this module OWNS, through the same resumable slot the
     // preview binary send uses — so the (20 KB) state JSON drains in chunks on tick20ms instead of a
     // blocking write on the render tick. Takes ownership of `ownedBody` (freed on drain-complete /

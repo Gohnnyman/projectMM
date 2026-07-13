@@ -881,6 +881,27 @@ void HttpServerModule::visitModuleLeaves(MoonModule* mod, Fn&& fn) {
     std::snprintf(num, sizeof(num), "%u", static_cast<unsigned>(mod->tickTimeUs())); leaf(path, num);
     std::snprintf(path, sizeof(path), "%s/@dynamicBytes", mod->name());
     std::snprintf(num, sizeof(num), "%u", static_cast<unsigned>(mod->dynamicBytes())); leaf(path, num);
+    // Status + severity change per tick too — a driver can fault at any moment (a Hue pairing result, a
+    // loopback verdict, a bus that won't init). They MUST ride the patch: the diff push is the only thing
+    // that runs every second, so a status carried by the full state alone sits stale until an unrelated
+    // resync — and a module whose card is collapsed behind a tab would surface no fault at all. The
+    // value-hash gate means an unchanged status costs nothing on the wire. Same wire strings writeStatus
+    // emits (a null status is the empty string, which the UI treats as "no status").
+    {
+        JsonSink sv;
+        sv.append("\"");
+        sv.writeJsonString(mod->status() ? mod->status() : "");
+        sv.append("\"");
+        std::snprintf(path, sizeof(path), "%s/@status", mod->name());
+        leaf(path, sv.data());
+    }
+    {
+        static const char* sevStr[] = {"status", "warning", "error"};
+        JsonSink sv;
+        sv.appendf("\"%s\"", sevStr[static_cast<int>(mod->severity())]);
+        std::snprintf(path, sizeof(path), "%s/@severity", mod->name());
+        leaf(path, sv.data());
+    }
     // Each control's value.
     auto& ctrls = mod->controls();
     for (uint8_t i = 0; i < ctrls.count(); i++) {
@@ -1027,7 +1048,6 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         writeControlMetadata(sink, c);
         // Emit optional flags only when set (common case is false; omit to save bytes).
         if (c.readonly) sink.append(",\"readonly\":true");
-        if (c.stepper) sink.append(",\"stepper\":true");
         // An editable List (the CRUD primitive) tells the UI to show add/delete/reorder + inline
         // row editors; a plain List stays read-only. The row objects carry a stable "id" the
         // /api/list/* ops address, and each editable row's detail carries its field descriptors.
@@ -2419,7 +2439,7 @@ void HttpServerModule::drainPreviewSend() {
     // interleaving with that stream inside one WS frame, and keeps us off a half-armed previewSend_.
     // try_lock, not a wait: this runs on the render thread's tick20ms, where blocking is forbidden —
     // core 1 releases within one message, so we simply drain on the next 20 ms tick instead.
-    platform::LockGuard lease{wsLock_};
+    LockGuard lease{wsLock_};
     if (!lease) return;
     if (!previewSend_.active) return;
     const size_t total = previewSend_.hdrLen + previewSend_.bodyLen;

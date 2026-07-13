@@ -245,12 +245,6 @@ struct ControlDescriptor {
                             // users (e.g. SystemModule.deviceModel, which MoonDeck and the web installer
                             // inject via POST /api/control). HTTP writes still succeed — the flag
                             // is a UI rendering hint, not a write gate. Set via setReadOnly().
-    bool stepper = false;   // UI hint for a bounded numeric (Uint8/Uint16): render as a plain number
-                            // input with up/down spinner, NOT a slider. A slider suits a continuous
-                            // magnitude you tune by feel (brightness, a rate); a COUNT you set exactly
-                            // (a channel count, a lane count) reads better as a number field. Rendering
-                            // hint only, like hidden/readonly; the bound (min/max) still applies. Set
-                            // via setStepper().
     // Optional per-control input validator (Text/Password only; nullptr = accept anything
     // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
     // write and returns ApplyResult::Malformed on reject, so the check covers EVERY write
@@ -352,7 +346,7 @@ public:
     void addText(const char* name, char* var, uint16_t bufSize = 16,
                  bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, validate};
     }
 
     // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
@@ -360,7 +354,7 @@ public:
     void addTextArea(const char* name, char* var, uint16_t bufSize = 16,
                      bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, validate};
     }
 
     // Like addText but the value is a secret: the API serializes it
@@ -447,13 +441,6 @@ public:
     // The UI renders the control display-only; HTTP /api/control writes still apply.
     void setReadOnly(uint8_t i, bool readonly) {
         if (i < count_) controls_[i].readonly = readonly;
-    }
-
-    // Mark a bounded numeric to render as a number+spinner instead of a slider. Typical use:
-    // call addUint8/addUint16 then setStepper(count() - 1) for a count control (a channel count,
-    // a lane count) the user sets exactly rather than drags.
-    void setStepper(uint8_t i, bool stepper = true) {
-        if (i < count_) controls_[i].stepper = stepper;
     }
 
 private:

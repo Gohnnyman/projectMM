@@ -85,6 +85,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # The CMake configure needs uv on PATH — it resolves UV_EXECUTABLE for the UI-embed step
+      # (CLAUDE.md § Use uv for every Python invocation), so a build without it fails at configure.
+      - uses: astral-sh/setup-uv@v3
       - name: build + run unit tests under ${{ matrix.kind }}sanitizer
         run: |
           cmake -S . -B build/san -DCMAKE_BUILD_TYPE=Debug \

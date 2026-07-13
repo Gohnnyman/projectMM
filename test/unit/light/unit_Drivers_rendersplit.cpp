@@ -238,3 +238,41 @@ TEST_CASE("render-split: toggling multicore live engages and disengages the work
     CHECK(r.drivers.renderSplitActive());     // worker respawned — no reboot needed
     r.drivers.release();
 }
+
+// ROBUSTNESS FLOOR: a wedged core-1 worker must not hang the RENDER loop. The frame boundary waits for
+// the encode, normally bounded by one encode (the `stall` KPI measures it). But a worker that never
+// signals done — starved, wedged, a lost notify — would otherwise spin core 0 forever, and a permanent
+// wedge ranks BELOW "degraded": the device must keep running, even poorly. So the boundary times out,
+// DISENGAGES the split, and every driver falls back to ticking inline on core 0 — the same single-core
+// path a memory-tight board already takes. Slower, still lit.
+//
+// This times tick()'s boundary specifically. It does NOT go through quiesce() (the structural-mutation
+// hook), which deliberately JOINS the worker on timeout — a blocking join is right there (the caller is
+// about to free the driver) but would be wrong here, on the render path.
+TEST_CASE("render-split: a wedged worker degrades to single-core instead of hanging the render loop") {
+    Rig r(64);
+    auto* slow = new SlowDriver();            // parks inside tick() until we release it
+    r.drivers.addChild(slow);
+    r.drivers.setup();
+    r.drivers.prepare();
+    REQUIRE(r.drivers.renderSplitActive());
+
+    r.drivers.tick();                         // core 1 enters slow->tick() and parks there
+    REQUIRE(slow->waitEntered());             // it is provably stuck
+
+    // Release the worker FIRST so the disengage path can't block on it — what is under test is the
+    // BOUNDARY giving up, not the teardown. The worker still hasn't signalled done for the frame the
+    // boundary is waiting on, so the wait below is a genuine wedge from the boundary's point of view.
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool completed = r.drivers.quiesceEncodeForTest();   // the boundary wait, in isolation
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+
+    CHECK_FALSE(completed);                           // it TIMED OUT rather than spinning forever
+    CHECK(elapsed < 2s);                              // and gave up promptly (timeout is 500 ms)
+    CHECK_FALSE(r.drivers.renderSplitActive());       // disengaged: drivers now tick inline on core 0
+    CHECK(r.drivers.status() != nullptr);             // and the user is told why
+
+    slow->letGo();                            // let the parked worker unwind
+    r.drivers.release();                      // joins it
+    delete slow;
+}

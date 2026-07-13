@@ -375,3 +375,38 @@ TEST_CASE("buildStatePatch: a changed control value yields a one-entry patch") {
 
     s.deleteTree(root);
 }
+
+// A module's STATUS must ride the 1 Hz value-diff, not the full state alone. A driver can fault at any
+// moment (a bus that won't init, a loopback verdict, a Hue pairing result) with no schema change and no
+// structural change — so nothing triggers a resync, and a status carried only by the full state would
+// sit stale indefinitely. It is worse with the tabbed UI: a module whose card is behind a collapsed tab
+// would surface no fault at all. This pins @status/@severity as patch leaves.
+TEST_CASE("buildStatePatch: a status change rides the patch (no resync needed)") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box(); root->setName("Root");
+    auto* k = new Knob(); k->setName("K");
+    root->addChild(k);
+    s.addModule(root);
+    s.setup();
+    mm::HttpServerModule http; http.setScheduler(&s);
+
+    http.baselineLeafHashesForTest();            // baseline: K has no status
+    {
+        mm::JsonSink sink;
+        CHECK(http.buildStatePatchForTest(sink) == 0);   // quiet tree → empty patch
+    }
+
+    // A fault appears — no control changed, no schema change, no structural change.
+    k->setStatus("bus init failed", mm::MoonModule::Severity::Error);
+
+    mm::JsonSink sink;
+    const uint16_t changed = http.buildStatePatchForTest(sink);
+    CHECK(changed > 0);                                          // it must reach the client…
+    CHECK(std::strstr(sink.data(), "\"K/@status\"") != nullptr); // …addressed as a header leaf
+    CHECK(std::strstr(sink.data(), "bus init failed") != nullptr);
+    CHECK(std::strstr(sink.data(), "\"K/@severity\"") != nullptr);
+    CHECK(std::strstr(sink.data(), "error") != nullptr);
+
+    s.deleteTree(root);
+}

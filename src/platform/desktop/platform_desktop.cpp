@@ -182,8 +182,11 @@ void writeExec(void* dst, const void* src, size_t len) {
 }
 
 void yield() {
-    // No-op on desktop — OS scheduler handles threading.
-    // Socket reads use SO_RCVTIMEO for blocking with timeout.
+    // Hand the CPU to another runnable thread — the desktop twin of the ESP32's vTaskDelay(1).
+    // It must actually yield, not no-op: the multicore split's frame boundary polls this while it
+    // waits for the encode worker, and a no-op turns that into a busy-spin that pins a core and
+    // starves the very worker it is waiting for. std::this_thread::yield() is the portable form.
+    std::this_thread::yield();
 }
 
 void delayMs(uint32_t ms) {

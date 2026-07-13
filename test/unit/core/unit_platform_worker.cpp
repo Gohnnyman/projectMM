@@ -9,6 +9,7 @@
 
 #include "doctest.h"
 #include "platform/platform.h"
+#include "core/TryLock.h"
 
 #include <atomic>
 #include <chrono>
@@ -107,7 +108,7 @@ TEST_CASE("worker seam: stopPinnedTask joins — the fn has returned before it r
 // That constraint is what lets it be a plain atomic_flag test-and-set rather than an OS mutex.
 
 TEST_CASE("TryLock: acquiring excludes a second acquirer, release re-opens it") {
-    mm::platform::TryLock lk;
+    mm::TryLock lk;
     REQUIRE(lk.tryAcquire());          // free → acquired
     CHECK_FALSE(lk.tryAcquire());      // held → a second acquirer is REFUSED, not blocked
     lk.release();
@@ -116,7 +117,7 @@ TEST_CASE("TryLock: acquiring excludes a second acquirer, release re-opens it") 
 }
 
 TEST_CASE("TryLock: a second THREAD is refused while held, and never blocks") {
-    mm::platform::TryLock lk;
+    mm::TryLock lk;
     REQUIRE(lk.tryAcquire());          // this thread holds it
 
     // The peer must come back promptly with "busy" rather than waiting for us — the whole point of
@@ -136,11 +137,11 @@ TEST_CASE("TryLock: a second THREAD is refused while held, and never blocks") {
 }
 
 TEST_CASE("TryLock: LockGuard releases on scope exit, and no-ops when busy") {
-    mm::platform::TryLock lk;
+    mm::TryLock lk;
     {
-        mm::platform::LockGuard g{lk};
+        mm::LockGuard g{lk};
         CHECK(bool(g));                          // acquired
-        mm::platform::LockGuard g2{lk};
+        mm::LockGuard g2{lk};
         CHECK_FALSE(bool(g2));                   // busy → the guard is falsy, and must NOT release on exit
     }
     CHECK(lk.tryAcquire());            // the busy guard's destructor did not wrongly release it

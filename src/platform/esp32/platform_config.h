@@ -69,11 +69,11 @@ constexpr uint8_t rmtTxChannels = RMT_LL_TX_CANDIDATES_PER_INST;
 constexpr uint8_t rmtTxChannels = 0;
 #endif
 
-// Parallel WS2812 lanes over the LCD_CAM i80 bus (ESP32-S3 among current
-// targets). The peripheral does 16; this increment deliberately caps at 8 —
-// half the DMA footprint, and widening is a constant change, not a redesign.
-// SOC-derived like rmtTxChannels so a future LCD_CAM-bearing chip works
-// untouched.
+// Parallel WS2812 lanes over the LCD_CAM i80 bus (ESP32-S3 / P4). The peripheral
+// does 16 data lines and the driver uses all of them: it derives the actual bus
+// width (8 or 16 — power-of-two only) from the configured pin count, so this is
+// the ceiling, not a self-imposed cap. SOC-derived like rmtTxChannels so a future
+// LCD_CAM-bearing chip works untouched.
 //
 // Gate on SOC_LCDCAM_I80_LCD_SUPPORTED (the LCD_CAM peripheral's i80 mode),
 // NOT SOC_LCD_I80_SUPPORTED: the classic ESP32 sets the latter for its

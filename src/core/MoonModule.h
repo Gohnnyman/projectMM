@@ -250,7 +250,7 @@ public:
             mix(static_cast<uint32_t>(c.type));
             mix(static_cast<uint32_t>(c.min));
             mix(static_cast<uint32_t>(c.max));
-            mix((c.hidden ? 1u : 0u) | (c.readonly ? 2u : 0u) | (c.stepper ? 4u : 0u));
+            mix((c.hidden ? 1u : 0u) | (c.readonly ? 2u : 0u));
             if (c.type == ControlType::Select && c.aux) {
                 // aux is the option array (const char* const*), max is its count — hash the strings so
                 // an in-place rename (same pointer) still changes the signature.

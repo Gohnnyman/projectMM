@@ -8,7 +8,7 @@
 
 **Yes — PSRAM can lift the classic-ESP32 ceiling, and the mechanism is a memory-model change, not a virtual-driver feature.** Our 2048-light wall is a direct consequence of the *whole-frame* DMA model: `esp_lcd`'s i80 backend materialises every light's WS2812 waveform in one contiguous DMA-capable block before the transfer starts, and on the classic ESP32 that block **cannot be PSRAM** — the IDF source rejects it outright (`esp_lcd_panel_io_i2s.c`: `ESP_RETURN_ON_FALSE((caps & MALLOC_CAP_SPIRAM) == 0, NULL, TAG, "external memory is not supported")`), because the classic chip's I2S DMA physically cannot address the external-RAM window. So the DMA buffer scales linearly with the light count against a ~76 KB internal wall.
 
-hpwit's driver uses a **streaming refill ring** instead: a handful of tiny DMA buffers (144 bytes each for RGB — *one LED slot across all 16 lanes*), refilled on the fly by the I2S completion ISR, which transposes the next pixel row out of the source color array as it goes. **The DMA never touches the source array — the CPU does, inside the ISR** — so the source array is under no DMA constraint and **can live in PSRAM**. Internal RAM becomes **constant (~1.6 KB at the default `nbDmaBuffer = 6`), independent of the light count**. That is the whole ballgame: the ring **decouples LED count from internal RAM**, for **any** driver built on it, virtual or not.
+hpwit's driver uses a **streaming refill ring** instead: a handful of tiny DMA buffers (144 bytes each for RGB — *one LED slot across all 16 lanes*), refilled on the fly by the I2S completion ISR, which transposes the next pixel row out of the source color array as it goes. **The DMA never touches the source array — the CPU does, inside the ISR** — so the source array is under no DMA constraint and **can live in PSRAM**. Internal RAM becomes **constant (~1.2 KB at the default `nbDmaBuffer = 6`), independent of the light count**. That is the whole ballgame: the ring **decouples LED count from internal RAM**, for **any** driver built on it, virtual or not.
 
 **The ring must be a second classic driver, not a flag on the existing one.** Our i80 driver goes through IDF's `esp_lcd`, which *owns* the DMA and only does whole-frame. **No IDF API can feed PSRAM into classic-ESP32 I2S DMA** — Espressif's own workaround *is* the ring ("add a buffer in internal memory that is DMA'able, and use memcpy to move data from/to that buffer"). So a ring driver means going under `esp_lcd` to the raw I2S registers, exactly as hpwit does, and it lands **alongside** the i80 driver as a user choice: **i80 = simple, WiFi-underrun-immune, ~2 K lights; ring = PSRAM-fed, many-K lights, needs the `nbDmaBuffer` flicker cushion.**
 
@@ -74,7 +74,7 @@ Ring, same 8 lanes, RGB (hpwit's own sizing, 144 B/buffer):
 
 | `nbDmaBuffer` | Ring internal RAM | Lights supported |
 |---|---:|---|
-| 6 (default) | (6+2) × 144 ≈ **1.6 KB** | **any** — 2 K, 16 K, 130 K; the count does not appear in the formula |
+| 6 (default) | (6+2) × 144 = **1,152 B** | **any** — 2 K, 16 K, 130 K; the count does not appear in the formula |
 | 32 | (32+2) × 144 ≈ **4.9 KB** | **any** |
 | 75 (StarLight-era) | (75+2) × 144 ≈ **11 KB** | **any** |
 
