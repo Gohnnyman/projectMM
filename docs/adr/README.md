@@ -23,3 +23,4 @@ Agents do not read this directory automatically, only when a decision's rational
 | [0011](0011-data-exchange-pull-and-prepare-pass-not-pubsub.md) | Inter-module data/events: pull + prepare-pass, not pub/sub | Accepted |
 | [0012](0012-ha-discovery-wled-default-mqtt-opt-in.md) | HA discovery: WLED by default, MQTT discovery opt-in | Accepted |
 | [0013](0013-no-migration-code-robust-persistence-plus-documented-breaks.md) | No migration code — robust persistence + documented breaks | Accepted |
+| [0014](0014-own-i80-dma-driver-below-esp-lcd.md) | Our own i80 DMA driver, one level below esp_lcd | Accepted |

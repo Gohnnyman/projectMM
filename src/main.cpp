@@ -92,6 +92,9 @@
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
 #include "light/drivers/I80LedDriver.h"
 #endif
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
+#include "light/drivers/MoonI80LedDriver.h"
+#endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
 #include "light/drivers/ParlioLedDriver.h"
 #endif
@@ -213,6 +216,12 @@ static void registerModuleTypes() {
     // the backend by chip, so ONE driver serves all i80-capable silicon under SOC_LCD_I80_SUPPORTED.
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
     mm::ModuleFactory::registerType<mm::I80LedDriver>("I80LedDriver", "light/drivers.md#i80led");
+#endif
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
+    // The same LCD_CAM output on our own DMA code instead of esp_lcd (ADR-0014). Registered
+    // ALONGSIDE I80LedDriver, not instead of it: I80LedDriver is the reference implementation and the
+    // default, this is the challenger, and having both registered makes the A/B a swap in the UI.
+    mm::ModuleFactory::registerType<mm::MoonI80LedDriver>("MoonI80LedDriver", "light/drivers.md#mooni80led");
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers.md#parlioled");

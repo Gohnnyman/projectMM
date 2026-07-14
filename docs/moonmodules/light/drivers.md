@@ -20,11 +20,14 @@ Every driver card leads with the same block, added once by [`DriverBase`](moxyge
 
 <a id="rmtled"></a>
 <a id="i80led"></a>
+<a id="mooni80led"></a>
 <a id="parlioled"></a>
 
 ### LED output 💫 · wire
 
 Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three peripherals do this — pick by chip: **RMT** (single/few strands, any ESP32), **i80** (8 or 16 parallel strands — the i80 bus, backed by LCD_CAM on the S3/P4 and by the I2S peripheral on the classic ESP32), **Parlio** (1–16 parallel strands, P4). Same controls, same wire contract; they differ only in how many strands clock out at once and on which chip.
+
+**MoonI80** is a fourth entry, and it is the odd one: the *same* LCD_CAM output as **i80**, with the same pins and the same controls, but driven by our own DMA code instead of ESP-IDF's `esp_lcd`. It exists because `esp_lcd` resets the peripheral between transactions — harmless for an LCD panel, fatal for WS2812's unbroken bit stream — which forces the whole frame into one DMA transaction and is what caps how many lights the driver can drive. Our own descriptor chain has no such boundary. **i80 remains the default and the reference implementation**; MoonI80 is the challenger, and both are offered so the two can be compared on the same board without a reflash. Rationale: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md).
 
 <img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="LED output driver controls">
 
@@ -39,7 +42,7 @@ Origin: WS2812B on FastLED / hpwit / WLED prior art ([analysis](../../backlog/le
 
 [Tests](../../tests/unit-tests.md#rmtleddriver)
 
-Detail: [RMT](moxygen/RmtLedDriver.md) · [i80](moxygen/I80LedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
+Detail: [RMT](moxygen/RmtLedDriver.md) · [i80](moxygen/I80LedDriver.md) · [MoonI80](moxygen/MoonI80LedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
 
 ## Network drivers
 

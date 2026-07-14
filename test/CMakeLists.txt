@@ -107,6 +107,7 @@ add_executable(mm_tests
     unit/light/unit_NetworkReceiveEffect.cpp
     unit/light/unit_NetworkReceiveEffect_protocols.cpp
     unit/light/unit_I80LedDriver.cpp
+    unit/light/unit_MoonI80LedDriver.cpp
     unit/light/unit_ParallelSlots.cpp
     unit/light/unit_ParlioLedDriver.cpp
     unit/light/unit_ParallelLedDriver_doublebuffer.cpp

@@ -1169,6 +1169,29 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
     return {};   // not supported off the S3
 }
 
+// MoonI80 (our own LCD_CAM DMA driver, ADR-0014) — no-op stubs, same as the esp_lcd-backed family
+// above. Desktop has no LCD_CAM, so the driver instantiates (lanesAvailable() == 0) and idles, which
+// is what lets its config/validation half be tested on the host.
+bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                       uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                       size_t /*bufferBytes*/, bool /*wantSecondBuffer*/,
+                       uint8_t /*clockMultiplier*/) {
+    return false;
+}
+uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
+size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& /*h*/) { return 0; }
+bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+bool moonI80Ws2812Wait(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
+uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& /*h*/) { return 0; }
+void moonI80Ws2812Deinit(MoonI80Ws2812Handle& /*h*/) {}
+RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+                                        uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                                        uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
+                                        size_t /*frameBytes*/, size_t /*dataBytes*/,
+                                        uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/) {
+    return {};   // not supported off LCD_CAM
+}
+
 // Parlio WS2812 — no-op stubs. Desktop has no Parlio peripheral; the driver
 // idles (parlioLanes == 0). Sizing/slicing is host-pinned by the driver tests.
 bool parlioWs2812Init(ParlioWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,

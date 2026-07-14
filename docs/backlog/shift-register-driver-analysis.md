@@ -253,6 +253,52 @@ Note the mismatch worth keeping in mind: the serial log still shows GDMA mount f
 | PSRAM is too slow | The S3's **octal** PSRAM has ample bandwidth for 26.67 MB/s. Never plausible; should have been checked before assuming. |
 | `trans_queue_depth = 1` | An early test "showing no change" was taken while accidentally in direct mode, so it proved nothing. Shift mode currently forces depth 1 anyway. |
 
+### The likely mechanism (PO's hypothesis, 2026-07-14) — and why the fix belongs in the CORE, not here
+
+**Whole-frame vs parts-of-a-frame.** Our path hands `esp_lcd` one gigantic PSRAM buffer and asks the GDMA to stream it, unassisted, at 26.67 MB/s from first byte to last — no CPU in the loop to cover a hiccup. hpwit's driver never does that: the DMA only ever reads **small internal-RAM buffers**, refilled by the CPU from data that may itself live in PSRAM. Same for Espressif's own RGB-LCD **bounce buffers**. The one place hpwit *does* DMA from PSRAM is the P4 Parlio path — **chunked** — which is consistent with our own result that a P4 runs the identical PSRAM whole-frame shift transfer perfectly while the S3 does not.
+
+This explains both facts we could not otherwise account for: **`asyncTransmit` OFF is better** (two whole frames in flight against a descriptor pool esp_lcd sizes for one), and **the internal/PSRAM cliff** (a sustained PSRAM read has no slack; an internal one does).
+
+**It is a hypothesis, not a diagnosis** — six well-fitting stories have already died on this bug. But it is *testable*, and testing it does not require leaving `esp_lcd`: stage the frame through a few internal-RAM chunks fed back-to-back.
+
+**The fix belongs in the core, but the expander is not optional — it is the whole performance story.** The same staging mechanism lifts two bigger *unshifted* ceilings — **P4 Parlio's ~4,096-light contiguous-block wall** and the **classic ESP32's 2,048-light PSRAM-unreachable wall** — so it is tracked as a **core** item and should be **built and proven on the unshifted path first**, where the win is measurable on proven code. That is a sequencing rule about where to de-risk the mechanism.
+
+It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time is a physical constant (30 µs/light, serial per strand), so the only lever on frame rate is **lights per strand**: 16 direct lanes × 1024 = 16K lights is stuck at **33 fps**, while **48 strands × 256 = 12K at 130 fps** — which hpwit and the PO have *actually run* (StarLight). The expander is the only way to reach 48+ strands without spending 48+ GPIOs, and therefore the only route to 100 fps at this scale. The two mechanisms buy different things — **staging buys lights, the expander buys fps** — and they compound: the expander's own ~145 KB frame is precisely the one that fails from PSRAM today. See [backlog-light § Chunked transfer](backlog-light.md).
+
+### PHASE 2 DESIGN — the encode-into-the-ring (2026-07-14, arithmetic done, not yet built)
+
+**The cap is now understood exactly**, and the fix follows from it. The frame scales with *lights per strand* (all strands clock in parallel), and in shift mode the encoder emits **1,152 bytes per light** (3 ch × 8 bits × 3 slots × 8 shift-words × 2 bytes on a 16-bit bus):
+
+| lights/strand | encoded frame | |
+|---|---|---|
+| 96 | 108 KB | fits internal DMA RAM (~110 KB) — **this is why 96 is the cap** |
+| 128 | 144 KB | PSRAM only → stalls |
+| 256 | 288 KB | PSRAM only → stalls |
+
+**The DMA cannot read PSRAM at the expander's clock (53 MB/s), and neither can the CPU** — it is the same memory over the same bus, and the CPU is not faster at bulk reads than the DMA. So *any* design that keeps a big encoded frame in PSRAM is dead, whoever reads it. (This is why hpwit's frame buffer is a plain `calloc` — internal RAM. He does not solve the PSRAM problem; he never has it.)
+
+**So: never materialise the encoded frame at all.** The DMA loops a small ring of *internal* buffers holding a few transposed lights; as each drains, the CPU encodes the next slice straight into it, reading from the **Layer buffer** — which is internal, and 24× smaller than the encoded output (3 bytes/light vs 1,152). PSRAM leaves the path entirely. hpwit, independently: *"you need to hack the interrupt to stop at every pixel frame instead of the full frame, which allows you to store only a buffer of transposed pixels."* Same design.
+
+**The deadline is comfortable, and the expander is why.** The DMA takes **21.6 µs** to drain one light's 1,152 bytes; the CPU encodes a light in ~3 µs. **7× headroom** — the 8× output inflation buys far more DMA time than it costs CPU.
+
+**The refill must run in the EOF ISR, in IRAM** — this is the load-bearing constraint, and it is why hpwit uses a level-3 IRAM interrupt. The alternative (encode ahead from the render task, ISR only advances descriptors) must survive a WiFi preemption of 1–2 ms, which needs a ~72 KB ring — at which point the frame buffer is back and nothing was gained:
+
+| ring | tolerates a preemption of |
+|---|---|
+| 4 × 4 lights (18 KB) | 259 µs |
+| 8 × 8 lights (72 KB) | 1,210 µs |
+
+**What it costs us.** The encoder + the correction LUT + the SWAR transpose all become ISR-reachable and must be `IRAM_ATTR`; a flash access or a cache miss in that path is an underrun, and an underrun is a visible glitch. That is precisely the fragility the whole-frame design was chosen to avoid ([ADR-0014](../adr/0014-own-i80-dma-driver-below-esp-lcd.md)) — and it is the price of going past 96 lights/strand on an S3. **Both drivers keep shipping**: `I80LedDriver` (esp_lcd, capped, bulletproof) and `MoonI80LedDriver` (ours, uncapped, real-time).
+
+**The seam**, keeping the platform boundary intact — the platform owns the ring/descriptors/ISR, the domain owns the encode:
+
+```cpp
+using MoonI80EncodeFn = void(*)(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount);
+bool moonI80Ws2812InitRing(handle, …, rowBytes, totalRows, MoonI80EncodeFn, void* user);
+```
+
+`ParallelLedDriver::encodeRows()` is *already* a per-row loop (`for (row = 0; row < maxLaneLights_; row++)`), so slicing it to a row range is a contained change that leaves every existing test valid.
+
 ### Where to start next
 
 **Begin from the PO's observation (#4), not from a new theory.** `asyncTransmit` OFF works far better — find out *why*, and the mechanism will likely fall out. Concretely: with async OFF the driver waits for each transfer before starting the next, so only one transfer is ever outstanding; with it ON, two buffers are in flight against a pool sized for one. That *sounds* like the answer — but doubling the pool did not fix it and made it worse, so the simple version of that story is already wrong. Instrument what the descriptors actually do across a transfer boundary before changing any more code.

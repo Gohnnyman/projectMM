@@ -436,18 +436,13 @@ public:
                         platform::mdnsStop();
                         onConnected("Ethernet");
                     } else if (!platform::wifiStaConnected()) {
-                        // **A dropout is not a divorce.** The radio auto-reconnects (the platform's
-                        // STA_DISCONNECTED handler calls esp_wifi_connect), and the common causes —
-                        // the AP rebooting, a roam, a few lost beacons — heal in seconds. Tearing the
-                        // STA down on the FIRST failed poll (what this did) threw away a working
-                        // network over a blip and stranded the device on its own AP forever: State::AP
-                        // only promotes back on wifiStaConnected(), which can never turn true once the
-                        // radio is in AP mode. Bench, 2026-07-14: both the SE16 and board B were found
-                        // serving an AP, rendering fine, unreachable on the LAN.
-                        //
-                        // So give the reconnect a grace window first, and only fall back to AP if the
-                        // network is really gone. Mirrors State::WaitingSta's existing 10 s grace —
-                        // same shape, same constant, so there is one rule for "STA had its chance".
+                        // **A dropout is not a divorce.** The radio reconnects itself (the platform's
+                        // STA_DISCONNECTED handler calls esp_wifi_connect), and the common causes — a
+                        // router rebooting, a roam, a few lost beacons — heal within seconds. So a
+                        // link that reads down gets a grace window to come back before we give up on
+                        // the network; only if it stays down do we fall back to AP. The window is
+                        // WaitingSta's kStaGraceMs: the question ("has STA had its chance?") is the
+                        // same for an initial connect and a mid-session drop, so the answer is too.
                         if (staLostTime_ == 0) {
                             staLostTime_ = now;
                             std::printf("NetworkModule: WiFi STA dropped, reconnecting\n");
@@ -477,17 +472,15 @@ public:
                     } else if (ssid_[0] != 0 && platform::wifiStaConnected()) {
                         onConnected("WiFi STA");
                     } else if (ssid_[0] != 0 && now - stateChangeTime_ > kApRetryStaMs) {
-                        // **AP is a fallback, not a destination.** Falling back stopped the STA radio,
-                        // so wifiStaConnected() can never turn true again on its own — the promote
-                        // check above would wait forever, and a device that lost WiFi once would sit
-                        // on its own AP until someone power-cycled it. With credentials configured,
-                        // the network is *expected* to come back (the AP was rebooting, the device was
-                        // briefly out of range), so periodically go and look: re-init STA and let
-                        // WaitingSta run its normal grace. If it fails, WaitingSta drops us right back
-                        // here and we try again later — an idle retry loop, not a dead end.
-                        //
-                        // AP stays up across the attempt (it is torn down only once STA actually
-                        // connects, in onConnected), so a user mid-setup on 4.3.2.1 is not cut off.
+                        // **AP is a fallback, not a destination.** Falling back stops the STA radio, so
+                        // wifiStaConnected() cannot become true on its own and the promote check above
+                        // would wait forever — a device that lost its network would stay on its own AP
+                        // until power-cycled. With credentials configured the network is expected back
+                        // (the router finishes rebooting; the device comes back into range), so go and
+                        // look periodically: re-init STA and let WaitingSta run its normal grace. A
+                        // failure drops straight back here and retries later — an idle loop, not a
+                        // dead end. AP stays up across the attempt (onConnected tears it down only once
+                        // STA is actually up), so a user mid-setup on 4.3.2.1 keeps their connection.
                         std::printf("NetworkModule: AP — retrying WiFi STA (%s)\n", ssid_);
                         if (platform::wifiStaInit(ssid_, password_)) {
                             state_ = State::WaitingSta;

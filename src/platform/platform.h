@@ -693,6 +693,53 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                     uint8_t clockMultiplier = 1);
 
 // ---------------------------------------------------------------------------
+// MoonI80 — the same i80 output, on OUR OWN DMA driver instead of IDF's esp_lcd.
+//
+// **Why a second implementation exists.** esp_lcd re-arms the peripheral on every
+// transaction — `lcd_start_transaction()` does `lcd_ll_reset()` + `lcd_ll_fifo_reset()` +
+// a hard-coded 4 µs busy-wait before each one. An LCD panel does not care; WS2812 is one
+// unbroken self-clocked bit stream, so a mid-frame reset garbles everything after it.
+// That makes a frame split across several esp_lcd transactions impossible to send gaplessly,
+// at any chunk size — which in turn forces the whole frame into ONE transaction, and THAT is
+// what caps the driver: the DMA must stream the entire frame from one contiguous, DMA-
+// reachable block (hence ~96 lights/strand through the '595 expander on an S3, and no PSRAM
+// at all on the classic ESP32).
+//
+// The hardware never demanded this. The LCD peripheral has no data-length register —
+// `lcd_ll_set_phase_cycles()` only sets `lcd_dout` as a boolean enable, and IDF's own comment
+// reads "Number of data phase cycles are controlled by DMA buffer length". So the peripheral
+// clocks out exactly what the DMA feeds it and stops when the chain ends: ONE gdma_start() over
+// an arbitrarily long descriptor chain + ONE lcd_ll_start() is a single gapless stream across as
+// many buffers as we like. This backend takes that, built on IDF's HAL + GDMA link-list APIs
+// (one level below esp_lcd — not raw registers; IDF's own drivers use the same APIs).
+//
+// **Both implementations ship.** The esp_lcd one above is the REFERENCE: correct, capped, and
+// what this is measured against. Selecting between them is a module swap in the UI (two
+// registered driver types), so the A/B needs no reflash. See docs/adr/0014.
+//
+// Identical contract to the i80Ws2812* family above, function for function — the domain driver
+// (src/light/drivers/MoonI80LedDriver.h) is the same CRTP sibling with its forwards re-pointed.
+// Inert on chips without LCD_CAM.
+// ---------------------------------------------------------------------------
+
+struct MoonI80Ws2812Handle { void* impl = nullptr; };
+
+bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
+                       uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
+                       bool wantSecondBuffer, uint8_t clockMultiplier = 1);
+uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& h, uint8_t buffer);
+size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& h);
+bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& h, uint8_t buffer, size_t bytes);
+bool moonI80Ws2812Wait(MoonI80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
+uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& h);
+void moonI80Ws2812Deinit(MoonI80Ws2812Handle& h);
+RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+                                        uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
+                                        const uint8_t* frame, size_t frameBytes,
+                                        size_t dataBytes, uint8_t rowBits,
+                                        uint8_t clockMultiplier = 1);
+
+// ---------------------------------------------------------------------------
 // Parlio (Parallel IO) WS2812 output — the ESP32-P4's parallel LED path, a
 // sibling of the LCD_CAM i80 functions above. Same autonomous-whole-frame DMA
 // shape, but Parlio is simpler: it takes the data GPIOs directly (no
