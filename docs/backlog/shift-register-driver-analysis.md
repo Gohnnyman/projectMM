@@ -209,69 +209,55 @@ Minimal, and no new module:
 | `src/platform/esp32/platform_esp32_i80.cpp` | The bus clock must run **8× faster** in shift mode: **26.67 MHz** (prescale 3, exact, 300 ns slots) rather than the 2.667 MHz `kPclkHz`. Granted on both S3 and P4 — a `pclk_hz` the driver selects per mode, not a platform risk. |
 | `docs/moonmodules/light/drivers.md` | Document the mode + the wiring + the memory cost. |
 
-## 7.5 STATUS — shipped dormant, blocked on a GDMA bug (2026-07-14)
+## 7.5 STATUS — shipped dormant; the transport bug is NOT yet understood (2026-07-14)
 
-**The feature is in the tree but OFF by default** (`shiftRegister` unchecked), and every shift-mode path is behind `shiftMode()`. Direct mode is proven unchanged on four boards (Board B S3-N16R8 8-lane, SE16 S3-N8R8 **16-lane**, both P4s in i80): **zero GDMA errors, all driving**. So this ships as dormant capability, not a half-working feature.
+**The feature is in the tree but OFF by default** (`shiftRegister` unchecked). Direct mode is proven unchanged on four boards: zero GDMA errors, all driving.
 
-### What works
+**Read this section as a list of things that are TRUE, and a list of things that were guessed and are FALSE.** Six hypotheses have now died on this bug, several of them written up here as if settled. The pattern is the lesson: each one explained the symptom, none survived a real test. Do not add a seventh theory before making a measurement that could refute it.
 
-The encoder is correct, and it is now *provably* correct: a **74HCT595 simulator** in `unit_ParallelSlots.cpp` (shift register + storage register + latch edge) replays the emitted bus words and asserts **what the strand physically receives**. On real hardware the LEDs light and the effect's content is visible — the data path is right.
+### What is TRUE (measured, reproducible)
 
-### THE BLOCKER: every shift-mode GDMA transfer fails to mount
+1. **The encoder is correct.** A 74HCT595 simulator in `unit_ParallelSlots.cpp` replays the emitted bus words and asserts what the strand physically receives. LEDs light, content is visible.
+2. **The failing mount always reports `need = pool + 1`.** The GDMA descriptor pool is sized by esp_lcd from `max_transfer_bytes` (= exactly one frame): `ceil(bytes/4032)` nodes. The mount asks for one more than that, at *every* frame size (38 vs 37 at 256 lights/strand; 29 vs 28 at 192). A constant, quantified off-by-one — the strongest clue we have. **Its cause is unknown.**
+3. **`avail` sweeps 0..pool and never reaches `need`.** `gdma_link_mount_buffers` mounts every transfer from index 0 and counts only descriptors the DMA has released (`gdma_link.c:163-174`).
+4. **`asyncTransmit` OFF is dramatically better** (PO observation, the single most useful data point so far — LEDs visibly clean vs. wild flicker). Not understood; **this is where the next investigation should start.**
+5. **The P4 runs the identical 147 KB shift frame from PSRAM with zero errors and full wire time.** The S3 does not.
+6. **The failure is silent to us:** `tx_color` returns `ESP_OK` (the enqueue succeeded); the mount fails later in the ISR, which discards the return value (`esp_lcd_panel_io_i80.c:895` — arguably an IDF bug worth reporting upstream).
 
-```
-E gdma-link: lli full  start=0  need=38  avail=<0..37, never 38>
-```
+### The internal-RAM / PSRAM cliff — found blind, by eye (PO, 2026-07-14)
 
-**This is not a capacity problem** — instrumentation on-device confirmed the pool really is 76 descriptors while the frame needs 38. The trap is what `avail` *means*: `gdma_link_mount_buffers()` always mounts at index 0 and walks forward, **stopping at the first descriptor the DMA still owns** (`gdma_link.c:163-174`, `check_owner`). So `avail` is not "free slots" — it is **"how many the previous transfer has released"**.
+The sharpest measurement of the whole investigation, and it was made **without knowing which memory the frame was in**: with shift mode preferring internal RAM, the PO swept `ledsPerPin` and reported
 
-And the failure is **silent to us**: `esp_lcd_panel_io_tx_color` returns `ESP_OK` because the *enqueue* succeeded; the **mount fails later, inside the ISR**. The driver therefore believes the transfer started, waits for a done-callback that never comes, and burns a 1 s timeout every frame (measured: a **45 ms driver tick for a 4.6 ms transfer**, 20 fps). The strands hold stale data → the scattered/flickering pixels on the bench.
+| leds/pin | frame | verdict |
+|---|---|---|
+| 64 | 36 KB | smooth, flicker-free |
+| **96** | **54 KB** | **smooth — the highest good value** |
+| 128 | 72 KB | not good |
+| 256 | 144 KB | wild flicker |
 
-**Direct mode never hits it**: its 19 KB frame clears the wire in ~1 ms, long before the next tick. The ×8 frame is 154 KB (~4.6 ms), so the next mount reliably lands mid-transfer.
+The board's largest free contiguous internal DMA block at the time: **~38 KB** (heap 217 KB free of 346 KB). So the good values are the ones whose frame lands (or nearly lands) in **internal RAM**, and the bad ones are exactly those that overflow to **PSRAM**. A blind visual sweep landing on the allocator's boundary is strong, independent confirmation: **a shift frame renders correctly from internal RAM and incorrectly from PSRAM, on the S3.**
 
-### THE KEY MEASUREMENT (2026-07-14): `avail` reaches 37 and never 38
+Note the mismatch worth keeping in mind: the serial log still shows GDMA mount failures in states the PO calls visually clean. **The error count is therefore NOT a reliable success metric** — it was used as one for most of this investigation, which is part of why so many hypotheses "confirmed" and then died. Trust the strands.
 
-Sampling every mount over 67 consecutive attempts, `avail` takes **every value from 0 to 37 — and never once 38**:
+**This caps the feature at roughly 96 leds/pin × 16 strands ≈ 1,500 lights** — *less* than direct mode already reaches, which is why internal-RAM-first is a labelled stopgap and not the destination. Getting PSRAM working (understanding the real mechanism, or streaming PSRAM through small internal chunks the way hpwit's ring and Espressif's RGB bounce buffers do) is what unlocks the large displays this feature exists for.
 
-```
-avail seen: 0 1 2 3 5 6 7 8 10 11 12 14 15 16 17 18 19 20 21 22 24 25 ... 35 36 37
-need:       38                    (never reached)
-```
+### What is FALSE (guessed, then refuted — do NOT re-derive)
 
-This **refutes the earlier "the descriptors are never handed back" reading**, which was built on a single unlucky `avail=3` sample. They *are* handed back, steadily — the pool climbs all the way to 37 and stops **exactly one short of what the frame needs, every single time**.
-
-That is not a race and not a leak. It is an **off-by-one**: `need` is one greater than the pool can ever yield. The frame is 38 descriptors' worth while the link list only ever surrenders 37 — so the mount can never succeed no matter how long it waits, which is precisely why *every* attempt fails and no amount of serialising (depth 1) or enlarging (×2 pool) helped. Doubling the pool was invisible to this failure because `avail` is bounded by what the **previous transfer released**, not by pool size.
-
-### The next experiment (start here)
-
-**Find where the 38th descriptor comes from and why the pool tops out at 37.** Concretely:
-
-1. **Suspect the latch pad.** The shift frame ends with a latch-only word + a zeroed reset pad (`encodeWs2812ShiftLatchPad`). If that pad pushes `frameBytes_` just past a descriptor boundary, the frame needs `n+1` nodes while the transfer only ever releases `n`. Compute `frameBytes_ / DMA node size` by hand for the exact bench config (2 pins × 3840 lights) and see whether 38 is `ceil` of something that is 37.x.
-2. **Log `esp_dma_calculate_node_count()`'s inputs and result** at bus-init next to the pool size, so `need` vs `capacity` is visible rather than inferred.
-3. **Try nudging `frameBytes_` down by one descriptor's worth** (or padding it up to a clean multiple) and see whether `need` drops to 37 and the mount succeeds. That is the decisive, cheap test.
-
-If it *is* the boundary, the fix is a sizing correction, not an architecture change — and shift mode is much closer than the earlier reading suggested.
-
-### Superseded — do NOT re-try these
-
-| hypothesis | result |
+| hypothesis | how it died |
 |---|---|
-| Pool too small → `max_transfer_bytes × 2` | **pool verified 76 on-device, errors unchanged.** Reverted: it changed the *proven* direct path without fixing the broken one. (Now explained: `avail` is bounded by the previous transfer's releases, not pool size — so this experiment could never have moved the number.) |
-| `trans_queue_depth = 1` | tried twice, **no change** |
-| "The descriptors are never handed back" (write-back disabled) | **refuted by the avail=0..37 sweep** — they *are* handed back, right up to one short of `need` |
-| `asyncTransmit` off (single buffer) | no change |
-| The loopback's private bus competing | no — errors persist with the loopback off |
-| Frame too big | **no** — errors got *worse* as the frame shrank (the rate just tracks fps) |
+| Pool too small → double `max_transfer_bytes` | **Tried. Made it WORSE** (189 failures, and it broke the previously-clean async-OFF path too). |
+| Descriptors are never handed back (write-back disabled) | Refuted: `avail` climbs steadily to pool-size. |
+| A frame-descriptor off-by-one we can fix by nudging `frameBytes_` | Refuted: a *fresh* bus mounts its full node count fine; only the repeating path degrades. |
+| Silent S3 FIFO underrun | Built on the S3's *inability to report* underruns — absence of evidence, not evidence. The P4 (which CAN report) shows zero underruns while working. |
+| The frame must live in internal RAM, not PSRAM | **Refuted twice.** The P4 works *from PSRAM*; the S3 fails *from internal RAM*. Also a dead end by design: internal DMA RAM is ~110 KB, which would cap a shift display *below* what direct mode already does — it saws off the branch the driver stands on. **PSRAM is what makes large displays possible; do not propose moving off it.** |
+| PSRAM is too slow | The S3's **octal** PSRAM has ample bandwidth for 26.67 MB/s. Never plausible; should have been checked before assuming. |
+| `trans_queue_depth = 1` | An early test "showing no change" was taken while accidentally in direct mode, so it proved nothing. Shift mode currently forces depth 1 anyway. |
 
-### The latch-pad fix: landed, but the bench cannot yet judge it
+### Where to start next
 
-The end-of-frame latch bug (the pad carried no latch bit, so the *last* clocked byte was never presented and a strand whose final wire byte is **odd** idled HIGH through the entire reset pad, never seeing the WS2812 reset) is fixed and pinned by a simulator test. On the bench, with the transport bug still in place, the product owner's read was **"same or slightly better, hard to tell, not worse."**
+**Begin from the PO's observation (#4), not from a new theory.** `asyncTransmit` OFF works far better — find out *why*, and the mechanism will likely fall out. Concretely: with async OFF the driver waits for each transfer before starting the next, so only one transfer is ever outstanding; with it ON, two buffers are in flight against a pool sized for one. That *sounds* like the answer — but doubling the pool did not fix it and made it worse, so the simple version of that story is already wrong. Instrument what the descriptors actually do across a transfer boundary before changing any more code.
 
-That is the *expected* result and it is worth writing down rather than over-claiming: the two faults are independent, and the transport bug dominates. Only a minority of frames reach the wire at all (45 ms driver tick for a 4.6 ms transfer), so a correction to *what a landed frame contains* cannot show cleanly until frames reliably land. **The visual bench is not a valid instrument for encoder correctness while the GDMA mount is failing** — which is precisely the argument for fixing the transport first and then leaning on the loopback (below) instead of the eye.
-
-### Start the next iteration from the LOOPBACK
-
-The loopback rig is wired (a spare '595 output → a 1 kΩ/2 kΩ divider → GPIO 16) but reports zero symbols — **because of this same GDMA bug**: its own transfer never mounts either. The encoder *does* emit a real waveform on that strand (the simulator shows 47 edges, identical to strand 0), so it is not a wiring fault. Once the mount succeeds, the loopback becomes the feedback instrument this feature has been missing — build on it first, before touching the encoder again.
+Also still unproven: **the loopback RX path** (the divider → GPIO 16 → RMT capture chain has never captured a single symbol, on any strand, even on a fresh bus whose transfer completes). Until it does, we have no closed-loop instrument, and every conclusion rests on serial logs and the PO's eyes.
 
 ## 8. Open questions for the PO
 

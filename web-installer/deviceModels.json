@@ -1258,8 +1258,9 @@
           "shiftRegister": true,
           "latchPin": 46,
           "clockPin": 3,
-          "ledsPerPin": "256",
-          "dcPin": 13
+          "ledsPerPin": "96",
+          "dcPin": 13,
+          "asyncTransmit": false
         }
       },
       {
@@ -1299,8 +1300,9 @@
           "shiftRegister": true,
           "latchPin": 46,
           "clockPin": 3,
-          "ledsPerPin": "256",
-          "dcPin": 21
+          "ledsPerPin": "96",
+          "dcPin": 21,
+          "asyncTransmit": false
         }
       },
       {

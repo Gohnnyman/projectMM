@@ -481,3 +481,11 @@ Legend: **Adopt-1.0** (small, high value) · **Defer-1.x** (needs engine work or
 They are **not** CI failures (CI is Debug) and each one inspected so far is a false positive of the same shape: a bounds check exists, but GCC cannot prove the degenerate case (e.g. `HttpServerModule.cpp:2400` warns "writing 1 byte into a region of size 0" on a line *guarded* by `if (wsLen + headerLen > sizeof(hdr)) return false;`). Still worth clearing: each is either a genuinely unprovable bound (fix the code) or a bound the code knows but does not state (make it explicit). Doing it in one pass beats letting them mask a real one later.
 
 Not done with the multi-destination/tab-UI merge because 17 warnings across four core files is its own change, not a tail on someone else's.
+
+## Preview stream: tail byte-phase desync under backpressure
+
+**Symptom (board B, 2026-07-14):** on a large grid the preview's bottom region (the frame tail) shows per-pixel noise; with a SOLID effect it flickers pure R / pure G / pure B at max brightness. Pure primaries from solid content = the frame bytes read at an offset that is not a multiple of 3 — tearing alone cannot discolor identical frames, so the resumable sender's offset accounting slips. Survives a browser refresh; occurs "occasionally" (per-frame), worst when the device is network-starved.
+
+**Suspect:** `HttpServerModule::sendBufferedFrame` (the zero-copy resumable send whose body is the live producer buffer, draining across transport ticks) — the resume-after-partial-socket-write path. Verify by logging the resume offset vs bytes actually written on EWOULDBLOCK; the fix is offset accounting, plus a resync rule (a client that missed bytes gets a fresh frame header, not a phase-shifted tail — the *robust to any input* bar).
+
+**Not** the shift-register transport bug and **not** buffer corruption: the composite buffer is proven correct (Solid writes every light; the preview alone garbles).

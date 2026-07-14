@@ -285,10 +285,16 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r) {
-    // Capture at 40 MHz: a slot is 15 ticks, so "0" ≈ 15 and "1" ≈ 30 high ticks
-    // — threshold midway at 25. One symbol per WS2812 bit; the frame's zeroed
-    // latch pad is the >100 µs idle that ends the capture.
+    // Capture at 40 MHz. The decode threshold is DERIVED from the strand's slot rate, not a
+    // constant: a "0" is HIGH for one slot, a "1" for two, so the midpoint (1.5 slots) separates
+    // them at ANY rate — 375 ns direct slots give 15/30 ticks (threshold 22), the shift expander's
+    // 300 ns slots give 12/24 (threshold 18). A hardcoded direct-mode threshold of 25 sat ABOVE the
+    // shift-mode "1" (24 ticks), decoding every 1-bit as 0 — the first pattern bit failed and the
+    // verdict blamed the transport for a decode fault. One symbol per WS2812 bit; the frame's
+    // zeroed latch pad is the >100 µs idle that ends the capture.
     constexpr uint32_t kCapResHz = 40'000'000;
+    const uint16_t slotTicks = static_cast<uint16_t>(kCapResHz / pclkHz);
+    const uint16_t threshTicks = static_cast<uint16_t>(slotTicks + slotTicks / 2);
     const size_t kBits = dataBytes / 3;
     const size_t capMax = kBits + 16;
     auto* rxSymbols = static_cast<uint32_t*>(heap_caps_aligned_alloc(
@@ -318,17 +324,24 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
             const int64_t t0 = esp_timer_get_time();
             transmitOnce();
             const int64_t dt = esp_timer_get_time() - t0;
-            ESP_LOGI(tag, "loopback: %u bytes in %lld us (expect ~%u us at %u Hz)",
+            r.txWallUs = static_cast<uint32_t>(dt);
+            // Expected wire time from the STRAND's view (unit-safe at any bus width / fan-out):
+            // kBits WS2812 bits × 3 slots each ÷ the slot rate. frameBytes ÷ pclkHz would mix
+            // units — frameBytes counts BUS bytes while pclkHz here is the slot rate, which
+            // overstates the expectation 8× in shift mode.
+            r.txExpectUs = static_cast<uint32_t>(kBits * 3ull * 1000000ull / pclkHz);
+            ESP_LOGI(tag, "loopback: %u bytes in %lld us (expect ~%u us at %u Hz slot rate)",
                      (unsigned)frameBytes, (long long)dt,
-                     (unsigned)(frameBytes * 1000000ull / pclkHz), (unsigned)pclkHz);
+                     (unsigned)r.txExpectUs, (unsigned)pclkHz);
         }
         // Back-to-back frames, exactly the render loop's transmit/wait cadence.
         for (int i = 0; i < 100 && !cap.done; i++) transmitOnce();
         for (int i = 0; i < 200 && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
     }
+    r.capturedSymbols = static_cast<uint32_t>(cap.got);
+    r.rxIdleLevel = static_cast<int8_t>(gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
     ESP_LOGI(tag, "loopback: rx captured %u symbols (need %u), idle rx level=%d",
-             (unsigned)cap.got, (unsigned)kBits,
-             gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
+             (unsigned)cap.got, (unsigned)kBits, (int)r.rxIdleLevel);
 
     if (cap.done && cap.got >= kBits) {
         // Verify EVERY bit of the frame against the per-row pattern (r.sent[],
@@ -337,7 +350,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         uint16_t minH[2] = {0x7FFF, 0x7FFF}, maxH[2] = {0, 0};
         for (size_t b = 0; b < kBits; b++) {
             const uint16_t high = static_cast<uint16_t>(rxSymbols[b] & 0x7FFF);
-            const uint8_t bit = (high >= 25) ? 1 : 0;
+            const uint8_t bit = (high >= threshTicks) ? 1 : 0;
             if (high < minH[bit]) minH[bit] = high;
             if (high > maxH[bit]) maxH[bit] = high;
             const uint8_t rowPos = static_cast<uint8_t>(b % rowBits);
@@ -349,7 +362,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         const size_t rowStart = (mismatch == SIZE_MAX)
                                     ? 0 : mismatch - (mismatch % rowBits);
         for (size_t b = rowStart; b < rowStart + 24 && b < cap.got; b++) {
-            const uint8_t bit = ((rxSymbols[b] & 0x7FFF) >= 25) ? 1 : 0;
+            const uint8_t bit = ((rxSymbols[b] & 0x7FFF) >= threshTicks) ? 1 : 0;
             r.got[(b - rowStart) / 8] =
                 static_cast<uint8_t>((r.got[(b - rowStart) / 8] << 1) | bit);
         }
@@ -357,8 +370,9 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         r.bitsChecked = static_cast<uint32_t>(kBits);
         r.firstBadBit = (mismatch == SIZE_MAX) ? static_cast<uint32_t>(kBits)
                                                : static_cast<uint32_t>(mismatch);
-        ESP_LOGI(tag, "loopback: high ticks — 0-bits %u..%u, 1-bits %u..%u (25ns/tick)",
-                 (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1]);
+        ESP_LOGI(tag, "loopback: high ticks — 0-bits %u..%u, 1-bits %u..%u (25ns/tick, threshold %u)",
+                 (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1],
+                 (unsigned)threshTicks);
         if (!r.pass) {
             ESP_LOGE(tag, "loopback: first bad bit %u (light %u, bit-in-row %u)",
                      (unsigned)mismatch, (unsigned)(mismatch / rowBits),

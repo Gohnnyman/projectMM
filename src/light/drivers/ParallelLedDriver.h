@@ -94,8 +94,12 @@ public:
     /// 8 OR 16 real pins (a partial bus is rejected — a sub-16 board parks unused lanes + WR/DC on
     /// spare GPIOs); Parlio runs on 1..16. Sized for 16 two-digit GPIOs + separators.
     char pins[64] = "";
-    /// Comma-separated lights-per-lane, matched to `pins` by position; the unassigned remainder
-    /// splits evenly over the remaining lanes. Each lane is clamped to the WS2812 per-pin ceiling
+    /// Comma-separated lights-per-lane; the unassigned remainder splits evenly over the remaining
+    /// lanes. **A lane is a STRAND, not a pin** — which only differ through the expander: direct
+    /// mode has one strand per pin, so entry N is pin N's; with `shiftRegister` on, each pin fans
+    /// out to 8 strands, so the list runs over all `pins × 8` of them (pin 0's eight first, then
+    /// pin 1's, …) and entry N is strand N. That is what lets two strands on one '595 have
+    /// different lengths. Each lane is clamped to the WS2812 per-pin ceiling
     /// (`kMaxWs2812LedsPerPin`) with a Warning status — it drives that many rather than choking a
     /// whole grid onto one line. Empty default splits this driver's window evenly. Sized for 16
     /// per-lane counts + separators.
@@ -182,8 +186,19 @@ public:
     /// cycles, and the DMA frame grows ×8 (each WS2812 slot becomes 8 bus words). Extra lanes on an
     /// already-fanned-out pin are then free (they ride the bus width) — which is why 15×256 and
     /// 48×256 cost the SAME frame. The bus also clocks ×8 faster (see kShiftPclkHz).
-    /// Needs a `latchPin` and a peripheral that can DMA a ~145 KB frame from PSRAM: the LCD_CAM i80
-    /// path (ESP32-S3 / -P4). Refused with a status on any other backend.
+    /// Needs a `latchPin` and the LCD_CAM i80 path (ESP32-S3 / -P4); refused with a status elsewhere.
+    ///
+    /// **⚠️ EXPERIMENTAL, and size-limited today.** The ×8 frame renders correctly only while it fits
+    /// **internal DMA RAM** (~110 KB, and less once WiFi has taken its share) — measured on the S3 as
+    /// roughly **96 lights per strand**, above which the strands flicker badly. The mechanism is not
+    /// yet understood: the identical frame runs perfectly from PSRAM on a P4, and the obvious
+    /// explanations (PSRAM bandwidth, DMA descriptor pool, FIFO underrun) have each been tested and
+    /// refuted. Two things that are known to help meanwhile: keep `ledsPerPin` ≤ 96, and turn
+    /// **`asyncTransmit` OFF** (the double-buffer makes it markedly worse).
+    ///
+    /// So the expander does not yet deliver the big displays it exists for — that needs the frame back
+    /// in PSRAM. Full status, and the hypotheses already ruled out, in
+    /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/backlog/shift-register-driver-analysis.md).
     bool     shiftRegister = false;
     /// The 74HCT595 LATCH (RCLK) line — pulsed once the shifted byte is in, presenting it on the
     /// '595 outputs. Unlike the shift clock (the peripheral's own WR pin), this is a DATA lane:
@@ -255,7 +270,13 @@ public:
     /// turning it OFF clears the verdict and re-derives the real driver status.
     void onControlChanged(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
+        // Every control that reshapes the lane config the self-test transmits through. shiftRegister
+        // and latchPin belong here for the same reason `pins` does: they change laneList_,
+        // frameBytes_ and latchBit_, so a test left running across such an edit would otherwise
+        // re-transmit through a stale bus and report a verdict for a configuration that is gone.
         const bool isPinControl  = std::strcmp(name, "pins") == 0
+                                || std::strcmp(name, "shiftRegister") == 0
+                                || std::strcmp(name, "latchPin") == 0
                                 || std::strcmp(name, "loopbackTxPin") == 0
                                 || std::strcmp(name, "loopbackRxPin") == 0;
         if (isTestControl && !loopbackTest) {
@@ -339,6 +360,7 @@ public:
     // right here. One DMA buffer, no alternation, no deferred-wait bookkeeping, 0 added latency. This
     // is the default (asyncTransmit OFF) and its timing is exactly the pre-double-buffer driver's.
     void tickSync(uint8_t outCh) {
+        if (busGaveUp()) return;
         // A previous frame's wait may have timed out, leaving the DMA still reading buffer 0 — re-wait
         // rather than encoding over a live transfer. (Normally a no-op: the wait below completes.)
         if (!busWaitIfBusy(0)) return;
@@ -362,6 +384,7 @@ public:
     // while frame N clocks out of the front, so the per-tick wall-clock is max(encode, wire) instead
     // of encode + wire. Costs the second DMA buffer + 1 frame of output latency. See the class doc.
     void tickAsync(uint8_t outCh) {
+        if (busGaveUp()) return;
         // 1. Finish the transfer that last used the buffer we're about to encode into, so the encode
         //    never overwrites a frame still clocking out (no-op on the first tick). If that wait TIMES
         //    OUT the DMA is still reading the buffer — skip this frame entirely rather than encoding
@@ -402,9 +425,64 @@ public:
     // is about to REUSE; the synchronous path (tickSync) waits inline and never uses this.
     bool busWaitIfBusy(uint8_t i) {
         if (!inFlight_[i]) return true;
-        if (!derived()->busWait(i, 1000 /* ms */)) return false;   // still in flight — do not reuse
+        if (!derived()->busWait(i, waitBudgetMs())) {
+            // The transfer did not complete within many times its own wire time, so it is not going
+            // to. Count it: a bus that keeps doing this is broken, and the ONLY thing that matters
+            // then is that the driver stops spending the render thread on it (see deadFrames_).
+            if (deadFrames_ < kDeadFramesBeforeGiveUp) deadFrames_++;
+            return false;   // still in flight — do not reuse the buffer
+        }
+        deadFrames_ = 0;   // a completed transfer clears the strike count: the bus is alive again
         inFlight_[i] = false;
         return true;
+    }
+
+    /// How long a transfer gets before we call it dead. **Derived from the frame, never a constant.**
+    /// The wire time is `frameBytes / pclk` by construction, so a healthy transfer completes in a few
+    /// ms; a fixed 1 s timeout (what this used) is 20× a whole tick budget, so a single undelivered
+    /// frame would block the render thread for 20 ticks' worth of CPU — enough to starve WiFi off the
+    /// air. That is how a merely *misconfigured* driver made a device unreachable (bench, 2026-07-14),
+    /// which is a robustness bug in its own right: no LED setting may cost the user the device.
+    ///
+    /// **A broken bus must not cost the user the device.** Every stalled frame is a wait on the RENDER
+    /// thread, so a bus that never delivers doesn't merely fail to light LEDs — it eats the CPU that
+    /// WiFi, HTTP and the UI need, and the device drops off the network with no way back in. That is
+    /// how a *misconfigured LED driver* (a frame the DMA can't sustain from PSRAM) made a bench board
+    /// unreachable and unrecoverable-without-a-cable, 2026-07-14.
+    ///
+    /// So after kDeadFramesBeforeGiveUp consecutive dead transfers, stop transmitting: report the failure
+    /// and let the tick return immediately. The LEDs go dark — but the device stays *reachable*, so the
+    /// user can see the status and fix the setting that caused it. Degraded, not crashed; the
+    /// *Robustness* rule ([architecture.md](../../../docs/architecture.md#robustness)) says a bad input
+    /// may leave the output idle, never the device wedged.
+    ///
+    /// It self-heals: any completed transfer clears the strike count, and a config change re-inits the
+    /// bus (prepare → reinit → deadFrames_ = 0), so fixing the setting brings the LEDs straight back with
+    /// no reboot.
+    bool busGaveUp() {
+        if (deadFrames_ < kDeadFramesBeforeGiveUp) return false;
+        if (!gaveUpReported_) {
+            gaveUpReported_ = true;
+            setStatus("output stalled — the bus is not delivering frames; check the driver settings",
+                      Severity::Error);
+        }
+        return true;
+    }
+
+    /// Computed from the WS2812 wire contract, which is the same on every backend and needs no
+    /// platform constant: one light clocks `channels × 8` bits, each bit is 3 slots, and a slot is
+    /// ~375 ns of WIRE time — the expander changes how many bus words fill a slot, not how long the
+    /// strand takes. So `maxLaneLights_` (the longest strand) sets the frame's wire time directly.
+    ///
+    /// 4× that, floored at 20 ms (a tiny frame still tolerates scheduling jitter) and capped at
+    /// 100 ms (even a huge frame cannot blow a tick budget). Generous enough never to kill a healthy
+    /// transfer; small enough that a dead one costs a frame, not a second.
+    uint32_t waitBudgetMs() const {
+        constexpr uint32_t kSlotNs = 375;   // WS2812 wire slot; 3 per bit (ParallelSlots.h)
+        const uint32_t bits = static_cast<uint32_t>(maxLaneLights_) * correction_.outChannels * 8u;
+        const uint32_t wireMs = (bits * 3u * kSlotNs) / 1'000'000u;
+        const uint32_t budget = wireMs * 4u;
+        return budget < 20u ? 20u : (budget > 100u ? 100u : budget);
     }
 
     // Drain BOTH buffers' in-flight transfers before a reinit/release frees them — a live DMA reading
@@ -526,6 +604,13 @@ protected:
     uint8_t active_ = 0;                 // which DMA buffer this tick encodes into (0/1); stays 0
                                          // in single-buffer mode (no second buffer allocated)
     bool inFlight_[2] = {};              // is buffer i's DMA transfer outstanding (awaiting its wait)
+    // Consecutive frames whose DMA transfer never completed within its budget. NOT the `stallUs`
+    // render-split KPI (which is a healthy core-0 wait) — this counts DEAD transfers, and is 0 on any
+    // working bus. See busGaveUp(): a bus that keeps failing gets switched off rather than allowed to
+    // spend the render thread and starve the network.
+    uint8_t deadFrames_ = 0;
+    bool gaveUpReported_ = false;        // one status write per give-up, not one per tick
+    static constexpr uint8_t kDeadFramesBeforeGiveUp = 8;
     // Per-row correction scratch (wire_ / wireCap_ live on DriverBase — the grow-only lifecycle is
     // shared with RmtLedDriver; only the SIZE differs). Here it is kMaxLanes × outChannels bytes,
     // lane-major (wire_[lane*outCh+ch]) — sized to the channel count off the hot path, so a light of
@@ -782,6 +867,10 @@ protected:
 
     void reinit() {
         if constexpr (Derived::lanesAvailable() == 0) return;
+        // A rebuild is the user fixing the setting that broke the bus: give the new bus a clean slate
+        // so a driver that gave up starts transmitting again (the live-reconfiguration rule — no reboot).
+        deadFrames_ = 0;
+        gaveUpReported_ = false;
         // Drain any in-flight DMA before touching the buffers: a rebuild (or the exact-match
         // re-zero below) must not race a transfer still reading the old buffer. No-op when idle.
         drainInFlight();
@@ -969,14 +1058,28 @@ protected:
             clearFailBuf();
             setStatus("loopback PASS", Severity::Status);
         } else if (failBufEnsure()) {
-            // Name the first corrupted light: the loopback reports the first
-            // mismatching bit; rowBits = outCh*8, so light = firstBadBit / rowBits.
-            const unsigned rowBits = static_cast<unsigned>(outCh) * 8u;
-            const unsigned badLight = rowBits ? r.firstBadBit / rowBits : 0u;
-            std::snprintf(failBuf_, kFailBufLen,
-                          "loopback FAIL: bad bit %u/%u (light %u)",
-                          static_cast<unsigned>(r.firstBadBit),
-                          static_cast<unsigned>(r.bitsChecked), badLight);
+            if (r.bitsChecked == 0) {
+                // The capture came up short — the verify never ran, so "bad bit" would blame the
+                // waveform for what is a transport/wiring/capture fault. Report the numbers that
+                // separate those: symbols captured, the RX line's idle level, and the first
+                // transmit's wall-vs-expected time (a wall time far above expected is a stalled or
+                // underrun transfer, measured — not inferred).
+                std::snprintf(failBuf_, kFailBufLen,
+                              "no capture: %u sym idle=%d tx %u/%uus",
+                              static_cast<unsigned>(r.capturedSymbols),
+                              static_cast<int>(r.rxIdleLevel),
+                              static_cast<unsigned>(r.txWallUs),
+                              static_cast<unsigned>(r.txExpectUs));
+            } else {
+                // Name the first corrupted light: the loopback reports the first
+                // mismatching bit; rowBits = outCh*8, so light = firstBadBit / rowBits.
+                const unsigned rowBits = static_cast<unsigned>(outCh) * 8u;
+                const unsigned badLight = rowBits ? r.firstBadBit / rowBits : 0u;
+                std::snprintf(failBuf_, kFailBufLen,
+                              "loopback FAIL: bad bit %u/%u (light %u)",
+                              static_cast<unsigned>(r.firstBadBit),
+                              static_cast<unsigned>(r.bitsChecked), badLight);
+            }
             setStatus(failBuf_, Severity::Error);
         } else {
             setStatus("loopback FAIL", Severity::Error);

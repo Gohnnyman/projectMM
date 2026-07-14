@@ -774,13 +774,44 @@ void ethGetIPv4(uint8_t out[4])         { out[0] = out[1] = out[2] = out[3] = 0;
 
 #ifndef MM_NO_WIFI
 
+// Set while a deliberate teardown (wifiStaStop) is in progress, so the disconnect it provokes is
+// not answered with a reconnect — that would race esp_wifi_deinit() with an in-flight connect.
+static volatile bool wifiStaStopping_ = false;
+
 // WiFi event handler
 static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                              int32_t id, void* data) {
     if (base == WIFI_EVENT) {
         if (id == WIFI_EVENT_STA_DISCONNECTED) {
-            ESP_LOGI(NET_TAG, "WiFi STA disconnected");
             wifiStaConnected_ = false;
+            // **RECONNECT. IDF does not do this for us** — without an explicit esp_wifi_connect()
+            // here, a single dropout (AP reboot, interference, a roam) orphans the device forever:
+            // it keeps rendering happily but is unreachable until someone power-cycles it, which for
+            // a light installation in a ceiling is a real failure. (Bench, 2026-07-14: the SE16 was
+            // found rendering at 38 fps with no IP and no retry, POWERON as its last reset reason.)
+            // This is the shape Espressif's own wifi_station example uses.
+            //
+            // The retry is unbounded on purpose: the recoverable causes (AP rebooting, WiFi out of
+            // range for a while) can outlast any bounded count, and the whole point is that the
+            // device comes back by itself. The backoff below is what keeps an unrecoverable cause
+            // (a wrong password) from pinning the radio.
+            if (!wifiStaStopping_) {
+                // Reconnect immediately, and do NOT sleep here to pace it: this runs on IDF's event-
+                // loop task, which also carries the Ethernet and IP events — blocking it would stall
+                // the whole networking stack. The pacing comes for free from the driver: a failing
+                // association takes its own ~1-2 s to time out before the next DISCONNECTED event
+                // arrives, so even a permanently-wrong credential retries at a sane rate rather than
+                // spinning. (The attempt counter is diagnostic only — it does not gate the retry.
+                // Retrying forever is the intent: the recoverable causes can outlast any bounded
+                // count, and self-healing is the whole point.)
+                static uint32_t attempts = 0;
+                if (attempts < UINT32_MAX) attempts++;
+                ESP_LOGI(NET_TAG, "WiFi STA disconnected — reconnecting (attempt %u)",
+                         (unsigned)attempts);
+                esp_wifi_connect();
+            } else {
+                ESP_LOGI(NET_TAG, "WiFi STA disconnected");
+            }
         } else if (id == WIFI_EVENT_AP_STACONNECTED) {
             ESP_LOGI(NET_TAG, "WiFi AP client connected");
         } else if (id == WIFI_EVENT_AP_STADISCONNECTED) {
@@ -919,6 +950,9 @@ void wifiStaGetIPv4(uint8_t out[4]) {
 }
 
 void wifiStaStop() {
+    // Tell the event handler this disconnect is deliberate, so it does not answer with a
+    // reconnect that would then race esp_wifi_deinit() below.
+    wifiStaStopping_ = true;
     esp_wifi_disconnect();
     esp_wifi_stop();
     // Unregister event handlers before deinit so subsequent init/stop cycles
@@ -935,6 +969,7 @@ void wifiStaStop() {
     }
     wifiStaConnected_ = false;
     wifiInitDone_ = false;
+    wifiStaStopping_ = false;   // a later wifiStaInit() must reconnect normally again
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
 }
 

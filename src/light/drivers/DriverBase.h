@@ -353,7 +353,9 @@ protected:
     const char* configErr_ = nullptr;
     const char* configWarn_ = nullptr;
     char* failBuf_ = nullptr;
-    static constexpr size_t kFailBufLen = 48;
+    // 64: the widest verdict is the loopback's worst-case "bad bit N/M (light K)" with
+    // full-range counters — GCC's -Wformat-truncation proves 48 can clip it.
+    static constexpr size_t kFailBufLen = 64;
 
     // Record a parse/config error: set the status and remember it so clearConfigErr
     // can later retract exactly this one.

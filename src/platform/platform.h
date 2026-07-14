@@ -579,6 +579,15 @@ struct RmtLoopbackResult {
     uint8_t got[3] = {};          // the light holding the first mismatch (light 0 when clean)
     uint32_t bitsChecked = 0;     // total WS2812 bits verified (frame mode); 24 for the short test
     uint32_t firstBadBit = 0;     // index of the first wrong bit, or bitsChecked when all pass
+    // Capture diagnostics (frame mode). The verdict must say WHY it failed, not only that it did:
+    // an empty capture (dead wiring, idle line, stalled transfer) is a different fault class from a
+    // full capture that decodes wrong (waveform/threshold) — without these numbers both collapse
+    // into the same "bad bit 0/0" and the instrument can't isolate anything.
+    uint32_t capturedSymbols = 0; // RMT RX symbols actually captured (target: >= bitsChecked)
+    int8_t rxIdleLevel = -1;      // RX GPIO level sampled after the capture window (-1 = unknown)
+    uint32_t txWallUs = 0;        // wall time of the first (timed) transmit
+    uint32_t txExpectUs = 0;      // expected wire time (byte count / configured clock) — a wall time
+                                  // far above this is a stalled/underrun transfer, measured directly
 };
 RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio);
 

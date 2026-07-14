@@ -30,9 +30,11 @@ The **classic ESP32 has 8 RMT TX channels**, so `RmtLedDriver` covers ≤8 paral
 
 The `shiftRegister` control on the parallel drivers (i80 + Parlio base) fans one data pin out to 8 strands through a 74HCT595 board — hpwit's expander. **It is in the tree but OFF by default**, and direct mode is proven unchanged on four boards (S3 8-lane, S3 16-lane, both P4s in i80: zero GDMA errors, all driving).
 
-**The encoder is right** — a 74HCT595 simulator in the unit tests asserts what the strand physically receives, and on hardware the LEDs light with the effect's content visible. **What blocks it is a GDMA bug**: every shift-mode transfer fails to mount (`lli full need=38 avail=3` on a pool of 76), because `avail` counts only the descriptors the *previous* transfer released — and the ×8 frame is 8× longer on the wire, so the next mount lands mid-transfer. The failure is silent (`tx_color` returns `ESP_OK`; the mount fails later in the ISR), so the driver waits out a 1 s timeout every frame.
+**The encoder is right** — a 74HCT595 simulator in the unit tests asserts what the strand physically receives, and on hardware the strands render smooth, flicker-free content.
 
-**Six hypotheses are ruled out by measurement** (pool size, queue depth, alignment, async, frame size, the loopback's private bus). The live one: GDMA descriptor **write-back** may be disabled, so descriptors are never handed back at all. **Full findings + the next experiment: [shift-register-driver-analysis.md § 7.5](shift-register-driver-analysis.md).**
+**What limits it: the frame only works from INTERNAL RAM, not PSRAM (on the S3).** Measured by a blind `ledsPerPin` sweep at the bench: ≤ 96 lights/strand (a ~54 KB frame, fits internal DMA RAM) renders cleanly; 128 and up (which overflow to PSRAM) flicker badly. `asyncTransmit` OFF is also markedly better than ON. That caps a shift display at roughly **1,500 lights — fewer than direct mode already drives**, so the feature does not yet deliver the large displays it exists for.
+
+**The mechanism is NOT understood, and six hypotheses have already died** (descriptor-pool size, queue depth, alignment, a silent FIFO underrun, PSRAM bandwidth, "PSRAM is the problem" — the identical frame runs perfectly from PSRAM on a **P4**). Do not re-derive them. **Read [shift-register-driver-analysis.md § 7.5](shift-register-driver-analysis.md) before touching this** — it separates what is measured from what was guessed and refuted, and the next attempt should start from the `asyncTransmit` observation, not a seventh theory.
 
 **Start the next iteration from the loopback** — the rig is wired (spare '595 output → 1k/2k divider → GPIO 16) and blocked only by this bug. Two days were lost to guessing for want of an instrument.
 

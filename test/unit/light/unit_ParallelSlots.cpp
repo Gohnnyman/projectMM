@@ -378,18 +378,55 @@ TEST_CASE("shift encoder: inactive strands idle LOW on every cycle") {
         // Pin 0 on strand 1's cycle: the wire byte is 0xFF but the strand is inactive,
         // so the data bit must still be 0.
         CHECK((out[bitBase(bit) + 1 * kSh + inactiveCycle] & 0x01) == 0);
+        // ...and the same on the PULSE-START slot. This is the case a per-pin "any live lane"
+        // mask misses: strands 0 and 1 SHARE physical pin 0, so a mask that says "pin 0 has an
+        // active lane" drives the start-pulse HIGH on *every* cycle of that pin — including the
+        // cycle that clocks strand 1's shift position. The inactive strand then presents a full
+        // WS2812 pulse-start and lights white. The activity test is per STRAND (per cycle), not
+        // per pin.
+        CHECK((out[bitBase(bit) + 0 * kSh + inactiveCycle] & 0x01) == 0);
     }
 }
 
-// The pulse-start slot drives every ACTIVE PIN high (the WS2812 pulse begins), and the tail
-// slot drives everything low. In shift mode those levels are held across all kShiftOutputs
-// cycles — the strand sees one 375 ns slot, not eight 50 ns blips.
+// The real-world shape of the rule above, and the one that bites on hardware: two strands on the
+// SAME '595, one longer than the other. Once the short strand is exhausted its activeMask bit
+// clears while its neighbour keeps rendering — so the pin stays busy, and only a PER-CYCLE
+// activity test can keep the exhausted strand dark. (A per-pin "has any live lane" mask drives the
+// pulse-start HIGH on every cycle of that pin, and the short strand flashes white at full
+// brightness for the rest of the frame.)
+TEST_CASE("shift encoder: an exhausted strand stays dark while its pin-mate keeps rendering") {
+    uint8_t wire[128 * 3] = {};
+    for (auto& b : wire) b = 0xFF;   // both strands' wire bytes are hot
+    uint8_t out[8 * kSlotsPerBit] = {};
+    const uint8_t latchBit = 3;
+    // Strand 0 (pin 0, pos 0) active; strand 1 (pin 0, pos 1) EXHAUSTED — same physical pin.
+    mm::encodeWs2812ShiftSlots<uint8_t>(wire, /*activeMask=*/1u, /*physPins=*/1, latchBit, kSh, 1, out);
+
+    const uint8_t liveCycle = static_cast<uint8_t>(kSh - 1 - 0);   // strand 0's cycle
+    const uint8_t deadCycle = static_cast<uint8_t>(kSh - 1 - 1);   // strand 1's cycle
+    for (int bit = 0; bit < 8; bit++) {
+        // The live strand still gets its full pulse: HIGH start, data, LOW tail.
+        CHECK((out[bitBase(bit) + 0 * kSh + liveCycle] & 0x01) != 0);
+        // The exhausted strand clocks in 0 on EVERY slot of its own cycle — start included.
+        CHECK((out[bitBase(bit) + 0 * kSh + deadCycle] & 0x01) == 0);
+        CHECK((out[bitBase(bit) + 1 * kSh + deadCycle] & 0x01) == 0);
+        CHECK((out[bitBase(bit) + 2 * kSh + deadCycle] & 0x01) == 0);
+    }
+}
+
+// The pulse-start slot clocks in a 1 for every ACTIVE STRAND (so the '595 presents the start of
+// the WS2812 pulse on that output), and the tail slot clocks in zeros. Note this is a per-CYCLE
+// property, not a per-pin one: cycle c carries shift position `kSh-1-c`, so the bit belongs to
+// exactly one strand of that pin. With all 8 strands of a pin active, the pin is HIGH on all 8
+// start-slot cycles — clocking in 0xFF, which the '595 presents as all-outputs-HIGH.
 TEST_CASE("shift encoder: start slot is HIGH and tail slot LOW across every cycle") {
     uint8_t wire[128 * 3] = {};
     wire[0] = 0x00;   // data all zero — proves start/tail levels don't depend on the data
     uint8_t out[8 * kSlotsPerBit] = {};
     const uint8_t latchBit = 1;
-    mm::encodeWs2812ShiftSlots<uint8_t>(wire, /*activeMask=*/1u, /*physPins=*/1, latchBit, kSh, 1, out);
+    // All kSh strands of pin 0 active — so every start-slot cycle has a live strand.
+    const uint64_t allOnPin0 = (uint64_t(1) << kSh) - 1u;
+    mm::encodeWs2812ShiftSlots<uint8_t>(wire, allOnPin0, /*physPins=*/1, latchBit, kSh, 1, out);
 
     const uint8_t latch = static_cast<uint8_t>(1u << latchBit);
     for (int bit = 0; bit < 8; bit++) {

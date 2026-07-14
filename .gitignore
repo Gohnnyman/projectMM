@@ -126,5 +126,7 @@ __pycache__/
 /docs/moonmodules/core/moxygen/
 /docs/moonmodules/light/moxygen/
 
-# Read-only hardware snapshots (flash/NVS dumps pulled off reverse-engineered boards)
-.snapshots
+# Read-only hardware snapshots (flash/NVS dumps pulled off reverse-engineered boards).
+# Root-anchored + dir-scoped, like /build/ above: a bare `.snapshots` would also swallow any
+# nested path of that name anywhere in the tree.
+/.snapshots/

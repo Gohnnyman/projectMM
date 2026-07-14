@@ -238,7 +238,12 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
         // Bit-planes per shift cycle: plane[c][bit] bit P = physical pin P's byte-bit `bit` for
         // the lane it drives on cycle c. Built by reusing the SWAR transpose once per cycle over
         Slot plane[kShiftOutputs][8];
-        Slot activePins = 0;   // physical pins with at least one live lane
+        // Active pins PER SHIFT CYCLE, not per pin. Cycle c clocks in the bit for shift position
+        // `pos` of every pin, so what belongs there is "is the strand at (pin, pos) active?" — a
+        // per-STRAND question. Aggregating one mask across all cycles ("pin P has some live lane")
+        // would drive the pulse-start HIGH on a cycle whose strand is inactive: two strands sharing
+        // a '595 (one long, one short) would make the short one flash white on every WS2812 pulse.
+        Slot activePins[kShiftOutputs] = {};
         for (uint8_t c = 0; c < outPerPin; c++) {
             // '595 shifts MSB-first: the first bit clocked in lands on the last output.
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
@@ -247,7 +252,7 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
                 const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
                 if (!(activeMask & (uint64_t(1) << v))) continue;   // inactive: idle LOW
                 lanes[p] = wire[static_cast<size_t>(v) * channels + ch];
-                activePins |= static_cast<Slot>(Slot(1) << p);
+                activePins[c] |= static_cast<Slot>(Slot(1) << p);
             }
             if constexpr (sizeof(Slot) == 1) transposeLanes8x8(lanes, plane[c]);
             else                             transposeLanes16x8(lanes, plane[c]);
@@ -287,15 +292,16 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
             // any latch) and the zeroed latch pad at the end absorb the ends of the pipeline.
             // Each slot clocks in the byte the strand will SEE one slot later (the pipeline above),
             // and the '595 needs a full byte per slot — 8 words, one bit each:
-            //   - to PRESENT all-HIGH (pulse start), clock in 0xFF: every word has the data bit set
-            //     for each active pin. `activePins` on all 8 words does that.
+            //   - to PRESENT all-HIGH (pulse start), clock in 0xFF for the ACTIVE strands: word c
+            //     sets the data bit of each pin whose strand at shift position c is active
+            //     (`activePins[c]`), so an exhausted strand keeps clocking in 0 and stays dark.
             //   - to PRESENT the data bit, clock in the transposed plane: word c carries, for each
             //     pin, the bit of the strand at shift position c. That is `plane[c][bit]`.
             //   - to PRESENT all-LOW (tail), clock in 0x00: eight zero words.
             for (uint8_t c = 0; c < outPerPin; c++) {
                 const Slot first = (c == 0) ? latch : Slot(0);   // RCLK on word 0 of each slot
                 // clocked in slot N  ->  seen by the strand in slot N+1
-                out[c]                 = static_cast<Slot>(activePins | first);      // -> seen: pulse start (HIGH)
+                out[c]                 = static_cast<Slot>(activePins[c] | first);   // -> seen: pulse start (HIGH)
                 out[outPerPin + c]     = static_cast<Slot>(plane[c][bit] | first);   // -> seen: the data bit
                 out[2 * outPerPin + c] = first;                                      // -> seen: pulse tail (LOW)
             }

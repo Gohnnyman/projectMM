@@ -6,6 +6,7 @@
 #include "correction_presets.h"
 
 #include <cstring>
+#include <vector>
 
 // The DRIVER half of the 74HCT595 shift-register expander (unit_ParallelSlots pins the encoded
 // bits). What matters here is the arithmetic the user's memory budget depends on, and the config
@@ -328,4 +329,52 @@ TEST_CASE("shift register: a timed-out transfer never gets its buffer re-encoded
     d.tick();
 
     CHECK(d.transmitCount() == transmitsAfterFirst);   // no new transfer while the old one is stuck
+}
+
+// **The robustness rule: a broken bus must not cost the user the DEVICE.** Every dead transfer is a
+// wait on the render thread, so a bus that never delivers doesn't just fail to light LEDs — it eats
+// the CPU that WiFi/HTTP need and the device drops off the network entirely, with no way back in
+// except a cable. That is exactly what a misconfigured shift-register frame did to a bench board
+// (2026-07-14): unreachable and unrecoverable remotely, from nothing but an LED setting.
+//
+// So a persistently-dead bus must be GIVEN UP ON: the driver reports the failure and stops paying for
+// it. Output idle, device alive — never the other way round.
+TEST_CASE("a persistently dead bus is given up on, so it cannot starve the device") {
+    MockShiftDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 16 * 256, "1,2", /*shiftOn=*/true, /*latch=*/3);
+
+    d.waitTimesOut = true;   // the DMA never signals done, every frame, forever
+
+    for (int i = 0; i < 40; i++) d.tick();
+
+    // It gave up: the failure is REPORTED (the user can see why the LEDs are dark)...
+    CHECK(d.severity() == MockShiftDriver::Severity::Error);
+    // ...and it stopped spending the render thread on a bus that will never deliver. The exact count
+    // doesn't matter; what matters is that it is BOUNDED — it did not keep trying for all 40 ticks.
+    CHECK(d.transmitCount() < 40u);
+}
+
+// Giving up must not be permanent: the user fixes the setting that broke the bus, the driver rebuilds,
+// and the LEDs come back — no reboot (the live-reconfiguration rule).
+TEST_CASE("a given-up driver recovers when the bus is fixed") {
+    MockShiftDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 16 * 256, "1,2", /*shiftOn=*/true, /*latch=*/3);
+
+    d.waitTimesOut = true;
+    for (int i = 0; i < 40; i++) d.tick();
+    REQUIRE(d.severity() == MockShiftDriver::Severity::Error);   // gave up
+    const size_t transmitsWhileDead = d.transmitCount();
+
+    // The user fixes the config: the bus is rebuilt, and now transfers complete.
+    d.waitTimesOut = false;
+    d.applyState();          // prepare -> reinit: a fresh bus deserves a clean slate
+
+    for (int i = 0; i < 5; i++) d.tick();
+
+    CHECK(d.transmitCount() > transmitsWhileDead);               // transmitting again
+    CHECK(d.severity() != MockShiftDriver::Severity::Error);     // and the error is cleared
 }

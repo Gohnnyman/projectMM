@@ -262,13 +262,43 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // ONLY on the LCD_CAM chips; the classic backend goes straight to internal DMA RAM. IDF also does
     // its own DMA/ext-mem cache alignment for whichever region it lands in. Zeroed so the trailing
     // latch pad holds the lines LOW.
+    // **Shift mode prefers INTERNAL RAM; direct mode prefers PSRAM.**
+    //
+    // Direct mode: PSRAM first, as above — the frame is large, the 2.67 MHz pixel clock is easy to
+    // sustain from PSRAM, and keeping it out of scarce internal DRAM is the right trade.
+    //
+    // Shift mode: internal first. **Measured, not theorised** (board B, S3, 2026-07-14): with the
+    // expander's 8× frame in PSRAM the strands flicker wildly and the GDMA logs thousands of mount
+    // failures; with the frame in internal RAM the same strands render smooth and flicker-free. The
+    // mechanism is NOT yet understood — the obvious explanations (PSRAM bandwidth, descriptor pool
+    // size, FIFO underrun) have each been tested and refuted, and the P4 runs the identical frame from
+    // PSRAM perfectly. So this is an empirical preference, honestly labelled as one.
+    //
+    // It is a STOPGAP, not the destination: internal DMA RAM is ~110 KB, which caps a shift display at
+    // roughly 2,000 lights — less than direct mode already reaches. PSRAM is what makes large displays
+    // possible and the driver must get back to it. PSRAM therefore remains the fallback (a frame too
+    // big for internal RAM still runs, just poorly, rather than refusing to drive at all).
+    //
+    // Full account + what has already been ruled out: docs/backlog/shift-register-driver-analysis.md § 7.5.
+    const bool shiftMode = clockMultiplier > 1;
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
-    st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
-        st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+    if (!shiftMode)
+        st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
+            st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
     if (!st->buf[0])
 #endif
         st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
             st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+#if SOC_LCDCAM_I80_LCD_SUPPORTED
+    // Shift mode wanted internal RAM and could not have it (a frame too big): take PSRAM rather than
+    // refuse to drive. Expect the flicker until the frame fits or the real fix lands.
+    if (!st->buf[0] && shiftMode) {
+        ESP_LOGW(I80_TAG, "shift frame (%u B) does not fit internal DMA RAM — using PSRAM; "
+                          "expect stalled transfers. Reduce lights per strand.", (unsigned)bufferBytes);
+        st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
+            st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+    }
+#endif
     if (!st->buf[0]) {
         destroyState(st);
         return nullptr;
@@ -343,7 +373,15 @@ bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCou
     // esp_lcd_i80_alloc_draw_buffer; it's only the free-SIZE query that must not be over-constrained.)
     // Querying the combined caps made this pre-check reject every PSRAM frame, silently forcing the
     // internal heap and capping the driver at the ~80 KB largest internal block.
+    // Guarded by the SAME capability check createState uses: only the LCD_CAM backends (S3/P4) can
+    // DMA a frame out of PSRAM. On the classic ESP32 (i80 = I2S) PSRAM is unreachable by the DMA, so
+    // counting it here would let an over-large frame pass this pre-check and then die inside bus
+    // creation with a misleading "check pins / memory" — the pre-check must fail first, and say so.
+#if SOC_LCDCAM_I80_LCD_SUPPORTED
     const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bufferBytes;
+#else
+    const bool fitsPsram = false;
+#endif
     if (!fitsInternal && !fitsPsram) return false;
     I80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, bufferBytes, wantSecondBuffer,
                                clockMultiplier);
