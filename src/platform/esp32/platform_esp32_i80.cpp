@@ -74,6 +74,36 @@ constexpr int kI80Cmd = 0;
 // window; the 160 MHz LCD clock divides to it exactly (/60).
 constexpr uint32_t kPclkHz = 2'666'666;
 
+// Pixel clock with a 74HCT595 expander fitted. **The constraint that matters is the WS2812 SLOT
+// DURATION, not the elegance of the divider — getting that backwards is what broke the first bench
+// run.** A '595 shifts each slot out over `clockMultiplier` bus words, so:
+//
+//     slot = clockMultiplier / pclk        and the slot IS the "0" pulse (T0H).
+//
+// WS2812B spec: **T0H 200-380 ns** (newer revisions cap ~380 — see lessons.md #5, the max-white
+// flicker), T1H 580-1000 ns. The direct path picks 2.67 MHz for a 375 ns slot, right at that edge.
+//
+// The first attempt here was 20 MHz "because it divides exactly": 8 × 50 ns = **400 ns**, which is
+// OVER the 380 ns T0H max. Bench result (2026-07-14, board B): the strands rendered scattered
+// MAX-BRIGHTNESS pixels and washed-out white — zeros being read as ones, exactly lesson #5. An exact
+// divider that produces an out-of-spec waveform is worthless; the divider is a means, not the goal.
+//
+// 26.67 MHz (prescale 3 off the 80 MHz bus resolution — still an exact divide, so esp_lcd's
+// silent round-down cannot bite):
+//     slot = 8 / 26.67 MHz  = 300 ns   T0H 300 (spec 200-380 ✓)  T1H 600 (spec 580-1000 ✓)
+//
+// (This band is also why a ×16 cascade is NOT offered: it needs a 42-55 MHz pclk to stay in spec, and
+// NO exact divide of 80 MHz lands there — the divides are 80/40/20/16/10. Two pins beat two cascaded
+// registers on every axis anyway; see ParallelSlots.h kShiftOutputs.)
+//
+// **Do NOT "fix" flicker by lowering this clock** — that was the original note's advice and it is
+// exactly backwards: a lower pclk makes the slot LONGER, pushing T0H further past 380 ns. If the
+// waveform ever needs adjusting, adjust it *up* (prescale 2 -> 40 MHz -> 200 ns slot, the bottom of
+// the T0H window) and check the buffer can carry the rate. The fitted SN74HCT245N (t_pd ~10-18 ns)
+// has real but adequate margin at 37.5 ns per shift cycle.
+constexpr uint32_t kShiftPclkHz = 26'666'666;   // prescale 3 of 80 MHz -> 300 ns WS2812 slots
+
+
 // Two DMA frame buffers for the async deferred-wait double-buffer: the driver encodes frame N+1
 // into buf[1-active] while the GDMA clocks frame N out of buf[active]. buf[1] is null when the
 // second allocation didn't fit (single-buffer mode — the driver runs the old wait-every-frame path
@@ -140,7 +170,8 @@ void destroyState(I80State* st) {
 // frame buffer (best-effort — null if it won't fit); false allocates buffer 0 only. Shared by the
 // runtime init and the loopback's private bus (which passes false — one transfer).
 I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
-                      uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes, bool wantSecond) {
+                      uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes, bool wantSecond,
+                      uint8_t clockMultiplier = 1) {
     auto* st = new (std::nothrow) I80State();
     if (!st) return nullptr;
 
@@ -179,12 +210,29 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
 
     esp_lcd_panel_io_i80_config_t ioCfg = {};
     ioCfg.cs_gpio_num = GPIO_NUM_NC;    // no chip select — we own the bus
-    ioCfg.pclk_hz = kPclkHz;
-    // Queue depth 2 so the deferred-wait tick can hand the IO device the next frame's
-    // transfer while the current one is still draining (double-buffer). The driver still
-    // waits before REUSING a buffer, so at most two transfers (one per buffer) are ever
-    // outstanding. Single-buffer boards allocate only buf[0] but the depth is harmless.
-    ioCfg.trans_queue_depth = 2;
+    // A '595 expander shifts each WS2812 slot out over 8 bus words, so the bus must clock 8× faster
+    // to keep the slot inside the WS2812 bit window. kShiftPclkHz is that rate — and it is one of the
+    // EXACT divides of the 80 MHz bus resolution, because esp_lcd silently rounds an inexact pclk DOWN
+    // into a wrong waveform rather than reporting it (see kShiftPclkHz).
+    ioCfg.pclk_hz = (clockMultiplier > 1) ? kShiftPclkHz : kPclkHz;
+    // Queue depth 2 so the deferred-wait tick can hand the IO device the next frame's transfer while
+    // the current one is still draining (the double-buffer). The driver still waits before REUSING a
+    // buffer, so at most two transfers (one per buffer) are ever outstanding.
+    //
+    // **Shift mode drops to depth 1, and it is NOT a fix — it is a narrowing.** With the expander's
+    // ×8 frame, EVERY GDMA mount fails (`lli full need=38 avail=3`) whatever the depth, and the
+    // failure is silent: tx_color returns ESP_OK because the enqueue succeeded — the mount fails later
+    // in the ISR — so the driver waits out a 1 s timeout per frame and the strands hold stale data.
+    // Depth 1 was tried because `avail` counts only what the PREVIOUS transfer released
+    // (gdma_link_mount_buffers walks from index 0 and stops at the first DMA-owned descriptor,
+    // gdma_link.c:163-174, `check_owner`), so serialising the mounts *should* have made the pool
+    // available. It did not. Neither did doubling the pool (76 descriptors verified on-device against
+    // a need of 38). Direct mode is unaffected: 0 errors on every bench board.
+    //
+    // Six hypotheses are ruled out by measurement; the open one is IDF's own note that without
+    // descriptor write-back "descriptor is always owned by DMA after being used". Full account +
+    // what NOT to re-try: docs/backlog/shift-register-driver-analysis.md § 7.5.
+    ioCfg.trans_queue_depth = (clockMultiplier > 1) ? 1 : 2;
     ioCfg.on_color_trans_done = i80DoneCb;
     ioCfg.user_ctx = st;
     // LCD_CAM backend (S3/P4): no command phase — tx_color(cmd = -1) skips it, so cmd_bits = 0.
@@ -269,8 +317,16 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
 
 bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                    uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
-                   bool wantSecondBuffer) {
-    if (!dataPins || laneCount == 0 || bufferBytes == 0) return false;
+                   bool wantSecondBuffer, uint8_t clockMultiplier) {
+    if (!dataPins || laneCount == 0 || bufferBytes == 0 || clockMultiplier == 0) return false;
+    // The shift-register expander needs the LCD_CAM backend: its ×8 frame (~145 KB) only fits in
+    // PSRAM, and the classic ESP32's I2S-i80 backend cannot DMA from PSRAM at all (see buf[0]) —
+    // it would fall back to internal RAM and fail the allocation, or worse, half-fit. Refuse it
+    // here so the driver reports a clean init failure instead of a mystery, and so the frame-size
+    // pre-check below isn't the thing that (accidentally) enforces a hardware rule.
+#if !SOC_LCDCAM_I80_LCD_SUPPORTED
+    if (clockMultiplier > 1) return false;
+#endif
     // Pre-check that the draw buffer can land SOMEWHERE before building the bus. createState
     // allocates PSRAM-first (the 16-lane frame is meant to live there), then falls back to internal.
     // So init is fine when EITHER the internal DMA heap has room past HEAP_RESERVE, OR PSRAM can hold
@@ -280,10 +336,17 @@ bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCou
     // status) when neither region fits.
     const bool fitsInternal =
         heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) >= bufferBytes + HEAP_RESERVE;
-    const bool fitsPsram =
-        heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM) >= bufferBytes;
+    // PSRAM capacity is queried with MALLOC_CAP_SPIRAM ALONE, not `| MALLOC_CAP_DMA`. The combined
+    // query asks the heap for a region tagged with BOTH caps and no registered heap is tagged both,
+    // so it returns 0 — even on an S3 whose LCD_CAM GDMA reaches PSRAM perfectly well. (The *alloc*
+    // does pass both caps, which is correct and is what IDF itself does in
+    // esp_lcd_i80_alloc_draw_buffer; it's only the free-SIZE query that must not be over-constrained.)
+    // Querying the combined caps made this pre-check reject every PSRAM frame, silently forcing the
+    // internal heap and capping the driver at the ~80 KB largest internal block.
+    const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bufferBytes;
     if (!fitsInternal && !fitsPsram) return false;
-    I80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, bufferBytes, wantSecondBuffer);
+    I80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, bufferBytes, wantSecondBuffer,
+                               clockMultiplier);
     if (!st) return false;
     h.impl = st;
     return true;
@@ -376,21 +439,35 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                     uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
                                     const uint8_t* frame, size_t frameBytes,
-                                    size_t dataBytes, uint8_t rowBits) {
+                                    size_t dataBytes, uint8_t rowBits,
+                                    uint8_t clockMultiplier) {
     RmtLoopbackResult r;
     r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;  // pattern in every row
     if (!dataPins || laneCount == 0 || !frame || frameBytes == 0
-        || dataBytes < 3 || dataBytes > frameBytes || rowBits < 8) return r;
+        || dataBytes < 3 || dataBytes > frameBytes || rowBits < 8
+        || clockMultiplier == 0) return r;
     const uint16_t txGpio = dataPins[0];   // lane 0 carries the pattern
+    const bool shiftMode = clockMultiplier > 1;
 
-    r.jumperDetected = detail::loopbackJumperOk(static_cast<uint8_t>(txGpio),
-                                                static_cast<uint8_t>(rxGpio));
-    if (!r.jumperDetected) return r;
+    if (shiftMode) {
+        // SKIP the continuity pre-check. It drives txGpio and expects rxGpio to follow directly,
+        // which is true of a bare jumper but FALSE through a 74HCT595: raising the serial input does
+        // not raise an output (that takes 8 shift clocks + a latch). Running it here would report
+        // "jumper not detected" on perfectly good wiring. The rx pin is fed from a '595 OUTPUT, so
+        // the only proof the wire is right is the bit-verify itself — which is the stronger check
+        // anyway (it validates the whole chain: encode → bus → shift → latch → output).
+        r.jumperDetected = true;
+    } else {
+        r.jumperDetected = detail::loopbackJumperOk(static_cast<uint8_t>(txGpio),
+                                                    static_cast<uint8_t>(rxGpio));
+        if (!r.jumperDetected) return r;
+    }
 
     // The continuity check above reset txGpio's GPIO matrix route; bus
     // creation re-claims it.
     I80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, frameBytes,
-                               /*wantSecond=*/false);   // one transfer — single buffer
+                               /*wantSecond=*/false,    // one transfer — single buffer
+                               clockMultiplier);        // shift mode → the kShiftPclkHz bus clock
     if (!st) {
         ESP_LOGE(I80_TAG, "loopback: private bus creation failed");
         return r;
@@ -415,7 +492,21 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
         if (xSemaphoreTake(st->done[0], pdMS_TO_TICKS(1000)) != pdTRUE)
             ESP_LOGE(I80_TAG, "loopback: tx done-callback timed out");
     };
-    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz,
+    // `pclkHz` tells the verifier the WS2812 SLOT RATE the strand sees — it derives both the pulse-
+    // width threshold ("0" = one slot, "1" = two) and the expected transmit duration from it. So it
+    // must describe the STRAND's waveform, not the bus.
+    //
+    // In shift mode the strand's slot is NOT the bus period: `clockMultiplier` bus words fill one
+    // slot, so slot rate = pclk / clockMultiplier. At 26.67 MHz ÷ 8 that is 3.33 MHz → a 300 ns slot.
+    //
+    // Passing kPclkHz (2.67 MHz → 375 ns) in shift mode — which this did, with a comment confidently
+    // asserting "the slot is still 375 ns" — makes the capture expect 15-tick pulses while the strand
+    // emits 12-tick ones, and sizes the capture window for a frame 8× shorter than the real one. The
+    // result is a decode that matches nothing: `bad bit 0/0`, zero bits captured, on a strand whose
+    // LEDs were visibly lighting. (Bench, board B, 2026-07-14 — the giveaway was exactly that: the
+    // LEDs worked, so a waveform existed; only the capture was blind to it.)
+    const uint32_t slotHz = (clockMultiplier > 1) ? (kShiftPclkHz / clockMultiplier) : kPclkHz;
+    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz,
                                   I80_TAG, transmitOnce, r);
     destroyState(st);
     return r;
@@ -428,7 +519,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 namespace mm::platform {
 
 bool i80Ws2812Init(I80Ws2812Handle&, const uint16_t*, uint8_t, uint16_t, uint16_t,
-                   size_t, bool) {
+                   size_t, bool, uint8_t) {
     return false;
 }
 uint8_t* i80Ws2812Buffer(const I80Ws2812Handle&, uint8_t) { return nullptr; }
@@ -438,7 +529,8 @@ bool i80Ws2812Wait(I80Ws2812Handle&, uint8_t, uint32_t) { return true; }
 uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle&) { return 0; }
 void i80Ws2812Deinit(I80Ws2812Handle&) {}
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t*, uint8_t, uint16_t, uint16_t,
-                                    uint16_t, const uint8_t*, size_t, size_t, uint8_t) {
+                                    uint16_t, const uint8_t*, size_t, size_t, uint8_t,
+                                    uint8_t) {
     return {};
 }
 

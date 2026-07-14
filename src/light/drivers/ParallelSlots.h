@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>   // size_t (the shift-register encoder's wire indexing)
 #include <cstdint>
 
 namespace mm {
@@ -110,6 +111,195 @@ inline void encodeWs2812ParallelSlots(const uint8_t* wire, Slot activeMask,
             *out++ = activeMask;    // slot 0: pulse start (active lanes HIGH)
             *out++ = plane[bit];    // slot 1: bit `bit` of every active lane
             *out++ = 0;             // slot 2: pulse tail (all LOW)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SHIFT-REGISTER encode — the same WS2812 wire contract, fanned out through
+// 74HCT595 expanders so each physical data pin drives `outputsPerPin` strands.
+// Named for the hardware (a shift register is what it is); the lineage this
+// studied calls it a "virtual" driver, but nothing here is virtual — the '595s,
+// the latch line and the level shifter are all physically on the board.
+// Prior art: hpwit's I2SClocklessVirtualLedDriver — studied, not copied.
+//
+// A '595 is SERIAL-IN, parallel-out: presenting 8 bits takes 8 clock cycles. So
+// each of the 3 WS2812 slots above becomes `outputsPerPin` SHIFT CYCLES here —
+// the bus word's bit P carries physical pin P's bit for one expanded output, and
+// the peripheral's own pixel clock (WR, already the i80 `clockPin`) is the shift
+// clock. That is the whole cost model: the fan-out multiplies the slot COUNT
+// (memory + wire time) but NOT the pin count, so extra lanes are free while the
+// ×8 itself is not.
+//
+// LATCH is a DATA lane (one bit of every bus word), not a peripheral pin: the
+// '595s present their shifted byte on its rising edge. It is pulsed on the LAST
+// shift cycle of each slot, once all `outputsPerPin` bits are in. `latchBit` is
+// its bus-bit index; the caller keeps it out of the data pins.
+//
+// Lane numbering: lane V lives on physical pin (V / outputsPerPin) at shift
+// position (V % outputsPerPin). Shift cycle c therefore gathers, for each physical
+// pin P, lane (P * outputsPerPin + c) — and that gather is STILL an 8-lane
+// bit-plane transpose, so the SWAR core above is reused unchanged.
+//
+// A '595 shifts MSB-of-the-register-first: the bit clocked in FIRST ends up on the
+// LAST output (QH). So cycle c must carry the byte for shift position
+// (outputsPerPin - 1 - c) to land lane V on the output the wiring calls V.
+
+/// Outputs per physical data pin when a 74HCT595 expander is fitted (one '595 = 8).
+/// The fan-out is a property of the board, not a free parameter.
+///
+/// **74HCT, not 74HC — the T is load-bearing.** (Plain-'HC parts are known to misbehave here; that
+/// is the reason the board specifies HCT.) Both are 8-bit shift registers; they differ in INPUT
+/// threshold, and the ESP32 drives 3.3 V logic into a part powered at 5 V:
+///   - **74HC** at 5 V: V_IH(min) = 0.7 × Vcc = **3.5 V** → a 3.3 V HIGH is BELOW threshold and is
+///     not guaranteed to read as a 1. It often *appears* to work (a given chip may trip nearer
+///     2.5 V at room temperature), then fails with temperature, supply, or a new batch — the
+///     symptom is flaky/garbled strands, not dead ones, which is what makes it so hard to chase.
+///   - **74HCT** at 5 V: TTL-compatible inputs, V_IH(min) = **2.0 V** → 3.3 V is comfortably a HIGH,
+///     while the outputs still swing a full 5 V, which is what the WS2812 data line wants.
+///
+/// The target board is hpwit's expander. Its BOM for 48 strands, read off the fitted parts:
+///   - **6 × 74HCT595N** (NXP) — the shift registers: the actual 1→8 fan-out (6 × 8 = 48).
+///   - **1 × SN74HCT245N** (TI) — an OCTAL buffer/level-shifter (it stores nothing): 3.3 V→5 V,
+///     and it supplies the drive current.
+///
+/// **One '245 is exactly enough for THIS board, and that fact is what caps it at 6 data pins.** The
+/// signals needing the shift are `dataPins + CLOCK + LATCH`, and a '245 is 8 channels wide — so
+/// 6 + 2 = 8 fills it exactly. It is *not* a general property of the design: hpwit's 15-pin variant
+/// needs 15 + 2 = 17 signals = **three** '245s. A board with one '245 can never be a 15-pin board.
+///
+/// **Timing headroom is thin, and the buffer is the reason — know this before blaming the code.**
+/// The fitted '245 is plain **HCT** (t_pd ≈ 10–18 ns at 5 V), not the ~5 ns **A**HCT part. Shift mode
+/// clocks the bus at 26.67 MHz — a 37.5 ns period — so the buffer alone can eat a third of the bit
+/// period in propagation delay. hpwit runs a comparable rate (19.2 MHz) on this hardware, so it *does*
+/// work; but there is little margin. **If a board is clean at the direct rate and flaky only through
+/// the expander, suspect the buffer's timing before the firmware** — an AHCT245 is the drop-in that
+/// buys the margin back.
+///
+/// Do not "simplify" any of these to a non-T part — see the threshold arithmetic above.
+///
+/// **8 outputs — one 74HCT595 per data pin. Cascading two ('595 -> '595 via Q7') would give 16, but
+/// ×16 is NOT offered, and the reason is the clock, not the code.
+///
+/// The bus rate is set by the shift DEPTH: each WS2812 slot must still last its 300 ns, filled by
+/// the fan-out's shift cycles, so doubling the depth doubles the required pclk. An in-spec slot needs
+/// 290-380 ns (T0H ≤ 380, T1H = 2 × slot ≥ 580), which puts ×16 at **42.1-55.2 MHz** — and the
+/// LCD_CAM bus resolution (80 MHz) has **no exact divide in that band** (its divides are 80, 40, 20,
+/// 16, 10 MHz). esp_lcd silently rounds an inexact request DOWN to an integer prescale, so asking for
+/// ~53 MHz yields **80 MHz**: a 200 ns slot, T1H 400 ns, far below the 580 ns floor. ×16 cannot emit a
+/// valid WS2812 waveform here at all.
+///
+/// (×8's band is 21.1-27.6 MHz, and 80/3 = 26.67 MHz sits inside it — the shipped rate is provably the
+/// only exact divide that works. A P4's APLL could synthesise an arbitrary rate and would be the only
+/// route to ×16; that is a separate driver-level change, not a config flag.)
+///
+/// **Grow on PINS, not on cascade depth** anyway: pin count is parallel, so it does not touch the
+/// clock and it does not grow the DMA frame — hpwit's 120-strand headline is 15 pins × 8, not a
+/// deeper chain.
+inline constexpr uint8_t kShiftOutputs = 8;   // one 74HCT595 per data pin
+
+/// Close a shift-register frame: one latch-only bus word, written at the START of the latch pad.
+///
+/// **Without this the frame never resets, content-dependently.** The '595 pipeline is one slot deep —
+/// the byte clocked during slot N is presented during slot N+1 — so the LAST slot of the last light
+/// needs a latch edge *after* it. The pad is all zeros and carries no latch bit, so the register
+/// would keep presenting the final DATA byte for the pad's whole ≥300 µs: a strand whose last wire
+/// byte is EVEN idles LOW and resets correctly, while one whose last byte is ODD idles **HIGH** and
+/// never sees the WS2812 reset at all — the next frame's bits then append to an unlatched stream and
+/// that strand garbles. (Direct mode has no such hazard: with no register in the path, a zeroed pad
+/// IS a LOW line.)
+///
+/// One word (data lanes LOW + the latch bit) latches the trailing zeros through, and the rest of the
+/// zeroed pad then holds every strand LOW. Call once, immediately after the last row.
+template <class Slot>
+inline void encodeWs2812ShiftLatchPad(uint8_t latchBit, Slot* out) {
+    *out = static_cast<Slot>(Slot(1) << latchBit);
+}
+
+/// Encode one ROW through the shift-register expander.
+///   wire:        lanes × `channels` corrected wire bytes, lane-major — as the direct
+///                encoder, but indexed by EXPANDED lane.
+///   activeMask:  bit V set = lane V drives this row. Up to kMaxLanes lanes (more than
+///                the bus is wide), so it is a uint64_t, not a Slot.
+///   physPins:    physical data pins in use (lanes ≤ physPins × outPerPin).
+///   latchBit:    bus-bit index of the LATCH line (never a data pin).
+///   outPerPin:   the fan-out — kShiftOutputs (8, one '595). A runtime parameter, not a constant,
+///                so the cost model stays explicit; see kShiftOutputs for why 16 is not offered.
+///   channels:    wire bytes per light (also the lane stride).
+///   out:         channels * 8 * 3 * outPerPin SLOTS, fully written.
+template <class Slot>
+inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
+                                   uint8_t physPins, uint8_t latchBit, uint8_t outPerPin,
+                                   uint8_t channels, Slot* out) {
+    constexpr uint8_t kLanes = sizeof(Slot) * 8;   // bus width: 8 or 16
+    if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
+    const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
+    for (uint8_t ch = 0; ch < channels; ch++) {
+        // Bit-planes per shift cycle: plane[c][bit] bit P = physical pin P's byte-bit `bit` for
+        // the lane it drives on cycle c. Built by reusing the SWAR transpose once per cycle over
+        Slot plane[kShiftOutputs][8];
+        Slot activePins = 0;   // physical pins with at least one live lane
+        for (uint8_t c = 0; c < outPerPin; c++) {
+            // '595 shifts MSB-first: the first bit clocked in lands on the last output.
+            const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
+            uint8_t lanes[kLanes] = {};
+            for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
+                const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
+                if (!(activeMask & (uint64_t(1) << v))) continue;   // inactive: idle LOW
+                lanes[p] = wire[static_cast<size_t>(v) * channels + ch];
+                activePins |= static_cast<Slot>(Slot(1) << p);
+            }
+            if constexpr (sizeof(Slot) == 1) transposeLanes8x8(lanes, plane[c]);
+            else                             transposeLanes16x8(lanes, plane[c]);
+        }
+        for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte, as the wire contract
+            // Each WS2812 slot is shifted out over outPerPin bus words. The i80 WR (pixel clock) IS
+            // the '595 shift clock, so EVERY bus word produces one SRCLK edge — including the word
+            // that carries the latch bit.
+            //
+            // **The latch therefore goes on the FIRST word of a slot, not the last.** RCLK is
+            // rising-edge triggered: it must fire when the slot's 8 bits are already all in, which is
+            // one word AFTER the last shift word — i.e. the first word of the NEXT slot. Putting it
+            // on the last word (the obvious-looking choice, and what this encoder did first) asserts
+            // RCLK *while the 8th bit is still being clocked in*, so the '595 presents a byte shifted
+            // one position short. Bench symptom (board B, 2026-07-14): only the first LED or two of
+            // every strand lit — a regular one-pixel-per-panel grid. The data words the latch rides
+            // are harmless: they are only ENTERING the shift register, not being latched.
+            //
+            // Verified against hpwit's driver, which does the same on its S3/LCD_CAM path
+            // (`putdefaultlatch`: `buff[i * (NUM_VIRT_PINS + 1)] = mask1`, i.e. word 0 of each slot).
+            // **THE ONE-SLOT PIPELINE.** A '595 only updates its OUTPUTS on the latch, so during a
+            // slot's shift cycles the strand sees the byte latched at the START of that slot — i.e.
+            // the byte shifted in during the PREVIOUS slot. The hardware is a one-slot delay line.
+            //
+            // So the encoder must shift each value in ONE SLOT EARLY. Writing "the value I want the
+            // strand to see" into the slot where I want it seen (the intuitive layout, and what this
+            // shipped first) makes the strand receive [tail][start][data] instead of
+            // [start][data][tail]: the first LED survives (empty pipeline) and everything after it is
+            // noise — the exact bench symptom on board B (2026-07-14).
+            //
+            // Hence the rotation below: slot 0 carries what the strand must SEE in slot 1, and so on.
+            // hpwit does the same by biasing his DMA write pointer a whole slot (`buff += OFFSET`).
+            //
+            // Wrap-around is safe: the LAST slot of a bit carries the FIRST slot of the next bit (the
+            // pulse start), and every WS2812 bit begins with that same all-HIGH pulse — so the value
+            // is identical whichever bit it belongs to. The frame's leading slot (shifted in before
+            // any latch) and the zeroed latch pad at the end absorb the ends of the pipeline.
+            // Each slot clocks in the byte the strand will SEE one slot later (the pipeline above),
+            // and the '595 needs a full byte per slot — 8 words, one bit each:
+            //   - to PRESENT all-HIGH (pulse start), clock in 0xFF: every word has the data bit set
+            //     for each active pin. `activePins` on all 8 words does that.
+            //   - to PRESENT the data bit, clock in the transposed plane: word c carries, for each
+            //     pin, the bit of the strand at shift position c. That is `plane[c][bit]`.
+            //   - to PRESENT all-LOW (tail), clock in 0x00: eight zero words.
+            for (uint8_t c = 0; c < outPerPin; c++) {
+                const Slot first = (c == 0) ? latch : Slot(0);   // RCLK on word 0 of each slot
+                // clocked in slot N  ->  seen by the strand in slot N+1
+                out[c]                 = static_cast<Slot>(activePins | first);      // -> seen: pulse start (HIGH)
+                out[outPerPin + c]     = static_cast<Slot>(plane[c][bit] | first);   // -> seen: the data bit
+                out[2 * outPerPin + c] = first;                                      // -> seen: pulse tail (LOW)
+            }
+            out += 3 * outPerPin;
         }
     }
 }

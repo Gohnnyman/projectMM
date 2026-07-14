@@ -110,6 +110,7 @@ add_executable(mm_tests
     unit/light/unit_ParallelSlots.cpp
     unit/light/unit_ParlioLedDriver.cpp
     unit/light/unit_ParallelLedDriver_doublebuffer.cpp
+    unit/light/unit_ParallelLedDriver_shiftregister.cpp
     unit/light/unit_RmtLedEncoder.cpp
     unit/light/unit_RmtLedDriver_lifecycle.cpp
     unit/light/unit_RmtLedDriver_pins.cpp

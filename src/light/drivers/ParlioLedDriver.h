@@ -56,6 +56,13 @@ public:
     /// Create the Parlio bus + its DMA buffer(s) sized for `frameBytes` on the current lanes, driving
     /// the pixel clock at kClockHz; `wantSecondBuffer` requests the async double-buffer's second frame
     /// buffer (allocated only if it fits). Returns whether init succeeded.
+    /// No 74HCT595 expander on Parlio: its single-shot transfer caps at 65,535 bytes
+    /// (PARLIO_LL_TX_MAX_BITS_PER_FRAME), and the ×8 fan-out frame is ~145 KB — 2.2× over. The base
+    /// refuses shift mode here with a status rather than emitting a frame the peripheral drops.
+    /// (The P4's route to the expander is its LCD_CAM/i80 bus, which I80LedDriver already drives;
+    /// lifting this needs the chunked-transfer work, not a flag flip.)
+    static constexpr bool kSupportsShiftRegister = false;
+
     bool busInit(size_t frameBytes, bool wantSecondBuffer) {
         return platform::parlioWs2812Init(parlio_, laneList_, laneCount_,
                                           kClockHz, frameBytes, wantSecondBuffer);

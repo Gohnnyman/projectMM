@@ -1229,5 +1229,87 @@
         "id": "Mqtt"
       }
     ]
+  },
+  {
+    "name": "hpwit shift-register board",
+    "chip": "ESP32-S3",
+    "firmwares": [
+      "esp32s3-n16r8"
+    ],
+    "image": "assets/deviceModels/hpwit-shift-register-board.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "hpwit shift-register board"
+        }
+      },
+      {
+        "type": "I80LedDriver",
+        "id": "I80Led",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "9,10,12,8,18,17",
+          "shiftRegister": true,
+          "latchPin": 46,
+          "clockPin": 3,
+          "ledsPerPin": "256",
+          "dcPin": 13
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
+      }
+    ]
+  },
+  {
+    "name": "hpwit shift-register 15",
+    "chip": "ESP32-S3",
+    "firmwares": [
+      "esp32s3-n16r8"
+    ],
+    "image": "assets/deviceModels/hpwit-shift-register-board.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "hpwit shift-register 15"
+        }
+      },
+      {
+        "type": "I80LedDriver",
+        "id": "I80Led",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "9,10",
+          "shiftRegister": true,
+          "latchPin": 46,
+          "clockPin": 3,
+          "ledsPerPin": "256",
+          "dcPin": 21
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
+      }
+    ]
   }
 ]

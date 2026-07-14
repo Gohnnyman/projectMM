@@ -44,7 +44,37 @@ public:
     /// actually builds is DERIVED from the configured pin count: ≤8 pins → an 8-bit bus (uint8
     /// slots), 9..16 pins → a 16-bit bus (uint16 slots). Both peripherals do 16 data lines
     /// (LCD_CAM `bus_width` 8|16; Parlio `data_width` 8|16 — powers of two only).
+    /// This is the BUS WIDTH — a hardware fact. The number of STRANDS can exceed it when a
+    /// shift-register expander is fitted (see kMaxStrands).
     static constexpr uint8_t kMaxLanes = 16;
+
+    /// Max strands the driver can drive: every data line fanned out through its '595 chain. Sizes the
+    /// per-strand arrays (laneCounts_, laneStart_). In direct mode only the first kMaxLanes are used.
+    ///
+    /// **64 is a REAL ceiling, and it is the active-strand mask that sets it.** The mask is a
+    /// `uint64_t` (encodeWs2812ShiftSlots' `activeMask`), so one row carries at most 64 strands.
+    /// parseConfig rejects anything larger rather than silently dropping strands.
+    ///
+    /// What that allows and blocks — worth knowing before wiring a board:
+    ///
+    /// | config | strands | frame (256 lights) | |
+    /// |---|---|---|---|
+    /// | 6 pins ×8  | 48  | ~151 KB | ✅ hpwit's board today |
+    /// | 7 pins ×8  | 56  | ~151 KB | ✅ |
+    /// | 15 pins ×8 | 120 | ~301 KB | ❌ over the mask (hpwit's headline number) |
+    ///
+    /// **Lifting it is cheap and NOT blocked by the uint64_t** — that framing would be wrong. The
+    /// encoder only ever needs *one physical pin's* strands at a time (it indexes
+    /// `p * outputsPerPin() + pos`), so a **per-pin mask of ≤16 bits** removes the ceiling entirely
+    /// without ever making the hot-path test a multi-word object. Deliberately not done yet: no board
+    /// we have needs >56, and the encode loop is still being profiled (it is the fps bottleneck), so
+    /// this is queued rather than guessed at.
+    ///
+    /// Extra **pins** ride the bus width and are nearly free; extra **shift depth** (cascading '595s)
+    /// would double the DMA frame *and* the shift time. hpwit's 120 comes from 15 PINS × 8, not from
+    /// cascading. **More pins beats deeper cascades** — which, with the clock arithmetic in
+    /// ParallelSlots.h, is why only the ×8 wiring is offered at all.
+    static constexpr uint8_t kMaxStrands = 64;
 
     /// Light count the loopback self-test drives (or `maxLaneLights_` if the strip is smaller).
     /// Small on purpose: the test verifies the peripheral emits *correct WS2812 bits*, which a few
@@ -107,8 +137,66 @@ public:
     /// (not uint16): the standard single-GPIO control, and -1 = unset keeps GPIO 0 usable as a
     /// loopback pin.
     int8_t   loopbackTxPin = -1;
+    /// Which STRAND carries the test pattern (shift mode only; ignored in direct mode, where the
+    /// pattern always rides lane 0).
+    ///
+    /// With a 74HCT595 expander the jumper comes off a register OUTPUT, and which output is
+    /// physically easiest to reach varies by board — while which STRAND that output carries depends
+    /// on the '595's shift order, which is exactly the kind of thing that is easy to get wrong on
+    /// paper. So rather than force the wire to strand 0, point the TEST at the wire: tap any output,
+    /// set this to the strand it drives, and the self-test puts its pattern there. A mismatch then
+    /// shows up as a bit FAIL, and walking this control 0..N-1 until the test PASSES *identifies*
+    /// the strand empirically — turning "which output is Q7?" from a guess into a measurement.
+    uint8_t  loopbackStrand = 0;
     /// Jumper this to the TX lane for the self-test (unset = -1 by default).
+    ///
+    /// **With a 74HCT595 expander (`shiftRegister` on) the jumper comes from a DIFFERENT place, and
+    /// getting it wrong can damage the ESP32.** In direct mode you jumper a data GPIO straight to
+    /// this pin. In shift mode a data GPIO carries the fast serial stream *into* the register, not
+    /// pixel data — so the wire must come from the register's OUTPUT side instead:
+    ///
+    ///  - **Which output:** the test pattern is driven on **strand 0** = the first data pin's '595 at
+    ///    shift position 0. A '595 shifts MSB-first (the first bit clocked in ends up on the last
+    ///    output), so strand 0 appears on that register's **Q7** (pin 7 of the '595, the last of the
+    ///    QA..QH row). That is the wire to feed back.
+    ///  - **⚠ LEVEL-SHIFT IT.** The '595 runs at 5 V, so Q7 swings to **5 V**, and an ESP32 GPIO is
+    ///    **not 5 V tolerant** — a direct wire can damage the pin. Use a divider (e.g. 1 kΩ from Q7
+    ///    to the GPIO, 2 kΩ from the GPIO to GND, giving 5 V × 2/3 ≈ 3.3 V) or any 5 V→3.3 V shifter.
+    ///  - **No continuity pre-check runs in shift mode** — it would drive the TX pin and expect this
+    ///    pin to follow, which a shift register does not do (that takes 8 clocks + a latch). So a
+    ///    mis-wired jumper shows up as a bit FAIL, not as "jumper not detected".
+    ///
+    /// The payoff is a *stronger* test than direct mode: it verifies the whole chain — encode → i80
+    /// bus → shift register → latch → output — rather than only the ESP32 half.
     int8_t   loopbackRxPin = -1;
+
+    /// Is a 74HCT595 shift-register expander board fitted? OFF (the default) = strands wired straight
+    /// to the GPIOs; ON = each data pin feeds one '595, so the driver drives `pins` × 8 strands.
+    ///
+    /// A **checkbox, not a fan-out number**: the 8 is the '595's own width, not a free parameter, so
+    /// there are exactly two wirings and a boolean says which one the board has. (An earlier
+    /// `outputsPerPin` number invited half-configured values like 4 and, bound as a Select, stored the
+    /// menu *index* — which made `1` mean *eight* in a catalog entry.)
+    ///
+    /// The expander buys pins, not memory: the '595 is serial-in, so presenting 8 bits costs 8 shift
+    /// cycles, and the DMA frame grows ×8 (each WS2812 slot becomes 8 bus words). Extra lanes on an
+    /// already-fanned-out pin are then free (they ride the bus width) — which is why 15×256 and
+    /// 48×256 cost the SAME frame. The bus also clocks ×8 faster (see kShiftPclkHz).
+    /// Needs a `latchPin` and a peripheral that can DMA a ~145 KB frame from PSRAM: the LCD_CAM i80
+    /// path (ESP32-S3 / -P4). Refused with a status on any other backend.
+    bool     shiftRegister = false;
+    /// The 74HCT595 LATCH (RCLK) line — pulsed once the shifted byte is in, presenting it on the
+    /// '595 outputs. Unlike the shift clock (the peripheral's own WR pin), this is a DATA lane:
+    /// it occupies one bit of every bus word, so it must NOT collide with a data pin or clockPin.
+    /// Shown only when the expander is on. Unset (-1) until the user wires it.
+    int8_t   latchPin = -1;
+
+    /// Is the shift-register expander engaged? (Reads the control; the alias keeps the intent
+    /// readable at the call sites that ask "am I encoding through a register?")
+    bool shiftMode() const { return shiftRegister; }
+    /// Strands driven per physical data pin: 1 direct, or the '595's width through the expander.
+    /// The multiplier every size/clock/slot computation below is expressed in.
+    uint8_t outputsPerPin() const { return shiftRegister ? kShiftOutputs : uint8_t(1); }
 
     /// Bind the driver's controls: the window (start/count), the `pins` and
     /// `ledsPerPin` text lists, any derived-supplied bus controls (i80 adds
@@ -124,12 +212,26 @@ public:
         // floor (independent of render load), so it shows how much headroom remains as the pipeline
         // improves — and it reflects an overclocked slot rate directly. Refreshed in tick1s().
         controls_.addReadOnly("wireUs", wireStr_, sizeof(wireStr_));
+        // A checkbox: the expander is fitted or it isn't. The '595's width (8) is the chip's, not a
+        // setting, so there is nothing to type — and a boolean can't be half-configured.
+        controls_.addBool("shiftRegister", shiftRegister);
+        // Always bound, shown only when the expander is on — the conditional-control shape
+        // (bound regardless so a saved latchPin survives a round-trip through direct mode).
+        controls_.addPin("latchPin", latchPin);
+        controls_.setHidden(controls_.count() - 1, !shiftMode());
         controls_.addBool("loopbackTest", loopbackTest);
         // Always bound, shown only in test mode — the conditional-control shape.
         controls_.addPin("loopbackTxPin", loopbackTxPin);
-        controls_.setHidden(controls_.count() - 1, !loopbackTest);
+        // Direct mode only. In shift mode the captured strand is decided by which '595 OUTPUT the
+        // jumper is on (loopbackStrand), not by which GPIO transmits — runLoopbackSelfTest ignores
+        // the override there — so showing it would only invite a mis-set control.
+        controls_.setHidden(controls_.count() - 1, !loopbackTest || shiftMode());
         controls_.addPin("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
+        // Which strand carries the pattern — shift mode only (in direct mode it is always lane 0).
+        // Lets the jumper come off ANY '595 output, including a spare one that drives no panel.
+        controls_.addUint8("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
+        controls_.setHidden(controls_.count() - 1, !loopbackTest || !shiftMode());
     }
 
     /// A change to the pins, per-lane counts, the window, a derived bus control (clockPin/dcPin on
@@ -137,9 +239,12 @@ public:
     /// asyncTransmit is a prepare trigger because it drives ALLOCATION: OFF allocates one DMA buffer,
     /// ON (the default) allocates a second for the double-buffer — so toggling it must rebuild the bus
     /// to add or free that buffer (a board that turns it off pays no second-buffer memory).
+    /// shiftRegister / latchPin are prepare triggers too: the expander multiplies frameBytes_ ×8 and
+    /// re-maps lanes onto pins, and the latch claims a bus bit — all of which is decided at bus init.
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || std::strcmp(name, "asyncTransmit") == 0
+            || std::strcmp(name, "shiftRegister") == 0 || std::strcmp(name, "latchPin") == 0
             || isWindowControl(name)
             || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80
     }
@@ -220,7 +325,7 @@ public:
         if (outCh == 0 || frameBytes_ > derived()->busCapacity()) return;
         // The per-row scratch must be allocated and sized for this channel count (prepareWire, off the
         // hot path). If it isn't (alloc failed / a shrunk realloc pending), idle rather than overrun.
-        if (!wire_ || wireCap_ < static_cast<size_t>(kMaxLanes) * outCh) return;
+        if (!wire_ || wireCap_ < static_cast<size_t>(kMaxStrands) * outCh) return;
 
         // Two explicitly-separate paths so the OFF path is PROVABLY the pre-Step-1.5 behavior (no
         // regression) and pays nothing for the double-buffer it isn't using. The mode is fixed by
@@ -239,8 +344,10 @@ public:
         if (!busWaitIfBusy(0)) return;
         uint8_t* buf = derived()->busBuffer(0);
         if (!buf) return;
-        if (laneCount_ <= 8) encodeRows<uint8_t>(outCh, buf);
-        else                 encodeRows<uint16_t>(outCh, buf);
+        // Branch on the BUS WIDTH (slotBytes), not the strand count — with a '595 expander the
+        // strands ride the shift cycles, so 48 strands on 6 pins is still an 8-bit bus.
+        if (slotBytes() == 1) encodeRows<uint8_t>(outCh, buf);
+        else                  encodeRows<uint16_t>(outCh, buf);
         // The latch pad (zeroed at reinit, never written here) ends the transfer holding every lane
         // LOW >=300 µs. Wait only when the transfer started — a failed transmit gives no done-callback,
         // so an unconditional wait would block the full timeout. A timed-out wait leaves the buffer
@@ -265,8 +372,10 @@ public:
         // 2. Fused per-ROW encode into buffer `active_`, one branch on the bus width (see encodeRows).
         uint8_t* buf = derived()->busBuffer(active_);
         if (!buf) return;
-        if (laneCount_ <= 8) encodeRows<uint8_t>(outCh, buf);
-        else                 encodeRows<uint16_t>(outCh, buf);
+        // Branch on the BUS WIDTH (slotBytes), not the strand count — with a '595 expander the
+        // strands ride the shift cycles, so 48 strands on 6 pins is still an 8-bit bus.
+        if (slotBytes() == 1) encodeRows<uint8_t>(outCh, buf);
+        else                  encodeRows<uint16_t>(outCh, buf);
         // 3. Kick this buffer's DMA and return WITHOUT waiting; flip to the other buffer for next tick.
         if (derived()->busTransmit(active_, frameBytes_)) {
             inFlight_[active_] = true;
@@ -325,19 +434,33 @@ public:
         // gates it, but this removes the read-of-uninitialised footgun).
         std::memset(wire_, 0, wireCap_);
         const size_t stride = outCh;
+        const bool shift = shiftMode();
+        // The active-strand mask is 64-bit because a '595 expander drives more strands than the bus
+        // is wide (up to kMaxStrands); in direct mode only the low `laneCount_` bits are ever set,
+        // and it narrows to Slot for the direct encoder.
         for (nrOfLightsType row = 0; row < maxLaneLights_; row++) {
-            Slot mask = 0;
+            uint64_t mask = 0;
             for (uint8_t lane = 0; lane < laneCount_; lane++) {
                 if (row >= laneCounts_[lane]) continue;   // short strand: idle LOW
-                mask |= static_cast<Slot>(Slot(1) << lane);
+                mask |= uint64_t(1) << lane;
                 // winStart_ shifts this driver's whole slice; laneStart_ is the
                 // per-lane offset within it.
                 correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
                                    wire_ + lane * stride);
             }
-            encodeWs2812ParallelSlots<Slot>(wire_, mask, outCh, out);
-            out += static_cast<size_t>(outCh) * 8 * 3;   // 3 slots × 8 bits × channels, in Slot elements
+            if (shift) {
+                encodeWs2812ShiftSlots<Slot>(wire_, mask, physPins_, latchBit_, outputsPerPin(), outCh, out);
+                out += static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
+            } else {
+                encodeWs2812ParallelSlots<Slot>(wire_, static_cast<Slot>(mask), outCh, out);
+                out += static_cast<size_t>(outCh) * 8 * 3;   // 3 slots × 8 bits × channels, in Slot elements
+            }
         }
+        // Close the frame: one latch-only word at the head of the (zeroed) latch pad, so the final
+        // byte is actually presented and every strand idles LOW through the pad — the WS2812 reset.
+        // Without it a strand whose last wire byte is ODD holds HIGH for the whole pad and never
+        // resets (see encodeWs2812ShiftLatchPad). Direct mode needs nothing: a zeroed pad IS a LOW line.
+        if (shift) encodeWs2812ShiftLatchPad<Slot>(latchBit_, out);
     }
 
     // Encode the loopback test frame at `Slot` width: the same pattern on lane 0 in every
@@ -351,6 +474,30 @@ public:
             encodeWs2812ParallelSlots<Slot>(wire, Slot(1), outCh, out);
             out += static_cast<size_t>(outCh) * 8 * 3;
         }
+    }
+
+    // The shift-register sibling: the same test pattern, but encoded through the '595 fan-out so the
+    // frame the private bus transmits is byte-for-byte what the render loop sends in shift mode.
+    // activeMask = bit 0 → STRAND 0, which is data pin 0's register at shift position 0. Because a
+    // '595 shifts MSB-first, that strand appears on the register's LAST output (Q7) — that is the pin
+    // the jumper must come from. The latch rides its own bus bit (latchBit_), as it does at runtime.
+    template <class Slot>
+    void encodeLoopbackFrameShift(uint8_t* frame, const uint8_t* wire, uint8_t outCh,
+                                  nrOfLightsType lights) {
+        auto* out = reinterpret_cast<Slot*>(frame);
+        // The pattern rides `loopbackStrand` — whichever '595 output the jumper is actually on. It
+        // need not be a strand the render loop drives: a spare output (e.g. the 16th of two '595s on
+        // a 15-panel board) is the ideal tap, since nothing else loads it.
+        const uint8_t s = (loopbackStrand < kMaxStrands) ? loopbackStrand : uint8_t{0};
+        const uint64_t mask = uint64_t(1) << s;
+        // `wire` holds ONE light's bytes at index 0; the shift encoder indexes it by strand, so
+        // point strand `s`'s slot at those bytes.
+        for (nrOfLightsType row = 0; row < lights; row++) {
+            encodeWs2812ShiftSlots<Slot>(wire, mask, physPins_, latchBit_,
+                                         outputsPerPin(), outCh, out);
+            out += static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
+        }
+        encodeWs2812ShiftLatchPad<Slot>(latchBit_, out);   // close the frame — see encodeRows
     }
 
     /// Test-only accessors — pin the lane slicing and frame-size arithmetic on the
@@ -387,14 +534,19 @@ protected:
     char wireStr_[40] = "—";             // read-only `wireUs` KPI text (refreshed in tick1s); sized
                                          // for the worst case "<us> µs (<fps> fps max)" + the 3-byte
                                          // UTF-8 µ, so the snprintf never truncates (-Wformat-truncation)
-    uint16_t laneList_[kMaxLanes] = {};
-    nrOfLightsType laneCounts_[kMaxLanes] = {};
-    nrOfLightsType laneStart_[kMaxLanes] = {};
+    uint16_t laneList_[kMaxLanes] = {};              // physical data GPIOs (bus width bound)
+    uint16_t busPinBuf_[kMaxLanes] = {};             // data pins + latch — the list busInit() builds from
+    nrOfLightsType laneCounts_[kMaxStrands] = {};    // per-STRAND light count (expander bound)
+    nrOfLightsType laneStart_[kMaxStrands] = {};     // per-STRAND offset into the window
     nrOfLightsType winStart_ = 0;   // first source-buffer light this driver reads (the window)
     nrOfLightsType winLen_ = 0;     // window length (lights), clamped to the buffer
-    uint8_t laneCount_ = 0;
+    uint8_t laneCount_ = 0;      // STRAND lanes driven = physPins_ × outputsPerPin() (expanded)
+    uint8_t physPins_ = 0;       // physical data GPIOs (== laneCount_ in direct mode)
+    uint8_t latchBit_ = 0;       // bus-bit index of the latch line (shift mode only)
     nrOfLightsType maxLaneLights_ = 0;
     size_t frameBytes_ = 0;
+
+    /// The two wirings that exist: strands on the GPIOs, or a 74HCT595 per GPIO.
     uint16_t busPins_[kMaxLanes] = {};   // data pins the live bus/unit was built
                                          // with — a pin change must rebuild even
                                          // when the buffer still fits
@@ -422,6 +574,13 @@ protected:
     /// warnings. Default null; a peripheral with bus control pins overrides it. Parlio has none.
     const char* validateBusFatal() const { return nullptr; }
 
+    /// CRTP hook: the GPIO a SPARE bus lane is parked on when the pin list is narrower than the bus
+    /// width (shift mode — the board decides the data-pin count, the peripheral decides the width).
+    /// The i80 driver hides this to return its WR pin, which the peripheral already drives; a
+    /// peripheral that accepts NC lanes (Parlio) never calls it. Default: lane 0's pin, so a spare
+    /// lane is at worst a harmless duplicate of a pin the bus already owns.
+    uint16_t clockPinForBus() const { return laneList_[0]; }
+
     // Frame bytes: longest lane × channels × 24 slots, plus a zeroed latch pad of
     // >=300 µs at the slot rate (800 slots) with clock-tolerance slack (64), each
     // scaled by `slotBytes` (1 for an 8-bit bus, 2 for a 16-bit bus — a slot is one
@@ -429,21 +588,74 @@ protected:
     // alignment. 0 when there's nothing to send. The pad scales too: it's a count of
     // idle bus words, and its LOW duration is measured in slots, so an unscaled pad
     // would be half the latch time on a 16-bit bus and could latch a strand mid-frame.
-    static size_t frameBytesFor(nrOfLightsType maxLights, uint8_t outCh, uint8_t slotBytes) {
-        if (maxLights == 0 || outCh == 0) return 0;
-        const size_t latchPad = static_cast<size_t>(800 + 64) * slotBytes;
-        const size_t bytes = static_cast<size_t>(maxLights) * outCh * 24 * slotBytes + latchPad;
+    //
+    // `outPerPin` (1, or kShiftOutputs with a '595 expander) multiplies the ROW slots: a
+    // shift register is serial-in, so presenting each WS2812 slot costs outPerPin shift
+    // cycles, each its own bus word. The latch pad is NOT multiplied — it is a LOW-time
+    // measured in bus words, and the bus already clocks outPerPin× faster in shift mode,
+    // so an unscaled pad holds the same wall-clock idle... which would be outPerPin× too
+    // SHORT. Scale it by outPerPin to keep the ≥300 µs strand-latch window intact.
+    static size_t frameBytesFor(nrOfLightsType maxLights, uint8_t outCh, uint8_t slotBytes,
+                                uint8_t outPerPin = 1) {
+        if (maxLights == 0 || outCh == 0 || outPerPin == 0) return 0;
+        const size_t latchPad = static_cast<size_t>(800 + 64) * slotBytes * outPerPin;
+        const size_t bytes = static_cast<size_t>(maxLights) * outCh * 24 * slotBytes * outPerPin
+                             + latchPad;
         return (bytes + 63) & ~static_cast<size_t>(63);
     }
 
-    // Bytes per bus slot: 1 for the 8-bit bus (≤8 lanes), 2 for the 16-bit bus.
-    uint8_t slotBytes() const { return laneCount_ > 8 ? 2 : 1; }
+    // Bytes per bus slot: 1 for the 8-bit bus, 2 for the 16-bit bus. Keys on the PHYSICAL
+    // pin count, not laneCount_ — with a '595 expander the lanes ride the shift cycles, not
+    // extra bus bits, so 48 lanes on 6 pins is still an 8-bit bus. (In direct mode the two
+    // counts are equal, so this is the original behaviour.)
+    uint8_t slotBytes() const { return busWidthPins() > 8 ? 2 : 1; }
+
+    // The i80 bus width is a POWER OF TWO (8 or 16) — a peripheral fact, independent of how many
+    // strands the board drives. In direct mode the pin list already fills it exactly. In shift mode
+    // the board decides the data-pin count (how many '595s are populated), so the driver rounds up to
+    // the next legal width and pads the spare lanes itself.
+    uint8_t busWidthPins() const {
+        if (!shiftMode()) return physPins_;
+        const uint8_t needed = static_cast<uint8_t>(physPins_ + 1);   // data pins + the latch lane
+        return needed <= 8 ? uint8_t{8} : uint8_t{16};
+    }
+
+    // The GPIO list the PERIPHERAL is built from, and its length. In direct mode that is just the
+    // data pins. With a '595 expander:
+    //   - bus bits 0..physPins_-1 are the data pins (bit L = the L-th entry of `pins`, the
+    //     ParallelSlots contract),
+    //   - bus bit latchBit_ (== physPins_) is the LATCH — a real lane the peripheral drives,
+    //   - every REMAINING lane up to the bus width is parked on the WR/clock pin. The i80 layer
+    //     rejects an NC data pin, so a spare lane must be *some* real GPIO; WR is the safe choice
+    //     because the peripheral already drives it and the board already wires it (hpwit's trick,
+    //     and exactly what platform_esp32_i80 does for lanes beyond laneCount). Those lanes carry no
+    //     strand — their bits are never set in activeMask — so they are inert.
+    // Kept in the base (one owner of the latch + the padding), so both derived busInit()s just pass
+    // these two calls.
+    const uint16_t* busPinList() {
+        if (!shiftMode()) return laneList_;
+        const uint8_t width = busWidthPins();
+        for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
+            if (i < physPins_)            busPinBuf_[i] = laneList_[i];                     // data
+            else if (i == latchBit_)      busPinBuf_[i] = static_cast<uint16_t>(latchPin);  // latch
+            else                          busPinBuf_[i] = derived()->clockPinForBus();
+        }
+        return busPinBuf_;
+    }
+    uint8_t busPinCount() const { return busWidthPins(); }
+    // Bus clock: a '595 must be fed kShiftOutputs shift cycles per WS2812 slot, so the bus clocks
+    // that much faster to hold the same 375 ns slot on the wire. The platform picks the exact rate
+    // its clock tree can divide to (see platform_esp32_i80.cpp); this is the multiplier.
+    uint8_t busClockMultiplier() const { return outputsPerPin(); }
 
     // (Re)size the per-row correction scratch to kMaxLanes × outCh bytes. Grows-only, off the hot
     // path (called from parseConfig). Sizing to outCh — not a fixed 4 — is what lets encodeRows lay
     // out any channel count without overrun. Failure leaves wire_ null; tick() then idles.
     void prepareWire(uint8_t outCh) {
-        ensureWire(static_cast<size_t>(kMaxLanes) * (outCh ? outCh : 1));   // DriverBase owns the lifecycle
+        // Sized for STRANDS, not bus lanes: with a '595 expander the wire block is indexed by
+        // expanded lane (up to kMaxStrands), which is what encodeRows fills and the shift encoder
+        // reads. Grows-only, so a direct-mode driver that later enables the expander just grows.
+        ensureWire(static_cast<size_t>(kMaxStrands) * (outCh ? outCh : 1));   // DriverBase owns the lifecycle
     }
 
     // Re-derive lanes/counts/starts/frame size from the controls and the wired
@@ -451,17 +663,53 @@ protected:
     // parse literal in the status slot (same shape as RmtLedDriver).
     bool parseConfig() {
         laneCount_ = 0;
+        physPins_ = 0;
         maxLaneLights_ = 0;
         frameBytes_ = 0;
         uint8_t n = 0;
         const char* err = parsePinList(pins, laneList_, maxLanesForTarget(), n);
+        // (Nothing to validate about the fan-out itself: shiftRegister is a bool, so the only two
+        // wirings that physically exist are the only two it can express.)
+        // The shift-register expander needs a backend that can DMA the 8× frame from PSRAM:
+        // the LCD_CAM i80 path (S3 / P4). Refuse it elsewhere rather than emit a waveform the hardware
+        // can't sustain — classic-ESP32 i80 is internal-DMA-only (it walls ~76 KB; its route in is the
+        // PSRAM refill ring), and Parlio caps a single transfer at 65,535 B.
+        if (!err && shiftMode() && !Derived::kSupportsShiftRegister)
+            err = "the 74HCT595 expander needs the LCD_CAM i80 bus (ESP32-S3 / -P4)";
+        // The latch is a real GPIO and a real bus bit; without it the '595s never present a byte.
+        if (!err && shiftMode() && latchPin < 0) err = "the 74HCT595 expander needs a latchPin";
         // i80 (kExactLaneCount) requires a real GPIO on every data line up to the
         // bus width, and the bus width is power-of-two only (8 or 16) — a partial
         // bus is rejected at esp_lcd_new_i80_bus(). So LCD accepts EXACTLY 8 or 16
         // pins; a sub-16 board parks unused lanes on spare GPIOs. Parlio accepts
         // 1..16 (unused lanes idle NC), so it sets kExactLaneCount=false and skips this.
+        // In shift mode the LATCH occupies one of those bus bits, so the data pins plus the
+        // latch must together hit the exact width (7 data + latch = 8, or 15 + latch = 16).
         if constexpr (Derived::kExactLaneCount) {
-            if (!err && n != 8 && n != 16) err = "i80 bus needs exactly 8 or 16 pins";
+            // Direct mode: every bus lane IS a strand, so the pin list must fill the bus exactly.
+            // Shift mode: the strands hang off the '595s, so the pin count is a property of the BOARD
+            // (how many registers are populated — 2 on one bench board, 6 on another), NOT of the bus.
+            // Requiring the user to pad the list to 7 was a design error: it forced fake "ghost"
+            // entries, which parsePinList then rejected as duplicates. The BUS width is the driver's
+            // problem, so the driver pads it (busPinList() parks the spare lanes on WR, the same trick
+            // the i80 layer itself uses) — the user configures only the pins that drive a register.
+            if (shiftMode()) {
+                const uint8_t maxData = static_cast<uint8_t>(kMaxLanes - 1);   // one bit goes to latch
+                if (!err && (n == 0 || n > maxData))
+                    err = "shift mode needs 1..15 data pins (one per populated 74HCT595)";
+            } else if (!err && n != 8 && n != 16) {
+                err = "i80 bus needs exactly 8 or 16 pins";
+            }
+        }
+        // The latch drives its own bus bit, so it must not double as a data pin (that lane would
+        // carry the latch waveform instead of pixel data). clockPin/dcPin overlap is the derived
+        // driver's validateBusPins/validateBusFatal job, and the latch is checked against them there.
+        if (!err && shiftMode()) {
+            for (uint8_t i = 0; i < n; i++)
+                if (laneList_[i] == static_cast<uint16_t>(latchPin)) {
+                    err = "latchPin collides with a data pin";
+                    break;
+                }
         }
         // Fatal bus-pin misconfig (I80LedDriver's clockPin==dcPin — the i80 bus can't init) → the
         // error path below, which idles the driver. Checked before the per-lane WARNINGS: a broken
@@ -475,6 +723,11 @@ protected:
         // garbage, and the user opted into that. Parlio has no WR/DC and returns null.
         // Kept a CRTP hook so the base stays peripheral-neutral.
         const char* warn = err ? nullptr : derived()->validateBusPins(laneList_, n);
+        // STRAND lanes: each physical pin fans out to outputsPerPin() strands through its '595.
+        // This is the count ledsPerPin distributes over and the encoder indexes — from here on
+        // "lane" means a strand, and physPins_ holds the GPIO count.
+        const uint8_t lanes = static_cast<uint8_t>(n * outputsPerPin());
+        if (!err && lanes > kMaxStrands) err = "too many strands (pins × 8 through the expander)";
         if (!err) {
             // Distribute over this driver's window slice, not the whole buffer.
             // assignCounts clamps each lane to kMaxWs2812LedsPerPin (drives that many
@@ -483,14 +736,19 @@ protected:
             const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
             windowSlice(bufN, winStart_, winLen_);
             const char* clampWarn = nullptr;
-            err = assignCounts(ledsPerPin, n, winLen_, laneCounts_, kMaxWs2812LedsPerPin, &clampWarn);
+            err = assignCounts(ledsPerPin, lanes, winLen_, laneCounts_, kMaxWs2812LedsPerPin,
+                               &clampWarn);
             if (clampWarn) warn = clampWarn;
         }
         if (err) {
             setConfigErr(err);
             return false;
         }
-        laneCount_ = n;
+        physPins_ = n;
+        laneCount_ = lanes;
+        // The latch takes the bus bit just above the data pins (data pins are bus bits 0..n-1,
+        // matching the ParallelSlots contract that bus bit L = the L-th entry of `pins`).
+        latchBit_ = n;
         nrOfLightsType start = 0;
         for (uint8_t i = 0; i < laneCount_; i++) {
             laneStart_[i] = start;
@@ -498,9 +756,10 @@ protected:
             if (laneCounts_[i] > maxLaneLights_) maxLaneLights_ = laneCounts_[i];
         }
         const uint8_t outCh = correction_.outChannels;
-        // laneCount_ is set above, so slotBytes() reflects the derived bus width (1 for
-        // ≤8 lanes, 2 for the 16-bit bus) — a 16-lane frame is twice the bytes.
-        frameBytes_ = frameBytesFor(maxLaneLights_, outCh, slotBytes());
+        // physPins_ and shiftRegister are set above, so slotBytes() reflects the real BUS width (data pins
+        // + the latch bit), not the strand count — 48 lanes on 6 pins is still an 8-bit bus. The
+        // ×8 lands in the slot COUNT instead (outputsPerPin()), which is what grows the frame.
+        frameBytes_ = frameBytesFor(maxLaneLights_, outCh, slotBytes(), outputsPerPin());
         // Size the per-row correction scratch to kMaxLanes × outCh (grows-only, off the hot path).
         // Stride outCh, so any channel count fits without the old fixed-4-byte overflow.
         prepareWire(outCh);
@@ -626,7 +885,11 @@ protected:
         // be 16-bit slots to match — and this then genuinely exercises the 16-bit transpose+DMA on
         // real silicon. Parlio builds a 1-lane private unit, so its loopback stays 8-bit regardless.
         const uint8_t sb = Derived::kLoopbackFullWidth ? slotBytes() : 1;
-        const size_t perLightBytes = static_cast<size_t>(outCh) * 8 * 3 * sb;   // 3 slots/bit × slotBytes
+        // The expander multiplies the SLOT COUNT (a '595 is serial-in: each WS2812 slot is shifted
+        // out over 8 bus words), exactly as frameBytesFor does for the operational frame. Omitting it
+        // here would build a frame 8× too small and transmit a truncated waveform.
+        const uint8_t opp = outputsPerPin();
+        const size_t perLightBytes = static_cast<size_t>(outCh) * 8 * 3 * sb * opp;
         const size_t testFrameBytes = static_cast<size_t>(lights) * perLightBytes;
         // Build the REAL frame with the test pattern in every row on lane 0 only;
         // the platform transmits the genuine transfer (size, DMA chain, latch pad)
@@ -640,19 +903,37 @@ protected:
             return;
         }
         std::memset(frame, 0, testFrameBytes);
-        // One light's wire bytes for lane 0 only (the loopback drives lane 0). The encoder reads
-        // wire[lane * outCh + ch] gated by activeMask = bit 0, so only wire[0..outCh) is read — size to
-        // outCh (no fixed 4-byte cap, matching the runtime encode). Off the hot path (control-driven).
-        auto* wire = static_cast<uint8_t*>(platform::alloc(outCh));
+        // One light's wire bytes, indexed BY STRAND (`wire[strand * outCh + ch]`, the encoder's
+        // layout). Direct mode drives lane 0, so byte 0 is enough — but shift mode can put the
+        // pattern on ANY strand (loopbackStrand, so the jumper can come off a spare '595 output), and
+        // the encoder would then read at `strand * outCh`. Size for the full strand range or that is
+        // an out-of-bounds read. Zeroed, so every strand but the chosen one is black.
+        const uint8_t patStrand = shiftMode() && loopbackStrand < kMaxStrands ? loopbackStrand
+                                                                              : uint8_t{0};
+        const size_t wireBytes = static_cast<size_t>(patStrand + 1) * outCh;
+        auto* wire = static_cast<uint8_t*>(platform::alloc(wireBytes));
         if (!wire) { platform::free(frame); clearFailBuf(); setStatus("loopback: out of memory", Severity::Error); return; }
-        std::memset(wire, 0, outCh);
-        wire[0] = 0xA5; if (outCh > 1) wire[1] = 0x00; if (outCh > 2) wire[2] = 0xFF;   // R/G/B pattern
+        std::memset(wire, 0, wireBytes);
+        uint8_t* pat = wire + static_cast<size_t>(patStrand) * outCh;   // the chosen strand's slot
+        pat[0] = 0xA5; if (outCh > 1) pat[1] = 0x00; if (outCh > 2) pat[2] = 0xFF;   // R/G/B pattern
         // Encode the pattern on lane 0 at the operational width. A wider bus adds only
         // idle high lanes (activeMask = bit 0); the private bus + loopbackTxPin override
         // carry lane 0's signal to the jumpered RX pin. Sized-per-slot so the 16-bit
         // buffer stride matches the 16-bit private bus.
-        if (sb == 1) encodeLoopbackFrame<uint8_t>(frame, wire, outCh, lights);
-        else         encodeLoopbackFrame<uint16_t>(frame, wire, outCh, lights);
+        //
+        // In SHIFT mode the pattern lands on strand 0 — which is data pin 0's '595, shift position 0,
+        // i.e. output **Q7** of that register (a '595 shifts MSB-first: the first bit clocked in ends
+        // up on the last output). That is the pin to jumper back; see the wiring note on the
+        // loopbackRxPin control. Everything else is identical, so the same rig verifies the whole
+        // chain through the shift register.
+        if (shiftMode()) {
+            if (sb == 1) encodeLoopbackFrameShift<uint8_t>(frame, wire, outCh, lights);
+            else         encodeLoopbackFrameShift<uint16_t>(frame, wire, outCh, lights);
+        } else if (sb == 1) {
+            encodeLoopbackFrame<uint8_t>(frame, wire, outCh, lights);
+        } else {
+            encodeLoopbackFrame<uint16_t>(frame, wire, outCh, lights);
+        }
         platform::free(wire);
         // dataBytes drives the RX capture's WS2812-bit count (kBits = dataBytes/3),
         // which is the wire signal on lane 0's RX pin — the SAME bit count at any bus
@@ -666,8 +947,14 @@ protected:
         // letting the test run on a dedicated jumper without re-typing `pins`. The
         // subclass busLoopback reads laneList_, so substitute lane 0 around the call
         // and restore it after, so the following reinit() rebuilds the real bus.
+        // The TX override is a DIRECT-mode affordance only. In shift mode the captured signal comes
+        // off a '595 output, not off a GPIO the driver can re-point — the strand is determined by
+        // which register output the jumper is on, not by which pin transmits. Substituting a pin here
+        // would just build the bus on the wrong GPIO, so ignore the override (busPinList() copies
+        // laneList_, and the '595s must stay wired to the real data pins for the test to mean
+        // anything).
         const uint16_t realLane0 = laneList_[0];
-        if (loopbackTxPin >= 0) laneList_[0] = static_cast<uint16_t>(loopbackTxPin);
+        if (loopbackTxPin >= 0 && !shiftMode()) laneList_[0] = static_cast<uint16_t>(loopbackTxPin);
         const auto r = derived()->busLoopback(frame, testFrameBytes, dataBytes,
                                               static_cast<uint8_t>(outCh * 8));
         laneList_[0] = realLane0;

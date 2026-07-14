@@ -55,6 +55,19 @@ public:
     /// startup, so the bus stays idle until the user sets them regardless. (Dropping WR/DC entirely
     /// needs a direct-LCD_CAM driver that bypasses esp_lcd, hpwit-style — backlogged, not this
     /// increment.)
+    ///
+    /// **`clockPin` is ONE pin doing TWO jobs, and with a 74HCT595 expander the second one is
+    /// load-bearing.** WR toggles once per bus word in hardware — which is exactly what a '595's
+    /// SRCLK (shift clock) needs — so the same wire serves both: the i80 pixel clock IS the shift
+    /// clock. That is the trick that makes the expander cost zero DMA bytes for its clock (hpwit
+    /// routes `LCD_PCLK_IDX` straight to the register's clock pin for the same reason).
+    ///
+    /// Two consequences worth knowing before editing this pin:
+    ///  - Every bus word clocks a bit INTO the shift register. That is why the LATCH must ride a
+    ///    *data lane* (a bit in every bus word) rather than a second clock output — the peripheral
+    ///    only gives us one — and why the latch's word position is so delicate (ParallelSlots.h).
+    ///  - In shift mode this pin is wired to the physical '595 clock line on the expander board.
+    ///    Changing it means re-wiring hardware, not just re-configuring.
     int8_t clockPin = 10;
     int8_t dcPin = 11;
 
@@ -71,6 +84,11 @@ public:
     // width (16-bit for a 16-lane driver) to match. (Parlio can do a 1-lane unit, so it sets false.)
     static constexpr bool kLoopbackFullWidth = true;
     static constexpr const char* kInitFailMsg = "i80 bus init failed — check pins / memory";
+
+    /// Spare bus lanes (shift mode, when the board has fewer data pins than the bus is wide) park on
+    /// WR: the peripheral already drives it and the board already wires it, so the lane is inert.
+    /// (Hides the base default; this is the "ghost pin" the platform layer uses for the same reason.)
+    uint16_t clockPinForBus() const { return static_cast<uint16_t>(clockPin); }
 
     /// Bind the i80-specific bus controls: the sacrificial WR (clockPin) and DC pins
     /// the peripheral mandates.
@@ -104,6 +122,17 @@ public:
     const char* validateBusFatal() const {
         if (clockPin >= 0 && clockPin == dcPin)
             return "clockPin (WR) and dcPin are the same GPIO — they must differ";
+        // The '595 latch is a BUS LANE, so it needs its own GPIO: sharing it with WR would make the
+        // pixel clock double as the latch (the '595 would present a byte on every shift cycle), and
+        // sharing it with DC would latch on the command phase. Both are fatal — the bus builds, but
+        // the strands get garbage — so this is an error, not a warning. (Bench-found: WR defaults to
+        // GPIO 10, which is the first pin a user reaches for when picking a latch.)
+        if (shiftMode() && latchPin >= 0) {
+            if (latchPin == clockPin)
+                return "latchPin is on clockPin (WR) — the latch needs its own GPIO";
+            if (latchPin == dcPin)
+                return "latchPin is on dcPin — the latch needs its own GPIO";
+        }
         return nullptr;
     }
 
@@ -121,10 +150,24 @@ public:
     /// Create the i80 bus + its DMA buffer(s) sized for `frameBytes` on the current data lanes plus
     /// the WR/DC pins; `wantSecondBuffer` requests the async double-buffer's second frame buffer
     /// (allocated only if it fits — else single-buffer). Returns whether init succeeded.
+    /// **LCD_CAM** is the one backend that can host the 74HCT595 expander: it reaches PSRAM (so the
+    /// ×8 frame fits), it has no single-transfer cap, and its WR pixel-clock pin IS the shift clock a
+    /// '595 needs. The classic ESP32 shares this class but not that backend — its i80 is the I2S
+    /// peripheral, whose DMA cannot read PSRAM at all, so a 154 KB frame has nowhere to live. Keying
+    /// the flag on `lcdLanes` (non-zero only on the LCD_CAM chips, S3/P4) makes the refusal a
+    /// compile-time property of the silicon rather than a runtime surprise, and the base then reports
+    /// it as a config error instead of letting the bus die at init with "check pins / memory".
+    static constexpr bool kSupportsShiftRegister = platform::lcdLanes > 0;
+
+    /// The bus pin list comes from the base: in shift mode it appends the latch to the data pins
+    /// (the latch is a bus lane), so the peripheral drives it. busClockMultiplier() tells the platform
+    /// how many bus words one WS2812 slot is shifted out over, so it can scale the pixel clock and the
+    /// slot keeps its wire duration.
     bool busInit(size_t frameBytes, bool wantSecondBuffer) {
-        return platform::i80Ws2812Init(i80_, laneList_, laneCount_,
+        return platform::i80Ws2812Init(i80_, this->busPinList(), this->busPinCount(),
                                        static_cast<uint16_t>(clockPin),
-                                       static_cast<uint16_t>(dcPin), frameBytes, wantSecondBuffer);
+                                       static_cast<uint16_t>(dcPin), frameBytes, wantSecondBuffer,
+                                       this->busClockMultiplier());
     }
     /// DMA buffer `i` (0/1) the base encodes into; buffer 1 is null when the second
     /// buffer didn't fit (single-buffer mode). Both are the same size (busCapacity).
@@ -146,11 +189,15 @@ public:
     /// carries the pattern on lane 0. Passes the WR/DC pins the init needs.
     platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
                                             size_t dataBytes, uint8_t rowBits) {
-        return platform::i80Ws2812Loopback(laneList_, laneCount_,
+        // The private bus is built from the base's bus pin list (which appends the latch in shift
+        // mode — the latch is a bus lane) and at the shift-mode pclk, so the test transmits exactly
+        // what the render loop does. In direct mode both reduce to today's behaviour.
+        return platform::i80Ws2812Loopback(this->busPinList(), this->busPinCount(),
                                            static_cast<uint16_t>(clockPin),
                                            static_cast<uint16_t>(dcPin),
                                            static_cast<uint16_t>(loopbackRxPin),
-                                           frame, frameBytes, dataBytes, rowBits);
+                                           frame, frameBytes, dataBytes, rowBits,
+                                           this->busClockMultiplier());
     }
 
     /// Store WR/DC alongside the data pins, so a clockPin/dcPin edit rebuilds the

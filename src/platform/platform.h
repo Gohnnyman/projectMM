@@ -618,9 +618,16 @@ struct I80Ws2812Handle { void* impl = nullptr; };
 // is never *required*). When `wantSecondBuffer` is false (default), NO second
 // buffer is allocated at all — the off path costs exactly one buffer. Returns
 // false only when buffer 0 (or the bus) can't be created (bad pins, DMA pressure).
+// `clockMultiplier` (1 = direct, 8 = a 74HCT595 shift-register expander on every data pin) scales
+// the pixel clock: a '595 is serial-in, so each WS2812 slot is shifted out over that many bus
+// words, and the bus must clock proportionally faster to keep the slot's duration on the wire.
+// The backend picks the exact rate its clock tree can divide to EXACTLY (an inexact rate is not an
+// error in esp_lcd — it silently rounds the prescale, which would emit a wrong waveform). A
+// multiplier > 1 is rejected on a backend that cannot DMA the resulting frame from PSRAM (the
+// classic-ESP32 I2S i80 path), rather than driving a frame the hardware can't sustain.
 bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                    uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
-                   bool wantSecondBuffer);
+                   bool wantSecondBuffer, uint8_t clockMultiplier = 1);
 
 // DMA frame buffer `buffer` (0 or 1) the driver encodes into (zero-copy).
 // Buffer 0 always exists once init succeeded; buffer 1 is null when the second
@@ -664,10 +671,17 @@ void i80Ws2812Deinit(I80Ws2812Handle& h);
 // short synthetic burst misses exactly the real-transfer failures (DMA
 // descriptor boundaries, sustained-rate stalls). Same result shape as the
 // RMT test; got[] holds the first mismatching row. No-op off the S3.
+// `clockMultiplier` > 1 = a 74HCT595 expander is fitted: the private bus is built at the
+// shift-mode pclk, and the GPIO CONTINUITY pre-check is SKIPPED. That pre-check drives the TX pin
+// and expects the RX pin to follow directly — true for a bare jumper, false through a shift
+// register (driving the serial input high does not raise an output; that takes 8 clocks + a latch),
+// so it would report "jumper not detected" on perfectly good wiring. The captured signal is the
+// real post-'595 WS2812 waveform, so the bit-verify itself is unchanged.
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                     uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
                                     const uint8_t* frame, size_t frameBytes,
-                                    size_t dataBytes, uint8_t rowBits);
+                                    size_t dataBytes, uint8_t rowBits,
+                                    uint8_t clockMultiplier = 1);
 
 // ---------------------------------------------------------------------------
 // Parlio (Parallel IO) WS2812 output — the ESP32-P4's parallel LED path, a

@@ -1151,7 +1151,8 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
 // ---------------------------------------------------------------------------
 bool i80Ws2812Init(I80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                    uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
-                   size_t /*bufferBytes*/, bool /*wantSecondBuffer*/) {
+                   size_t /*bufferBytes*/, bool /*wantSecondBuffer*/,
+                   uint8_t /*clockMultiplier*/) {
     return false;
 }
 uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
@@ -1164,7 +1165,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
                                     uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
                                     uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                     size_t /*frameBytes*/, size_t /*dataBytes*/,
-                                    uint8_t /*rowBits*/) {
+                                    uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/) {
     return {};   // not supported off the S3
 }
 
