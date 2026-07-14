@@ -49,16 +49,33 @@ namespace mm {
 // Studied, not copied; pinned bit-perfect by unit_ParallelSlots.cpp + the
 // on-device loopback self-test.
 
-// Transpose 8 lane bytes into 8 bit-plane bytes: out[b] bit L = in[L] bit b.
-// Inactive lanes must be passed as 0 (the caller masks them) so they contribute
-// no set bit to any plane. Three delta-swaps on the packed 64-bit matrix.
-inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
-    uint64_t x = 0;
-    for (int r = 0; r < 8; r++) x |= static_cast<uint64_t>(in[r]) << (8 * r);
+/// The 8×8 bit-transpose, on the PACKED representation — the form the hot path wants.
+///
+/// The matrix is one `uint64_t`: byte L is lane L's data byte, so bit (8·L + b) is lane L's bit b.
+/// Three delta-swaps later, byte b is the bit-plane for bit b (bit L of byte b = lane L's bit b).
+/// The textbook SWAR (Warren, *Hacker's Delight* §7-3) — this IS the body the array form below runs.
+///
+/// **Taking the packed word in and out is the point.** The array form makes the caller spill eight
+/// bytes to memory and the callee load them straight back, then spill eight result bytes the caller
+/// reloads one at a time. In the shift encoder that ceremony ran 24 times per light — and the staging
+/// cost more than the arithmetic it staged (measured: removing it took an S3 from 8.85 to 6.19 µs per
+/// light). A caller that can build the packed word straight from its source — the shift encoder can —
+/// keeps the whole transpose in registers.
+inline uint64_t transposeBits8x8(uint64_t x) {
     uint64_t t;
     t = (x ^ (x >> 7))  & 0x00AA00AA00AA00AAULL; x = x ^ t ^ (t << 7);
     t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL; x = x ^ t ^ (t << 14);
     t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL; x = x ^ t ^ (t << 28);
+    return x;
+}
+
+// Transpose 8 lane bytes into 8 bit-plane bytes: out[b] bit L = in[L] bit b.
+// Inactive lanes must be passed as 0 (the caller masks them) so they contribute
+// no set bit to any plane. The array-shaped wrapper around transposeBits8x8.
+inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
+    uint64_t x = 0;
+    for (int r = 0; r < 8; r++) x |= static_cast<uint64_t>(in[r]) << (8 * r);
+    x = transposeBits8x8(x);
     for (int c = 0; c < 8; c++) out[c] = static_cast<uint8_t>(x >> (8 * c));
 }
 
@@ -330,25 +347,41 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
 /// Called from the driver's `reinit()` (cold path) whenever the frame is rebuilt, and again whenever
 /// the active-strand set changes. `rows` is the strand length; the pad beyond it is left zeroed (a
 /// zeroed pad IS the WS2812 reset).
+/// Which pins carry an ACTIVE strand on each shift cycle, one bus word per cycle.
+///
+/// Per-CYCLE, not per-pin: cycle c clocks the bit for shift position `pos`, so the question is "is the
+/// strand at (pin, pos) live?" — a per-STRAND question. Aggregating one mask across all cycles ("pin P
+/// has some live lane") would drive the pulse-start HIGH on a cycle whose strand is exhausted, and two
+/// strands sharing a '595 (one long, one short) would make the short one flash white on every WS2812
+/// pulse. `out[c]` is written for every cycle c < outPerPin.
+///
+/// `encodeWs2812ShiftSlots` deliberately does NOT call this: there the same mask test is FUSED with the
+/// lane gather (one pass sets the active bit and reads the wire byte), so routing it through this helper
+/// would walk the pins twice and test each mask bit twice.
+template <class Slot>
+inline void shiftActivePins(uint64_t activeMask, uint8_t physPins, uint8_t outPerPin,
+                            Slot (&out)[kShiftOutputs]) {
+    constexpr uint8_t kLanes = sizeof(Slot) * 8;
+    for (uint8_t c = 0; c < outPerPin; c++) {
+        const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);   // '595 shifts MSB-first
+        Slot bits = 0;
+        for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
+            const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
+            if (activeMask & (uint64_t(1) << v)) bits |= static_cast<Slot>(Slot(1) << p);
+        }
+        out[c] = bits;
+    }
+}
+
 template <class Slot>
 inline void prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t physPins, uint8_t latchBit,
                                         uint8_t outPerPin, uint8_t channels, uint32_t rows,
                                         Slot* out) {
-    constexpr uint8_t kLanes = sizeof(Slot) * 8;
     if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
 
-    // Which pins carry an ACTIVE strand on each shift cycle. Per-cycle, not per-pin: cycle c clocks
-    // the bit for shift position `pos`, so the question is "is the strand at (pin, pos) live?" — an
-    // exhausted strand sharing a '595 with a longer one must keep clocking in 0 and stay dark.
     Slot activePins[kShiftOutputs] = {};
-    for (uint8_t c = 0; c < outPerPin; c++) {
-        const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);   // '595 shifts MSB-first
-        for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
-            const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
-            if (activeMask & (uint64_t(1) << v)) activePins[c] |= static_cast<Slot>(Slot(1) << p);
-        }
-    }
+    shiftActivePins<Slot>(activeMask, physPins, outPerPin, activePins);
 
     // Every channel, every bit of THIS row gets the same start/tail. The data word is left alone —
     // the encoder owns it.
@@ -381,23 +414,50 @@ inline void encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint
     if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
     for (uint8_t ch = 0; ch < channels; ch++) {
-        Slot plane[kShiftOutputs][8];
+        // The transposed bit-planes, held PACKED — one uint64 per shift cycle rather than an array of
+        // eight bytes. Byte `bit` of planes[c] IS the bit-plane for that bit (its bit P = pin P), so
+        // the emit loop shifts the byte it wants straight out of the register.
+        //
+        // **The staging arrays were the cost, not the butterfly.** The old form filled a `lanes[8]`
+        // array that the transpose immediately packed back into exactly this register, then spilled
+        // eight result bytes that the emit loop reloaded one at a time — 24 times per light. Measured
+        // on an S3 (board B, 16 strands through a '595): removing that ceremony took the encode from
+        // **8.85 to 6.19 µs/light**. The SWAR arithmetic itself is nearly free: a batched variant that
+        // packed four shift cycles into ONE butterfly (an 8×8 costs the same for 2 lanes as for 8) was
+        // built and measured, and changed nothing — so it was dropped rather than kept for elegance.
+        uint64_t planes[kShiftOutputs];
+        // The 16-lane bus is two INDEPENDENT 8-lane transposes (low byte = pins 0-7, high = pins 8-15),
+        // so it needs a second packed word. The 8-bit path never reads it and the compiler drops it.
+        uint64_t planesHi[kShiftOutputs];
+
         for (uint8_t c = 0; c < outPerPin; c++) {
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
-            uint8_t lanes[kLanes] = {};
+            // Pack the lane bytes straight into the SWAR word — no intermediate array.
+            uint64_t lo = 0, hi = 0;
             for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
                 const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
-                if (!(activeMask & (uint64_t(1) << v))) continue;   // inactive: idle LOW
-                lanes[p] = wire[static_cast<size_t>(v) * channels + ch];
+                if (!(activeMask & (uint64_t(1) << v))) continue;   // exhausted strand: idle LOW
+                const uint64_t b = wire[static_cast<size_t>(v) * channels + ch];
+                if (p < 8) lo |= b << (8 * p);
+                else       hi |= b << (8 * (p - 8));
             }
-            if constexpr (sizeof(Slot) == 1) transposeLanes8x8(lanes, plane[c]);
-            else                             transposeLanes16x8(lanes, plane[c]);
+            planes[c] = transposeBits8x8(lo);
+            if constexpr (sizeof(Slot) != 1) planesHi[c] = transposeBits8x8(hi);
         }
+
         for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte, as the wire contract
+            const uint8_t sh = static_cast<uint8_t>(8 * bit);   // byte `bit` of the packed plane
             for (uint8_t c = 0; c < outPerPin; c++) {
-                const Slot first = (c == 0) ? latch : Slot(0);
+                const Slot first = (c == 0) ? latch : Slot(0);   // RCLK rides word 0 of each slot
+                Slot data;
+                if constexpr (sizeof(Slot) == 1) {
+                    data = static_cast<Slot>(planes[c] >> sh);
+                } else {
+                    data = static_cast<Slot>((planes[c] >> sh) & 0xFF)
+                         | static_cast<Slot>(((planesHi[c] >> sh) & 0xFF) << 8);
+                }
                 // ONLY the data word. out[c] and out[2*outPerPin + c] are the prefilled constants.
-                out[outPerPin + c] = static_cast<Slot>(plane[c][bit] | first);
+                out[outPerPin + c] = static_cast<Slot>(data | first);
             }
             out += 3 * outPerPin;
         }

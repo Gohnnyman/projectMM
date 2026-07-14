@@ -754,7 +754,7 @@ using MoonI80EncodeFn = void (*)(void* user, uint8_t* dst, uint32_t firstRow, ui
                                  bool closeFrame);
 
 bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
-                       uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
+                       uint16_t wrGpio, size_t bufferBytes,
                        bool wantSecondBuffer, uint8_t clockMultiplier = 1);
 
 // Bring the bus up in RING mode instead of whole-frame mode. `rowBytes` is what one row (one light
@@ -762,7 +762,7 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
 // them. `encode` is called per drained buffer, from the EOF ISR, to fill the next slice.
 // Returns false if the ring cannot be built (then the caller falls back to the whole-frame path).
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
-                           uint16_t wrGpio, uint16_t dcGpio, size_t rowBytes, uint32_t totalRows,
+                           uint16_t wrGpio, size_t rowBytes, uint32_t totalRows,
                            size_t padBytes, uint8_t clockMultiplier,
                            MoonI80EncodeFn encode, void* user);
 
@@ -779,7 +779,7 @@ bool moonI80Ws2812Wait(MoonI80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutM
 uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& h);
 void moonI80Ws2812Deinit(MoonI80Ws2812Handle& h);
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
-                                        uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
+                                        uint16_t wrGpio, uint16_t rxGpio,
                                         const uint8_t* frame, size_t frameBytes,
                                         size_t dataBytes, uint8_t rowBits,
                                         uint8_t clockMultiplier = 1);

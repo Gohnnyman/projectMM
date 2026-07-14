@@ -280,8 +280,11 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // big for internal RAM still runs, just poorly, rather than refusing to drive at all).
     //
     // Full account + what has already been ruled out: docs/backlog/shift-register-driver-analysis.md § 7.5.
-    const bool shiftMode = clockMultiplier > 1;
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
+    // Only the LCD_CAM backend can reach PSRAM at all, so the preference only exists here. (The
+    // classic ESP32's i80 is the I2S peripheral, whose DMA cannot address PSRAM — it takes the
+    // internal-only path below unconditionally, and never asks the question.)
+    const bool shiftMode = clockMultiplier > 1;
     if (!shiftMode)
         st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
             st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));

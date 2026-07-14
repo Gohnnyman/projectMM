@@ -27,7 +27,10 @@ using mm::nrOfLightsType;
 class MockShiftDriver : public mm::ParallelLedDriver<MockShiftDriver> {
 public:
     static constexpr uint8_t lanesAvailable() { return 8; }   // 8 data lines, like an 8-bit bus
-    static constexpr bool kExactLaneCount = false;            // no exact-width rule in the mock
+    // The i80 shape: the BUS rounds to 8/16 whatever the pin count, so the driver pads the lane list.
+    // (Parlio, the other shape, sets this false — its bus width IS the pin count.) The expander only
+    // ever runs on an i80-shaped bus, so the mock models that one.
+    static constexpr bool kPowerOfTwoBus = true;
     static constexpr bool kLoopbackFullWidth = false;
     static constexpr bool kSupportsShiftRegister = true;      // memory bus: the expander is allowed
     static constexpr const char* kInitFailMsg = "mock init failed";
@@ -72,6 +75,11 @@ public:
     // Test-only view of the derived lane math.
     uint8_t physPinsForTest() const { return physPins_; }
     size_t transmitCount() const { return transmits_; }
+    // The GPIO list + length handed to the PERIPHERAL — the two must agree, or the platform reads off
+    // the end of the array. See the padding test below.
+    const uint16_t* busPinListForTest() { return this->busPinList(); }
+    uint8_t busPinCountForTest() const { return this->busPinCount(); }
+    uint16_t clockPinForBus() const { return 99; }   // a recognisable "parked here" sentinel
 
 private:
     std::vector<uint8_t> buf_;
@@ -432,4 +440,74 @@ TEST_CASE("streaming ring: a sliced encode is byte-identical to the whole-frame 
     }
 
     CHECK(std::memcmp(refBuf.data(), sliceBuf.data(), bytes) == 0);
+}
+
+// **The pin list handed to the peripheral must be exactly as long as the count that goes with it.**
+// The BUS is 8 or 16 bits wide whatever the board drives, so a 3-pin board still hands the peripheral
+// an 8-entry list: 3 data lanes, then the spares parked on the clock pin (a real GPIO the peripheral
+// already drives, so the lane is inert). This is what lets a board name only the pins it uses.
+//
+// The bug this pins: busPinList() used to shortcut `if (!shiftMode()) return laneList_` — the RAW,
+// unpadded list — while busPinCount() reported the rounded width. With fewer pins than the bus is
+// wide, the platform would then read past the end of laneList_. Direct mode never hit it only because
+// the validation rejected any count but 8 or 16; allowing any count is what exposes it.
+TEST_CASE("bus pin list is padded to the full bus width, in both modes") {
+    mm::Buffer src;
+    mm::Correction corr;
+
+    SUBCASE("direct mode: 3 pins → 8 lanes, 5 parked on the clock pin") {
+        MockShiftDriver d;
+        wire(d, src, corr, 64, "1,2,4", /*shiftOn=*/false, /*latch=*/-1);
+
+        REQUIRE(d.busPinCountForTest() == 8);        // the BUS width, not the pin count
+        const uint16_t* list = d.busPinListForTest();
+        CHECK(list[0] == 1);
+        CHECK(list[1] == 2);
+        CHECK(list[2] == 4);
+        for (uint8_t i = 3; i < 8; i++) CHECK(list[i] == 99);   // parked on clockPinForBus()
+    }
+
+    SUBCASE("shift mode: 2 pins + latch → 8 lanes, the rest parked") {
+        MockShiftDriver d;
+        wire(d, src, corr, 64, "1,2", /*shiftOn=*/true, /*latch=*/7);
+
+        REQUIRE(d.busPinCountForTest() == 8);
+        const uint16_t* list = d.busPinListForTest();
+        CHECK(list[0] == 1);
+        CHECK(list[1] == 2);
+        CHECK(list[2] == 7);                                    // the latch takes bus bit physPins_
+        for (uint8_t i = 3; i < 8; i++) CHECK(list[i] == 99);
+    }
+
+    // (The 16-bit bus is exercised in unit_I80LedDriver, on a driver whose chip actually HAS 16 lanes;
+    // this mock declares 8, so a 9th pin is correctly clamped away rather than widening the bus.)
+}
+
+// **The shift-mode loopback frame must reserve the trailing latch word it unconditionally writes.**
+//
+// encodeLoopbackFrameShift emits `lights` rows and then ALWAYS calls encodeWs2812ShiftLatchPad to
+// close the frame — one extra Slot past the last row. The buffer was sized for the rows only, so that
+// final word landed one-to-two bytes past the end of the heap block: a real overrun on every shift-mode
+// loopback, silent on a forgiving allocator and a crash on an unlucky one. (Direct mode writes no pad,
+// so it is unaffected — and that asymmetry is why sizing them the same was wrong.)
+//
+// The bug is a heap write, so the assertion that really catches it is the sanitizer, not a CHECK: run
+// this suite under ASan and the pre-fix code trips heap-buffer-overflow here. What the CHECKs below can
+// pin on their own is that the loopback ran to completion and left the driver healthy rather than
+// tripping the out-of-memory path.
+TEST_CASE("shift register: the loopback frame has room for its closing latch word") {
+    MockShiftDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 16 * 8, "1,2", /*shiftOn=*/true, /*latch=*/3);
+    REQUIRE(d.laneCount() == 16);          // 2 pins x 8 outputs
+
+    d.loopbackTest = true;
+    d.loopbackStrand = 0;
+    d.applyState();                        // arms the self-test
+    d.tick();                              // builds + "transmits" the test frame (mock bus)
+
+    // It must not have fallen into the out-of-memory branch, and must still be a live driver.
+    CHECK(d.severity() != MockShiftDriver::Severity::Error);
+    CHECK(d.laneCount() == 16);
 }

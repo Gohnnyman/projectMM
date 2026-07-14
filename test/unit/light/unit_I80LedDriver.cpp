@@ -38,9 +38,11 @@ void wire(mm::I80LedDriver& d, mm::Buffer& src, mm::Correction& corr,
 
 // frameBytes = maxLaneLights × outCh × 24 + 800 latch pad + 64 clock-tolerance
 // slack, rounded up to 64 (mirrors ParallelLedDriver::frameBytesFor).
-size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh) {
+// `slotBytes` is the BUS width in bytes: 1 for the 8-bit bus (≤8 pins), 2 for the 16-bit bus (9..16).
+// It scales both the slot stream and the latch pad, exactly as ParallelLedDriver::frameBytesFor does.
+size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotBytes = 1) {
     if (maxLights == 0) return 0;
-    const size_t raw = static_cast<size_t>(maxLights) * outCh * 24 + 800 + 64;
+    const size_t raw = static_cast<size_t>(maxLights) * outCh * 24 * slotBytes + (800 + 64) * slotBytes;
     return (raw + 63) & ~static_cast<size_t>(63);
 }
 
@@ -140,40 +142,50 @@ TEST_CASE("I80LedDriver with the empty default pins idles cleanly") {
     d.tick();                             // must be a no-op, not a crash
 }
 
-// IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than
-// 8 pins is a config error, not a narrower bus.
-// The i80 bus width is power-of-two only (8 or 16) and rejects NC data pins, so LCD
-// accepts EXACTLY 8 or 16 real pins; anything else (3, 10, 17) is a config error.
-TEST_CASE("I80LedDriver requires exactly 8 or 16 pins") {
+// **The BUS width is 8 or 16; the PIN COUNT is whatever the board drives.** They are different
+// numbers and the driver reconciles them: the peripheral always clocks a full 8- or 16-bit word, but
+// nothing requires every bit to reach a GPIO — busPinList() parks the lanes the board doesn't use on
+// WR, where the peripheral already drives and no strand reads them. So a 5-pin board is 5 data lanes
+// on an 8-bit bus, not a config error, and needs no fake "ghost" pins to pad the list out.
+TEST_CASE("I80LedDriver drives any pin count; the bus rounds up around it") {
     mm::Buffer src;
     mm::Correction corr;
-    {   // 3 pins → error (not 8 or 16)
+    {   // 3 pins → 3 lanes on the 8-bit bus, the spare 5 parked on WR.
         mm::I80LedDriver d;
         std::strcpy(d.pins, "1,2,4");
         wire(d, src, corr, 64);
-        CHECK(d.laneCount() == 0);
-        CHECK(d.frameBytes() == 0);
-        REQUIRE(d.status() != nullptr);
-        CHECK(std::strcmp(d.status(), "i80 bus needs exactly 8 or 16 pins") == 0);
+        CHECK(d.laneCount() == 3);
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);
+        // 64 lights over 3 lanes → the longest is 22. ≤8 pins → the 8-bit bus → 1-byte slots, which is
+        // what expectFrame() assumes — so a plain expectFrame match IS the "bus stayed 8-bit" assertion.
+        CHECK(d.maxLaneLights() == 22);
+        CHECK(d.frameBytes() == expectFrame(22, 3));
     }
-    {   // 16 pins → valid (the 16-bit bus). clock/dc moved clear of the data set
+    {   // 16 pins → the full 16-bit bus, nothing parked. clock/dc moved clear of the data set
         // (defaults 10/11 would collide with data pins 10/11 → the collision guard).
         mm::I80LedDriver d;
         d.clockPin = 20; d.dcPin = 21;
         std::strcpy(d.pins, "1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17");
         wire(d, src, corr, 64);
         CHECK(d.laneCount() == 16);
-        CHECK(d.severity() != mm::MoonModule::Severity::Error);   // 16 valid → info, not error
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);
+        CHECK(d.maxLaneLights() == 4);
+        CHECK(d.frameBytes() == expectFrame(4, 3, /*slotBytes=*/2));   // 16 pins → the 16-bit bus
     }
-    {   // 10 pins → error (between 8 and 16, not a valid bus width)
+    {   // 10 pins — the case the old "exactly 8 or 16" rule rejected outright. It is a perfectly good
+        // config: 10 data lanes on the 16-bit bus, the other 6 parked. This is the point of the change.
         mm::I80LedDriver d;
         d.clockPin = 20; d.dcPin = 21;
         std::strcpy(d.pins, "1,2,4,5,6,7,8,9,12,13");
         wire(d, src, corr, 64);
-        CHECK(d.laneCount() == 0);
-        REQUIRE(d.status() != nullptr);
-        CHECK(std::strcmp(d.status(), "i80 bus needs exactly 8 or 16 pins") == 0);
+        CHECK(d.laneCount() == 10);
+        CHECK(d.severity() != mm::MoonModule::Severity::Error);
+        // 64 over 10 lanes → 6 each, the last taking the remainder (PinList's even-split rule) → 10.
+        // >8 pins → the 16-bit bus → 2-byte slots.
+        CHECK(d.maxLaneLights() == 10);
+        CHECK(d.frameBytes() == expectFrame(10, 3, /*slotBytes=*/2));
     }
+    // (0 pins → idles: covered by "I80LedDriver with the empty default pins idles cleanly" above.)
 }
 
 // A data lane on the same GPIO as the WR (clockPin) or DC pin is a WARNING, not a

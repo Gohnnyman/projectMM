@@ -78,7 +78,7 @@ public:
     /// `lcdLanes` (LCD_CAM, S3/P4) or `i2sLanes` (I2S-i80, classic ESP32) — which are mutually
     /// exclusive per chip (at most one is non-zero), so the sum picks the right one.
     static constexpr uint8_t lanesAvailable() { return platform::lcdLanes + platform::i2sLanes; }
-    static constexpr bool kExactLaneCount = true;   // i80 needs exactly 8 or 16 data lanes
+    static constexpr bool kPowerOfTwoBus = true;   // the BUS rounds to 8/16; the pin count is free
     // The i80 loopback can't build a 1-lane private bus, so it rebuilds the FULL-WIDTH bus and
     // carries the pattern on lane 0 — the loopback frame must be encoded at the operational bus
     // width (16-bit for a 16-lane driver) to match. (Parlio can do a 1-lane unit, so it sets false.)

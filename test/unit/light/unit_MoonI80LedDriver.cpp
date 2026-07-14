@@ -19,7 +19,8 @@
 // So these cases pin only what is genuinely MoonI80's own:
 //   - it satisfies the CRTP contract (it instantiates and configures at all);
 //   - the constants that DIFFER from its sibling — chiefly that it is LCD_CAM-only;
-//   - its own bus-pin validation (a data lane on WR/DC is silent strand corruption).
+//   - its own bus-pin validation, and the fact that it needs FEWER pins than the sibling: no DC at
+//     all, and WR only under the expander (owning the GPIO matrix is what buys that).
 //
 // The hardware half (our GDMA descriptor chain) is inert on the host — desktop stubs return
 // false/nullptr and `lanesAvailable()` is 0 — and is proven on the S3 bench.
@@ -50,48 +51,53 @@ TEST_CASE("MoonI80LedDriver is LCD_CAM-only — it does not claim the classic ES
     CHECK(mm::MoonI80LedDriver::kSupportsShiftRegister == (mm::platform::lcdLanes > 0));
 }
 
-// The i80 peripheral rejects a partial bus (it configures all 8 or all 16 data lines), so the base's
-// exact-lane-count rule must be on — same as the sibling. And the loopback cannot build a 1-lane
-// private bus, so its test frame is encoded at the full operational width.
-TEST_CASE("MoonI80LedDriver keeps the i80 bus rules: exact lane count, full-width loopback") {
-    CHECK(mm::MoonI80LedDriver::kExactLaneCount);
+// The i80 BUS is 8 or 16 bits wide whatever the pin count, so the base rounds it up (kPowerOfTwoBus)
+// and parks the lanes the board does not use. And the loopback cannot build a 1-lane private bus, so
+// its test frame is encoded at the full operational width.
+TEST_CASE("MoonI80LedDriver keeps the i80 bus rules: power-of-two bus, full-width loopback") {
+    CHECK(mm::MoonI80LedDriver::kPowerOfTwoBus);
     CHECK(mm::MoonI80LedDriver::kLoopbackFullWidth);
 }
 
-// A data lane on WR or DC is SILENT corruption, not a clean failure: the GPIO matrix routes two
-// signals to the one pin, and that strand emits the clock or DC waveform instead of pixel data. The
-// driver must catch it rather than drive garbage.
-TEST_CASE("MoonI80LedDriver rejects a data pin on the clock or DC pin") {
+// **The bus control pins are a '595 cost, not an i80 cost — and owning the DMA is what proves it.**
+// DC exists so an LCD panel can separate command bytes from data bytes; a WS2812 strand has no such
+// concept, and the peripheral holds DC at a constant level. WR is the pixel clock, which only a shift
+// register consumes (as SRCLK) — WS2812 is self-clocked, so a strand ignores it. esp_lcd mandates a
+// valid GPIO for BOTH regardless (`wr_gpio_num >= 0 && dc_gpio_num >= 0`), which is why the sibling
+// still spends two pins on them. This backend routes its own GPIO matrix, so it routes neither in
+// direct mode: there is no dcPin at all, and clockPin reaches a pad only under the expander.
+//
+// The observable consequence, and what this case pins: in DIRECT mode `clockPin` may freely name a
+// GPIO that a strand also uses, because the signal never leaves the peripheral. Rejecting that would
+// forbid a working config to protect a signal nobody reads.
+TEST_CASE("MoonI80LedDriver direct mode: clockPin is unrouted, so it cannot collide") {
     mm::MoonI80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    std::strcpy(d.pins, "1,2,4,5,6,7,8,10");   // pin 10 IS the default clockPin (WR)
+    std::strcpy(d.pins, "1,2,4,5,6,7,8,10");   // pin 10 IS the default clockPin (WR) — fine here
+    wire(d, src, corr, 8 * 16);
+    CHECK(d.severity() != mm::MoonI80LedDriver::Severity::Error);
+    CHECK(d.laneCount() == 8);   // it drives all eight strands
+}
+
+// Under the expander WR IS routed (it clocks the '595s), so now it can collide — and a data lane
+// sharing it is silent corruption: the matrix drives both signals onto the one pad and that strand
+// emits the shift clock instead of pixel data.
+TEST_CASE("MoonI80LedDriver shift mode: a data pin on clockPin (WR) is caught") {
+    mm::MoonI80LedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    d.shiftRegister = true;
+    d.latchPin = 12;
+    std::strcpy(d.pins, "1,2,10");   // pin 10 IS clockPin, and here WR is a real pad
     wire(d, src, corr, 8 * 16);
     CHECK(d.severity() != mm::MoonI80LedDriver::Severity::Status);   // it complains
-
-    mm::MoonI80LedDriver d2;
-    mm::Buffer src2;
-    mm::Correction corr2;
-    std::strcpy(d2.pins, "1,2,4,5,6,7,8,11");   // pin 11 IS the default dcPin
-    wire(d2, src2, corr2, 8 * 16);
-    CHECK(d2.severity() != mm::MoonI80LedDriver::Severity::Status);
 }
 
-// WR and DC on the same GPIO is fatal — the peripheral needs both, distinctly.
-TEST_CASE("MoonI80LedDriver rejects clockPin == dcPin") {
-    mm::MoonI80LedDriver d;
-    mm::Buffer src;
-    mm::Correction corr;
-    d.dcPin = d.clockPin;
-    wire(d, src, corr, 8 * 16);
-    CHECK(d.severity() == mm::MoonI80LedDriver::Severity::Error);
-    CHECK(d.laneCount() == 0);   // idles rather than driving a bus it cannot build
-}
-
-// The '595 latch rides a DATA lane (the peripheral gives only one clock output, and WR is already
-// the shift clock), so it must not collide with WR or DC either.
-TEST_CASE("MoonI80LedDriver rejects a latchPin on WR or DC") {
-    // On WR: the latch would ride the shift clock itself, so nothing would ever latch.
+// The '595 latch rides a DATA lane (the peripheral gives only one clock output, and WR is already the
+// shift clock), so it must not land on WR — the latch would ride the shift clock itself and nothing
+// would ever latch, which looks like a dead strip rather than a config error.
+TEST_CASE("MoonI80LedDriver rejects a latchPin on WR") {
     mm::MoonI80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -99,16 +105,6 @@ TEST_CASE("MoonI80LedDriver rejects a latchPin on WR or DC") {
     d.latchPin = d.clockPin;
     wire(d, src, corr, 8 * 16);
     CHECK(d.severity() == mm::MoonI80LedDriver::Severity::Error);
-
-    // On DC: the symmetric branch. Both are fatal, and both must say so — a latch sharing a pin is a
-    // '595 that never presents a byte, which looks like a dead strip rather than a config error.
-    mm::MoonI80LedDriver d2;
-    mm::Buffer src2;
-    mm::Correction corr2;
-    d2.shiftRegister = true;
-    d2.latchPin = d2.dcPin;
-    wire(d2, src2, corr2, 8 * 16);
-    CHECK(d2.severity() == mm::MoonI80LedDriver::Severity::Error);
 }
 
 // Sanity: with a valid config the driver is a working CRTP sibling — it slices lanes and reports the

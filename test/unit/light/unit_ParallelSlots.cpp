@@ -603,3 +603,55 @@ TEST_CASE("shift encoder: prefill + data-only agree on an exhausted strand") {
 
     CHECK(std::memcmp(whole.data(), split.data(), whole.size()) == 0);
 }
+
+// **The hot-path sweep — the safety net for the packed-transpose rewrite.**
+//
+// `encodeWs2812ShiftData` keeps the whole transpose in registers: it packs the lane bytes straight
+// into the SWAR word and shifts each bit-plane byte back out, with no staging arrays. The packing
+// depends on the PIN COUNT, and the 16-bit bus adds a second packed word (pins 8-15) — so there are
+// several distinct paths, and a wrong shift or mask in any of them silently corrupts a strand.
+//
+// So sweep every pin count against the whole-slot encoder, on BOTH bus widths, with a dense pattern
+// and exhausted strands mixed in. `encodeWs2812ShiftSlots` is the reference: the simple, unoptimised
+// form that the '595 simulator already validates end-to-end. (This sweep earned its keep immediately:
+// it caught a real bug in a batched-transpose variant that the rest of the suite passed clean.)
+TEST_CASE("shift encoder: the packed transpose matches the reference at every pin count") {
+    constexpr uint8_t kCh = 3;
+
+    auto sweep = [&](auto slotTag, uint8_t physPins, uint64_t activeMask) {
+        using Slot = decltype(slotTag);
+        const uint8_t latchBit = static_cast<uint8_t>(sizeof(Slot) == 1 ? 7 : 15);
+        const size_t slots = static_cast<size_t>(kCh) * 8 * 3 * kSh;
+
+        // A dense, varied wire — every strand a different byte, so a mis-shifted bit shows up.
+        uint8_t wire[64 * kCh];
+        for (size_t i = 0; i < sizeof(wire); i++) wire[i] = static_cast<uint8_t>(i * 53 + 7);
+
+        std::vector<Slot> ref(slots, 0), got(slots, 0);
+        mm::encodeWs2812ShiftSlots<Slot>(wire, activeMask, physPins, latchBit, kSh, kCh, ref.data());
+        mm::prefillWs2812ShiftConstants<Slot>(activeMask, physPins, latchBit, kSh, kCh, 1, got.data());
+        mm::encodeWs2812ShiftData<Slot>(wire, activeMask, physPins, latchBit, kSh, kCh, got.data());
+
+        INFO("bus=", sizeof(Slot), " physPins=", physPins, " mask=", activeMask);
+        CHECK(std::memcmp(ref.data(), got.data(), slots * sizeof(Slot)) == 0);
+    };
+
+    for (uint8_t pins = 1; pins <= 8; pins++) {
+        const uint64_t all = (pins * kSh >= 64) ? ~0ull : ((1ull << (pins * kSh)) - 1u);
+        sweep(uint8_t{0}, pins, all);          // 8-bit bus, every strand live
+        sweep(uint8_t{0}, pins, all & 0x5555555555555555ull);   // every other strand exhausted
+        sweep(uint8_t{0}, pins, 1u);           // only strand 0 — the sparsest case
+    }
+    // The 16-bit bus: the second packed word, and pin counts that span the 8-lane split.
+    //
+    // Capped at 8 pins, because that is what the hardware allows: the expander fans each pin out to
+    // kShiftOutputs strands, and the driver rejects anything past kMaxStrands (64) — so 8 pins × 8 is
+    // the ceiling, and a 9th pin is a configuration that can never reach this encoder. (Sweeping past
+    // it would also shift a uint64 activeMask by ≥64, which is undefined behaviour in the TEST.)
+    for (uint8_t pins = 1; pins <= 8; pins++) {
+        const uint64_t all = (pins * kSh >= 64) ? ~0ull : ((1ull << (pins * kSh)) - 1u);
+        sweep(uint16_t{0}, pins, all);
+        sweep(uint16_t{0}, pins, all & 0x3333333333333333ull);
+        sweep(uint16_t{0}, pins, 1u);
+    }
+}

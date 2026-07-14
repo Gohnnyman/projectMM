@@ -173,11 +173,25 @@ The preview's transport — resumable cross-tick send from a stable buffer + new
 
 ## LCD / DMA driver work
 
-### Drop the i80 WR/DC sacrificial pins (S3 I80LedDriver) via direct LCD_CAM
+### MoonI80 shift-mode loopback stalls the bus
 
-The S3 i80 LED path costs **two GPIOs the LEDs never use**: the IDF `esp_lcd` i80 bus hard-requires a WR (pixel clock) and a DC pin on real GPIOs (`esp_lcd_panel_io_i80.c`: `wr_gpio_num >= 0 && dc_gpio_num >= 0`), even though WS2812 strands ignore both. Today `I80LedDriver` keeps overridable defaults (clockPin=10, dcPin=11) — peripheral-required, not user-strand wiring, so a default cannot do harm. **Two ways to reclaim the pins, neither trivial:**
-- **Cannot reuse a data pin for WR/DC.** A GPIO carries exactly one peripheral signal (`esp_rom_gpio_connect_out_signal` binds data_sig[i] / wr_sig / dc_sig each to its own pin); routing WR onto a data lane would clock the *clock* waveform onto that strand instead of its colour bytes. WR/DC must be distinct *physical* pins from the 8 data pins. (You CAN already point them at any otherwise-free or unstrapped GPIO via the controls — that's the "reuse a pin you're not using" answer; it's the *spare* pin you avoid, not a data pin.)
-- **Zero WR/DC pins needs bypassing esp_lcd** and driving the LCD_CAM peripheral's registers directly (hpwit's I2SClockless approach — legacy parallel mode has no DC concept and emits WR without a dedicated config pin). That's the only path to 8-pins-total on the S3. Cost: leaving the recognisable IDF `esp_lcd` API for register-banging (a *Common patterns first* hit), re-proving the driver bit-perfect on hardware (the loopback self-test is the proof). Benefit: 2 GPIOs back on a tight S3 board. Its own increment, not a pin-default tweak. Parlio (P4) already needs no extra pins (`clk_out_gpio_num = GPIO_NUM_NC`), so this is S3-i80-only.
+Turning `loopbackTest` on with the 74HCT595 expander fitted **kills the output**: the status goes to "output stalled — the bus is not delivering frames" (the dead-frame guard, after 8 frames with no completion) and `wireUs` goes blank. **A reboot recovers it**, so nothing persistent is corrupted; the bus simply never comes back.
+
+(A white/blue region on one panel during this is *not* part of the bug: those lights sit beyond `ledsPerPin`, so the driver never addresses them and they hold their power-on latch until the strip is power-cycled. Expected WS2812 behaviour for un-driven lights, unrelated to the loopback.)
+
+Bench: board B (S3, `pins=9,10`, `shiftRegister` on, `latchPin=46`), jumper from a '595 output to GPIO 16, `loopbackRxPin=16`. **Independent of `loopbackStrand`** — 0 and 15 (the wired one) fail identically, so the strand selection is not the trigger.
+
+**Prime suspect: the full-width private-bus rebuild.** `kLoopbackFullWidth = true` makes the loopback tear the operational bus down, build a private one for the test frame, and rebuild — and the evidence says it never rebuilds. Worth checking the teardown/rebuild path before anything else.
+
+**Root cause: this path has no test at all.** Nothing in the suite drives shift-mode loopback end-to-end, which is exactly how a *second* bug — `encodeLoopbackFrameShift` writing its closing latch word one Slot past the end of the heap block — lived there unnoticed until 2026-07-14. That overrun is fixed and the loopback frame now reserves the pad, but it did **not** fix this stall. So the first step is the missing test: drive shift-mode loopback through the mock bus, then chase the rebuild.
+
+Note ASan cannot help locally — a macOS ASan build of `mm_tests` hangs before producing output (see [lessons.md](../history/lessons.md)); the Linux CI ASan job is the only sanitizer that runs.
+
+### Drop the i80 WR/DC sacrificial pins — done for MoonI80, open for I80
+
+**Shipped for `MoonI80LedDriver` (2026-07-14).** Owning the GPIO matrix is what bought it: the matrix is a routing fabric, so a peripheral signal that is never connected to a pad simply stays inside the peripheral. `dcPin` is **gone entirely** (DC separates command from data bytes for an LCD panel; WS2812 has no such concept, and the peripheral holds it at a constant level), and WR is routed **only** when a '595 needs it as SRCLK — in direct mode WS2812 is self-clocked, nothing reads WR, and the pin stays free for a strand. Same trick frees the *spare data lanes*: they are simply not routed, rather than parked on a "ghost" GPIO. So a direct-mode MoonI80 board spends its GPIOs on strands alone.
+
+**Still open for `I80LedDriver`, and it cannot be fixed there.** IDF's `esp_lcd` hard-requires both (`esp_lcd_panel_io_i80.c`: `wr_gpio_num >= 0 && dc_gpio_num >= 0`) and rejects an NC data pin, which is *why* it must park spare lanes on a real GPIO. Reclaiming the two pins on that driver means leaving `esp_lcd` — which is precisely what MoonI80 already is. So this is not a change to make to `I80LedDriver`; it is a reason to prefer MoonI80 once it is proven. Parlio (P4) never needed the pins (`clk_out_gpio_num = GPIO_NUM_NC`).
 
 ### Parlio DMA frame buffer → PSRAM (free internal SRAM for big frames)
 

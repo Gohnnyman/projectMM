@@ -12,8 +12,9 @@ namespace mm {
 /// i80 driver:
 ///  - NO clockPin/dcPin: Parlio generates the pixel clock itself (kClockHz), so there are no
 ///    sacrificial WR/DC lines (addBusControls is empty).
-///  - kExactLaneCount = false: i80 rejects a partial bus; Parlio runs on 1..16 lanes (kMaxLanes) — whatever
-///    `pins` names.
+///  - kPowerOfTwoBus = false: Parlio's bus width IS the pin count (any 1..16), so nothing rounds. The
+///    i80 bus is 8 or 16 bits wide whatever the pin count, and parks the lanes it doesn't need on WR.
+///    Either way the user names only the pins that drive a strand.
 ///
 /// Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812 lineage —
 /// architecture studied, never copied.
@@ -33,7 +34,7 @@ public:
     /// The number of Parlio lanes this chip provides (0 = not this chip); the base's
     /// inert-on-wrong-chip guards key off it.
     static constexpr uint8_t lanesAvailable() { return platform::parlioLanes; }
-    static constexpr bool kExactLaneCount = false;   // 1..16 lanes all valid
+    static constexpr bool kPowerOfTwoBus = false;   // 1..16 lanes all valid
     // Parlio builds a 1-lane private unit for the loopback, so the loopback frame stays 8-bit
     // regardless of the operational bus width (unlike i80, which needs a full-width bus).
     static constexpr bool kLoopbackFullWidth = false;

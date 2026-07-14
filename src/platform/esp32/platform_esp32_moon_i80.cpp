@@ -300,22 +300,36 @@ bool initPeripheral(MoonI80State* st, uint32_t pclkHz) {
     return true;
 }
 
-// Route the peripheral's signals onto real pins through the GPIO matrix. Replicates
-// lcd_i80_bus_configure_gpio (esp_lcd_panel_io_i80.c:722-746).
-void configureGpio(const uint16_t* dataPins, uint8_t laneCount, size_t busWidth,
-                   uint16_t wrGpio, uint16_t dcGpio) {
-    // Every data line up to busWidth must be driven: the peripheral clocks all of them regardless,
-    // so a board with fewer real lanes parks the remainder on the WR "ghost pin" (hpwit's trick) —
-    // WR toggles on it harmlessly, and the domain driver clears those lanes' activeMask so they idle.
-    for (size_t i = 0; i < busWidth; i++) {
-        const uint16_t pin = (i < laneCount) ? dataPins[i] : wrGpio;
-        gpio_func_sel(static_cast<gpio_num_t>(pin), PIN_FUNC_GPIO);
-        esp_rom_gpio_connect_out_signal(pin, soc_lcd_i80_signals[kBusId].data_sigs[i], false, false);
+// Route the peripheral's signals onto real pins through the GPIO matrix.
+//
+// **We route only what a strand actually reads, which for WS2812 is the data lines and nothing else.**
+// The GPIO matrix is a routing fabric, not a broadcast: a peripheral signal that is never connected to
+// a pad simply stays inside the peripheral. So the lanes the board doesn't use, and the two bus control
+// lines, cost zero GPIOs:
+//
+//   - **Spare data lanes.** The peripheral clocks all 8/16 lines whatever the pin count, but the ones
+//     past `laneCount` go nowhere. (`esp_lcd` cannot do this — it rejects an NC data pin, which is why
+//     it must park spares on a real "ghost" GPIO. Owning the routing is what removes that tax.)
+//   - **DC.** An LCD panel needs it to separate command from data; WS2812 has no such concept, and
+//     configureBus() nails DC to a constant level in every phase. It emits nothing a strand could read.
+//   - **WR.** The peripheral must still GENERATE it — it is the pixel clock that shifts each bus word
+//     out, and it drives the '595 shift clock — but only a shift register consumes it. WS2812 is
+//     self-clocked, so in direct mode the strips ignore WR entirely and it needs no pad.
+//
+// Hence: dcGpio is never routed, and wrGpio is routed ONLY when a '595 expander needs the shift clock
+// on a pin (`routeWr`). A direct-mode board therefore spends its GPIOs on strands alone — the same
+// budget hpwit's hand-rolled driver has always had, and the reason an LCD-derived driver looked two
+// pins more expensive than it is.
+void configureGpio(const uint16_t* dataPins, uint8_t laneCount, uint16_t wrGpio, bool routeWr) {
+    for (size_t i = 0; i < laneCount; i++) {
+        gpio_func_sel(static_cast<gpio_num_t>(dataPins[i]), PIN_FUNC_GPIO);
+        esp_rom_gpio_connect_out_signal(dataPins[i], soc_lcd_i80_signals[kBusId].data_sigs[i],
+                                        false, false);
     }
-    gpio_func_sel(static_cast<gpio_num_t>(dcGpio), PIN_FUNC_GPIO);
-    esp_rom_gpio_connect_out_signal(dcGpio, soc_lcd_i80_signals[kBusId].dc_sig, false, false);
-    gpio_func_sel(static_cast<gpio_num_t>(wrGpio), PIN_FUNC_GPIO);
-    esp_rom_gpio_connect_out_signal(wrGpio, soc_lcd_i80_signals[kBusId].wr_sig, false, false);
+    if (routeWr) {
+        gpio_func_sel(static_cast<gpio_num_t>(wrGpio), PIN_FUNC_GPIO);
+        esp_rom_gpio_connect_out_signal(wrGpio, soc_lcd_i80_signals[kBusId].wr_sig, false, false);
+    }
 }
 
 // GDMA channel + descriptor chain. Replicates lcd_i80_init_dma_link (esp_lcd_panel_io_i80.c:670-712)
@@ -387,7 +401,7 @@ uint8_t* allocFrame(MoonI80State* st, size_t bufferBytes, bool psram) {
 // second frame buffer (best-effort — null if it won't fit); false allocates buffer 0 only. Shared by
 // the runtime init and the loopback (which passes false — one transfer).
 MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
-                          uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes, bool wantSecond,
+                          uint16_t wrGpio, size_t bufferBytes, bool wantSecond,
                           uint8_t clockMultiplier) {
     auto* st = new (std::nothrow) MoonI80State();
     if (!st) return nullptr;
@@ -402,7 +416,9 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
         destroyState(st);
         return nullptr;
     }
-    configureGpio(dataPins, laneCount, st->busWidth, wrGpio, dcGpio);
+    // WR reaches a pad only when a '595 needs it as the shift clock; a direct-mode strand ignores it,
+    // and DC never reaches a pad at all. See configureGpio.
+    configureGpio(dataPins, laneCount, wrGpio, /*routeWr=*/clockMultiplier > 1);
 
     st->done[0] = xSemaphoreCreateBinary();
     st->wireFree = xSemaphoreCreateBinary();
@@ -448,6 +464,11 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // PSRAM remains the fallback in shift mode: a frame too big for internal RAM still drives (badly)
     // rather than refusing to start, and the driver's dead-frame guard keeps a stalled bus from
     // starving the device.
+    //
+    // buf[0] is deliberately NOT reserve-guarded, unlike buf[1] below. The reserve protects the
+    // WiFi/HTTP heap from an OPTIONAL allocation; buf[0] is the frame itself, so refusing it to keep
+    // the reserve intact would decline to drive the LEDs at all — degrading the essential thing to
+    // protect a nice-to-have, the inverse of the allocate-and-degrade policy (ADR-0002).
     const bool shiftMode = clockMultiplier > 1;
     st->buf[0] = allocFrame(st, bufferBytes, /*psram=*/!shiftMode);
     if (!st->buf[0]) st->buf[0] = allocFrame(st, bufferBytes, /*psram=*/shiftMode);
@@ -535,7 +556,7 @@ bool startTransfer(MoonI80State* st, uint8_t buffer, size_t bytes) {
 } // namespace
 
 bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
-                       uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
+                       uint16_t wrGpio, size_t bufferBytes,
                        bool wantSecondBuffer, uint8_t clockMultiplier) {
     if (!dataPins || laneCount == 0 || bufferBytes == 0 || clockMultiplier == 0) return false;
     // Pre-check that the frame can land SOMEWHERE before touching the peripheral. createState
@@ -552,7 +573,7 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
         heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) >= bufferBytes + HEAP_RESERVE;
     const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bufferBytes;
     if (!fitsInternal && !fitsPsram) return false;
-    MoonI80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, bufferBytes,
+    MoonI80State* st = createState(dataPins, laneCount, wrGpio, bufferBytes,
                                    wantSecondBuffer, clockMultiplier);
     if (!st) return false;
     h.impl = st;
@@ -660,7 +681,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
 }
 
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
-                                        uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
+                                        uint16_t wrGpio, uint16_t rxGpio,
                                         const uint8_t* frame, size_t frameBytes,
                                         size_t dataBytes, uint8_t rowBits,
                                         uint8_t clockMultiplier) {
@@ -687,7 +708,7 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     }
 
     // The continuity check above reset txGpio's GPIO matrix route; createState re-claims it.
-    MoonI80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, frameBytes,
+    MoonI80State* st = createState(dataPins, laneCount, wrGpio, frameBytes,
                                    /*wantSecond=*/false,    // one transfer — single buffer
                                    clockMultiplier);        // shift mode → the kShiftPclkHz bus clock
     if (!st) {

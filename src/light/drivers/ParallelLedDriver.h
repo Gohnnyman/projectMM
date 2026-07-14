@@ -31,7 +31,7 @@ template <class Derived>
 /// the hot-path / data-over-objects rules and keeps the module tree as the one deliberate class
 /// hierarchy (the only virtual boundary remains MoonModule → DriverBase). The derived supplies just
 /// the peripheral-specific pieces: the bus* platform wrappers, `lanesAvailable()` (the inert-on-
-/// wrong-chip `if constexpr` guard), `kExactLaneCount` (i80 needs exactly 8 or 16; Parlio runs 1..16), the
+/// wrong-chip `if constexpr` guard), `kPowerOfTwoBus` (i80 needs exactly 8 or 16; Parlio runs 1..16), the
 /// slot rate `kClockHz`, and any extra pins the i80 driver tracks (WR/DC) that Parlio doesn't.
 /// configErr_/failBuf_ come from DriverBase (shared with RmtLedDriver too).
 class ParallelLedDriver : public DriverBase {
@@ -221,7 +221,6 @@ public:
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
-        derived()->addBusControls();   // i80 adds clockPin/dcPin here; Parlio none
         controls_.addBool("asyncTransmit", asyncTransmit);   // double-buffer on/off (latency opt-out)
         // Read-only KPI: the measured DMA wire time + the fps ceiling it implies. The pure output
         // floor (independent of render load), so it shows how much headroom remains as the pipeline
@@ -230,6 +229,11 @@ public:
         // A checkbox: the expander is fitted or it isn't. The '595's width (8) is the chip's, not a
         // setting, so there is nothing to type — and a boolean can't be half-configured.
         controls_.addBool("shiftRegister", shiftRegister);
+        // The bus pins sit UNDER the expander toggle because for a driver that owns its own GPIO
+        // routing they are '595 pins: MoonI80 routes WR only when a shift register needs it as SRCLK,
+        // and hides the control otherwise. (I80 goes through esp_lcd, which mandates a valid WR *and*
+        // DC GPIO whatever the mode, so it shows both unconditionally — same hook, different answer.)
+        derived()->addBusControls();
         // Always bound, shown only when the expander is on — the conditional-control shape
         // (bound regardless so a saved latchPin survives a round-trip through direct mode).
         controls_.addPin("latchPin", latchPin);
@@ -767,30 +771,33 @@ protected:
     // the board decides the data-pin count (how many '595s are populated), so the driver rounds up to
     // the next legal width and pads the spare lanes itself.
     uint8_t busWidthPins() const {
-        if (!shiftMode()) return physPins_;
-        const uint8_t needed = static_cast<uint8_t>(physPins_ + 1);   // data pins + the latch lane
+        // Data pins, plus the latch lane when a '595 expander is in use.
+        const uint8_t needed = static_cast<uint8_t>(physPins_ + (shiftMode() ? 1 : 0));
         return needed <= 8 ? uint8_t{8} : uint8_t{16};
     }
 
-    // The GPIO list the PERIPHERAL is built from, and its length. In direct mode that is just the
-    // data pins. With a '595 expander:
+    // The GPIO list the PERIPHERAL is built from — always busWidthPins() entries long, because the bus
+    // is 8 or 16 bits wide however many pins the board actually drives:
     //   - bus bits 0..physPins_-1 are the data pins (bit L = the L-th entry of `pins`, the
     //     ParallelSlots contract),
-    //   - bus bit latchBit_ (== physPins_) is the LATCH — a real lane the peripheral drives,
+    //   - in shift mode, bus bit latchBit_ (== physPins_) is the LATCH — a real lane the peripheral
+    //     drives,
     //   - every REMAINING lane up to the bus width is parked on the WR/clock pin. The i80 layer
     //     rejects an NC data pin, so a spare lane must be *some* real GPIO; WR is the safe choice
     //     because the peripheral already drives it and the board already wires it (hpwit's trick,
     //     and exactly what platform_esp32_i80 does for lanes beyond laneCount). Those lanes carry no
     //     strand — their bits are never set in activeMask — so they are inert.
+    // The padding is what lets a board name ONLY the pins it drives, at any count: an 8-bit bus with 5
+    // strands is 5 data lanes and 3 parked on WR. Returning the raw laneList_ in direct mode would hand
+    // the peripheral a short array while busPinCount() claims the full width — a read past the end.
     // Kept in the base (one owner of the latch + the padding), so both derived busInit()s just pass
     // these two calls.
     const uint16_t* busPinList() {
-        if (!shiftMode()) return laneList_;
         const uint8_t width = busWidthPins();
         for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
-            if (i < physPins_)            busPinBuf_[i] = laneList_[i];                     // data
-            else if (i == latchBit_)      busPinBuf_[i] = static_cast<uint16_t>(latchPin);  // latch
-            else                          busPinBuf_[i] = derived()->clockPinForBus();
+            if (i < physPins_)                        busPinBuf_[i] = laneList_[i];   // data
+            else if (shiftMode() && i == latchBit_)   busPinBuf_[i] = static_cast<uint16_t>(latchPin);
+            else                                      busPinBuf_[i] = derived()->clockPinForBus();
         }
         return busPinBuf_;
     }
@@ -830,28 +837,21 @@ protected:
             err = "the 74HCT595 expander needs the LCD_CAM i80 bus (ESP32-S3 / -P4)";
         // The latch is a real GPIO and a real bus bit; without it the '595s never present a byte.
         if (!err && shiftMode() && latchPin < 0) err = "the 74HCT595 expander needs a latchPin";
-        // i80 (kExactLaneCount) requires a real GPIO on every data line up to the
-        // bus width, and the bus width is power-of-two only (8 or 16) — a partial
-        // bus is rejected at esp_lcd_new_i80_bus(). So LCD accepts EXACTLY 8 or 16
-        // pins; a sub-16 board parks unused lanes on spare GPIOs. Parlio accepts
-        // 1..16 (unused lanes idle NC), so it sets kExactLaneCount=false and skips this.
-        // In shift mode the LATCH occupies one of those bus bits, so the data pins plus the
-        // latch must together hit the exact width (7 data + latch = 8, or 15 + latch = 16).
-        if constexpr (Derived::kExactLaneCount) {
-            // Direct mode: every bus lane IS a strand, so the pin list must fill the bus exactly.
-            // Shift mode: the strands hang off the '595s, so the pin count is a property of the BOARD
-            // (how many registers are populated — 2 on one bench board, 6 on another), NOT of the bus.
-            // Requiring the user to pad the list to 7 was a design error: it forced fake "ghost"
-            // entries, which parsePinList then rejected as duplicates. The BUS width is the driver's
-            // problem, so the driver pads it (busPinList() parks the spare lanes on WR, the same trick
-            // the i80 layer itself uses) — the user configures only the pins that drive a register.
-            if (shiftMode()) {
-                const uint8_t maxData = static_cast<uint8_t>(kMaxLanes - 1);   // one bit goes to latch
-                if (!err && (n == 0 || n > maxData))
-                    err = "shift mode needs 1..15 data pins (one per populated 74HCT595)";
-            } else if (!err && n != 8 && n != 16) {
-                err = "i80 bus needs exactly 8 or 16 pins";
-            }
+        // **The BUS width is a peripheral fact; the PIN COUNT is a board fact. They are not the same
+        // number, and the driver — not the user — reconciles them.** The i80 bus is 8 or 16 bits wide
+        // (lcd_ll_set_data_wire_width takes nothing else), but nothing says every bit must reach a
+        // GPIO: the matrix routes each data signal wherever we point it, and busPinList() parks the
+        // spare lanes on WR, where the peripheral already drives and nothing reads them. So the user
+        // configures only the pins that drive something, at ANY count, and the driver rounds the bus
+        // up around them.
+        //
+        // In shift mode the LATCH also occupies a bus bit, so it costs one of the width's lanes —
+        // hence kMaxLanes - 1 data pins there against kMaxLanes here.
+        if constexpr (Derived::kPowerOfTwoBus) {
+            const uint8_t maxData = static_cast<uint8_t>(kMaxLanes - (shiftMode() ? 1 : 0));
+            if (!err && (n == 0 || n > maxData))
+                err = shiftMode() ? "shift mode needs 1..15 data pins (one per populated 74HCT595)"
+                                  : "i80 bus needs 1..16 pins";
         }
         // The latch drives its own bus bit, so it must not double as a data pin (that lane would
         // carry the latch waveform instead of pixel data). clockPin/dcPin overlap is the derived
@@ -1048,7 +1048,11 @@ protected:
         // here would build a frame 8× too small and transmit a truncated waveform.
         const uint8_t opp = outputsPerPin();
         const size_t perLightBytes = static_cast<size_t>(outCh) * 8 * 3 * sb * opp;
-        const size_t testFrameBytes = static_cast<size_t>(lights) * perLightBytes;
+        // Shift mode closes the frame with one trailing latch word (encodeWs2812ShiftLatchPad, written
+        // unconditionally after the last row), so the buffer must hold one Slot beyond the rows or that
+        // write runs off the end of the heap block. Direct mode writes no pad, so it stays row-exact.
+        const size_t testFrameBytes = static_cast<size_t>(lights) * perLightBytes
+                                      + (shiftMode() ? sb : 0);
         // Build the REAL frame with the test pattern in every row on lane 0 only;
         // the platform transmits the genuine transfer (size, DMA chain, latch pad)
         // back to back and verifies every captured bit, so the test covers what

@@ -1174,7 +1174,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
 // above. Desktop has no LCD_CAM, so the driver instantiates (lanesAvailable() == 0) and idles, which
 // is what lets its config/validation half be tested on the host.
 bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
-                       uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                       uint8_t /*laneCount*/, uint16_t /*wrGpio*/,
                        size_t /*bufferBytes*/, bool /*wantSecondBuffer*/,
                        uint8_t /*clockMultiplier*/) {
     return false;
@@ -1186,7 +1186,7 @@ bool moonI80Ws2812Wait(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t 
 uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& /*h*/) { return 0; }
 void moonI80Ws2812Deinit(MoonI80Ws2812Handle& /*h*/) {}
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
-                                        uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                                        uint16_t /*wrGpio*/,
                                         uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                         size_t /*frameBytes*/, size_t /*dataBytes*/,
                                         uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/) {

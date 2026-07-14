@@ -46,7 +46,7 @@ public:
 
     // --- CRTP hooks (mock, host-only) ---
     static constexpr uint8_t lanesAvailable() { return 8; }   // pretend this chip has lanes
-    static constexpr bool kExactLaneCount = false;
+    static constexpr bool kPowerOfTwoBus = false;
     static constexpr bool kLoopbackFullWidth = false;
     // The mock bus is memory, not a peripheral, so it can host the 74HCT595 expander — which is what
     // lets the shift-register lane/frame arithmetic be pinned on the host (unit_ParallelSlots covers
