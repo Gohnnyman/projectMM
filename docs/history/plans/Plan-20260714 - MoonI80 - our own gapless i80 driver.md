@@ -48,7 +48,7 @@ The same descriptor machinery, but the chain points at a small ring of **interna
 
 The platform layer is *already* the interface. `I80LedDriver` talks to **8 functions** and knows nothing about `esp_lcd`:
 
-```
+```text
 i80Ws2812Init / Buffer / BufferCapacity / Transmit / Wait / LastTransmitUs / Deinit / Loopback
 ```
 
@@ -57,6 +57,7 @@ A second implementation is a second `.cpp` behind the same 8 functions. `ParlioL
 ## Implementation
 
 ### 1. Platform: the MoonI80 backend
+
 **New file `src/platform/esp32/platform_esp32_moon_i80.cpp`** + one explicit `SRCS` line in `esp32/main/CMakeLists.txt` (the list is explicit, no GLOB; must be warning-clean under `-Wall -Wextra -Werror`, and self-inerting on chips without LCD_CAM).
 
 Mirror the `i80Ws2812*` family as `moonI80Ws2812*` (same 8 signatures, same `MoonI80Ws2812Handle { void* impl; }` opaque handle) in `src/platform/platform.h`, next to the existing block.
@@ -68,6 +69,7 @@ Internals, built on IDF HAL + GDMA link-list (both reachable: `esp_hal_lcd` publ
 - **Deinit**: reverse, with the same drain-before-free discipline (a live DMA reading a buffer about to be freed is the use-after-free that bit the chunking attempt).
 
 ### 2. Domain: the sibling driver
+
 **New file `src/light/drivers/MoonI80LedDriver.h`** — the CRTP surface is 12 methods + 5 constants, and `I80LedDriver.h` is the template. Every `bus*` hook is a one-line forward to `moonI80Ws2812*`. Reuses `ParallelLedDriver` for *everything* (slicing, encode, double-buffer, shift-register, loopback, `wireUs` KPI, the dead-frame guard).
 
 **Register it** in `src/main.cpp`: one gated `#include` + one `registerType<mm::MoonI80LedDriver>("MoonI80LedDriver", "light/drivers.md#mooni80led")`, inside the existing `#if defined(CONFIG_SOC_LCD_I80_SUPPORTED)` block.
@@ -75,6 +77,7 @@ Internals, built on IDF HAL + GDMA link-list (both reachable: `esp_hal_lcd` publ
 This makes the A/B a **module swap in the UI** — both drivers are offered, the user picks. No reflash to compare, which is the whole point.
 
 ### 3. ADR
+
 **New `docs/adr/NNNN-own-i80-dma-driver.md`** (Nygard). Records: IDF's per-transaction peripheral reset makes gapless multi-transaction output impossible (with the source citation); the LCD data phase is DMA-length-driven, which is the opening; we go one level below `esp_lcd` to IDF's HAL+GDMA (not raw registers); both drivers ship until the challenger wins. This is a deliberate divergence from *Industry standards, our own code* and must be recorded, not slipped in.
 
 ## Verification

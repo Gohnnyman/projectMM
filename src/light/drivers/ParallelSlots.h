@@ -310,4 +310,98 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
     }
 }
 
+/// Write the frame's CONSTANT shift-mode words once, so the per-light encoder never touches them
+/// again. **This is the single biggest cost in the shift encoder, and it is pure waste without it.**
+///
+/// Of the three words a WS2812 slot emits per shift cycle, only ONE carries pixel data:
+///
+///   out[c]                 = activePins[c] | latch   ← pulse start (all-HIGH). Same every light.
+///   out[outPerPin + c]     = plane[c][bit] | latch   ← THE DATA. Changes every light.
+///   out[2 * outPerPin + c] = latch                   ← pulse tail (all-LOW). Same every light.
+///
+/// The start and tail depend only on which strands are active and where the latch bit sits — both
+/// fixed for the whole frame. Rewriting them per light burns **two thirds of the encoder's stores**
+/// (384 of 576 per light at 3 channels × 8 outputs). Pre-filling them once and having the encoder
+/// write only the data word is what takes the per-light cost from ~9.7 µs to ~3 µs on an S3.
+///
+/// This is hpwit's `putdefaultones()` / `putdefaultlatch()` — called once at buffer init, with the
+/// per-light transpose then biased past them (`buff += OFFSET`). Studied, then written fresh here.
+///
+/// Called from the driver's `reinit()` (cold path) whenever the frame is rebuilt, and again whenever
+/// the active-strand set changes. `rows` is the strand length; the pad beyond it is left zeroed (a
+/// zeroed pad IS the WS2812 reset).
+template <class Slot>
+inline void prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t physPins, uint8_t latchBit,
+                                        uint8_t outPerPin, uint8_t channels, uint32_t rows,
+                                        Slot* out) {
+    constexpr uint8_t kLanes = sizeof(Slot) * 8;
+    if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
+    const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
+
+    // Which pins carry an ACTIVE strand on each shift cycle. Per-cycle, not per-pin: cycle c clocks
+    // the bit for shift position `pos`, so the question is "is the strand at (pin, pos) live?" — an
+    // exhausted strand sharing a '595 with a longer one must keep clocking in 0 and stay dark.
+    Slot activePins[kShiftOutputs] = {};
+    for (uint8_t c = 0; c < outPerPin; c++) {
+        const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);   // '595 shifts MSB-first
+        for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
+            const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
+            if (activeMask & (uint64_t(1) << v)) activePins[c] |= static_cast<Slot>(Slot(1) << p);
+        }
+    }
+
+    // Every channel, every bit of THIS row gets the same start/tail. The data word is left alone —
+    // the encoder owns it.
+    //
+    // `rows` is how many rows share this active set. The caller re-prefills per RUN of rows with the
+    // same mask, because an exhausted strand changes the mask at the row where it runs out (see
+    // ParallelLedDriver::prefillShiftFrame). Uniform-length strands — the common case — are one run.
+    const uint32_t bitsPerLight = static_cast<uint32_t>(channels) * 8u;
+    for (uint32_t row = 0; row < rows; row++) {
+        for (uint32_t b = 0; b < bitsPerLight; b++) {
+            for (uint8_t c = 0; c < outPerPin; c++) {
+                const Slot first = (c == 0) ? latch : Slot(0);   // RCLK rides word 0 of each slot
+                out[c]                 = static_cast<Slot>(activePins[c] | first);
+                out[2 * outPerPin + c] = first;
+            }
+            out += 3 * outPerPin;
+        }
+    }
+}
+
+/// The per-light DATA encode: the sibling of `prefillWs2812ShiftConstants`, and it writes ONLY the
+/// data word of each slot. The start/tail words are already in the buffer and must not be touched.
+///
+/// Identical output to `encodeWs2812ShiftSlots` (the whole-slot encoder) provided the prefill ran
+/// first with the SAME activeMask — which the tests pin byte-for-byte.
+template <class Slot>
+inline void encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint8_t physPins,
+                                  uint8_t latchBit, uint8_t outPerPin, uint8_t channels, Slot* out) {
+    constexpr uint8_t kLanes = sizeof(Slot) * 8;
+    if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
+    const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
+    for (uint8_t ch = 0; ch < channels; ch++) {
+        Slot plane[kShiftOutputs][8];
+        for (uint8_t c = 0; c < outPerPin; c++) {
+            const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
+            uint8_t lanes[kLanes] = {};
+            for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
+                const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
+                if (!(activeMask & (uint64_t(1) << v))) continue;   // inactive: idle LOW
+                lanes[p] = wire[static_cast<size_t>(v) * channels + ch];
+            }
+            if constexpr (sizeof(Slot) == 1) transposeLanes8x8(lanes, plane[c]);
+            else                             transposeLanes16x8(lanes, plane[c]);
+        }
+        for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte, as the wire contract
+            for (uint8_t c = 0; c < outPerPin; c++) {
+                const Slot first = (c == 0) ? latch : Slot(0);
+                // ONLY the data word. out[c] and out[2*outPerPin + c] are the prefilled constants.
+                out[outPerPin + c] = static_cast<Slot>(plane[c][bit] | first);
+            }
+            out += 3 * outPerPin;
+        }
+    }
+}
+
 } // namespace mm

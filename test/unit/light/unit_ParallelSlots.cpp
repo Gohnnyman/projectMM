@@ -529,3 +529,77 @@ TEST_CASE("shift encoder: the strand idles LOW through the latch pad (the frame 
         }
     }
 }
+
+// **The prefill/data split must be byte-identical to the whole-slot encoder.**
+//
+// Two thirds of the shift encoder's stores write frame-CONSTANTS: the pulse-start word (which
+// strands are active) and the pulse-tail word (all-LOW) are the same for every light in the frame.
+// Only the middle word carries pixel data. So the constants are pre-filled once (cold path) and the
+// per-light encoder writes only the data word — which is what takes the encode from ~9.7 µs/light to
+// ~3 µs on an S3, and it is the difference between 8 fps and 25 fps on a 48-strand panel.
+//
+// That is only sound if prefill + data == the whole-slot encode, byte for byte. A single wrong word
+// here is a corrupted waveform on every strand, so it is pinned exactly.
+TEST_CASE("shift encoder: prefill + data-only == the whole-slot encode, byte for byte") {
+    constexpr uint8_t kPins = 2, kCh = 3;
+    constexpr uint32_t kRows = 5;
+    const uint8_t latchBit = 3;
+    const uint64_t mask = 0xFFFFu;   // all 16 strands of 2 pins active
+
+    // A dense, varied wire pattern per row — a zeroed buffer would hide a bug in either path.
+    uint8_t wire[16 * kCh];
+    for (size_t i = 0; i < sizeof(wire); i++) wire[i] = static_cast<uint8_t>(i * 37 + 11);
+
+    const size_t slotsPerLight = static_cast<size_t>(kCh) * 8 * 3 * kSh;
+    std::vector<uint8_t> whole(kRows * slotsPerLight, 0);
+    std::vector<uint8_t> split(kRows * slotsPerLight, 0);
+
+    // Reference: the whole-slot encoder, every word written per light.
+    uint8_t* w = whole.data();
+    for (uint32_t r = 0; r < kRows; r++) {
+        mm::encodeWs2812ShiftSlots<uint8_t>(wire, mask, kPins, latchBit, kSh, kCh, w);
+        w += slotsPerLight;
+    }
+
+    // The fast path: constants once, then data-only per light.
+    mm::prefillWs2812ShiftConstants<uint8_t>(mask, kPins, latchBit, kSh, kCh, kRows, split.data());
+    uint8_t* s = split.data();
+    for (uint32_t r = 0; r < kRows; r++) {
+        mm::encodeWs2812ShiftData<uint8_t>(wire, mask, kPins, latchBit, kSh, kCh, s);
+        s += slotsPerLight;
+    }
+
+    CHECK(std::memcmp(whole.data(), split.data(), whole.size()) == 0);
+}
+
+// The same, with a SHORT strand — the case the per-cycle active mask exists for. An exhausted strand
+// sharing a '595 with a longer one must stay dark, and the prefill is what encodes that (its
+// pulse-start word omits the dead strand's pin bit on that cycle). If the prefill and the encoder
+// disagreed about which strands are live, the short one would flash white at full brightness.
+TEST_CASE("shift encoder: prefill + data-only agree on an exhausted strand") {
+    constexpr uint8_t kPins = 1, kCh = 3;
+    constexpr uint32_t kRows = 3;
+    const uint8_t latchBit = 4;
+    const uint64_t mask = 0x1u;   // ONLY strand 0 of pin 0 — strands 1..7 are exhausted
+
+    uint8_t wire[8 * kCh];
+    for (size_t i = 0; i < sizeof(wire); i++) wire[i] = 0xFF;   // every strand's wire is hot...
+
+    const size_t slotsPerLight = static_cast<size_t>(kCh) * 8 * 3 * kSh;
+    std::vector<uint8_t> whole(kRows * slotsPerLight, 0);
+    std::vector<uint8_t> split(kRows * slotsPerLight, 0);
+
+    uint8_t* w = whole.data();
+    for (uint32_t r = 0; r < kRows; r++) {
+        mm::encodeWs2812ShiftSlots<uint8_t>(wire, mask, kPins, latchBit, kSh, kCh, w);
+        w += slotsPerLight;
+    }
+    mm::prefillWs2812ShiftConstants<uint8_t>(mask, kPins, latchBit, kSh, kCh, kRows, split.data());
+    uint8_t* s = split.data();
+    for (uint32_t r = 0; r < kRows; r++) {
+        mm::encodeWs2812ShiftData<uint8_t>(wire, mask, kPins, latchBit, kSh, kCh, s);
+        s += slotsPerLight;
+    }
+
+    CHECK(std::memcmp(whole.data(), split.data(), whole.size()) == 0);
+}

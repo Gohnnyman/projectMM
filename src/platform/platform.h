@@ -286,6 +286,10 @@ int  wifiStaChannel();
 bool wifiApInit(const char* apName, const char* ip);
 bool wifiApConnected();
 void wifiApStop();
+// Stations currently associated with our SoftAP. 0 when the AP is down or nobody is on it.
+// NetworkModule's AP fallback uses this to hold off its periodic STA retry while somebody is using
+// the portal: bringing STA up switches the radio to STA mode, which drops the AP under them.
+uint32_t wifiApClientCount();
 
 // True when it is safe to open/use a socket: the TCP/IP stack is initialised and
 // an interface has an IP. On ESP32 that means Ethernet or WiFi (STA/AP) is up —
@@ -724,9 +728,50 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 
 struct MoonI80Ws2812Handle { void* impl = nullptr; };
 
+// **The streaming ring — how MoonI80 drives a frame too big to hold.**
+//
+// The whole-frame path above needs the entire encoded frame in one DMA-reachable block, and that is
+// what caps the 74HCT595 expander: the encoder emits ~1,152 bytes per light in shift mode, so 96
+// lights per strand is already 108 KB — the internal-DMA-RAM edge. Above that the frame can only live
+// in PSRAM, and the S3's GDMA cannot sustain a PSRAM read at the expander's 10× pixel clock (measured:
+// a PSRAM frame drives fine at 2.67 MHz and never completes at 26.67 MHz, at any size). Moving that
+// read to the CPU does not help — same memory, same bus, and the CPU is not faster at bulk reads.
+//
+// So the frame is never materialised at all. The DMA loops a small ring of INTERNAL buffers, and as
+// each one drains, the CPU encodes the next slice straight into it — reading the Layer buffer, which
+// is internal and ~24× smaller than the encoded output (3 bytes/light vs 1,152). PSRAM leaves the path
+// entirely. Espressif's RGB-LCD driver calls the same trick "bounce buffers"; hpwit's LED driver
+// arrived at it independently.
+//
+// The deadline is comfortable, and the expander is *why*: the DMA takes ~21.6 µs to drain one light's
+// 1,152 bytes while the CPU encodes a light in ~9.7 µs (measured on an S3) — the 8× output inflation
+// buys more DMA time than it costs CPU. The refill runs in the EOF interrupt, in IRAM, so a WiFi task
+// cannot preempt it into an underrun.
+//
+// `MoonI80EncodeFn` is the seam: the platform owns the ring, the descriptors and the ISR; the domain
+// owns the encode. The callback is invoked FROM THE ISR — everything it touches must be IRAM-safe.
+using MoonI80EncodeFn = void (*)(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
+                                 bool closeFrame);
+
 bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                        uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes,
                        bool wantSecondBuffer, uint8_t clockMultiplier = 1);
+
+// Bring the bus up in RING mode instead of whole-frame mode. `rowBytes` is what one row (one light
+// across every strand) encodes to, `totalRows` the strand length; the platform sizes the ring from
+// them. `encode` is called per drained buffer, from the EOF ISR, to fill the next slice.
+// Returns false if the ring cannot be built (then the caller falls back to the whole-frame path).
+bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
+                           uint16_t wrGpio, uint16_t dcGpio, size_t rowBytes, uint32_t totalRows,
+                           size_t padBytes, uint8_t clockMultiplier,
+                           MoonI80EncodeFn encode, void* user);
+
+// Start one frame on the ring: prime the buffers, fire the DMA, and let the EOF ISR refill behind it.
+// Pair with moonI80Ws2812Wait(h, 0, …) — the ring reports completion on buffer slot 0.
+bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& h);
+
+// True when the handle was brought up as a ring (so the driver knows which transmit to call).
+bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& h);
 uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& h, uint8_t buffer);
 size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& h);
 bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& h, uint8_t buffer, size_t bytes);

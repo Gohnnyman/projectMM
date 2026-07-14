@@ -461,15 +461,25 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // if it fits, arm double-buffer mode (buf[1] + its semaphore); if it doesn't, leave buf[1] null
     // and the driver runs single-buffer. The internal fallback additionally must leave HEAP_RESERVE
     // intact — the second buffer is a nice-to-have and must never eat the WiFi/HTTP reserve.
+    //
+    // **The reserve guards the INTERNAL attempt, whichever attempt that is.** The preference order
+    // flips with the mode (shift wants internal first, direct wants PSRAM first), so binding the guard
+    // to a fixed branch would put it on the wrong one half the time — in shift mode it would leave the
+    // internal allocation unguarded (free to eat the WiFi/HTTP reserve) while pointlessly gating the
+    // PSRAM retry on internal free space. A small lambda keeps the rule with the thing it guards.
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinary();
         if (st->done[1]) {
-            st->buf[1] = allocFrame(st, bufferBytes, /*psram=*/!shiftMode);
-            if (!st->buf[1]
-                && heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
-                       >= bufferBytes + HEAP_RESERVE) {
-                st->buf[1] = allocFrame(st, bufferBytes, /*psram=*/shiftMode);
-            }
+            auto tryAlloc = [&](bool psram) -> uint8_t* {
+                if (!psram
+                    && heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+                           < bufferBytes + HEAP_RESERVE) {
+                    return nullptr;   // internal, and it would eat the reserve — refuse
+                }
+                return allocFrame(st, bufferBytes, psram);
+            };
+            st->buf[1] = tryAlloc(/*psram=*/!shiftMode);
+            if (!st->buf[1]) st->buf[1] = tryAlloc(/*psram=*/shiftMode);
             if (!st->buf[1]) {
                 vSemaphoreDelete(st->done[1]);
                 st->done[1] = nullptr;

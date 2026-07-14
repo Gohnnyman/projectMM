@@ -643,6 +643,7 @@ int wifiStaChannel() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+uint32_t wifiApClientCount() { return 0; }
 
 // Host sockets work regardless of the (stubbed) link predicates above, and there is
 // no lwip-style init race — always socket-safe.

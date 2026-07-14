@@ -91,13 +91,24 @@ TEST_CASE("MoonI80LedDriver rejects clockPin == dcPin") {
 // The '595 latch rides a DATA lane (the peripheral gives only one clock output, and WR is already
 // the shift clock), so it must not collide with WR or DC either.
 TEST_CASE("MoonI80LedDriver rejects a latchPin on WR or DC") {
+    // On WR: the latch would ride the shift clock itself, so nothing would ever latch.
     mm::MoonI80LedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     d.shiftRegister = true;
-    d.latchPin = d.clockPin;   // the latch on the shift clock — nothing would ever latch
+    d.latchPin = d.clockPin;
     wire(d, src, corr, 8 * 16);
     CHECK(d.severity() == mm::MoonI80LedDriver::Severity::Error);
+
+    // On DC: the symmetric branch. Both are fatal, and both must say so — a latch sharing a pin is a
+    // '595 that never presents a byte, which looks like a dead strip rather than a config error.
+    mm::MoonI80LedDriver d2;
+    mm::Buffer src2;
+    mm::Correction corr2;
+    d2.shiftRegister = true;
+    d2.latchPin = d2.dcPin;
+    wire(d2, src2, corr2, 8 * 16);
+    CHECK(d2.severity() == mm::MoonI80LedDriver::Severity::Error);
 }
 
 // Sanity: with a valid config the driver is a working CRTP sibling — it slices lanes and reports the

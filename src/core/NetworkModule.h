@@ -471,16 +471,23 @@ public:
                         onConnected("Ethernet");
                     } else if (ssid_[0] != 0 && platform::wifiStaConnected()) {
                         onConnected("WiFi STA");
-                    } else if (ssid_[0] != 0 && now - stateChangeTime_ > kApRetryStaMs) {
+                    } else if (ssid_[0] != 0 && now - stateChangeTime_ > kApRetryStaMs
+                               && platform::wifiApClientCount() == 0) {
                         // **AP is a fallback, not a destination.** Falling back stops the STA radio, so
                         // wifiStaConnected() cannot become true on its own and the promote check above
                         // would wait forever — a device that lost its network would stay on its own AP
-                        // until power-cycled. With credentials configured the network is expected back
-                        // (the router finishes rebooting; the device comes back into range), so go and
-                        // look periodically: re-init STA and let WaitingSta run its normal grace. A
-                        // failure drops straight back here and retries later — an idle loop, not a
-                        // dead end. AP stays up across the attempt (onConnected tears it down only once
-                        // STA is actually up), so a user mid-setup on 4.3.2.1 keeps their connection.
+                        // until power-cycled. The canonical case is a router rebooting: the network
+                        // comes back, and the device must find its way home unattended. So go and look
+                        // periodically: re-init STA and let WaitingSta run its normal grace. A failure
+                        // drops straight back here and retries later — an idle loop, not a dead end.
+                        //
+                        // **Gated on the AP being EMPTY, because the retry is not free.** The platform
+                        // has no concurrent AP+STA mode: wifiStaInit() puts the radio in STA mode,
+                        // which drops the SoftAP. Retrying while somebody is on the captive portal
+                        // would kick them off every interval. So we only look for the network when
+                        // nobody is using the AP — a user mid-setup is never interrupted, and an
+                        // unattended device (nobody connected, which is the router-reboot case) still
+                        // heals itself.
                         std::printf("NetworkModule: AP — retrying WiFi STA (%s)\n", ssid_);
                         if (platform::wifiStaInit(ssid_, password_)) {
                             state_ = State::WaitingSta;

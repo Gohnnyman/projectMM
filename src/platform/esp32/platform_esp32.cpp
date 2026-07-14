@@ -780,6 +780,10 @@ void ethGetIPv4(uint8_t out[4])         { out[0] = out[1] = out[2] = out[3] = 0;
 // carries no atomicity or ordering guarantee — only the compiler's promise not to elide the access.
 static std::atomic<bool> wifiStaStopping_{false};
 
+// How many stations are associated with our SoftAP right now. Written from IDF's event-loop task,
+// read from the render task, so it is atomic.
+static std::atomic<uint32_t> apClients_{0};
+
 // WiFi event handler
 static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                              int32_t id, void* data) {
@@ -809,8 +813,14 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                 ESP_LOGI(NET_TAG, "WiFi STA disconnected");
             }
         } else if (id == WIFI_EVENT_AP_STACONNECTED) {
+            // Track the count so the AP-fallback's periodic STA retry can hold off while somebody is
+            // actually using the portal: re-initialising STA switches the radio to WIFI_MODE_STA,
+            // which drops the AP. See NetworkModule's State::AP retry.
+            apClients_.fetch_add(1, std::memory_order_relaxed);
             ESP_LOGI(NET_TAG, "WiFi AP client connected");
         } else if (id == WIFI_EVENT_AP_STADISCONNECTED) {
+            uint32_t n = apClients_.load(std::memory_order_relaxed);
+            if (n > 0) apClients_.fetch_sub(1, std::memory_order_relaxed);
             ESP_LOGI(NET_TAG, "WiFi AP client disconnected");
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -1036,6 +1046,7 @@ bool wifiApInit(const char* apName, const char* ip) {
     }
 
     wifiApActive_ = true;
+    apClients_.store(0, std::memory_order_relaxed);
     ESP_LOGI(NET_TAG, "WiFi AP started: %s @ %s", apName ? apName : "?", ip ? ip : "?");
     return true;
 }
@@ -1043,6 +1054,8 @@ bool wifiApInit(const char* apName, const char* ip) {
 bool wifiApConnected() {
     return wifiApActive_;
 }
+
+uint32_t wifiApClientCount() { return apClients_.load(std::memory_order_relaxed); }
 
 void wifiApStop() {
     esp_wifi_stop();
@@ -1058,6 +1071,7 @@ void wifiApStop() {
         apNetif_ = nullptr;
     }
     wifiApActive_ = false;
+    apClients_.store(0, std::memory_order_relaxed);
     wifiInitDone_ = false;
     ESP_LOGI(NET_TAG, "WiFi AP stopped + deinit");
 }
@@ -1103,6 +1117,7 @@ int wifiStaChannel() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+uint32_t wifiApClientCount() { return 0; }
 int wifiTxPower() { return 0; }
 // Match the API contract: 0 is a successful no-op even when WiFi isn't
 // compiled in. Any non-zero value (actual cap attempt) returns false

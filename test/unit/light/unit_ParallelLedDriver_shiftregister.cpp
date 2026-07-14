@@ -44,6 +44,15 @@ public:
         buf_.assign(frameBytes, 0);
         return true;
     }
+
+    // The streaming ring encodes the frame one SLICE at a time, straight into the small internal
+    // buffer the DMA is about to read. That is only sound if a sliced encode produces byte-identical
+    // output to the whole-frame encode — so expose the encoder for the test that pins it.
+    template <class Slot>
+    void encodeSliceForTest(uint8_t outCh, uint8_t* dst, mm::nrOfLightsType first,
+                            mm::nrOfLightsType count, bool closeFrame) {
+        this->template encodeRows<Slot>(outCh, dst, first, count, closeFrame);
+    }
     uint8_t* busBuffer(uint8_t i) { return (i == 0 && !buf_.empty()) ? buf_.data() : nullptr; }
     size_t busCapacity() const { return cap_; }
     // busTransmit reports success — as the real one does. This is the crux of the 2026-07-14 bug:
@@ -377,4 +386,50 @@ TEST_CASE("a given-up driver recovers when the bus is fixed") {
 
     CHECK(d.transmitCount() > transmitsWhileDead);               // transmitting again
     CHECK(d.severity() != MockShiftDriver::Severity::Error);     // and the error is cleared
+}
+
+// **THE INVARIANT THE STREAMING RING RESTS ON.** The ring never materialises the big encoded frame:
+// the DMA loops a few small INTERNAL buffers, and the CPU encodes each slice straight into the buffer
+// the DMA is about to read. That is only sound if encoding in slices produces EXACTLY the bytes the
+// whole-frame encode would have produced — otherwise the wire sees a different frame depending on how
+// it happened to be chunked, which is the class of bug that is invisible on a sparse effect and
+// catastrophic on a dense one.
+//
+// Note the latch pad: only the LAST slice closes the frame (closeFrame), because the pad is what makes
+// every strand idle LOW into the WS2812 reset. A pad emitted mid-frame would reset the strand halfway.
+TEST_CASE("streaming ring: a sliced encode is byte-identical to the whole-frame encode") {
+    mm::Correction corr;
+    MockShiftDriver whole;
+    mm::Buffer srcWhole;
+    wire(whole, srcWhole, corr, 16 * 32, "1,2", /*shiftOn=*/true, /*latch=*/3);
+    REQUIRE(whole.maxLaneLights() == 32);
+
+    // Fill the source with a dense, varied pattern — a sparse/zero buffer would hide a slicing bug.
+    for (nrOfLightsType i = 0; i < 16 * 32; i++) {
+        uint8_t* px = srcWhole.data() + i * 3;
+        px[0] = static_cast<uint8_t>(i * 7 + 1);
+        px[1] = static_cast<uint8_t>(i * 13 + 2);
+        px[2] = static_cast<uint8_t>(i * 29 + 3);
+    }
+
+    const uint8_t outCh = 3;
+    const size_t bytes = whole.frameBytes();
+    std::vector<uint8_t> refBuf(bytes, 0), sliceBuf(bytes, 0);
+
+    // Reference: the whole frame in one call (what the driver does today).
+    whole.encodeSliceForTest<uint8_t>(outCh, refBuf.data(), 0, 0, /*closeFrame=*/true);
+
+    // The ring's way: the same frame in slices of 8 rows, each written at its own offset. Only the
+    // final slice closes the frame.
+    const nrOfLightsType rows = whole.maxLaneLights();
+    const nrOfLightsType per = 8;
+    // Bytes one row emits: channels x 8 bits x 3 slots x outputsPerPin, at 1 byte per slot (8-bit bus).
+    const size_t rowBytes = static_cast<size_t>(outCh) * 8 * 3 * 8;
+    for (nrOfLightsType first = 0; first < rows; first += per) {
+        const bool last = (first + per >= rows);
+        whole.encodeSliceForTest<uint8_t>(outCh, sliceBuf.data() + first * rowBytes,
+                                          first, per, /*closeFrame=*/last);
+    }
+
+    CHECK(std::memcmp(refBuf.data(), sliceBuf.data(), bytes) == 0);
 }

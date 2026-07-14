@@ -495,13 +495,77 @@ public:
         if (!busWaitIfBusy(1)) inFlight_[1] = false;
     }
 
-    // Encode every row into `dst` as `Slot`-wide bus words (uint8_t for the 8-bit bus,
-    // uint16_t for the 16-bit bus). Correct the same light index of every active lane
-    // into the wire block, then transpose+emit its 3 slots. No heap, integer math only.
-    // `dst` is the raw-byte DMA buffer this tick owns; a 16-bit frame views it as uint16
-    // slots (the buffer was sized ×2 by frameBytesFor). Called from tick().
+    /// Prefill both DMA buffers' shift-mode constants (a no-op in direct mode, where every slot word
+    /// already carries data or is a zero the buffer's memset provides). Called from reinit(), the cold
+    /// path, whenever the buffers are (re)established or re-zeroed.
+    void prefillShiftConstantsIfNeeded() {
+        if (!shiftMode() || !inited_) return;
+        const uint8_t outCh = correction_.outChannels;
+        if (outCh == 0 || maxLaneLights_ == 0) return;
+        for (uint8_t i = 0; i < 2; i++) {
+            uint8_t* buf = derived()->busBuffer(i);
+            if (!buf) continue;   // buffer 1 is null in single-buffer mode
+            if (slotBytes() == 1) prefillShiftFrame<uint8_t>(outCh, buf);
+            else                  prefillShiftFrame<uint16_t>(outCh, buf);
+        }
+    }
+
+    /// Write the shift-mode frame CONSTANTS into every DMA buffer, once, off the hot path.
+    ///
+    /// Of the three words a WS2812 slot emits per shift cycle, two are the same for every light: the
+    /// pulse-start (which strands are live) and the pulse-tail (all-LOW). Only the middle word carries
+    /// pixel data. Pre-filling the constants here means `encodeRows` writes **one word instead of
+    /// three** — two thirds of the encoder's stores, gone from the per-frame path. (Measured on an S3:
+    /// ~9.7 µs/light → ~3 µs.) hpwit does the same with `putdefaultones()` at buffer init; studied,
+    /// then written fresh against our own layout.
+    ///
+    /// **Short strands make this row-dependent, not frame-uniform.** A strand that runs out mid-frame
+    /// drops out of the active set at that row, and its pulse-start word must stop asserting from
+    /// there on — otherwise the exhausted strand flashes white at full brightness (the bug this
+    /// morning). So the frame is prefilled in RUNS: rows sharing an active mask are one call, and a
+    /// new run starts wherever a strand ends. Equal-length strands — the common case — are a single run.
     template <class Slot>
-    void encodeRows(uint8_t outCh, uint8_t* dst) {
+    void prefillShiftFrame(uint8_t outCh, uint8_t* dst) {
+        auto* out = reinterpret_cast<Slot*>(dst);
+        const size_t slotsPerRow = static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
+        nrOfLightsType row = 0;
+        while (row < maxLaneLights_) {
+            // The active set for this row, and how many rows keep it (until the next strand ends).
+            uint64_t mask = 0;
+            nrOfLightsType runEnd = maxLaneLights_;
+            for (uint8_t lane = 0; lane < laneCount_; lane++) {
+                if (row < laneCounts_[lane]) {
+                    mask |= uint64_t(1) << lane;
+                    if (laneCounts_[lane] < runEnd) runEnd = laneCounts_[lane];   // this strand ends first
+                }
+            }
+            if (runEnd <= row) runEnd = maxLaneLights_;   // no strand ends ahead: one run to the end
+            const uint32_t rows = static_cast<uint32_t>(runEnd - row);
+            prefillWs2812ShiftConstants<Slot>(mask, physPins_, latchBit_, outputsPerPin(), outCh,
+                                              rows, out + static_cast<size_t>(row) * slotsPerRow);
+            row = runEnd;
+        }
+    }
+
+    // Encode rows [firstRow, firstRow + rowCount) into `dst` as `Slot`-wide bus words (uint8_t for the
+    // 8-bit bus, uint16_t for the 16-bit bus). Correct the same light index of every active lane into
+    // the wire block, then transpose+emit its 3 slots. No heap, integer math only. `dst` is the raw-byte
+    // DMA buffer this tick owns; a 16-bit frame views it as uint16 slots (sized ×2 by frameBytesFor).
+    //
+    // **A ROW RANGE, not always the whole frame** — the whole-frame call is just the range [0, all).
+    // The streaming ring (MoonI80's phase-2 path) encodes one slice at a time straight into the small
+    // internal buffer the DMA is about to read, so the big encoded frame is never materialised at all.
+    // Slicing is why it can: the loop was already per-row, so a range costs nothing extra.
+    //
+    // `rowCount == 0` means "to the end". Only the LAST slice closes the frame with the latch pad, so a
+    // partial slice must not emit it — hence `closeFrame`.
+    template <class Slot>
+    void encodeRows(uint8_t outCh, uint8_t* dst,
+                    nrOfLightsType firstRow = 0, nrOfLightsType rowCount = 0,
+                    bool closeFrame = true) {
+        const nrOfLightsType lastRow = (rowCount == 0 || firstRow + rowCount > maxLaneLights_)
+                                           ? maxLaneLights_
+                                           : static_cast<nrOfLightsType>(firstRow + rowCount);
         const uint8_t* src = sourceBuffer_->data();
         const uint8_t srcCh = sourceBuffer_->channelsPerLight();
         auto* out = reinterpret_cast<Slot*>(dst);
@@ -516,7 +580,7 @@ public:
         // The active-strand mask is 64-bit because a '595 expander drives more strands than the bus
         // is wide (up to kMaxStrands); in direct mode only the low `laneCount_` bits are ever set,
         // and it narrows to Slot for the direct encoder.
-        for (nrOfLightsType row = 0; row < maxLaneLights_; row++) {
+        for (nrOfLightsType row = firstRow; row < lastRow; row++) {
             uint64_t mask = 0;
             for (uint8_t lane = 0; lane < laneCount_; lane++) {
                 if (row >= laneCounts_[lane]) continue;   // short strand: idle LOW
@@ -527,7 +591,10 @@ public:
                                    wire_ + lane * stride);
             }
             if (shift) {
-                encodeWs2812ShiftSlots<Slot>(wire_, mask, physPins_, latchBit_, outputsPerPin(), outCh, out);
+                // DATA WORDS ONLY. The pulse-start and pulse-tail words of every slot are frame
+                // constants and were written once by prefillShiftFrame() — two thirds of the stores,
+                // hoisted straight out of the hot path (see prefillWs2812ShiftConstants).
+                encodeWs2812ShiftData<Slot>(wire_, mask, physPins_, latchBit_, outputsPerPin(), outCh, out);
                 out += static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
             } else {
                 encodeWs2812ParallelSlots<Slot>(wire_, static_cast<Slot>(mask), outCh, out);
@@ -538,7 +605,7 @@ public:
         // byte is actually presented and every strand idles LOW through the pad — the WS2812 reset.
         // Without it a strand whose last wire byte is ODD holds HIGH for the whole pad and never
         // resets (see encodeWs2812ShiftLatchPad). Direct mode needs nothing: a zeroed pad IS a LOW line.
-        if (shift) encodeWs2812ShiftLatchPad<Slot>(latchBit_, out);
+        if (shift && closeFrame) encodeWs2812ShiftLatchPad<Slot>(latchBit_, out);
     }
 
     // Encode the loopback test frame at `Slot` width: the same pattern on lane 0 in every
@@ -893,6 +960,7 @@ protected:
             // Clear stale latch-pad bytes in BOTH buffers (buffer 1 is null in single-buffer mode).
             std::memset(dmaBuf_, 0, derived()->busCapacity());
             if (uint8_t* b1 = derived()->busBuffer(1)) std::memset(b1, 0, derived()->busCapacity());
+            prefillShiftConstantsIfNeeded();   // the zeroing above wiped them
             return;
         }
         deinit();
@@ -904,6 +972,7 @@ protected:
             for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
             busLaneCount_ = laneCount_;
             derived()->recordBusPins();   // i80 also stores WR/DC; Parlio no-op
+            prefillShiftConstantsIfNeeded();
         }
         if (!inited_) {
             clearFailBuf();

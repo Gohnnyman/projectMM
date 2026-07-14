@@ -48,7 +48,9 @@ An **internal-RAM ring with CPU refill** (hpwit's shape, and the only thing that
 
 ## Consequences
 
-**What we gain.** A gapless multi-buffer transfer, which is what lifts the memory ceilings: the frame no longer has to be one contiguous DMA-reachable block. It also removes the per-transaction size caps that bound Parlio.
+**What we gain in phase 1, precisely.** We own the descriptor chain and fire it with a single `gdma_start` + `lcd_ll_start`, so `esp_lcd`'s per-transaction re-arming (the peripheral reset that corrupts a WS2812 stream) is gone, and with it the whole `lli full` mount-failure class — the chain is mounted once, owner-checking off. **That is all phase 1 gains.** It does *not* yet lift a memory ceiling: it still mounts one contiguous frame buffer per transfer, exactly as `esp_lcd` did. And it does not touch Parlio, whose 65,535-byte and contiguous-block caps are its own peripheral's, not `esp_lcd`'s.
+
+What phase 1 *buys* is the **capability** the ceilings need: a chain we control, which phase 2 closes into a ring over small internal buffers. Only then does the frame stop needing to be one contiguous DMA-reachable block.
 
 **What we give up, and it is real.** This diverges from *[Industry standards, our own code](../../CLAUDE.md#principles)* — we are leaving a maintained IDF driver for code we own. The justification is that the maintained driver **cannot express the behaviour the hardware supports and WS2812 requires**, and that is demonstrated from IDF's source, not assumed. But we now carry: the GPIO/clock/bus setup `esp_lcd` was doing for us, the interrupt plumbing, and the risk of drifting against future IDF versions. Keeping `I80LedDriver` as the reference is the mitigation — if MoonI80 rots, the working path is still there and still default.
 
