@@ -101,9 +101,10 @@ public:
     /// pin 1's, …) and entry N is strand N. That is what lets two strands on one '595 have
     /// different lengths. Each lane is clamped to the WS2812 per-pin ceiling
     /// (`kMaxWs2812LedsPerPin`) with a Warning status — it drives that many rather than choking a
-    /// whole grid onto one line. Empty default splits this driver's window evenly. Sized for 16
-    /// per-lane counts + separators.
-    char ledsPerPin[96] = "";
+    /// whole grid onto one line. Empty default splits this driver's window evenly. Sized for the full
+    /// kMaxStrands contract: each strand's value is at most kMaxWs2812LedsPerPin (2048 → 4 digits) plus a
+    /// separator, times kMaxStrands, plus the NUL — so a fully-explicit 64-strand list never truncates.
+    char ledsPerPin[kMaxStrands * 5 + 1] = "";
 
     /// Async double-buffer transmit (default ON). When ON, the driver encodes the next frame into a
     /// SECOND DMA buffer while the current one clocks out (deferred-wait — per-tick wall-clock
@@ -321,13 +322,28 @@ public:
     /// and routes to release() (bus + DMA buffer freed) otherwise, so a shared GPIO is released
     /// when the driver, or a parent, is disabled.
     void prepare() override {
+        // Drain any in-flight transfer BEFORE parseConfig, not just before reinit's rebuild. parseConfig
+        // reallocates the per-row scratch (prepareWire → ensureWire frees-then-allocs on a channel-count
+        // change) and zeroes laneCounts_ — state the streaming ring's REFILL TASK reads concurrently on
+        // its own core for the ~5 ms wire window. Draining first guarantees that reader has stopped, so a
+        // grid resize or an RGB→RGBW switch mid-wire can't free the block the refill task is encoding
+        // into. A no-op when idle, and correct for the whole-frame paths too (they had no second reader,
+        // so it never mattered there — the ring is the first path that needs it).
+        drainInFlight();
         parseConfig();
         reinit();
     }
 
     /// RGB<->RGBW changes the bytes-per-light and therefore the frame size, so
     /// re-parse and re-init the bus. Skipped while (effectively) disabled (would re-grab the bus).
-    void onCorrectionChanged() override { if (!effectivelyEnabled()) return; parseConfig(); reinit(); }
+    /// Drains in-flight first (before parseConfig reallocates the scratch the ring's refill task reads) —
+    /// see prepare().
+    void onCorrectionChanged() override {
+        if (!effectivelyEnabled()) return;
+        drainInFlight();
+        parseConfig();
+        reinit();
+    }
 
     /// Point the driver at the source frame buffer and re-parse the lane config.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; parseConfig(); }
@@ -352,13 +368,20 @@ public:
         if (!inited_ || !dmaBuf_ || !sourceBuffer_ || !sourceBuffer_->data()
             || laneCount_ == 0 || maxLaneLights_ == 0) return;
         const uint8_t outCh = correction_.outChannels;
-        if (outCh == 0 || frameBytes_ > derived()->busCapacity()) return;
+        if (outCh == 0) return;
         // The per-row scratch must be allocated and sized for this channel count (prepareWire, off the
         // hot path). If it isn't (alloc failed / a shrunk realloc pending), idle rather than overrun.
         if (!wire_ || wireCap_ < static_cast<size_t>(kMaxStrands) * outCh) return;
 
-        // Two explicitly-separate paths so the OFF path is PROVABLY the pre-Step-1.5 behavior (no
-        // regression) and pays nothing for the double-buffer it isn't using. The mode is fixed by
+        // Three explicitly-separate paths. RING (MoonI80's oversize-shift path) streams the frame from
+        // small internal buffers refilled by the platform, so it does NOT hold the whole frame and the
+        // busCapacity() guard below (which the other two need) does not apply. The whole-frame paths keep
+        // their guard and their proven behavior byte-for-byte.
+        if (derived()->busIsRing()) { tickRing(outCh); return; }
+        if (frameBytes_ > derived()->busCapacity()) return;
+
+        // Two explicitly-separate whole-frame paths so the OFF path is PROVABLY the pre-Step-1.5 behavior
+        // (no regression) and pays nothing for the double-buffer it isn't using. The mode is fixed by
         // whether the second buffer was allocated (busInit(async) — ON allocs it, OFF doesn't), so a
         // stale flag can't route a single-buffer bus down the async path.
         if (derived()->busBuffer(1)) tickAsync(outCh);   // double-buffer (asyncTransmit ON)
@@ -415,6 +438,31 @@ public:
         }
     }
 
+    // Streaming-ring path (MoonI80, oversize shift mode) — the frame is too big to hold, so the platform
+    // streams it from a few small internal buffers, refilled by a pinned task (ringEncodeTrampoline →
+    // encodeRows) as the DMA drains them.
+    //
+    // **ASYNC per tick, like tickAsync — the render thread must NOT block on the wire.** The refill task
+    // has a hard real-time deadline (the DMA drains one buffer in ~360 µs, so a slice must be re-encoded
+    // within that), and it runs on the same core as the render loop. If tickRing BLOCKED here waiting out
+    // the whole ~6 ms wire, the render thread would hold the core across that window — and any work that
+    // piled on (a `/api/state` serialize from a UI refresh, a WiFi burst) would starve the refill task
+    // past its deadline, the DMA would hit an un-refilled buffer, and the frame would stall (the
+    // "freezes when I refresh the UI" bug). So: WAIT for the previous frame (a no-op if it finished while
+    // the render ran), START the next, and RETURN — the wire and its refills proceed in the background
+    // with the core free. One frame of latency, exactly as the double-buffer trades.
+    void tickRing(uint8_t /*outCh*/) {
+        if (busGaveUp()) return;
+        // Finish the PREVIOUS ring frame before starting the next (a strand receives one frame at a time;
+        // the ring reports completion on slot 0). Normally already done — the whole render tick elapsed
+        // since we kicked it. A timed-out wait leaves the frame in-flight so the next tick re-waits rather
+        // than starting a second frame over a live one.
+        if (!busWaitIfBusy(0)) return;
+        if (derived()->busTransmitRing()) {
+            inFlight_[0] = true;   // kicked; DO NOT wait here — the next tick waits, freeing the core now
+        }
+    }
+
     /// Refresh the read-only `wireUs` KPI once a second (off the hot path): the last measured DMA
     /// wire time and the fps ceiling it implies (1e6 / wireUs). This is the pure WS2812 output floor —
     /// the render loop can never beat it, so it's the target the multicore work drives the system tick
@@ -468,12 +516,31 @@ public:
     /// It self-heals: any completed transfer clears the strike count, and a config change re-inits the
     /// bus (prepare → reinit → deadFrames_ = 0), so fixing the setting brings the LEDs straight back with
     /// no reboot.
+    ///
+    /// **Give-up is not permanent — it periodically RETRIES.** A *misconfigured* bus never delivers and
+    /// stays given-up (correct: stop spending the render thread). But a *transient* stall — the streaming
+    /// ring's refill missing one deadline because a `/api/state` serialise stole the core for a few ms —
+    /// is recoverable: the next frame would succeed. Latching give-up until a reinit turns a momentary
+    /// hiccup into "LEDs dark until you touch a control or reboot," which is itself a robustness failure.
+    /// So once given up, let ONE frame through every `kGiveUpRetryTicks` ticks: if it completes, the
+    /// strike count clears and output resumes on its own; if it doesn't, we fall straight back to
+    /// given-up, having spent one frame's wait per ~`kGiveUpRetryTicks` ticks — cheap enough not to
+    /// starve the network, unlike retrying every tick.
     bool busGaveUp() {
         if (deadFrames_ < kDeadFramesBeforeGiveUp) return false;
         if (!gaveUpReported_) {
             gaveUpReported_ = true;
             setStatus("output stalled — the bus is not delivering frames; check the driver settings",
                       Severity::Error);
+        }
+        // Periodic retry window: every kGiveUpRetryTicks-th call, return false so the caller attempts one
+        // transfer. A completed transfer clears deadFrames_ (busWaitIfBusy) and lifts the give-up; a
+        // failed one re-increments and we stay given-up until the next window.
+        if (++giveUpRetry_ >= kGiveUpRetryTicks) {
+            giveUpRetry_ = 0;
+            deadFrames_ = kDeadFramesBeforeGiveUp - 1;   // one strike below the threshold: let this frame try
+            gaveUpReported_ = false;                     // re-report if it fails again (status stays honest)
+            return false;
         }
         return true;
     }
@@ -535,23 +602,38 @@ public:
     /// new run starts wherever a strand ends. Equal-length strands — the common case — are a single run.
     template <class Slot>
     void prefillShiftFrame(uint8_t outCh, uint8_t* dst) {
+        prefillShiftRows<Slot>(outCh, dst, 0, maxLaneLights_);
+    }
+
+    /// Prefill the shift constants for rows [firstRow, firstRow + rowCount) into `dst`, written
+    /// dst-RELATIVE (row `firstRow` lands at dst+0) — so a ring buffer holding one slice gets its
+    /// constants laid down exactly as the whole-frame buffer does for the same rows. `rowCount == 0`
+    /// means "to the end". The whole-frame path calls this as [0, all); the ring calls it per slice
+    /// (which is why the constants land on a recycled ring buffer that encodeRows alone would leave
+    /// stale — encodeRows writes only the DATA word, relying on these constants being present).
+    template <class Slot>
+    void prefillShiftRows(uint8_t outCh, uint8_t* dst, nrOfLightsType firstRow, nrOfLightsType rowCount) {
         auto* out = reinterpret_cast<Slot*>(dst);
         const size_t slotsPerRow = static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
-        nrOfLightsType row = 0;
-        while (row < maxLaneLights_) {
+        const nrOfLightsType lastRow = (rowCount == 0 || firstRow + rowCount > maxLaneLights_)
+                                           ? maxLaneLights_
+                                           : static_cast<nrOfLightsType>(firstRow + rowCount);
+        nrOfLightsType row = firstRow;
+        while (row < lastRow) {
             // The active set for this row, and how many rows keep it (until the next strand ends).
             uint64_t mask = 0;
-            nrOfLightsType runEnd = maxLaneLights_;
+            nrOfLightsType runEnd = lastRow;
             for (uint8_t lane = 0; lane < laneCount_; lane++) {
                 if (row < laneCounts_[lane]) {
                     mask |= uint64_t(1) << lane;
                     if (laneCounts_[lane] < runEnd) runEnd = laneCounts_[lane];   // this strand ends first
                 }
             }
-            if (runEnd <= row) runEnd = maxLaneLights_;   // no strand ends ahead: one run to the end
+            if (runEnd <= row) runEnd = lastRow;   // no strand ends ahead in range: one run to lastRow
             const uint32_t rows = static_cast<uint32_t>(runEnd - row);
-            prefillWs2812ShiftConstants<Slot>(mask, physPins_, latchBit_, outputsPerPin(), outCh,
-                                              rows, out + static_cast<size_t>(row) * slotsPerRow);
+            // dst-relative: row `firstRow` is at out+0, so offset by (row - firstRow).
+            prefillWs2812ShiftConstants<Slot>(mask, physPins_, latchBit_, outputsPerPin(), outCh, rows,
+                                              out + static_cast<size_t>(row - firstRow) * slotsPerRow);
             row = runEnd;
         }
     }
@@ -687,6 +769,11 @@ protected:
     uint8_t deadFrames_ = 0;
     bool gaveUpReported_ = false;        // one status write per give-up, not one per tick
     static constexpr uint8_t kDeadFramesBeforeGiveUp = 8;
+    // Given-up retry cadence: once given up, let one frame try every this-many ticks so a TRANSIENT stall
+    // self-recovers without a reinit (see busGaveUp). ~50 ticks ≈ 1 s of retries — rare enough not to
+    // starve the network with dead-frame waits, frequent enough that recovery feels immediate.
+    uint16_t giveUpRetry_ = 0;
+    static constexpr uint16_t kGiveUpRetryTicks = 50;
     // Per-row correction scratch (wire_ / wireCap_ live on DriverBase — the grow-only lifecycle is
     // shared with RmtLedDriver; only the SIZE differs). Here it is kMaxLanes × outChannels bytes,
     // lane-major (wire_[lane*outCh+ch]) — sized to the channel count off the hot path, so a light of
@@ -735,6 +822,16 @@ protected:
     /// warnings. Default null; a peripheral with bus control pins overrides it. Parlio has none.
     const char* validateBusFatal() const { return nullptr; }
 
+    /// CRTP ring hooks (default: this peripheral has no streaming ring, so it never rings). Only MoonI80
+    /// — which owns its DMA — overrides these to stream a frame too big for internal RAM (see its
+    /// busInitRing / the tickRing path). The esp_lcd I80 (the memory-capped reference) and Parlio use
+    /// these defaults: busIsRing() is always false, so tick() never selects tickRing and the ring transmit
+    /// is never called. reinit() consults wantsRing() to decide whether to attempt a ring build at all.
+    bool wantsRing() const { return false; }                        // should reinit try the ring for this config?
+    bool busInitRing(size_t /*rowBytes*/, uint32_t /*totalRows*/, size_t /*padBytes*/) { return false; }
+    bool busIsRing() const { return false; }
+    bool busTransmitRing() { return false; }
+
     /// CRTP hook: the GPIO a SPARE bus lane is parked on when the pin list is narrower than the bus
     /// width (shift mode — the board decides the data-pin count, the peripheral decides the width).
     /// The i80 driver hides this to return its WR pin, which the peripheral already drives; a
@@ -756,12 +853,24 @@ protected:
     // measured in bus words, and the bus already clocks outPerPin× faster in shift mode,
     // so an unscaled pad holds the same wall-clock idle... which would be outPerPin× too
     // SHORT. Scale it by outPerPin to keep the ≥300 µs strand-latch window intact.
+    // Bytes ONE light-row encodes to: outCh channels × 24 slots (3 per bit × 8 bits) × slotBytes ×
+    // outPerPin shift words. The single source of the row geometry — frameBytesFor and the streaming
+    // ring both derive from it, so the ring's per-slice size can never drift from the whole-frame size.
+    static size_t rowBytesFor(uint8_t outCh, uint8_t slotBytes, uint8_t outPerPin) {
+        return static_cast<size_t>(outCh) * 24 * slotBytes * outPerPin;
+    }
+    // The trailing latch pad: 800 idle bus words (≥300 µs at the slot rate) + 64 clock-tolerance slack,
+    // scaled by slotBytes and outPerPin (see the note above — the shift bus clocks faster, so the pad
+    // must scale to hold the same wall-clock LOW). One frame carries exactly one pad, at its end.
+    static size_t padBytesFor(uint8_t slotBytes, uint8_t outPerPin) {
+        return static_cast<size_t>(800 + 64) * slotBytes * outPerPin;
+    }
+
     static size_t frameBytesFor(nrOfLightsType maxLights, uint8_t outCh, uint8_t slotBytes,
                                 uint8_t outPerPin = 1) {
         if (maxLights == 0 || outCh == 0 || outPerPin == 0) return 0;
-        const size_t latchPad = static_cast<size_t>(800 + 64) * slotBytes * outPerPin;
-        const size_t bytes = static_cast<size_t>(maxLights) * outCh * 24 * slotBytes * outPerPin
-                             + latchPad;
+        const size_t bytes = static_cast<size_t>(maxLights) * rowBytesFor(outCh, slotBytes, outPerPin)
+                             + padBytesFor(slotBytes, outPerPin);
         return (bytes + 63) & ~static_cast<size_t>(63);
     }
 
@@ -943,6 +1052,7 @@ protected:
         // so a driver that gave up starts transmitting again (the live-reconfiguration rule — no reboot).
         deadFrames_ = 0;
         gaveUpReported_ = false;
+        giveUpRetry_ = 0;
         // Drain any in-flight DMA before touching the buffers: a rebuild (or the exact-match
         // re-zero below) must not race a transfer still reading the old buffer. No-op when idle.
         drainInFlight();
@@ -958,10 +1068,33 @@ protected:
         // Also rebuild when the second-buffer PRESENCE no longer matches asyncTransmit: toggling the
         // flag adds (ON) or frees (OFF) buffer 1, which only busInit/deinit can do. `haveSecond`
         // reflects what's currently allocated; `wantSecond` what the flag now asks for.
+        // RING PATH (MoonI80, oversize shift mode): the whole-frame reuse/alloc logic below does not
+        // apply — a ring holds no whole frame, so busCapacity() is one small slice and the exact-match
+        // check would never fire anyway. Build the ring fresh; on failure fall through to the whole-frame
+        // path, which then idles with a status if the frame won't fit either (the always-available
+        // degrade). The ring owns its own buffers + refill task, so a plain deinit()+rebuild is correct;
+        // ring-reuse is a later optimization (a config change already forces a rebuild).
+        if (derived()->wantsRing()) {
+            deinit();
+            const uint8_t outCh = correction_.outChannels;
+            const size_t rowBytes = rowBytesFor(outCh, slotBytes(), outputsPerPin());
+            const size_t padBytes = padBytesFor(slotBytes(), outputsPerPin());
+            if (derived()->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_), padBytes)) {
+                inited_ = true;
+                dmaBuf_ = derived()->busBuffer(0);   // ring[0] — a real pointer, the "inited" sentinel
+                for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
+                busLaneCount_ = laneCount_;
+                derived()->recordBusPins();
+                if (status() == Derived::kInitFailMsg) clearStatus();
+                return;
+            }
+            // Ring build failed (even the small buffers didn't fit) — fall through to whole-frame.
+        }
+
         const bool haveSecond = derived()->busBuffer(1) != nullptr;
         const bool wantSecond = asyncTransmit;
-        if (inited_ && derived()->busCapacity() == frameBytes_ && busPinsCurrent()
-            && busLaneCount_ == laneCount_ && haveSecond == wantSecond) {
+        if (inited_ && !derived()->busIsRing() && derived()->busCapacity() == frameBytes_
+            && busPinsCurrent() && busLaneCount_ == laneCount_ && haveSecond == wantSecond) {
             // Clear stale latch-pad bytes in BOTH buffers (buffer 1 is null in single-buffer mode).
             std::memset(dmaBuf_, 0, derived()->busCapacity());
             if (uint8_t* b1 = derived()->busBuffer(1)) std::memset(b1, 0, derived()->busCapacity());

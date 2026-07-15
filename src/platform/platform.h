@@ -744,13 +744,20 @@ struct MoonI80Ws2812Handle { void* impl = nullptr; };
 // entirely. Espressif's RGB-LCD driver calls the same trick "bounce buffers"; hpwit's LED driver
 // arrived at it independently.
 //
-// The deadline is comfortable, and the expander is *why*: the DMA takes ~21.6 µs to drain one light's
-// 1,152 bytes while the CPU encodes a light in ~9.7 µs (measured on an S3) — the 8× output inflation
-// buys more DMA time than it costs CPU. The refill runs in the EOF interrupt, in IRAM, so a WiFi task
-// cannot preempt it into an underrun.
+// The deadline is comfortable, and the expander is *why*: the DMA takes ~345 µs to drain one 16-row
+// buffer while the CPU encodes those rows in ~96 µs (measured on an S3) — the 8× output inflation buys
+// far more DMA time than it costs CPU, a ~3.6× margin.
 //
-// `MoonI80EncodeFn` is the seam: the platform owns the ring, the descriptors and the ISR; the domain
-// owns the encode. The callback is invoked FROM THE ISR — everything it touches must be IRAM-safe.
+// **The refill runs in a pinned task, not the EOF ISR.** The margin above makes ISR-grade determinism
+// unnecessary, and a task keeps the encode where all of `src/light/` already is: nothing there is
+// `IRAM_ATTR`, and this repo has no ISR→domain callback anywhere (platform_esp32_ir.cpp states the
+// convention — hand the ISR's result to a task, do the work there). So the EOF ISR does one
+// `xSemaphoreGiveFromISR`, and a high-priority task calls the encode. Escalating to an ISR refill later
+// (only if a bench underrun shows as glitching) is a change of *who calls the seam*, not a rewrite —
+// the signature is identical either way.
+//
+// `MoonI80EncodeFn` is the seam: the platform owns the ring, the descriptors and the completion; the
+// domain owns the encode. The callback runs on the refill task (or the priming call), off the ISR.
 using MoonI80EncodeFn = void (*)(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
                                  bool closeFrame);
 
@@ -773,6 +780,12 @@ bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& h);
 
 // True when the handle was brought up as a ring (so the driver knows which transmit to call).
 bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& h);
+
+// Would a whole `bytes`-sized frame fit internal DMA RAM right now (leaving the WiFi/HTTP reserve)? The
+// driver asks this to decide RING vs whole-frame: a shift frame that fits internal takes the proven
+// whole-frame path; one that doesn't would fall to PSRAM and stall at the expander clock, so it rings
+// instead. Reuses the exact heap-caps check moonI80Ws2812Init does. False on chips without LCD_CAM.
+bool moonI80Ws2812InternalFits(size_t bytes);
 uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& h, uint8_t buffer);
 size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& h);
 bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& h, uint8_t buffer, size_t bytes);

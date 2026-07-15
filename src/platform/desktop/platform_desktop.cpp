@@ -1179,6 +1179,17 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                        uint8_t /*clockMultiplier*/) {
     return false;
 }
+// Ring mode is a GDMA construct with no host equivalent — inert here, bench-verified on the S3, exactly
+// like the whole-frame path above. A driver that would pick the ring on device stays whole-frame on host.
+bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                           uint8_t /*laneCount*/, uint16_t /*wrGpio*/, size_t /*rowBytes*/,
+                           uint32_t /*totalRows*/, size_t /*padBytes*/, uint8_t /*clockMultiplier*/,
+                           MoonI80EncodeFn /*encode*/, void* /*user*/) {
+    return false;
+}
+bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& /*h*/) { return false; }
+bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& /*h*/) { return false; }
+bool moonI80Ws2812InternalFits(size_t /*bytes*/) { return false; }
 uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
 size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& /*h*/) { return 0; }
 bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }

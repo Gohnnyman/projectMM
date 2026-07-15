@@ -372,7 +372,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         // still settling as the first RCLK latch fires, so bit 0 of light 0 comes back ~12 ticks (a
         // "0") when the strand sent a "1". Measured on strand 15: EXACTLY 1 mismatch in 2304, always
         // bit 0, always short-clipped — the other 2303 bits and both pulse-width classes are textbook.
-        // It costs the very first pixel's most-significant colour bit and nothing else (invisible), so a
+        // It costs the very first pixel's most-significant color bit and nothing else (invisible), so a
         // lone short-clipped bit 0 is the '595's frame-start settling, not bad output — accept it. Any
         // second mismatch, or a bit-0 miss that is not short-clipped, still fails. Direct mode drives
         // the pin straight (no latch) so its bit 0 is clean and this never triggers there.

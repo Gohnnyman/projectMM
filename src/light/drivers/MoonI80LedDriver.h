@@ -126,6 +126,57 @@ public:
                                            static_cast<uint16_t>(clockPin), frameBytes,
                                            wantSecondBuffer, this->busClockMultiplier());
     }
+
+    /// Should reinit build a RING for this config instead of the whole-frame path? Only when the '595
+    /// expander is engaged AND the whole frame would NOT fit internal DMA RAM — in which case the
+    /// whole-frame path would put it in PSRAM and the S3's GDMA stalls reading PSRAM at the expander's
+    /// 26.67 MHz clock (ADR-0014). A shift frame that DOES fit internal keeps the proven whole-frame path
+    /// (and stays an A/B control against the ring at the same size). Direct mode never rings — it drives
+    /// PSRAM fine at the 10×-slower clock.
+    bool wantsRing() const {
+        return shiftMode() && !platform::moonI80Ws2812InternalFits(this->frameBytes_);
+    }
+
+    /// Bring the bus up as a streaming RING (the phase-2 path): the platform loops a few small internal
+    /// buffers and calls back per drained buffer to refill it, so a frame too big for internal RAM never
+    /// materialises (see platform.h). `rowBytes`/`padBytes` come from the base's frame arithmetic; the
+    /// trampoline below is the encode seam. Returns false if even the small ring won't fit — the base
+    /// then falls back to busInit (whole-frame), which idles with a status if IT can't fit either.
+    bool busInitRing(size_t rowBytes, uint32_t totalRows, size_t padBytes) {
+        return platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
+                                               static_cast<uint16_t>(clockPin), rowBytes, totalRows,
+                                               padBytes, this->busClockMultiplier(),
+                                               &MoonI80LedDriver::ringEncodeTrampoline, this);
+    }
+    bool busTransmitRing()          { return platform::moonI80Ws2812TransmitRing(bus_); }
+    bool busIsRing() const          { return platform::moonI80Ws2812IsRing(bus_); }
+
+    /// The platform's `MoonI80EncodeFn` seam: a plain function pointer (there is no CRTP hook for it), so
+    /// this static trampoline recovers `this` from `user` and encodes one slice into the ring buffer the
+    /// platform hands it. `dst` is the buffer; `firstRow`/`rowCount` name the slice; `closeFrame` gates
+    /// the trailing latch pad (only the last slice emits it).
+    ///
+    /// **It prefills the shift constants FIRST, then the data — because a ring buffer is recycled, not
+    /// re-zeroed.** The whole-frame path prefills once at reinit and `encodeRows` then writes only the
+    /// DATA word (two-thirds of the stores hoisted out); but a ring buffer holds a DIFFERENT slice each
+    /// time it drains, so its constants (pulse-start/tail per this slice's active mask, and the latch pad
+    /// on the last slice) must be re-laid on every refill or the buffer keeps the previous slice's
+    /// constants and renders wrong on the second frame (pinned by the recycled==fresh host test). Direct
+    /// mode writes every slot word in encodeRows, so it needs no prefill.
+    static void ringEncodeTrampoline(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
+                                     bool closeFrame) {
+        auto* self = static_cast<MoonI80LedDriver*>(user);
+        const uint8_t outCh = self->correction_.outChannels;
+        const auto first = static_cast<nrOfLightsType>(firstRow);
+        const auto count = static_cast<nrOfLightsType>(rowCount);
+        if (self->slotBytes() == 1) {
+            if (self->shiftMode()) self->prefillShiftRows<uint8_t>(outCh, dst, first, count);
+            self->encodeRows<uint8_t>(outCh, dst, first, count, closeFrame);
+        } else {
+            if (self->shiftMode()) self->prefillShiftRows<uint16_t>(outCh, dst, first, count);
+            self->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
+        }
+    }
     uint8_t*  busBuffer(uint8_t i)              { return platform::moonI80Ws2812Buffer(bus_, i); }
     size_t    busCapacity() const               { return platform::moonI80Ws2812BufferCapacity(bus_); }
     bool      busTransmit(uint8_t i, size_t bytes) { return platform::moonI80Ws2812Transmit(bus_, i, bytes); }

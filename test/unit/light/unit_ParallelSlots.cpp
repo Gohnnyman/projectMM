@@ -612,7 +612,7 @@ TEST_CASE("shift encoder: prefill + data-only agree on an exhausted strand") {
 // several distinct paths, and a wrong shift or mask in any of them silently corrupts a strand.
 //
 // So sweep every pin count against the whole-slot encoder, on BOTH bus widths, with a dense pattern
-// and exhausted strands mixed in. `encodeWs2812ShiftSlots` is the reference: the simple, unoptimised
+// and exhausted strands mixed in. `encodeWs2812ShiftSlots` is the reference: the simple, unoptimized
 // form that the '595 simulator already validates end-to-end. (This sweep earned its keep immediately:
 // it caught a real bug in a batched-transpose variant that the rest of the suite passed clean.)
 TEST_CASE("shift encoder: the packed transpose matches the reference at every pin count") {

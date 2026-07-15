@@ -354,3 +354,41 @@ TEST_CASE("ParallelLedDriver: a timed-out wait never re-encodes into the live bu
         if (d.calls[i].kind == Call::Transmit) transmittedNow = true;
     CHECK(transmittedNow);
 }
+
+// After ENOUGH consecutive dead frames the driver GIVES UP (stops spending the render thread on a bus
+// that won't deliver — a misconfigured bus must not starve the network). But give-up is not permanent:
+// a TRANSIENT stall (the streaming ring's refill missing one deadline under a burst of HTTP load) must
+// self-recover WITHOUT a reinit, or a momentary hiccup leaves the LEDs dark until the user touches a
+// control. So once given up, the driver periodically lets one frame through; if the bus is alive again,
+// output resumes on its own. This pins that retry-recovery.
+TEST_CASE("ParallelLedDriver: give-up self-recovers on a periodic retry, no reinit needed") {
+    MockParallelDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 64, /*async=*/true);
+
+    // Wedge the bus and tick until it gives up: every wait times out, so each frame is a dead strike.
+    d.waitTimesOut = true;
+    for (int i = 0; i < 40; i++) d.tick();   // well past kDeadFramesBeforeGiveUp
+    CHECK(d.severity() == mm::DriverBase::Severity::Error);   // reported "output stalled"
+
+    // While given up, a tick must NOT transmit every frame (that would keep spending the render thread).
+    size_t mark = d.calls.size();
+    d.tick();
+    bool transmittedWhileGivenUp = false;
+    for (size_t i = mark; i < d.calls.size(); i++)
+        if (d.calls[i].kind == Call::Transmit) transmittedWhileGivenUp = true;
+    CHECK_FALSE(transmittedWhileGivenUp);   // this tick was inside the quiet window, not a retry
+
+    // The bus comes back to life. Within one retry window the driver lets a frame through, it completes,
+    // and output resumes — no config change, no reinit.
+    d.waitTimesOut = false;
+    mark = d.calls.size();
+    bool recovered = false;
+    for (int i = 0; i < 60 && !recovered; i++) {   // < kGiveUpRetryTicks + margin
+        d.tick();
+        for (size_t j = mark; j < d.calls.size(); j++)
+            if (d.calls[j].kind == Call::Transmit) recovered = true;
+    }
+    CHECK(recovered);   // a retry frame got through and the driver is transmitting again
+}
