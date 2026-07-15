@@ -344,6 +344,11 @@ public:
     /// for exactly one buffer — see the asyncTransmit control + docs/history/lessons.md.)
     void tick() override {
         if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
+        // Loopback mode owns the peripheral EXCLUSIVELY. While it is on, the render loop must not
+        // transmit — the loopback tears the bus down, drives its own private frame, and rebuilds it.
+        // KNOWN BUG (backlog): after toggling OFF, the shift-mode bus does not deliver frames until a
+        // reboot ("output stalled") — a no-reboot-principle violation still under investigation.
+        if (loopbackTest) return;
         if (!inited_ || !dmaBuf_ || !sourceBuffer_ || !sourceBuffer_->data()
             || laneCount_ == 0 || maxLaneLights_ == 0) return;
         const uint8_t outCh = correction_.outChannels;

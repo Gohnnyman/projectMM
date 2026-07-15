@@ -19,11 +19,27 @@ public:
 
     uint8_t speed = 30;   // BPM
     uint8_t axis  = 0;    // 0=all 1=x(red) 2=y(green) 3=z(blue)
+    uint8_t mode  = 0;    // 0=lines (the sweeping planes), 1=panel dots (a static mapping test)
+    uint8_t panelW = 16;  // panel block width  in lights (panel-dots mapping)
+    uint8_t panelH = 16;  // panel block height in lights — SEPARATE from width (panels aren't square:
+                          //   a 16×6 module has W≠H, and one square size skips whole panel rows)
 
     void defineControls() override {
         static constexpr const char* kAxisOptions[] = {"all", "x (red)", "y (green)", "z (blue)"};
+        static constexpr const char* kModeOptions[] = {"lines", "panel dots"};
+        controls_.addSelect("mode", mode, kModeOptions, 2);
+        // The two modes have disjoint controls, so show only the active mode's. defineControls re-runs
+        // on every control change (MoonModule), so toggling `mode` re-hides these automatically — the
+        // conditional-control shape the driver uses for latchPin/loopback pins.
+        const bool dots = (mode == 1);
         controls_.addUint8("speed", speed, 1, 240);
+        controls_.setHidden(controls_.count() - 1, dots);          // lines only
         controls_.addSelect("axis", axis, kAxisOptions, 4);
+        controls_.setHidden(controls_.count() - 1, dots);          // lines only
+        controls_.addUint8("panelW", panelW, 1, 64);
+        controls_.setHidden(controls_.count() - 1, !dots);         // panel dots only
+        controls_.addUint8("panelH", panelH, 1, 64);
+        controls_.setHidden(controls_.count() - 1, !dots);         // panel dots only
     }
 
     void tick() override {
@@ -34,6 +50,32 @@ public:
         const uint8_t    cpl = channelsPerLight();
 
         memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
+
+        // PANEL DOTS — a static mapping aid, NOT an animation. Each panelW×panelH block lights
+        // (panelIndex + 1) LEDs along its top row: panel 0 shows 1 dot, panel 1 shows 2, and so on, so
+        // you can read straight off the wall which physical panel carries which grid block (and thus
+        // which strand). Panel index is row-major in GRID space (panelsPerRow across, then down); the
+        // physical wiring order is the layout's job, so any mismatch between the count you see and the
+        // position is exactly the mapping fact this reveals. W and H are SEPARATE so non-square panels
+        // (e.g. 16×6) get one dot-group per panel — a single square step skips whole rows of panels.
+        if (mode == 1) {
+            const lengthType pw = panelW ? panelW : 1;
+            const lengthType ph = panelH ? panelH : 1;
+            const lengthType panelsPerRow = (w + pw - 1) / pw;
+            for (lengthType py = 0; py < h; py += ph) {
+                for (lengthType px = 0; px < w; px += pw) {
+                    const lengthType panelIdx = (py / ph) * panelsPerRow + (px / pw);
+                    const lengthType dots = panelIdx + 1;   // panel 0 → 1 dot, panel 1 → 2, …
+                    for (lengthType i = 0; i < dots && (px + i) < w && i < pw; i++) {
+                        const size_t off = (static_cast<size_t>(py) * w + (px + i)) * cpl;
+                        if (cpl >= 1) buf[off + 0] = 255;   // white dots, brightest for a clear read
+                        if (cpl >= 2) buf[off + 1] = 255;
+                        if (cpl >= 3) buf[off + 2] = 255;
+                    }
+                }
+            }
+            return;
+        }
 
         // Sawtooth 0–65535 at speed BPM. Use 64-bit to avoid overflow.
         const uint32_t period = 60000u / static_cast<uint32_t>(speed ? speed : 1);

@@ -99,8 +99,13 @@ public:
     /// signal never leaves the peripheral, so `clockPin` naming a strand's GPIO is harmless — and
     /// rejecting it would forbid a perfectly good config for the sake of a signal nobody reads.
     const char* validateBusFatal() const {
-        if (shiftMode() && latchPin >= 0 && latchPin == clockPin)
-            return "latchPin is on clockPin (WR) — the latch needs its own GPIO";
+        if (shiftMode()) {
+            // The '595 needs WR on a real GPIO (it is the SRCLK). Unset (-1) would route the
+            // peripheral's WR signal to GPIO 65535 — reject it before busInit reaches the pad.
+            if (clockPin < 0) return "the 74HCT595 expander needs a clockPin (its shift clock)";
+            if (latchPin >= 0 && latchPin == clockPin)
+                return "latchPin is on clockPin (WR) — the latch needs its own GPIO";
+        }
         return nullptr;
     }
     /// A data lane sharing WR's GPIO is silent corruption — the matrix routes both signals to the one

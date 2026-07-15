@@ -607,6 +607,11 @@ bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& h, uint8_t buffer, size_t bytes)
     // N+1 overlapped the wire time of frame N, and that has already happened by the time we are
     // called. What is left is the wire itself, which is serial on any design — the strand can only
     // receive one frame at a time.
+    //
+    // Drain a STALE wire-free token first: the previous frame's EOF gives wireFree unconditionally, so
+    // a token can sit un-consumed when no transmit was waiting on it. Taking it non-blocking here means
+    // the busy-wait below waits for THIS frame's EOF, not a past one.
+    xSemaphoreTake(st->wireFree, 0);
     if (st->busy) {
         // Block on the dedicated wire-free signal, not on the in-flight buffer's done[] — that one
         // belongs to the DRIVER (it waits on the buffer it means to reuse), and consuming it here

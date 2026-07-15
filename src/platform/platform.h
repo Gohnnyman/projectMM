@@ -570,6 +570,7 @@ void rmtWs2812Deinit(RmtWs2812Handle& h);
 size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
                           uint32_t* outSymbols, size_t maxSymbols, uint32_t timeoutMs);
 
+
 // Self-contained RMT loopback self-test, runnable from the running firmware (the
 // RmtLedDriver's loopbackTest control). Drives a known WS2812 pattern out `txGpio`
 // and captures it back on `rxGpio` (the user jumpers them), proving the GPIO emits

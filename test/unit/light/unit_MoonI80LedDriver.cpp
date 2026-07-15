@@ -107,6 +107,28 @@ TEST_CASE("MoonI80LedDriver rejects a latchPin on WR") {
     CHECK(d.severity() == mm::MoonI80LedDriver::Severity::Error);
 }
 
+// The '595's shift clock IS WR, so shift mode needs clockPin on a real GPIO. Unset (-1) would route
+// the peripheral's WR signal to GPIO 65535 — catch it as a config error, not a bad pad write. Direct
+// mode does not care (WR is unrouted there), so the same unset pin is fine without the expander.
+TEST_CASE("MoonI80LedDriver shift mode requires a clockPin; direct mode does not") {
+    mm::MoonI80LedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    d.shiftRegister = true;
+    d.latchPin = 12;
+    d.clockPin = -1;                 // unset
+    wire(d, src, corr, 8 * 16);
+    CHECK(d.severity() == mm::MoonI80LedDriver::Severity::Error);
+
+    mm::MoonI80LedDriver d2;          // same unset clockPin, DIRECT mode → fine
+    mm::Buffer src2;
+    mm::Correction corr2;
+    d2.clockPin = -1;
+    std::strcpy(d2.pins, "1,2,4,5,6,7,8,9");
+    wire(d2, src2, corr2, 8 * 16);
+    CHECK(d2.severity() != mm::MoonI80LedDriver::Severity::Error);
+}
+
 // Sanity: with a valid config the driver is a working CRTP sibling — it slices lanes and reports the
 // lights it drives, exactly like its sibling. (The lane/frame ARITHMETIC itself is the base's, and is
 // covered once, in unit_I80LedDriver and the Mock suites.)
