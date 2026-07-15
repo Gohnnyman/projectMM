@@ -381,14 +381,22 @@ TEST_CASE("ParallelLedDriver: give-up self-recovers on a periodic retry, no rein
     CHECK_FALSE(transmittedWhileGivenUp);   // this tick was inside the quiet window, not a retry
 
     // The bus comes back to life. Within one retry window the driver lets a frame through, it completes,
-    // and output resumes — no config change, no reinit.
+    // and output resumes — no config change, no reinit. Recovery means the driver actually LEFT the
+    // give-up state (its Error status cleared), not merely that one retry Transmit happened: a retry that
+    // transmits but whose wait still fails would keep the driver given-up, and that must NOT count.
     d.waitTimesOut = false;
-    mark = d.calls.size();
     bool recovered = false;
-    for (int i = 0; i < 60 && !recovered; i++) {   // < kGiveUpRetryTicks + margin
+    for (int i = 0; i < 200 && !recovered; i++) {   // several retry windows' worth of margin
         d.tick();
-        for (size_t j = mark; j < d.calls.size(); j++)
-            if (d.calls[j].kind == Call::Transmit) recovered = true;
+        if (d.severity() != mm::DriverBase::Severity::Error) recovered = true;
     }
-    CHECK(recovered);   // a retry frame got through and the driver is transmitting again
+    CHECK(recovered);   // the give-up Error state cleared — the driver is transmitting normally again
+
+    // And it keeps transmitting on the following ticks (steady-state, not a one-off retry blip).
+    const size_t after = d.calls.size();
+    d.tick();
+    bool stillTransmitting = false;
+    for (size_t j = after; j < d.calls.size(); j++)
+        if (d.calls[j].kind == Call::Transmit) stillTransmitting = true;
+    CHECK(stillTransmitting);
 }

@@ -129,6 +129,15 @@ public:
     /// the container's `multicore` control, and they stack: this hides the WIRE behind DMA within one
     /// core; that hides the ENCODE behind the render on the other core. See docs/history/lessons.md.
     bool asyncTransmit = true;
+    /// Streaming-ring source snapshot on/off — an A/B measurement knob, ring path only. ON (default,
+    /// the safe behavior) freezes the source into a driver-owned buffer each frame so the ring's refill
+    /// (which encodes off the render thread, concurrently with rendering) reads an immutable copy — no
+    /// use-after-free on a grid resize, no frame tearing. OFF reads the live source directly, matching
+    /// the pre-snapshot behavior, so a bench can A/B the snapshot's effect on ring frame completion live
+    /// without a reflash. Live (NOT a prepare trigger): it changes only what tickRing does per frame,
+    /// nothing the bus was built with, so the next tick honors the new value. Ignored off the ring path
+    /// (the whole-frame paths encode inline on the render thread, no concurrency, so they never snapshot).
+    bool ringSnapshot = true;
     /// On-device loopback self-test — jumper a lane's TX to `loopbackRxPin`, tick to transmit a
     /// known WS2812 pattern and bit-verify the capture, proving the peripheral emits correct bytes
     /// on real silicon. A persistent on/off mode (see onControlChanged): while on it re-runs on every
@@ -160,13 +169,15 @@ public:
     /// this pin. In shift mode a data GPIO carries the fast serial stream *into* the register, not
     /// pixel data — so the wire must come from the register's OUTPUT side instead:
     ///
-    ///  - **Which output:** the test pattern is driven on **strand 0** = the first data pin's '595 at
-    ///    shift position 0. A '595 shifts MSB-first (the first bit clocked in ends up on the last
-    ///    output), so strand 0 appears on that register's **Q7** (pin 7 of the '595, the last of the
-    ///    QA..QH row). That is the wire to feed back.
-    ///  - **⚠ LEVEL-SHIFT IT.** The '595 runs at 5 V, so Q7 swings to **5 V**, and an ESP32 GPIO is
-    ///    **not 5 V tolerant** — a direct wire can damage the pin. Use a divider (e.g. 1 kΩ from Q7
-    ///    to the GPIO, 2 kΩ from the GPIO to GND, giving 5 V × 2/3 ≈ 3.3 V) or any 5 V→3.3 V shifter.
+    ///  - **Which output:** the test pattern is driven on the strand named by **`loopbackStrand`** (which
+    ///    defaults to 0 but can be any strand — pick the '595 output that is physically easiest to reach,
+    ///    e.g. a spare one that drives no panel). Strand S is data pin `S / 8`'s register at shift
+    ///    position `S % 8`. A '595 shifts MSB-first — the first bit clocked in lands on the LAST output —
+    ///    so shift position `p` appears on output **Q(7 − p)**. Strand 0 (position 0) is therefore Q7;
+    ///    strand 7 (position 7) is Q0; and so on. Feed that output back.
+    ///  - **⚠ LEVEL-SHIFT IT.** The '595 runs at 5 V, so its output swings to **5 V**, and an ESP32 GPIO
+    ///    is **not 5 V tolerant** — a direct wire can damage the pin. Use a divider (e.g. 1 kΩ from the
+    ///    output to the GPIO, 2 kΩ from the GPIO to GND, giving 5 V × 2/3 ≈ 3.3 V) or any 5 V→3.3 V shifter.
     ///  - **No continuity pre-check runs in shift mode** — it would drive the TX pin and expect this
     ///    pin to follow, which a shift register does not do (that takes 8 clocks + a latch). So a
     ///    mis-wired jumper shows up as a bit FAIL, not as "jumper not detected".
@@ -189,17 +200,19 @@ public:
     /// 48×256 cost the SAME frame. The bus also clocks ×8 faster (see kShiftPclkHz).
     /// Needs a `latchPin` and the LCD_CAM i80 path (ESP32-S3 / -P4); refused with a status elsewhere.
     ///
-    /// **⚠️ EXPERIMENTAL, and size-limited today.** The ×8 frame renders correctly only while it fits
-    /// **internal DMA RAM** (~110 KB, and less once WiFi has taken its share) — measured on the S3 as
-    /// roughly **96 lights per strand**, above which the strands flicker badly. The mechanism is not
-    /// yet understood: the identical frame runs perfectly from PSRAM on a P4, and the obvious
-    /// explanations (PSRAM bandwidth, DMA descriptor pool, FIFO underrun) have each been tested and
-    /// refuted. Two things that are known to help meanwhile: keep `ledsPerPin` ≤ 96, and turn
-    /// **`asyncTransmit` OFF** (the double-buffer makes it markedly worse).
+    /// **⚠️ EXPERIMENTAL, and size-limited today — the limit depends on the backend.** The ×8 frame is
+    /// ~1.1 KB/light, so it exceeds internal DMA RAM (~110 KB, less once WiFi has taken its share) above
+    /// roughly **96 lights per strand**. The **esp_lcd i80** backend must stream one contiguous frame, so
+    /// it is capped there (above it the frame falls to PSRAM, which the S3's GDMA cannot sustain at the
+    /// expander's 26.67 MHz clock — the frame never completes). The **MoonI80** backend lifts that with a
+    /// streaming ring (small internal buffers refilled as the DMA drains them, so PSRAM is never on the
+    /// path): it drives **128 lights/strand reliably**. Above 128 the ring reuses buffers and a residual
+    /// refill-vs-DMA race still stalls it — the current working ceiling is 128/strand via MoonI80, 96 via
+    /// i80.
     ///
-    /// So the expander does not yet deliver the big displays it exists for — that needs the frame back
-    /// in PSRAM. Full status, and the hypotheses already ruled out, in
-    /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/backlog/shift-register-driver-analysis.md).
+    /// Full status, the reuse-race + concurrency follow-ups, and the measurements behind these limits:
+    /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/backlog/shift-register-driver-analysis.md)
+    /// and the ring items in `docs/backlog/backlog-light.md`.
     bool     shiftRegister = false;
     /// The 74HCT595 LATCH (RCLK) line — pulsed once the shifted byte is in, presenting it on the
     /// '595 outputs. Unlike the shift clock (the peripheral's own WR pin), this is a DATA lane:
@@ -223,6 +236,12 @@ public:
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
         controls_.addBool("asyncTransmit", asyncTransmit);   // double-buffer on/off (latency opt-out)
+        // Streaming-ring source-snapshot A/B knob (ring path only; inert on the whole-frame paths). Shown
+        // unconditionally: the precise "only when ringing" gate would key on wantsRing(), but that reads
+        // frameBytes_, which is 0 at defineControls() time (the source buffer is wired AFTER the schema is
+        // built at boot) — so a wantsRing() gate hid it exactly when it was needed. Backlogged: hide the
+        // ring-inert controls once the schema can be rebuilt post-source-wiring. See backlog-light.md.
+        controls_.addBool("ringSnapshot", ringSnapshot);
         // Read-only KPI: the measured DMA wire time + the fps ceiling it implies. The pure output
         // floor (independent of render load), so it shows how much headroom remains as the pipeline
         // improves — and it reflects an overclocked slot rate directly. Refreshed in tick1s().
@@ -313,7 +332,9 @@ public:
     /// Deinit the bus, then clear the shared fail/config-error state
     /// (DriverBase::release()).
     void release() override {
-        deinit();
+        deinit();   // drains in-flight first, so the ring's refill has stopped reading the snapshot
+        if (snapshotBuf_) { platform::free(snapshotBuf_); snapshotBuf_ = nullptr; snapshotCap_ = 0; }
+        encodeSrc_ = nullptr;
         DriverBase::release();   // frees the correction scratch, clears failBuf_ + configErr_
     }
 
@@ -334,15 +355,27 @@ public:
         reinit();
     }
 
-    /// RGB<->RGBW changes the bytes-per-light and therefore the frame size, so
-    /// re-parse and re-init the bus. Skipped while (effectively) disabled (would re-grab the bus).
-    /// Drains in-flight first (before parseConfig reallocates the scratch the ring's refill task reads) —
-    /// see prepare().
+    /// RGB<->RGBW changes the bytes-per-light and therefore the frame size, so re-parse and re-init the
+    /// bus — but ONLY when the frame size actually changed. Skipped while (effectively) disabled (would
+    /// re-grab the bus). Drains in-flight first (before parseConfig reallocates the scratch the ring's
+    /// refill task reads) — see prepare().
+    ///
+    /// **The frame-size gate is what stops a redundant double-reinit.** The Drivers container's prepare()
+    /// pushes every child's correction (passBufferToDrivers → rebuildCorrection → this) and THEN the same
+    /// prepareTree sweep runs each child's own prepare() (which reinits unconditionally). Without the gate,
+    /// a plain `ledsPerPin`/window edit — which changes the LIGHT COUNT but not the per-light CHANNELS, so
+    /// frameBytes_ is unchanged by the correction push — would reinit here AND again in prepare(), tearing
+    /// the bus down and rebuilding it twice in rapid succession. On the shift-mode LCD_CAM ring that second
+    /// rapid rebuild came up with its GDMA EOF interrupt dead (the "output stalled" wedge). Gating on a real
+    /// frameBytes_ change makes this a no-op in that path (only prepare() rebuilds), while a genuine RGB↔RGBW
+    /// channel-count change — which prepare() does NOT necessarily follow (a standalone preset/whiteMode edit
+    /// doesn't trigger prepareTree) — still rebuilds here.
     void onCorrectionChanged() override {
         if (!effectivelyEnabled()) return;
+        const size_t before = frameBytes_;
         drainInFlight();
         parseConfig();
-        reinit();
+        if (frameBytes_ != before) reinit();   // rebuild only on a real frame-size change (see above)
     }
 
     /// Point the driver at the source frame buffer and re-parse the lane config.
@@ -458,6 +491,15 @@ public:
         // since we kicked it. A timed-out wait leaves the frame in-flight so the next tick re-waits rather
         // than starting a second frame over a live one.
         if (!busWaitIfBusy(0)) return;
+        // Freeze the source for this frame BEFORE kicking the transfer: busTransmitRing primes the first
+        // ring buffers synchronously (trampoline → encodeRows) and its refill re-encodes the rest off the
+        // render thread across the ~6 ms wire, so both must read an immutable copy, not the live Layer
+        // buffer the render loop is free to overwrite. A failed snapshot (source gone / OOM) skips the
+        // frame rather than encoding from a moving source. The `ringSnapshot` A/B knob turns this off to
+        // read the live source directly (matches pre-snapshot behavior) — a bench measurement lever, not a
+        // shipping opt-out; it defaults ON.
+        if (ringSnapshot) { if (!snapshotSourceForRing()) return; }
+        else              encodeSrc_ = nullptr;   // OFF: encodeRows reads the live sourceBuffer_
         if (derived()->busTransmitRing()) {
             inFlight_[0] = true;   // kicked; DO NOT wait here — the next tick waits, freeing the core now
         }
@@ -491,6 +533,12 @@ public:
         }
         deadFrames_ = 0;   // a completed transfer clears the strike count: the bus is alive again
         inFlight_[i] = false;
+        // If we'd already reported give-up ("output stalled"), a completed transfer means the bus
+        // recovered — re-derive the real status so the UI stops showing a fault the device no longer has.
+        // parseConfig() (not a bare clearStatus) is what RESTORES the normal "driving N of M lights" info;
+        // clearStatus alone would wipe the error but leave the status blank forever (the info is only set
+        // in parseConfig, which the retry path doesn't otherwise re-run).
+        if (gaveUpReported_) { gaveUpReported_ = false; parseConfig(); }
         return true;
     }
 
@@ -539,7 +587,18 @@ public:
         if (++giveUpRetry_ >= kGiveUpRetryTicks) {
             giveUpRetry_ = 0;
             deadFrames_ = kDeadFramesBeforeGiveUp - 1;   // one strike below the threshold: let this frame try
-            gaveUpReported_ = false;                     // re-report if it fails again (status stays honest)
+            // ABANDON the wedged in-flight transfer so the retry starts CLEAN. After this many timeouts
+            // the transfer is not going to complete; leaving inFlight_ set would make the tick's
+            // busWaitIfBusy() wait on that dead transfer (and time out again) instead of arming a fresh
+            // one. Clearing the flags lets the next tick encode+transmit a replacement — the transmit
+            // re-arms the bus, which is what actually recovers it.
+            inFlight_[0] = inFlight_[1] = false;
+            // Do NOT clear the "output stalled" status here — the retry has not SUCCEEDED yet, it is only
+            // about to try. Leave gaveUpReported_ set so the status stays honest during the attempt: if the
+            // retry frame completes, busWaitIfBusy() re-derives the real "driving N of M" status (via
+            // parseConfig); if it fails again, the error was correctly still showing the whole time. This
+            // is the fix for the earlier bug where an eager clear wiped the status to blank forever (the
+            // driving-info is only re-set on a successful transfer, not on the retry attempt itself).
             return false;
         }
         return true;
@@ -657,7 +716,14 @@ public:
         const nrOfLightsType lastRow = (rowCount == 0 || firstRow + rowCount > maxLaneLights_)
                                            ? maxLaneLights_
                                            : static_cast<nrOfLightsType>(firstRow + rowCount);
-        const uint8_t* src = sourceBuffer_->data();
+        // The streaming ring encodes OFF the render thread (its refill runs while the DMA drains and the
+        // render loop is free to overwrite the source buffer), so it reads from an immutable per-frame
+        // SNAPSHOT (encodeSrc_) instead of the live sourceBuffer_ — no use-after-free on a resize, no
+        // frame tearing. encodeSrc_ is snapshotSourceForRing()'s windowed copy, bias-corrected by
+        // -winStart_ so the index math below (winStart_ + laneStart_ + row) is unchanged either way. The
+        // sync/async whole-frame paths encode inline on the render thread with no such hazard, so they
+        // leave encodeSrc_ null and read the live buffer as before.
+        const uint8_t* src = encodeSrc_ ? encodeSrc_ : sourceBuffer_->data();
         const uint8_t srcCh = sourceBuffer_->channelsPerLight();
         auto* out = reinterpret_cast<Slot*>(dst);
         // Per-lane wire slots, lane-major with stride `outCh` (wire_[lane * outCh + ch]). Sized to the
@@ -793,6 +859,55 @@ protected:
     uint8_t latchBit_ = 0;       // bus-bit index of the latch line (shift mode only)
     nrOfLightsType maxLaneLights_ = 0;
     size_t frameBytes_ = 0;
+
+    // Per-frame source SNAPSHOT for the streaming ring. The ring's refill encodes OFF the render thread,
+    // concurrently with the render loop overwriting the source buffer (the Drivers output buffer, or the
+    // layer buffer in the zero-copy identity case), so it must read an immutable copy. Only THIS DRIVER'S
+    // WINDOW is copied — `winLen_ × srcCh` bytes from `winStart_`, not the whole source — so on a large
+    // display split across many drivers each copies only the slice it reads, not the entire frame. (The
+    // source is the raw pixel array: 3 B/light, so 48 KB at 16K lights — the window keeps a per-driver
+    // copy proportional to that driver's strands, ~11.5 KB for a 16×256 driver.) snapshotSourceForRing()
+    // fills it at transmit time and points encodeSrc_ at it (biased by -winStart_ so encodeRows' index is
+    // unchanged); encodeRows reads encodeSrc_ when set. Grow-only, freed in release() with the scratch.
+    uint8_t* snapshotBuf_ = nullptr;      // driver-owned copy of the source WINDOW (ring only)
+    size_t   snapshotCap_ = 0;            // allocated capacity, grows to fit the window
+    const uint8_t* encodeSrc_ = nullptr;  // when non-null, encodeRows reads this (bias-corrected) instead of sourceBuffer_
+
+    /// Copy THIS DRIVER'S WINDOW of the source into the driver-owned snapshot and route the ring's encode
+    /// at it, so the refill (off the render thread) reads a frozen frame. Returns false (and leaves
+    /// encodeSrc_ null, so the caller can bail) if the source is missing or the snapshot won't allocate.
+    /// Copies only `winLen_ × srcCh` bytes from `winStart_` — the window this driver actually reads — then
+    /// sets encodeSrc_ = snapshotBuf_ - winStart_ * srcCh, so encodeRows' index (winStart_ + laneStart_ +
+    /// row) lands correctly in the windowed copy WITHOUT changing the formula. The bias is a pointer that
+    /// is only ever dereferenced at indices ≥ winStart_ * srcCh (never below the real buffer), so it never
+    /// reads out of bounds.
+    bool snapshotSourceForRing() {
+        encodeSrc_ = nullptr;
+        if (!sourceBuffer_ || !sourceBuffer_->data()) return false;
+        const size_t srcCh = sourceBuffer_->channelsPerLight();
+        // Clamp the window to the live buffer: winLen_/winStart_ are parsed from config and the buffer can
+        // have shrunk since, so copy only what the buffer actually holds (a resize past the render thread
+        // is exactly the hazard this snapshot guards, so it must be robust to a smaller-than-expected src).
+        const nrOfLightsType count = sourceBuffer_->count();
+        if (winStart_ >= count) return false;
+        const nrOfLightsType winLights = (winStart_ + winLen_ > count)
+                                             ? static_cast<nrOfLightsType>(count - winStart_)
+                                             : winLen_;
+        const size_t bytes = static_cast<size_t>(winLights) * srcCh;
+        if (bytes == 0) return false;
+        if (snapshotCap_ < bytes) {   // grow-only
+            uint8_t* grown = static_cast<uint8_t*>(platform::alloc(bytes));
+            if (!grown) return false;
+            if (snapshotBuf_) platform::free(snapshotBuf_);
+            snapshotBuf_ = grown;
+            snapshotCap_ = bytes;
+        }
+        std::memcpy(snapshotBuf_, sourceBuffer_->data() + static_cast<size_t>(winStart_) * srcCh, bytes);
+        // Bias so the unchanged index (winStart_ + laneStart_ + row) * srcCh addresses into the windowed
+        // copy: snapshotBuf_[0] holds the light at winStart_, so subtract winStart_ * srcCh.
+        encodeSrc_ = snapshotBuf_ - static_cast<size_t>(winStart_) * srcCh;
+        return true;
+    }
 
     /// The two wirings that exist: strands on the GPIOs, or a 74HCT595 per GPIO.
     uint16_t busPins_[kMaxLanes] = {};   // data pins the live bus/unit was built

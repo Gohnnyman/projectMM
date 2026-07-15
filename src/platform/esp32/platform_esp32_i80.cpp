@@ -472,7 +472,7 @@ void i80Ws2812Deinit(I80Ws2812Handle& h) {
 // differs. Declared here so this TU can call it (same pattern as loopbackJumperOk).
 namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool shiftMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r);
 }
@@ -547,7 +547,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
     // LEDs were visibly lighting. (Bench, board B, 2026-07-14 — the giveaway was exactly that: the
     // LEDs worked, so a waveform existed; only the capture was blind to it.)
     const uint32_t slotHz = (clockMultiplier > 1) ? (kShiftPclkHz / clockMultiplier) : kPclkHz;
-    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz,
+    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz, clockMultiplier > 1,
                                   I80_TAG, transmitOnce, r);
     destroyState(st);
     return r;

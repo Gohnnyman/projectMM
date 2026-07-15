@@ -117,17 +117,29 @@ public:
         return assembled;
     }
 
-    // Was the latch pad written in the LAST slice's buffer (and nowhere else)? Checks the pad region of
-    // every ring buffer: exactly the last-slice buffer may be non-zero there.
+    // Was the latch pad written in the LAST slice's buffer (and NOWHERE else)? The pad region begins
+    // right after each buffer's actual rows: the last slice may be SHORT (lastRows < kMockRingRows), so
+    // its pad starts at lastRows*rowBytes — checking from the full kMockRingRows offset would miss the
+    // stale-row window a short slice recycles. Two assertions: (1) the last-slice buffer HAS a latch byte
+    // in its pad (the frame was actually closed), and (2) no OTHER ring buffer has any pad byte set (a
+    // non-last slice was encoded closeFrame=false, so its pad stays zero).
     bool onlyLastSliceClosedFrame() const {
+        if (lastSlot_ < 0) return false;
+        const size_t lastRows = ringTotalRows_ - (nSlicesForTest() - 1) * kMockRingRows;
         for (uint8_t s = 0; s < kMockRingBufs; s++) {
-            const size_t rowRegion = static_cast<size_t>(kMockRingRows) * ringRowBytes_;
+            // For the last-slice buffer the pad starts after its (short) rows; for the others, after a
+            // full slice — a non-last slice always fills kMockRingRows rows before its (unwritten) pad.
+            const size_t padStart = (static_cast<int32_t>(s) == lastSlot_)
+                                        ? lastRows * ringRowBytes_
+                                        : static_cast<size_t>(kMockRingRows) * ringRowBytes_;
             bool padNonZero = false;
-            for (size_t i = rowRegion; i < ring_[s].size(); i++)
+            for (size_t i = padStart; i < ring_[s].size(); i++)
                 if (ring_[s][i] != 0) { padNonZero = true; break; }
-            // Only the buffer that held the last slice may have a written pad. (Other buffers were also
-            // used for earlier slices, but those were encoded with closeFrame=false → pad stays zero.)
-            if (padNonZero && static_cast<int32_t>(s) != lastSlot_) return false;
+            if (static_cast<int32_t>(s) == lastSlot_) {
+                if (!padNonZero) return false;   // the last slice MUST close the frame (latch byte present)
+            } else if (padNonZero) {
+                return false;                    // no other buffer may have a written pad
+            }
         }
         return true;
     }
@@ -186,6 +198,11 @@ public:
 
     size_t rowBytesForTest() const { return ringRowBytes_; }
 
+    // Freeze the current source into the driver-owned snapshot and route the ring encode at it — the same
+    // call tickRing makes before kicking a frame. After this, encodeRows reads the snapshot, so mutating
+    // the live source (a resize / repaint on the render thread) can't tear or UAF the in-flight frame.
+    bool snapshotForTest() { return this->snapshotSourceForRing(); }
+
 private:
     std::vector<uint8_t> buf_;
     size_t cap_ = 0;
@@ -205,7 +222,11 @@ void wireShift(MockRingDriver& d, mm::Buffer& src, mm::Correction& corr, nrOfLig
     std::strcpy(d.pins, pins);
     d.shiftRegister = true;
     d.latchPin = 20;
-    REQUIRE(src.allocate(lights * 8, 3) == true);   // enough lights for the strands
+    // Source must hold EVERY configured strand's `lights` — one strand per pin × the '595 fan-out
+    // (outputsPerPin), not a fixed ×8. A "1,2" 2-pin config is 2×8=16 strands, so 16×lights; under-
+    // sizing would clamp the window and silently test fewer strands than configured.
+    const int pinCount = 1 + static_cast<int>(std::count(pins, pins + std::strlen(pins), ','));
+    REQUIRE(src.allocate(lights * pinCount * 8, 3) == true);
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     d.defineControls();
     d.setSourceBuffer(&src);
@@ -323,4 +344,93 @@ TEST_CASE("MoonI80 ring: a short last slice in a reused buffer has a clean pad (
     d.driveRingFrame();
     d.driveRingFrame();
     CHECK(d.lastSliceStalePadBytes() == 0);   // pad clean past the one latch word — no ghost rows
+}
+
+// 5. SOURCE SNAPSHOT — the ring encodes off the render thread across the ~6 ms wire, so it must read a
+//    frozen per-frame copy, not the live Layer buffer. tickRing calls snapshotSourceForRing() before
+//    kicking the frame; after that the render loop is free to overwrite (or free) the source. This pins
+//    the invariant: once snapshotted, the encode's bytes track the SNAPSHOT, so mutating the live source
+//    mid-frame changes nothing on the wire. (On device this is what stops a grid resize / RGBW switch
+//    mid-wire from tearing or reading freed memory.)
+TEST_CASE("MoonI80 ring: the encode reads a per-frame snapshot, not the live source") {
+    MockRingDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wireShift(d, src, corr, 200, "1,2");
+    uint8_t* s = src.data();
+    for (nrOfLightsType i = 0; i < src.count(); i++) {
+        s[i * 3 + 0] = static_cast<uint8_t>(i * 5 + 3);
+        s[i * 3 + 1] = static_cast<uint8_t>(i * 11);
+        s[i * 3 + 2] = static_cast<uint8_t>(i * 17 + 7);
+    }
+    const uint8_t outCh = corr.outChannels;
+    d.setWantRing(true);
+    const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
+    const size_t padBytes = static_cast<size_t>(800 + 64) * 1 * d.outputsPerPin();
+    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights()), padBytes));
+
+    // Freeze the source, then SCRIBBLE all over the live buffer as the render thread would between kick
+    // and wire-completion. The snapshot must shield the encode from it.
+    REQUIRE(d.snapshotForTest());
+    std::vector<uint8_t> fromSnapshot = d.driveRingFrame();
+    std::memset(src.data(), 0xA5, static_cast<size_t>(src.count()) * src.channelsPerLight());
+    std::vector<uint8_t> afterMutation = d.driveRingFrame();   // still on the same snapshot
+
+    REQUIRE(fromSnapshot.size() == afterMutation.size());
+    CHECK(std::memcmp(fromSnapshot.data(), afterMutation.data(), fromSnapshot.size()) == 0);
+
+    // And the sync/async paths (encodeSrc_ null) must still read the LIVE source: re-snapshot the now-
+    // scribbled buffer and confirm the encode follows it (a uniform 0xA5 source → uniform encoded bytes,
+    // clearly different from the structured pattern above).
+    REQUIRE(d.snapshotForTest());
+    std::vector<uint8_t> fromMutated = d.driveRingFrame();
+    REQUIRE(fromMutated.size() == fromSnapshot.size());
+    CHECK(std::memcmp(fromMutated.data(), fromSnapshot.data(), fromMutated.size()) != 0);
+}
+
+// 6. WINDOWED SNAPSHOT — the snapshot copies only THIS DRIVER'S WINDOW (winLen_ × srcCh from winStart_),
+//    not the whole source, then biases encodeSrc_ by -winStart_ so the encode's index math is unchanged.
+//    With a NON-ZERO window start the bias is load-bearing (a plain full-copy would read the wrong pixels),
+//    so this drives the same content two ways — once through a windowed snapshot at start=W, once by hand-
+//    offsetting a whole-buffer source so the live read lands on the same pixels — and asserts they match.
+TEST_CASE("MoonI80 ring: the windowed snapshot bias reads this driver's slice, not from light 0") {
+    // Reference: a driver whose window starts at 0 over a buffer sized for exactly its strands.
+    MockRingDriver ref;
+    mm::Buffer refSrc;
+    mm::Correction corr;
+    wireShift(ref, refSrc, corr, 64, "1,2");   // 16 strands × 64 lights = 1024-light window
+    const nrOfLightsType winLights = refSrc.count();   // the whole buffer IS the window here
+    auto paint = [](uint8_t* p, nrOfLightsType n, nrOfLightsType base) {
+        for (nrOfLightsType i = 0; i < n; i++) {
+            p[i * 3 + 0] = static_cast<uint8_t>((base + i) * 7 + 1);
+            p[i * 3 + 1] = static_cast<uint8_t>((base + i) * 13 + 5);
+            p[i * 3 + 2] = static_cast<uint8_t>((base + i) * 29 + 2);
+        }
+    };
+    paint(refSrc.data(), winLights, /*base=*/64);   // same pixel VALUES the windowed driver will see
+    ref.setWantRing(true);
+    const size_t rowBytes = static_cast<size_t>(corr.outChannels) * 24 * 1 * ref.outputsPerPin();
+    const size_t padBytes = static_cast<size_t>(800 + 64) * 1 * ref.outputsPerPin();
+    REQUIRE(ref.busInitRing(rowBytes, static_cast<uint32_t>(ref.maxLaneLights()), padBytes));
+    REQUIRE(ref.snapshotForTest());
+    std::vector<uint8_t> refFrame = ref.driveRingFrame();
+
+    // Windowed: a bigger buffer, the driver's window offset to start=64, painted so window pixel k equals
+    // reference pixel k. The bias must make the snapshot read [64, 64+winLights), i.e. the SAME values.
+    MockRingDriver win;
+    mm::Buffer winSrc;
+    mm::Correction corr2;
+    wireShift(win, winSrc, corr2, 64, "1,2");   // same geometry...
+    // ...but re-allocate the source with a 64-light lead-in the window skips, and re-apply the window.
+    REQUIRE(winSrc.allocate(winLights + 64, 3) == true);
+    paint(winSrc.data(), winLights + 64, /*base=*/0);  // pixel 64.. == refSrc pixel 0.. (base 64)
+    win.setWindow(64, winLights);
+    win.applyState();
+    win.setWantRing(true);
+    REQUIRE(win.busInitRing(rowBytes, static_cast<uint32_t>(win.maxLaneLights()), padBytes));
+    REQUIRE(win.snapshotForTest());
+    std::vector<uint8_t> winFrame = win.driveRingFrame();
+
+    REQUIRE(refFrame.size() == winFrame.size());
+    CHECK(std::memcmp(refFrame.data(), winFrame.data(), refFrame.size()) == 0);
 }

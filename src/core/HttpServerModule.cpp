@@ -889,9 +889,12 @@ void HttpServerModule::visitModuleLeaves(MoonModule* mod, Fn&& fn) {
     // emits (a null status is the empty string, which the UI treats as "no status").
     {
         JsonSink sv;
-        sv.append("\"");
+        // writeJsonString ALREADY emits the surrounding quotes (and escapes). Wrapping it in manual
+        // quotes double-quoted the value (`""driving…""`), which is invalid JSON — the browser rejected
+        // the WHOLE patch frame, so the @status change it carried never applied (the UI only updated on a
+        // manual /api/state refresh). A status with no special chars just happened to look fine in the
+        // full-state path; the patch is where it broke. One writeJsonString, no manual quotes.
         sv.writeJsonString(mod->status() ? mod->status() : "");
-        sv.append("\"");
         std::snprintf(path, sizeof(path), "%s/@status", mod->name());
         leaf(path, sv.data());
     }

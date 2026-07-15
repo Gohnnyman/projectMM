@@ -317,7 +317,7 @@ void parlioWs2812Deinit(ParlioWs2812Handle& h) {
 namespace detail {
 bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio);
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool shiftMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r);
 }
@@ -367,7 +367,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
         if (xSemaphoreTake(st->done[0], pdMS_TO_TICKS(1000)) != pdTRUE)
             ESP_LOGE(PAR_TAG, "loopback: tx done-callback timed out");
     };
-    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz,
+    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz, /*shiftMode=*/false,
                                   PAR_TAG, transmitOnce, r);
     destroyState(st);
     return r;

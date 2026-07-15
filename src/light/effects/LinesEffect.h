@@ -49,6 +49,11 @@ public:
         const lengthType d   = depth();
         const uint8_t    cpl = channelsPerLight();
 
+        // Nothing to draw on an empty volume — a zero in ANY dimension (or channel count) makes the
+        // buffer zero-length, and buf itself may be null. Guard before the memset (and before either
+        // mode's loops) so no null / zero-length allocation is ever touched. Covers 0×0×0.
+        if (!buf || w == 0 || h == 0 || d == 0 || cpl == 0) return;
+
         memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
 
         // PANEL DOTS — a static mapping aid, NOT an animation. Each panelW×panelH block lights
@@ -59,10 +64,6 @@ public:
         // position is exactly the mapping fact this reveals. W and H are SEPARATE so non-square panels
         // (e.g. 16×6) get one dot-group per panel — a single square step skips whole rows of panels.
         if (mode == 1) {
-            // The dot loops key on w×h, but the buffer is w×h×d×cpl — so a zero DEPTH (or zero channels)
-            // makes the buffer empty while w and h stay non-zero, and writing buf[off] would run off a
-            // zero-length allocation. Guard the whole 3D volume, not just the 2D face the loops walk.
-            if (w == 0 || h == 0 || d == 0 || cpl == 0) return;
             const lengthType pw = panelW ? panelW : 1;
             const lengthType ph = panelH ? panelH : 1;
             const lengthType panelsPerRow = (w + pw - 1) / pw;

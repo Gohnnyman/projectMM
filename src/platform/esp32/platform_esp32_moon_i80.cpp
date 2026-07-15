@@ -934,10 +934,16 @@ bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& h) {
 }
 
 bool moonI80Ws2812InternalFits(size_t bytes) {
-    // The same internal-fit test moonI80Ws2812Init uses (MALLOC_CAP_DMA|INTERNAL free ≥ bytes +
-    // HEAP_RESERVE). A shift frame that fits here streams fine on the whole-frame path; one that doesn't
-    // would land in PSRAM and stall at the expander clock, so the driver rings instead.
-    return heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) >= bytes + HEAP_RESERVE;
+    // Does a whole `bytes`-sized frame fit internal DMA RAM as ONE CONTIGUOUS BLOCK? The whole-frame path
+    // allocates the frame in a single `heap_caps_aligned_calloc`, so what matters is the LARGEST FREE
+    // BLOCK, not total free — a fragmented heap can have megabytes free yet no 144 KB contiguous block.
+    // Using total-free here was a bug: at 16 strands a 144 KB shift frame reported "fits" on total-free,
+    // so wantsRing() said false, the whole-frame alloc then FAILED the contiguous 144 KB, fell back to
+    // PSRAM, and STALLED at the expander clock (the exact failure this test exists to route around). The
+    // largest-block test is what the alloc actually faces, and it also leaves HEAP_RESERVE for WiFi/HTTP.
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    const size_t freeTotal = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    return largest >= bytes && freeTotal >= bytes + HEAP_RESERVE;
 }
 
 uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& h, uint8_t buffer) {
@@ -1046,7 +1052,7 @@ void moonI80Ws2812Deinit(MoonI80Ws2812Handle& h) {
 
 namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool shiftMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r);
 }
@@ -1163,7 +1169,7 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     // the wrong pulse width and size the window for a frame 8× too short — a decode that matches
     // nothing on a strand whose LEDs are visibly lighting.
     const uint32_t slotHz = shiftMode ? (kShiftPclkHz / clockMultiplier) : kPclkHz;
-    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz,
+    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz, shiftMode,
                                   MOON_I80_TAG, transmitOnce, r);
     destroyState(st);
     return r;

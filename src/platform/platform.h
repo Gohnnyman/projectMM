@@ -767,15 +767,15 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
 
 // Bring the bus up in RING mode instead of whole-frame mode. `rowBytes` is what one row (one light
 // across every strand) encodes to, `totalRows` the strand length; the platform sizes the ring from
-// them. `encode` is called per drained buffer, from the EOF ISR, to fill the next slice.
-// Returns false if the ring cannot be built (then the caller falls back to the whole-frame path).
+// them. `encode` is called per drained buffer, from the pinned refill task the EOF ISR wakes, to fill
+// the next slice. Returns false if the ring cannot be built (then the caller falls back to whole-frame).
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                            uint16_t wrGpio, size_t rowBytes, uint32_t totalRows,
                            size_t padBytes, uint8_t clockMultiplier,
                            MoonI80EncodeFn encode, void* user);
 
-// Start one frame on the ring: prime the buffers, fire the DMA, and let the EOF ISR refill behind it.
-// Pair with moonI80Ws2812Wait(h, 0, …) — the ring reports completion on buffer slot 0.
+// Start one frame on the ring: prime the buffers, fire the DMA, and let the refill task (woken by the
+// EOF ISR) refill behind it. Pair with moonI80Ws2812Wait(h, 0, …) — the ring reports completion on slot 0.
 bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& h);
 
 // True when the handle was brought up as a ring (so the driver knows which transmit to call).

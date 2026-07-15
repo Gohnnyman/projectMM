@@ -197,6 +197,19 @@ async function errorMessage(res) {
 }
 
 async function sendControl(moduleName, controlName, value) {
+    // Optimistically update the local `state` to what we just sent — the standard controlled-input
+    // pattern. Without this, `state` keeps the OLD value until the device echoes the change back in a
+    // value patch (up to a tick1s later, or folded into a full resync for a control that triggers a
+    // rebuild like a driver's ledsPerPin). In that gap, an unrelated WS frame runs updateModuleControls,
+    // and once the dragTs edit-guard expires (>1s after the last keystroke — trivial if the user pauses)
+    // it writes the stale `state` value straight back into the field the user just changed (the value
+    // "reverses"; a manual refresh shows the correct value because it refetches). The client knows what
+    // it sent, so update `state` now; any later echo just confirms it.
+    if (state && Array.isArray(state.modules)) {
+        const mod = allModules().find(m => m.name === moduleName);
+        const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
+        if (ctrl) ctrl.value = value;
+    }
     // Best-effort by design — failures are not retried here. Non-ok responses +
     // network errors are logged to console so a user with devtools open can see
     // what went wrong (e.g. a control value the device-side validator rejected).
