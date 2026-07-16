@@ -66,6 +66,15 @@ public:
     /// pad. Spending a GPIO on it would buy nothing.
     int8_t clockPin = 10;
 
+    /// A/B path selector: which output path the shift-mode driver uses. 0 = AUTO (wantsRing() decides:
+    /// ring when the whole frame won't fit internal DMA RAM, else whole-frame), 1 = force RING, 2 = force
+    /// WHOLE-FRAME. The force modes exist to A/B the two paths on the same board/content/load — in
+    /// particular to test whether the whole-frame PSRAM path actually holds at the shift clock (the premise
+    /// the ring was built to work around), and to force the ring for its own diagnosis. AUTO is the shipping
+    /// default; the forces are diagnostic. Ignored in direct mode (never rings). A prepare trigger (rebuilds
+    /// the bus). Values match the Select option order below.
+    uint8_t forceRing = 0;
+
     // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
 
     /// LCD_CAM lanes on this chip (0 = none, and then the base's guards make the driver inert).
@@ -77,6 +86,8 @@ public:
     /// the pattern on lane 0 — the test frame must therefore be encoded at the operational bus width.
     static constexpr bool kLoopbackFullWidth = true;
     static constexpr const char* kInitFailMsg = "MoonI80 bus init failed — check pins / memory";
+    /// forceRing Select options (index = the forceRing member value): 0 auto, 1 ring, 2 whole-frame.
+    static constexpr const char* kForceRingOptions[3] = {"auto", "ring", "wholeFrame"};
     /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this driver is
     /// LCD_CAM-only, so the answer is simply "wherever this driver runs at all".
     static constexpr bool kSupportsShiftRegister = platform::lcdLanes > 0;
@@ -90,9 +101,32 @@ public:
     void addBusControls() {
         controls_.addPin("clockPin", clockPin);
         controls_.setHidden(controls_.count() - 1, !shiftMode());
+        // A/B path selector (shift mode only): AUTO / force ring / force whole-frame. Options match the
+        // forceRing member (0/1/2). Distinct axis from ringSnapshot — this picks the PATH, ringSnapshot
+        // tunes how the RING reads its source; they compose (force ring, then snapshot on/off). Shown only
+        // in shift mode (direct never rings). Force whole-frame is how the whole-frame-PSRAM-at-the-shift-
+        // clock question gets tested deliberately rather than left to the auto router.
+        controls_.addSelect("forceRing", forceRing, kForceRingOptions, 3);
+        controls_.setHidden(controls_.count() - 1, !shiftMode());
+        // TEMP DIAGNOSTIC: ring internals as a read-only control, so the ≥256 stall can be diagnosed by
+        // polling /api/state (reliable) instead of scraping serial. Shows "slices/bufs eof/N done drain
+        // items(cap/used)". Remove once the reuse boundary is fixed.
+        controls_.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
+    }
+    /// Refresh the ringDbg diagnostic string once a second (base tick1s chains here via refreshBusKpi).
+    void refreshBusKpi() {
+        const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
+        if (!s.isRing) { std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "not ring"); return; }
+        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u de%u enc%u gap%u",
+                      static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
+                      static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.descErr),
+                      static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.maxIsrGapUs));
+                      // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
+                      // enc >= gap == the refill can't keep pace (PACE); enc << gap but still fails == CURSOR/logic.
     }
     bool busControlTriggersBuild(const char* name) const {
-        return std::strcmp(name, "clockPin") == 0;
+        return std::strcmp(name, "clockPin") == 0
+            || std::strcmp(name, "forceRing") == 0;   // A/B path switch: rebuild the bus on the new path
     }
 
     /// WR only reaches a pad in shift mode, so it can only COLLIDE in shift mode. In direct mode the
@@ -134,7 +168,10 @@ public:
     /// (and stays an A/B control against the ring at the same size). Direct mode never rings — it drives
     /// PSRAM fine at the 10×-slower clock.
     bool wantsRing() const {
-        return shiftMode() && !platform::moonI80Ws2812InternalFits(this->frameBytes_);
+        if (!shiftMode()) return false;                  // direct mode never rings (drives PSRAM fine)
+        if (forceRing == 1) return true;                 // A/B: force the ring
+        if (forceRing == 2) return false;                // A/B: force whole-frame (test PSRAM at the shift clock)
+        return !platform::moonI80Ws2812InternalFits(this->frameBytes_);   // AUTO
     }
 
     /// Bring the bus up as a streaming RING (the phase-2 path): the platform loops a few small internal
@@ -200,6 +237,7 @@ public:
 private:
     platform::MoonI80Ws2812Handle bus_;
     int8_t lastClockPin_ = -1;
+    char ringDbgStr_[48] = "—";   // TEMP DIAGNOSTIC: ring counters (refreshed in refreshBusKpi via tick1s)
 };
 
 } // namespace mm

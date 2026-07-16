@@ -511,10 +511,15 @@ public:
     /// toward, and it tracks an overclocked slot rate directly. "—" until the first transfer completes.
     void tick1s() override {
         const uint32_t us = derived()->busLastTransmitUs();
-        if (us == 0) { std::snprintf(wireStr_, sizeof(wireStr_), "—"); return; }
-        std::snprintf(wireStr_, sizeof(wireStr_), "%u µs (%u fps max)",
-                      static_cast<unsigned>(us), static_cast<unsigned>(1000000u / us));
+        if (us == 0) std::snprintf(wireStr_, sizeof(wireStr_), "—");
+        else std::snprintf(wireStr_, sizeof(wireStr_), "%u µs (%u fps max)",
+                           static_cast<unsigned>(us), static_cast<unsigned>(1000000u / us));
+        derived()->refreshBusKpi();   // per-backend extra read-only KPIs (MoonI80's ring diagnostic); base no-op
     }
+
+    /// CRTP hook: refresh any backend-specific read-only KPI once a second (off the hot path). Base is a
+    /// no-op; MoonI80LedDriver overrides it to publish its ring diagnostic counters (see ringDbg).
+    void refreshBusKpi() {}
 
     // Wait for buffer `i`'s in-flight transfer to finish. Returns TRUE when the buffer is free to
     // reuse — either nothing was outstanding (first tick, or a transmit that failed to start, so an
@@ -873,35 +878,45 @@ protected:
     size_t   snapshotCap_ = 0;            // allocated capacity, grows to fit the window
     const uint8_t* encodeSrc_ = nullptr;  // when non-null, encodeRows reads this (bias-corrected) instead of sourceBuffer_
 
+    /// (Re)size the ring snapshot to hold this driver's whole window (`winLen_ × srcCh`), OFF the hot path.
+    /// Called from the ring build in reinit(), so snapshotSourceForRing() on the render thread only memcpys
+    /// — never allocates (the hot-path no-alloc rule). Grow-only; a larger window later re-grows here, not
+    /// mid-frame. Returns false if it can't allocate (the ring build then degrades like any alloc failure).
+    bool ensureSnapshotCap() {
+        if (!sourceBuffer_) return true;   // sized on the first build that has a source; harmless if absent
+        const size_t bytes = static_cast<size_t>(winLen_) * sourceBuffer_->channelsPerLight();
+        if (bytes == 0 || snapshotCap_ >= bytes) return true;
+        uint8_t* grown = static_cast<uint8_t*>(platform::alloc(bytes));
+        if (!grown) return false;
+        if (snapshotBuf_) platform::free(snapshotBuf_);
+        snapshotBuf_ = grown;
+        snapshotCap_ = bytes;
+        return true;
+    }
+
     /// Copy THIS DRIVER'S WINDOW of the source into the driver-owned snapshot and route the ring's encode
-    /// at it, so the refill (off the render thread) reads a frozen frame. Returns false (and leaves
-    /// encodeSrc_ null, so the caller can bail) if the source is missing or the snapshot won't allocate.
-    /// Copies only `winLen_ × srcCh` bytes from `winStart_` — the window this driver actually reads — then
-    /// sets encodeSrc_ = snapshotBuf_ - winStart_ * srcCh, so encodeRows' index (winStart_ + laneStart_ +
-    /// row) lands correctly in the windowed copy WITHOUT changing the formula. The bias is a pointer that
-    /// is only ever dereferenced at indices ≥ winStart_ * srcCh (never below the real buffer), so it never
-    /// reads out of bounds.
+    /// at it, so the refill (off the render thread) reads a frozen frame. NO ALLOCATION here — the buffer
+    /// was sized in reinit() (ensureSnapshotCap); this is memcpy-only, safe for the render hot path.
+    /// Returns false (encodeSrc_ null, caller bails) if the source is missing, the window is empty, or the
+    /// snapshot wasn't sized (a reconfigure that shrank the buffer below the window — clamped defensively).
+    /// Sets encodeSrc_ = snapshotBuf_ - winStart_ * srcCh, so encodeRows' index (winStart_ + laneStart_ +
+    /// row) lands in the windowed copy WITHOUT changing the formula. The bias pointer is only ever
+    /// dereferenced at indices ≥ winStart_ * srcCh (never below the real buffer), so it never reads OOB.
     bool snapshotSourceForRing() {
         encodeSrc_ = nullptr;
-        if (!sourceBuffer_ || !sourceBuffer_->data()) return false;
+        if (!sourceBuffer_ || !sourceBuffer_->data() || !snapshotBuf_) return false;
         const size_t srcCh = sourceBuffer_->channelsPerLight();
-        // Clamp the window to the live buffer: winLen_/winStart_ are parsed from config and the buffer can
-        // have shrunk since, so copy only what the buffer actually holds (a resize past the render thread
-        // is exactly the hazard this snapshot guards, so it must be robust to a smaller-than-expected src).
+        // Clamp the copy to what the live buffer AND the sized snapshot both hold: winLen_/winStart_ come
+        // from config and the source can have shrunk since reinit (a grid resize past the render thread is
+        // exactly the hazard this snapshot guards), so never read past the source nor write past snapshotCap_.
         const nrOfLightsType count = sourceBuffer_->count();
         if (winStart_ >= count) return false;
-        const nrOfLightsType winLights = (winStart_ + winLen_ > count)
-                                             ? static_cast<nrOfLightsType>(count - winStart_)
-                                             : winLen_;
-        const size_t bytes = static_cast<size_t>(winLights) * srcCh;
+        nrOfLightsType winLights = (winStart_ + winLen_ > count)
+                                       ? static_cast<nrOfLightsType>(count - winStart_)
+                                       : winLen_;
+        size_t bytes = static_cast<size_t>(winLights) * srcCh;
+        if (bytes > snapshotCap_) bytes = snapshotCap_;   // never overrun the buffer sized in reinit
         if (bytes == 0) return false;
-        if (snapshotCap_ < bytes) {   // grow-only
-            uint8_t* grown = static_cast<uint8_t*>(platform::alloc(bytes));
-            if (!grown) return false;
-            if (snapshotBuf_) platform::free(snapshotBuf_);
-            snapshotBuf_ = grown;
-            snapshotCap_ = bytes;
-        }
         std::memcpy(snapshotBuf_, sourceBuffer_->data() + static_cast<size_t>(winStart_) * srcCh, bytes);
         // Bias so the unchanged index (winStart_ + laneStart_ + row) * srcCh addresses into the windowed
         // copy: snapshotBuf_[0] holds the light at winStart_, so subtract winStart_ * srcCh.
@@ -1195,6 +1210,7 @@ protected:
             const size_t rowBytes = rowBytesFor(outCh, slotBytes(), outputsPerPin());
             const size_t padBytes = padBytesFor(slotBytes(), outputsPerPin());
             if (derived()->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_), padBytes)) {
+                ensureSnapshotCap();   // size the per-frame snapshot here, OFF the hot path (tickRing only memcpys)
                 inited_ = true;
                 dmaBuf_ = derived()->busBuffer(0);   // ring[0] — a real pointer, the "inited" sentinel
                 for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];

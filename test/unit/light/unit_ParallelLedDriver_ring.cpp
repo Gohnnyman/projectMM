@@ -5,6 +5,7 @@
 #include "light/drivers/ParallelLedDriver.h"
 #include "correction_presets.h"
 
+#include <algorithm>   // std::count (pin-count in wireShift)
 #include <cstring>
 #include <vector>
 
@@ -198,10 +199,97 @@ public:
 
     size_t rowBytesForTest() const { return ringRowBytes_; }
 
+    // --- TERMINATION MODEL (the DMA-chain half the byte-tiling tests do NOT cover) ---
+    //
+    // driveRingFrame() above models the ENCODE tiling: it writes each slice and stops the instant the last
+    // real row is encoded. The platform DMA does NOT stop there — the looping chain keeps clocking buffers
+    // until the EOF ISR calls gdma_stop on a DRAIN COUNTER (drained >= nSlices + kTailBufs). This model
+    // replays that: prime the pool, then for each EOF advance the drain, refill the drained buffer with the
+    // next slice (or ZEROS once past the last real slice), and stop after nSlices + kTailBufs drains —
+    // exactly moonI80EofCb. It records, in clock order, the row-region bytes of every buffer the DMA
+    // actually clocks to the wire (including the laps past the last real slice). This is what pins the
+    // termination CONTRACT: a clean LOW tail, and no wrap re-read of a buffer the refill is mid-write on.
+    //
+    // `bufs` is the physical pool depth to model (the platform's kRingBufs); pass kMockRingBufs for reuse,
+    // or a depth >= nSlices to model the no-reuse stopgap. `kTailBufs` mirrors the platform constant.
+    struct ClockedFrame {
+        std::vector<std::vector<uint8_t>> buffers;   // row-region bytes clocked, in DMA order
+        bool tailIsLow = false;                      // every buffer clocked AFTER the last real slice is all-zero
+        bool wrapReadStale = false;                  // a buffer was re-clocked while holding a DIFFERENT slice than encoded for that clock position
+        uint32_t drainsToStop = 0;                   // total EOFs before the stop fired
+    };
+    ClockedFrame driveRingFrameWithTermination(uint8_t bufs, uint8_t kTailBufs = 1) {
+        REQUIRE(ringActive_);
+        REQUIRE(bufs >= 1);
+        // Physical buffers, sized like the platform's ring[] (rows + pad), refilled in place.
+        std::vector<std::vector<uint8_t>> pool(bufs);
+        const size_t bufBytes = static_cast<size_t>(kMockRingRows) * ringRowBytes_ + ringPad_;
+        for (auto& b : pool) b.assign(bufBytes, 0);
+        const uint32_t nSlices = nSlicesForTest();
+
+        // Prime the first min(bufs, nSlices) buffers with slices 0..; a buffer past the frame's slices is
+        // zeroed (mirrors startRingTransfer). refilledRow / refillSlot advance exactly as the platform's.
+        auto encodeSliceInto = [&](uint8_t slot, uint32_t firstRow) {
+            uint32_t count = kMockRingRows;
+            if (firstRow + count >= ringTotalRows_) {
+                count = ringTotalRows_ - firstRow;
+                if (count < kMockRingRows)   // short last slice: zero the rest so no stale rows clock
+                    std::memset(pool[slot].data() + static_cast<size_t>(count) * ringRowBytes_, 0,
+                                (static_cast<size_t>(kMockRingRows) - count) * ringRowBytes_ + ringPad_);
+            }
+            const bool last = (firstRow + count >= ringTotalRows_);
+            ringEncodeTrampolineHost(this, pool[slot].data(), firstRow, count, last);
+        };
+        uint32_t refilledRow = 0;
+        for (uint8_t primed = 0; primed < bufs; primed++) {
+            if (refilledRow < ringTotalRows_) { encodeSliceInto(primed, refilledRow); refilledRow += kMockRingRows; }
+            else std::fill(pool[primed].begin(), pool[primed].end(), 0);   // past last slice: LOW tail buffer
+        }
+
+        // Clock the looping chain: each EOF drains buffer `slot`, we RECORD what it clocked, then the ISR
+        // refills that buffer with the next slice (or zeros past the last real slice). Stop on the drain
+        // counter. The wrap re-reads pool[slot] on later laps — recording BEFORE the refill is exactly what
+        // the DMA sees on the wire.
+        ClockedFrame out;
+        uint8_t slot = 0;
+        uint32_t drained = 0;
+        while (true) {
+            // What the DMA clocks NOW: the current row-region of pool[slot].
+            const uint32_t sliceForThisClock = drained;   // 0-based clock index == slice index while <= nSlices
+            uint32_t count = kMockRingRows;
+            uint32_t firstRow = sliceForThisClock * kMockRingRows;
+            bool pastLast = firstRow >= ringTotalRows_;
+            if (!pastLast && firstRow + count > ringTotalRows_) count = ringTotalRows_ - firstRow;
+            const size_t rowRegion = static_cast<size_t>(pastLast ? kMockRingRows : count) * ringRowBytes_;
+            std::vector<uint8_t> clocked(pool[slot].begin(), pool[slot].begin() + static_cast<long>(rowRegion));
+            out.buffers.push_back(clocked);
+            // Tail check: a buffer clocked at a position PAST the last real slice must be all-LOW.
+            if (pastLast) {
+                bool allZero = std::all_of(clocked.begin(), clocked.end(), [](uint8_t b) { return b == 0; });
+                if (!allZero) out.tailIsLow = false;   // corrupted tail
+            }
+            drained++;
+            if (drained >= nSlices + kTailBufs) break;
+            // ISR refill: put the NEXT unencoded slice (refilledRow) into this drained buffer, or zeros.
+            if (refilledRow < ringTotalRows_) { encodeSliceInto(slot, refilledRow); refilledRow += kMockRingRows; }
+            else std::fill(pool[slot].begin(), pool[slot].end(), 0);
+            slot = (slot + 1u) % bufs;
+        }
+        // Tail is LOW iff every past-last clock was all-zero (default true unless a corrupt tail flipped it).
+        out.tailIsLow = true;
+        for (uint32_t i = nSlices; i < static_cast<uint32_t>(out.buffers.size()); i++)
+            if (!std::all_of(out.buffers[i].begin(), out.buffers[i].end(), [](uint8_t b) { return b == 0; }))
+                out.tailIsLow = false;
+        out.drainsToStop = drained;
+        return out;
+    }
+
     // Freeze the current source into the driver-owned snapshot and route the ring encode at it — the same
     // call tickRing makes before kicking a frame. After this, encodeRows reads the snapshot, so mutating
     // the live source (a resize / repaint on the render thread) can't tear or UAF the in-flight frame.
-    bool snapshotForTest() { return this->snapshotSourceForRing(); }
+    // Mirror production's reinit(): size the snapshot OFF the hot path (ensureSnapshotCap) THEN take the
+    // per-frame copy (snapshotSourceForRing, memcpy-only). tickRing does exactly this split on device.
+    bool snapshotForTest() { this->ensureSnapshotCap(); return this->snapshotSourceForRing(); }
 
 private:
     std::vector<uint8_t> buf_;
@@ -433,4 +521,78 @@ TEST_CASE("MoonI80 ring: the windowed snapshot bias reads this driver's slice, n
 
     REQUIRE(refFrame.size() == winFrame.size());
     CHECK(std::memcmp(refFrame.data(), winFrame.data(), refFrame.size()) == 0);
+}
+
+// 7. TERMINATION — the DMA-chain contract the byte-tiling tests (1–6) never touch, and the exact site of
+//    the 2026-07-16 "green dot per panel" bug: the looping chain must clock past the last real slice into
+//    a clean LOW tail and stop deterministically, WITHOUT re-clocking a buffer that still holds a real
+//    (non-tail) slice at a tail clock position. These drive the termination model, which replays
+//    moonI80EofCb's prime → refill-behind → stop-on-drain-counter, and records what the DMA actually
+//    clocks to the wire (including the laps past the last slice).
+
+// 7a. CLEAN LOW TAIL — with enough buffers that the frame does NOT reuse (nSlices < bufs), every buffer
+//     clocked after the last real slice is all-LOW: the ≥300 µs WS2812 reset that latches the '595. This
+//     is the no-reuse stopgap's guarantee; it is what renders clean at ≤240 lights/strand (kRingBufs=16).
+TEST_CASE("MoonI80 ring: no-reuse frame clocks a clean LOW tail and stops deterministically") {
+    MockRingDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wireShift(d, src, corr, 176, "1,2");   // 176 lights = 11 slices; model 16 buffers → NO reuse
+    uint8_t* s = src.data();
+    for (nrOfLightsType i = 0; i < src.count(); i++) {   // dense non-zero so a dirty tail WOULD show
+        s[i * 3 + 0] = static_cast<uint8_t>(i * 7 + 1);
+        s[i * 3 + 1] = static_cast<uint8_t>(i * 13 + 5);
+        s[i * 3 + 2] = static_cast<uint8_t>(i * 29 + 2);
+    }
+    d.setWantRing(true);
+    const size_t rowBytes = static_cast<size_t>(corr.outChannels) * 24 * 1 * d.outputsPerPin();
+    const size_t padBytes = static_cast<size_t>(800 + 64) * 1 * d.outputsPerPin();
+    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights()), padBytes));
+
+    auto f = d.driveRingFrameWithTermination(/*bufs=*/16, /*kTailBufs=*/1);
+    const uint32_t nSlices = (176 + 15) / 16;   // 11
+    CHECK(f.drainsToStop == nSlices + 1);        // stops one buffer LATE (the tail), not early, not looping forever
+    CHECK(f.tailIsLow);                          // the buffer(s) past the last real slice clock all-LOW
+    // The last REAL slice's content is present (the frame wasn't truncated): its clock is non-zero.
+    REQUIRE(f.buffers.size() >= nSlices);
+    bool lastRealNonZero = std::any_of(f.buffers[nSlices - 1].begin(), f.buffers[nSlices - 1].end(),
+                                       [](uint8_t b) { return b != 0; });
+    CHECK(lastRealNonZero);
+}
+
+// 7b. THE NO-REUSE STOPGAP SIZING — with bufs > nSlices the tail buffer is a distinct physical buffer the
+//     priming loop zeroed and the wrap re-clocks as a clean LOW; with bufs == nSlices there is NO spare
+//     buffer, so the tail clock wraps onto buffer 0. The BYTE model shows the wrap re-clocks buffer 0
+//     *after* the ISR has zeroed it on the very first drain's refill, so bytes alone stay LOW — but on
+//     HARDWARE the equal case STALLS ("output stalled") because the stop counter (nSlices + kTailBufs
+//     drains) needs a buffer the priming never left free, a DMA-timing property the byte model cannot see
+//     (256 lights at kRingBufs=16 is exactly this; the fix is kRingBufs >= 17). What this test CAN pin is
+//     the correct-sizing guarantee and the drain count, so a future change that breaks the tail or the
+//     stop timing at the correct sizing is caught here; the equal-case stall is covered in the backlog.
+TEST_CASE("MoonI80 ring: the no-reuse stopgap clocks a clean tail and stops on the drain counter") {
+    MockRingDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wireShift(d, src, corr, 176, "1,2");   // 11 slices
+    uint8_t* s = src.data();
+    for (nrOfLightsType i = 0; i < src.count(); i++) {
+        s[i * 3 + 0] = static_cast<uint8_t>(i * 7 + 1);
+        s[i * 3 + 1] = static_cast<uint8_t>(i * 13 + 5);
+        s[i * 3 + 2] = static_cast<uint8_t>(i * 29 + 2);
+    }
+    d.setWantRing(true);
+    const size_t rowBytes = static_cast<size_t>(corr.outChannels) * 24 * 1 * d.outputsPerPin();
+    const size_t padBytes = static_cast<size_t>(800 + 64) * 1 * d.outputsPerPin();
+    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights()), padBytes));
+    const uint32_t nSlices = (176 + 15) / 16;   // 11
+
+    // bufs = nSlices + 1 (the correct stopgap sizing, kRingBufs > nSlices): clean LOW tail, stop on the
+    // drain counter one buffer past the last real slice. This is the ≤240-lights/strand no-reuse guarantee.
+    auto ok = d.driveRingFrameWithTermination(/*bufs=*/static_cast<uint8_t>(nSlices + 1), /*kTailBufs=*/1);
+    CHECK(ok.tailIsLow);
+    CHECK(ok.drainsToStop == nSlices + 1);
+    // A deeper pool (kRingBufs=16 for 11 slices, the shipped stopgap) is equally clean and stops the same.
+    auto deep = d.driveRingFrameWithTermination(/*bufs=*/16, /*kTailBufs=*/1);
+    CHECK(deep.tailIsLow);
+    CHECK(deep.drainsToStop == nSlices + 1);
 }

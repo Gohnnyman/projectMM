@@ -1010,8 +1010,13 @@ void HttpServerModule::writeStatus(JsonSink& sink, MoonModule* mod) {
     const char* s = mod->status();
     if (!s) return;
     static const char* sevStr[] = {"status", "warning", "error"};
-    sink.appendf(",\"status\":\"%s\",\"severity\":\"%s\"",
-                 s, sevStr[static_cast<int>(mod->severity())]);
+    // Escape the status value through writeJsonString (it emits its own quotes) rather than a raw %s in
+    // manual quotes — a status with a `"` or `\` would otherwise produce invalid JSON. Severity is a fixed
+    // vocabulary (no special chars), so it stays a plain %s. Mirrors the patch path (@status leaf), which
+    // hit exactly this: a manually-quoted value broke the frame. See writeMetricsPatch.
+    sink.append(",\"status\":");
+    sink.writeJsonString(s);
+    sink.appendf(",\"severity\":\"%s\"", sevStr[static_cast<int>(mod->severity())]);
 }
 
 void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {

@@ -1195,6 +1195,7 @@ size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& /*h*/) { return 0;
 bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
 bool moonI80Ws2812Wait(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
 uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& /*h*/) { return 0; }
+MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& /*h*/) { return {}; }
 void moonI80Ws2812Deinit(MoonI80Ws2812Handle& /*h*/) {}
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                         uint16_t /*wrGpio*/,

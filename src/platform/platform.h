@@ -748,16 +748,21 @@ struct MoonI80Ws2812Handle { void* impl = nullptr; };
 // buffer while the CPU encodes those rows in ~96 µs (measured on an S3) — the 8× output inflation buys
 // far more DMA time than it costs CPU, a ~3.6× margin.
 //
-// **The refill runs in a pinned task, not the EOF ISR.** The margin above makes ISR-grade determinism
-// unnecessary, and a task keeps the encode where all of `src/light/` already is: nothing there is
-// `IRAM_ATTR`, and this repo has no ISR→domain callback anywhere (platform_esp32_ir.cpp states the
-// convention — hand the ISR's result to a task, do the work there). So the EOF ISR does one
-// `xSemaphoreGiveFromISR`, and a high-priority task calls the encode. Escalating to an ISR refill later
-// (only if a bench underrun shows as glitching) is a change of *who calls the seam*, not a rewrite —
-// the signature is identical either way.
+// **The refill runs INLINE IN THE GDMA EOF ISR** — IDF's own continuous-gapless pattern (the RGB-LCD
+// bounce buffers, esp_lcd_panel_rgb.c: the refill runs synchronously in the EOF handler). As each buffer
+// drains, the ISR encodes the next slice into it at interrupt priority, so the refill always finishes
+// before the DMA laps back into that buffer `kRingBufs` slices later. That is the reuse-race guarantee: a
+// lower-priority task (the original design) could lose the buffer-reuse race to task-wake latency at >8
+// slices (≥192 lights/strand), stalling the frame; an ISR cannot. The domain encode it calls lives in
+// FLASH, which is safe here because the channel does NOT set `isr_cache_safe` — the interrupt is not
+// `ESP_INTR_FLAG_IRAM`, so a flash-resident callback is permitted and only faults if the ISR fires while
+// the flash cache is disabled (a SPI-flash write: OTA/NVS), which never overlaps rendering. This is
+// exactly how esp_lcd_panel_rgb.c behaves by default (its ISR-refill is forced into IRAM only under the
+// opt-in CONFIG_LCD_RGB_ISR_IRAM_SAFE). Full-flash-write hardening (isr_cache_safe + an IRAM encode via a
+// neutral MM_HOT macro) is a later increment, not needed for the reuse-race fix.
 //
 // `MoonI80EncodeFn` is the seam: the platform owns the ring, the descriptors and the completion; the
-// domain owns the encode. The callback runs on the refill task (or the priming call), off the ISR.
+// domain owns the encode. The callback runs from the EOF ISR (and once from the priming call).
 using MoonI80EncodeFn = void (*)(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
                                  bool closeFrame);
 
@@ -791,6 +796,28 @@ size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& h);
 bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& h, uint8_t buffer, size_t bytes);
 bool moonI80Ws2812Wait(MoonI80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs);
 uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& h);
+
+// Ring diagnostic counters, surfaced so the driver can expose them as a read-only control (reliable
+// polling via /api/state instead of scraping serial). All zero on a whole-frame handle. `nSlices` is the
+// frame's slice count (light-count / rowsPerBuf); `eofTotal`/`doneGiven` are lifetime counts the EOF ISR
+// bumps; `lastDrain` is the drainCount the last EOF saw (should reach nSlices each frame); `numItems`/
+// `consumedItems` are the descriptor pool capacity vs what the mount loop used (a mismatch is the ≥256
+// chain-sizing bug). Read-only, best-effort (volatile reads, no lock) — a diagnostic, not a contract.
+struct MoonI80RingStats {
+    bool     isRing = false;
+    uint32_t nSlices = 0;
+    uint32_t ringBufs = 0;       // kRingBufs (buffer-pool size; reuse happens when nSlices > this)
+    uint32_t eofTotal = 0;       // lifetime EOF interrupts
+    uint32_t doneGiven = 0;      // lifetime frame completions (last-slice EOF)
+    uint32_t lastDrain = 0;      // drainCount at the last EOF
+    uint32_t numItems = 0;       // descriptor pool capacity
+    uint32_t consumedItems = 0;  // items the mount loop actually used (== numItems when sized right)
+    uint32_t descErr = 0;        // GDMA descriptor-error count (>0 == the in-ISR encode corrupted the chain: B1)
+    uint32_t maxEncodeUs = 0;    // worst ISR refill-encode time (the producer)
+    uint32_t maxIsrGapUs = 0;    // worst gap between EOFs = DMA buffer-drain time (the deadline)
+};
+MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h);
+
 void moonI80Ws2812Deinit(MoonI80Ws2812Handle& h);
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                         uint16_t wrGpio, uint16_t rxGpio,

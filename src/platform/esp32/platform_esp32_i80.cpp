@@ -317,17 +317,22 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinary();
         if (st->done[1]) {
-            // PSRAM first (LCD_CAM only — the classic I2S backend can't DMA from PSRAM, see buf[0]).
-            // PSRAM doesn't touch the scarce internal DMA heap, so no reserve check needed there.
+            // buf[1] follows buf[0]'s allocation POLICY exactly (same region preference per mode), so the
+            // async back buffer never lands where the front one refused to: PSRAM-first only in DIRECT mode
+            // (LCD_CAM reaches PSRAM fine at the 2.67 MHz clock); in SHIFT mode the LCD_CAM GDMA can't
+            // sustain a PSRAM read at the 26.67 MHz expander clock, so internal-first — a PSRAM buf[1] there
+            // would stall exactly like a PSRAM buf[0] does. PSRAM doesn't touch the scarce internal DMA heap,
+            // so no reserve check on that branch.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
-            st->buf[1] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
-                st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+            if (!shiftMode)
+                st->buf[1] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
+                    st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
 #endif
             // Internal fallback ONLY if it leaves HEAP_RESERVE intact — the second buffer is a nice-to-
             // have (allocate-and-degrade), so it must never eat the WiFi/HTTP reserve. Without this guard
             // a default-ON async board whose frame lands internal (e.g. a big moving-head frame, or the
             // P4 where PSRAM DMA degrades) would drop internal RAM below the reserve → WiFi/HTTP alloc
-            // failures. Degrade to single-buffer instead.
+            // failures. Degrade to single-buffer instead. This is also the FIRST attempt in shift mode.
             if (!st->buf[1]
                 && heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
                        >= bufferBytes + HEAP_RESERVE) {

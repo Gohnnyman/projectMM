@@ -386,9 +386,10 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                  (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1],
                  (unsigned)threshTicks);
         if (!r.pass) {
-            ESP_LOGE(tag, "loopback: first bad bit %u (light %u, bit-in-row %u)",
+            ESP_LOGE(tag, "loopback: first bad bit %u (light %u, bit-in-row %u), %u/%u bits bad; row0 got %02x%02x%02x exp %02x%02x%02x",
                      (unsigned)mismatch, (unsigned)(mismatch / rowBits),
-                     (unsigned)(mismatch % rowBits));
+                     (unsigned)(mismatch % rowBits), (unsigned)mismatchCount, (unsigned)kBits,
+                     r.got[0], r.got[1], r.got[2], r.sent[0], r.sent[1], r.sent[2]);
         }
     }
     heap_caps_free(rxSymbols);
