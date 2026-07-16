@@ -198,18 +198,18 @@ def main():
             if isinstance(controls, dict) and "pins" in controls and not str(mtype).endswith("LedDriver"):
                 errors.append(f"{where}: module '{mtype}' has a 'pins' control but is not a *LedDriver")
 
-            # 74HCT595 shift-register expander (shiftRegister = is the board fitted?). The wiring
+            # 74HCT595 pin expander (pinExpander = is the board fitted?). The wiring
             # invariants are what a bad catalog entry gets wrong, and they fail on a bench with dark
             # LEDs rather than loudly, so pin them here.
-            if isinstance(controls, dict) and controls.get("shiftRegister"):
+            if isinstance(controls, dict) and controls.get("pinExpander"):
                 if "latchPin" not in controls:
-                    errors.append(f"{where}: shiftRegister (74HCT595) needs a 'latchPin'")
+                    errors.append(f"{where}: pinExpander (74HCT595) needs a 'latchPin'")
                 # The data-pin count is a property of the BOARD (how many '595 sockets are
                 # populated), not of the bus: the driver pads the bus width itself. So any 1..15
                 # is legal — only an empty or over-wide list is a mistake.
                 n = len([p for p in str(controls.get("pins", "")).split(",") if p.strip()])
                 if not 1 <= n <= 15:
-                    errors.append(f"{where}: shiftRegister (74HCT595) needs 1..15 data "
+                    errors.append(f"{where}: pinExpander (74HCT595) needs 1..15 data "
                                   f"pins (one per populated register), got {n}")
                 latch = controls.get("latchPin")
                 for other in ("clockPin", "dcPin"):

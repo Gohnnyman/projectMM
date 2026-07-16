@@ -7,7 +7,7 @@
 namespace mm {
 
 /// Output driver: parallel WS2812B over the ESP32-P4 Parlio (Parallel IO) TX peripheral — the P4's
-/// scale path, sibling of I80LedDriver. The shared body (slicing, encode, single-shot DMA, loopback)
+/// scale path, sibling of MultiPinLedDriver. The shared body (slicing, encode, single-shot DMA, loopback)
 /// lives in ParallelLedDriver; Parlio is the SIMPLER peripheral, so this class adds LESS than the
 /// i80 driver:
 ///  - NO clockPin/dcPin: Parlio generates the pixel clock itself (kClockHz), so there are no
@@ -60,9 +60,9 @@ public:
     /// No 74HCT595 expander on Parlio: its single-shot transfer caps at 65,535 bytes
     /// (PARLIO_LL_TX_MAX_BITS_PER_FRAME), and the ×8 fan-out frame is ~145 KB — 2.2× over. The base
     /// refuses shift mode here with a status rather than emitting a frame the peripheral drops.
-    /// (The P4's route to the expander is its LCD_CAM/i80 bus, which I80LedDriver already drives;
+    /// (The P4's route to the expander is its LCD_CAM/i80 bus, which MultiPinLedDriver already drives;
     /// lifting this needs the chunked-transfer work, not a flag flip.)
-    static constexpr bool kSupportsShiftRegister = false;
+    static constexpr bool kSupportsPinExpander = false;
 
     bool busInit(size_t frameBytes, bool wantSecondBuffer) {
         return platform::parlioWs2812Init(parlio_, laneList_, laneCount_,

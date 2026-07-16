@@ -19,7 +19,7 @@ namespace mm {
 ///    peripheral — same reason its siblings are named `Rmt`/`Parlio` (their APIs).
 ///
 /// The shared body (slicing, the whole-frame async double-buffer DMA, the fused encode, the loopback
-/// self-test, the `wireUs` KPI) lives in ParallelLedDriver; this class adds only the i80-specific pieces:
+/// self-test, the `frameTime` KPI) lives in ParallelLedDriver; this class adds only the i80-specific pieces:
 ///  - The sacrificial WR (pixel clock) + DC GPIOs the i80 bus mandates even though WS2812 ignores
 ///    both, and the "exactly 8 or 16 pins" rule (the i80 layer rejects a partial bus). A sub-16 board
 ///    parks unused lanes + WR/DC on one spare GPIO (the ghost-pin trick).
@@ -37,7 +37,7 @@ namespace mm {
 /// Prior art: Adafruit's LCD_CAM discovery, hpwit's I2SClockless lineage (classic-ESP32 I2S parallel),
 /// FastLED's S3 driver — architecture studied, never copied. We build on IDF's maintained esp_lcd i80
 /// abstraction rather than tracing the raw-register I2S driver (*Industry standards, our own code*).
-class I80LedDriver : public ParallelLedDriver<I80LedDriver> {
+class MultiPinLedDriver : public ParallelLedDriver<MultiPinLedDriver> {
 public:
     // Data pins + loopback pin default to UNSET: they are user-soldered (the strand
     // runs to whatever GPIOs the user wired), so a hard-coded default would be a
@@ -127,7 +127,7 @@ public:
         // sharing it with DC would latch on the command phase. Both are fatal — the bus builds, but
         // the strands get garbage — so this is an error, not a warning. (Bench-found: WR defaults to
         // GPIO 10, which is the first pin a user reaches for when picking a latch.)
-        if (shiftMode() && latchPin >= 0) {
+        if (pinExpanderMode() && latchPin >= 0) {
             if (latchPin == clockPin)
                 return "latchPin is on clockPin (WR) — the latch needs its own GPIO";
             if (latchPin == dcPin)
@@ -157,7 +157,7 @@ public:
     /// the flag on `lcdLanes` (non-zero only on the LCD_CAM chips, S3/P4) makes the refusal a
     /// compile-time property of the silicon rather than a runtime surprise, and the base then reports
     /// it as a config error instead of letting the bus die at init with "check pins / memory".
-    static constexpr bool kSupportsShiftRegister = platform::lcdLanes > 0;
+    static constexpr bool kSupportsPinExpander = platform::lcdLanes > 0;
 
     /// The bus pin list comes from the base: in shift mode it appends the latch to the data pins
     /// (the latch is a bus lane), so the peripheral drives it. busClockMultiplier() tells the platform

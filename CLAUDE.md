@@ -205,6 +205,7 @@ docs/
   building.md              ← how to build, flash, run for every target
   testing.md               ← test inventory and strategy
   performance.md           ← per-module timing, memory, sizeof for each platform
+  MIGRATING.md             ← breaking-change log (newest first): what changed + the action it costs the user
   backlog/                 ← forward-looking: what to build next (not present-tense)
     README.md              ← landing page: overview of every item + index (the rest of the system links here, not into items)
     backlog-core.md        ← to-build list, core / infrastructure domain (+ UI)

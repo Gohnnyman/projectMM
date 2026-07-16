@@ -147,6 +147,7 @@ nav:
       - Building: building.md
       - Testing strategy: testing.md
       - Performance: performance.md
+      - Migrating (breaking changes): MIGRATING.md
       - Hardware reference:
           - GPIO usage per MCU: reference/gpio-usage.md
           - ESP32-S31 coreboard: reference/esp32-s31-coreboard.md

@@ -1,5 +1,5 @@
-// Parallel WS2812 output over the ESP-IDF esp_lcd i80 bus — the peripheral half of I80LedDriver
-// (src/light/drivers/I80LedDriver.h), which does all the domain work: applies Correction and
+// Parallel WS2812 output over the ESP-IDF esp_lcd i80 bus — the peripheral half of MultiPinLedDriver
+// (src/light/drivers/MultiPinLedDriver.h), which does all the domain work: applies Correction and
 // 3-slot-encodes every light into the DMA frame buffer (ParallelSlots.h). This file owns only the
 // peripheral — the esp_lcd i80 bus, the IO device, the DMA-capable frame buffer, transmit + wait,
 // and the loopback test's TX side. No domain logic here.
@@ -14,13 +14,13 @@
 // via its own CMake, to whichever peripheral the chip has: **LCD_CAM** on the S3/P4
 // (esp_lcd_panel_io_i80.c) or the **I2S peripheral in i80/LCD mode** on the classic ESP32
 // (esp_lcd_panel_io_i2s.c). Both do WHOLE-FRAME chained DMA with WR/DC + 8/16 bus width, so this
-// file's body is 100% generic i80 and serves both — the single I80LedDriver runs on all three.
+// file's body is 100% generic i80 and serves both — the single MultiPinLedDriver runs on all three.
 //
 // Gated on SOC_LCD_I80_SUPPORTED (true on classic + S3 + P4) with inert stubs otherwise. This is the
 // BROAD macro on purpose (not the narrower SOC_LCDCAM_I80_LCD_SUPPORTED), precisely so the classic
 // I2S backend compiles here too. (An earlier note warned against the broad macro — that was before
 // an i2s-backed driver existed, so compiling this onto classic init'd a bus with no consumer; now
-// I80LedDriver is that consumer on every i80 chip.)
+// MultiPinLedDriver is that consumer on every i80 chip.)
 
 #include "platform/platform.h"
 
@@ -94,7 +94,7 @@ constexpr uint32_t kPclkHz = 2'666'666;
 //
 // (This band is also why a ×16 cascade is NOT offered: it needs a 42-55 MHz pclk to stay in spec, and
 // NO exact divide of 80 MHz lands there — the divides are 80/40/20/16/10. Two pins beat two cascaded
-// registers on every axis anyway; see ParallelSlots.h kShiftOutputs.)
+// registers on every axis anyway; see ParallelSlots.h kPinExpanderOutputs.)
 //
 // **Do NOT "fix" flicker by lowering this clock** — that was the original note's advice and it is
 // exactly backwards: a lower pclk makes the slot LONGER, pushing T0H further past 380 ns. If the
@@ -150,7 +150,7 @@ bool IRAM_ATTR i80DoneCb(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_
     st->fifoTail = (st->fifoTail + 1u) & 1u;
     // In-order queue: a buffer already queued behind this one starts the instant this transfer ends —
     // stamp its true start here, since the transmit call deliberately skipped stamping it (the wire was
-    // busy). Without this the second buffer's wireUs would include this one's remaining wire time.
+    // busy). Without this the second buffer's frameTime would include this one's remaining wire time.
     if (st->fifoTail != st->fifoHead) st->txStartUs[st->fifoTail] = now;
     BaseType_t high = pdFALSE;
     xSemaphoreGiveFromISR(st->done[b], &high);

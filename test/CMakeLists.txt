@@ -106,12 +106,12 @@ add_executable(mm_tests
     unit/light/unit_RainbowEffect.cpp
     unit/light/unit_NetworkReceiveEffect.cpp
     unit/light/unit_NetworkReceiveEffect_protocols.cpp
-    unit/light/unit_I80LedDriver.cpp
-    unit/light/unit_MoonI80LedDriver.cpp
+    unit/light/unit_MultiPinLedDriver.cpp
+    unit/light/unit_MoonLedDriver.cpp
     unit/light/unit_ParallelSlots.cpp
     unit/light/unit_ParlioLedDriver.cpp
     unit/light/unit_ParallelLedDriver_doublebuffer.cpp
-    unit/light/unit_ParallelLedDriver_shiftregister.cpp
+    unit/light/unit_ParallelLedDriver_pinexpander.cpp
     unit/light/unit_ParallelLedDriver_ring.cpp
     unit/light/unit_RmtLedEncoder.cpp
     unit/light/unit_RmtLedDriver_lifecycle.cpp

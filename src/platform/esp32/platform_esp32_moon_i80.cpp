@@ -1,6 +1,6 @@
 // Parallel WS2812 output over the ESP32-S3/P4 LCD_CAM i80 peripheral, driven by OUR OWN DMA
-// sequencing instead of IDF's esp_lcd component — the peripheral half of MoonI80LedDriver
-// (src/light/drivers/MoonI80LedDriver.h), which does all the domain work: applies Correction and
+// sequencing instead of IDF's esp_lcd component — the peripheral half of MoonLedDriver
+// (src/light/drivers/MoonLedDriver.h), which does all the domain work: applies Correction and
 // 3-slot-encodes every light into the DMA frame buffer (ParallelSlots.h). This file owns only the
 // peripheral — the LCD_CAM registers, the GDMA channel + descriptor chain, the frame buffer(s),
 // transmit + wait, and the loopback test's TX side. No domain logic here.
@@ -148,7 +148,7 @@ constexpr uint32_t kRingRows = 16;
 // size, so 16 buffers ≈ 147 KB and 17 ≈ 156 KB. The S3 has only ~160 KB free internal DMA heap, and
 // moonI80Ws2812InternalFits tests the LARGEST CONTIGUOUS block (always < total free) — so 17 buffers do
 // NOT fit: the ring alloc fails, the driver falls back to whole-frame, and whole-frame shift mode STALLS
-// at the shift clock (wireUs=—, no lights). Bench-confirmed: depth 17 failed to ring at BOTH 192 and 256.
+// at the shift clock (frameTime=—, no lights). Bench-confirmed: depth 17 failed to ring at BOTH 192 and 256.
 // So "more buffers" cannot reach 256 here — it hits the RAM wall at exactly this boundary, which is the
 // whole reason the ring exists (constant RAM) and why the real fix below is the only path past 240.
 //
@@ -349,7 +349,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
         // FIFO may still be draining it); one extra ZERO buffer past it both flushes the last real slice and
         // clocks a LOW tail (16 rows ≈ well past the ≥300 µs WS2812 reset). Only ONE extra, not a full ring:
         // more extra buffers re-lap the loop into buffers the ISR is refilling, which corrupts the frame
-        // (the "shifted" bit-verify failure) and multiplies wireUs. The reset is the zero tail + idle-LOW
+        // (the "shifted" bit-verify failure) and multiplies frameTime. The reset is the zero tail + idle-LOW
         // until the next frame arms — never a pad inside a data buffer.
         constexpr uint32_t kTailBufs = 1;
         if (drained >= st->nSlices + kTailBufs) {

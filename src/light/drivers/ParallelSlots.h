@@ -8,7 +8,7 @@ namespace mm {
 // WS2812 encode for parallel WS2812 buses — the contract between a parallel
 // driver (domain) and a parallel peripheral, named for the wire unit it builds
 // (one pixel-clock SLOT = one byte on the 8-bit bus), the RmtSymbol.h sibling.
-// Used by BOTH the LCD_CAM i80 driver (ESP32-S3, I80LedDriver) and the Parlio
+// Used by BOTH the LCD_CAM i80 driver (ESP32-S3, MultiPinLedDriver) and the Parlio
 // driver (ESP32-P4, ParlioLedDriver) — a Parlio bus byte and an i80 bus byte
 // are identical (one word per slot, bit L = data line L), so one encoder
 // serves both. Pure data transform, no platform include — the host CI encoder
@@ -213,7 +213,7 @@ inline void encodeWs2812ParallelSlots(const uint8_t* wire, Slot activeMask,
 /// **Grow on PINS, not on cascade depth** anyway: pin count is parallel, so it does not touch the
 /// clock and it does not grow the DMA frame — hpwit's 120-strand headline is 15 pins × 8, not a
 /// deeper chain.
-inline constexpr uint8_t kShiftOutputs = 8;   // one 74HCT595 per data pin
+inline constexpr uint8_t kPinExpanderOutputs = 8;   // one 74HCT595 per data pin
 
 /// Close a shift-register frame: one latch-only bus word, written at the START of the latch pad.
 ///
@@ -240,8 +240,8 @@ inline void encodeWs2812ShiftLatchPad(uint8_t latchBit, Slot* out) {
 ///                the bus is wide), so it is a uint64_t, not a Slot.
 ///   physPins:    physical data pins in use (lanes ≤ physPins × outPerPin).
 ///   latchBit:    bus-bit index of the LATCH line (never a data pin).
-///   outPerPin:   the fan-out — kShiftOutputs (8, one '595). A runtime parameter, not a constant,
-///                so the cost model stays explicit; see kShiftOutputs for why 16 is not offered.
+///   outPerPin:   the fan-out — kPinExpanderOutputs (8, one '595). A runtime parameter, not a constant,
+///                so the cost model stays explicit; see kPinExpanderOutputs for why 16 is not offered.
 ///   channels:    wire bytes per light (also the lane stride).
 ///   out:         channels * 8 * 3 * outPerPin SLOTS, fully written.
 template <class Slot>
@@ -249,18 +249,18 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
                                    uint8_t physPins, uint8_t latchBit, uint8_t outPerPin,
                                    uint8_t channels, Slot* out) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;   // bus width: 8 or 16
-    if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
+    if (outPerPin == 0 || outPerPin > kPinExpanderOutputs) return;
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
     for (uint8_t ch = 0; ch < channels; ch++) {
         // Bit-planes per shift cycle: plane[c][bit] bit P = physical pin P's byte-bit `bit` for
         // the lane it drives on cycle c. Built by reusing the SWAR transpose once per cycle over
-        Slot plane[kShiftOutputs][8];
+        Slot plane[kPinExpanderOutputs][8];
         // Active pins PER SHIFT CYCLE, not per pin. Cycle c clocks in the bit for shift position
         // `pos` of every pin, so what belongs there is "is the strand at (pin, pos) active?" — a
         // per-STRAND question. Aggregating one mask across all cycles ("pin P has some live lane")
         // would drive the pulse-start HIGH on a cycle whose strand is inactive: two strands sharing
         // a '595 (one long, one short) would make the short one flash white on every WS2812 pulse.
-        Slot activePins[kShiftOutputs] = {};
+        Slot activePins[kPinExpanderOutputs] = {};
         for (uint8_t c = 0; c < outPerPin; c++) {
             // '595 shifts MSB-first: the first bit clocked in lands on the last output.
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
@@ -360,7 +360,7 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
 /// would walk the pins twice and test each mask bit twice.
 template <class Slot>
 inline void shiftActivePins(uint64_t activeMask, uint8_t physPins, uint8_t outPerPin,
-                            Slot (&out)[kShiftOutputs]) {
+                            Slot (&out)[kPinExpanderOutputs]) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;
     for (uint8_t c = 0; c < outPerPin; c++) {
         const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);   // '595 shifts MSB-first
@@ -377,10 +377,10 @@ template <class Slot>
 inline void prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t physPins, uint8_t latchBit,
                                         uint8_t outPerPin, uint8_t channels, uint32_t rows,
                                         Slot* out) {
-    if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
+    if (outPerPin == 0 || outPerPin > kPinExpanderOutputs) return;
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
 
-    Slot activePins[kShiftOutputs] = {};
+    Slot activePins[kPinExpanderOutputs] = {};
     shiftActivePins<Slot>(activeMask, physPins, outPerPin, activePins);
 
     // Every channel, every bit of THIS row gets the same start/tail. The data word is left alone —
@@ -411,7 +411,7 @@ template <class Slot>
 inline void encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint8_t physPins,
                                   uint8_t latchBit, uint8_t outPerPin, uint8_t channels, Slot* out) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;
-    if (outPerPin == 0 || outPerPin > kShiftOutputs) return;
+    if (outPerPin == 0 || outPerPin > kPinExpanderOutputs) return;
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
     for (uint8_t ch = 0; ch < channels; ch++) {
         // The transposed bit-planes, held PACKED — one uint64 per shift cycle rather than an array of
@@ -425,10 +425,10 @@ inline void encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint
         // **8.85 to 6.19 µs/light**. The SWAR arithmetic itself is nearly free: a batched variant that
         // packed four shift cycles into ONE butterfly (an 8×8 costs the same for 2 lanes as for 8) was
         // built and measured, and changed nothing — so it was dropped rather than kept for elegance.
-        uint64_t planes[kShiftOutputs];
+        uint64_t planes[kPinExpanderOutputs];
         // The 16-lane bus is two INDEPENDENT 8-lane transposes (low byte = pins 0-7, high = pins 8-15),
         // so it needs a second packed word. The 8-bit path never reads it and the compiler drops it.
-        uint64_t planesHi[kShiftOutputs];
+        uint64_t planesHi[kPinExpanderOutputs];
 
         for (uint8_t c = 0; c < outPerPin; c++) {
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);

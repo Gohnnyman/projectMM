@@ -9,7 +9,7 @@
     "PreviewDriver",
     "NetworkSendDriver",
     "RmtLedDriver",
-    "I80LedDriver",
+    "MultiPinLedDriver",
     "ParlioLedDriver",
     "MultiplyModifier",
     "SpiralEffect",
@@ -836,10 +836,10 @@
     },
     {
       "name": "add-i80-driver",
-      "description": "+I80LedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. I80LedDriver also registers on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
+      "description": "+MultiPinLedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. MultiPinLedDriver also registers on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
       "op": "add_module",
-      "id": "I80",
-      "type": "I80LedDriver",
+      "id": "MultiPin",
+      "type": "MultiPinLedDriver",
       "parent_id": "Drivers",
       "props": {
         "pins": "1,2,3,4,5,6,7,8",
@@ -913,7 +913,7 @@
     {
       "name": "remove-i80-driver",
       "op": "remove_module",
-      "id": "I80",
+      "id": "MultiPin",
       "optional": true
     },
     {

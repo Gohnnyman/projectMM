@@ -1,4 +1,4 @@
-// @module I80LedDriver
+// @module MultiPinLedDriver
 // @also Correction
 
 #include "doctest.h"
@@ -205,7 +205,7 @@ TEST_CASE("LCD encoder 16-lane: RGBW row is 96 uint16 slots, all written") {
 // ---------------------------------------------------------------------------
 // Shift-register (74HCT595) encode. The strands are not on the GPIOs here: each
 // data pin feeds a '595 whose 8 outputs are the strands. A '595 is serial-in, so
-// every WS2812 slot above becomes kShiftOutputs shift cycles, and a LATCH bit
+// every WS2812 slot above becomes kPinExpanderOutputs shift cycles, and a LATCH bit
 // (a real bus lane) presents the byte on the last one. These tests pin the parts
 // that no host can otherwise prove until the physical board exists: the shift
 // ordering, the latch timing, and which strand lands on which output.
@@ -213,9 +213,9 @@ TEST_CASE("LCD encoder 16-lane: RGBW row is 96 uint16 slots, all written") {
 
 namespace {
 
-constexpr uint8_t kSh = mm::kShiftOutputs;   // 8
+constexpr uint8_t kSh = mm::kPinExpanderOutputs;   // 8
 
-// Slots per WS2812 bit in shift mode: 3 (start/data/tail) x kShiftOutputs cycles.
+// Slots per WS2812 bit in shift mode: 3 (start/data/tail) x kPinExpanderOutputs cycles.
 constexpr int kSlotsPerBit = 3 * kSh;
 
 // The encoder writes channels*8 bits, each kSlotsPerBit slots.
@@ -313,7 +313,7 @@ TEST_CASE("shift encoder: latch pulses on the FIRST cycle of each slot (not the 
 }
 
 // A '595 shifts MSB-of-the-register-first: the bit clocked in FIRST ends up on the LAST
-// output (QH). So strand V (output V) must be carried on shift cycle (kShiftOutputs-1-V).
+// output (QH). So strand V (output V) must be carried on shift cycle (kPinExpanderOutputs-1-V).
 // Get this backwards and every strand lights its neighbour's data — the failure mode that
 // is nearly impossible to debug on a wired panel, so it is pinned here.
 TEST_CASE("shift encoder: strand N rides the correct shift cycle ('595 MSB-first)") {
@@ -645,7 +645,7 @@ TEST_CASE("shift encoder: the packed transpose matches the reference at every pi
     // The 16-bit bus: the second packed word, and pin counts that span the 8-lane split.
     //
     // Capped at 8 pins, because that is what the hardware allows: the expander fans each pin out to
-    // kShiftOutputs strands, and the driver rejects anything past kMaxStrands (64) — so 8 pins × 8 is
+    // kPinExpanderOutputs strands, and the driver rejects anything past kMaxStrands (64) — so 8 pins × 8 is
     // the ceiling, and a 9th pin is a configuration that can never reach this encoder. (Sweeping past
     // it would also shift a uint64 activeMask by ≥64, which is undefined behaviour in the TEST.)
     for (uint8_t pins = 1; pins <= 8; pins++) {

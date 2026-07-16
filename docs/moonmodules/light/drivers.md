@@ -19,15 +19,15 @@ Every driver card leads with the same block, added once by [`DriverBase`](moxyge
 ## LED output drivers
 
 <a id="rmtled"></a>
-<a id="i80led"></a>
-<a id="mooni80led"></a>
+<a id="multipinled"></a>
+<a id="moonled"></a>
 <a id="parlioled"></a>
 
 ### LED output 💫 · wire
 
-Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three peripherals do this — pick by chip: **RMT** (single/few strands, any ESP32), **i80** (8 or 16 parallel strands — the i80 bus, backed by LCD_CAM on the S3/P4 and by the I2S peripheral on the classic ESP32), **Parlio** (1–16 parallel strands, P4). Same controls, same wire contract; they differ only in how many strands clock out at once and on which chip.
+Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three peripherals do this — pick by chip: **RMT** (single/few strands, any ESP32), **MultiPin** (8 or 16 parallel strands — the i80 bus, backed by LCD_CAM on the S3/P4 and by the I2S peripheral on the classic ESP32), **Parlio** (1–16 parallel strands, P4). Same controls, same wire contract; they differ only in how many strands clock out at once and on which chip.
 
-**MoonI80** is a fourth entry: the *same* LCD_CAM output as **i80**, same pins and same controls, but driven by our own DMA code instead of ESP-IDF's `esp_lcd`. It exists to lift the memory ceiling that caps how many lights the i80 driver can drive. **i80 remains the default and the reference implementation**; MoonI80 is the challenger, and both are offered so they can be compared on the same board without a reflash. Why, and what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md).
+**Moon** is a fourth entry: the *same* LCD_CAM output as **MultiPin**, same pins and same controls, but driven by our own DMA code instead of ESP-IDF's `esp_lcd`. It exists to lift the memory ceiling that caps how many lights the MultiPin driver can drive. **MultiPin remains the default and the reference implementation**; Moon is the challenger, and both are offered so they can be compared on the same board without a reflash. Why, and what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md).
 
 <img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="LED output driver controls">
 
@@ -42,7 +42,7 @@ Origin: WS2812B on FastLED / hpwit / WLED prior art ([analysis](../../backlog/le
 
 [Tests](../../tests/unit-tests.md#rmtleddriver)
 
-Detail: [RMT](moxygen/RmtLedDriver.md) · [i80](moxygen/I80LedDriver.md) · [MoonI80](moxygen/MoonI80LedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
+Detail: [RMT](moxygen/RmtLedDriver.md) · [MultiPin](moxygen/MultiPinLedDriver.md) · [Moon](moxygen/MoonLedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
 
 ## Network drivers
 
@@ -109,13 +109,13 @@ Detail: [technical](moxygen/PreviewDriver.md)
 
 ## LED output — details
 
-The LED-output drivers, compared. All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism, chip, and — for the two i80 entries — in who programs the DMA.
+The LED-output drivers, compared. All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism, chip, and — for the two i80-bus entries (**MultiPin** and **Moon**) — in who programs the DMA.
 
 | Peripheral | Chip | Strands | Notes |
 |------------|------|---------|-------|
 | **RMT** ([RmtLedDriver.md](moxygen/RmtLedDriver.md)) | any ESP32 (classic 8 ch, S3 4, P4 4 DMA) | one per RMT TX channel | the general single-/few-strand output; default for classic + S3 board entries. Adds `loopbackFrame` — a whole-frame variant of the self-test (bit-verifies a full frame, catching frame-rate / RF corruption a 24-bit burst misses). |
-| **i80** ([I80LedDriver.md](moxygen/I80LedDriver.md)) | ESP32-S3 / P4 (LCD_CAM backend) · classic ESP32 (I2S backend) | **exactly 8 or 16** parallel (one DMA transfer) | the scale path where RMT tops out — one driver over IDF's i80 bus, routed to LCD_CAM on the S3/P4 and to the I2S peripheral on the classic ESP32. Bus width follows the pin count (≤8 → 8-bit, 9–16 → 16-bit). Adds `clockPin` (10) / `dcPin` (11) — i80 bus lines the LEDs ignore. A sub-16 board parks unused data lanes on spare GPIOs. The classic backend allocates its DMA buffer in internal RAM (I2S can't DMA from PSRAM), capping it at **2048 lights** (measured, 8×256); the LCD_CAM backend draws from PSRAM and reaches the full 16384. Over the cap the driver degrades with an `i80 bus init failed` status rather than crashing. |
-| **MoonI80** ([MoonI80LedDriver.md](moxygen/MoonI80LedDriver.md)) | ESP32-S3 / P4 (LCD_CAM only) | **exactly 8 or 16** parallel (one DMA transfer) | the *same* LCD_CAM output as **i80**, with the same pins and controls, but on our own GDMA descriptor chain instead of `esp_lcd`. **i80 stays the default and the reference**; this is the challenger, offered alongside it so the two can be compared on one board without a reflash. Not offered on the classic ESP32 (whose i80 is the I2S peripheral, a different register file). Why it exists and what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md). |
+| **MultiPin** ([MultiPinLedDriver.md](moxygen/MultiPinLedDriver.md)) | ESP32-S3 / P4 (LCD_CAM backend) · classic ESP32 (I2S backend) | **exactly 8 or 16** parallel (one DMA transfer) | the scale path where RMT tops out — one driver over IDF's i80 bus, routed to LCD_CAM on the S3/P4 and to the I2S peripheral on the classic ESP32. Bus width follows the pin count (≤8 → 8-bit, 9–16 → 16-bit). Adds `clockPin` (10) / `dcPin` (11) — i80 bus lines the LEDs ignore. A sub-16 board parks unused data lanes on spare GPIOs. The classic backend allocates its DMA buffer in internal RAM (I2S can't DMA from PSRAM), capping it at **2048 lights** (measured, 8×256); the LCD_CAM backend draws from PSRAM and reaches the full 16384. Over the cap the driver degrades with an `i80 bus init failed` status rather than crashing. |
+| **Moon** ([MoonLedDriver.md](moxygen/MoonLedDriver.md)) | ESP32-S3 / P4 (LCD_CAM only) | **exactly 8 or 16** parallel (one DMA transfer) | the *same* LCD_CAM output as **MultiPin**, with the same pins and controls, but on our own GDMA descriptor chain instead of `esp_lcd`. **MultiPin stays the default and the reference**; this is the challenger, offered alongside it so the two can be compared on one board without a reflash. Not offered on the classic ESP32 (whose i80 is the I2S peripheral, a different register file). Why it exists and what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md). |
 | **Parlio** ([ParlioLedDriver.md](moxygen/ParlioLedDriver.md)) | ESP32-P4 | **1–16** parallel (one DMA transfer) | the P4's parallel path (Parlio generates its own pixel clock — no clock/dc pins). Bus width follows the pin count (≤8 → 8-bit, 9–16 → 16-bit). On P4-NANO a known-good 8-set is `20,21,22,23,24,25,26,27`. |
 
 The detail pages carry each peripheral's wire contract, buffer slicing, memory sizing, and the loopback self-test.

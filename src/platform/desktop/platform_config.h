@@ -22,7 +22,7 @@ constexpr uint8_t lcdLanes = 0;
 // No Parlio peripheral — the Parlio LED driver guards on this and is inert too.
 constexpr uint8_t parlioLanes = 0;
 
-// No I2S-i80 peripheral — I80LedDriver's lanesAvailable() reads lcdLanes + i2sLanes;
+// No I2S-i80 peripheral — MultiPinLedDriver's lanesAvailable() reads lcdLanes + i2sLanes;
 // both 0 on desktop, so the driver is inert (host tests exercise only its parse/slice math).
 constexpr uint8_t i2sLanes = 0;
 

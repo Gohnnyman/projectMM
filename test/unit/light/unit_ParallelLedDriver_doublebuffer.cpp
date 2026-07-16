@@ -1,5 +1,5 @@
 // @module ParallelLedDriver
-// @also I80LedDriver, ParlioLedDriver
+// @also MultiPinLedDriver, ParlioLedDriver
 
 #include "doctest.h"
 #include "light/drivers/ParallelLedDriver.h"
@@ -51,7 +51,7 @@ public:
     // The mock bus is memory, not a peripheral, so it can host the 74HCT595 expander — which is what
     // lets the shift-register lane/frame arithmetic be pinned on the host (unit_ParallelSlots covers
     // the encoded bits; here it's the driver plumbing).
-    static constexpr bool kSupportsShiftRegister = true;
+    static constexpr bool kSupportsPinExpander = true;
     static constexpr const char* kInitFailMsg = "mock init failed";
 
     void addBusControls() {}
@@ -61,7 +61,7 @@ public:
     const char* validateBusPins(const uint16_t*, uint8_t) const { return nullptr; }
     const char* validateBusFatal() const { return nullptr; }
 
-    // busInit gets `wantSecond` from the base (= asyncTransmit). The mock allocates the second
+    // busInit gets `wantSecond` from the base (= doubleBuffer). The mock allocates the second
     // buffer only when BOTH the flag wants it AND the test's twoBuffers knob allows it (so a test
     // can simulate a memory-tight board that refuses the second buffer even with async on).
     bool busInit(size_t frameBytes, bool wantSecond) {
@@ -89,7 +89,7 @@ public:
     }
     bool waitTimesOut = false;
     uint32_t busLastTransmitUs() const { return lastTransmitUs; }   // mock wire-time KPI
-    uint32_t lastTransmitUs = 0;   // a test can set this to check the wireUs string formatting
+    uint32_t lastTransmitUs = 0;   // a test can set this to check the frameTime string formatting
     void busDeinit() { cap_ = 0; buf_[0].clear(); buf_[1].clear(); inited_ = false; }
     mm::platform::RmtLoopbackResult busLoopback(const uint8_t*, size_t, size_t, uint8_t) {
         return {};
@@ -102,13 +102,13 @@ private:
 };
 
 // Wire a mock driver onto a `lights`-light source buffer + a GRB correction, and drive it ready.
-// `async` sets asyncTransmit (whether the base requests a second buffer); `canSecond` is the mock's
+// `async` sets doubleBuffer (whether the base requests a second buffer); `canSecond` is the mock's
 // board-fits-a-second-buffer knob (lets a test simulate a memory-tight board that refuses it even
 // with async on). Mirrors the other parallel-driver test helpers.
 void wire(MockParallelDriver& d, mm::Buffer& src, mm::Correction& corr,
           nrOfLightsType lights, bool async, bool canSecond = true) {
     d.twoBuffers = canSecond;
-    d.asyncTransmit = async;
+    d.doubleBuffer = async;
     std::strcpy(d.pins, "1,2,3,4");
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
@@ -182,12 +182,12 @@ TEST_CASE("ParallelLedDriver single-buffer mode waits every frame on buffer 0") 
     for (const auto& c : d.calls) CHECK(c.buffer == 0);
 }
 
-// asyncTransmit is the on/off knob AND drives allocation: OFF (default) allocates ONE buffer and
+// doubleBuffer is the on/off knob AND drives allocation: OFF (default) allocates ONE buffer and
 // runs the synchronous path; ON requests a second buffer and alternates. Flipping it rebuilds the
 // bus (affectsPrepare) so the second buffer is freed (→off) or allocated (→on) — a board that leaves
 // it off never holds the second buffer. This mirrors the live toggle (the A/B knob), which routes
 // through applyState()/prepare() the same way.
-TEST_CASE("ParallelLedDriver asyncTransmit toggles allocation and path") {
+TEST_CASE("ParallelLedDriver doubleBuffer toggles allocation and path") {
     MockParallelDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -201,7 +201,7 @@ TEST_CASE("ParallelLedDriver asyncTransmit toggles allocation and path") {
     CHECK(d.calls[1].kind == Call::Wait);
 
     // Flip ON and re-prepare (what a live control change does): the second buffer is now allocated.
-    d.asyncTransmit = true;
+    d.doubleBuffer = true;
     d.applyState();
     CHECK(d.busBuffer(1) != nullptr);
     d.calls.clear();
@@ -214,13 +214,13 @@ TEST_CASE("ParallelLedDriver asyncTransmit toggles allocation and path") {
     CHECK(d.calls[1].kind == Call::Transmit); CHECK(d.calls[1].buffer == 1);
 
     // Flip back OFF and re-prepare: the second buffer is freed, back to synchronous.
-    d.asyncTransmit = false;
+    d.doubleBuffer = false;
     d.applyState();
     CHECK(d.busBuffer(1) == nullptr);
 }
 
 // A board that WANTS async but can't fit the second buffer (memory-tight) degrades to single-buffer
-// synchronous — never fails to init. asyncTransmit is on, but the mock refuses the second buffer.
+// synchronous — never fails to init. doubleBuffer is on, but the mock refuses the second buffer.
 TEST_CASE("ParallelLedDriver async degrades to synchronous when second buffer won't fit") {
     MockParallelDriver d;
     mm::Buffer src;
@@ -233,10 +233,10 @@ TEST_CASE("ParallelLedDriver async degrades to synchronous when second buffer wo
     CHECK(d.calls[1].kind == Call::Wait);
 }
 
-// The wireUs KPI: tick1s() pulls the platform's measured wire time via busLastTransmitUs(). The
+// The frameTime KPI: tick1s() pulls the platform's measured wire time via busLastTransmitUs(). The
 // string formatting + the actual DMA timing are verified on hardware (the metric's whole point is a
 // real wire measurement); here we just pin that tick1s reads the seam without crashing pre-first-frame.
-TEST_CASE("ParallelLedDriver wireUs tick1s is safe before the first transfer") {
+TEST_CASE("ParallelLedDriver frameTime tick1s is safe before the first transfer") {
     MockParallelDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -257,7 +257,7 @@ TEST_CASE("ParallelLedDriver drives an N-channel (>4) correction without overflo
     MockParallelDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    d.asyncTransmit = true;
+    d.doubleBuffer = true;
     std::strcpy(d.pins, "1,2,3,4");
     REQUIRE(src.allocate(64, 3) == true);
     // An 8-channel fixture-style correction (RGBW + 4 fixture roles) — well over the old 4-byte slot.

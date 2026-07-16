@@ -7,7 +7,7 @@ namespace mm {
 
 /// Output driver: parallel 8-or-16-lane WS2812B on the **LCD_CAM** peripheral, driven by **our own
 /// DMA code** instead of ESP-IDF's `esp_lcd` component. Same peripheral, same wire contract, same
-/// pins as [I80LedDriver](I80LedDriver.md) — the difference is underneath (who programs the DMA), plus
+/// pins as [MultiPinLedDriver](MultiPinLedDriver.md) — the difference is underneath (who programs the DMA), plus
 /// what falls out of it: owning the GPIO matrix means this driver needs no DC pin at all and routes WR
 /// only when a '595 expander reads it, so a direct-mode board spends its GPIOs on strands alone.
 ///
@@ -28,7 +28,7 @@ namespace mm {
 /// GDMA link-list APIs (one level below `esp_lcd`, not raw registers; IDF's own drivers use the same
 /// APIs). Rationale + what we give up: [ADR-0014](https://github.com/MoonModules/projectMM/blob/main/docs/adr/0014-own-i80-dma-driver-below-esp-lcd.md).
 ///
-/// **Both drivers ship, and that is deliberate.** `I80LedDriver` is the **reference**: correct,
+/// **Both drivers ship, and that is deliberate.** `MultiPinLedDriver` is the **reference**: correct,
 /// memory-capped, and the thing this one is measured against. This is the **challenger**. Because both
 /// are registered module types, switching between them is a swap in the UI — the A/B needs no reflash,
 /// on the same board, on the same effect. The reference is retired only if and when the challenger
@@ -36,13 +36,13 @@ namespace mm {
 ///
 /// Everything above the DMA is inherited unchanged from ParallelLedDriver: the slicing, the fused
 /// 3-slot encode ([ParallelSlots.h](ParallelSlots.md)), the async double-buffer, the 74HCT595
-/// shift-register expander, the loopback self-test, the `wireUs` KPI, and the dead-frame guard. This
+/// shift-register expander, the loopback self-test, the `frameTime` KPI, and the dead-frame guard. This
 /// class adds only what is i80-specific — the WR pin (a '595 pin here, not an i80 tax: see clockPin)
 /// and the platform forwards — which is why it is nearly all one-liners.
 ///
 /// LCD_CAM only (ESP32-S3 / -P4). The classic ESP32's i80 is the I2S peripheral, a different backend
 /// entirely, so this driver is not offered there.
-class MoonI80LedDriver : public ParallelLedDriver<MoonI80LedDriver> {
+class MoonLedDriver : public ParallelLedDriver<MoonLedDriver> {
 public:
     // Data pins + loopback pin default to UNSET, for the same reason as the sibling: they are
     // user-soldered, so a hard-coded default would be a guess that could drive a pin the user
@@ -90,7 +90,7 @@ public:
     static constexpr const char* kForceRingOptions[3] = {"auto", "ring", "wholeFrame"};
     /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this driver is
     /// LCD_CAM-only, so the answer is simply "wherever this driver runs at all".
-    static constexpr bool kSupportsShiftRegister = platform::lcdLanes > 0;
+    static constexpr bool kSupportsPinExpander = platform::lcdLanes > 0;
 
     /// The base pads spare bus lanes with this GPIO. Unrouted lanes cost nothing here, so the value is
     /// only ever *used* in shift mode — where WR is a real pad and the padding is genuinely inert.
@@ -100,14 +100,14 @@ public:
     /// survives a round-trip through direct mode) but shown only when a shift register can read it.
     void addBusControls() {
         controls_.addPin("clockPin", clockPin);
-        controls_.setHidden(controls_.count() - 1, !shiftMode());
+        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
         // A/B path selector (shift mode only): AUTO / force ring / force whole-frame. Options match the
         // forceRing member (0/1/2). Distinct axis from ringSnapshot — this picks the PATH, ringSnapshot
         // tunes how the RING reads its source; they compose (force ring, then snapshot on/off). Shown only
         // in shift mode (direct never rings). Force whole-frame is how the whole-frame-PSRAM-at-the-shift-
         // clock question gets tested deliberately rather than left to the auto router.
         controls_.addSelect("forceRing", forceRing, kForceRingOptions, 3);
-        controls_.setHidden(controls_.count() - 1, !shiftMode());
+        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
         // TEMP DIAGNOSTIC: ring internals as a read-only control, so the ≥256 stall can be diagnosed by
         // polling /api/state (reliable) instead of scraping serial. Shows "slices/bufs eof/N done drain
         // items(cap/used)". Remove once the reuse boundary is fixed.
@@ -133,7 +133,7 @@ public:
     /// signal never leaves the peripheral, so `clockPin` naming a strand's GPIO is harmless — and
     /// rejecting it would forbid a perfectly good config for the sake of a signal nobody reads.
     const char* validateBusFatal() const {
-        if (shiftMode()) {
+        if (pinExpanderMode()) {
             // The '595 needs WR on a real GPIO (it is the SRCLK). Unset (-1) would route the
             // peripheral's WR signal to GPIO 65535 — reject it before busInit reaches the pad.
             if (clockPin < 0) return "the 74HCT595 expander needs a clockPin (its shift clock)";
@@ -145,7 +145,7 @@ public:
     /// A data lane sharing WR's GPIO is silent corruption — the matrix routes both signals to the one
     /// pad and that strand emits the shift clock instead of pixel data. Only possible in shift mode.
     const char* validateBusPins(const uint16_t* lanes, uint8_t n) const {
-        if (!shiftMode()) return nullptr;
+        if (!pinExpanderMode()) return nullptr;
         for (uint8_t i = 0; i < n; i++)
             if (lanes[i] == static_cast<uint16_t>(clockPin)) return "a data pin is on clockPin (WR)";
         return nullptr;
@@ -168,7 +168,7 @@ public:
     /// (and stays an A/B control against the ring at the same size). Direct mode never rings — it drives
     /// PSRAM fine at the 10×-slower clock.
     bool wantsRing() const {
-        if (!shiftMode()) return false;                  // direct mode never rings (drives PSRAM fine)
+        if (!pinExpanderMode()) return false;                  // direct mode never rings (drives PSRAM fine)
         if (forceRing == 1) return true;                 // A/B: force the ring
         if (forceRing == 2) return false;                // A/B: force whole-frame (test PSRAM at the shift clock)
         return !platform::moonI80Ws2812InternalFits(this->frameBytes_);   // AUTO
@@ -183,7 +183,7 @@ public:
         return platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
                                                padBytes, this->busClockMultiplier(),
-                                               &MoonI80LedDriver::ringEncodeTrampoline, this);
+                                               &MoonLedDriver::ringEncodeTrampoline, this);
     }
     bool busTransmitRing()          { return platform::moonI80Ws2812TransmitRing(bus_); }
     bool busIsRing() const          { return platform::moonI80Ws2812IsRing(bus_); }
@@ -202,15 +202,15 @@ public:
     /// mode writes every slot word in encodeRows, so it needs no prefill.
     static void ringEncodeTrampoline(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
                                      bool closeFrame) {
-        auto* self = static_cast<MoonI80LedDriver*>(user);
+        auto* self = static_cast<MoonLedDriver*>(user);
         const uint8_t outCh = self->correction_.outChannels;
         const auto first = static_cast<nrOfLightsType>(firstRow);
         const auto count = static_cast<nrOfLightsType>(rowCount);
         if (self->slotBytes() == 1) {
-            if (self->shiftMode()) self->prefillShiftRows<uint8_t>(outCh, dst, first, count);
+            if (self->pinExpanderMode()) self->prefillShiftRows<uint8_t>(outCh, dst, first, count);
             self->encodeRows<uint8_t>(outCh, dst, first, count, closeFrame);
         } else {
-            if (self->shiftMode()) self->prefillShiftRows<uint16_t>(outCh, dst, first, count);
+            if (self->pinExpanderMode()) self->prefillShiftRows<uint16_t>(outCh, dst, first, count);
             self->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
         }
     }

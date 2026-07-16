@@ -1,4 +1,4 @@
-// @module I80LedDriver
+// @module MultiPinLedDriver
 // @also ParallelLedDriver
 
 #include "doctest.h"
@@ -32,7 +32,7 @@ public:
     // ever runs on an i80-shaped bus, so the mock models that one.
     static constexpr bool kPowerOfTwoBus = true;
     static constexpr bool kLoopbackFullWidth = false;
-    static constexpr bool kSupportsShiftRegister = true;      // memory bus: the expander is allowed
+    static constexpr bool kSupportsPinExpander = true;      // memory bus: the expander is allowed
     static constexpr const char* kInitFailMsg = "mock init failed";
 
     void addBusControls() {}
@@ -93,7 +93,7 @@ void wire(MockShiftDriver& d, mm::Buffer& src, mm::Correction& corr, nrOfLightsT
           const char* pins, bool shiftOn, int8_t latch, const char* ledsPerPin = "") {
     std::strcpy(d.pins, pins);
     std::strcpy(d.ledsPerPin, ledsPerPin);
-    d.shiftRegister = shiftOn;
+    d.pinExpander = shiftOn;
     d.latchPin = latch;
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
@@ -232,7 +232,7 @@ TEST_CASE("shift register: the expander needs a latchPin") {
 // The latch must not land on the peripheral's own WR/DC pins either — bench-found, because WR
 // defaults to GPIO 10 and that is the first free-looking pin a user reaches for. The i80 bus builds
 // fine, so the failure is silent garbage on the strands rather than an init error; that is what makes
-// it worth an explicit guard. (The check itself lives in I80LedDriver::validateBusFatal, which the
+// it worth an explicit guard. (The check itself lives in MultiPinLedDriver::validateBusFatal, which the
 // mock does not have — this pins the base's half: a data-pin collision is caught, so the mechanism
 // is live. The WR/DC half is a compile-time-visible guard in the i80 driver.)
 TEST_CASE("shift register: driver refuses a latch that collides with a data lane") {
@@ -278,14 +278,14 @@ TEST_CASE("shift register: toggling the expander live reconfigures cleanly") {
     const size_t directFrame = d.frameBytes();
 
     // Expander ON (with a latch) → 32 strands, bigger frame.
-    d.shiftRegister = true;
+    d.pinExpander = true;
     d.latchPin = 7;
     d.applyState();
     CHECK(d.laneCount() == 32);          // 4 pins x 8
     CHECK(d.frameBytes() > directFrame);
 
     // ...and back OFF → exactly the original configuration, no residue.
-    d.shiftRegister = false;
+    d.pinExpander = false;
     d.applyState();
     CHECK(d.laneCount() == 4);
     CHECK(d.frameBytes() == directFrame);
@@ -447,7 +447,7 @@ TEST_CASE("streaming ring: a sliced encode is byte-identical to the whole-frame 
 // an 8-entry list: 3 data lanes, then the spares parked on the clock pin (a real GPIO the peripheral
 // already drives, so the lane is inert). This is what lets a board name only the pins it uses.
 //
-// The bug this pins: busPinList() used to shortcut `if (!shiftMode()) return laneList_` — the RAW,
+// The bug this pins: busPinList() used to shortcut `if (!pinExpanderMode()) return laneList_` — the RAW,
 // unpadded list — while busPinCount() reported the rounded width. With fewer pins than the bus is
 // wide, the platform would then read past the end of laneList_. Direct mode never hit it only because
 // the validation rejected any count but 8 or 16; allowing any count is what exposes it.

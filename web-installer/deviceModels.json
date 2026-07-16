@@ -867,8 +867,8 @@
         }
       },
       {
-        "type": "I80LedDriver",
-        "id": "I80Led",
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
         "parent_id": "Drivers",
         "controls": {
           "pins": "47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48",
@@ -925,8 +925,8 @@
         }
       },
       {
-        "type": "I80LedDriver",
-        "id": "I80Led",
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
         "parent_id": "Drivers",
         "controls": {
           "pins": "47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1",
@@ -1250,17 +1250,17 @@
         }
       },
       {
-        "type": "I80LedDriver",
-        "id": "I80Led",
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
         "parent_id": "Drivers",
         "controls": {
           "pins": "9,10,12,8,18,17",
-          "shiftRegister": true,
+          "pinExpander": true,
           "latchPin": 46,
           "clockPin": 3,
           "ledsPerPin": "96",
           "dcPin": 13,
-          "asyncTransmit": false
+          "doubleBuffer": false
         }
       },
       {
@@ -1292,17 +1292,17 @@
         }
       },
       {
-        "type": "I80LedDriver",
-        "id": "I80Led",
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
         "parent_id": "Drivers",
         "controls": {
           "pins": "9,10",
-          "shiftRegister": true,
+          "pinExpander": true,
           "latchPin": 46,
           "clockPin": 3,
           "ledsPerPin": "96",
           "dcPin": 21,
-          "asyncTransmit": false
+          "doubleBuffer": false
         }
       },
       {

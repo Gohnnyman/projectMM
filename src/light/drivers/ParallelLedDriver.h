@@ -10,7 +10,7 @@
 namespace mm {
 
 template <class Derived>
-/// Base for the parallel WS2812B LED-output drivers — the S3's LCD_CAM i80 bus (I80LedDriver) and
+/// Base for the parallel WS2812B LED-output drivers — the S3's LCD_CAM i80 bus (MultiPinLedDriver) and
 /// the P4's Parlio peripheral (ParlioLedDriver). Both drive up to 16 strands that clock out
 /// SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of the source buffer (see kMaxLanes).
 ///
@@ -36,7 +36,7 @@ template <class Derived>
 /// configErr_/failBuf_ come from DriverBase (shared with RmtLedDriver too).
 class ParallelLedDriver : public DriverBase {
 public:
-    /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its I80LedDriver
+    /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its MultiPinLedDriver
     /// subclass) references the "GRB" preset by default. The user can pick any preset.
     ParallelLedDriver() { this->setDefaultPresetName("GRB"); }
 
@@ -96,7 +96,7 @@ public:
     char pins[64] = "";
     /// Comma-separated lights-per-lane; the unassigned remainder splits evenly over the remaining
     /// lanes. **A lane is a STRAND, not a pin** — which only differ through the expander: direct
-    /// mode has one strand per pin, so entry N is pin N's; with `shiftRegister` on, each pin fans
+    /// mode has one strand per pin, so entry N is pin N's; with `pinExpander` on, each pin fans
     /// out to 8 strands, so the list runs over all `pins × 8` of them (pin 0's eight first, then
     /// pin 1's, …) and entry N is strand N. That is what lets two strands on one '595 have
     /// different lengths. Each lane is clamped to the WS2812 per-pin ceiling
@@ -128,7 +128,7 @@ public:
     /// Toggling rebuilds the bus (via affectsPrepare) to add or free the second buffer. Distinct from
     /// the container's `multicore` control, and they stack: this hides the WIRE behind DMA within one
     /// core; that hides the ENCODE behind the render on the other core. See docs/history/lessons.md.
-    bool asyncTransmit = true;
+    bool doubleBuffer = true;
     /// Streaming-ring source snapshot on/off — an A/B measurement knob, ring path only. ON (default,
     /// the safe behavior) freezes the source into a driver-owned buffer each frame so the ring's refill
     /// (which encodes off the render thread, concurrently with rendering) reads an immutable copy — no
@@ -164,7 +164,7 @@ public:
     uint8_t  loopbackStrand = 0;
     /// Jumper this to the TX lane for the self-test (unset = -1 by default).
     ///
-    /// **With a 74HCT595 expander (`shiftRegister` on) the jumper comes from a DIFFERENT place, and
+    /// **With a 74HCT595 expander (`pinExpander` on) the jumper comes from a DIFFERENT place, and
     /// getting it wrong can damage the ESP32.** In direct mode you jumper a data GPIO straight to
     /// this pin. In shift mode a data GPIO carries the fast serial stream *into* the register, not
     /// pixel data — so the wire must come from the register's OUTPUT side instead:
@@ -213,7 +213,7 @@ public:
     /// Full status, the reuse-race + concurrency follow-ups, and the measurements behind these limits:
     /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/backlog/shift-register-driver-analysis.md)
     /// and the ring items in `docs/backlog/backlog-light.md`.
-    bool     shiftRegister = false;
+    bool     pinExpander = false;
     /// The 74HCT595 LATCH (RCLK) line — pulsed once the shifted byte is in, presenting it on the
     /// '595 outputs. Unlike the shift clock (the peripheral's own WR pin), this is a DATA lane:
     /// it occupies one bit of every bus word, so it must NOT collide with a data pin or clockPin.
@@ -222,10 +222,10 @@ public:
 
     /// Is the shift-register expander engaged? (Reads the control; the alias keeps the intent
     /// readable at the call sites that ask "am I encoding through a register?")
-    bool shiftMode() const { return shiftRegister; }
+    bool pinExpanderMode() const { return pinExpander; }
     /// Strands driven per physical data pin: 1 direct, or the '595's width through the expander.
     /// The multiplier every size/clock/slot computation below is expressed in.
-    uint8_t outputsPerPin() const { return shiftRegister ? kShiftOutputs : uint8_t(1); }
+    uint8_t outputsPerPin() const { return pinExpander ? kPinExpanderOutputs : uint8_t(1); }
 
     /// Bind the driver's controls: the window (start/count), the `pins` and
     /// `ledsPerPin` text lists, any derived-supplied bus controls (i80 adds
@@ -235,7 +235,7 @@ public:
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
-        controls_.addBool("asyncTransmit", asyncTransmit);   // double-buffer on/off (latency opt-out)
+        controls_.addBool("doubleBuffer", doubleBuffer);   // double-buffer on/off (latency opt-out)
         // Streaming-ring source-snapshot A/B knob (ring path only; inert on the whole-frame paths). Shown
         // unconditionally: the precise "only when ringing" gate would key on wantsRing(), but that reads
         // frameBytes_, which is 0 at defineControls() time (the source buffer is wired AFTER the schema is
@@ -245,10 +245,10 @@ public:
         // Read-only KPI: the measured DMA wire time + the fps ceiling it implies. The pure output
         // floor (independent of render load), so it shows how much headroom remains as the pipeline
         // improves — and it reflects an overclocked slot rate directly. Refreshed in tick1s().
-        controls_.addReadOnly("wireUs", wireStr_, sizeof(wireStr_));
+        controls_.addReadOnly("frameTime", frameTimeStr_, sizeof(frameTimeStr_));
         // A checkbox: the expander is fitted or it isn't. The '595's width (8) is the chip's, not a
         // setting, so there is nothing to type — and a boolean can't be half-configured.
-        controls_.addBool("shiftRegister", shiftRegister);
+        controls_.addBool("pinExpander", pinExpander);
         // The bus pins sit UNDER the expander toggle because for a driver that owns its own GPIO
         // routing they are '595 pins: MoonI80 routes WR only when a shift register needs it as SRCLK,
         // and hides the control otherwise. (I80 goes through esp_lcd, which mandates a valid WR *and*
@@ -257,33 +257,33 @@ public:
         // Always bound, shown only when the expander is on — the conditional-control shape
         // (bound regardless so a saved latchPin survives a round-trip through direct mode).
         controls_.addPin("latchPin", latchPin);
-        controls_.setHidden(controls_.count() - 1, !shiftMode());
+        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
         controls_.addBool("loopbackTest", loopbackTest);
         // Always bound, shown only in test mode — the conditional-control shape.
         controls_.addPin("loopbackTxPin", loopbackTxPin);
         // Direct mode only. In shift mode the captured strand is decided by which '595 OUTPUT the
         // jumper is on (loopbackStrand), not by which GPIO transmits — runLoopbackSelfTest ignores
         // the override there — so showing it would only invite a mis-set control.
-        controls_.setHidden(controls_.count() - 1, !loopbackTest || shiftMode());
+        controls_.setHidden(controls_.count() - 1, !loopbackTest || pinExpanderMode());
         controls_.addPin("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
         // Which strand carries the pattern — shift mode only (in direct mode it is always lane 0).
         // Lets the jumper come off ANY '595 output, including a spare one that drives no panel.
         controls_.addUint8("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
-        controls_.setHidden(controls_.count() - 1, !loopbackTest || !shiftMode());
+        controls_.setHidden(controls_.count() - 1, !loopbackTest || !pinExpanderMode());
     }
 
     /// A change to the pins, per-lane counts, the window, a derived bus control (clockPin/dcPin on
-    /// i80), or `asyncTransmit` re-parses and re-inits the bus live via the prepare sweep.
-    /// asyncTransmit is a prepare trigger because it drives ALLOCATION: OFF allocates one DMA buffer,
+    /// i80), or `doubleBuffer` re-parses and re-inits the bus live via the prepare sweep.
+    /// doubleBuffer is a prepare trigger because it drives ALLOCATION: OFF allocates one DMA buffer,
     /// ON (the default) allocates a second for the double-buffer — so toggling it must rebuild the bus
     /// to add or free that buffer (a board that turns it off pays no second-buffer memory).
-    /// shiftRegister / latchPin are prepare triggers too: the expander multiplies frameBytes_ ×8 and
+    /// pinExpander / latchPin are prepare triggers too: the expander multiplies frameBytes_ ×8 and
     /// re-maps lanes onto pins, and the latch claims a bus bit — all of which is decided at bus init.
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
-            || std::strcmp(name, "asyncTransmit") == 0
-            || std::strcmp(name, "shiftRegister") == 0 || std::strcmp(name, "latchPin") == 0
+            || std::strcmp(name, "doubleBuffer") == 0
+            || std::strcmp(name, "pinExpander") == 0 || std::strcmp(name, "latchPin") == 0
             || isWindowControl(name)
             || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80
     }
@@ -294,12 +294,12 @@ public:
     /// turning it OFF clears the verdict and re-derives the real driver status.
     void onControlChanged(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
-        // Every control that reshapes the lane config the self-test transmits through. shiftRegister
+        // Every control that reshapes the lane config the self-test transmits through. pinExpander
         // and latchPin belong here for the same reason `pins` does: they change laneList_,
         // frameBytes_ and latchBit_, so a test left running across such an edit would otherwise
         // re-transmit through a stale bus and report a verdict for a configuration that is gone.
         const bool isPinControl  = std::strcmp(name, "pins") == 0
-                                || std::strcmp(name, "shiftRegister") == 0
+                                || std::strcmp(name, "pinExpander") == 0
                                 || std::strcmp(name, "latchPin") == 0
                                 || std::strcmp(name, "loopbackTxPin") == 0
                                 || std::strcmp(name, "loopbackRxPin") == 0;
@@ -384,13 +384,13 @@ public:
     /// Per-tick output (deferred-wait double-buffer): a fused per-ROW pass corrects the same
     /// light index of every active lane and transposes it into 3-slot bus words in the DMA buffer,
     /// then ships it as one autonomous transfer. Two paths, chosen by whether a second DMA buffer is
-    /// allocated (which `asyncTransmit` drives at init): SYNCHRONOUS (default, one buffer — the
+    /// allocated (which `doubleBuffer` drives at init): SYNCHRONOUS (default, one buffer — the
     /// original encode→transmit→wait, 0 added latency, provably no regression) or DEFERRED-WAIT
-    /// DOUBLE-BUFFER (asyncTransmit ON — encode N+1 while N clocks out, `max(encode, wire)` per tick,
+    /// DOUBLE-BUFFER (doubleBuffer ON — encode N+1 while N clocks out, `max(encode, wire)` per tick,
     /// +1 frame latency, +1 DMA buffer). Inert off this chip and idle until inited with a source
     /// buffer + correction. (The double-buffer defaults ON — it overlaps the blocking wire wait and
     /// lifted the P4 whole-board rate 48→76 fps; OFF is the sound-reactive 0-latency opt-out and pays
-    /// for exactly one buffer — see the asyncTransmit control + docs/history/lessons.md.)
+    /// for exactly one buffer — see the doubleBuffer control + docs/history/lessons.md.)
     void tick() override {
         if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
         // Loopback mode owns the peripheral EXCLUSIVELY. While it is on, the render loop must not
@@ -417,13 +417,13 @@ public:
         // (no regression) and pays nothing for the double-buffer it isn't using. The mode is fixed by
         // whether the second buffer was allocated (busInit(async) — ON allocs it, OFF doesn't), so a
         // stale flag can't route a single-buffer bus down the async path.
-        if (derived()->busBuffer(1)) tickAsync(outCh);   // double-buffer (asyncTransmit ON)
-        else                         tickSync(outCh);    // synchronous (asyncTransmit OFF / no 2nd buf)
+        if (derived()->busBuffer(1)) tickAsync(outCh);   // double-buffer (doubleBuffer ON)
+        else                         tickSync(outCh);    // synchronous (doubleBuffer OFF / no 2nd buf)
     }
 
     // Synchronous single-buffer path — the ORIGINAL tick, verbatim: encode buffer 0, transmit, wait
     // right here. One DMA buffer, no alternation, no deferred-wait bookkeeping, 0 added latency. This
-    // is the default (asyncTransmit OFF) and its timing is exactly the pre-double-buffer driver's.
+    // is the default (doubleBuffer OFF) and its timing is exactly the pre-double-buffer driver's.
     void tickSync(uint8_t outCh) {
         if (busGaveUp()) return;
         // A previous frame's wait may have timed out, leaving the DMA still reading buffer 0 — re-wait
@@ -445,7 +445,7 @@ public:
         }
     }
 
-    // Deferred-wait double-buffer path (asyncTransmit ON) — encode frame N+1 into the back buffer
+    // Deferred-wait double-buffer path (doubleBuffer ON) — encode frame N+1 into the back buffer
     // while frame N clocks out of the front, so the per-tick wall-clock is max(encode, wire) instead
     // of encode + wire. Costs the second DMA buffer + 1 frame of output latency. See the class doc.
     void tickAsync(uint8_t outCh) {
@@ -505,20 +505,20 @@ public:
         }
     }
 
-    /// Refresh the read-only `wireUs` KPI once a second (off the hot path): the last measured DMA
-    /// wire time and the fps ceiling it implies (1e6 / wireUs). This is the pure WS2812 output floor —
+    /// Refresh the read-only `frameTime` KPI once a second (off the hot path): the last measured DMA
+    /// wire time and the fps ceiling it implies (1e6 / frameTime). This is the pure WS2812 output floor —
     /// the render loop can never beat it, so it's the target the multicore work drives the system tick
     /// toward, and it tracks an overclocked slot rate directly. "—" until the first transfer completes.
     void tick1s() override {
         const uint32_t us = derived()->busLastTransmitUs();
-        if (us == 0) std::snprintf(wireStr_, sizeof(wireStr_), "—");
-        else std::snprintf(wireStr_, sizeof(wireStr_), "%u µs (%u fps max)",
+        if (us == 0) std::snprintf(frameTimeStr_, sizeof(frameTimeStr_), "—");
+        else std::snprintf(frameTimeStr_, sizeof(frameTimeStr_), "%u µs (%u fps max)",
                            static_cast<unsigned>(us), static_cast<unsigned>(1000000u / us));
         derived()->refreshBusKpi();   // per-backend extra read-only KPIs (MoonI80's ring diagnostic); base no-op
     }
 
     /// CRTP hook: refresh any backend-specific read-only KPI once a second (off the hot path). Base is a
-    /// no-op; MoonI80LedDriver overrides it to publish its ring diagnostic counters (see ringDbg).
+    /// no-op; MoonLedDriver overrides it to publish its ring diagnostic counters (see ringDbg).
     void refreshBusKpi() {}
 
     // Wait for buffer `i`'s in-flight transfer to finish. Returns TRUE when the buffer is free to
@@ -583,7 +583,7 @@ public:
         if (deadFrames_ < kDeadFramesBeforeGiveUp) return false;
         if (!gaveUpReported_) {
             gaveUpReported_ = true;
-            setStatus("output stalled — the bus is not delivering frames; check the driver settings",
+            setStatus("no LED output — the driver is not sending frames; check pins and LED count",
                       Severity::Error);
         }
         // Periodic retry window: every kGiveUpRetryTicks-th call, return false so the caller attempts one
@@ -639,7 +639,7 @@ public:
     /// already carries data or is a zero the buffer's memset provides). Called from reinit(), the cold
     /// path, whenever the buffers are (re)established or re-zeroed.
     void prefillShiftConstantsIfNeeded() {
-        if (!shiftMode() || !inited_) return;
+        if (!pinExpanderMode() || !inited_) return;
         const uint8_t outCh = correction_.outChannels;
         if (outCh == 0 || maxLaneLights_ == 0) return;
         for (uint8_t i = 0; i < 2; i++) {
@@ -738,7 +738,7 @@ public:
         // gates it, but this removes the read-of-uninitialised footgun).
         std::memset(wire_, 0, wireCap_);
         const size_t stride = outCh;
-        const bool shift = shiftMode();
+        const bool shift = pinExpanderMode();
         // The active-strand mask is 64-bit because a '595 expander drives more strands than the bus
         // is wide (up to kMaxStrands); in direct mode only the low `laneCount_` bits are ever set,
         // and it narrows to Slot for the direct encoder.
@@ -850,7 +850,7 @@ protected:
     // lane-major (wire_[lane*outCh+ch]) — sized to the channel count off the hot path, so a light of
     // any channel count fits (RGB=3, RGBW=4, RGBCCT=5, an N-channel fixture; limit is memory). A fixed
     // 4-byte-stride stack array here overflowed for >4-channel corrections → the SE16 bootloop.
-    char wireStr_[40] = "—";             // read-only `wireUs` KPI text (refreshed in tick1s); sized
+    char frameTimeStr_[40] = "—";             // read-only `frameTime` KPI text (refreshed in tick1s); sized
                                          // for the worst case "<us> µs (<fps> fps max)" + the 3-byte
                                          // UTF-8 µ, so the snprintf never truncates (-Wformat-truncation)
     uint16_t laneList_[kMaxLanes] = {};              // physical data GPIOs (bus width bound)
@@ -942,13 +942,13 @@ protected:
     /// CRTP hook (default: no extra bus pins to validate). A derived driver whose
     /// peripheral commits its own GPIOs beyond the data lanes (the i80 bus's WR/DC)
     /// HIDES this to flag a data lane that overlaps them. Returns a WARNING string
-    /// (the driver keeps running — see I80LedDriver::validateBusPins for why it's a
+    /// (the driver keeps running — see MultiPinLedDriver::validateBusPins for why it's a
     /// warning, not a blocker) or null when the data pins are clean. Parlio has no
     /// such pins, so it uses this default.
     const char* validateBusPins(const uint16_t* /*lanes*/, uint8_t /*n*/) const { return nullptr; }
 
     /// FATAL bus-pin check → the ERROR path (idles the driver), for a bus-pin misconfig the peripheral
-    /// can't init at all (I80LedDriver's clockPin==dcPin). Distinct from validateBusPins' per-lane
+    /// can't init at all (MultiPinLedDriver's clockPin==dcPin). Distinct from validateBusPins' per-lane
     /// warnings. Default null; a peripheral with bus control pins overrides it. Parlio has none.
     const char* validateBusFatal() const { return nullptr; }
 
@@ -977,7 +977,7 @@ protected:
     // idle bus words, and its LOW duration is measured in slots, so an unscaled pad
     // would be half the latch time on a 16-bit bus and could latch a strand mid-frame.
     //
-    // `outPerPin` (1, or kShiftOutputs with a '595 expander) multiplies the ROW slots: a
+    // `outPerPin` (1, or kPinExpanderOutputs with a '595 expander) multiplies the ROW slots: a
     // shift register is serial-in, so presenting each WS2812 slot costs outPerPin shift
     // cycles, each its own bus word. The latch pad is NOT multiplied — it is a LOW-time
     // measured in bus words, and the bus already clocks outPerPin× faster in shift mode,
@@ -1016,7 +1016,7 @@ protected:
     // the next legal width and pads the spare lanes itself.
     uint8_t busWidthPins() const {
         // Data pins, plus the latch lane when a '595 expander is in use.
-        const uint8_t needed = static_cast<uint8_t>(physPins_ + (shiftMode() ? 1 : 0));
+        const uint8_t needed = static_cast<uint8_t>(physPins_ + (pinExpanderMode() ? 1 : 0));
         return needed <= 8 ? uint8_t{8} : uint8_t{16};
     }
 
@@ -1040,13 +1040,13 @@ protected:
         const uint8_t width = busWidthPins();
         for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
             if (i < physPins_)                        busPinBuf_[i] = laneList_[i];   // data
-            else if (shiftMode() && i == latchBit_)   busPinBuf_[i] = static_cast<uint16_t>(latchPin);
+            else if (pinExpanderMode() && i == latchBit_)   busPinBuf_[i] = static_cast<uint16_t>(latchPin);
             else                                      busPinBuf_[i] = derived()->clockPinForBus();
         }
         return busPinBuf_;
     }
     uint8_t busPinCount() const { return busWidthPins(); }
-    // Bus clock: a '595 must be fed kShiftOutputs shift cycles per WS2812 slot, so the bus clocks
+    // Bus clock: a '595 must be fed kPinExpanderOutputs shift cycles per WS2812 slot, so the bus clocks
     // that much faster to hold the same 375 ns slot on the wire. The platform picks the exact rate
     // its clock tree can divide to (see platform_esp32_i80.cpp); this is the multiplier.
     uint8_t busClockMultiplier() const { return outputsPerPin(); }
@@ -1071,16 +1071,16 @@ protected:
         frameBytes_ = 0;
         uint8_t n = 0;
         const char* err = parsePinList(pins, laneList_, maxLanesForTarget(), n);
-        // (Nothing to validate about the fan-out itself: shiftRegister is a bool, so the only two
+        // (Nothing to validate about the fan-out itself: pinExpander is a bool, so the only two
         // wirings that physically exist are the only two it can express.)
         // The shift-register expander needs a backend that can DMA the 8× frame from PSRAM:
         // the LCD_CAM i80 path (S3 / P4). Refuse it elsewhere rather than emit a waveform the hardware
         // can't sustain — classic-ESP32 i80 is internal-DMA-only (it walls ~76 KB; its route in is the
         // PSRAM refill ring), and Parlio caps a single transfer at 65,535 B.
-        if (!err && shiftMode() && !Derived::kSupportsShiftRegister)
+        if (!err && pinExpanderMode() && !Derived::kSupportsPinExpander)
             err = "the 74HCT595 expander needs the LCD_CAM i80 bus (ESP32-S3 / -P4)";
         // The latch is a real GPIO and a real bus bit; without it the '595s never present a byte.
-        if (!err && shiftMode() && latchPin < 0) err = "the 74HCT595 expander needs a latchPin";
+        if (!err && pinExpanderMode() && latchPin < 0) err = "the 74HCT595 expander needs a latchPin";
         // **The BUS width is a peripheral fact; the PIN COUNT is a board fact. They are not the same
         // number, and the driver — not the user — reconciles them.** The i80 bus is 8 or 16 bits wide
         // (lcd_ll_set_data_wire_width takes nothing else), but nothing says every bit must reach a
@@ -1092,22 +1092,22 @@ protected:
         // In shift mode the LATCH also occupies a bus bit, so it costs one of the width's lanes —
         // hence kMaxLanes - 1 data pins there against kMaxLanes here.
         if constexpr (Derived::kPowerOfTwoBus) {
-            const uint8_t maxData = static_cast<uint8_t>(kMaxLanes - (shiftMode() ? 1 : 0));
+            const uint8_t maxData = static_cast<uint8_t>(kMaxLanes - (pinExpanderMode() ? 1 : 0));
             if (!err && (n == 0 || n > maxData))
-                err = shiftMode() ? "shift mode needs 1..15 data pins (one per populated 74HCT595)"
+                err = pinExpanderMode() ? "shift mode needs 1..15 data pins (one per populated 74HCT595)"
                                   : "i80 bus needs 1..16 pins";
         }
         // The latch drives its own bus bit, so it must not double as a data pin (that lane would
         // carry the latch waveform instead of pixel data). clockPin/dcPin overlap is the derived
         // driver's validateBusPins/validateBusFatal job, and the latch is checked against them there.
-        if (!err && shiftMode()) {
+        if (!err && pinExpanderMode()) {
             for (uint8_t i = 0; i < n; i++)
                 if (laneList_[i] == static_cast<uint16_t>(latchPin)) {
                     err = "latchPin collides with a data pin";
                     break;
                 }
         }
-        // Fatal bus-pin misconfig (I80LedDriver's clockPin==dcPin — the i80 bus can't init) → the
+        // Fatal bus-pin misconfig (MultiPinLedDriver's clockPin==dcPin — the i80 bus can't init) → the
         // error path below, which idles the driver. Checked before the per-lane WARNINGS: a broken
         // bus is worse than a garbled lane, so it wins the status.
         if (!err) err = derived()->validateBusFatal();
@@ -1152,7 +1152,7 @@ protected:
             if (laneCounts_[i] > maxLaneLights_) maxLaneLights_ = laneCounts_[i];
         }
         const uint8_t outCh = correction_.outChannels;
-        // physPins_ and shiftRegister are set above, so slotBytes() reflects the real BUS width (data pins
+        // physPins_ and pinExpander are set above, so slotBytes() reflects the real BUS width (data pins
         // + the latch bit), not the strand count — 48 lanes on 6 pins is still an 8-bit bus. The
         // ×8 lands in the slot COUNT instead (outputsPerPin()), which is what grows the frame.
         frameBytes_ = frameBytesFor(maxLaneLights_, outCh, slotBytes(), outputsPerPin());
@@ -1195,7 +1195,7 @@ protected:
         // error). Exact-match reuse (not `>=`) keeps the bus always valid-or-rebuilt. The pin check
         // matters (a pin edit keeps the size but must move the GPIOs); the lane-count check matters for
         // Parlio (8→4 keeps frameBytes but the bus was built for 8 lanes).
-        // Also rebuild when the second-buffer PRESENCE no longer matches asyncTransmit: toggling the
+        // Also rebuild when the second-buffer PRESENCE no longer matches doubleBuffer: toggling the
         // flag adds (ON) or frees (OFF) buffer 1, which only busInit/deinit can do. `haveSecond`
         // reflects what's currently allocated; `wantSecond` what the flag now asks for.
         // RING PATH (MoonI80, oversize shift mode): the whole-frame reuse/alloc logic below does not
@@ -1223,7 +1223,7 @@ protected:
         }
 
         const bool haveSecond = derived()->busBuffer(1) != nullptr;
-        const bool wantSecond = asyncTransmit;
+        const bool wantSecond = doubleBuffer;
         if (inited_ && !derived()->busIsRing() && derived()->busCapacity() == frameBytes_
             && busPinsCurrent() && busLaneCount_ == laneCount_ && haveSecond == wantSecond) {
             // Clear stale latch-pad bytes in BOTH buffers (buffer 1 is null in single-buffer mode).
@@ -1233,9 +1233,9 @@ protected:
             return;
         }
         deinit();
-        // Pass asyncTransmit so busInit allocates the second buffer only when the double-buffer is
+        // Pass doubleBuffer so busInit allocates the second buffer only when the double-buffer is
         // wanted — OFF (default) costs exactly one DMA buffer, no async overhead, no second alloc.
-        inited_ = derived()->busInit(frameBytes_, asyncTransmit);
+        inited_ = derived()->busInit(frameBytes_, doubleBuffer);
         dmaBuf_ = inited_ ? derived()->busBuffer(0) : nullptr;
         if (inited_) {
             for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
@@ -1321,7 +1321,7 @@ protected:
         // unconditionally after the last row), so the buffer must hold one Slot beyond the rows or that
         // write runs off the end of the heap block. Direct mode writes no pad, so it stays row-exact.
         const size_t testFrameBytes = static_cast<size_t>(lights) * perLightBytes
-                                      + (shiftMode() ? sb : 0);
+                                      + (pinExpanderMode() ? sb : 0);
         // Build the REAL frame with the test pattern in every row on lane 0 only;
         // the platform transmits the genuine transfer (size, DMA chain, latch pad)
         // back to back and verifies every captured bit, so the test covers what
@@ -1339,7 +1339,7 @@ protected:
         // pattern on ANY strand (loopbackStrand, so the jumper can come off a spare '595 output), and
         // the encoder would then read at `strand * outCh`. Size for the full strand range or that is
         // an out-of-bounds read. Zeroed, so every strand but the chosen one is black.
-        const uint8_t patStrand = shiftMode() && loopbackStrand < kMaxStrands ? loopbackStrand
+        const uint8_t patStrand = pinExpanderMode() && loopbackStrand < kMaxStrands ? loopbackStrand
                                                                               : uint8_t{0};
         const size_t wireBytes = static_cast<size_t>(patStrand + 1) * outCh;
         auto* wire = static_cast<uint8_t*>(platform::alloc(wireBytes));
@@ -1357,7 +1357,7 @@ protected:
         // up on the last output). That is the pin to jumper back; see the wiring note on the
         // loopbackRxPin control. Everything else is identical, so the same rig verifies the whole
         // chain through the shift register.
-        if (shiftMode()) {
+        if (pinExpanderMode()) {
             if (sb == 1) encodeLoopbackFrameShift<uint8_t>(frame, wire, outCh, lights);
             else         encodeLoopbackFrameShift<uint16_t>(frame, wire, outCh, lights);
         } else if (sb == 1) {
@@ -1385,7 +1385,7 @@ protected:
         // laneList_, and the '595s must stay wired to the real data pins for the test to mean
         // anything).
         const uint16_t realLane0 = laneList_[0];
-        if (loopbackTxPin >= 0 && !shiftMode()) laneList_[0] = static_cast<uint16_t>(loopbackTxPin);
+        if (loopbackTxPin >= 0 && !pinExpanderMode()) laneList_[0] = static_cast<uint16_t>(loopbackTxPin);
         const auto r = derived()->busLoopback(frame, testFrameBytes, dataBytes,
                                               static_cast<uint8_t>(outCh * 8));
         laneList_[0] = realLane0;

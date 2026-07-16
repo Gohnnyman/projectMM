@@ -9,7 +9,7 @@
 namespace mm {
 
 // The LIGHT-DOMAIN half of pin/count list parsing for multi-output LED drivers — RmtLedDriver (one RMT
-// channel per pin) and I80LedDriver (one i80 data lane per pin) drive consecutive slices of the source
+// channel per pin) and MultiPinLedDriver (one i80 data lane per pin) drive consecutive slices of the source
 // buffer from two text controls. The GPIO-CSV parser (`parsePinList`) is a domain-neutral core primitive
 // (core/PinList.h); the LED-count distribution below (`assignCounts`, which speaks nrOfLightsType) stays
 // here in the light layer. Both return nullptr on success or a static error literal for setStatus();

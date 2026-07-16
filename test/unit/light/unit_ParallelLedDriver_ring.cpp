@@ -1,4 +1,4 @@
-// @module MoonI80LedDriver
+// @module MoonLedDriver
 // @also ParallelLedDriver
 
 #include "doctest.h"
@@ -41,7 +41,7 @@ public:
     static constexpr uint8_t lanesAvailable() { return 8; }   // 8 data lines (an 8-bit bus)
     static constexpr bool kPowerOfTwoBus = true;
     static constexpr bool kLoopbackFullWidth = false;
-    static constexpr bool kSupportsShiftRegister = true;
+    static constexpr bool kSupportsPinExpander = true;
     static constexpr const char* kInitFailMsg = "mock init failed";
 
     void addBusControls() {}
@@ -170,7 +170,7 @@ public:
     }
     size_t slotBytesForTest() const { return this->slotBytes(); }
 
-    // The trampoline the real driver registers is MoonI80LedDriver::ringEncodeTrampoline; the mock
+    // The trampoline the real driver registers is MoonLedDriver::ringEncodeTrampoline; the mock
     // reproduces its body (recover `this`, branch on bus width, call encodeRows) so the host drives the
     // identical encode the seam does on device.
     static void ringEncodeTrampolineHost(void* user, uint8_t* dst, uint32_t firstRow,
@@ -186,13 +186,13 @@ public:
         if (closeFrame && self->ringPad_) {
             std::memset(dst + static_cast<size_t>(count) * self->ringRowBytes_, 0, self->ringPad_);
         }
-        // Prefill THEN encode, exactly as MoonI80LedDriver::ringEncodeTrampoline does — the recycled
+        // Prefill THEN encode, exactly as MoonLedDriver::ringEncodeTrampoline does — the recycled
         // buffer needs its constants re-laid, and encodeRows writes only the data word in shift mode.
         if (self->slotBytes() == 1) {
-            if (self->shiftMode()) self->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
+            if (self->pinExpanderMode()) self->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
             self->template encodeRows<uint8_t>(outCh, dst, first, cnt, closeFrame);
         } else {
-            if (self->shiftMode()) self->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
+            if (self->pinExpanderMode()) self->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
             self->template encodeRows<uint16_t>(outCh, dst, first, cnt, closeFrame);
         }
     }
@@ -308,7 +308,7 @@ private:
 void wireShift(MockRingDriver& d, mm::Buffer& src, mm::Correction& corr, nrOfLightsType lights,
                const char* pins) {
     std::strcpy(d.pins, pins);
-    d.shiftRegister = true;
+    d.pinExpander = true;
     d.latchPin = 20;
     // Source must hold EVERY configured strand's `lights` — one strand per pin × the '595 fan-out
     // (outputsPerPin), not a fixed ×8. A "1,2" 2-pin config is 2×8=16 strands, so 16×lights; under-

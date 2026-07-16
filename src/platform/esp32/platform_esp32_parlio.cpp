@@ -84,7 +84,7 @@ bool IRAM_ATTR parlioDoneCb(parlio_tx_unit_handle_t, const parlio_tx_done_event_
     st->fifoTail = (st->fifoTail + 1u) & 1u;
     // In-order queue: if another buffer is already queued behind this one, the hardware starts it the
     // instant this transfer ends — stamp its true start here, since parlioWs2812Transmit deliberately
-    // skipped stamping it (the wire was busy). This is what keeps the second buffer's wireUs honest.
+    // skipped stamping it (the wire was busy). This is what keeps the second buffer's frameTime honest.
     if (st->fifoTail != st->fifoHead) st->txStartUs[st->fifoTail] = now;
     BaseType_t high = pdFALSE;
     xSemaphoreGiveFromISR(st->done[b], &high);
@@ -267,7 +267,7 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     // Stamp the wire-time start only when the wire is IDLE — then enqueue == hardware-start. When a
     // transfer is already clocking out, this one does not start until that one finishes, so stamping
     // here would fold the predecessor's remaining wire time into this buffer's measured duration
-    // (inflating wireUs for the second buffer of the double-buffer pair). In that case the done-callback
+    // (inflating frameTime for the second buffer of the double-buffer pair). In that case the done-callback
     // stamps this slot's start as it completes the predecessor — the moment the hardware really starts it.
     if (wireIdle) st->txStartUs[slot] = esp_timer_get_time();
     st->fifoHead = (st->fifoHead + 1u) & 1u;
