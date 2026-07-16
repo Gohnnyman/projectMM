@@ -334,7 +334,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
             // P4 where PSRAM DMA degrades) would drop internal RAM below the reserve → WiFi/HTTP alloc
             // failures. Degrade to single-buffer instead. This is also the FIRST attempt in shift mode.
             if (!st->buf[1]
-                && heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+                && heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
                        >= bufferBytes + HEAP_RESERVE) {
                 st->buf[1] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
                     st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
@@ -373,7 +373,8 @@ bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCou
     // WiFi/HTTP reserve); a PSRAM buffer doesn't touch it. Degrade (return false → driver idles with a
     // status) when neither region fits.
     const bool fitsInternal =
-        heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) >= bufferBytes + HEAP_RESERVE;
+        heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+            >= bufferBytes + HEAP_RESERVE;
     // PSRAM capacity is queried with MALLOC_CAP_SPIRAM ALONE, not `| MALLOC_CAP_DMA`. The combined
     // query asks the heap for a region tagged with BOTH caps and no registered heap is tagged both,
     // so it returns 0 — even on an S3 whose LCD_CAM GDMA reaches PSRAM perfectly well. (The *alloc*
@@ -386,7 +387,7 @@ bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCou
     // counting it here would let an over-large frame pass this pre-check and then die inside bus
     // creation with a misleading "check pins / memory" — the pre-check must fail first, and say so.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
-    const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bufferBytes;
+    const bool fitsPsram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bufferBytes;
 #else
     const bool fitsPsram = false;
 #endif

@@ -69,6 +69,29 @@ inline uint64_t transposeBits8x8(uint64_t x) {
     return x;
 }
 
+/// The same 8×8 butterfly on a REGISTER PAIR — bit-identical to `transposeBits8x8`, but written in the
+/// 32-bit words the target actually has.
+///
+/// The ESP32's Xtensa is a 32-bit machine, so every `uint64_t` step above becomes register-pair
+/// arithmetic: a shift by 7 across a 64-bit value is several instructions, not one. Hacker's Delight
+/// states this transpose on two 32-bit halves for exactly that reason, and it is the form hpwit's driver
+/// uses (`x`, `y`, `x1`, `y1` — never a 64-bit word). Only the third round crosses the halves, and it is
+/// a plain field exchange, so the two forms compute the same function — pinned by a test over the byte
+/// patterns the encoder produces, and checked against 300k random inputs when this was written.
+///
+/// Keep BOTH: the 64-bit form is the clearer statement of the algorithm and is what a 64-bit host
+/// compiles best; this one is what the 32-bit device wants. `transposeLanes8x8` picks per platform.
+inline void transposeBits8x8Pair(uint32_t& lo, uint32_t& hi) {
+    uint32_t t;
+    t = (lo ^ (lo >> 7))  & 0x00AA00AAu; lo = lo ^ t ^ (t << 7);
+    t = (hi ^ (hi >> 7))  & 0x00AA00AAu; hi = hi ^ t ^ (t << 7);
+    t = (lo ^ (lo >> 14)) & 0x0000CCCCu; lo = lo ^ t ^ (t << 14);
+    t = (hi ^ (hi >> 14)) & 0x0000CCCCu; hi = hi ^ t ^ (t << 14);
+    // The 28-step is the only round that moves bits between the halves: it swaps the low word's high
+    // nibbles with the high word's low nibbles, which is one masked exchange rather than a 64-bit shift.
+    t = (lo ^ (hi << 4)) & 0xF0F0F0F0u; lo ^= t; hi ^= (t >> 4);
+}
+
 // Transpose 8 lane bytes into 8 bit-plane bytes: out[b] bit L = in[L] bit b.
 // Inactive lanes must be passed as 0 (the caller masks them) so they contribute
 // no set bit to any plane. The array-shaped wrapper around transposeBits8x8.
@@ -413,53 +436,55 @@ inline void encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint
     constexpr uint8_t kLanes = sizeof(Slot) * 8;
     if (outPerPin == 0 || outPerPin > kPinExpanderOutputs) return;
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
-    for (uint8_t ch = 0; ch < channels; ch++) {
-        // The transposed bit-planes, held PACKED — one uint64 per shift cycle rather than an array of
-        // eight bytes. Byte `bit` of planes[c] IS the bit-plane for that bit (its bit P = pin P), so
-        // the emit loop shifts the byte it wants straight out of the register.
-        //
-        // **The staging arrays were the cost, not the butterfly.** The old form filled a `lanes[8]`
-        // array that the transpose immediately packed back into exactly this register, then spilled
-        // eight result bytes that the emit loop reloaded one at a time — 24 times per light. Measured
-        // on an S3 (board B, 16 strands through a '595): removing that ceremony took the encode from
-        // **8.85 to 6.19 µs/light**. The SWAR arithmetic itself is nearly free: a batched variant that
-        // packed four shift cycles into ONE butterfly (an 8×8 costs the same for 2 lanes as for 8) was
-        // built and measured, and changed nothing — so it was dropped rather than kept for elegance.
-        uint64_t planes[kPinExpanderOutputs];
-        // The 16-lane bus is two INDEPENDENT 8-lane transposes (low byte = pins 0-7, high = pins 8-15),
-        // so it needs a second packed word. The 8-bit path never reads it and the compiler drops it.
-        uint64_t planesHi[kPinExpanderOutputs];
+    // Words per WS2812 bit: each bit is one 3-word slot per shift cycle.
+    const size_t bitStride = static_cast<size_t>(3) * outPerPin;
 
+    // **The transpose IS the emit: each shift cycle's eight bit-planes are stored the moment they are
+    // computed, while they are still in registers.** Staging them in a planes[] array first cannot work
+    // on this target — 8 cycles × 2 words exceeds the register file, so every plane spills to the stack
+    // and is reloaded once per bit. Measured on an S3, that staging cost 97 word load/stores per light
+    // against the 17 byte-stores of actual output.
+    //
+    // This is the same lesson the `lanes[8]` array taught one level down (8.85 → 6.19 µs/light when it
+    // went); planes[] was the identical pattern. hpwit's driver has no staging either — his transpose
+    // stores straight into the DMA buffer at its pulse offsets. Studied, then written fresh here.
+    //
+    // The price is a strided store (one cycle's eight planes land `bitStride` apart, not contiguously),
+    // which is one address add per store — far cheaper than a spill plus a reload.
+    for (uint8_t ch = 0; ch < channels; ch++) {
+        Slot* chBase = out + static_cast<size_t>(ch) * 8 * bitStride;
         for (uint8_t c = 0; c < outPerPin; c++) {
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
-            // Pack the lane bytes straight into the SWAR word — no intermediate array.
-            uint64_t lo = 0, hi = 0;
+            // Pack the lane bytes straight into the SWAR register pair — lane p is byte p of the 8×8
+            // matrix, i.e. byte p of A (p<4) or byte p-4 of B (p≥4). A 16-lane bus needs a second pair
+            // for pins 8..15; the 8-bit path never touches it and the compiler drops it.
+            uint32_t loA = 0, loB = 0, hiA = 0, hiB = 0;
             for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
                 const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
                 if (!(activeMask & (uint64_t(1) << v))) continue;   // exhausted strand: idle LOW
-                const uint64_t b = wire[static_cast<size_t>(v) * channels + ch];
-                if (p < 8) lo |= b << (8 * p);
-                else       hi |= b << (8 * (p - 8));
+                const uint32_t b = wire[static_cast<size_t>(v) * channels + ch];
+                if (p < 8) { if (p < 4) loA |= b << (8 * p); else loB |= b << (8 * (p - 4)); }
+                else       { const uint8_t q = static_cast<uint8_t>(p - 8);
+                             if (q < 4) hiA |= b << (8 * q); else hiB |= b << (8 * (q - 4)); }
             }
-            planes[c] = transposeBits8x8(lo);
-            if constexpr (sizeof(Slot) != 1) planesHi[c] = transposeBits8x8(hi);
-        }
+            transposeBits8x8Pair(loA, loB);
+            if constexpr (sizeof(Slot) != 1) transposeBits8x8Pair(hiA, hiB);
 
-        for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte, as the wire contract
-            const uint8_t sh = static_cast<uint8_t>(8 * bit);   // byte `bit` of the packed plane
-            for (uint8_t c = 0; c < outPerPin; c++) {
-                const Slot first = (c == 0) ? latch : Slot(0);   // RCLK rides word 0 of each slot
+            const Slot first = (c == 0) ? latch : Slot(0);   // RCLK rides word 0 of each slot
+            Slot* dst = chBase + outPerPin + c;              // the DATA word of bit 7's slot, cycle c
+            for (int bit = 7; bit >= 0; bit--) {             // MSB-first per byte, as the wire contract
+                const uint8_t sh = static_cast<uint8_t>(8 * (bit & 3));
                 Slot data;
                 if constexpr (sizeof(Slot) == 1) {
-                    data = static_cast<Slot>(planes[c] >> sh);
+                    data = static_cast<Slot>(((bit < 4) ? loA : loB) >> sh);
                 } else {
-                    data = static_cast<Slot>((planes[c] >> sh) & 0xFF)
-                         | static_cast<Slot>(((planesHi[c] >> sh) & 0xFF) << 8);
+                    data = static_cast<Slot>((((bit < 4) ? loA : loB) >> sh) & 0xFF)
+                         | static_cast<Slot>(((((bit < 4) ? hiA : hiB) >> sh) & 0xFF) << 8);
                 }
-                // ONLY the data word. out[c] and out[2*outPerPin + c] are the prefilled constants.
-                out[outPerPin + c] = static_cast<Slot>(data | first);
+                // ONLY the data word — the slot's other two are the prefilled constants.
+                *dst = static_cast<Slot>(data | first);
+                dst += bitStride;
             }
-            out += 3 * outPerPin;
         }
     }
 }

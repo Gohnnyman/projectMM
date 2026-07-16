@@ -20,6 +20,7 @@
 #include "platform/platform.h"
 
 #include "esp_timer.h"
+#include "esp_cpu.h"        // esp_cpu_get_cycle_count — the CCOUNT read behind cycleCount()
 #include "esp_heap_caps.h"
 #include "esp_cache.h"        // esp_cache_msync — I-cache sync after writing MoonLive code to IRAM
 #include "esp_system.h"
@@ -105,6 +106,17 @@ void* alloc(size_t bytes) {
     if (ptr) return ptr;
 #endif
     return heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
+}
+
+void* allocIsr(size_t bytes) {
+    // Internal SRAM only — never the PSRAM alloc() prefers. See platform.h for why an ISR must not
+    // read external RAM. No fallback: silently landing in PSRAM is the bug this call exists to avoid,
+    // so a caller that cannot get internal RAM must degrade instead.
+    return heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+uint32_t cycleCount() {
+    return static_cast<uint32_t>(esp_cpu_get_cycle_count());
 }
 
 void free(void* ptr) {

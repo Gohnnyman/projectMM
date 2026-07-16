@@ -31,6 +31,24 @@ void setTestBindFails(bool fail);
 void* alloc(size_t bytes);
 void free(void* ptr);
 
+// Memory an INTERRUPT reads. Distinct from alloc() because alloc() prefers PSRAM — the right default
+// for the big buffers (a 48 KB pixel array), and the wrong one for anything an ISR touches: PSRAM is
+// external SPI behind a cache, so a miss inside an interrupt costs orders of magnitude more than the
+// same read from internal SRAM, and it is not readable at all while the flash cache is disabled.
+// Returns nullptr when internal RAM is exhausted — the caller degrades exactly as it would for a
+// failed alloc(), never crashes. Freed with the same free().
+//
+// The consumer is the LED streaming ring: its GDMA end-of-buffer ISR encodes the next slice, reading
+// the pixel snapshot per light at up to ~46 kHz. Desktop has one heap, so this is just alloc() there.
+void* allocIsr(size_t bytes);
+
+// The CPU's free-running cycle counter. A raw register read (~1 cycle), unlike micros(), which goes
+// through a timer peripheral — so it can time a region too short for a microsecond clock to resolve,
+// which is what profiling a per-light encode needs. Wraps at 2^32 (~18 s at 240 MHz); callers subtract
+// two reads, so a wrap between them is correct by unsigned arithmetic. Desktop returns a steady-clock
+// tick so host code compiles and reads sane deltas; the absolute rate is NOT comparable across targets.
+uint32_t cycleCount();
+
 // Executable memory for JIT-emitted native code (MoonLive). Distinct from alloc()
 // because code must live in memory the CPU can FETCH from, not just read/write:
 // IRAM on ESP32 (MALLOC_CAP_EXEC), an mmap'd PROT_EXEC page on desktop. Returns
@@ -766,6 +784,23 @@ struct MoonI80Ws2812Handle { void* impl = nullptr; };
 using MoonI80EncodeFn = void (*)(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
                                  bool closeFrame);
 
+// The encode's other half: lay the words that are the SAME for every light in the frame.
+//
+// A WS2812 slot is three bus words and only ONE carries pixel data; the other two depend solely on which
+// strands are active and where the latch bit sits, both fixed for the whole frame. So the ring calls this
+// ONCE per buffer when a frame arms, and `MoonI80EncodeFn` then writes only the data word per light —
+// two thirds of the stores hoisted out of the per-light path entirely. Without it the ring would re-lay
+// 384 constants per light against the 192 data words it actually needs, which is more work than writing
+// every slot whole.
+//
+// It is safe to hoist because a ring buffer holds the same constants on every lap: the DMA drains, the
+// ISR refills the data, the constants underneath are already correct. This is hpwit's `putdefaultones()`
+// / `putdefaultlatch()`, called per DMA buffer at init and never again. Studied, then written fresh here.
+//
+// Runs on the render thread at frame start, never from the ISR. Null is legal — direct-mode frames have
+// no constants and the ring then only encodes.
+using MoonI80PrefillFn = void (*)(void* user, uint8_t* dst, uint32_t rows);
+
 bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                        uint16_t wrGpio, size_t bufferBytes,
                        bool wantSecondBuffer, uint8_t clockMultiplier = 1);
@@ -777,7 +812,7 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                            uint16_t wrGpio, size_t rowBytes, uint32_t totalRows,
                            size_t padBytes, uint8_t clockMultiplier,
-                           MoonI80EncodeFn encode, void* user);
+                           MoonI80EncodeFn encode, MoonI80PrefillFn prefill, void* user);
 
 // Start one frame on the ring: prime the buffers, fire the DMA, and let the refill task (woken by the
 // EOF ISR) refill behind it. Pair with moonI80Ws2812Wait(h, 0, …) — the ring reports completion on slot 0.
@@ -813,8 +848,31 @@ struct MoonI80RingStats {
     uint32_t numItems = 0;       // descriptor pool capacity
     uint32_t consumedItems = 0;  // items the mount loop actually used (== numItems when sized right)
     uint32_t descErr = 0;        // GDMA descriptor-error count (>0 == the in-ISR encode corrupted the chain: B1)
-    uint32_t maxEncodeUs = 0;    // worst ISR refill-encode time (the producer)
-    uint32_t maxIsrGapUs = 0;    // worst gap between EOFs = DMA buffer-drain time (the deadline)
+    // Pace, measured over the LAST FRAME only (reset per frame in startRingTransfer). Mean answers "does
+    // the refill keep up?"; the extremes bound the tail. A lifetime max cannot answer either — it outlives
+    // the configuration that produced it and reads back as if it described the current one.
+    uint32_t encCount = 0;       // ISR refills that ENCODED. **0 == the ISR encode never ran** (nSlices <=
+                                 // ringBufs: startRingTransfer primed every buffer, the ISR only memsets).
+                                 // When this is 0, the encode timings below are meaningless — do not read them.
+    uint32_t encMeanUs = 0;      // mean ISR refill-encode time (the producer)
+    uint32_t encMaxUs = 0;       // worst single ISR refill-encode this frame
+    uint32_t gapMeanUs = 0;      // mean EOF-to-EOF = DMA buffer-drain time
+    uint32_t gapMinUs = 0;       // shortest EOF-to-EOF this frame. NOTE it can read BELOW the theoretical
+                                 // wire drain: TX EOF fires when the DMA pushes the last bytes into the LCD
+                                 // FIFO, a few pclk before the bits leave the pins — so a fast gap is FIFO
+                                 // lead-time, not a deadline anything missed.
+    uint32_t gapCount = 0;       // **Print this with gapMeanUs, always.** encCount and gapCount are
+                                 // DIFFERENT populations: enc averages only the EOFs that took the encode
+                                 // branch; gap averages EVERY EOF (most are memset-only and fast). Comparing
+                                 // the means without their denominators manufactured a phantom "the refill
+                                 // is 2.3x too slow". They are also not independent — gap is
+                                 // timed ISR-entry to ISR-entry with the encode running inside it.
+    // Raw refill cursor — exposed because `sl` (nSlices) and `encCount` can disagree, and when two derived
+    // numbers contradict each other the only way forward is to look at the inputs. totalRows/rowsPerBuf are
+    // what nSlices is computed FROM; refilledRow is the cursor the ISR gates on (`firstRow < totalRows`).
+    uint32_t totalRows = 0;
+    uint32_t rowsPerBuf = 0;
+    uint32_t refilledRow = 0;    // where the encode cursor ENDED this frame (== totalRows when all handed out)
 };
 MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h);
 

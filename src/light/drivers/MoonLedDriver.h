@@ -114,15 +114,53 @@ public:
         controls_.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
     }
     /// Refresh the ringDbg diagnostic string once a second (base tick1s chains here via refreshBusKpi).
+    ///
+    /// Reads: `sl<nSlices>/bf<ringBufs> dn<frames> de<descErr>` then the PACE half, which is per-FRAME:
+    ///   - `enc:none` — the ISR encode branch never ran (nSlices <= ringBufs: every buffer was primed on
+    ///     the render thread before gdma_start, so the ISR only memsets). **There is no pace question in
+    ///     this regime** — printing a number here invites reading a leftover as if it meant something.
+    ///   - `enc<mean>/<max>us gap<mean>/<min>us` — the refill (producer) against the drain (deadline).
+    ///     Compare MEAN to MEAN for "does it keep up?"; `max` vs `min` is the worst case. The gap extreme
+    ///     shown is the MIN because the tightest deadline is what a refill has to beat — a max gap is the
+    ///     most slack, which flatters.
+    /// The per-frame reset + mean are deliberate: a lifetime max outlives the config that produced it and
+    /// gets read back under another one.
     void refreshBusKpi() {
         const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
-        if (!s.isRing) { std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "not ring"); return; }
-        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u de%u enc%u gap%u",
+        // STAGE PROFILE (temporary): cycles/light for each stage of the encode, at 240 MHz.
+        uint32_t cm = 0, cc = 0, ce = 0, cr = 0;
+        this->dbgProfile(cm, cc, ce, cr);
+        char prof[48] = "";
+        if (cr) {
+            std::snprintf(prof, sizeof(prof), " | ms%u co%u en%u cyc/l",
+                          static_cast<unsigned>(cm / cr), static_cast<unsigned>(cc / cr),
+                          static_cast<unsigned>(ce / cr));
+            this->dbgProfileReset();
+        }
+        if (!s.isRing) {
+            std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "not ring%s", prof);
+            return;
+        }
+        char pace[56];
+        if (s.encCount == 0)
+            std::snprintf(pace, sizeof(pace), "enc:none");   // ISR never encoded — no pace question here
+        else
+            // **The COUNTS are printed, and they are not decorative.** `enc` averages only the EOFs that
+            // took the encode branch; `gap` averages EVERY EOF (most are memset-only and fast). Comparing
+            // the two means without their denominators is the error that produced a phantom "the refill is
+            // 2.3x too slow". They are also not independent: `gap` is measured ISR-entry to
+            // ISR-entry with the encode running INSIDE it, so gap >= enc by construction for the same EOF.
+            std::snprintf(pace, sizeof(pace), "enc%u/%uus(n%u) gap%u/%uus(n%u)",
+                          static_cast<unsigned>(s.encMeanUs), static_cast<unsigned>(s.encMaxUs),
+                          static_cast<unsigned>(s.encCount),
+                          static_cast<unsigned>(s.gapMeanUs), static_cast<unsigned>(s.gapMinUs),
+                          static_cast<unsigned>(s.gapCount));
+        // rows<refilledRow>/<totalRows> is the raw refill cursor: it says directly whether the ISR had any
+        // slice left to encode, which `enc:none` alone cannot distinguish from "the ISR never fired".
+        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u rows%u/%u dn%u de%u %s%s",
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
-                      static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.descErr),
-                      static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.maxIsrGapUs));
-                      // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
-                      // enc >= gap == the refill can't keep pace (PACE); enc << gap but still fails == CURSOR/logic.
+                      static_cast<unsigned>(s.refilledRow), static_cast<unsigned>(s.totalRows),
+                      static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.descErr), pace, prof);
     }
     bool busControlTriggersBuild(const char* name) const {
         return std::strcmp(name, "clockPin") == 0
@@ -183,7 +221,8 @@ public:
         return platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
                                                padBytes, this->busClockMultiplier(),
-                                               &MoonLedDriver::ringEncodeTrampoline, this);
+                                               &MoonLedDriver::ringEncodeTrampoline,
+                                               &MoonLedDriver::ringPrefillTrampoline, this);
     }
     bool busTransmitRing()          { return platform::moonI80Ws2812TransmitRing(bus_); }
     bool busIsRing() const          { return platform::moonI80Ws2812IsRing(bus_); }
@@ -193,26 +232,48 @@ public:
     /// platform hands it. `dst` is the buffer; `firstRow`/`rowCount` name the slice; `closeFrame` gates
     /// the trailing latch pad (only the last slice emits it).
     ///
-    /// **It prefills the shift constants FIRST, then the data — because a ring buffer is recycled, not
-    /// re-zeroed.** The whole-frame path prefills once at reinit and `encodeRows` then writes only the
-    /// DATA word (two-thirds of the stores hoisted out); but a ring buffer holds a DIFFERENT slice each
-    /// time it drains, so its constants (pulse-start/tail per this slice's active mask, and the latch pad
-    /// on the last slice) must be re-laid on every refill or the buffer keeps the previous slice's
-    /// constants and renders wrong on the second frame (pinned by the recycled==fresh host test). Direct
-    /// mode writes every slot word in encodeRows, so it needs no prefill.
+    /// **It encodes DATA words only (`wholeSlots=false`), the same as the whole-frame path** — the ring's
+    /// buffer already holds this slice's pulse-start/tail constants, laid by `encodeRingSlice` immediately
+    /// before this call. Writing all three words per slot costs 576 stores per light against 192; measured
+    /// on the host at the bench geometry (2 pins × 8 taps, 3 channels), whole-slot is **5.64× slower**, and
+    /// the ring's whole budget is the 21.6 µs/light the wire takes to drain a buffer. That factor is the
+    /// difference between an encode that keeps ahead of the DMA and one that cannot.
+    ///
+    /// The prefill+data pair is safe *here*, though it would not be on a live buffer: the ring refills a
+    /// buffer **from the GDMA EOF ISR, on the buffer that just drained** — at EOF "the DMA is provably
+    /// finished reading a buffer" (see `moonI80EofCb`), so both passes run while the peripheral is clocking
+    /// a *different* buffer. Nothing half-written is ever on the wire. Prefilling per slice (rather than
+    /// once at init) is also what keeps a strand that ends mid-slice correct: the active mask is a function
+    /// of the row, so each refill re-derives it for the rows it is about to write. Direct mode has no
+    /// constants and writes every slot word in one pass regardless.
     static void ringEncodeTrampoline(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
                                      bool closeFrame) {
         auto* self = static_cast<MoonLedDriver*>(user);
         const uint8_t outCh = self->correction_.outChannels;
         const auto first = static_cast<nrOfLightsType>(firstRow);
         const auto count = static_cast<nrOfLightsType>(rowCount);
-        if (self->slotBytes() == 1) {
-            if (self->pinExpanderMode()) self->prefillShiftRows<uint8_t>(outCh, dst, first, count);
-            self->encodeRows<uint8_t>(outCh, dst, first, count, closeFrame);
-        } else {
-            if (self->pinExpanderMode()) self->prefillShiftRows<uint16_t>(outCh, dst, first, count);
-            self->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
-        }
+        if (self->slotBytes() == 1) self->encodeRows<uint8_t>(outCh, dst, first, count, closeFrame);
+        else                        self->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
+    }
+    /// The platform's `MoonI80PrefillFn` seam's other half: lay one ring buffer's frame constants. Called
+    /// once per buffer when a frame arms (render thread, never the ISR), so `ringEncodeTrampoline` writes
+    /// only data words — see the platform.h contract for why that is two thirds of the stores.
+    ///
+    /// **Row 0's active-strand mask is used for every buffer, which is exact only while the strands are
+    /// the same length.** The mask is a function of the row (a strand that runs out clears its bit), and a
+    /// ring buffer holds a different light on every lap, so with RAGGED strands a buffer would carry the
+    /// pulse-start of row 0 while clocking a light past a short strand's end — that strand would be driven
+    /// HIGH instead of idle. Uniform strands (the '595 expander's normal wiring — one panel chain per tap)
+    /// have one mask for the whole frame, so this is correct there. Ragged support needs the constants
+    /// re-laid per lap at the row the buffer is about to hold, which costs back the stores this hoists;
+    /// the honest fix is to prefill per RUN of equal-mask rows. Not yet done — see the backlog.
+    static void ringPrefillTrampoline(void* user, uint8_t* dst, uint32_t rows) {
+        auto* self = static_cast<MoonLedDriver*>(user);
+        if (!self->pinExpanderMode()) return;   // direct mode has no constants
+        const uint8_t outCh = self->correction_.outChannels;
+        const auto count = static_cast<nrOfLightsType>(rows);
+        if (self->slotBytes() == 1) self->prefillShiftRows<uint8_t>(outCh, dst, 0, count);
+        else                        self->prefillShiftRows<uint16_t>(outCh, dst, 0, count);
     }
     uint8_t*  busBuffer(uint8_t i)              { return platform::moonI80Ws2812Buffer(bus_, i); }
     size_t    busCapacity() const               { return platform::moonI80Ws2812BufferCapacity(bus_); }
@@ -237,7 +298,9 @@ public:
 private:
     platform::MoonI80Ws2812Handle bus_;
     int8_t lastClockPin_ = -1;
-    char ringDbgStr_[48] = "—";   // TEMP DIAGNOSTIC: ring counters (refreshed in refreshBusKpi via tick1s)
+    // TEMP DIAGNOSTIC: ring counters (refreshed in refreshBusKpi via tick1s). Sized for the worst case
+    // "sl16/bf16 dn99999 de0 enc2456/2456us gap2460/2460us" (~56) — a truncated diagnostic is a lying one.
+    char ringDbgStr_[160] = "—";
 };
 
 } // namespace mm

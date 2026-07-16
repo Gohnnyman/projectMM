@@ -124,6 +124,18 @@ void* alloc(size_t bytes) {
     return std::malloc(bytes);
 }
 
+void* allocIsr(size_t bytes) {
+    return std::malloc(bytes);   // one heap on desktop: no PSRAM to avoid
+}
+
+uint32_t cycleCount() {
+    // No cycle register to read portably; a steady-clock nanosecond tick keeps the shape (monotonic,
+    // wrapping, deltas meaningful) so host code compiles and profiles relatively.
+    return static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 void free(void* ptr) {
     std::free(ptr);
 }
@@ -1184,7 +1196,8 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                            uint8_t /*laneCount*/, uint16_t /*wrGpio*/, size_t /*rowBytes*/,
                            uint32_t /*totalRows*/, size_t /*padBytes*/, uint8_t /*clockMultiplier*/,
-                           MoonI80EncodeFn /*encode*/, void* /*user*/) {
+                           MoonI80EncodeFn /*encode*/, MoonI80PrefillFn /*prefill*/,
+                           void* /*user*/) {
     return false;
 }
 bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& /*h*/) { return false; }
