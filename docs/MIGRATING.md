@@ -20,6 +20,20 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### `MoonLedDriver`: `forceRing` → `useRing`, and the ring's geometry is now settable (2026-07-17)
+
+The pin-expander path selector was a three-option Select (`auto` / `ring` / `wholeFrame`) named for a *diagnostic override*. The auto-router is gone — at the size the expander exists for (48 strands × 256 lights) a whole frame never fits internal DMA RAM, so "auto" had exactly one right answer while presenting itself as a choice, and its silent fallback hid which path was actually running. What remains is the honest question, as a switch:
+
+| Old | New |
+|---|---|
+| control `forceRing` (Select: `auto`/`ring`/`wholeFrame`) | `useRing` (a switch: on = ring, off = whole frame) |
+| — | `ringRows` (new: lights per DMA buffer, 1..64) |
+| — | `ringBufs` (new: buffers the DMA circulates, 2..32) |
+
+**Action: re-set `useRing` if you had `forceRing` on `wholeFrame`.**
+
+`forceRing` reads as absent → ignored, and `useRing` takes its default (**on**, the ring). A device that had explicitly selected whole-frame therefore comes up on the ring; flip `useRing` off to get it back. `ringRows`/`ringBufs` default to 16 and 12 — the geometry the driver effectively ran. (It shipped with a pool of 16, but 16 buffers never fit the S3's internal DMA heap, so the ring build failed its own fit check and the driver quietly fell back to whole-frame; 12 is what actually held. A config on the old defaults may therefore start *ringing* where it used to fall back.) They exist so the RAM / encode-overhead / interrupt-rate / lap-time trade-off can be swept on a live board rather than fixed at compile time.
+
 ### LED driver + control rename — a human-readable UI (2026-07-16)
 
 The LED driver module types and several controls were renamed so the UI reads in plain language rather than peripheral jargon (the UI shows a control's name verbatim, so the name *is* the label).

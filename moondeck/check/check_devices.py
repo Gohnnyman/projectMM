@@ -205,16 +205,26 @@ def main():
                 if "latchPin" not in controls:
                     errors.append(f"{where}: pinExpander (74HCT595) needs a 'latchPin'")
                 # The data-pin count is a property of the BOARD (how many '595 sockets are
-                # populated), not of the bus: the driver pads the bus width itself. So any 1..15
-                # is legal — only an empty or over-wide list is a mistake.
-                n = len([p for p in str(controls.get("pins", "")).split(",") if p.strip()])
-                if not 1 <= n <= 15:
-                    errors.append(f"{where}: pinExpander (74HCT595) needs 1..15 data "
-                                  f"pins (one per populated register), got {n}")
+                # populated), not of the bus: the driver pads the bus width itself. The ceiling is the
+                # runtime's, not an arbitrary one — every pin fans out to 8 strands through its register,
+                # and ParallelLedDriver refuses more than kMaxStrands (64), so 8 pins is the most that can
+                # ever be driven ("too many strands (pins x 8 through the expander)").
+                pins = [p.strip() for p in str(controls.get("pins", "")).split(",") if p.strip()]
+                if not 1 <= len(pins) <= 8:
+                    errors.append(f"{where}: pinExpander (74HCT595) needs 1..8 data pins "
+                                  f"(one per populated register; 8 x 8 taps = the 64-strand ceiling), "
+                                  f"got {len(pins)}")
+                # The latch rides a DATA LANE (the peripheral gives only one clock), so it must not share a
+                # GPIO with anything the bus drives — the bus controls OR a data pin. A data pin carrying
+                # the latch waveform emits garbage on that strand.
                 latch = controls.get("latchPin")
-                for other in ("clockPin", "dcPin"):
-                    if latch is not None and controls.get(other) == latch:
-                        errors.append(f"{where}: latchPin ({latch}) collides with {other} — "
+                if latch is not None:
+                    for other in ("clockPin", "dcPin"):
+                        if controls.get(other) == latch:
+                            errors.append(f"{where}: latchPin ({latch}) collides with {other} — "
+                                          f"the latch needs its own GPIO")
+                    if str(latch) in pins:
+                        errors.append(f"{where}: latchPin ({latch}) is also a data pin — "
                                       f"the latch needs its own GPIO")
 
             # Ethernet is explicit, not defaulted: a board that turns Ethernet ON (NetworkModule with

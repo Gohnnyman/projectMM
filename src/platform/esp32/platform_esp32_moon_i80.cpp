@@ -127,39 +127,31 @@ constexpr int kBusId = 0;
 // the DMA never reads PSRAM at the shift clock at all. The encoder reads the tiny (internal) Layer
 // buffer instead — ~24× smaller than the encoded frame. See platform.h and ADR-0014.
 
-// Rows per ring buffer. One "row" is one light across every strand; a 16-strand 8-bit-bus RGB row is
-// 576 B, so a 16-row buffer is 9,216 B. The DMA drains it in ~345 µs; the CPU refills it in ~96 µs.
-constexpr uint32_t kRingRows = 16;
-
-// Ring depth = how many internal buffers the DMA loops over while the EOF ISR refills them behind the
-// read head.
+// **The ring's geometry is RUNTIME, not a constant** — `rowsPerBuf` (lights per DMA buffer) and
+// `ringBufs` (pool depth) arrive as parameters and live on MoonI80State. The driver exposes both as
+// controls, because the optimum is a measurement, not a derivation: RAM is the ONLY axis that wants a
+// small rowsPerBuf, and three others want it big.
 //
-// **16 is a no-reuse STOPGAP, not the end state.** The looping chain (GDMA_FINAL_LINK_TO_HEAD) plus the
-// ISR's async one-buffer-late stop re-clocks/re-latches the '595 at FRAME WRAP whenever a buffer is
-// REUSED (nSlices > kRingBufs): the wrap laps the DMA into a buffer the ISR is mid-refill, and the
-// '595 latches a stray 0xFF pulse-start constant as a pixel byte — one bad row across all parallel
-// strands per frame (a green dot per panel, byte 0 = G in GRB, surviving brightness=0 because it is a
-// constant not a data word). Avoiding it needs kRingBufs STRICTLY GREATER than nSlices — the ISR stops on
-// `drained >= nSlices + kTailBufs` (kTailBufs=1), so it needs one buffer PAST the real slices for the LOW
-// tail. So the clean no-reuse range is nSlices < kRingBufs, i.e. **≤ 240 lights/strand** at depth 16 (15
-// slices + tail), bench-verified clean on the strip at 128/192/196.
+//   RAM              = rowsPerBuf × ringBufs × rowBytes. Only at rowsPerBuf=1 does it stop scaling with
+//                      strand length (~18 KB flat, any length) — the sole reason a per-light ring exists,
+//                      since a 48×256 frame is 144 KB contiguous internal and that does not exist.
+//   per-call cost    = the encode seam's fixed overhead, amortised over rowsPerBuf. At 1 it is paid per
+//                      light, inside the ISR.
+//   interrupt rate   = lights/rowsPerBuf per frame (one EOF per buffer). 256 lights at 100 fps is 25.6k
+//                      int/s at rowsPerBuf=1 vs 1.6k at 16 — and a busy core-0 ISR starves the network
+//                      stack (measured: a ~19 ms encode killed the W5500 ethernet on the LC16).
+//   lap-time runway  = rowsPerBuf × ringBufs × wire-µs-per-light: how long a WiFi preemption may last
+//                      before the DMA laps a buffer the ISR is still refilling. 1×32 ≈ 690 µs; 16×12 ≈ 4.1 ms.
 //
-// **Why not deeper (256 wants depth 17+): the internal-RAM WALL.** Each buffer is ~9.2 KB at the 16-strand
-// size, so 16 buffers ≈ 147 KB and 17 ≈ 156 KB. The S3 has only ~160 KB free internal DMA heap, and
-// moonI80Ws2812InternalFits tests the LARGEST CONTIGUOUS block (always < total free) — so 17 buffers do
-// NOT fit: the ring alloc fails, the driver falls back to whole-frame, and whole-frame shift mode STALLS
-// at the shift clock (frameTime=—, no lights). Bench-confirmed: depth 17 failed to ring at BOTH 192 and 256.
-// So "more buffers" cannot reach 256 here — it hits the RAM wall at exactly this boundary, which is the
-// whole reason the ring exists (constant RAM) and why the real fix below is the only path past 240.
-//
-// The real fix (unlimited length at constant RAM, the ring's whole point) is to terminate the wire the
-// way the whole-frame path does — a self-terminating chain ending on the real trailing latch pad
-// (GDMA_FINAL_LINK_TO_NULL), refilling a small pool behind the read head but ending DETERMINISTICALLY,
-// so the '595 sees exactly one clean frame end and one ≥300 µs LOW reset, no wrap re-latch. That removes
-// the kRingBufs-vs-length coupling entirely. (A depth of 2 — IDF's RGB-LCD bounce-buffer count — was
-// tried and BROKE transport: the loopback failed at bit 0, because our chain runs owner_check=false and
-// lacks the owner gate IDF's 2-buffer scheme relies on.)
-constexpr uint8_t kRingBufs = 16;
+// Bench history worth keeping: at rowsPerBuf=16 the pool only ever held ~12 buffers (~140 KB; 16 buffers
+// = 176 KB never fit the S3's ~160 KB free internal DMA heap), which caps that geometry near 240
+// lights/strand — nSlices must stay under ringBufs to avoid reuse, and reuse is where the wrap re-latch
+// bug lived. A per-light ring is necessarily a DEEP-REUSE configuration (nSlices == totalRows), and it has
+// run 160 refills/frame with descErr=0 — so reuse works; it is the ISR deadline that decides, not the wrap.
+// A depth of 2 (IDF's RGB-LCD bounce-buffer count) BROKE transport: the loopback failed at bit 0, because
+// our chain runs owner_check=false and lacks the owner gate IDF's 2-buffer scheme relies on. Hence the
+// floor of 2 is a hard minimum, not a useful setting.
+constexpr uint8_t kRingBufsMax = 32;   // array bound only; the live count is MoonI80State::ringBufs
 
 // Backstop for a transmit that arrives while the previous frame is still on the wire (the async
 // double-buffer's normal case — see moonI80Ws2812Transmit). It bounds a WEDGED peripheral, nothing
@@ -213,13 +205,13 @@ struct MoonI80State {
 
     // --- Ring mode. Null/zero on a whole-frame handle; populated only by moonI80Ws2812InitRing. ------
     bool isRing = false;
-    uint8_t* ring[kRingBufs] = {};   // the internal-RAM slice buffers the DMA loops over
-    uint32_t rowsPerBuf = 0;         // rows one ring buffer holds (always kRingRows; the last SLICE may be shorter)
+    uint8_t* ring[kRingBufsMax] = {};   // the internal-RAM slice buffers the DMA loops over (first `ringBufs` used)
+    uint8_t  ringBufs = 0;           // pool depth in use — the live count; kRingBufsMax is only the array bound
+    uint32_t rowsPerBuf = 0;         // rows one ring buffer holds (the last SLICE may be shorter)
     uint32_t totalRows = 0;          // strand length in rows — the frame ends after this many
     size_t   linkItemCap = 0;        // descriptor-pool capacity — the mount loop must not exceed it (IDF wraps silently)
     uint32_t consumedItems = 0;      // descriptor items the mount loop actually used (diagnostic; == linkItemCap when sized right)
     size_t   ringRowBytes = 0;       // encoded bytes per row (encode writes rowsPerBuf × this per buffer)
-    size_t   ringPadBytes = 0;       // trailing latch-pad bytes the LAST slice appends after its rows
     MoonI80EncodeFn   encode = nullptr;   // the domain's slice encoder (platform.h seam)
     void*             encodeUser = nullptr;
     volatile uint32_t refilledRow = 0;    // first row NOT yet handed to the ring (the EOF ISR's encode cursor)
@@ -267,7 +259,7 @@ bool IRAM_ATTR moonI80DescErrCb(gdma_channel_handle_t, gdma_event_data_t*, void*
 
 // Forward decl: the ring branch of the EOF ISR below refills the drained buffer inline by calling this
 // (defined further down with the ring code). The move to an ISR-driven refill is the reuse-race fix.
-void encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t count, bool last);
+void encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t count);
 
 // GDMA transfer-EOF callback: the descriptor chain hit its EOF node — pop the oldest started buffer
 // index, record the wire duration, and release THAT buffer's waiter.
@@ -306,7 +298,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
 
         // (a) REFILL the drained buffer with the next unencoded slice, RIGHT HERE in the ISR — the race-free
         // producer/consumer guarantee (IDF's RGB-LCD bounce-buffer pattern + hpwit's ring): at interrupt
-        // priority the refill finishes before the DMA laps the loop back into this buffer kRingBufs slices
+        // priority the refill finishes before the DMA laps the loop back into this buffer ringBufs slices
         // later. Flash-resident encode is safe (channel is not isr_cache_safe; faults only during a flash
         // write, which never overlaps rendering). Skips once every slice has been handed out (the loop's
         // remaining laps re-clock already-encoded tail buffers until the stop below fires).
@@ -332,7 +324,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
                                 static_cast<size_t>(st->rowsPerBuf - count) * st->ringRowBytes);
             }
             const int64_t encStart = esp_timer_get_time();     // REUSE-RACE INSTRUMENTATION (temporary)
-            encodeRingSlice(st, static_cast<uint8_t>(slot), firstRow, count, /*last=*/false);
+            encodeRingSlice(st, static_cast<uint8_t>(slot), firstRow, count);
             const uint32_t encUs = static_cast<uint32_t>(esp_timer_get_time() - encStart);
             if (encUs > st->dbgMaxEncodeUs) st->dbgMaxEncodeUs = encUs;
             st->refilledRow = firstRow + count;
@@ -342,7 +334,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
             // "too bright + shifted" symptom). hpwit does the same with a self-looping zero terminator node.
             std::memset(st->ring[slot], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
         }
-        st->refillSlot = (slot + 1u) % kRingBufs;
+        st->refillSlot = (slot + 1u) % st->ringBufs;
 
         // (b) STOP a short bit LATE. The looping chain clocks forever, so the frame ends here. Stopping at
         // exactly nSlices cuts the last real slice mid-clock (its EOF fires when the DMA MOVES ON, but the
@@ -571,6 +563,7 @@ bool initDma(MoonI80State* st, size_t bufferBytes) {
 // address and the length must be a cache-line multiple on the P4 / on PSRAM, or the cache
 // write-back before a transfer would touch neighbouring allocations).
 uint8_t* allocFrame(MoonI80State* st, size_t bufferBytes, bool psram) {
+
     size_t intAlign = 0, extAlign = 0;
     gdma_get_alignment_constraints(st->dma, &intAlign, &extAlign);
     const size_t align = psram ? extAlign : intAlign;
@@ -653,9 +646,20 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // WiFi/HTTP heap from an OPTIONAL allocation; buf[0] is the frame itself, so refusing it to keep
     // the reserve intact would decline to drive the LEDs at all — degrading the essential thing to
     // protect a nice-to-have, the inverse of the allocate-and-degrade policy (ADR-0002).
-    const bool shiftMode = clockMultiplier > 1;
-    st->buf[0] = allocFrame(st, bufferBytes, /*psram=*/!shiftMode);
-    if (!st->buf[0]) st->buf[0] = allocFrame(st, bufferBytes, /*psram=*/shiftMode);
+    // **With a PIN EXPANDER there is NO PSRAM fallback: internal RAM or nothing.** A '595 clocks at
+    // clockMultiplier x the pixel rate, and the LCD DMA cannot sustain PSRAM at that rate — measured on an
+    // S3: a 256-light frame placed in PSRAM (0x3c...) reports "no LED output" and burns ~219 ms per tick
+    // timing out, while the same frame in internal RAM (0x3f...) drives fine. So a PSRAM fallback does not
+    // degrade, it WEDGES: busInit still returns true, the driver reports "driving N of M lights", and every
+    // tick times out its wait and its wire-free token. Returning null instead surfaces the failure through
+    // the normal path — and the real fallback for an oversize frame is the streaming RING, which never
+    // needs the frame contiguous at all.
+    //
+    // Direct mode keeps PSRAM as its PRIMARY: one bus word per pixel clock is a rate PSRAM sustains, and
+    // that is what lets a direct-mode board drive 16K lights it could never hold internally.
+    const bool pinExpanderMode = clockMultiplier > 1;
+    st->buf[0] = allocFrame(st, bufferBytes, /*psram=*/!pinExpanderMode);
+    if (!st->buf[0] && !pinExpanderMode) st->buf[0] = allocFrame(st, bufferBytes, /*psram=*/false);
     if (!st->buf[0]) {
         destroyState(st);
         return nullptr;
@@ -683,8 +687,12 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
                 }
                 return allocFrame(st, bufferBytes, psram);
             };
-            st->buf[1] = tryAlloc(/*psram=*/!shiftMode);
-            if (!st->buf[1]) st->buf[1] = tryAlloc(/*psram=*/shiftMode);
+            // Same rule as buf[0]: with a pin expander it is internal-or-nothing. A PSRAM buf[1] is worse than no
+            // second buffer at all — tickAsync would alternate a working internal buf[0] with a PSRAM
+            // buf[1] that never completes, giving exactly one frame at boot and then ~207 ms per tick
+            // forever. Refusing it leaves buf[1] null, which the driver reads as "run single-buffered".
+            st->buf[1] = tryAlloc(/*psram=*/!pinExpanderMode);
+            if (!st->buf[1] && !pinExpanderMode) st->buf[1] = tryAlloc(/*psram=*/false);
             if (!st->buf[1]) {
                 vSemaphoreDelete(st->done[1]);
                 st->done[1] = nullptr;
@@ -739,32 +747,25 @@ bool startTransfer(MoonI80State* st, uint8_t buffer, size_t bytes) {
 
 // --- Ring mode ---------------------------------------------------------------------------------------
 
-// Encode one ring slice into buffer `slot`: rows [firstRow, firstRow + count) of the frame, straight
-// into the internal buffer the DMA is about to read. `last` closes the frame (the encoder appends the
-// latch pad). Cache sync is a no-op for internal RAM (line size 0), but kept for symmetry with the
-// whole-frame path and correctness if a ring buffer ever lands cache-mapped.
-void encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t count, bool last) {
-    // **Zero the pad window before a LAST slice into a RECYCLED buffer.** The encoder writes `count` rows
-    // then ONE latch word and relies on the rest of the pad being zero (encodeWs2812ShiftLatchPad). But a
-    // ring buffer is recycled: when the frame's row count is not a multiple of the buffer's row capacity,
-    // the last slice is SHORT (count < rowsPerBuf), and the pad window [count*rowBytes, +padBytes) still
-    // holds this buffer's EARLIER full slice — real pixel rows, not zeros. Left there, the DMA would clock
-    // those ghost rows in place of the ≥300 µs LOW reset and a strand could miss its latch. Zeroing the
-    // pad window restores the "rest is zero" contract. Only the last slice has a pad; only a short last
-    // slice into a recycled buffer needs it, but zeroing unconditionally on `last` is a cheap ~7 KB memset
-    // once per frame (off the DMA's read, before the encode) and keeps the rule simple.
-    if (last && st->ringPadBytes) {
-        std::memset(st->ring[slot] + static_cast<size_t>(count) * st->ringRowBytes, 0, st->ringPadBytes);
-    }
-    st->encode(st->encodeUser, st->ring[slot], firstRow, count, last);
+// Encode one ring slice into buffer `slot`: rows [firstRow, firstRow + count) of the frame, straight into
+// the internal buffer the DMA is about to read.
+//
+// **A ring buffer holds rows and nothing else.** There is no latch pad here — the WS2812 reset comes from
+// STOPPING the peripheral and letting the lines idle LOW (moonI80EofCb), never from a pad inside a
+// circulating buffer, and the buffers are allocated rows-only to match. So the seam is passed
+// `closeFrame=false` for every slice: a pad written here would land past the allocation.
+//
+// Cache sync is a no-op for internal RAM (line size 0), but kept for symmetry with the whole-frame path
+// and correctness if a ring buffer ever lands cache-mapped.
+void encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t count) {
+    st->encode(st->encodeUser, st->ring[slot], firstRow, count, /*closeFrame=*/false);
     if (esp_cache_get_line_size_by_addr(st->ring[slot]) > 0) {
-        const size_t bytes = static_cast<size_t>(count) * st->ringRowBytes + (last ? st->ringPadBytes : 0);
-        esp_cache_msync(st->ring[slot], bytes,
+        esp_cache_msync(st->ring[slot], static_cast<size_t>(count) * st->ringRowBytes,
                         ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     }
 }
 
-// Prime the first kRingBufs buffers with their slices and start the transaction over the LOOPING chain
+// Prime the first ringBufs buffers with their slices and start the transaction over the LOOPING chain
 // (built once in createRingState, GDMA_FINAL_LINK_TO_HEAD). The DMA circles the buffer pool; moonI80EofCb
 // refills each drained buffer with the next slice and STOPS the engine once nSlices slices have drained.
 // Re-arming from the head each frame restarts the loop (the previous frame's ISR stopped the DMA on its
@@ -775,16 +776,16 @@ bool startRingTransfer(MoonI80State* st) {
     st->refillSlot = 0;   // frame starts refilling at buffer 0 (priming fills 0..N-1; buffer 0 drains first)
     st->busy = true;
 
-    // Prime the first min(nSlices, kRingBufs) buffers in slice order — node i of the loop points at ring[i],
-    // so this supplies slices 0..min(nSlices,kRingBufs)-1; the EOF ISR refills the rest behind the DMA as it
-    // laps the loop. A frame with FEWER slices than buffers (nSlices < kRingBufs) primes only nSlices of them
+    // Prime the first min(nSlices, ringBufs) buffers in slice order — node i of the loop points at ring[i],
+    // so this supplies slices 0..min(nSlices,ringBufs)-1; the EOF ISR refills the rest behind the DMA as it
+    // laps the loop. A frame with FEWER slices than buffers (nSlices < ringBufs) primes only nSlices of them
     // and the drain-count stop fires before the DMA reaches the un-primed ones.
-    // Prime buffers 0..kRingBufs-1. A buffer holding a real slice gets its rows encoded (and its tail zeroed
-    // if the slice is short); a buffer PAST the frame's slices (nSlices < kRingBufs) is fully zeroed so the
+    // Prime buffers 0..ringBufs-1. A buffer holding a real slice gets its rows encoded (and its tail zeroed
+    // if the slice is short); a buffer PAST the frame's slices (nSlices < ringBufs) is fully zeroed so the
     // loop clocks clean LOW there. No `last`/latch-pad: the reset comes from the stop, not a pad in a node
     // (see the ISR + initRingDma). Matches the ISR's refill rule so priming and refill are consistent.
     uint32_t row = 0;
-    for (uint8_t primed = 0; primed < kRingBufs; primed++) {
+    for (uint8_t primed = 0; primed < st->ringBufs; primed++) {
         if (row < st->totalRows) {
             uint32_t count = st->rowsPerBuf;
             if (row + count >= st->totalRows) {
@@ -793,7 +794,7 @@ bool startRingTransfer(MoonI80State* st) {
                     std::memset(st->ring[primed] + static_cast<size_t>(count) * st->ringRowBytes, 0,
                                 static_cast<size_t>(st->rowsPerBuf - count) * st->ringRowBytes);
             }
-            encodeRingSlice(st, primed, row, count, /*last=*/false);
+            encodeRingSlice(st, primed, row, count);
             row += count;
         } else {
             std::memset(st->ring[primed], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
@@ -816,21 +817,8 @@ bool startRingTransfer(MoonI80State* st) {
     return true;
 }
 
-// GDMA channel + a link list long enough to hold the WHOLE frame as a LINEAR, self-terminating chain of
-// `nSlices` slices. Mirrors initDma (channel alloc / connect / strategy / transfer / EOF callback).
-//
-// **The chain is LINEAR and rebuilt per frame, NOT a closed loop.** An earlier looping design
-// (GDMA_FINAL_LINK_TO_HEAD + gdma_stop in the ISR) had two fatal faults: (1) the stop raced the GDMA
-// prefetcher, so the DMA clocked extra laps before halting (intermittent 227 ms timeouts), and (2) each
-// ring buffer was mounted at its FULL length — rows PLUS the frame's trailing latch pad — so a ≥300 µs
-// LOW pad landed after EVERY slice, and a WS2812 strand latches on that gap, fragmenting the frame into
-// per-slice chunks (the scrambled image). A linear chain sized to exactly `nSlices` slices, each mounted
-// at its OWN length (rows only; the last slice alone carries the pad), terminating on NULL, fixes both:
-// the DMA self-terminates with no prefetch race, and the pad appears once, at the true frame end.
-//
-// The slices still cycle through only `kRingBufs` physical buffers (node i → ring[i % kRingBufs]); the
-// refill task fills the buffer behind the DMA as it advances. So the chain is long (one node-run per
-// slice) but the buffer POOL stays small — the memory win the ring exists for.
+// GDMA channel + the link list the ring circulates. Mirrors initDma (channel alloc / connect / strategy /
+// transfer / EOF callback); the chain itself is described where it is mounted, in createRingState.
 bool initRingDma(MoonI80State* st) {
     gdma_channel_alloc_config_t chanCfg = {};
 #if defined(SOC_GDMA_BUS_AXI) && (SOC_GDMA_TRIG_PERIPH_LCD0_BUS == SOC_GDMA_BUS_AXI)
@@ -865,12 +853,12 @@ bool initRingDma(MoonI80State* st) {
 
     st->nSlices = (st->totalRows + st->rowsPerBuf - 1) / st->rowsPerBuf;
 
-    // **LOOPING chain (hpwit's proven S3 LCD_CAM ring).** The chain is a fixed pool of exactly kRingBufs
+    // **LOOPING chain (hpwit's proven S3 LCD_CAM ring).** The chain is a fixed pool of exactly ringBufs
     // node-runs, one per physical buffer, whose LAST node links back to the HEAD (GDMA_FINAL_LINK_TO_HEAD)
     // so the DMA CIRCLES the small buffer pool forever — it never reaches a NULL terminator mid-frame. The
     // EOF ISR refills the drained buffer, chasing the DMA around the loop, and stops the engine on the drain
     // counter (moonI80EofCb). This replaces the LINEAR nSlices-node chain, which stalled at ≥192 lights: a
-    // linear chain that revisits BUFFERS (nSlices > kRingBufs) halted cleanly after a few EOFs (descErr=0,
+    // linear chain that revisits BUFFERS (nSlices > ringBufs) halted cleanly after a few EOFs (descErr=0,
     // not corruption) because the DMA reached a node it could not continue past — the exact failure a
     // self-perpetuating loop cannot have. Every node is ROWS-ONLY (rowsPerBuf × rowBytes, NO latch pad): the
     // bit stream must flow CONTINUOUSLY buffer-to-buffer (a trailing LOW pad on any circulating buffer is a
@@ -879,7 +867,7 @@ bool initRingDma(MoonI80State* st) {
     // the lines idle LOW until the next frame arms — hpwit's exact mechanism (studied, written fresh).
     const size_t rowsOnlyBytes = static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes;
     const size_t itemsPerBuf = esp_dma_calculate_node_count(rowsOnlyBytes, intAlign, kDmaNodeMaxBytes);
-    const size_t numItems = itemsPerBuf * kRingBufs;
+    const size_t numItems = itemsPerBuf * st->ringBufs;
 
     st->linkItemCap = numItems;
 
@@ -899,19 +887,22 @@ bool initRingDma(MoonI80State* st) {
 // createState (same clock, GPIO routing, DC/WR handling) — only the DMA + buffers differ. Returns null
 // (and the caller falls back to the whole-frame path) if any internal buffer or the chain won't fit.
 MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint16_t wrGpio,
-                              size_t rowBytes, uint32_t totalRows, size_t padBytes,
+                              size_t rowBytes, uint32_t totalRows,
+                              uint32_t rowsPerBuf, uint8_t ringBufs,
                               uint8_t clockMultiplier, MoonI80EncodeFn encode, void* user) {
     auto* st = new (std::nothrow) MoonI80State();
     if (!st) return nullptr;
     st->isRing = true;
     st->busWidth = laneCount <= 8 ? 8 : 16;
     st->ringRowBytes = rowBytes;
-    st->ringPadBytes = padBytes;
     st->totalRows = totalRows;
-    st->rowsPerBuf = kRingRows;
+    // The geometry, before initRingDma — it derives nSlices and the descriptor-pool size from both.
+    st->rowsPerBuf = rowsPerBuf;
+    st->ringBufs = ringBufs;
+
     st->encode = encode;
     st->encodeUser = user;
-    st->cap = kRingRows * rowBytes + padBytes;   // reported buffer capacity (one ring buffer)
+    st->cap = st->rowsPerBuf * rowBytes;   // reported buffer capacity (one ring buffer — ROWS ONLY, no pad)
 
     const uint32_t pclkHz = (clockMultiplier > 1) ? kShiftPclkHz : kPclkHz;
     if (!initPeripheral(st, pclkHz) || !initRingDma(st)) { destroyState(st); return nullptr; }
@@ -922,13 +913,13 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
 
     // N internal ring buffers, each one slice + the latch pad (the LAST slice appends the pad; sizing
     // every buffer to hold it keeps them uniform and lets any buffer be the last one).
-    const size_t bufBytes = static_cast<size_t>(kRingRows) * rowBytes + padBytes;
-    for (uint8_t i = 0; i < kRingBufs; i++) {
+    const size_t bufBytes = static_cast<size_t>(st->rowsPerBuf) * rowBytes;
+    for (uint8_t i = 0; i < st->ringBufs; i++) {
         st->ring[i] = allocFrame(st, bufBytes, /*psram=*/false);
         if (!st->ring[i]) { destroyState(st); return nullptr; }
     }
 
-    // Mount the LOOPING chain: exactly kRingBufs node-runs, node i → ring[i], the LAST looping back to the
+    // Mount the LOOPING chain: exactly ringBufs node-runs, node i → ring[i], the LAST looping back to the
     // HEAD (GDMA_FINAL_LINK_TO_HEAD) so the DMA circles the buffer pool forever (hpwit's proven S3 ring).
     // Every node carries mark_eof → every drain fires the refill ISR (moonI80EofCb), which re-encodes the
     // drained buffer with the next unencoded slice and stops the engine on the drain counter. Each node is
@@ -936,11 +927,11 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
     // the loop is on when the drain count is reached, so any buffer must be able to carry the pad. The pad
     // after a NON-last slice is a ≥300 µs LOW gap that would latch the strand mid-frame — so encodeRingSlice
     // zeroes the pad on non-last refills and only the last slice writes the latch word (unchanged).
-    const size_t rowsOnly = static_cast<size_t>(kRingRows) * rowBytes;   // node length: rows, NO pad
+    const size_t rowsOnly = static_cast<size_t>(st->rowsPerBuf) * rowBytes;   // node length: rows, NO pad
     int idx = 0;
     bool mountOk = true;
-    for (uint8_t b = 0; b < kRingBufs && mountOk; b++) {
-        const bool last = (b == kRingBufs - 1);
+    for (uint8_t b = 0; b < st->ringBufs && mountOk; b++) {
+        const bool last = (b == st->ringBufs - 1);
         gdma_buffer_mount_config_t mount = {};
         mount.buffer = st->ring[b];
         mount.length = rowsOnly;   // rows only — continuous stream, no inter-buffer LOW gap (see initRingDma)
@@ -976,9 +967,16 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
     // SPIRAM and DMA, so the combined query returns 0 even on an S3 whose GDMA reaches PSRAM
     // perfectly well, and gating on it would silently cap the driver at the internal heap. (The
     // *alloc* does pass both caps, which is correct — that's what IDF itself does.)
+    // LARGEST BLOCK, not total free: this is ONE contiguous frame, so a fragmented heap reporting
+    // megabytes free with no run big enough would pass a total-free test and then fail the alloc. The
+    // sibling i80 backend tests the same way, for the same reason — a single-buffer path must ask
+    // "is there a run this big?", never "is there this much in total". (The ring's own check in
+    // moonI80Ws2812InitRing deliberately uses free SIZE: it makes many small allocations, so no single
+    // run of the total is needed.)
     const bool fitsInternal =
-        heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) >= bufferBytes + HEAP_RESERVE;
-    const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bufferBytes;
+        heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+            >= bufferBytes + HEAP_RESERVE;
+    const bool fitsPsram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bufferBytes;
     if (!fitsInternal && !fitsPsram) return false;
     MoonI80State* st = createState(dataPins, laneCount, wrGpio, bufferBytes,
                                    wantSecondBuffer, clockMultiplier);
@@ -989,19 +987,35 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
 
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                            uint16_t wrGpio, size_t rowBytes, uint32_t totalRows,
-                           size_t padBytes, uint8_t clockMultiplier,
-                           MoonI80EncodeFn encode, void* user) {
+                           uint32_t rowsPerBuf, uint8_t ringBufs,
+                           uint8_t clockMultiplier, MoonI80EncodeFn encode, void* user) {
     if (!dataPins || laneCount == 0 || rowBytes == 0 || totalRows == 0 || clockMultiplier == 0
         || !encode) return false;
+    // The geometry is a user control, so clamp it here rather than trusting the caller: a 0 would divide
+    // by zero in the nSlices math, and a depth past the array bound would overrun `ring[]`. Depth 2 is the
+    // hard floor (see kRingBufsMax's note: IDF's 2-buffer bounce scheme relies on an owner gate this chain
+    // does not run).
+    if (rowsPerBuf == 0 || ringBufs < 2 || ringBufs > kRingBufsMax) return false;
     // The ring's N internal buffers must fit internal DMA RAM while leaving the WiFi/HTTP reserve — this
     // is the whole reason the ring exists (the frame would NOT fit; the small buffers do). If even the
     // ring won't fit, fail so the caller falls back to the whole-frame path (which then idles with a
     // status if IT can't fit either — same degrade as always).
-    const size_t bufBytes = static_cast<size_t>(kRingRows) * rowBytes + padBytes;
-    const size_t need = bufBytes * kRingBufs + HEAP_RESERVE;
+    // **ROWS ONLY — a ring buffer carries no latch pad.** The mount sets `mount.length = rowsOnly`, so a
+    // pad inside a buffer would be allocated, encoded, cache-synced and NEVER CLOCKED — 43% of the ring's
+    // RAM for nothing. Worse, it decided whether the ring ran AT ALL: sizing every buffer rows+pad pushed
+    // the pool past the internal DMA heap, so this guard returned false and the driver silently fell back
+    // to whole-frame even with the ring explicitly selected. The WS2812 reset comes from stopping the peripheral and
+    // letting the lines idle LOW (moonI80EofCb), never from a pad inside a circulating node.
+    //
+    // Free SIZE, not largest block: the ring makes `ringBufs` separate small allocations, so no single
+    // contiguous run of this size is needed (unlike moonI80Ws2812InternalFits, which sizes ONE frame and
+    // must test the largest block). The per-allocation heap overhead (~8-12 B/block) is not modelled —
+    // negligible at kilobyte buffers, but it is a real fraction of a small rowsPerBuf=1 buffer.
+    const size_t bufBytes = static_cast<size_t>(rowsPerBuf) * rowBytes;
+    const size_t need = bufBytes * ringBufs + HEAP_RESERVE;
     if (heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) < need) return false;  // fall back to whole-frame
     MoonI80State* st = createRingState(dataPins, laneCount, wrGpio, rowBytes, totalRows,
-                                       padBytes, clockMultiplier, encode, user);
+                                       rowsPerBuf, ringBufs, clockMultiplier, encode, user);
     if (!st) return false;
     h.impl = st;
     return true;
@@ -1127,7 +1141,7 @@ MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h) {
     if (!st || !st->isRing) return s;
     s.isRing        = true;
     s.nSlices       = st->nSlices;
-    s.ringBufs      = kRingBufs;
+    s.ringBufs      = st->ringBufs;
     s.eofTotal      = st->dbgEofTotal;
     s.doneGiven     = st->dbgDoneGiven;
     s.lastDrain     = st->dbgLastDrain;
@@ -1159,7 +1173,7 @@ void moonI80Ws2812Deinit(MoonI80Ws2812Handle& h) {
 
 namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, bool shiftMode, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r);
 }
@@ -1175,9 +1189,9 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
         || dataBytes < 3 || dataBytes > frameBytes || rowBits < 8
         || clockMultiplier == 0) return r;
     const uint16_t txGpio = dataPins[0];   // lane 0 carries the pattern
-    const bool shiftMode = clockMultiplier > 1;
+    const bool pinExpanderMode = clockMultiplier > 1;
 
-    if (shiftMode) {
+    if (pinExpanderMode) {
         // SKIP the continuity pre-check. It drives txGpio and expects rxGpio to follow directly,
         // which is true of a bare jumper but FALSE through a 74HCT595: raising the serial input does
         // not raise an output (that takes 8 shift clocks + a latch). Running it here would report
@@ -1201,34 +1215,33 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     // The ring's encode seam is a slice PRODUCER; the loopback already holds the whole pre-encoded frame,
     // so its "encode" is a COPY of the matching slice out of `frame`. Deriving the ring geometry from the
     // loopback's parameters: rowBytes = the per-row encoded size, totalRows = the light count.
-    const bool useRing = shiftMode && !moonI80Ws2812InternalFits(frameBytes);
+    const bool useRing = pinExpanderMode && !moonI80Ws2812InternalFits(frameBytes);
     const uint8_t sb = laneCount <= 8 ? 1 : 2;
     // rowBytes = outCh(=rowBits/8) × 8 × 3 × slotBytes × outputsPerPin(=clockMultiplier in shift mode).
     const size_t loopRowBytes = static_cast<size_t>(rowBits) * 3u * sb * clockMultiplier;
     const uint32_t loopRows = loopRowBytes ? static_cast<uint32_t>(dataBytes / (static_cast<size_t>(rowBits) * 3u)) : 0;
-    const size_t loopPad = (loopRows && frameBytes > static_cast<size_t>(loopRows) * loopRowBytes)
-                               ? frameBytes - static_cast<size_t>(loopRows) * loopRowBytes : 0;
 
     MoonI80State* st = nullptr;
     // The copy-slice "encoder": the frame is already encoded, so a ring slice is a straight memcpy out of
     // it. The seam is a plain function pointer + `void* user`, so the frame geometry rides in `user` (a
     // stack struct that outlives the transmit — the ring runs synchronously within this function).
-    struct LoopCopyCtx { const uint8_t* frame; size_t rowBytes; size_t pad; uint32_t totalRows; };
-    LoopCopyCtx ctx{frame, loopRowBytes, loopPad, loopRows};
+    // ROWS ONLY, like every ring slice: the pre-built frame's trailing latch pad is NOT copied. A ring
+    // buffer holds rows and nothing else (the WS2812 reset comes from stopping the peripheral), so the
+    // pad has nowhere to go — and the seam is called with closeFrame=false for every slice anyway.
+    struct LoopCopyCtx { const uint8_t* frame; size_t rowBytes; };
+    LoopCopyCtx ctx{frame, loopRowBytes};
     if (useRing && loopRows > 0) {
-        auto copySlice = [](void* user, uint8_t* dst, uint32_t firstRow, uint32_t count, bool last) {
+        auto copySlice = [](void* user, uint8_t* dst, uint32_t firstRow, uint32_t count, bool /*close*/) {
             auto* c = static_cast<LoopCopyCtx*>(user);
             std::memcpy(dst, c->frame + static_cast<size_t>(firstRow) * c->rowBytes,
                         static_cast<size_t>(count) * c->rowBytes);
-            // The last slice carries the frame's trailing latch pad, which sits after the final row in
-            // the pre-built frame (the domain wrote it there via encodeWs2812ShiftLatchPad).
-            if (last && c->pad)
-                std::memcpy(dst + static_cast<size_t>(count) * c->rowBytes,
-                            c->frame + static_cast<size_t>(c->totalRows) * c->rowBytes, c->pad);
         };
         MoonI80Ws2812Handle h;
-        if (moonI80Ws2812InitRing(h, dataPins, laneCount, wrGpio, loopRowBytes, loopRows, loopPad,
-                                  clockMultiplier, copySlice, &ctx)) {
+        // Geometry: the self-test proves TRANSPORT, not the encode deadline (its "encode" is a memcpy), so
+        // it takes the platform's own defaults rather than the driver's swept values — the bit-verify must
+        // mean the same thing whatever geometry the render path is currently tuned to.
+        if (moonI80Ws2812InitRing(h, dataPins, laneCount, wrGpio, loopRowBytes, loopRows,
+                                  kRingRowsDefault, kRingBufsDefault, clockMultiplier, copySlice, &ctx)) {
             st = static_cast<MoonI80State*>(h.impl);
         }
     }
@@ -1275,8 +1288,8 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     // (26.67 MHz ÷ 8 = 3.33 MHz → a 300 ns slot). Passing the bus rate here makes the capture expect
     // the wrong pulse width and size the window for a frame 8× too short — a decode that matches
     // nothing on a strand whose LEDs are visibly lighting.
-    const uint32_t slotHz = shiftMode ? (kShiftPclkHz / clockMultiplier) : kPclkHz;
-    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz, shiftMode,
+    const uint32_t slotHz = pinExpanderMode ? (kShiftPclkHz / clockMultiplier) : kPclkHz;
+    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz, pinExpanderMode,
                                   MOON_I80_TAG, transmitOnce, r);
     destroyState(st);
     return r;

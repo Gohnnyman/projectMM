@@ -774,10 +774,21 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
 // across every strand) encodes to, `totalRows` the strand length; the platform sizes the ring from
 // them. `encode` is called per drained buffer, from the pinned refill task the EOF ISR wakes, to fill
 // the next slice. Returns false if the ring cannot be built (then the caller falls back to whole-frame).
+// The ring geometry the driver ships with, and the values its self-test uses. Named here (not duplicated
+// per caller) so the driver's control defaults and the platform's own use cannot drift apart.
+constexpr uint8_t kRingRowsDefault = 16;   // lights per DMA buffer
+constexpr uint8_t kRingBufsDefault = 12;   // buffers the DMA circulates
+
+// `rowsPerBuf` (lights per DMA buffer) and `ringBufs` (pool depth) are the ring's GEOMETRY, and they are
+// the caller's choice because the optimum is a measurement, not a derivation. RAM is the only axis that
+// wants a small rowsPerBuf — it alone stops scaling with strand length at 1 (the only way a 48x256 frame
+// is reachable at all); per-call encode overhead, interrupt rate and lap-time runway all want it big.
+// Returns false (caller falls back to whole-frame) if the pool won't fit, if rowsPerBuf is 0, or if
+// ringBufs is outside the platform's supported depth.
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                            uint16_t wrGpio, size_t rowBytes, uint32_t totalRows,
-                           size_t padBytes, uint8_t clockMultiplier,
-                           MoonI80EncodeFn encode, void* user);
+                           uint32_t rowsPerBuf, uint8_t ringBufs,
+                           uint8_t clockMultiplier, MoonI80EncodeFn encode, void* user);
 
 // Start one frame on the ring: prime the buffers, fire the DMA, and let the refill task (woken by the
 // EOF ISR) refill behind it. Pair with moonI80Ws2812Wait(h, 0, …) — the ring reports completion on slot 0.

@@ -14,26 +14,38 @@ template <class Derived>
 /// the P4's Parlio peripheral (ParlioLedDriver). Both drive up to 16 strands that clock out
 /// SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of the source buffer (see kMaxLanes).
 ///
-/// **Single-shot autonomous DMA:** both pre-encode the whole frame (a per-ROW fused
-/// correct+transpose, the SAME ParallelSlots.h encoder — a Parlio bus byte and an i80 bus byte are
-/// identical: one word per slot, bit L = data line L) plus a zeroed ≥300 µs latch pad into a
-/// platform-owned DMA buffer, then ship it as one autonomous transfer. So there's NO CPU deadline
-/// during transmission — the WiFi-induced bit-slip of refill-based drivers cannot occur by
-/// construction. (The i80 bus owns the DMA buffer and its max transfer size is fixed at creation, so
-/// re-creating the bus IS the buffer resize.) The two drivers were ~250 of ~370 lines byte-for-byte
-/// identical; this is the one copy (the No-duplication rule).
+/// **The words this page uses.** A **strand** is one chain of LEDs. A **lane** is one bus data line —
+/// in the normal case, one GPIO driving one strand. A **slot** is one WS2812 bit on the wire, and a
+/// **row** is one light across every strand at once (so a frame is `maxLaneLights` rows).
 ///
-/// **Buffer slicing across pins:** consecutive slices in `pins` order, sizes from `ledsPerPin`,
-/// even-split remainder — identical semantics to RmtLedDriver, parsers shared (PinList.h).
+/// **How it works: encode the whole frame, then hand it to the DMA and walk away.** Every WS2812 bit of
+/// every strand is written into one buffer up front — including a zeroed ≥300 µs pad at the end, the
+/// reset that tells the strands the frame is over — and then shipped as a single autonomous transfer.
 ///
-/// **CRTP, not a virtual hierarchy:** the base calls back into the derived through
-/// `static_cast<Derived*>(this)->busX()` — no vtable, no runtime indirection — so it stays inside
-/// the hot-path / data-over-objects rules and keeps the module tree as the one deliberate class
-/// hierarchy (the only virtual boundary remains MoonModule → DriverBase). The derived supplies just
-/// the peripheral-specific pieces: the bus* platform wrappers, `lanesAvailable()` (the inert-on-
-/// wrong-chip `if constexpr` guard), `kPowerOfTwoBus` (i80 needs exactly 8 or 16; Parlio runs 1..16), the
-/// slot rate `kClockHz`, and any extra pins the i80 driver tracks (WR/DC) that Parlio doesn't.
-/// configErr_/failBuf_ come from DriverBase (shared with RmtLedDriver too).
+/// The encode is a **fused correct + transpose, per row** (ParallelSlots.h). Transpose is the heart of
+/// it: the source has each light's bytes together, but the wire needs each bus WORD to carry one bit of
+/// EVERY strand at the same instant (bit L of the word = data line L). So the encoder turns 8 lights'
+/// bytes on their side — an 8x8 bit matrix transpose — and writes one word per slot. Both peripherals
+/// take the identical bytes: a Parlio bus word and an i80 bus word have the same meaning.
+///
+/// **Why single-shot matters:** there is NO CPU deadline while a frame is on the wire. A driver that
+/// refills buffers as the DMA drains them must beat the clock on every refill, and a WiFi interrupt at
+/// the wrong moment slips a bit and garbles the rest of the frame. Encoding first makes that impossible
+/// by construction. (The streaming ring in MoonLedDriver deliberately gives this up — it is the price of
+/// a frame too big to hold.)
+///
+/// **Slicing:** the strands are fed consecutive slices of this driver's window, in `pins` order, sized
+/// by `ledsPerPin` with the remainder split evenly — the same rule (and the same parser) as
+/// RmtLedDriver, so a strand count means the same thing on every LED driver.
+///
+/// **CRTP, not virtual calls.** The base calls into the derived through
+/// `static_cast<Derived*>(this)->busX()`, so the shared body costs no vtable and no runtime indirection
+/// on the hot path, and the module tree stays the project's one deliberate class hierarchy (the only
+/// virtual boundary is MoonModule -> DriverBase). A derived driver supplies only the peripheral-specific
+/// pieces: the `bus*` platform wrappers, `lanesAvailable()` (which makes it inert on the wrong chip),
+/// `kPowerOfTwoBus` (the i80 bus rounds to 8 or 16; Parlio's width IS its pin count), the slot rate
+/// `kClockHz`, and any extra bus pins it owns. The two drivers were ~250 of ~370 lines byte-for-byte
+/// identical before this base existed.
 class ParallelLedDriver : public DriverBase {
 public:
     /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its MultiPinLedDriver
@@ -258,6 +270,9 @@ public:
         // (bound regardless so a saved latchPin survives a round-trip through direct mode).
         controls_.addPin("latchPin", latchPin);
         controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
+        // A ring-capable backend's geometry, AFTER latchPin so the bus pins stay one unbroken group
+        // (clockPin and latchPin are a wiring pair). Default no-op; only MoonI80 rings.
+        derived()->addRingControls();
         controls_.addBool("loopbackTest", loopbackTest);
         // Always bound, shown only in test mode — the conditional-control shape.
         controls_.addPin("loopbackTxPin", loopbackTxPin);
@@ -424,6 +439,8 @@ public:
     // Synchronous single-buffer path — the ORIGINAL tick, verbatim: encode buffer 0, transmit, wait
     // right here. One DMA buffer, no alternation, no deferred-wait bookkeeping, 0 added latency. This
     // is the default (doubleBuffer OFF) and its timing is exactly the pre-double-buffer driver's.
+    /// Blocking path (doubleBuffer OFF): encode the frame, send it, and wait out the wire before
+    /// returning — so a tick costs encode + wire. One DMA buffer, no output latency.
     void tickSync(uint8_t outCh) {
         if (busGaveUp()) return;
         // A previous frame's wait may have timed out, leaving the DMA still reading buffer 0 — re-wait
@@ -448,6 +465,9 @@ public:
     // Deferred-wait double-buffer path (doubleBuffer ON) — encode frame N+1 into the back buffer
     // while frame N clocks out of the front, so the per-tick wall-clock is max(encode, wire) instead
     // of encode + wire. Costs the second DMA buffer + 1 frame of output latency. See the class doc.
+    /// Deferred-wait path (doubleBuffer ON, the default): encode frame N+1 into the back buffer while
+    /// frame N clocks out of the front, so a tick costs max(encode, wire) instead of encode + wire. Costs
+    /// a second DMA buffer and one frame of output latency.
     void tickAsync(uint8_t outCh) {
         if (busGaveUp()) return;
         // 1. Finish the transfer that last used the buffer we're about to encode into, so the encode
@@ -484,6 +504,9 @@ public:
     // "freezes when I refresh the UI" bug). So: WAIT for the previous frame (a no-op if it finished while
     // the render ran), START the next, and RETURN — the wire and its refills proceed in the background
     // with the core free. One frame of latency, exactly as the double-buffer trades.
+    /// Streaming-ring path: wait for the previous frame, arm the next, and RETURN — the wire and its
+    /// refills run in the background. Never blocks the render core for a whole frame, which is what keeps
+    /// the UI responsive at sizes where the wire takes tens of milliseconds.
     void tickRing(uint8_t /*outCh*/) {
         if (busGaveUp()) return;
         // Finish the PREVIOUS ring frame before starting the next (a strand receives one frame at a time;
@@ -527,6 +550,9 @@ public:
     // the wait TIMED OUT: the DMA may still be reading, so `inFlight_` stays set and the caller must
     // not touch the buffer. Used by tickAsync (the deferred-wait double-buffer path) on the buffer it
     // is about to REUSE; the synchronous path (tickSync) waits inline and never uses this.
+    /// Wait for buffer `i`'s transfer if one is still in flight; false means it wedged (the caller then
+    /// skips the frame rather than writing into memory the DMA may still be reading). A no-op when idle,
+    /// so callers arm it unconditionally instead of tracking state themselves.
     bool busWaitIfBusy(uint8_t i) {
         if (!inFlight_[i]) return true;
         if (!derived()->busWait(i, waitBudgetMs())) {
@@ -630,6 +656,8 @@ public:
     // no-op on an idle buffer). If a wait times out here we cannot simply skip: the buffers are about
     // to go away, so the peripheral itself is torn down (deinit stops the unit / deletes the bus,
     // which cancels any transfer) — the flag is cleared so the teardown proceeds rather than spinning.
+    /// Block until nothing is reading the DMA buffers or the source snapshot — the barrier that makes a
+    /// live resize safe (a grid change or an RGB->RGBW switch must not free memory a transfer is reading).
     void drainInFlight() {
         if (!busWaitIfBusy(0)) inFlight_[0] = false;   // deinit below cancels the wedged transfer
         if (!busWaitIfBusy(1)) inFlight_[1] = false;
@@ -714,6 +742,10 @@ public:
     //
     // `rowCount == 0` means "to the end". Only the LAST slice closes the frame with the latch pad, so a
     // partial slice must not emit it — hence `closeFrame`.
+    /// Encode rows `[firstRow, firstRow + rowCount)` into `dst` — the whole frame in one call for the
+    /// direct paths, one slice per call for the ring (`rowCount == 0` means "to the end"). Writes
+    /// dst-relative, so a slice lands at dst+0 whatever its first row. `closeFrame` appends the latch
+    /// pad, so only the LAST slice may set it.
     template <class Slot>
     void encodeRows(uint8_t outCh, uint8_t* dst,
                     nrOfLightsType firstRow = 0, nrOfLightsType rowCount = 0,
@@ -773,6 +805,8 @@ public:
     // Encode the loopback test frame at `Slot` width: the same pattern on lane 0 in every
     // row (activeMask = bit 0). Matches the private loopback bus's width so the DMA stride
     // is right. `frame` is raw bytes; viewed as Slot elements.
+    /// Build the self-test frame for DIRECT mode: the known pattern on lane 0, every other lane idle.
+    /// Encoded at the operational bus width so the DMA stride matches the real thing.
     template <class Slot>
     void encodeLoopbackFrame(uint8_t* frame, const uint8_t* wire, uint8_t outCh,
                              nrOfLightsType lights) {
@@ -788,6 +822,9 @@ public:
     // activeMask = bit 0 → STRAND 0, which is data pin 0's register at shift position 0. Because a
     // '595 shifts MSB-first, that strand appears on the register's LAST output (Q7) — that is the pin
     // the jumper must come from. The latch rides its own bus bit (latchBit_), as it does at runtime.
+    /// Build the self-test frame for EXPANDER mode: the pattern on one '595 output (`loopbackStrand`),
+    /// every other strand dark, the latch on its own bus bit exactly as at runtime — so the capture proves
+    /// the expander's real wire, not a simplified one.
     template <class Slot>
     void encodeLoopbackFrameShift(uint8_t* frame, const uint8_t* wire, uint8_t outCh,
                                   nrOfLightsType lights) {
@@ -958,7 +995,8 @@ protected:
     /// these defaults: busIsRing() is always false, so tick() never selects tickRing and the ring transmit
     /// is never called. reinit() consults wantsRing() to decide whether to attempt a ring build at all.
     bool wantsRing() const { return false; }                        // should reinit try the ring for this config?
-    bool busInitRing(size_t /*rowBytes*/, uint32_t /*totalRows*/, size_t /*padBytes*/) { return false; }
+    void addRingControls() {}                                       // a ring-capable backend's geometry controls
+    bool busInitRing(size_t /*rowBytes*/, uint32_t /*totalRows*/) { return false; }
     bool busIsRing() const { return false; }
     bool busTransmitRing() { return false; }
 
@@ -1207,10 +1245,15 @@ protected:
         if (derived()->wantsRing()) {
             deinit();
             const uint8_t outCh = correction_.outChannels;
+            // Rows only — a ring buffer carries no latch pad (the reset comes from stopping the
+            // peripheral), so unlike the whole-frame path below there is no padBytesFor() here.
             const size_t rowBytes = rowBytesFor(outCh, slotBytes(), outputsPerPin());
-            const size_t padBytes = padBytesFor(slotBytes(), outputsPerPin());
-            if (derived()->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_), padBytes)) {
-                ensureSnapshotCap();   // size the per-frame snapshot here, OFF the hot path (tickRing only memcpys)
+            // The snapshot is sized HERE, off the hot path (tickRing only memcpys into it), and it is
+            // load-bearing: the ring's encode reads it instead of the live source. If it won't allocate,
+            // the ring cannot run — so treat it exactly like a failed ring build: tear the half-built bus
+            // down and fall through to whole-frame, rather than marking the driver inited with no snapshot.
+            if (derived()->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_))
+                && ensureSnapshotCap()) {
                 inited_ = true;
                 dmaBuf_ = derived()->busBuffer(0);   // ring[0] — a real pointer, the "inited" sentinel
                 for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
@@ -1219,7 +1262,18 @@ protected:
                 if (status() == Derived::kInitFailMsg) clearStatus();
                 return;
             }
-            // Ring build failed (even the small buffers didn't fit) — fall through to whole-frame.
+            // Ring build failed (the small buffers or the snapshot didn't fit) — drop whatever the ring
+            // did allocate, then fall through to whole-frame.
+            //
+            // busDeinit() DIRECTLY, not deinit(): deinit() only tears the bus down `if (inited_)`, and
+            // `inited_` is false here by construction (the deinit() above cleared it; only the success
+            // branch sets it). The dangerous case is busInitRing SUCCEEDING and ensureSnapshotCap then
+            // failing — a fully-built ring, GDMA channel + ISR + ~150 KB of internal DMA RAM, that
+            // deinit() would walk straight past, and the whole-frame busInit below would overwrite the
+            // handle of. That leaks the scarcest memory on the chip on exactly the OOM path most likely
+            // to hit it, and repeats on every prepare rebuild. busDeinit is idempotent and null-safe.
+            derived()->busDeinit();
+            deinit();
         }
 
         const bool haveSecond = derived()->busBuffer(1) != nullptr;

@@ -283,7 +283,7 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
 // AND wait for its done-callback) and the params needed to size the capture and
 // log the granted clock. `r` is filled in place (jumperDetected already set).
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, bool shiftMode, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r) {
     // Capture at 40 MHz. The decode threshold is DERIVED from the strand's slot rate, not a
@@ -375,9 +375,9 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         // It costs the very first pixel's most-significant color bit and nothing else (invisible), so a
         // lone short-clipped bit 0 is the '595's frame-start settling, not bad output — accept it. Any
         // second mismatch, or a bit-0 miss that is not short-clipped, still fails. Direct mode drives
-        // the pin straight (no latch) so its bit 0 is clean — the exception is gated on `shiftMode` so a
+        // the pin straight (no latch) so its bit 0 is clean — the exception is gated on `pinExpanderMode` so a
         // real first-bit fault on the direct i80 / Parlio paths can never be excused through it.
-        const bool onlyBit0Clip = shiftMode && mismatchCount == 1 && mismatch == 0
+        const bool onlyBit0Clip = pinExpanderMode && mismatchCount == 1 && mismatch == 0
                                 && (static_cast<uint16_t>(rxSymbols[0] & 0x7FFF) < threshTicks);
         r.pass = (mismatch == SIZE_MAX) || onlyBit0Clip;
         r.bitsChecked = static_cast<uint32_t>(kBits);

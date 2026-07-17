@@ -5,43 +5,95 @@
 
 namespace mm {
 
-/// Output driver: parallel 8-or-16-lane WS2812B on the **LCD_CAM** peripheral, driven by **our own
-/// DMA code** instead of ESP-IDF's `esp_lcd` component. Same peripheral, same wire contract, same
-/// pins as [MultiPinLedDriver](MultiPinLedDriver.md) — the difference is underneath (who programs the DMA), plus
-/// what falls out of it: owning the GPIO matrix means this driver needs no DC pin at all and routes WR
-/// only when a '595 expander reads it, so a direct-mode board spends its GPIOs on strands alone.
+/// Output driver: parallel WS2812B on the **LCD_CAM** peripheral (ESP32-S3 / -P4), driven by **our own
+/// DMA code** instead of ESP-IDF's `esp_lcd`. Same peripheral, same pins and same wire contract as
+/// [MultiPinLedDriver](MultiPinLedDriver.md) — the difference is underneath, and it buys two things
+/// `esp_lcd` cannot give: a frame **streamed** rather than held whole, and a **74HCT595 pin expander**
+/// (one GPIO driving 8 strands — see the last section; skip it if you drive strands directly).
 ///
-/// **Why this exists.** `esp_lcd` re-arms the peripheral on every transaction: `lcd_start_transaction()`
-/// does `lcd_ll_reset()` + `lcd_ll_fifo_reset()` + a hard-coded 4 µs busy-wait before each one. An LCD
-/// panel does not care — it is addressed, not clocked continuously. WS2812 is one unbroken self-clocked
-/// bit stream, so a reset mid-frame corrupts everything after it. That makes a frame split across
-/// several `esp_lcd` transactions impossible to send gaplessly at ANY chunk size, which forces the
-/// whole frame into ONE transaction — and that is what caps the driver: the DMA must stream the entire
-/// frame from a single contiguous, DMA-reachable block.
+/// **A frame STREAMED, not held.** The DMA refills a small pool of internal buffers behind the read head,
+/// so **RAM stops scaling with strand length**: at one light per buffer the pool is ~18 KB whether a
+/// strand is 128 lights or 1024. `useRing` picks this path; `ringRows`/`ringBufs` size it.
 ///
-/// The hardware never demanded that. The LCD peripheral has **no data-length register**
-/// (`lcd_ll_set_phase_cycles()` sets `lcd_dout` as a boolean *enable*; IDF's own comment reads
-/// "Number of data phase cycles are controlled by DMA buffer length"). It clocks out exactly what the
-/// DMA feeds it and stops when the chain ends. So **one `gdma_start()` over an arbitrarily long
-/// descriptor chain plus one `lcd_ll_start()` is a single gapless stream across as many buffers as we
-/// like** — which is what lifts the memory ceiling. This driver takes that, built on IDF's HAL and
-/// GDMA link-list APIs (one level below `esp_lcd`, not raw registers; IDF's own drivers use the same
-/// APIs). Rationale + what we give up: [ADR-0014](https://github.com/MoonModules/projectMM/blob/main/docs/adr/0014-own-i80-dma-driver-below-esp-lcd.md).
+/// **Why `esp_lcd` cannot do it.** It re-arms the peripheral on every transaction:
+/// `lcd_start_transaction()` does `lcd_ll_reset()` + `lcd_ll_fifo_reset()` + a hard-coded 4 µs busy-wait
+/// before each one. An LCD panel does not care — it is addressed, not clocked continuously. WS2812 is one
+/// unbroken self-clocked bit stream, so a reset mid-frame corrupts everything after it: a frame cannot be
+/// split across transactions at ANY chunk size, which forces the whole frame into ONE transaction, from
+/// ONE contiguous DMA-reachable block. That is the cap this driver exists to lift.
 ///
-/// **Both drivers ship, and that is deliberate.** `MultiPinLedDriver` is the **reference**: correct,
-/// memory-capped, and the thing this one is measured against. This is the **challenger**. Because both
-/// are registered module types, switching between them is a swap in the UI — the A/B needs no reflash,
-/// on the same board, on the same effect. The reference is retired only if and when the challenger
-/// demonstrably beats it.
+/// **The hardware never demanded it.** The LCD peripheral has **no data-length register**
+/// (`lcd_ll_set_phase_cycles()` sets `lcd_dout` as a boolean *enable*; IDF's own comment reads "Number of
+/// data phase cycles are controlled by DMA buffer length"). It clocks exactly what the DMA feeds it and
+/// stops when the chain ends. So **one `gdma_start()` over an arbitrarily long descriptor chain plus one
+/// `lcd_ll_start()` is a single gapless stream across as many buffers as we like.** This driver takes
+/// that, on IDF's HAL + GDMA link-list APIs — one level below `esp_lcd`, not raw registers; IDF's own
+/// drivers use the same APIs. Rationale + what we give up:
+/// [ADR-0014](https://github.com/MoonModules/projectMM/blob/main/docs/adr/0014-own-i80-dma-driver-below-esp-lcd.md).
 ///
-/// Everything above the DMA is inherited unchanged from ParallelLedDriver: the slicing, the fused
-/// 3-slot encode ([ParallelSlots.h](ParallelSlots.md)), the async double-buffer, the 74HCT595
-/// shift-register expander, the loopback self-test, the `frameTime` KPI, and the dead-frame guard. This
-/// class adds only what is i80-specific — the WR pin (a '595 pin here, not an i80 tax: see clockPin)
-/// and the platform forwards — which is why it is nearly all one-liners.
+/// **What streaming costs.** The whole-frame path has no CPU deadline once a transfer is armed; the ring
+/// does. Its refill runs from the DMA's end-of-buffer interrupt and must beat the wire — 576 B per light
+/// at 26.67 MHz is **21.6 µs/light** — or the strands see a gap. That trade is the reason both paths ship
+/// and `useRing` is a switch, not a constant.
 ///
-/// LCD_CAM only (ESP32-S3 / -P4). The classic ESP32's i80 is the I2S peripheral, a different backend
-/// entirely, so this driver is not offered there.
+/// **Both drivers ship, deliberately.** `MultiPinLedDriver` is the **reference**: correct, memory-capped,
+/// and what this one is measured against. This is the **challenger**. Both are registered module types, so
+/// switching is a swap in the UI — the A/B needs no reflash, same board, same effect. The reference is
+/// retired only if and when the challenger demonstrably beats it.
+///
+/// Everything above the DMA is inherited unchanged from ParallelLedDriver: the slicing, the fused 3-slot
+/// encode (ParallelSlots.h), the async double-buffer, the loopback self-test, the
+/// `frameTime` KPI, and the dead-frame guard. This class adds only what is i80-specific — WR, the ring's
+/// geometry, and the platform forwards — which is why it is nearly all one-liners. LCD_CAM only: the
+/// classic ESP32's i80 is the I2S peripheral, a different backend entirely.
+///
+/// ---
+///
+/// ## The 74HCT595 pin expander (skip unless one is fitted)
+///
+/// **1 GPIO drives 8 strands**, so 6 data pins → **48 strands**. Off by default (`pinExpander`); with it
+/// off, everything above is the whole story and WR never reaches a pad.
+///
+/// ```text
+///   bus lane 0 ──────► SER    ┌── 74HCT595 ──┐ QA ──► strand 0
+///                             │              │ QB ──► strand 1
+///   WR (pixel clock) ──┬────► SRCLK (shift)  │ ..        ..
+///                      │      │              │ QH ──► strand 7
+///   bus lane N ──┬─────┼────► RCLK (latch)   └──────────────┘
+///                │     │
+///                │     └────► SRCLK of every other '595  (all shift in lockstep)
+///                └──────────► RCLK  of every other '595  (all latch together)
+/// ```
+///
+/// **How one lane becomes 8 strands.** A '595 is a serial-in / parallel-out shift register: 8 SRCLK edges
+/// clock 8 bits down its chain, then one RCLK edge presents all 8 at once on QA..QH. So a lane's byte
+/// becomes 8 strands' worth of one WS2812 bit, and the whole '595 bank presents that bit simultaneously.
+///
+/// **Why WR is free, and why the latch is not.** The peripheral toggles WR once per bus word in hardware —
+/// exactly a shift clock — so SRCLK costs **zero DMA bytes**. But the peripheral has only ONE clock
+/// output, and it is already spent on SRCLK; the latch has to come from somewhere else, and the only
+/// thing left is a **data lane**, driven per word like pixel data — one lane that carries no strand.
+///
+/// **What bounds the strand count is the driver, not the bus:** every data pin fans out to 8, and
+/// ParallelLedDriver refuses more than `kMaxStrands` (64), so **8 data pins is the ceiling** — 64 strands.
+/// hpwit's board populates **6 → 48 strands**.
+///
+/// **The '595 is a one-slot pipeline.** Its outputs only change on the latch, so during slot N the strand
+/// sees the byte latched at the START of slot N — i.e. what was shifted in during slot N−1. The encoder
+/// therefore writes every value ONE SLOT EARLY (the rotation in ParallelSlots.h). Get that wrong and the
+/// first LED survives while everything after it is noise.
+///
+/// **Why the expander needs the ring.** The fan-out costs 8 bus words per WS2812 bit, so a light is 576 B
+/// and a **48 x 256** frame is ~144 KB — more contiguous internal RAM than an S3 has, and from PSRAM the
+/// DMA cannot sustain the expander's 26.67 MHz clock (both measured). Streaming is the only route to that
+/// target, which is why these two features are one story.
+///
+/// **Prior art.** The '595 expander and the per-light streaming ring are hpwit's ideas, from
+/// [I2SClocklessVirtualLedDriver](https://github.com/hpwit/I2SClocklessVirtualLedDriver) and his expander
+/// board — studied hard, credited, and then written fresh against our own architecture and layout (his
+/// `putdefaultones()` prefill has our own counterpart; the transpose is our own SWAR). He runs a PLL240M
+/// clock tree (19.2 MHz, a 30 µs/light encode budget); we run PLL160M, where the only in-spec integer
+/// prescale is 26.67 MHz — a **21.6 µs/light** budget.
 class MoonLedDriver : public ParallelLedDriver<MoonLedDriver> {
 public:
     // Data pins + loopback pin default to UNSET, for the same reason as the sibling: they are
@@ -66,14 +118,38 @@ public:
     /// pad. Spending a GPIO on it would buy nothing.
     int8_t clockPin = 10;
 
-    /// A/B path selector: which output path the shift-mode driver uses. 0 = AUTO (wantsRing() decides:
-    /// ring when the whole frame won't fit internal DMA RAM, else whole-frame), 1 = force RING, 2 = force
-    /// WHOLE-FRAME. The force modes exist to A/B the two paths on the same board/content/load — in
-    /// particular to test whether the whole-frame PSRAM path actually holds at the shift clock (the premise
-    /// the ring was built to work around), and to force the ring for its own diagnosis. AUTO is the shipping
-    /// default; the forces are diagnostic. Ignored in direct mode (never rings). A prepare trigger (rebuilds
-    /// the bus). Values match the Select option order below.
-    uint8_t forceRing = 0;
+    /// Stream the frame as a RING of small internal DMA buffers (on, the default), or send it WHOLE from
+    /// one contiguous buffer (off). Ignored in direct mode — that never rings. A prepare trigger (rebuilds
+    /// the bus).
+    ///
+    /// Whole-frame is the simpler path and is proven under ~240 lights/strand, but it cannot reach the
+    /// expander's target size: a 48x256 frame is ~144 KB contiguous internal, which does not exist, and
+    /// from PSRAM the DMA cannot sustain the 26.67 MHz expander clock (measured: the identical frame runs
+    /// from internal RAM and produces no output from PSRAM). So it stays as the A/B reference the ring is
+    /// measured against, not as a fallback the ring degrades into.
+    bool useRing = true;
+
+    /// Lights per DMA buffer — the ring's grain, and a control rather than a constant because the optimum
+    /// is a measurement, not a derivation. RAM is the ONLY axis that wants it small: at 1 the ring is
+    /// ~18 KB flat at ANY strand length (128, 256, 1024 all cost the same), which is what puts 48x256 in
+    /// reach. Three axes want it big:
+    ///
+    /// | axis | why big wins |
+    /// |---|---|
+    /// | per-call overhead | the encode seam's fixed cost amortises over the rows in a buffer; at 1 it is paid per light, inside the ISR |
+    /// | interrupt rate | one EOF per buffer: 256 lights at 100 fps is 25.6k int/s at 1 row vs 1.6k at 16 — and a busy ISR starves the network stack |
+    /// | lap-time runway | `ringRows x ringBufs x 21.6 us` is how long a WiFi preemption may last before the DMA laps a buffer the ISR is still refilling |
+    ///
+    /// So the per-light ring is not "better" — it is the only geometry whose RAM is flat. Sweep this to
+    /// find the knee. Pin-expander mode only; a prepare trigger (the buffers are sized and the DMA chain
+    /// mounted at build time, so a change is a rebuild). Default = what this driver shipped with, so an
+    /// existing config renders identically.
+    uint8_t ringRows = platform::kRingRowsDefault;
+
+    /// How many buffers the DMA circulates. Depth buys **lap time**, not capacity: the pool is a sliding
+    /// window the encoder refills behind the read head, so `ringRows x ringBufs x 21.6 us` is the jitter
+    /// the ring absorbs. Pin-expander mode only; a prepare trigger.
+    uint8_t ringBufs = platform::kRingBufsDefault;
 
     // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
 
@@ -81,13 +157,18 @@ public:
     /// Unlike the sibling this does NOT add `i2sLanes`: the classic ESP32's i80 is the I2S peripheral,
     /// which this backend does not implement.
     static constexpr uint8_t lanesAvailable() { return platform::lcdLanes; }
-    static constexpr bool kPowerOfTwoBus = true;   // the BUS rounds to 8/16; the pin count is free
+    /// The i80 bus width is 8 or 16 — a hardware fact (`lcd_ll_set_data_wire_width` takes nothing else).
+    /// The PIN count stays free: configure only the pins that drive something and the base rounds the bus
+    /// up around them, parking the spare lanes on WR (which the peripheral already drives, and nothing
+    /// reads). Parlio sets this false — its bus width IS its pin count.
+    static constexpr bool kPowerOfTwoBus = true;
     /// The loopback cannot build a 1-lane private bus, so it rebuilds the full-width bus and carries
     /// the pattern on lane 0 — the test frame must therefore be encoded at the operational bus width.
     static constexpr bool kLoopbackFullWidth = true;
+    /// Status text when the bus will not come up, so the cause is on screen rather than in a serial log.
+    /// The two real causes are named: a pin the peripheral cannot route, or no DMA-reachable memory for
+    /// the frame (or the ring's pool).
     static constexpr const char* kInitFailMsg = "MoonI80 bus init failed — check pins / memory";
-    /// forceRing Select options (index = the forceRing member value): 0 auto, 1 ring, 2 whole-frame.
-    static constexpr const char* kForceRingOptions[3] = {"auto", "ring", "wholeFrame"};
     /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this driver is
     /// LCD_CAM-only, so the answer is simply "wherever this driver runs at all".
     static constexpr bool kSupportsPinExpander = platform::lcdLanes > 0;
@@ -101,22 +182,38 @@ public:
     void addBusControls() {
         controls_.addPin("clockPin", clockPin);
         controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
-        // A/B path selector (shift mode only): AUTO / force ring / force whole-frame. Options match the
-        // forceRing member (0/1/2). Distinct axis from ringSnapshot — this picks the PATH, ringSnapshot
-        // tunes how the RING reads its source; they compose (force ring, then snapshot on/off). Shown only
-        // in shift mode (direct never rings). Force whole-frame is how the whole-frame-PSRAM-at-the-shift-
-        // clock question gets tested deliberately rather than left to the auto router.
-        controls_.addSelect("forceRing", forceRing, kForceRingOptions, 3);
-        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
-        // TEMP DIAGNOSTIC: ring internals as a read-only control, so the ≥256 stall can be diagnosed by
-        // polling /api/state (reliable) instead of scraping serial. Shows "slices/bufs eof/N done drain
-        // items(cap/used)". Remove once the reuse boundary is fixed.
-        controls_.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
     }
+
+    /// The output path + the ring's geometry and instrument. A separate hook from addBusControls() so the
+    /// base can place these AFTER latchPin — clockPin and latchPin are one '595 wiring pair and belong
+    /// together in the UI, not split by a mode selector.
+    void addRingControls() {
+        // Path selector (pin-expander mode only): the ring, or the whole frame. A distinct axis from
+        // ringSnapshot — this picks the PATH, ringSnapshot tunes how the RING reads its source; they
+        // compose. Whole-frame is the A/B reference: it is how the whole-frame-PSRAM-at-the-expander-clock
+        // question stays testable on the same board and content.
+        controls_.addBool("useRing", useRing);
+        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
+        // The geometry + the instrument, shown only when the RING is the chosen path — all three are
+        // meaningless on the whole-frame one. (Gating on wantsRing() is safe here, unlike ringSnapshot's:
+        // it reads `useRing`, a plain member, not frameBytes_, which is still 0 when the schema is first
+        // built.)
+        controls_.addUint8("ringRows", ringRows, 1, 64);
+        controls_.setHidden(controls_.count() - 1, !wantsRing());
+        controls_.addUint8("ringBufs", ringBufs, 2, 32);
+        controls_.setHidden(controls_.count() - 1, !wantsRing());
+        // Ring internals, so the streaming can be diagnosed by polling /api/state (reliable) rather than
+        // scraping serial: "sl<slices>/bf<bufs> dn<done> de<descErr> enc<worst refill µs> gap<worst EOF-to-EOF µs>".
+        controls_.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
+        controls_.setHidden(controls_.count() - 1, !wantsRing());
+    }
+
     /// Refresh the ringDbg diagnostic string once a second (base tick1s chains here via refreshBusKpi).
+    /// Nothing to report on the whole-frame path — the control is hidden there, so leave it untouched
+    /// rather than writing a "no ring" status that only repeats what useRing says.
     void refreshBusKpi() {
         const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
-        if (!s.isRing) { std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "not ring"); return; }
+        if (!s.isRing) return;
         std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u de%u enc%u gap%u",
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
                       static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.descErr),
@@ -124,9 +221,14 @@ public:
                       // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
                       // enc >= gap == the refill can't keep pace (PACE); enc << gap but still fails == CURSOR/logic.
     }
+    /// Which of this driver's controls need the BUS rebuilt (not just a re-encode) when they change:
+    /// the WR pin, the output path, and the ring's geometry — buffers are sized and the DMA chain mounted
+    /// at build time, so each of these is a rebuild.
     bool busControlTriggersBuild(const char* name) const {
         return std::strcmp(name, "clockPin") == 0
-            || std::strcmp(name, "forceRing") == 0;   // A/B path switch: rebuild the bus on the new path
+            || std::strcmp(name, "useRing") == 0      // path switch: rebuild the bus on the new path
+            || std::strcmp(name, "ringRows") == 0     // geometry: buffers are sized and the chain mounted
+            || std::strcmp(name, "ringBufs") == 0;    // at build time, so a change is a rebuild
     }
 
     /// WR only reaches a pad in shift mode, so it can only COLLIDE in shift mode. In direct mode the
@@ -161,17 +263,18 @@ public:
                                            wantSecondBuffer, this->busClockMultiplier());
     }
 
-    /// Should reinit build a RING for this config instead of the whole-frame path? Only when the '595
-    /// expander is engaged AND the whole frame would NOT fit internal DMA RAM — in which case the
-    /// whole-frame path would put it in PSRAM and the S3's GDMA stalls reading PSRAM at the expander's
-    /// 26.67 MHz clock (ADR-0014). A shift frame that DOES fit internal keeps the proven whole-frame path
-    /// (and stays an A/B control against the ring at the same size). Direct mode never rings — it drives
-    /// PSRAM fine at the 10×-slower clock.
+    /// Should reinit build a RING for this config instead of the whole-frame path? Only in pin-expander
+    /// mode — direct mode never rings, it drives PSRAM fine at the 10x-slower clock — and then it is the
+    /// user's choice via `useRing`, defaulting to on.
+    ///
+    /// There is no auto-router. It would have exactly one right answer at the size the expander exists for
+    /// (a 48x256 frame never fits internal DMA RAM, so it would always pick the ring) while presenting
+    /// itself as a decision, and its silent fallback made the ACTIVE path invisible — the driver reported
+    /// "driving N lights" while quietly running whole-frame from PSRAM, which does not clock at the
+    /// expander's 26.67 MHz. The switch says what runs.
     bool wantsRing() const {
-        if (!pinExpanderMode()) return false;                  // direct mode never rings (drives PSRAM fine)
-        if (forceRing == 1) return true;                 // A/B: force the ring
-        if (forceRing == 2) return false;                // A/B: force whole-frame (test PSRAM at the shift clock)
-        return !platform::moonI80Ws2812InternalFits(this->frameBytes_);   // AUTO
+        if (!pinExpanderMode()) return false;   // direct mode never rings (drives PSRAM fine)
+        return useRing;
     }
 
     /// Bring the bus up as a streaming RING (the phase-2 path): the platform loops a few small internal
@@ -179,13 +282,16 @@ public:
     /// materialises (see platform.h). `rowBytes`/`padBytes` come from the base's frame arithmetic; the
     /// trampoline below is the encode seam. Returns false if even the small ring won't fit — the base
     /// then falls back to busInit (whole-frame), which idles with a status if IT can't fit either.
-    bool busInitRing(size_t rowBytes, uint32_t totalRows, size_t padBytes) {
+    bool busInitRing(size_t rowBytes, uint32_t totalRows) {
         return platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
-                                               padBytes, this->busClockMultiplier(),
+                                               ringRows, ringBufs, this->busClockMultiplier(),
                                                &MoonLedDriver::ringEncodeTrampoline, this);
     }
+    /// Send one frame on the ring: prime the pool, fire the DMA, and let the EOF ISR refill behind it.
     bool busTransmitRing()          { return platform::moonI80Ws2812TransmitRing(bus_); }
+    /// Did the bus actually come up as a ring? The base routes tick() on this, so it reports what the
+    /// platform BUILT, not what was asked for — a ring that would not fit falls back to whole-frame.
     bool busIsRing() const          { return platform::moonI80Ws2812IsRing(bus_); }
 
     /// The platform's `MoonI80EncodeFn` seam: a plain function pointer (there is no CRTP hook for it), so
@@ -214,13 +320,26 @@ public:
             self->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
         }
     }
+    /// The whole-frame path's DMA buffer `i` (0, or 1 with doubleBuffer on) — where the base encodes a
+    /// frame. Null on a ring handle, which has no whole-frame buffer to hand out.
     uint8_t*  busBuffer(uint8_t i)              { return platform::moonI80Ws2812Buffer(bus_, i); }
+    /// Bytes that buffer holds — the base's guard against encoding past the end after a live resize.
     size_t    busCapacity() const               { return platform::moonI80Ws2812BufferCapacity(bus_); }
+    /// Clock buffer `i` out: one gapless DMA transfer of `bytes`, returning as soon as it is armed.
     bool      busTransmit(uint8_t i, size_t bytes) { return platform::moonI80Ws2812Transmit(bus_, i, bytes); }
+    /// Block until buffer `i` has finished clocking (or `ms` elapses) — how the async double-buffer
+    /// defers its wait to the NEXT frame instead of stalling this one.
     bool      busWait(uint8_t i, uint32_t ms)   { return platform::moonI80Ws2812Wait(bus_, i, ms); }
+    /// Measured wire time of the last frame, in µs — the `frameTime` KPI's source, and the output floor
+    /// the encode is compared against.
     uint32_t  busLastTransmitUs() const         { return platform::moonI80Ws2812LastTransmitUs(bus_); }
+    /// Tear the bus down: stop the DMA before freeing anything it could still read. Safe on a
+    /// half-built bus, so a failed init and a live one release through the same path.
     void      busDeinit()                       { platform::moonI80Ws2812Deinit(bus_); }
 
+    /// Drive `frame` on a private bus and capture the wire back on `loopbackRxPin` (jumpered), so the
+    /// self-test bit-verifies what the peripheral ACTUALLY emitted — the one instrument that does not
+    /// take the driver's word for it.
     platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
                                             size_t dataBytes, uint8_t rowBits) {
         return platform::moonI80Ws2812Loopback(this->busPinList(), this->busPinCount(),
@@ -232,6 +351,8 @@ public:
 
     /// WR is part of the bus identity, so a change to it rebuilds the bus — not just a data-pin edit.
     void recordBusPins() { lastClockPin_ = clockPin; }
+    /// Do this driver's extra bus pins still match the live bus? WR is bus identity here, so the base
+    /// rebuilds when this goes false rather than routing a stale clock.
     bool extraBusPinsCurrent() const { return lastClockPin_ == clockPin; }
 
 private:

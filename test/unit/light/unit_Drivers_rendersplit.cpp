@@ -240,7 +240,7 @@ TEST_CASE("render-split: toggling multicore live engages and disengages the work
 }
 
 // ROBUSTNESS FLOOR: a wedged core-1 worker must not hang the RENDER loop. The frame boundary waits for
-// the encode, normally bounded by one encode (the `stall` KPI measures it). But a worker that never
+// the encode, normally bounded by one encode (the `renderWait` KPI measures it). But a worker that never
 // signals done — starved, wedged, a lost notify — would otherwise spin core 0 forever, and a permanent
 // wedge ranks BELOW "degraded": the device must keep running, even poorly. So the boundary times out,
 // DISENGAGES the split, and every driver falls back to ticking inline on core 0 — the same single-core

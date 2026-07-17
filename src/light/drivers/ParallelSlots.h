@@ -5,49 +5,52 @@
 
 namespace mm {
 
-// WS2812 encode for parallel WS2812 buses — the contract between a parallel
-// driver (domain) and a parallel peripheral, named for the wire unit it builds
-// (one pixel-clock SLOT = one byte on the 8-bit bus), the RmtSymbol.h sibling.
-// Used by BOTH the LCD_CAM i80 driver (ESP32-S3, MultiPinLedDriver) and the Parlio
-// driver (ESP32-P4, ParlioLedDriver) — a Parlio bus byte and an i80 bus byte
-// are identical (one word per slot, bit L = data line L), so one encoder
-// serves both. Pure data transform, no platform include — the host CI encoder
-// test (unit_ParallelSlots.cpp) pins it with no ESP32.
-//
-// Technique (hpwit / Adafruit "ESP32uesday" / FastLED S3 lineage — studied,
-// not copied): every WS2812 data bit becomes THREE bus slots clocked at
-// 2.67 MHz (slot = 375 ns, bit = 1.125 µs):
-//
-//   slot 0: activeMask        — every active lane HIGH (the pulse start)
-//   slot 1: data bits & mask  — lane L's current bit at bus bit L
-//   slot 2: 0x00              — every lane LOW (the pulse tail)
-//
-// so a "1" bit is HIGH for 2 slots (750 ns ≈ t1h 700 ns) and a "0" bit for
-// 1 slot (375 ns ≈ t0h 350 ns). The LedDriverConfig nanosecond fields are
-// APPROXIMATED by the slot clock — timing is fixed by the pclk (chosen in
-// platform_esp32_i80.cpp; 375 ns keeps T0H inside even the newest WS2812B
-// revisions' ~380 ns max — longer "0" pulses wash strips out white on a
-// direct 3.3 V data line).
-//
-// Lanes-active-mask rule: a lane whose strand is shorter than the longest one
-// must appear in NEITHER slot 0 nor slot 1 once its lights are exhausted —
-// excluded lanes idle LOW for the rest of the frame instead of flashing white.
-// The caller expresses that by clearing the lane's bit in `activeMask`.
-//
-// Bus bit L = the L-th entry of the driver's `pins` list (D0 = first pin).
-// Bits go MSB-first per byte; channel order (GRB, …) is already applied by
-// Correction before the encode, so the encoder is order-agnostic (same
-// contract as encodeWs2812Symbols).
-//
-// The data slot is an 8×8 BIT-MATRIX TRANSPOSE: 8 lane bytes (rows) → 8 bus
-// bytes (one per data bit, the columns), byte b bit L = lane L's bit b. This
-// is the measured render-loop hot spot (docs/backlog/multicore-analysis-*: the
-// transpose is ~85% of the driver frame at 16K lights), so it uses the
-// branch-free SWAR transpose (Warren, *Hacker's Delight* §7-3 "delta swap";
-// the same 3-step 64-bit trick FastLED's transpose8x1 uses) instead of a
-// per-bit-per-lane gather loop — same result, no table, ~an order fewer ops.
-// Studied, not copied; pinned bit-perfect by unit_ParallelSlots.cpp + the
-// on-device loopback self-test.
+/// @defgroup ParallelSlots WS2812 slot encoder — the transpose + 3-slot wire format
+/// @{
+///
+/// WS2812 encode for parallel WS2812 buses — the contract between a parallel
+/// driver (domain) and a parallel peripheral, named for the wire unit it builds
+/// (one pixel-clock SLOT = one byte on the 8-bit bus) — the sibling of the RMT driver's symbol encoder.
+/// Used by BOTH the LCD_CAM i80 driver (ESP32-S3, MultiPinLedDriver) and the Parlio
+/// driver (ESP32-P4, ParlioLedDriver) — a Parlio bus byte and an i80 bus byte
+/// are identical (one word per slot, bit L = data line L), so one encoder
+/// serves both. Pure data transform, no platform include — the host CI encoder
+/// test (unit_ParallelSlots.cpp) pins it with no ESP32.
+///
+/// Technique (hpwit / Adafruit "ESP32uesday" / FastLED S3 lineage — studied,
+/// not copied): every WS2812 data bit becomes THREE bus slots clocked at
+/// 2.67 MHz (slot = 375 ns, bit = 1.125 µs):
+///
+///   slot 0: activeMask        — every active lane HIGH (the pulse start)
+///   slot 1: data bits & mask  — lane L's current bit at bus bit L
+///   slot 2: 0x00              — every lane LOW (the pulse tail)
+///
+/// so a "1" bit is HIGH for 2 slots (750 ns ≈ t1h 700 ns) and a "0" bit for
+/// 1 slot (375 ns ≈ t0h 350 ns). The LedDriverConfig nanosecond fields are
+/// APPROXIMATED by the slot clock — timing is fixed by the pclk (chosen in
+/// platform_esp32_i80.cpp; 375 ns keeps T0H inside even the newest WS2812B
+/// revisions' ~380 ns max — longer "0" pulses wash strips out white on a
+/// direct 3.3 V data line).
+///
+/// Lanes-active-mask rule: a lane whose strand is shorter than the longest one
+/// must appear in NEITHER slot 0 nor slot 1 once its lights are exhausted —
+/// excluded lanes idle LOW for the rest of the frame instead of flashing white.
+/// The caller expresses that by clearing the lane's bit in `activeMask`.
+///
+/// Bus bit L = the L-th entry of the driver's `pins` list (D0 = first pin).
+/// Bits go MSB-first per byte; channel order (GRB, …) is already applied by
+/// Correction before the encode, so the encoder is order-agnostic (same
+/// contract as encodeWs2812Symbols).
+///
+/// The data slot is an 8×8 BIT-MATRIX TRANSPOSE: 8 lane bytes (rows) → 8 bus
+/// bytes (one per data bit, the columns), byte b bit L = lane L's bit b. This
+/// is the measured render-loop hot spot (docs/backlog/multicore-analysis-*: the
+/// transpose is ~85% of the driver frame at 16K lights), so it uses the
+/// branch-free SWAR transpose (Warren, *Hacker's Delight* §7-3 "delta swap";
+/// the same 3-step 64-bit trick FastLED's transpose8x1 uses) instead of a
+/// per-bit-per-lane gather loop — same result, no table, ~an order fewer ops.
+/// Studied, not copied; pinned bit-perfect by unit_ParallelSlots.cpp + the
+/// on-device loopback self-test.
 
 /// The 8×8 bit-transpose, on the PACKED representation — the form the hot path wants.
 ///
@@ -69,9 +72,33 @@ inline uint64_t transposeBits8x8(uint64_t x) {
     return x;
 }
 
-// Transpose 8 lane bytes into 8 bit-plane bytes: out[b] bit L = in[L] bit b.
-// Inactive lanes must be passed as 0 (the caller masks them) so they contribute
-// no set bit to any plane. The array-shaped wrapper around transposeBits8x8.
+/// The same 8×8 butterfly on a REGISTER PAIR — bit-identical to `transposeBits8x8`, but written in the
+/// 32-bit words the target actually has.
+///
+/// The ESP32's Xtensa is a 32-bit machine, so every `uint64_t` step above becomes register-pair
+/// arithmetic: a shift by 7 across a 64-bit value is several instructions, not one. Hacker's Delight
+/// states this transpose on two 32-bit halves for exactly that reason, and it is the form hpwit's driver
+/// uses (`x`, `y`, `x1`, `y1` — never a 64-bit word). Only the third round crosses the halves, and it is
+/// a plain field exchange, so the two forms compute the same function — pinned by a test over the byte
+/// patterns the encoder produces, and checked against 300k random inputs when this was written.
+///
+/// Keep BOTH: the 64-bit form is the clearer statement of the algorithm and is what a 64-bit host
+/// compiles best; this one is what the 32-bit device wants. `transposeLanes8x8` picks per platform.
+inline void transposeBits8x8Pair(uint32_t& lo, uint32_t& hi) {
+    uint32_t t;
+    t = (lo ^ (lo >> 7))  & 0x00AA00AAu; lo = lo ^ t ^ (t << 7);
+    t = (hi ^ (hi >> 7))  & 0x00AA00AAu; hi = hi ^ t ^ (t << 7);
+    t = (lo ^ (lo >> 14)) & 0x0000CCCCu; lo = lo ^ t ^ (t << 14);
+    t = (hi ^ (hi >> 14)) & 0x0000CCCCu; hi = hi ^ t ^ (t << 14);
+    // The 28-step is the only round that moves bits between the halves: it swaps the low word's high
+    // nibbles with the high word's low nibbles, which is one masked exchange rather than a 64-bit shift.
+    t = (lo ^ (hi << 4)) & 0xF0F0F0F0u; lo ^= t; hi ^= (t >> 4);
+}
+
+/// Transpose 8 lane bytes into 8 bit-plane bytes: `out[b]` bit L = `in[L]` bit b — the array-shaped
+/// wrapper around transposeBits8x8, for callers that hold their lanes as bytes.
+///
+/// Inactive lanes must be passed as 0 (the caller masks them) so they contribute no set bit to any plane.
 inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
     uint64_t x = 0;
     for (int r = 0; r < 8; r++) x |= static_cast<uint64_t>(in[r]) << (8 * r);
@@ -87,6 +114,10 @@ inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
 // no new magic constants. (If profiling ever shows the two-pass combine is the
 // ceiling, a fused 128-bit SWAR is a drop-in behind this signature + the same test.)
 // Inactive lanes must be passed as 0 by the caller, as with transposeLanes8x8.
+/// The 16-lane transpose: 16 lane bytes into 8 bit-plane HALFWORDS, for a 16-bit bus.
+///
+/// Two 8-lane passes combined, so it reuses the same butterfly and adds no new magic constants.
+/// Inactive lanes must be passed as 0 by the caller, as with transposeLanes8x8.
 inline void transposeLanes16x8(const uint8_t* in, uint16_t* out) {
     uint8_t lo[8], hi[8];
     transposeLanes8x8(in,     lo);   // lanes 0..7  → low byte of each plane
@@ -109,6 +140,12 @@ inline void transposeLanes16x8(const uint8_t* in, uint16_t* out) {
 //   activeMask: bit L set = lane L drives this row (8 or 16 bits wide = Slot).
 //   channels:   wire bytes per light (3 RGB / 4 RGBW / 5 RGBCCT / …), also the lane stride.
 //   out:        channels * 8 * 3 SLOTS (Slot elements), fully written.
+/// Encode one ROW — one light across every lane — into `channels * 8 * 3` bus slots: the DIRECT-mode
+/// encoder, one lane per pin, no expander.
+///
+/// Writes all three words of every slot (pulse start / data / tail). `activeMask` carries which lanes are
+/// live: an exhausted strand's bit is clear, so it idles LOW instead of flashing. This is the render
+/// loop's hot spot — see the group description for the transpose and why it is SWAR.
 template <class Slot>
 inline void encodeWs2812ParallelSlots(const uint8_t* wire, Slot activeMask,
                                  uint8_t channels, Slot* out) {
@@ -413,55 +450,59 @@ inline void encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint
     constexpr uint8_t kLanes = sizeof(Slot) * 8;
     if (outPerPin == 0 || outPerPin > kPinExpanderOutputs) return;
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
-    for (uint8_t ch = 0; ch < channels; ch++) {
-        // The transposed bit-planes, held PACKED — one uint64 per shift cycle rather than an array of
-        // eight bytes. Byte `bit` of planes[c] IS the bit-plane for that bit (its bit P = pin P), so
-        // the emit loop shifts the byte it wants straight out of the register.
-        //
-        // **The staging arrays were the cost, not the butterfly.** The old form filled a `lanes[8]`
-        // array that the transpose immediately packed back into exactly this register, then spilled
-        // eight result bytes that the emit loop reloaded one at a time — 24 times per light. Measured
-        // on an S3 (board B, 16 strands through a '595): removing that ceremony took the encode from
-        // **8.85 to 6.19 µs/light**. The SWAR arithmetic itself is nearly free: a batched variant that
-        // packed four shift cycles into ONE butterfly (an 8×8 costs the same for 2 lanes as for 8) was
-        // built and measured, and changed nothing — so it was dropped rather than kept for elegance.
-        uint64_t planes[kPinExpanderOutputs];
-        // The 16-lane bus is two INDEPENDENT 8-lane transposes (low byte = pins 0-7, high = pins 8-15),
-        // so it needs a second packed word. The 8-bit path never reads it and the compiler drops it.
-        uint64_t planesHi[kPinExpanderOutputs];
+    // Words per WS2812 bit: each bit is one 3-word slot per shift cycle.
+    const size_t bitStride = static_cast<size_t>(3) * outPerPin;
 
+    // **The transpose IS the emit: each shift cycle's eight bit-planes are stored the moment they are
+    // computed, while they are still in registers.** Staging them in a planes[] array first cannot work
+    // on this target — 8 cycles × 2 words exceeds the register file, so every plane spills to the stack
+    // and is reloaded once per bit. Measured on an S3, that staging cost 97 word load/stores per light
+    // against the 17 byte-stores of actual output.
+    //
+    // This is the same lesson the `lanes[8]` array taught one level down (8.85 → 6.19 µs/light when it
+    // went); planes[] was the identical pattern. hpwit's driver has no staging either — his transpose
+    // stores straight into the DMA buffer at its pulse offsets. Studied, then written fresh here.
+    //
+    // The price is a strided store (one cycle's eight planes land `bitStride` apart, not contiguously),
+    // which is one address add per store — far cheaper than a spill plus a reload.
+    for (uint8_t ch = 0; ch < channels; ch++) {
+        Slot* chBase = out + static_cast<size_t>(ch) * 8 * bitStride;
         for (uint8_t c = 0; c < outPerPin; c++) {
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
-            // Pack the lane bytes straight into the SWAR word — no intermediate array.
-            uint64_t lo = 0, hi = 0;
+            // Pack the lane bytes straight into the SWAR register pair — lane p is byte p of the 8×8
+            // matrix, i.e. byte p of A (p<4) or byte p-4 of B (p≥4). A 16-lane bus needs a second pair
+            // for pins 8..15; the 8-bit path never touches it and the compiler drops it.
+            uint32_t loA = 0, loB = 0, hiA = 0, hiB = 0;
             for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
                 const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
                 if (!(activeMask & (uint64_t(1) << v))) continue;   // exhausted strand: idle LOW
-                const uint64_t b = wire[static_cast<size_t>(v) * channels + ch];
-                if (p < 8) lo |= b << (8 * p);
-                else       hi |= b << (8 * (p - 8));
+                const uint32_t b = wire[static_cast<size_t>(v) * channels + ch];
+                if (p < 8) { if (p < 4) loA |= b << (8 * p); else loB |= b << (8 * (p - 4)); }
+                else       { const uint8_t q = static_cast<uint8_t>(p - 8);
+                             if (q < 4) hiA |= b << (8 * q); else hiB |= b << (8 * (q - 4)); }
             }
-            planes[c] = transposeBits8x8(lo);
-            if constexpr (sizeof(Slot) != 1) planesHi[c] = transposeBits8x8(hi);
-        }
+            transposeBits8x8Pair(loA, loB);
+            if constexpr (sizeof(Slot) != 1) transposeBits8x8Pair(hiA, hiB);
 
-        for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte, as the wire contract
-            const uint8_t sh = static_cast<uint8_t>(8 * bit);   // byte `bit` of the packed plane
-            for (uint8_t c = 0; c < outPerPin; c++) {
-                const Slot first = (c == 0) ? latch : Slot(0);   // RCLK rides word 0 of each slot
+            const Slot first = (c == 0) ? latch : Slot(0);   // RCLK rides word 0 of each slot
+            Slot* dst = chBase + outPerPin + c;              // the DATA word of bit 7's slot, cycle c
+            for (int bit = 7; bit >= 0; bit--) {             // MSB-first per byte, as the wire contract
+                const uint8_t sh = static_cast<uint8_t>(8 * (bit & 3));
                 Slot data;
                 if constexpr (sizeof(Slot) == 1) {
-                    data = static_cast<Slot>(planes[c] >> sh);
+                    data = static_cast<Slot>(((bit < 4) ? loA : loB) >> sh);
                 } else {
-                    data = static_cast<Slot>((planes[c] >> sh) & 0xFF)
-                         | static_cast<Slot>(((planesHi[c] >> sh) & 0xFF) << 8);
+                    data = static_cast<Slot>((((bit < 4) ? loA : loB) >> sh) & 0xFF)
+                         | static_cast<Slot>(((((bit < 4) ? hiA : hiB) >> sh) & 0xFF) << 8);
                 }
-                // ONLY the data word. out[c] and out[2*outPerPin + c] are the prefilled constants.
-                out[outPerPin + c] = static_cast<Slot>(data | first);
+                // ONLY the data word — the slot's other two are the prefilled constants.
+                *dst = static_cast<Slot>(data | first);
+                dst += bitStride;
             }
-            out += 3 * outPerPin;
         }
     }
 }
+
+/// @}
 
 } // namespace mm

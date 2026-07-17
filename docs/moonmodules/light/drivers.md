@@ -1,12 +1,16 @@
 # Drivers
 
-A driver reads its window of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies its per-light [output correction](moxygen/DriverBase.md), and sends the result out — a wire protocol (WS2812), the network (Art-Net / E1.31 / DDP), a smart-light hub (Hue), or the web UI (Preview). Drivers are added per board through the catalog ([`deviceModels.json`](../../../web-installer/deviceModels.json)); `PreviewDriver` is the one boot-wired driver. Every driver leads with the same [shared correction + source-window controls](#shared-driver-controls) (`localBrightness` / `preset` / `whiteMode` and the `start` / `count` slice `[start, start+count)`), then its own. Each card links to a detail page and, where it doesn't fit the table, a **⌄ details** section below.
+A driver sends lights somewhere. It reads its slice of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies its own [output correction](moxygen/DriverBase.md), and outputs — over a wire (WS2812), the network (Art-Net / E1.31 / DDP), to a smart-light hub (Hue), or to the web UI (Preview).
 
-**Jump to:** [shared controls](#shared-driver-controls) · [LED output](#led-output-drivers) · [Network](#network-drivers) · [Smart light](#smart-light-drivers) · [Preview](#preview-drivers)
+Several drivers can share one buffer, each driving its own slice. Every driver starts with the same [shared controls](#shared-driver-controls), then adds its own. Drivers are added per board through the catalog ([`deviceModels.json`](../../../web-installer/deviceModels.json)); `PreviewDriver` is the one boot-wired driver.
+
+**Jump to:** [shared controls](#shared-driver-controls) · [LED](#led-drivers) · [Network](#network-drivers) · [Smart light](#smart-light-drivers) · [Preview](#preview-drivers)
 
 ## Shared driver controls
 
-Every driver card leads with the same block, added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements it: a per-driver **output correction** (how this driver's slice looks) and a **source window** (which slice of the shared buffer it reads). The driver's own controls (pins, protocol, IP…) follow.
+### Shared 💫 · every driver
+
+Added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements it: a per-driver **output correction** (how this driver's slice looks) and a **source window** (which slice of the shared buffer it reads). Every driver card leads with this block; its own controls follow.
 
 <img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="Shared driver controls: localBrightness, preset, whiteMode, start, count">
 
@@ -14,33 +18,33 @@ Every driver card leads with the same block, added once by [`DriverBase`](moxyge
 - `preset` — the [light preset](supporting.md) this driver applies per light (channel order / RGBW synthesis), referenced by its stable id (not its name), so renaming or reordering presets never breaks a driver's reference and it survives a reboot.
 - `whiteMode` — how the white channel is derived for an RGBW strip, applied only when the referenced preset carries a W channel.
 - `start` — first light of the shared buffer this driver reads (default `0`).
-- `count` — how many lights from `start` this driver drives. **Blank / default drives all lights** (the value is the `uint16` max, clamped to the buffer); set a number to output only that slice — the way multiple drivers each own a section of one buffer (an onboard status LED at `0`, the main strip from `1`).
+- `count` — how many lights from `start` this driver drives. **Blank / default drives all lights**; set a number to output only that slice — the way multiple drivers each own a section of one buffer (an onboard status LED at `0`, the main strip from `1`).
 
-## LED output drivers
+Detail: [technical](moxygen/DriverBase.md)
+
+## LED drivers
 
 <a id="rmtled"></a>
 <a id="multipinled"></a>
 <a id="moonled"></a>
 <a id="parlioled"></a>
 
-### LED output 💫 · wire
+### LED driver 💫 · wire
 
-Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three peripherals do this — pick by chip: **RMT** (single/few strands, any ESP32), **MultiPin** (8 or 16 parallel strands — the i80 bus, backed by LCD_CAM on the S3/P4 and by the I2S peripheral on the classic ESP32), **Parlio** (1–16 parallel strands, P4). Same controls, same wire contract; they differ only in how many strands clock out at once and on which chip.
-
-**Moon** is a fourth entry: the *same* LCD_CAM output as **MultiPin**, same pins and same controls, but driven by our own DMA code instead of ESP-IDF's `esp_lcd`. It exists to lift the memory ceiling that caps how many lights the MultiPin driver can drive. **MultiPin remains the default and the reference implementation**; Moon is the challenger, and both are offered so they can be compared on the same board without a reflash. Why, and what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md).
+Addressable WS2812B-class LEDs over a wire. Four drivers, same controls and same wire contract; they differ in how many strands clock out at once and on which chip. **Start with RMT** for a few strands, **MultiPin** for many (up to 16), **Parlio** on a P4 — and **Moon** when you need more lights than one DMA buffer holds, or more strands than you have GPIOs (its 74HCT595 pin expander turns 6 pins into 48 strands). Which to pick, and why: [details](#led-driver-details).
 
 <img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="LED output driver controls">
 
-Plus the [shared correction + window controls](#shared-driver-controls) above:
+Plus the [shared controls](#shared-driver-controls) above:
 
-- `pins` — data GPIO list, e.g. `18,17,16` (one strand each). Empty idles until set; changing it re-inits live.
-- `ledsPerPin` — lights per pin, following the broadcasting idiom (cf. NumPy / CSS shorthand): **empty** = even split of the window across pins; **one number** = that many on *every* pin (`64` → 64 each); **a list** `3,4,5` = one per pin by position (a short list even-splits the remainder). Shorter lanes idle for the extra pixel-clocks (padded to the longest).
+- `pins` — data GPIO list, e.g. `18,17,16`. One strand each — or, with Moon's pin expander, one *group of 8*. Empty idles until set; changing it re-inits live.
+- `ledsPerPin` — lights per **strand**, following the broadcasting idiom (cf. NumPy / CSS shorthand): **empty** = even split of the window; **one number** = that many on *every* strand (`64` → 64 each); **a list** `3,4,5` = one per strand by position (a short list even-splits the remainder). Shorter strands go dark early while the longest finishes. Through an expander an entry is one strand, not one pin, so two strands on one '595 can differ.
 - `loopbackTest` — on/off TX→RX loopback self-test (jumper the first pin to `loopbackRxPin`); verdict in the status field.
 - `loopbackTxPin` / `loopbackRxPin` — optional TX override + the RX pin for the self-test. Shown only while `loopbackTest` is on.
 
 Origin: WS2812B on FastLED / hpwit / WLED prior art ([analysis](../../backlog/leddriver-analysis-top-down.md))
 
-[Tests](../../tests/unit-tests.md#rmtleddriver)
+Tests: [RMT](../../tests/unit-tests.md#rmtleddriver) · [MultiPin](../../tests/unit-tests.md#multipinleddriver) · [Moon](../../tests/unit-tests.md#moonleddriver) · [Parlio](../../tests/unit-tests.md#parlioleddriver) · [shared](../../tests/unit-tests.md#parallelleddriver)
 
 Detail: [RMT](moxygen/RmtLedDriver.md) · [MultiPin](moxygen/MultiPinLedDriver.md) · [Moon](moxygen/MoonLedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
 
@@ -76,12 +80,12 @@ Detail: [technical](moxygen/NetworkSendDriver.md)
 
 <img src="../../assets/light/drivers/HueDriver.png" width="300" alt="A HueDriver in the UI">
 
-Drives **Philips Hue bulbs as pixels**: each colour bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit — smooth ambient colour, not strobing.
+Drives **Philips Hue bulbs as pixels**: each color bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit — smooth ambient color, not strobing.
 
 - `bridgeIp` — the bridge's LAN IPv4.
 - `appKey` — the Hue app key; filled by `pair`, persisted.
 - `pair` — button: press it, then the bridge's physical link button within ~30 s to claim a key.
-- `room` / `light` — dropdowns narrowing which colour lights are driven (both default `All`).
+- `room` / `light` — dropdowns narrowing which color lights are driven (both default `All`).
 
 Origin: projectMM, on the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/)
 
@@ -107,15 +111,36 @@ Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/s
 
 Detail: [technical](moxygen/PreviewDriver.md)
 
-## LED output — details
+## LED driver — details
 
-The LED-output drivers, compared. All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism, chip, and — for the two i80-bus entries (**MultiPin** and **Moon**) — in who programs the DMA.
+**Which driver?**
 
-| Peripheral | Chip | Strands | Notes |
-|------------|------|---------|-------|
-| **RMT** ([RmtLedDriver.md](moxygen/RmtLedDriver.md)) | any ESP32 (classic 8 ch, S3 4, P4 4 DMA) | one per RMT TX channel | the general single-/few-strand output; default for classic + S3 board entries. Adds `loopbackFrame` — a whole-frame variant of the self-test (bit-verifies a full frame, catching frame-rate / RF corruption a 24-bit burst misses). |
-| **MultiPin** ([MultiPinLedDriver.md](moxygen/MultiPinLedDriver.md)) | ESP32-S3 / P4 (LCD_CAM backend) · classic ESP32 (I2S backend) | **exactly 8 or 16** parallel (one DMA transfer) | the scale path where RMT tops out — one driver over IDF's i80 bus, routed to LCD_CAM on the S3/P4 and to the I2S peripheral on the classic ESP32. Bus width follows the pin count (≤8 → 8-bit, 9–16 → 16-bit). Adds `clockPin` (10) / `dcPin` (11) — i80 bus lines the LEDs ignore. A sub-16 board parks unused data lanes on spare GPIOs. The classic backend allocates its DMA buffer in internal RAM (I2S can't DMA from PSRAM), capping it at **2048 lights** (measured, 8×256); the LCD_CAM backend draws from PSRAM and reaches the full 16384. Over the cap the driver degrades with an `i80 bus init failed` status rather than crashing. |
-| **Moon** ([MoonLedDriver.md](moxygen/MoonLedDriver.md)) | ESP32-S3 / P4 (LCD_CAM only) | **exactly 8 or 16** parallel (one DMA transfer) | the *same* LCD_CAM output as **MultiPin**, with the same pins and controls, but on our own GDMA descriptor chain instead of `esp_lcd`. **MultiPin stays the default and the reference**; this is the challenger, offered alongside it so the two can be compared on one board without a reflash. Not offered on the classic ESP32 (whose i80 is the I2S peripheral, a different register file). Why it exists and what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md). |
-| **Parlio** ([ParlioLedDriver.md](moxygen/ParlioLedDriver.md)) | ESP32-P4 | **1–16** parallel (one DMA transfer) | the P4's parallel path (Parlio generates its own pixel clock — no clock/dc pins). Bus width follows the pin count (≤8 → 8-bit, 9–16 → 16-bit). On P4-NANO a known-good 8-set is `20,21,22,23,24,25,26,27`. |
+| Want | Use | Why |
+|---|---|---|
+| A few strands, any ESP32 | **RMT** | The default. Simple, no bus width to think about, one channel per strand. |
+| Many strands (up to 16) | **MultiPin** | The scale path where RMT runs out of channels. One DMA transfer drives every strand at once. |
+| Up to 16 strands on a **P4** | **Parlio** | The P4's own parallel peripheral — it generates its pixel clock, so there is no clock pin to spend. |
+| **More lights than fit one DMA buffer**, or **more strands than you have GPIOs** | **Moon** | The same LCD_CAM output as MultiPin, on our own DMA: it *streams* the frame, and it drives a 74HCT595 **pin expander** — 6 pins → 48 strands. |
 
-The detail pages carry each peripheral's wire contract, buffer slicing, memory sizing, and the loopback self-test.
+**Moon and MultiPin drive the same pins the same way; only the DMA underneath differs.** Start with MultiPin — it is the proven path. Choose Moon when you hit one of its two limits. Both are registered module types, so you can swap them in the UI on one board with no reflash.
+
+**The four, compared.** All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism, chip, and — for the two i80-bus entries (**MultiPin** and **Moon**) — in who programs the DMA.
+
+**Lane, pin, strand.** A **lane** is one bus data line; a **strand** is one chain of LEDs. The i80 **bus** is 8 or 16 lanes wide (a hardware fact — `lcd_ll_set_data_wire_width` takes nothing else), but you configure only the **pins** that drive something, at any count from 1: the driver rounds the bus up around them and parks the spare lanes on a pin the peripheral already drives, where nothing reads them.
+
+- **Direct:** one pin = one lane = one strand. 1–16 strands.
+- **Through an expander:** each data pin feeds one '595 and fans out to 8 strands, so **1–8 data pins → up to 64 strands** (the driver's ceiling). The **latch** also costs a lane — the peripheral has only one clock output, so it has to ride a data line — but the strand ceiling binds first. hpwit's board populates 6 pins → **48 strands**.
+
+| Driver | Chip | Strands | Extra controls | Notes |
+|---|---|---|---|---|
+| **RMT** ([detail](moxygen/RmtLedDriver.md)) | any ESP32 (classic 8 ch, S3 4, P4 4 DMA) | one per RMT TX channel | `loopbackFrame` | The general single-/few-strand output; default for classic + S3 board entries. `loopbackFrame` bit-verifies a *whole frame*, catching frame-rate / RF corruption a 24-bit burst misses. |
+| **MultiPin** ([detail](moxygen/MultiPinLedDriver.md)) | S3 / P4 (LCD_CAM) · classic (I2S) | **1–16** | `clockPin` `dcPin` | One driver over IDF's `esp_lcd` i80 bus. The **bus** is 8 or 16 bits wide (≤8 pins → 8-bit, 9–16 → 16-bit) — but the **pin count is free**: configure only the pins that drive something and the driver rounds the bus up around them, parking the spare lanes on a pin the peripheral already drives. `clockPin`/`dcPin` are i80 bus lines the LEDs ignore. **Capped by one contiguous DMA buffer**: the classic backend is internal-RAM only (I2S can't reach PSRAM) → **2048 lights**; LCD_CAM draws from PSRAM → **16384**. Over the cap it idles with a status rather than crashing. |
+| **Moon** ([detail](moxygen/MoonLedDriver.md)) | S3 / P4 (LCD_CAM only) | **1–16**; ×8 per pin with an expander (**6 pins → 48 strands**) | `clockPin` `pinExpander` `latchPin` `useRing` `ringRows` `ringBufs` | The same LCD_CAM output as MultiPin on **our own GDMA chain**, which buys two things `esp_lcd` cannot: a frame **streamed** through a small buffer pool instead of held whole (so length stops being a memory question), and a **74HCT595 pin expander** — one GPIO fans out to 8 strands. No `dcPin` at all, and WR is routed only when a '595 needs it as its shift clock. Not on the classic ESP32 (its i80 is the I2S peripheral). Why + what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md). |
+| **Parlio** ([detail](moxygen/ParlioLedDriver.md)) | ESP32-P4 | **1–16** | — | The P4's parallel path; Parlio generates its own pixel clock, so no clock/dc pins to spend. Bus width follows the pin count. On P4-NANO a known-good 8-set is `20,21,22,23,24,25,26,27`. |
+
+The detail pages carry each driver's wire contract, buffer slicing, memory sizing, and the loopback self-test.
+
+**What the parallel drivers share.** MultiPin, Moon and Parlio are thin peripheral shells over two common pieces — worth reading if you care how a frame is actually built:
+
+- **[Parallel LED driver base](moxygen/ParallelLedDriver.md)** — the shared body: strand slicing, the encode loop, the async double-buffer, the latch pad, the loopback self-test. A derived driver adds only its peripheral's DMA calls.
+- **[Slot encoder](moxygen/ParallelSlots.md)** — the wire format itself. Each WS2812 bit becomes three bus slots (pulse start / data / tail), and the data slot is an **8×8 bit transpose**: lanes in, bit-planes out, so one bus word carries the same bit of every strand. It is the render loop's measured hot spot.

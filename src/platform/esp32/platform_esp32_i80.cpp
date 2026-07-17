@@ -284,8 +284,8 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // Only the LCD_CAM backend can reach PSRAM at all, so the preference only exists here. (The
     // classic ESP32's i80 is the I2S peripheral, whose DMA cannot address PSRAM — it takes the
     // internal-only path below unconditionally, and never asks the question.)
-    const bool shiftMode = clockMultiplier > 1;
-    if (!shiftMode)
+    const bool pinExpanderMode = clockMultiplier > 1;
+    if (!pinExpanderMode)
         st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
             st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
     if (!st->buf[0])
@@ -295,7 +295,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
     // Shift mode wanted internal RAM and could not have it (a frame too big): take PSRAM rather than
     // refuse to drive. Expect the flicker until the frame fits or the real fix lands.
-    if (!st->buf[0] && shiftMode) {
+    if (!st->buf[0] && pinExpanderMode) {
         ESP_LOGW(I80_TAG, "shift frame (%u B) does not fit internal DMA RAM — using PSRAM; "
                           "expect stalled transfers. Reduce lights per strand.", (unsigned)bufferBytes);
         st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
@@ -324,7 +324,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
             // would stall exactly like a PSRAM buf[0] does. PSRAM doesn't touch the scarce internal DMA heap,
             // so no reserve check on that branch.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
-            if (!shiftMode)
+            if (!pinExpanderMode)
                 st->buf[1] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
                     st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
 #endif
@@ -334,7 +334,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
             // P4 where PSRAM DMA degrades) would drop internal RAM below the reserve → WiFi/HTTP alloc
             // failures. Degrade to single-buffer instead. This is also the FIRST attempt in shift mode.
             if (!st->buf[1]
-                && heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+                && heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
                        >= bufferBytes + HEAP_RESERVE) {
                 st->buf[1] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
                     st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
@@ -373,7 +373,8 @@ bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCou
     // WiFi/HTTP reserve); a PSRAM buffer doesn't touch it. Degrade (return false → driver idles with a
     // status) when neither region fits.
     const bool fitsInternal =
-        heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) >= bufferBytes + HEAP_RESERVE;
+        heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+            >= bufferBytes + HEAP_RESERVE;
     // PSRAM capacity is queried with MALLOC_CAP_SPIRAM ALONE, not `| MALLOC_CAP_DMA`. The combined
     // query asks the heap for a region tagged with BOTH caps and no registered heap is tagged both,
     // so it returns 0 — even on an S3 whose LCD_CAM GDMA reaches PSRAM perfectly well. (The *alloc*
@@ -386,7 +387,7 @@ bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCou
     // counting it here would let an over-large frame pass this pre-check and then die inside bus
     // creation with a misleading "check pins / memory" — the pre-check must fail first, and say so.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
-    const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bufferBytes;
+    const bool fitsPsram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bufferBytes;
 #else
     const bool fitsPsram = false;
 #endif
@@ -477,7 +478,7 @@ void i80Ws2812Deinit(I80Ws2812Handle& h) {
 // differs. Declared here so this TU can call it (same pattern as loopbackJumperOk).
 namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, bool shiftMode, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r);
 }
@@ -493,9 +494,9 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
         || dataBytes < 3 || dataBytes > frameBytes || rowBits < 8
         || clockMultiplier == 0) return r;
     const uint16_t txGpio = dataPins[0];   // lane 0 carries the pattern
-    const bool shiftMode = clockMultiplier > 1;
+    const bool pinExpanderMode = clockMultiplier > 1;
 
-    if (shiftMode) {
+    if (pinExpanderMode) {
         // SKIP the continuity pre-check. It drives txGpio and expects rxGpio to follow directly,
         // which is true of a bare jumper but FALSE through a 74HCT595: raising the serial input does
         // not raise an output (that takes 8 shift clocks + a latch). Running it here would report

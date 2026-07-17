@@ -1183,8 +1183,8 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
 // like the whole-frame path above. A driver that would pick the ring on device stays whole-frame on host.
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                            uint8_t /*laneCount*/, uint16_t /*wrGpio*/, size_t /*rowBytes*/,
-                           uint32_t /*totalRows*/, size_t /*padBytes*/, uint8_t /*clockMultiplier*/,
-                           MoonI80EncodeFn /*encode*/, void* /*user*/) {
+                           uint32_t /*totalRows*/, uint32_t /*rowsPerBuf*/, uint8_t /*ringBufs*/,
+                           uint8_t /*clockMultiplier*/, MoonI80EncodeFn /*encode*/, void* /*user*/) {
     return false;
 }
 bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& /*h*/) { return false; }

@@ -68,6 +68,22 @@ public:
     ///    only gives us one — and why the latch's word position is so delicate (ParallelSlots.h).
     ///  - In shift mode this pin is wired to the physical '595 clock line on the expander board.
     ///    Changing it means re-wiring hardware, not just re-configuring.
+    ///
+    /// **Give it a real, free GPIO — do not set -1.** Bench-proven that nothing on a WS2812 strand reads
+    /// WR or DC (4096 lights over 16 lanes, and 1440 through a '595, both render with both pins at -1:
+    /// the peripheral generates the signals internally and the GPIO matrix only carries them off-chip).
+    /// But -1 does not MEAN "unrouted" here — it means **65535**: the value reaches the platform as
+    /// `uint16_t`, which slips past IDF's `wr_gpio_num >= 0 && dc_gpio_num >= 0` check
+    /// (esp_lcd_panel_io_i80.c), where a properly-typed `GPIO_NUM_NC` would be rejected outright.
+    /// `esp_lcd` then hands 65535 to `esp_rom_gpio_connect_out_signal`, and what happens next is PER-TARGET
+    /// ROM, not an API contract: the S3 and classic ROMs open with an unsigned bounds compare and return
+    /// without writing (a silent no-op), but the **ESP32-P4 ROM has no such guard** and computes a store
+    /// ~0x50120554 — a quarter-megabyte past the GPIO block, in another peripheral's window — plus a
+    /// >31-bit shift. This driver runs on the P4. IDF's own `esp_rom/patches/esp_rom_gpio.c` is unguarded
+    /// too, so the S3's check is an implementation detail a patch could remove, not a promise. FastLED's
+    /// LCD_CAM driver parks both pins on a dummy GPIO for the same reason. To spend no GPIO at all, use
+    /// MoonLedDriver: owning the DMA below esp_lcd, it holds DC at a constant level and routes WR only
+    /// when a '595 needs it as SRCLK.
     int8_t clockPin = 10;
     int8_t dcPin = 11;
 

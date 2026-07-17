@@ -43,7 +43,7 @@ import gen_api  # noqa: E402  (same dir, on sys.path via _HERE above)
 # moonmodules.org). A `.h` link for a module that HAS a generated technical page is
 # repointed at that in-site page instead (see _API_MODULES / on_page_markdown); only
 # files with no generated page fall through to the GitHub blob URL.
-_BLOB_BASE = "https://github.com/MoonModules/projectMM/blob/main"
+_BLOB_BASE = gen_api._BLOB_BASE   # one definition — branch-pinned, see gen_api._blob_base()
 
 # {module stem: domain} for every module that got a generated technical page this
 # build, e.g. {"Control": "core", "FireEffect": "light"} — populated by on_files,
@@ -93,7 +93,12 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
         # rewrite below.
         stem = Path(rel).stem
         is_line_anchor = re.match(r'#L\d', frag)
-        if rel.endswith(".h") and stem in _API_MODULES and not is_line_anchor:
+        # EXCEPT on a generated moxygen page: that page IS the `.h`'s technical view, so
+        # repointing its own `Source: Foo.h` banner at the in-site page links it to
+        # ITSELF and the reader can never reach the header. A generated page's `.h`
+        # links stay GitHub blob URLs.
+        on_generated_page = "/moxygen/" in src_uri
+        if rel.endswith(".h") and stem in _API_MODULES and not is_line_anchor and not on_generated_page:
             domain = _API_MODULES[stem]
             return f"]({up}moonmodules/{domain}/moxygen/{stem}.md{frag})"
         # Resolve against the page dir to a repo-relative path (the correct case).
@@ -141,7 +146,11 @@ _ANCHOR_RE = re.compile(r'^<a id="(?P<id>[^"]+)"></a>\s*$')
 _IMG_RE = re.compile(r'^<img\b.*?>\s*$')
 _PARAM_RE = re.compile(r'^-\s+')
 _ORIGIN_RE = re.compile(r'^Origin:\s*(?P<body>.+?)\s*$')
+# `[Tests](href)` — the single-link form every card used before a card could cover several
+# modules. `Tests: [RMT](..) · [Moon](..)` is the multi-link form (mirrors the `Detail:` line),
+# for a merged card whose modules each have their own test section.
 _TESTS_RE = re.compile(r'^\[Tests\]\((?P<href>[^)]+)\)\s*$')
+_TESTS_MULTI_RE = re.compile(r'^Tests:\s*(?P<body>.+?)\s*$')
 _DETAIL_RE = re.compile(r'^Detail:\s*(?P<body>.+?)\s*$')   # `Detail: [Foo.md](..) · …` → Links column
 _DETAILS_RE = re.compile(r'^##\s+(?P<name>.+?)\s+—\s+details\s*$')
 
@@ -206,7 +215,9 @@ def _emit_row(b: dict, details_names: set) -> str:
     # the tag emoji in the Name column) so the link TYPE is scannable, not a wall of
     # small text — the recognizable docs-site convention. Labels are Title Case.
     links = []
-    if b["tests"]:
+    if b.get("testsMulti"):
+        links.append(f":material-test-tube: {b['testsMulti']}")
+    elif b["tests"]:
         links.append(f":material-test-tube: [Tests]({b['tests']})")
     if b["detail"]:
         # Title-case a lone `[technical]` label so it reads "Technical"; leave a named
@@ -270,7 +281,7 @@ def _render_catalog_table(markdown: str) -> str:
             flush_block()
             cur = {"anchors": pending_anchors, "title": _H3_RE.match(ln).group("title"),
                    "desc": [], "img": None, "params": [], "origin": None,
-                   "tests": None, "detail": None}
+                   "tests": None, "testsMulti": None, "detail": None}
             pending_anchors = []
             continue
         if _H2_RE.match(ln):                       # section boundary: close block + table
@@ -290,6 +301,8 @@ def _render_catalog_table(markdown: str) -> str:
                 cur["origin"] = _ORIGIN_RE.match(ln).group("body")
             elif _TESTS_RE.match(ln):
                 cur["tests"] = _TESTS_RE.match(ln).group("href")
+            elif _TESTS_MULTI_RE.match(ln):
+                cur["testsMulti"] = _TESTS_MULTI_RE.match(ln).group("body")
             elif _DETAIL_RE.match(ln):
                 cur["detail"] = _DETAIL_RE.match(ln).group("body")
             elif ln.strip():

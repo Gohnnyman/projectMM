@@ -82,9 +82,9 @@ The driver's loopback self-test works with the expander fitted, and it is a **st
 
 - **Why Q7 and not Q0.** The test pattern is driven on **strand 0**, which is data pin 0's register at shift position 0. A '595 shifts **MSB-first** — the bit clocked in *first* ends up on the *last* output — so strand 0 emerges on **Q7** (the last of the QA…QH row), not Q0. Wiring Q0 captures a different strand's data and fails every bit, which would look exactly like a firmware bug.
 - **⚠ The '595 output swings to 5 V. An ESP32 GPIO is not 5 V tolerant.** Do **not** wire Q7 straight to a GPIO. Divide it: **1 kΩ from Q7 to the GPIO, 2 kΩ from that GPIO to GND** gives 5 V × 2/3 ≈ 3.3 V. (Any 5 V → 3.3 V shifter works; the divider is just the two-resistor version.)
-- **Set `loopbackRxPin`** to that GPIO, and turn `loopbackTest` on. `loopbackTxPin` is **ignored** in shift mode — the strand is decided by which register output the jumper is on, not by which pin transmits.
+- **Set `loopbackRxPin`** to that GPIO, and turn `loopbackTest` on. `loopbackTxPin` is **ignored** in pin expander mode — the strand is decided by which register output the jumper is on, not by which pin transmits.
 
-**A mis-wired jumper reads as a bit FAIL, not "jumper not detected."** The GPIO continuity pre-check is deliberately **skipped** in shift mode: it drives the TX pin and expects the RX pin to follow directly, which is true of a bare jumper but false through a shift register (raising the serial input does not raise an output — that takes 8 clocks and a latch). So the bit-verify is the only proof the wire is right, and it is the better proof anyway.
+**A mis-wired jumper reads as a bit FAIL, not "jumper not detected."** The GPIO continuity pre-check is deliberately **skipped** in pin expander mode: it drives the TX pin and expects the RX pin to follow directly, which is true of a bare jumper but false through a shift register (raising the serial input does not raise an output — that takes 8 clocks and a latch). So the bit-verify is the only proof the wire is right, and it is the better proof anyway.
 
 ## 3. The wire format
 
@@ -166,7 +166,7 @@ W mm_i80: CLOCK SPIKE: request 20000000 Hz -> GRANTED (prescale 4 -> granted 200
 | | source | bus resolution | prescale | granted |
 |---|---|---|---|---|
 | today (direct) | PLL160M | 80 MHz | 30 | 2.667 MHz (exact) |
-| **shift mode** | PLL160M | 80 MHz | **4** | **20.000 MHz (exact)** |
+| **pin expander mode** | PLL160M | 80 MHz | **4** | **20.000 MHz (exact)** |
 
 Both S3 and P4 default to `LCD_CLK_SRC_PLL160M` with `LCD_PERIPH_CLOCK_PRE_SCALE = 2` → an 80 MHz bus resolution, and both cap the prescale at 64. hpwit's 19.2 MHz is an artifact of the **classic I2S fractional divider** (`div_num`/`div_a`/`div_b`), which LCD_CAM does not share. So the rate must be an exact divide AND land in the in-spec slot band (290–380 ns → 21.1–27.6 MHz): **26.67 MHz** (prescale 3) is the only one that does, giving a 300 ns slot — T0H 300 ns, T1H 600 ns, both comfortably inside spec. This is the same reasoning that already picked the exact `/30` for `kPclkHz`.
 
@@ -176,13 +176,13 @@ The P4 additionally exposes `LCD_CLK_SRC_APLL`, which could hit a true 21.33 MHz
 
 ## 6. Module shape
 
-### 6.1 Recommendation: a `shiftRegister` checkbox + `latchPin` on the existing parallel drivers
+### 6.1 Recommendation: a `pinExpanderMode` checkbox + `latchPin` on the existing parallel drivers
 
-Three shapes were on the table. Recommending **(c)**: two controls on `ParallelLedDriver` — `shiftRegister` (a checkbox: is the expander board fitted?) and `latchPin` (a GPIO) — with the ×8 as a hardware constant, not a user control. The '595's width is the chip's, not a setting, so there are exactly two wirings and a boolean says which.
+Three shapes were on the table. Recommending **(c)**: two controls on `ParallelLedDriver` — `pinExpanderMode` (a checkbox: is the expander board fitted?) and `latchPin` (a GPIO) — with the ×8 as a hardware constant, not a user control. The '595's width is the chip's, not a setting, so there are exactly two wirings and a boolean says which.
 
 - **(a) A separate `ShiftRegisterLedDriver` class** — rejected. It would duplicate the lane parsing, the window slicing, the correction LUT, the DMA double-buffer, the loopback self-test, the `wireUs` KPI: the ~250 lines `ParallelLedDriver` exists specifically to hold once. Adding a driver class to change *how bits are packed into an existing bus* is the sibling-class mistake.
 - **(b) A submodule/child of an LED driver** — rejected. The fan-out is not a separable unit of behaviour with its own lifecycle; it is an *encoding mode* of the parent's DMA frame. A child module that reaches into its parent's DMA buffer is worse than a flag.
-- **(c) Controls on the existing drivers** — **recommended.** The peripheral, the pins, the DMA path, and the encode are all *already there*; the shift mode changes the **encode function and the frame size**, which is exactly what `prepare()` already rebuilds live.
+- **(c) Controls on the existing drivers** — **recommended.** The peripheral, the pins, the DMA path, and the encode are all *already there*; the pin expander mode changes the **encode function and the frame size**, which is exactly what `prepare()` already rebuilds live.
 
 **Against the principles:**
 - ***Default to subtraction*** — (c) adds two controls and one encode branch. (a) adds a class, a registration, a doc page, and a duplicate of everything the base owns.
@@ -204,14 +204,14 @@ Minimal, and no new module:
 | File | Change |
 |---|---|
 | `src/light/drivers/ParallelSlots.h` | **New encode entry point** for the shift-register wire format: 24 bus words/bit, the latch lane, the 8-position shift. Reuses `transposeLanes8x8` with a different lane gather. Host-testable, no platform include — pin it in `unit_ParallelSlots.cpp`. |
-| `src/light/drivers/ParallelLedDriver.h` | Two controls (`shiftRegister`, `latchPin`); `frameBytesFor` gains the ×8 factor; `encodeRows` branches to the shift encoder; `parseConfig` maps strands → physical pins (`ceil(lanes/8)`) and validates `latchPin` against the data pins + `clockPin`. Both `affectsPrepare` triggers. |
+| `src/light/drivers/ParallelLedDriver.h` | Two controls (`pinExpanderMode`, `latchPin`); `frameBytesFor` gains the ×8 factor; `encodeRows` branches to the shift encoder; `parseConfig` maps strands → physical pins (`ceil(lanes/8)`) and validates `latchPin` against the data pins + `clockPin`. Both `affectsPrepare` triggers. |
 | `src/light/drivers/I80LedDriver.h` | Likely **nothing** — its `clockPin` (WR) already *is* the shift clock, which is a genuinely lucky fit. |
-| `src/platform/esp32/platform_esp32_i80.cpp` | The bus clock must run **8× faster** in shift mode: **26.67 MHz** (prescale 3, exact, 300 ns slots) rather than the 2.667 MHz `kPclkHz`. Granted on both S3 and P4 — a `pclk_hz` the driver selects per mode, not a platform risk. |
+| `src/platform/esp32/platform_esp32_i80.cpp` | The bus clock must run **8× faster** in pin expander mode: **26.67 MHz** (prescale 3, exact, 300 ns slots) rather than the 2.667 MHz `kPclkHz`. Granted on both S3 and P4 — a `pclk_hz` the driver selects per mode, not a platform risk. |
 | `docs/moonmodules/light/drivers.md` | Document the mode + the wiring + the memory cost. |
 
 ## 7.5 STATUS — shipped dormant; the transport bug is NOT yet understood (2026-07-14)
 
-**The feature is in the tree but OFF by default** (`shiftRegister` unchecked). Direct mode is proven unchanged on four boards: zero GDMA errors, all driving.
+**The feature is in the tree but OFF by default** (`pinExpanderMode` unchecked). Direct mode is proven unchanged on four boards: zero GDMA errors, all driving.
 
 **Read this section as a list of things that are TRUE, and a list of things that were guessed and are FALSE.** Six hypotheses have now died on this bug, several of them written up here as if settled. The pattern is the lesson: each one explained the symptom, none survived a real test. Do not add a seventh theory before making a measurement that could refute it.
 
@@ -226,7 +226,7 @@ Minimal, and no new module:
 
 ### The internal-RAM / PSRAM cliff — found blind, by eye (PO, 2026-07-14)
 
-The sharpest measurement of the whole investigation, and it was made **without knowing which memory the frame was in**: with shift mode preferring internal RAM, the PO swept `ledsPerPin` and reported
+The sharpest measurement of the whole investigation, and it was made **without knowing which memory the frame was in**: with pin expander mode preferring internal RAM, the PO swept `ledsPerPin` and reported
 
 | leds/pin | frame | verdict |
 |---|---|---|
@@ -267,7 +267,7 @@ It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time 
 
 ### PHASE 2 DESIGN — the encode-into-the-ring (2026-07-14, arithmetic done, not yet built)
 
-**The cap is now understood exactly**, and the fix follows from it. The frame scales with *lights per strand* (all strands clock in parallel), and in shift mode the encoder emits **1,152 bytes per light** (3 ch × 8 bits × 3 slots × 8 shift-words × 2 bytes on a 16-bit bus):
+**The cap is now understood exactly**, and the fix follows from it. The frame scales with *lights per strand* (all strands clock in parallel), and in pin expander mode the encoder emits **1,152 bytes per light** (3 ch × 8 bits × 3 slots × 8 shift-words × 2 bytes on a 16-bit bus):
 
 | lights/strand | encoded frame | |
 |---|---|---|
@@ -279,7 +279,9 @@ It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time 
 
 **So: never materialise the encoded frame at all.** The DMA loops a small ring of *internal* buffers holding a few transposed lights; as each drains, the CPU encodes the next slice straight into it, reading from the **Layer buffer** — which is internal, and 24× smaller than the encoded output (3 bytes/light vs 1,152). PSRAM leaves the path entirely. hpwit, independently: *"you need to hack the interrupt to stop at every pixel frame instead of the full frame, which allows you to store only a buffer of transposed pixels."* Same design.
 
-**The deadline is comfortable, and the expander is why.** The DMA takes **21.6 µs** to drain one light's 1,152 bytes; the CPU encodes a light in ~3 µs. **7× headroom** — the 8× output inflation buys far more DMA time than it costs CPU.
+**~~The deadline is comfortable, and the expander is why.~~ REFUTED ON THE BENCH (2026-07-17) — the "~3 µs encode / 7× headroom" estimate was wrong by ~15×, and it is the single most expensive error in this document.** The DMA does take **21.6 µs** to drain one light. The measured encode is **46 µs/light** (S3, `-O2`, 1-LED ring, after the prefill fix below) — **2.1× OVER the wire, not 7× under it.** There is no headroom; the producer is slower than the consumer, which is the one condition under which a ring cannot stream. Every "it works at N lights" result before this was the whole-frame fallback, not the ring (see § 7.6).
+
+**Do not re-derive the encode cost from an estimate — measure it.** The estimate was arrived at by counting operations on paper; the bench disagreed by more than an order of magnitude. Same failure mode as the tap-hoist phantom (§ 7.6).
 
 **The refill must run in the EOF ISR, in IRAM** — this is the load-bearing constraint, and it is why hpwit uses a level-3 IRAM interrupt. The alternative (encode ahead from the render task, ISR only advances descriptors) must survive a WiFi preemption of 1–2 ms, which needs a ~72 KB ring — at which point the frame buffer is back and nothing was gained:
 
@@ -299,6 +301,83 @@ bool moonI80Ws2812InitRing(handle, …, rowBytes, totalRows, MoonI80EncodeFn, vo
 
 `ParallelLedDriver::encodeRows()` is *already* a per-row loop (`for (row = 0; row < maxLaneLights_; row++)`), so slicing it to a row range is a contained change that leaves every existing test valid.
 
+## 7.6 The 1-LED ring — what the first attempt proved (2026-07-16/17)
+
+**The ring was built and it streams.** `kRingRows=1` / `kRingBufs=32`: RAM **147 KB → 18 KB, constant at any strand length** — 256, 512, 1024 all cost the same. That was the whole point of the geometry and it works. What it does *not* yet do is meet the deadline: **46 µs encode against a 21.6 µs wire**. Start the second attempt from these four facts, not from the § 5 arithmetic.
+
+### The encode deadline is BUYABLE, not fixed — hpwit's `_DMA_EXTENSTION`
+
+The most useful thing learned, and it reframes the § 5.1 clock question. From his header:
+
+```c
+#define _DMA_EXTENSTION 0                                              // default
+#define _NB_BIT (_DMA_EXTENSTION * 2 + (NUM_VIRT_PINS + 1) * nb_components * 8 * 3)
+#define _BUFFER_TIMING ((_NB_BIT / 19.2) - 4)                          // <-- his encode deadline
+```
+
+**The extension sits inside the numerator of the deadline.** Padding a DMA buffer with zeros lengthens its *wire time*, so the ISR gets more microseconds to encode the next one. It is legal because the WS2812 only latches on a ≥300 µs LOW — his README: *"if you wait less than 150us than the led will pass the new data like it was sent just after"*. Sub-150 µs of zeros is a **pause, not a reset**. Cost: frame delivery time, i.e. fps.
+
+**So hpwit is over his own budget too, and says so** — *"mine takes 50 microseconds"* against a 30 µs slot. He does not live inside the deadline; he **moved** it. That is the second mechanism he has and we do not (the first: PLL240M → 19.2 MHz → a 30 µs slot vs our 26.67 MHz → 21.6 µs). **He is not faster than us. He has a bigger budget, twice over.**
+
+The headroom menu is therefore three items, not two:
+
+| lever | buys | costs |
+|---|---|---|
+| PLL240M (19.2 MHz) | +8.4 µs/light | a peripheral clock-tree change ([ADR](../adr/)-worthy) |
+| `_DMA_EXTENSTION` | arbitrary, tunable | **RAM per DMA buffer** + fps |
+| a faster encode | the real fix | engineering |
+
+**Why the extension does not rescue us** (check before reaching for it): we pad at 26.67 MHz vs his 19.2, so ~2.3× more zero bytes per µs bought; closing 46 → 21.6 needs roughly 576 B → ~1,200 B/light; and the pad is **per DMA buffer**, which at `kRingRows=1` means per light. Our heap's largest free block is **73,728 B** and the ring already fragments it. **RAM is the wall we are already standing against — the knob that saves him is the one we can least afford.**
+
+**Verdict: at 46 µs neither PLL240M (+8.4 µs) nor an affordable pad closes 2.1×. The encode remains the lever.** hpwit agrees, unprompted: *"that is why the first version was only able to do 5:1 and I spent most of the time optimising the code to be able to do 8:1."*
+
+**Two things from his README that DO transfer:**
+1. **`__BRIGHTNESS_BIT`** — brightness as a power of 2 (`#define __BRIGHTNESS_BIT 5` → max 32), which *"will drastically decrease the time of the buffer calculation"* by removing brightness arithmetic from the ISR. Our `Correction::apply` runs **16 lanes × 16 rows per slice inside the ISR**. Independent evidence it is worth measuring; cheap to try.
+2. **He ships the instrument** — `_max_pixels_out_of_time` (counts lights that missed the deadline) and `_proposed_dma_extension` (auto-tunes the pad from the measured max). Same idea as our `ringDbg` `enc`/`gap`, but self-correcting. Worth copying the *idea*.
+
+### Where the 46 µs goes — the measured decomposition
+
+Cycle-counted on an S3 with the real encoder (not a model). **The transpose + emit is the target; nothing else is worth attacking first.**
+
+| stage | cycles | µs | share |
+|---|---:|---:|---:|
+| `memset(wire_)` | 131 | 0.5 | 2% |
+| correction, 16 lanes | 1510 | 6.3 | 19% |
+| **transpose + emit** | **6280** | **26.2** | **79%** |
+| cache msync | 95 | 0.4 | 1% |
+| **accounted** | **~8000** | **~33** | |
+
+A diagnostic encoder that paints a self-generated pattern — no source read, no correction, no memset, just the 192 data stores — runs at **19 µs/light**. That is the floor: **the data stores alone are ~9 µs and irreducible.**
+
+**Ruled out on the bench — do not re-attempt these** (each was measured, each was null):
+
+| hypothesis | test | result |
+|---|---|---|
+| PSRAM snapshot reads | `allocIsr`, retested at 1 light/buffer | 50 → 50 µs |
+| cache msync per refill | split counter | 0.4 µs (1%) |
+| flash-resident ISR code | `IRAM_ATTR` on the encode chain | no change |
+| 16 KB instruction cache | 32 KB | no change |
+| per-call setup overhead | 4 rows/buffer (¼ the calls) | 48.3 vs 46 µs |
+| `planes[]` staging spill | fused emit | byte-identical ELF |
+
+**The lesson that outlives the numbers:** six optimisation attempts were spent on the encode *before* anyone built the 19 µs diagnostic encoder — which then showed the wall was still wrong, proving speed was not the fault at all (it was the frame-close bug, since fixed). **Build the cheap floor test first when an artifact might be correctness OR speed.**
+
+### Prefill once per FRAME, not per slice — a per-slice cost becomes a per-light cost
+
+**The trap, and it is a shape, not a typo.** The data-only prefill (§ 7.5) lays constants **per slice** — correct and cheap at `kRingRows=16`, amortised over 16 lights. At **`kRingRows=1` the slice IS one light**, so it fired once per light: **384 constant stores + 192 data stores = 576 = exactly the whole-slot encoder it had replaced.** The 4.4×-on-host win was cancelled to zero, **silently — no test failed, the bytes were correct**. Only a decomposition found it.
+
+**The fix** (hpwit's `putdefaultones`, our own seam): a `MoonI80PrefillFn` called from `startRingTransfer` lays each buffer's constants **once at frame arm**; the ISR refill writes **data only**. Measured: **enc 66 → 46 µs/light (1.43×)**, frameTime 12021 → 8913 µs (83 → 112 fps). Biggest single win of the attempt.
+
+**The general rule for the next attempt: re-cost every per-slice operation after ANY geometry change — the per-light budget is the only denominator that matters.** A win measured at one `kRingRows` does not survive another for free.
+
+### LATENT BUG carried into the next attempt — ragged strands
+
+`ringPrefillTrampoline` uses **row 0's active mask for every buffer**. Correct for **uniform strands only**. With ragged strands (different lights per pin — which the PO has called a hard constraint for all drivers, since end users mix strips and panels) an exhausted strand's lane is driven **HIGH** instead of released. **The tests pass only because the mock's geometry is uniform and misses it.** Needs prefill-per-equal-mask-run. Documented at the seam in the header.
+
+### The instrument lies — fix before trusting any fps claim
+
+The module header reports the **tick** rate (252 fps) while `frameTime` reports the real frame (83 fps). Every fps number in this document predating 2026-07-17 should be read with that in mind.
+
 ### Where to start next
 
 **Begin from the PO's observation (#4), not from a new theory.** `asyncTransmit` OFF works far better — find out *why*, and the mechanism will likely fall out. Concretely: with async OFF the driver waits for each transfer before starting the next, so only one transfer is ever outstanding; with it ON, two buffers are in flight against a pool sized for one. That *sounds* like the answer — but doubling the pool did not fix it and made it worse, so the simple version of that story is already wrong. Instrument what the descriptors actually do across a transfer boundary before changing any more code.
@@ -316,7 +395,9 @@ Also still unproven: **the loopback RX path** (the divider → GPIO 16 → RMT c
 ## 9. Sources
 
 **hpwit (primary — source read at `main` HEAD, 2026-07):**
-- [`I2SClocklessVirtualLedDriver.h`](https://github.com/hpwit/I2SClocklessVirtualLedDriver/blob/main/src/I2SClocklessVirtualLedDriver.h) — `:119` `NUM_VIRT_PINS 7`; `:122` `NBIS2SERIALPINS`; `:257` `_BASE_BUFFER_TIMING … / 19.2`; `:291` `WS2812_DMA_DESCRIPTOR_BUFFER_MAX_SIZE = (NUM_VIRT_PINS+1) * nb_components * 8 * 3 * 2 + …`; `:567` `setPins(Pins, clock_pin, latch_pin)`; `:579` latch → I2S **data** lane; `:581`/`:594` clock → `deviceClockIndex` / `LCD_PCLK_IDX` (**peripheral clock**); `:777-779` `clkm_div_num=3, div_a=6, div_b=7` → **19.2 MHz**.
+- [`I2SClocklessVirtualLedDriver.h`](https://github.com/hpwit/I2SClocklessVirtualLedDriver/blob/main/src/I2SClocklessVirtualLedDriver.h) — `:119` `NUM_VIRT_PINS 7`; `:122` `NBIS2SERIALPINS`; `:257` `_BASE_BUFFER_TIMING … / 19.2`; `:291` `WS2812_DMA_DESCRIPTOR_BUFFER_MAX_SIZE = (NUM_VIRT_PINS+1) * nb_components * 8 * 3 * 2 + …`; `:567` `setPins(Pins, clock_pin, latch_pin)`; `:579` latch → I2S **data** lane; `:581`/`:594` clock → `deviceClockIndex` / `LCD_PCLK_IDX` (**peripheral clock**); `:777-779` `clkm_div_num=3, div_a=6, div_b=7` → **19.2 MHz**. Also (read 2026-07-17, § 7.6): `_DMA_EXTENSTION` (default 0) inside `_NB_BIT`, hence inside `_BUFFER_TIMING` — **the deadline is a tunable, not a constant**; `WS2812_DMA_DESCRIPTOR_BUFFER_MAX_SIZE (576*2)` and `__NB_DMA_BUFFER 10` on the S3 branch; `__BRIGHTNESS_BIT` (default 8) → `__HARDWARE_BRIGHTNESS`; `_max_pixels_out_of_time` + `_proposed_dma_extension` (his deadline-miss counter + auto-tuner).
+- [`I2SClocklessVirtualLedDriver` README](https://github.com/hpwit/I2SClocklessVirtualLedDriver) — chapters *"Increase the buffer length"* (the <150 µs pause rule: *"if you wait less than 150us than the led will pass the new data like it was sent just after"*), *"Reduce buffer calculation time"* (`__BRIGHTNESS_BIT`), *"Artifacts due to interrupts"* (`__NB_DMA_BUFFER`).
+- **hpwit direct (Discord, 2026-07-17)** — *"the first version was only able to do 5:1 and I spent most of the time optimising the code to be able to do 8:1"*; *"mine takes 50 microseconds"* (against his own 30 µs slot); and the standing offer: *"If I can look at the code I could give you some hints."*
 - [`I2SClocklessLedDriver.h`](https://github.com/hpwit/I2SClocklessLedDriver/blob/main/src/I2SClocklessLedDriver.h) — `:575-577` `clkm_div_num=33, div_a=3, div_b=1` → **2.4 MHz**; the 144 B direct buffer.
 
 **projectMM's own code + measurements:**
