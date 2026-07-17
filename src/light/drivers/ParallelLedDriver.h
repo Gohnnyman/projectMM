@@ -714,12 +714,6 @@ public:
     //
     // `rowCount == 0` means "to the end". Only the LAST slice closes the frame with the latch pad, so a
     // partial slice must not emit it — hence `closeFrame`.
-    //
-    // **In shift mode this writes only each slot's DATA word** — the pulse-start and tail words are frame
-    // constants (see prefillWs2812ShiftConstants), two thirds of the stores, and they are already in the
-    // buffer: the whole-frame path lays them once per reinit (prefillShiftFrame), the ring once per buffer
-    // when a frame arms (MoonI80PrefillFn). Measured on the host at the bench geometry, data-only is 5.64×
-    // the whole-slot encoder — the difference between an encode that outruns the DMA and one that cannot.
     template <class Slot>
     void encodeRows(uint8_t outCh, uint8_t* dst,
                     nrOfLightsType firstRow = 0, nrOfLightsType rowCount = 0,
@@ -742,11 +736,7 @@ public:
         // RGBCCT / an N-channel fixture) is laid out without overrun. Zeroed each frame so a
         // short-strand lane's slot (skipped below) contributes no set bit (the activeMask rule already
         // gates it, but this removes the read-of-uninitialised footgun).
-        // STAGE PROFILE (temporary): where does a light's encode actually go? Cycle counts, not an
-        // instruction-count model — six model-driven theories measured null, so measure the stages.
-        const uint32_t p0 = platform::cycleCount();
         std::memset(wire_, 0, wireCap_);
-        const uint32_t p1 = platform::cycleCount();
         const size_t stride = outCh;
         const bool shift = pinExpanderMode();
         // The active-strand mask is 64-bit because a '595 expander drives more strands than the bus
@@ -762,23 +752,12 @@ public:
                 correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
                                    wire_ + lane * stride);
             }
-            const uint32_t p2 = platform::cycleCount();
             if (shift) {
-                // DATA WORDS ONLY. The pulse-start and pulse-tail words of every slot are constants and
-                // are already in the buffer — laid once per reinit by prefillShiftFrame() on the
-                // whole-frame path, or just above for this slice on the ring's. Two thirds of the stores,
+                // DATA WORDS ONLY. The pulse-start and pulse-tail words of every slot are frame
+                // constants and were written once by prefillShiftFrame() — two thirds of the stores,
                 // hoisted straight out of the hot path (see prefillWs2812ShiftConstants).
-                encodeWs2812ShiftData<Slot>(wire_, mask, physPins_, latchBit_, outputsPerPin(),
-                                            outCh, out);
+                encodeWs2812ShiftData<Slot>(wire_, mask, physPins_, latchBit_, outputsPerPin(), outCh, out);
                 out += static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
-                const uint32_t p3 = platform::cycleCount();
-                // p0..p1 is the per-CALL memset; p1..p2 spans the correction of THIS row only when the
-                // row loop runs once (the ring). On the whole-frame path p1..p2 also covers the previous
-                // rows' encode, so only the ring's numbers are per-light — compare like with like.
-                dbgCycMemset_ += (p1 - p0);
-                dbgCycCorrect_ += (p2 - p1);
-                dbgCycEncode_ += (p3 - p2);
-                dbgCycRows_++;
             } else {
                 encodeWs2812ParallelSlots<Slot>(wire_, static_cast<Slot>(mask), outCh, out);
                 out += static_cast<size_t>(outCh) * 8 * 3;   // 3 slots × 8 bits × channels, in Slot elements
@@ -895,14 +874,6 @@ protected:
     // copy proportional to that driver's strands, ~11.5 KB for a 16×256 driver.) snapshotSourceForRing()
     // fills it at transmit time and points encodeSrc_ at it (biased by -winStart_ so encodeRows' index is
     // unchanged); encodeRows reads encodeSrc_ when set. Grow-only, freed in release() with the scratch.
-    // STAGE PROFILE (temporary): per-light cycle totals, read by the driver's status line.
-    uint32_t dbgCycMemset_ = 0, dbgCycCorrect_ = 0, dbgCycEncode_ = 0, dbgCycRows_ = 0;
-public:
-    void dbgProfile(uint32_t& mset, uint32_t& corr, uint32_t& enc, uint32_t& rows) const {
-        mset = dbgCycMemset_; corr = dbgCycCorrect_; enc = dbgCycEncode_; rows = dbgCycRows_;
-    }
-    void dbgProfileReset() { dbgCycMemset_ = dbgCycCorrect_ = dbgCycEncode_ = dbgCycRows_ = 0; }
-protected:
     uint8_t* snapshotBuf_ = nullptr;      // driver-owned copy of the source WINDOW (ring only)
     size_t   snapshotCap_ = 0;            // allocated capacity, grows to fit the window
     const uint8_t* encodeSrc_ = nullptr;  // when non-null, encodeRows reads this (bias-corrected) instead of sourceBuffer_
@@ -915,12 +886,7 @@ protected:
         if (!sourceBuffer_) return true;   // sized on the first build that has a source; harmless if absent
         const size_t bytes = static_cast<size_t>(winLen_) * sourceBuffer_->channelsPerLight();
         if (bytes == 0 || snapshotCap_ >= bytes) return true;
-        // allocIsr, NOT alloc: the ring's EOF ISR reads this snapshot ONCE PER LIGHT (the ring holds one
-        // light per DMA buffer), and alloc() prefers PSRAM — external SPI behind a cache. The window is
-        // small enough to afford internal RAM: winLen_ × srcCh, ~576 B for a 16×192 driver, and the ring
-        // itself is only ~18 KB. If internal RAM is exhausted the ring build fails and the driver falls
-        // back to whole-frame, which is the correct degradation.
-        uint8_t* grown = static_cast<uint8_t*>(platform::allocIsr(bytes));
+        uint8_t* grown = static_cast<uint8_t*>(platform::alloc(bytes));
         if (!grown) return false;
         if (snapshotBuf_) platform::free(snapshotBuf_);
         snapshotBuf_ = grown;
@@ -1243,12 +1209,8 @@ protected:
             const uint8_t outCh = correction_.outChannels;
             const size_t rowBytes = rowBytesFor(outCh, slotBytes(), outputsPerPin());
             const size_t padBytes = padBytesFor(slotBytes(), outputsPerPin());
-            // The snapshot is sized HERE, off the hot path (tickRing only memcpys into it), and it is
-            // load-bearing: the ring's encode reads it instead of the live source. If it won't allocate the
-            // ring cannot run, so treat it exactly like a failed ring build — tear the half-built bus down
-            // and fall through to whole-frame, rather than marking the driver inited with no snapshot.
-            if (derived()->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_), padBytes)
-                && ensureSnapshotCap()) {
+            if (derived()->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_), padBytes)) {
+                ensureSnapshotCap();   // size the per-frame snapshot here, OFF the hot path (tickRing only memcpys)
                 inited_ = true;
                 dmaBuf_ = derived()->busBuffer(0);   // ring[0] — a real pointer, the "inited" sentinel
                 for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
@@ -1257,9 +1219,7 @@ protected:
                 if (status() == Derived::kInitFailMsg) clearStatus();
                 return;
             }
-            // Ring build failed (the small buffers or the snapshot didn't fit) — drop whatever the ring
-            // did allocate, then fall through to whole-frame.
-            deinit();
+            // Ring build failed (even the small buffers didn't fit) — fall through to whole-frame.
         }
 
         const bool haveSecond = derived()->busBuffer(1) != nullptr;

@@ -7,7 +7,6 @@
 
 #include <algorithm>   // std::count (pin-count in wireShift)
 #include <cstring>
-#include <utility>   // std::pair (the frame-close arithmetic test)
 #include <vector>
 
 // The DOMAIN half of the MoonI80 streaming ring (the platform GDMA half is bench-verified on the S3 —
@@ -35,12 +34,7 @@ using mm::nrOfLightsType;
 // slices (a 200-light frame = 13 slices reuses buffers 0..4), which is exactly the path the recycled /
 // short-last-slice tests need to exercise. The mock tests the domain SLICING contract, not the depth.
 constexpr uint8_t kMockRingBufs = 4;
-// Multi-row slices. The platform ships ONE light per buffer (kRingRows = 1); this mock keeps a
-// multi-row geometry deliberately, because what it pins is the SLICING contract — that a slice written
-// at any firstRow tiles into the whole frame byte-for-byte — and a 1-row slice cannot express a tiling
-// bug at all. The per-light geometry's own rule (which buffer closes the frame) is pinned separately,
-// by the arithmetic test at the bottom of this file.
-constexpr uint32_t kMockRingRows = 16;
+constexpr uint32_t kMockRingRows = 16; // mirrors kRingRows
 
 class MockRingDriver : public mm::ParallelLedDriver<MockRingDriver> {
 public:
@@ -102,10 +96,6 @@ public:
     std::vector<uint8_t> driveRingFrame() {
         REQUIRE(ringActive_);
         std::vector<uint8_t> assembled;
-        // Mirror startRingTransfer: lay every buffer's frame constants ONCE, before any light is
-        // encoded. The refill below then writes only data words. Skipping this would leave the data-only
-        // encoder writing into buffers with no pulse-start/tail words at all.
-        for (auto& buf : ring_) MockRingDriver::ringPrefillTrampolineHost(this, buf.data(), kMockRingRows);
         uint32_t row = 0;
         uint8_t slot = 0;
         int32_t lastSlot = -1;
@@ -183,15 +173,6 @@ public:
     // The trampoline the real driver registers is MoonLedDriver::ringEncodeTrampoline; the mock
     // reproduces its body (recover `this`, branch on bus width, call encodeRows) so the host drives the
     // identical encode the seam does on device.
-    // Mirrors MoonLedDriver::ringPrefillTrampoline: lay ONE ring buffer's frame constants. The platform
-    // calls this per buffer when a frame arms, so the per-light refill writes only data words.
-    static void ringPrefillTrampolineHost(void* user, uint8_t* dst, uint32_t rows) {
-        auto* self = static_cast<MockRingDriver*>(user);
-        if (!self->pinExpanderMode()) return;   // direct mode has no constants
-        const uint8_t outCh = self->correction_.outChannels;
-        self->template prefillShiftRows<uint8_t>(outCh, dst, 0, static_cast<nrOfLightsType>(rows));
-    }
-
     static void ringEncodeTrampolineHost(void* user, uint8_t* dst, uint32_t firstRow,
                                          uint32_t count, bool closeFrame) {
         auto* self = static_cast<MockRingDriver*>(user);
@@ -205,12 +186,15 @@ public:
         if (closeFrame && self->ringPad_) {
             std::memset(dst + static_cast<size_t>(count) * self->ringRowBytes_, 0, self->ringPad_);
         }
-        // Data words only — exactly as MoonLedDriver::ringEncodeTrampoline does. The constants were laid
-        // once per buffer by ringPrefillTrampolineHost above, mirroring the platform's frame-arm prefill.
-        if (self->slotBytes() == 1)
+        // Prefill THEN encode, exactly as MoonLedDriver::ringEncodeTrampoline does — the recycled
+        // buffer needs its constants re-laid, and encodeRows writes only the data word in shift mode.
+        if (self->slotBytes() == 1) {
+            if (self->pinExpanderMode()) self->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
             self->template encodeRows<uint8_t>(outCh, dst, first, cnt, closeFrame);
-        else
+        } else {
+            if (self->pinExpanderMode()) self->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
             self->template encodeRows<uint16_t>(outCh, dst, first, cnt, closeFrame);
+        }
     }
 
     size_t rowBytesForTest() const { return ringRowBytes_; }
@@ -611,61 +595,4 @@ TEST_CASE("MoonI80 ring: the no-reuse stopgap clocks a clean tail and stops on t
     auto deep = d.driveRingFrameWithTermination(/*bufs=*/16, /*kTailBufs=*/1);
     CHECK(deep.tailIsLow);
     CHECK(deep.drainsToStop == nSlices + 1);
-}
-
-// The ring's frame-CLOSE rule, as arithmetic. The mock above models the encode tiling and reimplements
-// the ISR's bookkeeping, so it cannot see a bug in moonI80EofCb itself — and it did not: a guard that
-// skipped the first tail-branch EOF shipped green while the closing latch never reached the wire (traced
-// on the S3: at 128 lights over 32 buffers the latch landed in buffer 31 while the DMA stopped on buffer
-// 0, so every frame ended by re-clocking a stale slice — the "shifted by one, constant stuck in position
-// 0, survives brightness=0" fault the latch exists to prevent).
-//
-// What the platform must satisfy, for ANY (nSlices, kRingBufs): the buffer holding the closing latch is
-// the buffer the DMA clocks LAST. This mirrors startRingTransfer + moonI80EofCb's slot walk exactly, so
-// it pins the rule rather than a reimplementation of it.
-TEST_CASE("MoonI80 ring: the closing latch lands in the buffer the DMA clocks last") {
-    // One light per DMA buffer (kRingRows = 1), so a slice IS a light and nSlices == totalRows.
-    constexpr uint32_t kTailBufs = 1;   // mirrors the platform constant
-    auto latchBufferAndStopBuffer = [](uint32_t nSlices, uint32_t bufs) {
-        // --- startRingTransfer: prime every buffer, in order, with the next unencoded slice.
-        uint32_t refilledRow = 0;
-        int32_t primedLatch = -1;
-        for (uint32_t primed = 0; primed < bufs; primed++) {
-            if (refilledRow < nSlices) refilledRow++;                       // a real slice
-            else if (primedLatch < 0)  primedLatch = static_cast<int32_t>(primed);   // the tail (short frame)
-        }
-        // --- moonI80EofCb: each EOF refills the just-drained buffer, or writes the tail once slices run out.
-        uint32_t refillSlot = 0, drained = 0;
-        int32_t isrLatch = -1;
-        while (true) {
-            drained++;
-            const uint32_t slot = refillSlot;
-            if (refilledRow < nSlices) refilledRow++;
-            else if (isrLatch < 0)     isrLatch = static_cast<int32_t>(slot);
-            refillSlot = (slot + 1u) % bufs;
-            if (drained >= nSlices + kTailBufs) break;
-        }
-        const int32_t latch = (primedLatch >= 0) ? primedLatch : isrLatch;
-        const int32_t stopBuffer = static_cast<int32_t>((nSlices + kTailBufs - 1) % bufs);
-        return std::pair<int32_t, int32_t>{latch, stopBuffer};
-    };
-
-    SUBCASE("frame longer than the pool — the ISR writes the tail (the reuse case)") {
-        for (uint32_t n : {33u, 100u, 128u, 192u, 256u, 512u}) {
-            auto [latch, stop] = latchBufferAndStopBuffer(n, 32);
-            INFO("nSlices=", n);
-            CHECK(latch == stop);
-        }
-    }
-    SUBCASE("frame exactly the pool size — the boundary the old guard broke") {
-        auto [latch, stop] = latchBufferAndStopBuffer(32, 32);
-        CHECK(latch == stop);
-    }
-    SUBCASE("frame shorter than the pool — priming writes the tail") {
-        for (uint32_t n : {1u, 8u, 31u}) {
-            auto [latch, stop] = latchBufferAndStopBuffer(n, 32);
-            INFO("nSlices=", n);
-            CHECK(latch == stop);
-        }
-    }
 }

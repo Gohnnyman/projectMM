@@ -29,7 +29,6 @@ so they survive regeneration.
 """
 
 import json
-import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -38,34 +37,6 @@ OUT_FILE = ROOT / "src" / "core" / "build_info.h"
 
 data = json.loads(LIBRARY_JSON.read_text())
 version = data["version"]
-
-
-def build_id() -> str:
-    """The short git hash the binary was built from, with `+` if the tree was dirty.
-
-    This is the answer to "which code is on this board?" — the question MM_BUILD_DATE
-    cannot answer. `__DATE__`/`__TIME__` expand when the *including translation unit*
-    compiles, and build_info.h is a header consumed by one TU: change a driver .cpp and
-    that TU is NOT rebuilt, so the reported date FREEZES while the firmware moves on. A
-    stale date reads as "the flash didn't take" and sends you debugging the wrong binary
-    (measured the hard way, 2026-07-16). The hash comes from git at generate time and is
-    regenerated on every build (the CMake rule is ALWAYS out-of-date by design), so it
-    tracks the source, not a compile timestamp.
-
-    Falls back to "nogit" for a tarball / no-git build — never fails the build.
-    """
-    def git(*args: str) -> str:
-        return subprocess.run(("git", "-C", str(ROOT), *args),
-                              capture_output=True, text=True, check=True).stdout.strip()
-    try:
-        h = git("rev-parse", "--short=8", "HEAD")
-        dirty = "+" if git("status", "--porcelain") else ""
-        return f"{h}{dirty}"
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        return "nogit"
-
-
-build = build_id()
 
 content = f'''#pragma once
 
@@ -80,24 +51,7 @@ content = f'''#pragma once
 #ifndef MM_VERSION
 #define MM_VERSION    "{version}"
 #endif
-
-// MM_BUILD_DATE — when the TU that includes this header was compiled. **Do NOT use it to
-// tell which code is on a board.** __DATE__/__TIME__ expand at the *including* TU's
-// compile, and only that TU's own dependencies trigger a rebuild — edit a driver .cpp and
-// this date does not move, so a freshly flashed board still reports the OLD timestamp.
-// Trusting it as a firmware-identity signal misleads: two different builds can carry the same date.
-// Use MM_BUILD_ID for identity; this is a human-readable "roughly when" only.
 #define MM_BUILD_DATE __DATE__ " " __TIME__
-
-// MM_BUILD_ID — the short git hash this binary was built from, `+`-suffixed when the tree
-// was dirty ("a1b2c3d4+"), or "nogit" without a git checkout. THIS is the firmware-identity
-// signal: it is regenerated from git on every build (the CMake rule is deliberately always
-// out-of-date), so it names the SOURCE rather than a compile timestamp. Read it off a
-// running device to answer "did my flash land, and with what?" — the question that must be
-// answerable before any bench measurement can be trusted.
-#ifndef MM_BUILD_ID
-#define MM_BUILD_ID   "{build}"
-#endif
 
 // Compile-time identity from build flags. The build script that knows the
 // value passes it as a -D, and SystemModule surfaces it on the device card
@@ -131,7 +85,6 @@ namespace mm {{
 
 constexpr const char* kVersion      = MM_VERSION;
 constexpr const char* kBuildDate    = MM_BUILD_DATE;
-constexpr const char* kBuildId      = MM_BUILD_ID;
 constexpr const char* kFirmwareName = MM_FIRMWARE_NAME;
 constexpr const char* kRelease      = MM_RELEASE;
 

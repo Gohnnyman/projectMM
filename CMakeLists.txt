@@ -77,17 +77,14 @@ target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # Winsock for the desktop socket surface on Windows.
 target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)
 
-# Generate build_info.h from library.json + git (carries version, build id, build date, board name).
-# ALWAYS out-of-date on purpose — see the same rule in esp32/main/CMakeLists.txt for why: MM_BUILD_ID
-# must track the git hash on every build, and pinning this to library.json's mtime is what made the
-# reported build stamp go stale, which reads as a failed flash and sends debugging at the wrong binary. The generator
-# rewrites the header only when its content changes, so an unchanged tree triggers no rebuild.
-add_custom_target(build_info_gen ALL
+# Generate build_info.h from library.json (carries version, build date, board name).
+add_custom_command(
+    OUTPUT ${CMAKE_SOURCE_DIR}/src/core/build_info.h
     COMMAND ${UV_EXECUTABLE} run python ${CMAKE_SOURCE_DIR}/moondeck/build/generate_build_info.py
-    BYPRODUCTS ${CMAKE_SOURCE_DIR}/src/core/build_info.h
-    COMMENT "Generating build_info.h (git build id)"
-    VERBATIM
+    DEPENDS ${CMAKE_SOURCE_DIR}/library.json ${CMAKE_SOURCE_DIR}/moondeck/build/generate_build_info.py
+    COMMENT "Generating build_info.h"
 )
+add_custom_target(build_info_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/build_info.h)
 
 # Embed UI files as C arrays. Pass UV_EXECUTABLE through as a single value
 # (no semicolons on the command line — those would either get split by `make`

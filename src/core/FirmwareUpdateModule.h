@@ -120,11 +120,7 @@ public:
         // machine-comparable version. This keeps `version` a clean semver the UI's update check can
         // compare against the newest GitHub release.
         std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
-        // `build` carries the git BUILD ID first, then the compile timestamp: "0d75fdbe+ · Jul 16 2026
-        // 14:51:02". The id is what actually answers "which code is on this board?" — kBuildDate alone
-        // cannot, because __DATE__ expands when the TU including build_info.h compiles, so it freezes
-        // while the firmware moves on (a stale date reads as a failed flash; see build_info.h).
-        std::snprintf(buildStr_, sizeof(buildStr_), "%s · %s", kBuildId, kBuildDate);
+        std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
         std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
     }
 
@@ -193,7 +189,7 @@ private:
     uint32_t totalSnap_     = 0;
     // Firmware identity (static for this build) + the running app-partition usage.
     char     versionStr_[32] = {};   ///< pure semver — such as "2.0.0" or "2.1.0-dev.7"
-    char     buildStr_[48]   = {};   // "<8-hex><+?> · <__DATE__ __TIME__>" — id + separator + 20-char stamp
+    char     buildStr_[24]   = {};
     char     firmwareStr_[24] = {};  ///< build variant name, such as "esp32s3-n16r8"
     uint32_t firmwareSizeVal_ = 0;   ///< bytes used in the app partition
     uint32_t totalFlashVal_   = 0;   ///< app partition size
