@@ -254,6 +254,7 @@ abstraction. Scaffolding left in the tree: bufLastNode[], termNode, itemsPerBuf,
 diag. Board reverted to known-good (reset-tail + prime-only gate render clean).
 
 ### RESOLVED: prime-only self-termination SHIPS — verified on the wall at 60/128/192 lights per strand
+
 The "GDMA index puzzle" was never an index-mapping problem. It was THREE stacked bugs, each found by a
 targeted diagnostic (ld/tx/ipb/ci/tn in ringDbg) and each fixed structurally:
 
@@ -282,3 +283,51 @@ hpwit's ISR splice of the terminator a POOL-DEPTH ahead of the read head, and no
 (the lapping refill still needs per-buffer EOFs, but frame-end must key off the terminator, not a count).
 The platform mount/EOF contract is below the busInitRing seam, so it is hardware-verified (the host mock pins
 the driver-side contract above the seam; 27/27 ring tests green throughout).
+
+### LAPPING phase, measurement 1 (floor-first): THE ENCODE IS THE GATE — 532 µs/slice vs a 151 µs budget
+Measured on the committed build, rows=7/256/bufs=32 (37 slices, lapping): `enc` (worst ISR slice refill) =
+595 µs with a PSRAM-resident snapshot, 532 µs after moving the snapshot to internal RAM
+(platform::allocInternal — kept: correct ISR-read hygiene, ~10%). Budget = one buffer's drain =
+7 × 21.6 µs = 151 µs. **The refill is ~3.5× over the wire — no ring redesign (splice/batch/clock-oracle)
+can fix a producer 3.5× slower than the consumer.** This confirms the encode-deadline memories against the
+CURRENT code and kills the PSRAM-source hypothesis as the dominant term.
+
+Lever map (per-light ≈ 76 µs vs 21.6 µs):
+- Prefill re-runs PER REFILL in the ring trampoline (~20 µs/light — the prefill-hoist win exists for
+  whole-frame but not the lapping refill). Hoist candidate #1.
+- Transpose+emit ~26–36 µs/light (the §7.6 decomposition). Candidates: template the lane loop on a
+  compile-time count (the runtime `laneCount_` bound blocks unrolling), then IRAM/asm per the recorded order.
+- hpwit's deadline-stretch (_DMA_EXTENSTION zero-pad) is DEAD as per-buffer padding at our clock (needs
+  ~10 KB/buffer, breaks the one-node rule) — BUT an INTERLEAVED SHARED zero-pad node (data → sharedZeroPad →
+  data …, one static 4 KB zero block referenced by every pad node, <150 µs so it reads as a pause not a
+  latch) raises the per-slice deadline 151 → ~300 µs at the cost of ~half the fps (48×256 ≈ 90 fps instead
+  of 180). A fallback lever if pure encode speed can't close 3.5×.
+- Note for the real 48×256 target: the 16-bit bus (6 pins) doubles the per-light wire time (43.2 µs
+  budget) while the encode grows less than 2× — the bench's 2-pin 8-bit config is the WORST-case ratio.
+
+### LAPPING phase, measurement 2 (2026-07-18): THE CLOCK WAS THE FLOOR — and the target-shape gap is 1.34×
+The day's lever hunt, measured honestly on the bench (uniform lapping 180/rows=5/bufs=32, budget 108 µs/slice):
+- Prefill hoist (needsPrefill lifecycle flag): 74 → 65 µs/light (~12%; ragged strands still prefill per refill).
+- Correcting snapshot (Correction::apply moved to the render-thread snapshot copy; byte-identity pinned by the
+  27 ring tests): ~nil on the ISR — but kept, it is the right thread for that work.
+- MM_RAMFUNC IRAM encode chain (+ `-mauto-litpools`, Xtensa-gated, for template literal pools; placement
+  verified via nm at 0x4037xxxx): enc 324 → 248 µs. ISR-context only (cold icache when the ISR interrupts the
+  render core); render-thread encode unchanged. A worst-case/jitter lever — exactly what the deadline races.
+- Internal wire_ (allocInternal-first in ensureWire): ~nil — the S3 dcache keeps small hot scratch fast
+  wherever it lives. The PSRAM penalty is for big streamed buffers, not hot 192-byte blocks.
+- **CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ was IDF's 160 default, not 240.** The uniform 1.5× no code lever could
+  reveal (it scaled the floor test too). Fixed in sdkconfig.defaults; the new System `cpu` control reads the
+  RUNNING clock ("240 MHz, 2 cores") so a config/hardware mismatch is visible in the UI. Measured: enc
+  247 → 165 µs (the exact 1.5×), 192/strand prime-only 56 → 80 fps, wall-verified clean.
+
+**Target-shape measurement (the decisive one):** 6 pins × 8 = 48 strands, 256/strand, ALL 12288 lights driven
+(Panels grown to 16×3), rows=5/bufs=12, deep lapping (52 slices): measured drain budget 262 µs/slice
+(tx 13.6 ms / 52 — the 16-bit bus doubles the per-light budget as predicted), measured enc 350 µs/slice
+(worst case). **Gap = 1.34×, not the 2–2.5× extrapolation** — the transpose count per light is fixed; only the
+small gather loop grows with pin count while the budget doubles with bus width.
+
+Consequence for the lever order: the interleaved SHARED zero-pad node (~100 µs of zeros per slice, one ~5 KB
+zero block shared by every pad node, under the ~150 µs latch threshold) closes 1.34× outright — it is promoted
+from fallback to primary, paired with the lapping-v2 mechanics (clock-oracle batch refill immune to EOF
+coalescing, terminator splice at last-slice-WRITTEN, ESP_INTR_FLAG_IRAM+LEVEL3 now that the chain is IRAM,
+no mid-frame stop). The lane-loop unroll stays in reserve if the soak shows enc spikes near the padded deadline.

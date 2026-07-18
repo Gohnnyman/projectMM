@@ -18,6 +18,14 @@
 #include "hal/rmt_ll.h"
 #endif
 
+// MM_RAMFUNC — "this function executes from RAM, not flash" (the __ramfunc concept from STM32/Zephyr,
+// spelled IRAM_ATTR in ESP-IDF). For code an ISR runs on a tight deadline: flash-resident code shares
+// one instruction cache between both cores, so a hot render loop evicts an ISR's code path between
+// invocations and every firing pays flash-refetch latency. A macro (not if constexpr) because it is a
+// function ATTRIBUTE; defined per-platform here behind the platform boundary, empty on desktop.
+#include "esp_attr.h"
+#define MM_RAMFUNC IRAM_ATTR
+
 namespace mm::platform {
 
 #ifdef CONFIG_SPIRAM

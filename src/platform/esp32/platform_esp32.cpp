@@ -107,6 +107,12 @@ void* alloc(size_t bytes) {
     return heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
 }
 
+void* allocInternal(size_t bytes) {
+    // Internal only, no PSRAM fallback here — the caller chose this seam because PSRAM latency breaks it
+    // (an ISR-read buffer); a silent PSRAM grant would hand back the exact problem. Caller falls back.
+    return heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 void free(void* ptr) {
     heap_caps_free(ptr);
 }
@@ -253,6 +259,20 @@ const char* chipModel() {
         case CHIP_ESP32P4: return "ESP32-P4";
         default:           return "ESP32-?";
     }
+}
+
+const char* cpuInfo() {
+    // Frequency from the running clock (esp_rom_get_cpu_ticks_per_us == MHz), not the sdkconfig macro,
+    // so a config/hardware mismatch shows up. Cores from esp_chip_info, same source chipModel uses.
+    static char buf[24] = {};
+    if (!buf[0]) {
+        esp_chip_info_t info;
+        esp_chip_info(&info);
+        std::snprintf(buf, sizeof(buf), "%u MHz, %u cores",
+                      static_cast<unsigned>(esp_rom_get_cpu_ticks_per_us()),
+                      static_cast<unsigned>(info.cores));
+    }
+    return buf;
 }
 
 const char* hostIp() {

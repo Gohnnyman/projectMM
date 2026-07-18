@@ -4,6 +4,10 @@
 
 #include <cstdint>
 
+// MM_RAMFUNC — RAM-resident code attribute for deadline-bound ISR paths (see the ESP32
+// platform_config.h for the rationale). Desktop code always executes from RAM; empty.
+#define MM_RAMFUNC
+
 namespace mm::platform {
 
 constexpr bool hasPsram = true;

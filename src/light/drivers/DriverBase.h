@@ -182,10 +182,15 @@ protected:
 
     /// Grow `wire_` to at least `bytes`. Keeps the existing block when it is already big enough.
     /// Leaves `wire_` null on allocation failure (the caller's tick() then idles).
+    /// Internal-RAM-first: this scratch is the encoder's hottest data — written AND read back per light
+    /// (a parallel encoder touches ~100 of its bytes per light), so a PSRAM-resident block multiplies
+    /// the whole encode by PSRAM latency. It is tiny (≤ kMaxStrands × channels), so internal always
+    /// has room; plain alloc() is only the degraded fallback.
     void ensureWire(size_t bytes) {
         if (wire_ && wireCap_ >= bytes) return;
         freeWire();
-        wire_ = static_cast<uint8_t*>(platform::alloc(bytes));
+        wire_ = static_cast<uint8_t*>(platform::allocInternal(bytes));
+        if (!wire_) wire_ = static_cast<uint8_t*>(platform::alloc(bytes));
         wireCap_ = wire_ ? bytes : 0;
     }
     /// Release the scratch (on the true teardown — release(), not a mid-life reinit).

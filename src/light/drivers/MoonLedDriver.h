@@ -216,8 +216,8 @@ public:
         if (!s.isRing) return;
         // The extended fields (ld/tx/ipb/ci/tn) are the LAPPING-phase instruments — the same readouts that
         // isolated the prime-only bugs (ld = drain progress, tx = real wire time vs the physical frame
-        // minimum, ipb/ci/tn = node accounting + the terminator). Kept until 256+/strand ships (see the
-        // backlog's ring entry for the removal list).
+        // minimum, ipb/ci/tn = node accounting + the terminator). Their scope lives in the backlog's ring
+        // entry.
         std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u tx%u ipb%u ci%u tn%d de%u enc%u gap%u",
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
                       static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.lastDrain),
@@ -313,17 +313,24 @@ public:
     /// on the last slice) must be re-laid on every refill or the buffer keeps the previous slice's
     /// constants and renders wrong on the second frame (pinned by the recycled==fresh host test). Direct
     /// mode writes every slot word in encodeRows, so it needs no prefill.
-    static void ringEncodeTrampoline(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
-                                     bool closeFrame) {
+    static void MM_RAMFUNC ringEncodeTrampoline(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
+                                                bool closeFrame, bool needsPrefill) {
         auto* self = static_cast<MoonLedDriver*>(user);
         const uint8_t outCh = self->correction_.outChannels;
         const auto first = static_cast<nrOfLightsType>(firstRow);
         const auto count = static_cast<nrOfLightsType>(rowCount);
+        // Prefill only when the buffer's constants are actually gone (`needsPrefill` — the platform's
+        // buffer-lifecycle fact: first use, or after a platform memset; see MoonI80EncodeFn). A recycled
+        // buffer's constants survive a data-only refill byte-identically, and the per-refill prefill was
+        // ~1/3 of the ISR encode cost — the difference between the refill fitting its drain deadline or not.
+        // RAGGED strands still prefill every time: the active mask varies per ROW, so a buffer holding a
+        // different slice needs that slice's row masks re-laid regardless of recycling.
+        const bool prefill = self->pinExpanderMode() && (needsPrefill || !self->uniformLaneCounts());
         if (self->slotBytes() == 1) {
-            if (self->pinExpanderMode()) self->prefillShiftRows<uint8_t>(outCh, dst, first, count);
+            if (prefill) self->prefillShiftRows<uint8_t>(outCh, dst, first, count);
             self->encodeRows<uint8_t>(outCh, dst, first, count, closeFrame);
         } else {
-            if (self->pinExpanderMode()) self->prefillShiftRows<uint16_t>(outCh, dst, first, count);
+            if (prefill) self->prefillShiftRows<uint16_t>(outCh, dst, first, count);
             self->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
         }
     }

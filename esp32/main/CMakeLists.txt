@@ -44,6 +44,15 @@ idf_component_register(
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
+# Xtensa: interleave literal pools into the text section (-mauto-litpools). Required by MM_RAMFUNC
+# (IRAM_ATTR) on TEMPLATE functions: a comdat instantiation's code lands in `.iram1.*` but its literal
+# pool in `.literal._Z…`, which the IDF linker script keeps in flash — out of l32r's backward reach
+# ("dangerous relocation: literal placed after use"). Auto-litpools makes each function self-contained.
+# RISC-V targets (P4) place constants inline natively and don't know the flag.
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    target_compile_options(${COMPONENT_LIB} PRIVATE -mauto-litpools)
+endif()
+
 # Firmware-variant defines, set by moondeck/build/build_esp32.py via firmware_cmake_args().
 # See docs/architecture.md § Firmware vs board — "firmware" is the compiled
 # binary variant; the physical "board" is a separate concept the device

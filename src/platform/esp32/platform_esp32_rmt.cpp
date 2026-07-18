@@ -309,7 +309,12 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
     struct Cap {
         uint8_t rxGpio; uint32_t* buf; size_t max; size_t need;
         bool ride; volatile size_t got = 0; volatile bool done = false;
-    } cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax, kBits, rideMode};
+    };
+    // HEAP, not stack: the rx task holds this pointer, and the wedged-task exit below returns while the
+    // task may still be running — a stack Cap would then be a use-after-return. Heap lets that path leak
+    // the context alongside rxSymbols (the deliberate failure mode) instead of dangling it.
+    auto* cap = new (std::nothrow) Cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax, kBits, rideMode};
+    if (!cap) { heap_caps_free(rxSymbols); return; }
     // Each rmt_receive captures ONE run of pulses ending at the next >100 µs gap (the WS2812 reset). With a
     // controlled transmit the run starts at frame start, so one arm yields the whole frame. RIDING a
     // free-running pipeline, an arm lands mid-frame and captures only the tail (< kBits) before the reset —
@@ -333,7 +338,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         c->done = true;
         vTaskDelete(nullptr);
     };
-    const bool taskStarted = xTaskCreate(rxTask, "lblb", 4096, &cap, 5, nullptr) == pdPASS;
+    const bool taskStarted = xTaskCreate(rxTask, "lblb", 4096, cap, 5, nullptr) == pdPASS;
     if (taskStarted) {
         vTaskDelay(pdMS_TO_TICKS(50));
         // First transmit timed — the wall time of a known byte count confirms the
@@ -354,19 +359,19 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                      (unsigned)r.txExpectUs, (unsigned)pclkHz);
         }
         // Back-to-back frames, exactly the render loop's transmit/wait cadence.
-        for (int i = 0; i < 100 && !cap.done; i++) transmitOnce();
+        for (int i = 0; i < 100 && !cap->done; i++) transmitOnce();
         // Wait for the capture task. Ride mode re-arms internally (each arm returns in ~1 frame when the
         // pipeline is live), so give it a longer ceiling than the controlled-transmit path — a live frame is
         // caught in well under this, and a dead wire still ends when the task exhausts its bounded retries.
         const int waitTicks = rideMode ? 600 : 200;   // ×10 ms = 6 s (ride) / 2 s (controlled)
-        for (int i = 0; i < waitTicks && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
+        for (int i = 0; i < waitTicks && !cap->done; i++) vTaskDelay(pdMS_TO_TICKS(10));
     }
-    r.capturedSymbols = static_cast<uint32_t>(cap.got);
+    r.capturedSymbols = static_cast<uint32_t>(cap->got);
     r.rxIdleLevel = static_cast<int8_t>(gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
     ESP_LOGI(tag, "loopback: rx captured %u symbols (need %u), idle rx level=%d",
-             (unsigned)cap.got, (unsigned)kBits, (int)r.rxIdleLevel);
+             (unsigned)cap->got, (unsigned)kBits, (int)r.rxIdleLevel);
 
-    if (cap.done && cap.got >= kBits) {
+    if (cap->done && cap->got >= kBits) {
         // Verify EVERY bit of the frame against the per-row pattern (r.sent[],
         // zero-padded for RGBW rows), not just the first light.
         size_t mismatch = SIZE_MAX;
@@ -385,7 +390,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         // r.got[] reports the row holding the first mismatch (row 0 when clean).
         const size_t rowStart = (mismatch == SIZE_MAX)
                                     ? 0 : mismatch - (mismatch % rowBits);
-        for (size_t b = rowStart; b < rowStart + 24 && b < cap.got; b++) {
+        for (size_t b = rowStart; b < rowStart + 24 && b < cap->got; b++) {
             const uint8_t bit = ((rxSymbols[b] & 0x7FFF) >= threshTicks) ? 1 : 0;
             r.got[(b - rowStart) / 8] =
                 static_cast<uint8_t>((r.got[(b - rowStart) / 8] << 1) | bit);
@@ -414,16 +419,17 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                      r.got[0], r.got[1], r.got[2], r.sent[0], r.sent[1], r.sent[2]);
         }
     }
-    // NEVER free the capture buffer while the rx task may still write into it. The retry budget is sized
-    // under the wait ceiling above, so cap.done is normally long set by here; this drains the residue if the
-    // scheduler starved the task. If it STILL hasn't finished (an RMT-driver wedge), leaking one buffer is
-    // the correct failure — a use-after-free from the still-running task is not.
-    for (int i = 0; taskStarted && !cap.done && i < 500; i++) vTaskDelay(pdMS_TO_TICKS(10));
-    if (taskStarted && !cap.done) {
+    // NEVER free what the rx task may still touch — the capture buffer it writes AND the Cap context it
+    // reads. The retry budget is sized under the wait ceiling above, so cap->done is normally long set by
+    // here; this drains the residue if the scheduler starved the task. If it STILL hasn't finished (an
+    // RMT-driver wedge), leaking both is the correct failure — a use-after-free under a running task is not.
+    for (int i = 0; taskStarted && !cap->done && i < 500; i++) vTaskDelay(pdMS_TO_TICKS(10));
+    if (taskStarted && !cap->done) {
         ESP_LOGE(tag, "loopback: rx task never finished — leaking the capture buffer instead of freeing under it");
-        return;
+        return;   // rxSymbols and cap both stay allocated, deliberately
     }
     heap_caps_free(rxSymbols);
+    delete cap;
 }
 
 } // namespace detail

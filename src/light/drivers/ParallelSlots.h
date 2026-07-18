@@ -2,6 +2,7 @@
 
 #include <cstddef>   // size_t (the shift-register encoder's wire indexing)
 #include <cstdint>
+#include "platform_config.h"   // MM_RAMFUNC — the ring ISR runs these encoders on a drain deadline
 
 namespace mm {
 
@@ -64,7 +65,7 @@ namespace mm {
 /// cost more than the arithmetic it staged (measured: removing it took an S3 from 8.85 to 6.19 µs per
 /// light). A caller that can build the packed word straight from its source — the shift encoder can —
 /// keeps the whole transpose in registers.
-inline uint64_t transposeBits8x8(uint64_t x) {
+inline uint64_t MM_RAMFUNC transposeBits8x8(uint64_t x) {
     uint64_t t;
     t = (x ^ (x >> 7))  & 0x00AA00AA00AA00AAULL; x = x ^ t ^ (t << 7);
     t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL; x = x ^ t ^ (t << 14);
@@ -84,7 +85,7 @@ inline uint64_t transposeBits8x8(uint64_t x) {
 ///
 /// Keep BOTH: the 64-bit form is the clearer statement of the algorithm and is what a 64-bit host
 /// compiles best; this one is what the 32-bit device wants. `transposeLanes8x8` picks per platform.
-inline void transposeBits8x8Pair(uint32_t& lo, uint32_t& hi) {
+inline void MM_RAMFUNC transposeBits8x8Pair(uint32_t& lo, uint32_t& hi) {
     uint32_t t;
     t = (lo ^ (lo >> 7))  & 0x00AA00AAu; lo = lo ^ t ^ (t << 7);
     t = (hi ^ (hi >> 7))  & 0x00AA00AAu; hi = hi ^ t ^ (t << 7);
@@ -99,7 +100,7 @@ inline void transposeBits8x8Pair(uint32_t& lo, uint32_t& hi) {
 /// wrapper around transposeBits8x8, for callers that hold their lanes as bytes.
 ///
 /// Inactive lanes must be passed as 0 (the caller masks them) so they contribute no set bit to any plane.
-inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
+inline void MM_RAMFUNC transposeLanes8x8(const uint8_t* in, uint8_t* out) {
     uint64_t x = 0;
     for (int r = 0; r < 8; r++) x |= static_cast<uint64_t>(in[r]) << (8 * r);
     x = transposeBits8x8(x);
@@ -118,7 +119,7 @@ inline void transposeLanes8x8(const uint8_t* in, uint8_t* out) {
 ///
 /// Two 8-lane passes combined, so it reuses the same butterfly and adds no new magic constants.
 /// Inactive lanes must be passed as 0 by the caller, as with transposeLanes8x8.
-inline void transposeLanes16x8(const uint8_t* in, uint16_t* out) {
+inline void MM_RAMFUNC transposeLanes16x8(const uint8_t* in, uint16_t* out) {
     uint8_t lo[8], hi[8];
     transposeLanes8x8(in,     lo);   // lanes 0..7  → low byte of each plane
     transposeLanes8x8(in + 8, hi);   // lanes 8..15 → high byte of each plane
@@ -147,7 +148,7 @@ inline void transposeLanes16x8(const uint8_t* in, uint16_t* out) {
 /// live: an exhausted strand's bit is clear, so it idles LOW instead of flashing. This is the render
 /// loop's hot spot — see the group description for the transpose and why it is SWAR.
 template <class Slot>
-inline void encodeWs2812ParallelSlots(const uint8_t* wire, Slot activeMask,
+inline void MM_RAMFUNC encodeWs2812ParallelSlots(const uint8_t* wire, Slot activeMask,
                                  uint8_t channels, Slot* out) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;   // 8 or 16
     for (uint8_t ch = 0; ch < channels; ch++) {
@@ -266,7 +267,7 @@ inline constexpr uint8_t kPinExpanderOutputs = 8;   // one 74HCT595 per data pin
 /// One word (data lanes LOW + the latch bit) latches the trailing zeros through, and the rest of the
 /// zeroed pad then holds every strand LOW. Call once, immediately after the last row.
 template <class Slot>
-inline void encodeWs2812ShiftLatchPad(uint8_t latchBit, Slot* out) {
+inline void MM_RAMFUNC encodeWs2812ShiftLatchPad(uint8_t latchBit, Slot* out) {
     *out = static_cast<Slot>(Slot(1) << latchBit);
 }
 
@@ -396,7 +397,7 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
 /// lane gather (one pass sets the active bit and reads the wire byte), so routing it through this helper
 /// would walk the pins twice and test each mask bit twice.
 template <class Slot>
-inline void shiftActivePins(uint64_t activeMask, uint8_t physPins, uint8_t outPerPin,
+inline void MM_RAMFUNC shiftActivePins(uint64_t activeMask, uint8_t physPins, uint8_t outPerPin,
                             Slot (&out)[kPinExpanderOutputs]) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;
     for (uint8_t c = 0; c < outPerPin; c++) {
@@ -411,7 +412,7 @@ inline void shiftActivePins(uint64_t activeMask, uint8_t physPins, uint8_t outPe
 }
 
 template <class Slot>
-inline void prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t physPins, uint8_t latchBit,
+inline void MM_RAMFUNC prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t physPins, uint8_t latchBit,
                                         uint8_t outPerPin, uint8_t channels, uint32_t rows,
                                         Slot* out) {
     if (outPerPin == 0 || outPerPin > kPinExpanderOutputs) return;
@@ -445,7 +446,7 @@ inline void prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t physPins, u
 /// Identical output to `encodeWs2812ShiftSlots` (the whole-slot encoder) provided the prefill ran
 /// first with the SAME activeMask — which the tests pin byte-for-byte.
 template <class Slot>
-inline void encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint8_t physPins,
+inline void MM_RAMFUNC encodeWs2812ShiftData(const uint8_t* wire, uint64_t activeMask, uint8_t physPins,
                                   uint8_t latchBit, uint8_t outPerPin, uint8_t channels, Slot* out) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;
     if (outPerPin == 0 || outPerPin > kPinExpanderOutputs) return;

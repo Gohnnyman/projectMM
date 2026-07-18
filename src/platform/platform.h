@@ -31,6 +31,15 @@ void setTestBindFails(bool fail);
 void* alloc(size_t bytes);
 void free(void* ptr);
 
+// Internal-RAM-only allocation — the mirror of alloc()'s PSRAM-first policy, for buffers a hot ISR READS.
+// alloc() prefers PSRAM because most large buffers are touched from tasks where PSRAM latency amortizes;
+// a buffer read per-byte inside an interrupt (the streaming ring's encode source) pays that latency
+// hundreds of times per invocation and blows its deadline (measured: ~595 µs per slice refill with a
+// PSRAM-resident source, against a 151 µs drain budget). Returns nullptr when internal RAM can't supply it —
+// the CALLER decides the fallback (typically plain alloc(), accepting the slower PSRAM read over failing).
+// Free with the ordinary free().
+void* allocInternal(size_t bytes);
+
 // Executable memory for JIT-emitted native code (MoonLive). Distinct from alloc()
 // because code must live in memory the CPU can FETCH from, not just read/write:
 // IRAM on ESP32 (MALLOC_CAP_EXEC), an mmap'd PROT_EXEC page on desktop. Returns
@@ -183,6 +192,12 @@ void getMacAddress(uint8_t mac[6]);
 const char* macString();
 const char* chipModel();
 const char* sdkVersion();
+
+// CPU frequency + core count as one short static string ("240 MHz, 2 cores"), read from the RUNNING
+// hardware, not a config macro — so a stale sdkconfig or a PM downclock is visible in the UI (finding
+// the chip silently at 160 MHz is exactly what this control exists to catch). Desktop reports cores
+// only (host clock speed has no portable query). Static-buffer contract as macString above.
+const char* cpuInfo();
 
 // PSRAM interface type as a short static string: "quad" (1-line SPI, classic ESP32 / WROVER) or
 // "octal" (8-line, the S3/S2 -R8 parts). Derived from the compile-time CONFIG_SPIRAM_MODE (there is no
@@ -763,8 +778,17 @@ struct MoonI80Ws2812Handle { void* impl = nullptr; };
 //
 // `MoonI80EncodeFn` is the seam: the platform owns the ring, the descriptors and the completion; the
 // domain owns the encode. The callback runs from the EOF ISR (and once from the priming call).
+//
+// `needsPrefill` is the platform's buffer-lifecycle fact the encode's biggest saving hangs on: a ring
+// buffer's CONSTANT words (the shift waveform frame prefillShiftRows lays) survive recycling — a data-only
+// refill of a recycled buffer is byte-identical to a full one — so the encoder may skip the prefill except
+// when the platform says the buffer's constants are gone: its FIRST use since the pool was built, or after
+// any platform-side memset (the short-last-slice tail zero, the past-frame zero-fill). Only the platform
+// knows those events, so it computes the flag; the domain decides what "prefill" means (and may still
+// prefill unconditionally when its lane masks vary per row — ragged strands). Measured: the per-refill
+// prefill was ~1/3 of the ISR encode cost.
 using MoonI80EncodeFn = void (*)(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
-                                 bool closeFrame);
+                                 bool closeFrame, bool needsPrefill);
 
 bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                        uint16_t wrGpio, size_t bufferBytes,
@@ -826,9 +850,9 @@ struct MoonI80RingStats {
     uint32_t descErr = 0;        // GDMA descriptor-error count (>0 == the in-ISR encode corrupted the chain: B1)
     uint32_t maxEncodeUs = 0;    // worst ISR refill-encode time (the producer)
     uint32_t maxIsrGapUs = 0;    // worst gap between EOFs = DMA buffer-drain time (the deadline)
-    // Ring-diagnosis fields, kept until the LAPPING phase (256+/strand) ships — they are the instruments
-    // that isolated the three prime-only bugs (mount re-link, multi-node buffers, EOF coalescing) and the
-    // lapping work reads them the same way. Removal note: backlog-light § MoonI80 streaming ring.
+    // Ring-diagnosis fields — the instruments that isolated the three prime-only bugs (mount re-link,
+    // multi-node buffers, EOF coalescing); the lapping work reads them the same way. Their scope lives in
+    // backlog-light § MoonI80 streaming ring.
     uint32_t itemsPerBuf = 0;    // descriptor nodes per ring buffer (1 by construction since the clamp)
     int32_t  termNodeDiag = -1;  // the mount-time NULL terminator node (-1 = looping/lapping chain)
 };

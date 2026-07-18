@@ -124,6 +124,10 @@ void* alloc(size_t bytes) {
     return std::malloc(bytes);
 }
 
+void* allocInternal(size_t bytes) {
+    return std::malloc(bytes);   // desktop has one flat RAM — internal == ordinary
+}
+
 void free(void* ptr) {
     std::free(ptr);
 }
@@ -362,6 +366,14 @@ const char* macString() {
 
 const char* chipModel() {
     return "desktop";
+}
+
+const char* cpuInfo() {
+    // Cores only: the host's clock speed has no portable query (and boosts dynamically anyway).
+    static char buf[16] = {};
+    if (!buf[0])
+        std::snprintf(buf, sizeof(buf), "%u cores", std::thread::hardware_concurrency());
+    return buf;
 }
 
 const char* hostIp() {

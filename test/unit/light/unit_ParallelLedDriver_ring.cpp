@@ -96,6 +96,9 @@ public:
         ringActive_ = true;
         const size_t bufBytes = static_cast<size_t>(kMockRingRows) * rowBytes;
         for (auto& b : ring_) b.assign(bufBytes, 0);
+        // Fresh (zeroed) pool: every buffer needs its constants laid on first use — the platform's
+        // bufNeedsPrefill lifecycle, mirrored here so the byte-compare tests pin the prefill-skip contract.
+        for (auto& f : needsPrefill_) f = true;
         return true;
     }
     bool busIsRing() const { return ringActive_; }
@@ -120,11 +123,17 @@ public:
             // Short last slice into a rows-only, RECYCLED buffer: zero rows [count, kMockRingRows) first —
             // exactly as the platform ISR does (moonI80EofCb) before encodeRingSlice. Those mounted bytes
             // still hold this buffer's EARLIER full slice and would clock as ghost rows otherwise.
-            if (count < kMockRingRows)
+            const bool shortSlice = count < kMockRingRows;
+            if (shortSlice)
                 std::memset(ring_[slot].data() + static_cast<size_t>(count) * ringRowBytes_, 0,
                             (static_cast<size_t>(kMockRingRows) - count) * ringRowBytes_);
-            // The platform calls the trampoline with (dst, firstRow, count) — closeFrame is always false.
-            MockRingDriver::ringEncodeTrampolineHost(this, ring_[slot].data(), row, count, last);
+            // The platform's bufNeedsPrefill lifecycle: consume this use's flag, hand it to the trampoline,
+            // and re-flag the buffer after a tail memset (its constants are gone for the NEXT use).
+            const bool needsPrefill = needsPrefill_[slot];
+            needsPrefill_[slot] = false;
+            MockRingDriver::ringEncodeTrampolineHost(this, ring_[slot].data(), row, count, last,
+                                                     needsPrefill);
+            if (shortSlice) needsPrefill_[slot] = true;
             // Reassemble the row region in DMA order.
             assembled.insert(assembled.end(), ring_[slot].begin(),
                              ring_[slot].begin() + static_cast<long>(rowBytesOf(count)));
@@ -179,20 +188,22 @@ public:
     // reproduces its body (recover `this`, branch on bus width, call encodeRows) so the host drives the
     // identical encode the seam does on device. `closeFrame` is ALWAYS false to the encoder: the platform
     // (encodeRingSlice) never appends a latch pad to a rows-only ring buffer — the WS2812 reset comes from
-    // stopping the peripheral, not from a pad inside a circulating buffer.
+    // stopping the peripheral, not from a pad inside a circulating buffer. `needsPrefill` mirrors the real
+    // trampoline's prefill-skip: constants are laid only when the platform says the buffer's are gone (or
+    // the lanes are ragged), and the byte-compare tests prove a data-only refill of a recycled buffer is
+    // identical to a full one.
     static void ringEncodeTrampolineHost(void* user, uint8_t* dst, uint32_t firstRow,
-                                         uint32_t count, bool /*last*/) {
+                                         uint32_t count, bool /*last*/, bool needsPrefill) {
         auto* self = static_cast<MockRingDriver*>(user);
         const uint8_t outCh = self->correction_.outChannels;
         const auto first = static_cast<nrOfLightsType>(firstRow);
         const auto cnt = static_cast<nrOfLightsType>(count);
-        // Prefill THEN encode, exactly as MoonLedDriver::ringEncodeTrampoline does — the recycled
-        // buffer needs its constants re-laid, and encodeRows writes only the data word in shift mode.
+        const bool prefill = self->pinExpanderMode() && (needsPrefill || !self->uniformLaneCounts());
         if (self->slotBytes() == 1) {
-            if (self->pinExpanderMode()) self->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
+            if (prefill) self->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
             self->template encodeRows<uint8_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
         } else {
-            if (self->pinExpanderMode()) self->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
+            if (prefill) self->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
             self->template encodeRows<uint16_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
         }
     }
@@ -228,22 +239,33 @@ public:
         const uint32_t nSlices = nSlicesForTest();
 
         // Prime the first min(bufs, nSlices) buffers with slices 0..; a buffer past the frame's slices is
-        // zeroed (mirrors startRingTransfer). refilledRow / refillSlot advance exactly as the platform's.
+        // zeroed (mirrors startRingTransfer). refilledRow / refillSlot advance exactly as the platform's,
+        // and so does the bufNeedsPrefill lifecycle (fresh pool = true; consumed per use; re-set on memset).
+        std::vector<bool> poolNeedsPrefill(bufs, true);
         auto encodeSliceInto = [&](uint8_t slot, uint32_t firstRow) {
             uint32_t count = kMockRingRows;
+            bool shortSlice = false;
             if (firstRow + count >= ringTotalRows_) {
                 count = ringTotalRows_ - firstRow;
-                if (count < kMockRingRows)   // short last slice: zero the rest so no stale rows clock
+                if (count < kMockRingRows) {  // short last slice: zero the rest so no stale rows clock
                     std::memset(pool[slot].data() + static_cast<size_t>(count) * ringRowBytes_, 0,
                                 (static_cast<size_t>(kMockRingRows) - count) * ringRowBytes_);
+                    shortSlice = true;
+                }
             }
             const bool last = (firstRow + count >= ringTotalRows_);
-            ringEncodeTrampolineHost(this, pool[slot].data(), firstRow, count, last);
+            const bool needsPrefill = poolNeedsPrefill[slot];
+            poolNeedsPrefill[slot] = false;
+            ringEncodeTrampolineHost(this, pool[slot].data(), firstRow, count, last, needsPrefill);
+            if (shortSlice) poolNeedsPrefill[slot] = true;   // the tail memset erased those rows' constants
         };
         uint32_t refilledRow = 0;
         for (uint8_t primed = 0; primed < bufs; primed++) {
             if (refilledRow < ringTotalRows_) { encodeSliceInto(primed, refilledRow); refilledRow += kMockRingRows; }
-            else std::fill(pool[primed].begin(), pool[primed].end(), 0);   // past last slice: LOW tail buffer
+            else {
+                std::fill(pool[primed].begin(), pool[primed].end(), 0);   // past last slice: LOW tail buffer
+                poolNeedsPrefill[primed] = true;
+            }
         }
 
         // Clock the looping chain: each EOF drains buffer `slot`, we RECORD what it clocked, then the ISR
@@ -272,7 +294,7 @@ public:
             if (drained >= nSlices + kTailBufs) break;
             // ISR refill: put the NEXT unencoded slice (refilledRow) into this drained buffer, or zeros.
             if (refilledRow < ringTotalRows_) { encodeSliceInto(slot, refilledRow); refilledRow += kMockRingRows; }
-            else std::fill(pool[slot].begin(), pool[slot].end(), 0);
+            else { std::fill(pool[slot].begin(), pool[slot].end(), 0); poolNeedsPrefill[slot] = true; }
             slot = (slot + 1u) % bufs;
         }
         // Tail is LOW iff every past-last clock was all-zero (default true unless a corrupt tail flipped it).
@@ -295,6 +317,7 @@ private:
     std::vector<uint8_t> buf_;
     size_t cap_ = 0;
     std::vector<uint8_t> ring_[kMockRingBufs];
+    bool needsPrefill_[kMockRingBufs] = {};   // the platform's bufNeedsPrefill lifecycle, mirrored
     size_t ringRowBytes_ = 0;
     uint32_t ringTotalRows_ = 0;
     bool ringActive_ = false;
@@ -631,6 +654,43 @@ TEST_CASE("MoonI80 ring: a ragged frame tiles byte-identically (a strand ending 
 
     // The frame is still as long as the LONGEST strand — the short ones just go dark early.
     REQUIRE(d.maxLaneLights() == 200);
+
+    d.busInit(d.frameBytes(), false);
+    d.prefillShiftFrameForTest<uint8_t>(outCh, d.busBuffer(0));
+    d.encodeWholeForTest<uint8_t>(outCh, d.busBuffer(0));
+    std::vector<uint8_t> whole(d.busBuffer(0), d.busBuffer(0) + rowRegion);
+    d.busDeinit();
+
+    d.setWantRing(true);
+    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    std::vector<uint8_t> assembled = d.driveRingFrame();
+
+    REQUIRE(assembled.size() == whole.size());
+    CHECK(std::memcmp(assembled.data(), whole.data(), whole.size()) == 0);
+}
+
+// 9b. EMPTY LANES ARE NOT RAGGED. The prefill-skip gate (uniformLaneCounts) requires a frame-constant
+//     active mask, and a count-0 lane is in NO row's mask — so a source that fills only 15 of 16
+//     expander strands must count as uniform (skip allowed), not ragged (prefill every refill, ~1/3 of
+//     the refill cost). This pins BOTH halves: the gate says uniform, and the ring's recycled-buffer
+//     frames — which now skip the prefill — stay byte-identical to the whole-frame encode.
+TEST_CASE("MoonI80 ring: an EMPTY lane does not break uniformity (prefill-skip stays valid)") {
+    MockRingDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    // 15 strands at the full 200, the 16th empty — the 3840-lights-on-16-strands wall shape.
+    wireShift(d, src, corr, 200, "1,2",
+              "200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,0");
+    CHECK(d.uniformLaneCounts());   // the gate itself: empty lane ignored
+    uint8_t* s = src.data();
+    for (nrOfLightsType i = 0; i < src.count(); i++) {
+        s[i * 3 + 0] = static_cast<uint8_t>(i * 7);
+        s[i * 3 + 1] = static_cast<uint8_t>(i * 13 + 1);
+        s[i * 3 + 2] = static_cast<uint8_t>(i * 29 + 2);
+    }
+    const uint8_t outCh = corr.outChannels;
+    const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
+    const size_t rowRegion = static_cast<size_t>(d.maxLaneLights()) * rowBytes;
 
     d.busInit(d.frameBytes(), false);
     d.prefillShiftFrameForTest<uint8_t>(outCh, d.busBuffer(0));

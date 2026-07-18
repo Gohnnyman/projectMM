@@ -721,7 +721,7 @@ public:
     /// (which is why the constants land on a recycled ring buffer that encodeRows alone would leave
     /// stale — encodeRows writes only the DATA word, relying on these constants being present).
     template <class Slot>
-    void prefillShiftRows(uint8_t outCh, uint8_t* dst, nrOfLightsType firstRow, nrOfLightsType rowCount) {
+    void MM_RAMFUNC prefillShiftRows(uint8_t outCh, uint8_t* dst, nrOfLightsType firstRow, nrOfLightsType rowCount) {
         auto* out = reinterpret_cast<Slot*>(dst);
         const size_t slotsPerRow = static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
         const nrOfLightsType lastRow = (rowCount == 0 || firstRow + rowCount > maxLaneLights_)
@@ -764,7 +764,7 @@ public:
     /// dst-relative, so a slice lands at dst+0 whatever its first row. `closeFrame` appends the latch
     /// pad, so only the LAST slice may set it.
     template <class Slot>
-    void encodeRows(uint8_t outCh, uint8_t* dst,
+    void MM_RAMFUNC encodeRows(uint8_t outCh, uint8_t* dst,
                     nrOfLightsType firstRow = 0, nrOfLightsType rowCount = 0,
                     bool closeFrame = true) {
         const nrOfLightsType lastRow = (rowCount == 0 || firstRow + rowCount > maxLaneLights_)
@@ -773,11 +773,15 @@ public:
         // The streaming ring encodes OFF the render thread (its refill runs while the DMA drains and the
         // render loop is free to overwrite the source buffer), so it reads from an immutable per-frame
         // SNAPSHOT (encodeSrc_) instead of the live sourceBuffer_ — no use-after-free on a resize, no
-        // frame tearing. encodeSrc_ is snapshotSourceForRing()'s windowed copy, bias-corrected by
-        // -winStart_ so the index math below (winStart_ + laneStart_ + row) is unchanged either way. The
-        // sync/async whole-frame paths encode inline on the render thread with no such hazard, so they
-        // leave encodeSrc_ null and read the live buffer as before.
-        const uint8_t* src = encodeSrc_ ? encodeSrc_ : sourceBuffer_->data();
+        // frame tearing. The snapshot is PRE-CORRECTED: snapshotSourceForRing() runs Correction::apply as it
+        // copies (outCh-stride wire bytes), so THIS loop's per-lane work in snapshot mode is a plain outCh
+        // copy — the ~16 apply calls per row move off the ISR's drain deadline onto the elastic render
+        // thread (the deadline-bound refill keeps only gather + transpose + emit). encodeSrc_ is biased by
+        // -winStart_ (at the snapshot's outCh stride) so the index (winStart_ + laneStart_ + row) is
+        // unchanged. The sync/async whole-frame paths encode inline on the render thread with no such
+        // hazard, so they leave encodeSrc_ null, read the live buffer, and apply correction per light here.
+        const bool preCorrected = encodeSrc_ != nullptr;
+        const uint8_t* src = preCorrected ? encodeSrc_ : sourceBuffer_->data();
         const uint8_t srcCh = sourceBuffer_->channelsPerLight();
         auto* out = reinterpret_cast<Slot*>(dst);
         // Per-lane wire slots, lane-major with stride `outCh` (wire_[lane * outCh + ch]). Sized to the
@@ -798,8 +802,14 @@ public:
                 mask |= uint64_t(1) << lane;
                 // winStart_ shifts this driver's whole slice; laneStart_ is the
                 // per-lane offset within it.
-                correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
-                                   wire_ + lane * stride);
+                if (preCorrected) {
+                    // Snapshot mode: the bytes are already corrected wire bytes at outCh stride — gather only.
+                    std::memcpy(wire_ + lane * stride,
+                                src + (winStart_ + laneStart_[lane] + row) * stride, stride);
+                } else {
+                    correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
+                                       wire_ + lane * stride);
+                }
             }
             if (shift) {
                 // DATA WORDS ONLY. The pulse-start and pulse-tail words of every slot are frame
@@ -866,6 +876,22 @@ public:
     uint8_t laneCount() const { return laneCount_; }
     /// Lights on lane `i` (0 if out of range). Test-only.
     nrOfLightsType laneLightCount(uint8_t i) const { return i < laneCount_ ? laneCounts_[i] : 0; }
+    /// All POPULATED strands the same length? Gates the ring's prefill-skip: what the skip actually
+    /// requires is a per-row active mask that is constant across the frame — then a recycled buffer's
+    /// prefilled constants stay valid across slices. An EMPTY lane (count 0) is in no row's mask at all,
+    /// so it can never vary the mask: only the non-zero lane counts must agree. (The case that matters:
+    /// a source that fills 15 of 16 expander strands is as cheap as a full uniform wall, not "ragged".)
+    /// A truly ragged config re-prefills every refill (the mask varies per row region). Computed live —
+    /// a handful of integer compares against the ~1/3-of-encode prefill it saves.
+    bool MM_RAMFUNC uniformLaneCounts() const {
+        nrOfLightsType ref = 0;
+        for (uint8_t i = 0; i < laneCount_; i++) {
+            if (laneCounts_[i] == 0) continue;   // empty lane: never in any mask
+            if (ref == 0) ref = laneCounts_[i];
+            else if (laneCounts_[i] != ref) return false;
+        }
+        return true;
+    }
     /// First light index of lane `i`'s slice (0 if out of range). Test-only.
     nrOfLightsType laneStart(uint8_t i) const { return i < laneCount_ ? laneStart_[i] : 0; }
     /// Length of the longest lane — the frame's row count. Test-only.
@@ -938,9 +964,16 @@ protected:
     /// mid-frame. Returns false if it can't allocate (the ring build then degrades like any alloc failure).
     bool ensureSnapshotCap() {
         if (!sourceBuffer_) return true;   // sized on the first build that has a source; harmless if absent
-        const size_t bytes = static_cast<size_t>(winLen_) * sourceBuffer_->channelsPerLight();
+        // The snapshot holds PRE-CORRECTED WIRE bytes at outCh stride (snapshotSourceForRing runs the
+        // correction as it copies), so size by the OUTPUT channel count, not the source's.
+        const size_t bytes = static_cast<size_t>(winLen_) * correction_.outChannels;
         if (bytes == 0 || snapshotCap_ >= bytes) return true;
-        uint8_t* grown = static_cast<uint8_t*>(platform::alloc(bytes));
+        // INTERNAL RAM first: the ring's ISR refill reads this buffer per byte, and a PSRAM-resident
+        // snapshot pays PSRAM latency hundreds of times per slice (measured ~10% of a 595 µs refill). PSRAM
+        // fallback keeps a RAM-tight board rendering (slow beats dark); the internal window is modest
+        // (window lights × outCh, e.g. ~12 KB at 16×256 RGB, ~36 KB at 48×256).
+        uint8_t* grown = static_cast<uint8_t*>(platform::allocInternal(bytes));
+        if (!grown) grown = static_cast<uint8_t*>(platform::alloc(bytes));
         if (!grown) return false;
         if (snapshotBuf_) platform::free(snapshotBuf_);
         snapshotBuf_ = grown;
@@ -948,48 +981,60 @@ protected:
         return true;
     }
 
-    /// Copy THIS DRIVER'S WINDOW of the source into the driver-owned snapshot and route the ring's encode
-    /// at it, so the refill (off the render thread) reads a frozen frame. NO ALLOCATION here — the buffer
-    /// was sized in reinit() (ensureSnapshotCap); this is memcpy-only, safe for the render hot path.
-    /// Returns false (encodeSrc_ null, caller bails) if the source is missing, the window is empty, or the
-    /// snapshot wasn't sized (a reconfigure that shrank the buffer below the window — clamped defensively).
-    /// Sets encodeSrc_ = snapshotBuf_ - winStart_ * srcCh, so encodeRows' index (winStart_ + laneStart_ +
-    /// row) lands in the windowed copy WITHOUT changing the formula. The bias pointer is only ever
-    /// dereferenced at indices ≥ winStart_ * srcCh (never below the real buffer), so it never reads OOB.
+    /// Freeze THIS DRIVER'S WINDOW of the source into the driver-owned snapshot as PRE-CORRECTED WIRE
+    /// bytes — Correction::apply runs here, per light, as the copy is taken — and route the ring's encode
+    /// at it. Two jobs in one pass over bytes the copy touches anyway: (1) the refill (off the render
+    /// thread) reads a frozen frame — no use-after-free on a resize, no tearing; (2) the per-lane
+    /// correction moves OFF the ISR's drain deadline onto this elastic render-thread call — the deadline-
+    /// bound refill keeps only gather + transpose + emit (correction was the largest single term of the
+    /// lapping refill's budget overrun). NO ALLOCATION here — the buffer was sized in reinit()
+    /// (ensureSnapshotCap, outCh stride). Returns false (encodeSrc_ null, caller bails) if the source is
+    /// missing, the window is empty, or the snapshot wasn't sized.
+    /// Sets encodeSrc_ = snapshotBuf_ - winStart_ * outCh, so encodeRows' index (winStart_ + laneStart_ +
+    /// row) lands in the windowed copy WITHOUT changing the formula (at the snapshot's outCh stride). The
+    /// bias pointer is only ever dereferenced at indices ≥ winStart_ * outCh, so it never reads OOB.
     bool snapshotSourceForRing() {
         encodeSrc_ = nullptr;
         if (!sourceBuffer_ || !sourceBuffer_->data() || !snapshotBuf_) return false;
         const size_t srcCh = sourceBuffer_->channelsPerLight();
-        // Clamp the copy to what the live buffer AND the sized snapshot both hold: winLen_/winStart_ come
-        // from config and the source can have shrunk since reinit (a grid resize past the render thread is
+        const size_t outCh = correction_.outChannels;
+        if (srcCh == 0 || outCh == 0) return false;
+        // Clamp to what the live buffer AND the sized snapshot both hold: winLen_/winStart_ come from
+        // config and the source can have shrunk since reinit (a grid resize past the render thread is
         // exactly the hazard this snapshot guards), so never read past the source nor write past snapshotCap_.
         const nrOfLightsType count = sourceBuffer_->count();
         if (winStart_ >= count) return false;
         nrOfLightsType winLights = (winStart_ + winLen_ > count)
                                        ? static_cast<nrOfLightsType>(count - winStart_)
                                        : winLen_;
-        size_t bytes = static_cast<size_t>(winLights) * srcCh;
-        if (bytes > snapshotCap_) bytes = snapshotCap_;   // never overrun the buffer sized in reinit
-        if (bytes == 0) return false;
-        std::memcpy(snapshotBuf_, sourceBuffer_->data() + static_cast<size_t>(winStart_) * srcCh, bytes);
+        if (static_cast<size_t>(winLights) * outCh > snapshotCap_)
+            winLights = static_cast<nrOfLightsType>(snapshotCap_ / outCh);   // never overrun the sized buffer
+        if (winLights == 0) return false;
+        const uint8_t* srcBase = sourceBuffer_->data() + static_cast<size_t>(winStart_) * srcCh;
+        for (nrOfLightsType i = 0; i < winLights; i++)
+            correction_.apply(srcBase + static_cast<size_t>(i) * srcCh,
+                              snapshotBuf_ + static_cast<size_t>(i) * outCh);
         // INTRUSIVE loopback pattern hold: overwrite the tapped strand's rows in the snapshot with the test
-        // pattern, so EVERY frame the ring encodes clocks the known bytes on that strand (whatever the effect
-        // wrote), while the rest of the wall keeps rendering. Window-relative index (the snapshot starts at
-        // winStart_), clamped to the snapshot's byte count. Reuses the snapshot path — no per-frame race, no
-        // second buffer, no effect coupling. Off (-1) is the normal render path.
+        // pattern — CORRECTED like everything else here, so the wire carries what a real render of the
+        // pattern would (the bit-verify's expectation is built the same way). Window-relative index,
+        // clamped to the lights the copy actually filled. Off (-1) is the normal render path.
         if (patternHoldStrand_ >= 0 && static_cast<uint8_t>(patternHoldStrand_) < laneCount_) {
             const uint8_t lane = static_cast<uint8_t>(patternHoldStrand_);
+            uint8_t patSrc[8] = {};   // pattern in SOURCE channels, then corrected once into wire bytes
+            for (size_t ch = 0; ch < srcCh && ch < sizeof(patSrc); ch++)
+                patSrc[ch] = ch < 3 ? kPatternRGB_[ch] : uint8_t{0};
+            uint8_t patWire[8] = {};
+            correction_.apply(patSrc, patWire);
             const nrOfLightsType laneRows = laneCounts_[lane];
             for (nrOfLightsType row = 0; row < laneRows; row++) {
-                const size_t off = (static_cast<size_t>(laneStart_[lane]) + row) * srcCh;
-                if (off + srcCh > bytes) break;   // clamp to the snapshot the copy actually filled
-                for (uint8_t ch = 0; ch < srcCh; ch++)
-                    snapshotBuf_[off + ch] = ch < 3 ? kPatternRGB_[ch] : uint8_t{0};
+                if (static_cast<nrOfLightsType>(laneStart_[lane] + row) >= winLights) break;
+                std::memcpy(snapshotBuf_ + (static_cast<size_t>(laneStart_[lane]) + row) * outCh,
+                            patWire, outCh);
             }
         }
-        // Bias so the unchanged index (winStart_ + laneStart_ + row) * srcCh addresses into the windowed
-        // copy: snapshotBuf_[0] holds the light at winStart_, so subtract winStart_ * srcCh.
-        encodeSrc_ = snapshotBuf_ - static_cast<size_t>(winStart_) * srcCh;
+        // Bias so the unchanged index (winStart_ + laneStart_ + row) — at outCh stride — addresses into
+        // the windowed copy: snapshotBuf_[0] holds the light at winStart_.
+        encodeSrc_ = snapshotBuf_ - static_cast<size_t>(winStart_) * outCh;
         return true;
     }
     // INTRUSIVE loopback pattern hold: which strand carries the pinned pattern (-1 = off), and the RGB bytes

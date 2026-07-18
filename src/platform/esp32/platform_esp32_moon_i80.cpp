@@ -253,6 +253,11 @@ struct MoonI80State {
     // WRONG — it terminated a buffer early (bench: ld=7 for a 10-slice frame, node 21 landed in buffer 7 not
     // 10). The mount's own endIdx is the ground truth.
     int32_t  bufLastNode[kRingBufsMax] = {};
+    // Per-buffer "constants gone" flag for the encode seam's needsPrefill (see MoonI80EncodeFn in
+    // platform.h): true at pool build and after any platform-side memset of the buffer; cleared when the
+    // encode has been told once. Lets a uniform-lane encoder skip the per-refill prefill (~1/3 of the ISR
+    // encode cost) on every recycled buffer whose constants are still intact.
+    bool     bufNeedsPrefill[kRingBufsMax] = {};
     size_t   ringRowBytes = 0;       // encoded bytes per row (encode writes rowsPerBuf × this per buffer)
     MoonI80EncodeFn   encode = nullptr;   // the domain's slice encoder (platform.h seam)
     void*             encodeUser = nullptr;
@@ -274,13 +279,13 @@ struct MoonI80State {
     volatile uint32_t dbgEofTotal = 0;
     volatile uint32_t dbgDoneGiven = 0;
     volatile uint32_t dbgLastDrain = 0;
-    // B1-DISCRIMINATOR (temporary): a GDMA descriptor-error count. The researcher's leading hypothesis is
+    // B1-DISCRIMINATOR (diagnostic): a GDMA descriptor-error count. The researcher's leading hypothesis is
     // that the in-ISR encode writes outside ring[slot] and smashes the descriptor pool → the GDMA fetches a
     // garbage descriptor and halts SILENTLY (TX_DESC_ERROR is not a registered interrupt today). Registering
     // on_descr_err and counting it here turns that silent halt into a visible signal: descErr > 0 at the
     // stall == B1 confirmed (memory corruption), descErr == 0 == look elsewhere (B2 underrun-wedge / B3).
     volatile uint32_t dbgDescErr = 0;
-    // REUSE-RACE INSTRUMENTATION (temporary): is the ISR refill LOSING the race at deep reuse (256)?
+    // REUSE-RACE INSTRUMENTATION (diagnostic): is the ISR refill LOSING the race at deep reuse (256)?
     // dbgMaxEncodeUs = worst-case time one ISR refill (encodeRingSlice) took. dbgMaxIsrGapUs = worst gap
     // between two consecutive EOFs (how fast the DMA drains a buffer — the deadline the refill must beat).
     // If dbgMaxEncodeUs approaches/exceeds dbgMaxIsrGapUs, the refill can't keep pace (a PACE problem);
@@ -290,7 +295,7 @@ struct MoonI80State {
     volatile int64_t  dbgLastEofUs = 0;
 };
 
-// B1-DISCRIMINATOR (temporary): GDMA descriptor-error callback. Registered alongside on_trans_eof so a
+// B1-DISCRIMINATOR (diagnostic): GDMA descriptor-error callback. Registered alongside on_trans_eof so a
 // descriptor-fetch fault (the silent-halt class the researcher suspects) is COUNTED instead of ignored.
 // IRAM_ATTR + trivial (one volatile increment) — ISR-safe.
 bool IRAM_ATTR moonI80DescErrCb(gdma_channel_handle_t, gdma_event_data_t*, void* user) {
@@ -333,10 +338,10 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
     // doc / platform.h / the mount loop (GDMA_FINAL_LINK_TO_HEAD).
     if (st->isRing) {
         BaseType_t high = pdFALSE;
-        st->dbgEofTotal = st->dbgEofTotal + 1u;         // ISR INSTRUMENTATION (temporary)
+        st->dbgEofTotal = st->dbgEofTotal + 1u;         // ISR INSTRUMENTATION (diagnostic)
         const uint32_t drained = st->drainCount + 1u;   // this EOF completes the `drained`-th slice
         st->drainCount = drained;                       // explicit read-modify-write (no ++ on volatile)
-        st->dbgLastDrain = drained;                     // ISR INSTRUMENTATION (temporary)
+        st->dbgLastDrain = drained;                     // ISR INSTRUMENTATION (diagnostic)
 
         // (a) REFILL the drained buffer with the next unencoded slice, RIGHT HERE in the ISR — the race-free
         // producer/consumer guarantee (IDF's RGB-LCD bounce-buffer pattern + hpwit's ring): at interrupt
@@ -344,7 +349,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
         // later. Flash-resident encode is safe (channel is not isr_cache_safe; faults only during a flash
         // write, which never overlaps rendering). Skips once every slice has been handed out (the loop's
         // remaining laps re-clock already-encoded tail buffers until the stop below fires).
-        // REUSE-RACE INSTRUMENTATION (temporary): gap since the previous EOF = how fast the DMA drains one
+        // REUSE-RACE INSTRUMENTATION (diagnostic): gap since the previous EOF = how fast the DMA drains one
         // buffer (the refill deadline).
         const int64_t eofNow = esp_timer_get_time();
         if (st->dbgLastEofUs != 0) {
@@ -357,18 +362,24 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
         const uint32_t slot = st->refillSlot;
         if (firstRow < st->totalRows) {
             uint32_t count = st->rowsPerBuf;
+            bool shortSlice = false;
             if (firstRow + count >= st->totalRows) {
                 // Short last real slice (strand length not a multiple of rowsPerBuf): encode `count` rows,
                 // then ZERO the rest of this rows-only node so no stale rows clock as ghost pixels.
                 count = st->totalRows - firstRow;
-                if (count < st->rowsPerBuf)
+                if (count < st->rowsPerBuf) {
                     std::memset(st->ring[slot] + static_cast<size_t>(count) * st->ringRowBytes, 0,
                                 static_cast<size_t>(st->rowsPerBuf - count) * st->ringRowBytes);
+                    shortSlice = true;
+                }
             }
-            const int64_t encStart = esp_timer_get_time();     // REUSE-RACE INSTRUMENTATION (temporary)
+            const int64_t encStart = esp_timer_get_time();     // REUSE-RACE INSTRUMENTATION (diagnostic)
             encodeRingSlice(st, static_cast<uint8_t>(slot), firstRow, count);
             const uint32_t encUs = static_cast<uint32_t>(esp_timer_get_time() - encStart);
             if (encUs > st->dbgMaxEncodeUs) st->dbgMaxEncodeUs = encUs;
+            // AFTER the encode (encodeRingSlice consumed this use's flag): the memset above erased the tail
+            // rows' constants, so the buffer's NEXT full refill must re-prefill.
+            if (shortSlice) st->bufNeedsPrefill[slot] = true;
             st->refilledRow = firstRow + count;
         } else if (st->nSlices > st->ringBufs) {
             // LAPPING frame only (nSlices > ringBufs): the DMA will re-read this buffer on a later lap, so
@@ -383,6 +394,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
             // (rows=6: 10 slices in 16 bufs). The refill must never write a buffer the DMA could still be
             // draining — hpwit's rule that the write always TRAILS the read by the pool depth, never leads it.
             std::memset(st->ring[slot], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
+            st->bufNeedsPrefill[slot] = true;   // the zero-fill erased the constants: re-prefill on next use
         }
         st->refillSlot = (slot + 1u) % st->ringBufs;
 
@@ -410,7 +422,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
             const int64_t now = esp_timer_get_time();
             st->lastStopUs = now;   // the strand begins idling LOW here — the reset clock starts (see the field)
             st->lastTransmitUs = static_cast<uint32_t>(now - st->txStartUs[0]);
-            st->dbgDoneGiven = st->dbgDoneGiven + 1u;    // ISR INSTRUMENTATION (temporary)
+            st->dbgDoneGiven = st->dbgDoneGiven + 1u;    // ISR INSTRUMENTATION (diagnostic)
             xSemaphoreGiveFromISR(st->done[0], &high);   // the ring reports completion on slot 0
         }
         return high == pdTRUE;
@@ -831,8 +843,17 @@ bool startTransfer(MoonI80State* st, uint8_t buffer, size_t bytes) {
 //
 // Cache sync is a no-op for internal RAM (line size 0), but kept for symmetry with the whole-frame path
 // and correctness if a ring buffer ever lands cache-mapped.
-void encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t count) {
-    st->encode(st->encodeUser, st->ring[slot], firstRow, count, /*closeFrame=*/false);
+//
+// IRAM_ATTR: this is the ISR encode chain's entry (moonI80EofCb → here → the domain encode via
+// MM_RAMFUNC), and the WHOLE chain lives in IRAM for throughput, not just flash-write safety: flash-
+// resident code shares one instruction cache between both cores, and the render core's effect/HTTP churn
+// evicts this path between EOF firings — every refill then pays flash refetch on top of the encode.
+void IRAM_ATTR encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t count) {
+    // Hand the encoder the buffer-lifecycle fact its prefill-skip hangs on, and consume it: after this
+    // call the buffer's constants are laid (or were already), until a memset invalidates them again.
+    const bool needsPrefill = st->bufNeedsPrefill[slot];
+    st->bufNeedsPrefill[slot] = false;
+    st->encode(st->encodeUser, st->ring[slot], firstRow, count, /*closeFrame=*/false, needsPrefill);
     if (esp_cache_get_line_size_by_addr(st->ring[slot]) > 0) {
         esp_cache_msync(st->ring[slot], static_cast<size_t>(count) * st->ringRowBytes,
                         ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
@@ -862,16 +883,23 @@ bool startRingTransfer(MoonI80State* st) {
     for (uint8_t primed = 0; primed < st->ringBufs; primed++) {
         if (row < st->totalRows) {
             uint32_t count = st->rowsPerBuf;
+            bool shortSlice = false;
             if (row + count >= st->totalRows) {
                 count = st->totalRows - row;
-                if (count < st->rowsPerBuf)
+                if (count < st->rowsPerBuf) {
                     std::memset(st->ring[primed] + static_cast<size_t>(count) * st->ringRowBytes, 0,
                                 static_cast<size_t>(st->rowsPerBuf - count) * st->ringRowBytes);
+                    shortSlice = true;
+                }
             }
             encodeRingSlice(st, primed, row, count);
+            // The tail memset erased those rows' constants — the buffer's next (full) use must re-prefill.
+            // Set AFTER the encode, which consumed this use's flag (same order as the ISR refill).
+            if (shortSlice) st->bufNeedsPrefill[primed] = true;
             row += count;
         } else {
             std::memset(st->ring[primed], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
+            st->bufNeedsPrefill[primed] = true;   // zero-filled: constants gone until re-prefilled
         }
     }
     st->refilledRow = row;
@@ -965,7 +993,7 @@ bool initRingDma(MoonI80State* st) {
 
     gdma_tx_event_callbacks_t cbs = {};
     cbs.on_trans_eof = moonI80EofCb;
-    cbs.on_descr_err = moonI80DescErrCb;   // B1-DISCRIMINATOR (temporary): catch the silent descriptor-fetch halt
+    cbs.on_descr_err = moonI80DescErrCb;   // B1-DISCRIMINATOR (diagnostic): catch the silent descriptor-fetch halt
     return gdma_register_tx_event_callbacks(st->dma, &cbs, st) == ESP_OK;
 }
 
@@ -1015,6 +1043,7 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
     for (uint8_t i = 0; i < st->ringBufs; i++) {
         st->ring[i] = allocFrame(st, bufBytes, /*psram=*/false);
         if (!st->ring[i]) { destroyState(st); return nullptr; }
+        st->bufNeedsPrefill[i] = true;   // fresh (zeroed) buffer: no constants laid yet
     }
 
     // Mount the LOOPING chain: exactly ringBufs node-runs, node i → ring[i], the LAST looping back to the
@@ -1146,11 +1175,17 @@ bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uin
     // contiguous run of this size is needed (unlike moonI80Ws2812InternalFits, which sizes ONE frame and
     // must test the largest block). The per-allocation heap overhead (~8-12 B/block) is not modelled —
     // negligible at kilobyte buffers, but it is a real fraction of a small rowsPerBuf=1 buffer.
-    const size_t bufBytes = static_cast<size_t>(rowsPerBuf) * rowBytes;
+    // Clamp to the one-node row limit HERE, before the heap-fit math, so the pre-check prices the
+    // geometry createRingState actually builds (it applies the same clamp): an oversized ringRows must
+    // not inflate `need` into a spurious whole-frame fallback. Same floor of 1 row.
+    const uint32_t maxRowsPerNode = static_cast<uint32_t>(kDmaNodeMaxBytes / rowBytes);
+    const uint32_t rowsEffective = rowsPerBuf > maxRowsPerNode ? (maxRowsPerNode ? maxRowsPerNode : 1u)
+                                                              : rowsPerBuf;
+    const size_t bufBytes = static_cast<size_t>(rowsEffective) * rowBytes;
     const size_t need = bufBytes * ringBufs + HEAP_RESERVE;
     if (heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) < need) return false;  // fall back to whole-frame
     MoonI80State* st = createRingState(dataPins, laneCount, wrGpio, rowBytes, totalRows,
-                                       rowsPerBuf, ringBufs, clockMultiplier, encode, user);
+                                       rowsEffective, ringBufs, clockMultiplier, encode, user);
     if (!st) return false;
     h.impl = st;
     return true;
@@ -1379,7 +1414,8 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     struct LoopCopyCtx { const uint8_t* frame; size_t rowBytes; };
     LoopCopyCtx ctx{frame, loopRowBytes};
     if (useRing && loopRows > 0) {
-        auto copySlice = [](void* user, uint8_t* dst, uint32_t firstRow, uint32_t count, bool /*close*/) {
+        auto copySlice = [](void* user, uint8_t* dst, uint32_t firstRow, uint32_t count, bool /*close*/,
+                            bool /*needsPrefill*/) {   // a full memcpy re-writes constants + data alike
             auto* c = static_cast<LoopCopyCtx*>(user);
             std::memcpy(dst, c->frame + static_cast<size_t>(firstRow) * c->rowBytes,
                         static_cast<size_t>(count) * c->rowBytes);

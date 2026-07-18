@@ -20,7 +20,7 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
   gives up; one terminator EOF makes that impossible and cuts interrupts ~`nSlices`-fold). The old
   "`bufs ≥ nSlices + 2` margin" rule is obsolete here — no reuse, no refill, so `bufs = nSlices + 1` (data +
   zero tail) suffices; 192/strand runs at `ringRows=7`, 29 buffers, ~117 KB in 4 KB chunks (no contiguous
-  block needed). Full arc: `docs/history/plans/Plan-20260718 - …`.
+  block needed). Full arc: `docs/history/plans/Plan-20260718 - MoonI80 ring trailing-refill + loopback instrument.md`.
 
 - **LAPPING (`nSlices > ringBufs`, i.e. 256+/strand at `kRingBufsMax=32`) — scatters; this is the open item.**
   It still runs the looping chain (`GDMA_FINAL_LINK_TO_HEAD`), per-buffer EOFs driving the ISR refill, and a
@@ -31,11 +31,13 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
   keeps hpwit's hard-stop fallback as the safety net. `bufLastNode[]`/`termNode`/`itemsPerBuf` on
   `MoonI80State` are the scaffolding for this splice.
 
-**Encode budget — re-measure on the lapping ring, not before.** Prime-only does not encode in the ISR at all
-(everything is primed on the render thread), so the 21.6 µs/light wire deadline gates only the frame *rate*
-there. The deadline gates the *refill* only in lapping; the historical ~46 µs/light figure was measured on
-the broken looping ring and does not describe the current code. Measure once the lapping splice runs, then
-follow the order in the encode-optimization notes (compile-time lane count first; assembler last).
+**Encode budget — MEASURED at the target shape (2026-07-18, 240 MHz, IRAM chain).** Prime-only does not
+encode in the ISR at all, so the wire deadline gates only the frame *rate* there. In lapping, the measured
+worst-case refill vs its drain budget: 48 strands × 256 (16-bit bus, all 12288 lights) = **350 µs vs
+262 µs/slice — a 1.34× worst-case gap with the AVERAGE at/under budget** (the wall renders mostly correct;
+the tail misses). The 2-pin bench (8-bit bus, half the budget) is the worst-case ratio at ~1.5×. The gap is
+the zero-pad's size, so the interleaved shared pad is the primary lever, the compile-time lane count the
+reserve, assembler last.
 
 **Diagnostic controls to remove once lapping ships:** `ringDbg` (read-only ring counters), the `descErr`
 counter, and the timing counters (`maxEncodeUs`/`maxIsrGapUs`). `useRing` and the geometry controls stay —
@@ -256,7 +258,7 @@ Today a "light" is a point at a static coordinate with a colour. A **moving head
 
 **User request (via PO):** driving a slat wall on the P4 where each data pin's physical strand has BLACK GAPS between addressed segments — e.g. pin 1's strand is 550 LEDs physically, but column 1 is LEDs 0–250, column 2 is LEDs 300–550, and 251–299 are unaddressed spacer LEDs that must stay dark. Today's layouts map a contiguous run of pixels per strand; there is no way to express "skip N physical LEDs here, then resume."
 
-The need is a layout (or layout modifier) that inserts **spacer regions** into a strand's pixel-to-physical mapping: the effect/grid still sees a contiguous logical space, but the driver's per-strand output leaves the gap LEDs at zero (dark). Design questions to settle before building: is this a new **layout type** (a "SlatWall"/"SpacedStrip" that takes segment lengths + gap lengths), a **modifier** on an existing layout (insert gaps into the coordinate stream), or a **driver-level** per-strand offset map? The driver already has a window (`start`/`count`) per strand; a gap is essentially multiple windows per strand, so the cleanest fit may be a layout that emits the real physical positions (with gaps as unmapped coordinates) so the un-addressed LEDs simply never receive data and hold LOW. Spec it (a `docs/moonmodules/light/layouts` entry) before code; the panels/grid layout code is the reference for how coordinates map to the buffer.
+The need is a layout (or layout modifier) that inserts **spacer regions** into a strand's pixel-to-physical mapping: the effect/grid still sees a contiguous logical space, but the driver's per-strand output leaves the gap LEDs at zero (dark). Design questions to settle before building: is this a new **layout type** (a "SlatWall"/"SpacedStrip" that takes segment lengths + gap lengths), a **modifier** on an existing layout (insert gaps into the coordinate stream), or a **driver-level** per-strand offset map? The driver already has a window (`start`/`count`) per strand; a gap is essentially multiple windows per strand. Physics constraint whatever the design: a serial WS2812 strand cannot skip positions (LED n+1's data passes through LED n), so every spacer LED must receive explicitly clocked ZERO bytes each frame — "unmapped" coordinates still occupy wire slots, and the design must guarantee those slots carry zeros, not stale buffer content. Spec it (a `docs/moonmodules/light/layouts` entry) before code; the panels/grid layout code is the reference for how coordinates map to the buffer.
 
 ### Mixing light types in one Layouts — open design question (undesigned)
 
