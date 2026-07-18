@@ -393,10 +393,19 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
         // more extra buffers re-lap the loop into buffers the ISR is refilling, which corrupts the frame
         // (the "shifted" bit-verify failure) and multiplies frameTime. The reset is the zero tail + idle-LOW
         // until the next frame arms — never a pad inside a data buffer.
+        // Frame end. PRIME-ONLY (nSlices <= ringBufs): only the TERMINATOR node carries suc_eof (see the
+        // mount), so the one EOF that reaches this ISR IS the frame's end — no drain counting, which was
+        // unsound anyway (coalesced EOFs undercount; see the mount comment). The chain has SELF-TERMINATED
+        // at the mount-time NULL by the time it fires — do NOT gdma_stop, that mid-frame stop racing the
+        // prefetcher/re-prime is the bug this design removed. LAPPING (nSlices > ringBufs): per-buffer EOFs
+        // drive the refill, the looping chain clocks forever, and the drain-count stop still ends the frame.
         constexpr uint32_t kTailBufs = 1;
-        if (drained >= st->nSlices + kTailBufs) {
-            lcd_ll_stop(st->hal.dev);
-            gdma_stop(st->dma);
+        const bool primeOnly = st->nSlices <= st->ringBufs;
+        if (primeOnly || drained >= st->nSlices + kTailBufs) {
+            if (!primeOnly) {
+                lcd_ll_stop(st->hal.dev);
+                gdma_stop(st->dma);
+            }
             st->busy = false;
             const int64_t now = esp_timer_get_time();
             st->lastStopUs = now;   // the strand begins idling LOW here — the reset clock starts (see the field)
@@ -973,8 +982,20 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
     st->busWidth = laneCount <= 8 ? 8 : 16;
     st->ringRowBytes = rowBytes;
     st->totalRows = totalRows;
+    // **One ring buffer = ONE DMA descriptor node — hpwit's structural rule, enforced here.** His driver's
+    // buffer struct IS a single lldesc_t (I2SClocklessVirtualLedDriver.h ~438, buffer size capped to one
+    // descriptor's max), so his splice/terminate logic never meets a buffer that spans nodes. Ours did:
+    // a buffer > kDmaNodeMaxBytes spans 2+ nodes, and the per-buffer mount + mark_final + re-link interaction
+    // then breaks the self-terminating NULL (bench: rows=8, ipb=2 — the NULL sat correctly on node 33 yet
+    // the DMA stopped at ~node 25; with ipb=1 the identical logic is clean). Clamping rowsPerBuf so the
+    // buffer fits one node deletes that bug class instead of patching it — and small buffers are the
+    // small-pool 48x256 direction anyway. The clamp is a floor of 1 row (a single row larger than a node
+    // cannot ring at all; init fails downstream and the driver falls back to whole-frame).
+    const uint32_t maxRowsPerNode = rowBytes ? static_cast<uint32_t>(kDmaNodeMaxBytes / rowBytes) : 1u;
+    const uint32_t rowsClamped = rowsPerBuf > maxRowsPerNode ? (maxRowsPerNode ? maxRowsPerNode : 1u)
+                                                             : rowsPerBuf;
     // The geometry, before initRingDma — it derives nSlices and the descriptor-pool size from both.
-    st->rowsPerBuf = rowsPerBuf;
+    st->rowsPerBuf = rowsClamped;
     st->ringBufs = ringBufs;
 
     st->encode = encode;
@@ -1004,23 +1025,59 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
     // the loop is on when the drain count is reached, so any buffer must be able to carry the pad. The pad
     // after a NON-last slice is a ≥300 µs LOW gap that would latch the strand mid-frame — so encodeRingSlice
     // zeroes the pad on non-last refills and only the last slice writes the latch word (unchanged).
+    // SELF-TERMINATING CHAIN, mounted at BUILD time (hpwit's mechanism, our esp_lcd link API — the clean
+    // version). A PRIME-ONLY geometry (nSlices <= ringBufs) has a fixed frame length, so its terminator is
+    // fixed too: buffer `nSlices` (the zero reset-tail just past the last real slice) is mounted with
+    // GDMA_FINAL_LINK_TO_NULL, so the DMA clocks [slice 0 .. slice nSlices-1][one zero tail] and
+    // SELF-TERMINATES — no mid-frame gdma_stop racing the prefetcher (the small-ringRows flicker), and NO
+    // runtime gdma_link_concat splice (which raced the still-walking DMA and was index-fragile: last
+    // session's ld=5 wedge). The chain is self-terminating from creation; re-arm is a plain gdma_start(head).
+    // A LAPPING geometry (nSlices > ringBufs, e.g. 256 lights in a small pool) can't use a fixed terminator
+    // — the DMA re-reads buffers — so it keeps the LOOPING chain (last buffer -> HEAD) and the ISR ends the
+    // frame; that path is unchanged here and handled in a later step (hpwit's ISR splice a pool-depth ahead).
+    const bool primeOnly = st->nSlices <= st->ringBufs;
+    const uint32_t termBuf = primeOnly
+        ? (st->nSlices < st->ringBufs ? st->nSlices : st->ringBufs - 1u)   // the zero reset-tail buffer
+        : st->ringBufs;   // sentinel "none" for the lapping case (no buffer gets LINK_TO_NULL)
     const size_t rowsOnly = static_cast<size_t>(st->rowsPerBuf) * rowBytes;   // node length: rows, NO pad
+    // Mount up to AND INCLUDING the terminator buffer, then STOP. gdma_link_mount_buffers is called one
+    // buffer at a time, and each call re-links the PREVIOUS node to the one it mounts — so mounting buffer
+    // termBuf+1 would overwrite the NULL `next` we set on termBuf, and the chain would loop forever instead
+    // of self-terminating (bench: ld=230, the DMA lapped ~23x and `done` fired on stale looped buffers = the
+    // scatter). The DMA never reaches buffers past the terminator, so leaving them unmounted is correct.
+    const uint8_t mountCount = primeOnly ? static_cast<uint8_t>(termBuf + 1u) : st->ringBufs;
     int idx = 0;
     bool mountOk = true;
-    for (uint8_t b = 0; b < st->ringBufs && mountOk; b++) {
-        const bool last = (b == st->ringBufs - 1);
+    for (uint8_t b = 0; b < mountCount && mountOk; b++) {
+        const bool last = (b == mountCount - 1);
         gdma_buffer_mount_config_t mount = {};
         mount.buffer = st->ring[b];
         mount.length = rowsOnly;   // rows only — continuous stream, no inter-buffer LOW gap (see initRingDma)
-        mount.flags.mark_eof = true;
-        mount.flags.mark_final = last ? GDMA_FINAL_LINK_TO_HEAD : GDMA_FINAL_LINK_TO_DEFAULT;  // LOOP back to head
+        // PRIME-ONLY: interrupt ONCE per frame, on the terminator only. The whole frame is primed before
+        // arming, so the ISR has no per-buffer work — and counting per-buffer EOFs to detect frame-end is
+        // UNSOUND: the GDMA interrupt status is a latch bit, not a queue, so two EOFs landing while the ISR
+        // is delayed (a large /api/state serialise, WiFi) coalesce into ONE invocation and the drain count
+        // undercounts — `done` then never fires and the driver gives up (bench: every big-frame config died
+        // within ~20 frames with ld stuck a few short of nSlices+1; small frames rarely coalesced). One EOF
+        // per frame makes the undercount impossible and cuts the interrupt load ~nSlices-fold (the
+        // sub-hot-path rule). hpwit does the same: his prime/arm node carries suc_eof=0 — he too interrupts
+        // only where it means something. LAPPING keeps per-buffer EOFs — its ISR genuinely refills per drain.
+        mount.flags.mark_eof = primeOnly ? (b == termBuf) : true;
+        // Prime-only: the reset-tail buffer self-terminates (NULL). Lapping: the last buffer loops to HEAD.
+        // Every other buffer links to the next (DEFAULT).
+        mount.flags.mark_final =
+            (b == termBuf)                          ? GDMA_FINAL_LINK_TO_NULL
+            : (last && !primeOnly)                  ? GDMA_FINAL_LINK_TO_HEAD
+                                                    : GDMA_FINAL_LINK_TO_DEFAULT;
         int endIdx = 0;
         if (idx >= static_cast<int>(st->linkItemCap)) mountOk = false;
         else if (gdma_link_mount_buffers(st->link, idx, &mount, 1, &endIdx) != ESP_OK) mountOk = false;
-        else st->bufLastNode[b] = endIdx;   // buffer b's real last node — the self-terminate splices here
+        else st->bufLastNode[b] = endIdx;   // buffer b's real last node (kept for the lapping ISR splice)
         idx = endIdx + 1;
     }
     st->consumedItems = static_cast<uint32_t>(idx);   // diagnostic: exposed via moonI80Ws2812RingStats
+    // SELF-TERM DIAG (temp): the actual mount-time NULL terminator node, for the ringDbg readout.
+    st->termNode = primeOnly ? st->bufLastNode[termBuf] : -1;
     if (!mountOk) { destroyState(st); return nullptr; }
 
     // No refill task: the EOF ISR encodes the next slice inline as each buffer drains (see moonI80EofCb).
@@ -1228,6 +1285,8 @@ MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h) {
     s.descErr       = st->dbgDescErr;
     s.maxEncodeUs   = st->dbgMaxEncodeUs;
     s.maxIsrGapUs   = st->dbgMaxIsrGapUs;
+    s.itemsPerBuf   = st->itemsPerBuf;
+    s.termNodeDiag  = st->termNode;
     return s;
 }
 
@@ -1302,7 +1361,13 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     const uint8_t sb = laneCount <= 8 ? 1 : 2;
     // rowBytes = outCh(=rowBits/8) × 8 × 3 × slotBytes × outputsPerPin(=clockMultiplier in shift mode).
     const size_t loopRowBytes = static_cast<size_t>(rowBits) * 3u * sb * clockMultiplier;
-    const uint32_t loopRows = loopRowBytes ? static_cast<uint32_t>(dataBytes / loopRowBytes) : 0;
+    // The ROW COUNT is the strand's light count, and it must come from the STRAND-side units: dataBytes
+    // counts strand wire bytes (lights × rowBits/8 × 3, width-independent — see the caller's derivation),
+    // and rowBits×3 is one light's strand bytes, so the quotient is `lights`. Dividing by loopRowBytes
+    // (BUS bytes per row, which carries ×sb×clockMultiplier) mixes units and shrinks the ring to
+    // lights/(sb×multiplier) rows — an expander loopback would build a ring for 1/8th of the frame.
+    const uint32_t rowStrandBytes = static_cast<uint32_t>(rowBits) * 3u;
+    const uint32_t loopRows = rowStrandBytes ? static_cast<uint32_t>(dataBytes / rowStrandBytes) : 0;
 
     MoonI80State* st = nullptr;
     // The copy-slice "encoder": the frame is already encoded, so a ring slice is a straight memcpy out of

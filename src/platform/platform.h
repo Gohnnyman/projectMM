@@ -826,6 +826,11 @@ struct MoonI80RingStats {
     uint32_t descErr = 0;        // GDMA descriptor-error count (>0 == the in-ISR encode corrupted the chain: B1)
     uint32_t maxEncodeUs = 0;    // worst ISR refill-encode time (the producer)
     uint32_t maxIsrGapUs = 0;    // worst gap between EOFs = DMA buffer-drain time (the deadline)
+    // Ring-diagnosis fields, kept until the LAPPING phase (256+/strand) ships — they are the instruments
+    // that isolated the three prime-only bugs (mount re-link, multi-node buffers, EOF coalescing) and the
+    // lapping work reads them the same way. Removal note: backlog-light § MoonI80 streaming ring.
+    uint32_t itemsPerBuf = 0;    // descriptor nodes per ring buffer (1 by construction since the clamp)
+    int32_t  termNodeDiag = -1;  // the mount-time NULL terminator node (-1 = looping/lapping chain)
 };
 MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h);
 

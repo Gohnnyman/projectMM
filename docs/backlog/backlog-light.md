@@ -4,28 +4,42 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
 
 ## Drivers
 
-### MoonI80 streaming ring — the encode misses its deadline; that is the whole remaining problem
+### MoonI80 streaming ring — prime-only self-termination ships; lapping (256+/strand) is the remaining work
 
-**Current status (2026-07-17).** The ring's geometry is now a pair of live controls — `ringRows` (lights per DMA buffer) and `ringBufs` (pool depth) — so the RAM/overhead trade-off is swept on a running board instead of fixed at compile time. `useRing` picks ring vs whole-frame; there is no auto-router (at 48×256 a whole frame never fits internal RAM, so "auto" had one right answer while hiding which path ran).
+**Current status (2026-07-18).** The ring runs two regimes, split by whether the frame fits the buffer pool:
 
-**What is settled:**
-- **A per-light ring (`ringRows=1`) streams.** RAM drops 147 KB → **~18 KB, constant at ANY strand length** — 256, 512, 1024 all cost the same. Measured with real buffer reuse: 160 ISR refills per frame, `descErr=0`. This is the property the ring exists for, and it works.
-- **The frame breaks between 8 and 16 SLICES — and nothing else explains it (bench, 2026-07-17).** Every mechanism proposed for this has been killed on the wall, in this order: **reuse** (`bufs=17` for a 16-slice frame — no lap at all — still scatters), the **refill cursor** (rewritten to target the buffer the EOF just drained; no change), the **lap**, the **encode** (`enc0` scatters; 65 µs/light at 3× over the deadline renders fine), and the **descriptor pool** (36 nodes in both a clean and a scattered config). What survives is only the slice count:
+- **PRIME-ONLY (`nSlices <= ringBufs`) — DONE, wall-verified clean at 60, 128, and 192 lights/strand.** The
+  whole frame is encoded into single-node buffers on the render thread before arming; the chain is mounted
+  NULL-terminated at build time (buffer `nSlices`, the zero reset-tail, ends it), the arm is a plain
+  `gdma_start(head)` behind a ≥350 µs reset-idle guard, and ONE `mark_eof` — on the terminator only — is the
+  frame-done interrupt. No mid-frame `gdma_stop` exists, so nothing races the prefetcher or the next prime.
+  Three structural rules make it robust (each one closed a wall-verified failure): mount only up to the
+  terminator (a later per-buffer mount call re-links the NULL away); **one buffer = one DMA descriptor node**
+  (`rowsPerBuf` clamps to ≤4095 B — hpwit's own structure, his buffer *is* a single `lldesc_t`); and **never
+  count EOFs for frame-end** (the GDMA interrupt is a latch bit — coalesced EOFs undercount and the driver
+  gives up; one terminator EOF makes that impossible and cuts interrupts ~`nSlices`-fold). The old
+  "`bufs ≥ nSlices + 2` margin" rule is obsolete here — no reuse, no refill, so `bufs = nSlices + 1` (data +
+  zero tail) suffices; 192/strand runs at `ringRows=7`, 29 buffers, ~117 KB in 4 KB chunks (no contiguous
+  block needed). Full arc: `docs/history/plans/Plan-20260718 - …`.
 
-  | lights | rows | slices | bufs | laps? | ISR | wall |
-  |---|---|---|---|---|---|---|
-  | 128 | 16 | **8** | 12 | no | `enc0` | ✅ clean |
-  | 128 | whole-frame | 1 | — | — | — | ✅ clean |
-  | 128 | 8 | **16** | 12 | yes | encodes | ❌ scattered |
-  | 128 | 8 | **16** | **17** | **no** | `enc0` | ❌ scattered |
-  | 256 | 16 | **16** | 12 | yes | encodes | ❌ scattered |
+- **LAPPING (`nSlices > ringBufs`, i.e. 256+/strand at `kRingBufsMax=32`) — scatters; this is the open item.**
+  It still runs the looping chain (`GDMA_FINAL_LINK_TO_HEAD`), per-buffer EOFs driving the ISR refill, and a
+  drain-count `gdma_stop` — every hazard the prime-only redesign removed. The design that fixes it applies
+  the same principles to the lap: the ISR splices the terminator a **pool-depth ahead** of the read head
+  (hpwit's exact mechanism — his comment: "not −1 because it takes time to have the change into account"),
+  keeps per-buffer EOFs for the refill but keys **frame-end off the terminator's EOF, never a count**, and
+  keeps hpwit's hard-stop fallback as the safety net. `bufLastNode[]`/`termNode`/`itemsPerBuf` on
+  `MoonI80State` are the scaffolding for this splice.
 
-  **The counters are blind to it**: `descErr=0` and healthy timings in every scattered case. The symptom is a **CORRECT geometry drawn in SCATTERED DOTS** — right bytes, chopped frame — which is why it reads as a wire/latch fault, not a data fault. Note the two earlier entries here (first "reuse works", then "REUSE IS THE BLOCKER") were BOTH wrong, and both were written from counters; the wall settled it each time. **Next: bisect the boundary (rows 16/13/11/10/9/8 at 128 lights = 8/10/12/13/15/16 slices) — its exact value is the evidence — or ask hpwit, who runs a per-pixel ring with hundreds of slices on this silicon.**
-- **The encode misses the wire.** 576 B/light at 26.67 MHz = a **21.6 µs/light** budget; the measured encode is **~46 µs/light** after the `-O2` and prefill wins. A ring only streams while producer ≤ consumer, so this is the one thing between us and 48×256. The per-light decomposition and the six ruled-out hypotheses are in [the shift-register analysis](shift-register-driver-analysis.md#76-the-1-led-ring--what-the-first-attempt-proved).
+**Encode budget — re-measure on the lapping ring, not before.** Prime-only does not encode in the ISR at all
+(everything is primed on the render thread), so the 21.6 µs/light wire deadline gates only the frame *rate*
+there. The deadline gates the *refill* only in lapping; the historical ~46 µs/light figure was measured on
+the broken looping ring and does not describe the current code. Measure once the lapping splice runs, then
+follow the order in the encode-optimization notes (compile-time lane count first; assembler last).
 
-**The open question is the encode, and the geometry sweep is how to bound it.** `ringRows` trades four things against each other and only one favours a small value: **RAM** wants 1 (it alone is flat in strand length); **per-call overhead**, **interrupt rate** (one EOF per buffer — 25.6k/s at `ringRows=1`, 256 lights, 100 fps) and **lap-time runway** (`ringRows × ringBufs × 21.6 µs`, the tolerable WiFi preemption) all want it big. Sweep it and find the knee; do not assume 1 is optimal because it is the extreme.
-
-**Diagnostic controls to remove once the encode meets its deadline:** `ringDbg` (read-only ring counters), the `descErr` counter, the timing counters (`maxEncodeUs`/`maxIsrGapUs`), and the enriched loopback log. `useRing` and the geometry controls stay — they are the A/B the driver is measured with.
+**Diagnostic controls to remove once lapping ships:** `ringDbg` (read-only ring counters), the `descErr`
+counter, and the timing counters (`maxEncodeUs`/`maxIsrGapUs`). `useRing` and the geometry controls stay —
+they are the A/B the driver is measured with.
 
 **Instrument still missing:** a **MULTI-STRAND loopback**. The current one drives only one `loopbackStrand`, so it is structurally blind to a multi-strand fault (it passed while the wall was visibly corrupt).
 
@@ -109,7 +123,7 @@ The `shiftRegister` control on the parallel drivers (i80 + Parlio base) fans one
 
 **What limits it ON THE WHOLE-FRAME `esp_lcd`/`I80LedDriver` BACKEND: the frame only works from INTERNAL RAM, not PSRAM (on the S3).** This ceiling is specific to the whole-frame path, NOT to shift mode in general — the **MoonI80 streaming ring supersedes it** and is reliable at 128 and 192 lights/strand (see the ring entry at the top of this section), because the ring never materialises the frame in PSRAM at the expander clock. On the whole-frame path, a blind `ledsPerPin` sweep at the bench measured: ≤ 96 lights/strand (a ~54 KB frame, fits internal DMA RAM) renders cleanly; 128 and up (which overflow to PSRAM) flicker badly, and `asyncTransmit` OFF is markedly better than ON. That caps a *whole-frame* shift display at roughly **1,500 lights**, which is why MoonI80 rings instead. (This whole entry predates the ring; it is retained for the whole-frame measurements + the refuted hypotheses below, which the ring's ≥256 reuse work should not re-derive.)
 
-**The mechanism is NOT understood, and six hypotheses have already died** (descriptor-pool size, queue depth, alignment, a silent FIFO underrun, PSRAM bandwidth, "PSRAM is the problem" — the identical frame runs perfectly from PSRAM on a **P4**). Do not re-derive them. **Read [shift-register-driver-analysis.md § 7.5](shift-register-driver-analysis.md) before touching this** — it separates what is measured from what was guessed and refuted, and the next attempt should start from the `asyncTransmit` observation, not a seventh theory.
+**The mechanism is NOT understood, and six hypotheses have already died** (descriptor-pool size, queue depth, alignment, a silent FIFO underrun, PSRAM bandwidth *as the cause of this specific whole-frame corruption* — the identical frame runs perfectly from PSRAM on a **P4**; the measured PSRAM stall at the *shift* clock in § *PSRAM-at-shift-clock* above is a separate, real effect and stands — and the blanket "PSRAM is the problem"). Do not re-derive them. **Read [shift-register-driver-analysis.md § 7.5](shift-register-driver-analysis.md) before touching this** — it separates what is measured from what was guessed and refuted, and the next attempt should start from the `asyncTransmit` observation, not a seventh theory.
 
 **Start the next iteration from the loopback** — the rig is wired (spare '595 output → 1k/2k divider → GPIO 16) and blocked only by this bug. Two days were lost to guessing for want of an instrument.
 
@@ -264,7 +278,7 @@ Bench: board B (S3, `pins=9,10`, `shiftRegister` on, `latchPin=46`), jumper from
 
 **Prime suspect: the full-width private-bus rebuild.** `kLoopbackFullWidth = true` makes the loopback tear the operational bus down, build a private one for the test frame, and rebuild — and the evidence says it never rebuilds. Worth checking the teardown/rebuild path before anything else.
 
-**Root cause: this path has no test at all.** Nothing in the suite drives shift-mode loopback end-to-end, which is exactly how a *second* bug — `encodeLoopbackFrameShift` writing its closing latch word one Slot past the end of the heap block — lived there unnoticed until 2026-07-14. That overrun is fixed and the loopback frame now reserves the pad, but it did **not** fix this stall. So the first step is the missing test: drive shift-mode loopback through the mock bus, then chase the rebuild.
+**The stall's root cause is unresolved (the rebuild path is the prime suspect above — likely the same private-bus teardown/rebuild fragmentation documented under *Loopback teardown leak* below, where a rebuilt pool can't get contiguous RAM and the bus never comes back).** What *let* it live unnoticed is a **detection gap**: nothing in the suite drives shift-mode loopback end-to-end — the same gap that hid a second bug (`encodeLoopbackFrameShift` writing its closing latch word one Slot past the heap block) until 2026-07-14. That overrun is fixed and the loopback frame now reserves the pad, but it did **not** fix this stall. So the first step is closing the gap — drive shift-mode loopback through the mock bus — and then chase the rebuild with the test as the net.
 
 Note ASan cannot help locally — a macOS ASan build of `mm_tests` hangs before producing output (see [lessons.md](../history/lessons.md)); the Linux CI ASan job is the only sanitizer that runs.
 

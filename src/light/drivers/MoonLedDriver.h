@@ -214,9 +214,16 @@ public:
     void refreshBusKpi() {
         const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
         if (!s.isRing) return;
-        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u de%u enc%u gap%u",
+        // The extended fields (ld/tx/ipb/ci/tn) are the LAPPING-phase instruments — the same readouts that
+        // isolated the prime-only bugs (ld = drain progress, tx = real wire time vs the physical frame
+        // minimum, ipb/ci/tn = node accounting + the terminator). Kept until 256+/strand ships (see the
+        // backlog's ring entry for the removal list).
+        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u tx%u ipb%u ci%u tn%d de%u enc%u gap%u",
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
-                      static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.descErr),
+                      static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.lastDrain),
+                      static_cast<unsigned>(platform::moonI80Ws2812LastTransmitUs(bus_)),
+                      static_cast<unsigned>(s.itemsPerBuf), static_cast<unsigned>(s.consumedItems),
+                      static_cast<int>(s.termNodeDiag), static_cast<unsigned>(s.descErr),
                       static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.maxIsrGapUs));
                       // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
                       // enc >= gap == the refill can't keep pace (PACE); enc << gap but still fails == CURSOR/logic.
@@ -359,7 +366,7 @@ public:
 private:
     platform::MoonI80Ws2812Handle bus_;
     int8_t lastClockPin_ = -1;
-    char ringDbgStr_[48] = "—";   // TEMP DIAGNOSTIC: ring counters (refreshed in refreshBusKpi via tick1s)
+    char ringDbgStr_[112] = "—";   // TEMP DIAGNOSTIC: ring counters incl. the lapping-phase fields (refreshed in refreshBusKpi via tick1s)
 };
 
 } // namespace mm

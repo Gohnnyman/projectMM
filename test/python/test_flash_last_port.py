@@ -62,6 +62,16 @@ def test_strips_stale_port_from_swapped_out_board(tmp_path):
     assert devices[1]["last_port"] == "/dev/shared"       # moved to the flashed board
 
 
+def test_s31_eui64_mac_alias_still_links(tmp_path):
+    # The S31 case: esptool reports the raw EFUSE MAC, but the catalog holds the MAC the DEVICE
+    # reports — the EUI-64-truncated form (FF:FE inserted after the OUI, cut to 6 bytes). The
+    # catalog write must accept the alias via moondeck's _mac_matches, or a CLI-flashed S31
+    # silently never gains a last_port (the exact regression _mac_matches exists for).
+    catalog = _catalog(tmp_path, [{"mac": "30:ED:A0:FF:FE:F3", "deviceName": "MM-S31"}])
+    flash_esp32._set_last_port_in_catalog("30:ED:A0:F3:D4:68", "/dev/cu.s31port")
+    assert _read(catalog)[0]["last_port"] == "/dev/cu.s31port"
+
+
 def test_no_mac_is_a_noop(tmp_path):
     # A flash whose MAC couldn't be parsed leaves the catalog untouched (the breadcrumb
     # path still covers the MoonDeck-GUI case).

@@ -252,3 +252,33 @@ this entirely by pointing at a PERMANENT separate NULL node ([N+1]) via his OWN 
 link-list indices — consider building our own descriptor array like his rather than fighting the IDF index
 abstraction. Scaffolding left in the tree: bufLastNode[], termNode, itemsPerBuf, and the ld/tn/ci ringDbg
 diag. Board reverted to known-good (reset-tail + prime-only gate render clean).
+
+### RESOLVED: prime-only self-termination SHIPS — verified on the wall at 60/128/192 lights per strand
+The "GDMA index puzzle" was never an index-mapping problem. It was THREE stacked bugs, each found by a
+targeted diagnostic (ld/tx/ipb/ci/tn in ringDbg) and each fixed structurally:
+
+1. **Per-buffer mount calls re-linked the terminator away.** `gdma_link_mount_buffers` links `node[start-1]
+   -> node[start]` on every call, so mounting buffer termBuf+1 overwrote the NULL just placed on termBuf —
+   the chain looped ~23x per "frame" (ld=230, tx=24ms). Fix: mount only up to and including the terminator.
+2. **Multi-node buffers break the walk.** With a buffer spanning 2+ descriptor nodes (rows>=8 at 576 B/row),
+   the NULL sat on the right node (tn=33) yet the DMA stopped mid-chain (~node 25). hpwit never enters this
+   case: his buffer struct IS a single lldesc_t. Fix: clamp rowsPerBuf so one buffer = ONE node (<= 4095 B),
+   deleting the bug class. Lossless — small buffers are the small-pool direction anyway.
+3. **EOF counting undercounts.** The GDMA interrupt is a latch bit, not a queue: two EOFs during an ISR delay
+   (an /api/state serialise) coalesce into one invocation, the drain count comes up short, `done` never
+   fires, the driver gives up (every big-frame config died within ~20 frames, ld stuck a few short). Fix:
+   in prime-only, mark_eof ONLY on the terminator — ONE interrupt per frame, no counting, undercount
+   impossible, ~nSlices-fold fewer interrupts (hpwit's suc_eof=0 on his arm node is the same instinct).
+
+End state: prime-only frames (nSlices <= ringBufs) mount a NULL-terminated single-node-per-buffer chain at
+BUILD time, arm with plain gdma_start(head), interrupt once at the terminator, and never gdma_stop — no race
+exists by construction. Wall-verified clean at 60, 128, and 192 lights/strand (rows=7, 28 slices, 29 nodes),
+stable under heavy API polling. NOTE: the old "+2 margin" rule is obsolete for prime-only — no reuse, no
+refill, so bufs = nSlices + 1 (tail) suffices.
+
+**Remaining: LAPPING (256+/strand, nSlices > ringBufs max 32) — 256 still scatters on the old looping path**
+(verified on the wall alongside the clean 192). The next phase applies the SAME principles to the lap:
+hpwit's ISR splice of the terminator a POOL-DEPTH ahead of the read head, and no load-bearing EOF counting
+(the lapping refill still needs per-buffer EOFs, but frame-end must key off the terminator, not a count).
+The platform mount/EOF contract is below the busInitRing seam, so it is hardware-verified (the host mock pins
+the driver-side contract above the seam; 27/27 ring tests green throughout).

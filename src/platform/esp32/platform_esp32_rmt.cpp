@@ -318,16 +318,23 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
     // dead wire still times out instead of looping forever.
     auto rxTask = [](void* arg) {
         auto* c = static_cast<Cap*>(arg);
-        const int attempts = c->ride ? 40 : 1;   // ~40 × up-to-1-frame arms ≈ well inside the 4 s outer wait
+        // The retry budget must fit INSIDE the outer wait ceiling below, or the function frees rxSymbols
+        // while this task is still capturing into it. Ride: 40 arms × 100 ms = 4 s worst (< the 6 s
+        // ceiling) — a live pipeline delivers a frame within a few ms, so 100 ms per arm is already
+        // generous slack, and a dead wire exhausts the budget in bounded time. Controlled transmit keeps
+        // the single 1000 ms arm (< its 2 s ceiling).
+        const int attempts = c->ride ? 40 : 1;
+        const uint32_t perArmTimeoutMs = c->ride ? 100 : 1000;
         for (int a = 0; a < attempts; a++) {
-            const size_t g = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, 1000);
+            const size_t g = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, perArmTimeoutMs);
             if (g > c->got) c->got = g;           // keep the fullest capture seen
             if (g >= c->need) break;              // a complete frame — stop
         }
         c->done = true;
         vTaskDelete(nullptr);
     };
-    if (xTaskCreate(rxTask, "lblb", 4096, &cap, 5, nullptr) == pdPASS) {
+    const bool taskStarted = xTaskCreate(rxTask, "lblb", 4096, &cap, 5, nullptr) == pdPASS;
+    if (taskStarted) {
         vTaskDelay(pdMS_TO_TICKS(50));
         // First transmit timed — the wall time of a known byte count confirms the
         // granted pixel clock matches the configured slot rate (the bus driver
@@ -406,6 +413,15 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                      (unsigned)(mismatch % rowBits), (unsigned)mismatchCount, (unsigned)kBits,
                      r.got[0], r.got[1], r.got[2], r.sent[0], r.sent[1], r.sent[2]);
         }
+    }
+    // NEVER free the capture buffer while the rx task may still write into it. The retry budget is sized
+    // under the wait ceiling above, so cap.done is normally long set by here; this drains the residue if the
+    // scheduler starved the task. If it STILL hasn't finished (an RMT-driver wedge), leaking one buffer is
+    // the correct failure — a use-after-free from the still-running task is not.
+    for (int i = 0; taskStarted && !cap.done && i < 500; i++) vTaskDelay(pdMS_TO_TICKS(10));
+    if (taskStarted && !cap.done) {
+        ESP_LOGE(tag, "loopback: rx task never finished — leaking the capture buffer instead of freeing under it");
+        return;
     }
     heap_caps_free(rxSymbols);
 }

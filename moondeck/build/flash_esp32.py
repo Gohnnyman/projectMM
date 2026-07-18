@@ -199,20 +199,27 @@ def _set_last_port_in_catalog(mac: str, port: str) -> None:
     """Set `last_port` on the moondeck.json device with this MAC, and strip the port
     from any OTHER device that still carries it (a physical port maps to exactly one
     board at a time; boards get swapped on the same USB port). No MAC, or no matching
-    device, is a no-op — the breadcrumb path still covers the MoonDeck-GUI case."""
+    device, is a no-op — the breadcrumb path still covers the MoonDeck-GUI case.
+
+    Matching goes through MoonDeck's `_mac_matches`, not plain equality: esptool
+    reports the board's raw EFUSE MAC, but an S31 device REPORTS the EUI-64-truncated
+    form of it (FF:FE inserted after the OUI, cut to 6 bytes) — the same alias the
+    breadcrumb path already tolerates. A plain compare would silently never link the
+    S31's port (the exact regression `_mac_matches` exists for)."""
     import json
     if not mac:
         return
+    sys.path.insert(0, str(ROOT / "moondeck"))
+    from moondeck import _mac_matches
     catalog = ROOT / "moondeck" / "moondeck.json"
     try:
         data = json.loads(catalog.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return
-    mac = mac.strip().upper()
     changed = False
     for network in data.get("networks", []):
         for device in network.get("devices", []):
-            same = (device.get("mac", "") or "").strip().upper() == mac
+            same = _mac_matches(mac, device.get("mac", "") or "")
             if same:
                 if device.get("last_port") != port:
                     device["last_port"] = port
