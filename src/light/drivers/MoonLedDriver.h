@@ -129,27 +129,52 @@ public:
     /// measured against, not as a fallback the ring degrades into.
     bool useRing = true;
 
-    /// Lights per DMA buffer — the ring's grain, and a control rather than a constant because the optimum
-    /// is a measurement, not a derivation. RAM is the ONLY axis that wants it small: at 1 the ring is
-    /// ~18 KB flat at ANY strand length (128, 256, 1024 all cost the same), which is what puts 48x256 in
-    /// reach. Three axes want it big:
+    /// Lights per DMA buffer — the ring's grain. **Who tunes the three ring controls:** a config at or
+    /// under the prime-only boundary (`ceil(lights/strand ÷ ringRows) ≤ ringBufs`, ~224 lights/strand at
+    /// the defaults) never needs any of them — the whole frame is encoded before arming, the pad is not
+    /// even mounted, and the defaults just work. They exist for the LAPPING frontier (256+/strand), where
+    /// the ISR races the wire. `ringRows`/`ringBufs` are DEVICE tuning (RAM vs interrupt rate vs jitter
+    /// pool); `ringPadUs` is a HARDWARE fact of the strip (see its doc). The `ringDbg` counters — `lt`
+    /// above all — are the meter every sweep reads.
+    ///
+    /// A control rather than a constant because the optimum is a measurement, not a derivation. RAM is
+    /// the ONLY axis that wants it small: at 1 the ring is ~18 KB flat at ANY strand length (128, 256,
+    /// 1024 all cost the same), which is what puts 48x256 in reach. Three axes want it big:
     ///
     /// | axis | why big wins |
     /// |---|---|
     /// | per-call overhead | the encode seam's fixed cost amortises over the rows in a buffer; at 1 it is paid per light, inside the ISR |
     /// | interrupt rate | one EOF per buffer: 256 lights at 100 fps is 25.6k int/s at 1 row vs 1.6k at 16 — and a busy ISR starves the network stack |
-    /// | lap-time runway | `ringRows x ringBufs x 21.6 us` is how long a WiFi preemption may last before the DMA laps a buffer the ISR is still refilling |
+    /// | refill deadline | the drain of one buffer (`ringRows × 21.6 µs` + the pad) is the slice deadline the ISR's AVERAGE encode must beat |
     ///
-    /// So the per-light ring is not "better" — it is the only geometry whose RAM is flat. Sweep this to
-    /// find the knee. Pin-expander mode only; a prepare trigger (the buffers are sized and the DMA chain
-    /// mounted at build time, so a change is a rebuild). Default = what this driver shipped with, so an
-    /// existing config renders identically.
+    /// The platform additionally clamps a buffer to ONE DMA descriptor node (4095 bytes — 7 rows at the
+    /// 16-strand row size), so values above the clamp behave as the clamp: 7 is the effective maximum
+    /// there, and the sweet spot measured on the bench. Pin-expander mode only; a prepare trigger (the
+    /// buffers are sized and the DMA chain mounted at build time, so a change is a rebuild).
     uint8_t ringRows = platform::kRingRowsDefault;
 
-    /// How many buffers the DMA circulates. Depth buys **lap time**, not capacity: the pool is a sliding
-    /// window the encoder refills behind the read head, so `ringRows x ringBufs x 21.6 us` is the jitter
-    /// the ring absorbs. Pin-expander mode only; a prepare trigger.
+    /// How many buffers the DMA circulates. Depth buys **jitter absorption**, not capacity: the pool is a
+    /// sliding window the clock-oracle refill keeps ahead of the read head, so a worst-case encode spike
+    /// may borrow up to `(ringBufs − 2) × slice-duration` of lead and repay it over the next batches —
+    /// which is why only the AVERAGE refill must beat the slice deadline, not the worst case. More depth
+    /// = more RAM (`ringRows × rowBytes` each, internal DMA heap); 16 rides the measured knee on the
+    /// bench. Pin-expander mode only; a prepare trigger.
     uint8_t ringBufs = platform::kRingBufsDefault;
+
+    /// Inter-buffer zero-pad, µs (LAPPING only; 0 = off). Each ring buffer is followed by a shared block
+    /// of zeros on the wire — a strand-level PAUSE that stretches the ISR's per-slice refill deadline by
+    /// exactly this long, at a linear frame-time cost (every slice grows by the pad, so the fps ceiling
+    /// drops). Sweep it up only until `ringDbg`'s `lt` counter stays 0 (hpwit's _DMA_EXTENSTION, studied
+    /// then written fresh).
+    ///
+    /// **The ceiling is the STRIP's latch threshold, and it is per-silicon — measure it on the wall.**
+    /// A WS2812 that reads a LOW gap as a reset LATCHES AND RESETS ITS ADDRESS, and then every slice
+    /// repaints LEDs 0..ringRows-1 — the unmistakable signature (each panel shows only its first few
+    /// LEDs flickering through the whole frame's colors, while every ring counter stays clean). The
+    /// bench wall latches at ≤60 µs (30 is safe there); other strips tolerate up to ~150. That hardware
+    /// dependence is why this is a user control and not a constant. A prepare trigger (the pad is a
+    /// mounted DMA node).
+    uint8_t ringPadUs = 0;
 
     // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
 
@@ -202,6 +227,8 @@ public:
         controls_.setHidden(controls_.count() - 1, !wantsRing());
         controls_.addUint8("ringBufs", ringBufs, 2, 32);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
+        controls_.addUint8("ringPadUs", ringPadUs, 0, platform::kRingPadMaxUs);
+        controls_.setHidden(controls_.count() - 1, !wantsRing());
         // Ring internals, so the streaming can be diagnosed by polling /api/state (reliable) rather than
         // scraping serial: "sl<slices>/bf<bufs> dn<done> de<descErr> enc<worst refill µs> gap<worst EOF-to-EOF µs>".
         controls_.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
@@ -218,13 +245,16 @@ public:
         // isolated the prime-only bugs (ld = drain progress, tx = real wire time vs the physical frame
         // minimum, ipb/ci/tn = node accounting + the terminator). Their scope lives in the backlog's ring
         // entry.
-        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u tx%u ipb%u ci%u tn%d de%u enc%u gap%u",
+        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u gap%u",
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
                       static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.lastDrain),
+                      static_cast<unsigned>(s.late),
                       static_cast<unsigned>(platform::moonI80Ws2812LastTransmitUs(bus_)),
                       static_cast<unsigned>(s.itemsPerBuf), static_cast<unsigned>(s.consumedItems),
                       static_cast<int>(s.termNodeDiag), static_cast<unsigned>(s.descErr),
                       static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.maxIsrGapUs));
+                      // lt = slices refilled AFTER their drain began (stale on the wire) — the scatter
+                      // meter; a clean soak is lt frozen at its arm-time value.
                       // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
                       // enc >= gap == the refill can't keep pace (PACE); enc << gap but still fails == CURSOR/logic.
     }
@@ -235,7 +265,8 @@ public:
         return std::strcmp(name, "clockPin") == 0
             || std::strcmp(name, "useRing") == 0      // path switch: rebuild the bus on the new path
             || std::strcmp(name, "ringRows") == 0     // geometry: buffers are sized and the chain mounted
-            || std::strcmp(name, "ringBufs") == 0;    // at build time, so a change is a rebuild
+            || std::strcmp(name, "ringBufs") == 0     // at build time, so a change is a rebuild
+            || std::strcmp(name, "ringPadUs") == 0;   // the pad is a mounted DMA node — same rebuild
     }
 
     /// WR only reaches a pad in shift mode, so it can only COLLIDE in shift mode. In direct mode the
@@ -292,11 +323,18 @@ public:
     bool busInitRing(size_t rowBytes, uint32_t totalRows) {
         return platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
-                                               ringRows, ringBufs, this->busClockMultiplier(),
+                                               ringRows, ringBufs, ringPadUs, this->busClockMultiplier(),
                                                &MoonLedDriver::ringEncodeTrampoline, this);
     }
     /// Send one frame on the ring: prime the pool, fire the DMA, and let the EOF ISR refill behind it.
     bool busTransmitRing()          { return platform::moonI80Ws2812TransmitRing(bus_); }
+    /// The ring's regime for the driving-status suffix: "primed" (whole frame encoded before arming —
+    /// no deadline, pixel-perfect) vs "lapping" (the ISR refills behind the DMA — the deadline regime).
+    const char* busRingMode() const {
+        const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
+        if (!s.isRing) return nullptr;
+        return s.nSlices <= s.ringBufs ? "primed" : "lapping";
+    }
     /// Did the bus actually come up as a ring? The base routes tick() on this, so it reports what the
     /// platform BUILT, not what was asked for — a ring that would not fit falls back to whole-frame.
     bool busIsRing() const          { return platform::moonI80Ws2812IsRing(bus_); }
@@ -373,7 +411,7 @@ public:
 private:
     platform::MoonI80Ws2812Handle bus_;
     int8_t lastClockPin_ = -1;
-    char ringDbgStr_[112] = "—";   // TEMP DIAGNOSTIC: ring counters incl. the lapping-phase fields (refreshed in refreshBusKpi via tick1s)
+    char ringDbgStr_[128] = "—";   // TEMP DIAGNOSTIC: ring counters incl. the lapping-phase fields (refreshed in refreshBusKpi via tick1s)
 };
 
 } // namespace mm

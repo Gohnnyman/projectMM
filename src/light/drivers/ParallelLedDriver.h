@@ -1080,6 +1080,9 @@ protected:
     bool busInitRing(size_t /*rowBytes*/, uint32_t /*totalRows*/) { return false; }
     bool busIsRing() const { return false; }
     bool busTransmitRing() { return false; }
+    /// The ring's regime as a one-word status suffix ("primed" / "lapping"), or null when not ringing —
+    /// so the driving-status line shows which side of the streaming boundary a config sits on.
+    const char* busRingMode() const { return nullptr; }
 
     /// CRTP hook: the GPIO a SPARE bus lane is parked on when the pin list is narrower than the bus
     /// width (shift mode — the board decides the data-pin count, the peripheral decides the width).
@@ -1341,6 +1344,17 @@ protected:
                 busLaneCount_ = laneCount_;
                 derived()->recordBusPins();
                 if (status() == Derived::kInitFailMsg) clearStatus();
+                // Re-issue the driving status WITH the ring's regime word — the regime (primed vs
+                // lapping) is a platform fact that exists only now, after the ring build; parseConfig
+                // set the plain form before it could know. Same numbers, same severity rules.
+                // Only when the plain form is what's showing — a clamp warning (or any more urgent
+                // status) must keep winning, same rule as parseConfig's `!warn` guard.
+                if (const char* mode = derived()->busRingMode();
+                    mode && status() && std::strncmp(status(), "driving ", 8) == 0) {
+                    nrOfLightsType driven = 0;
+                    for (uint8_t i = 0; i < laneCount_; i++) driven += laneCounts_[i];
+                    if (driven > 0) setDrivingInfo(driven, winLen_, correction_.outChannels, mode);
+                }
                 return;
             }
             // Ring build failed (the small buffers or the snapshot didn't fit) — drop whatever the ring

@@ -22,22 +22,24 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
   zero tail) suffices; 192/strand runs at `ringRows=7`, 29 buffers, ~117 KB in 4 KB chunks (no contiguous
   block needed). Full arc: `docs/history/plans/Plan-20260718 - MoonI80 ring trailing-refill + loopback instrument.md`.
 
-- **LAPPING (`nSlices > ringBufs`, i.e. 256+/strand at `kRingBufsMax=32`) — scatters; this is the open item.**
-  It still runs the looping chain (`GDMA_FINAL_LINK_TO_HEAD`), per-buffer EOFs driving the ISR refill, and a
-  drain-count `gdma_stop` — every hazard the prime-only redesign removed. The design that fixes it applies
-  the same principles to the lap: the ISR splices the terminator a **pool-depth ahead** of the read head
-  (hpwit's exact mechanism — his comment: "not −1 because it takes time to have the change into account"),
-  keeps per-buffer EOFs for the refill but keys **frame-end off the terminator's EOF, never a count**, and
-  keeps hpwit's hard-stop fallback as the safety net. `bufLastNode[]`/`termNode`/`itemsPerBuf` on
-  `MoonI80State` are the scaffolding for this splice.
+- **LAPPING (`nSlices > ringBufs`) — STREAMS CLEAN at 16 strands × 256 (wall-verified); the 48-strand
+  encode is the open item.** The lapping ring runs the clock-oracle design: the EOF ISR derives the drain
+  position from elapsed time (the looping DMA free-runs at wire speed — a coalesced interrupt can no
+  longer skip a refill), batch-refills toward the writable window (the pool is the jitter buffer: only
+  the AVERAGE encode must beat the slice duration), stops the engine clock-keyed over the zeroed tail
+  (never a count; a late stop just clocks more reset), and defers when the flash cache is off (the
+  standard cache-safe-ISR guard — the batch catches up). The `ringPadUs` control mounts a shared
+  zero-node after every buffer, stretching the refill deadline; its ceiling is the STRIP's latch
+  threshold (this wall: ~30 µs — a longer pad latch-resets the strand and every slice repaints LEDs
+  0..ringRows-1). The `late` counter in ringDbg is the scatter meter (clean soak = frozen at 0).
 
-**Encode budget — MEASURED at the target shape (2026-07-18, 240 MHz, IRAM chain).** Prime-only does not
-encode in the ISR at all, so the wire deadline gates only the frame *rate* there. In lapping, the measured
-worst-case refill vs its drain budget: 48 strands × 256 (16-bit bus, all 12288 lights) = **350 µs vs
-262 µs/slice — a 1.34× worst-case gap with the AVERAGE at/under budget** (the wall renders mostly correct;
-the tail misses). The 2-pin bench (8-bit bus, half the budget) is the worst-case ratio at ~1.5×. The gap is
-the zero-pad's size, so the interleaved shared pad is the primary lever, the compile-time lane count the
-reserve, assembler last.
+**The 48-strand encode gap — MEASURED (2026-07-18, 240 MHz, IRAM chain, the 8-bit bus the 6-pin config
+actually runs).** At 48 strands × 256, all 12288 lights: worst refill 466 µs vs the 181 µs padded
+deadline, ~17% of slices late — a SUSTAINED deficit no pool depth or pad (latch-capped) can absorb. The
+named lever, in order: the compile-time lane-count unroll (hpwit's "unroll loops", templated on a
+constant), then the 19.2 MHz shift clock (+78 µs/slice budget at a ~110 fps ceiling — still above the
+100 fps goal). Assembler last. Also open: a ~1-frame white flash every ~5 s at 256/strand (`late`=0
+throughout, so not a stale slice) — the intrusive-loopback soak is the instrument to catch it.
 
 **Diagnostic controls to remove once lapping ships:** `ringDbg` (read-only ring counters), the `descErr`
 counter, and the timing counters (`maxEncodeUs`/`maxIsrGapUs`). `useRing` and the geometry controls stay —
@@ -121,7 +123,7 @@ The **classic ESP32 has 8 RMT TX channels**, so `RmtLedDriver` covers ≤8 paral
 
 The `shiftRegister` control on the parallel drivers (i80 + Parlio base) fans one data pin out to 8 strands through a 74HCT595 board — hpwit's expander. **It is in the tree but OFF by default**, and direct mode is proven unchanged on four boards (S3 8-lane, S3 16-lane, both P4s in i80: zero GDMA errors, all driving).
 
-**The encoder is right** — a 74HCT595 simulator in the unit tests asserts what the strand physically receives, and on hardware the strands render smooth, flicker-free content.
+**The encoder is right** — a 74HCT595 simulator in the unit tests asserts what the strand physically receives, and on hardware the strands render smooth, flicker-free content **on the configurations that keep the frame out of PSRAM**: the MoonI80 streaming ring (any strand length) and the whole-frame path while it fits internal RAM (≤ 96 lights/strand on the S3). The whole-frame S3 path spilling into PSRAM is the exception — it flickers (see below).
 
 **What limits it ON THE WHOLE-FRAME `esp_lcd`/`I80LedDriver` BACKEND: the frame only works from INTERNAL RAM, not PSRAM (on the S3).** This ceiling is specific to the whole-frame path, NOT to shift mode in general — the **MoonI80 streaming ring supersedes it** and is reliable at 128 and 192 lights/strand (see the ring entry at the top of this section), because the ring never materialises the frame in PSRAM at the expander clock. On the whole-frame path, a blind `ledsPerPin` sweep at the bench measured: ≤ 96 lights/strand (a ~54 KB frame, fits internal DMA RAM) renders cleanly; 128 and up (which overflow to PSRAM) flicker badly, and `asyncTransmit` OFF is markedly better than ON. That caps a *whole-frame* shift display at roughly **1,500 lights**, which is why MoonI80 rings instead. (This whole entry predates the ring; it is retained for the whole-frame measurements + the refuted hypotheses below, which the ring's ≥256 reuse work should not re-derive.)
 

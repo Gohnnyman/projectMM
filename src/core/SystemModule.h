@@ -23,8 +23,9 @@ namespace mm {
 ///   (largest contiguous allocatable block).
 /// - *Configurable:* `deviceName` (default `MM-XXXX`, XXXX = last 4 hex of the MAC) and
 ///   `deviceModel` (display-only in the UI, pushed by tooling).
-/// - *Static (set at boot):* `chip`, `cpu` (running clock + core count, read from the hardware so a
-///   misconfigured frequency is visible), `sdk`, `flash`, `bootReason`, `wifiCoproc`, and
+/// - *Static (set at boot):* `chip`, `cpu` (core count, plus the running clock on ESP32 — read from the
+///   hardware so a misconfigured frequency is visible; desktop reports cores only), `sdk`, `flash`,
+///   `bootReason`, `wifiCoproc`, and
 ///   `psramType` (quad / octal, shown only on a PSRAM board — the interface mode the firmware
 ///   drives the PSRAM in). On desktop the hardware-specific fields read "desktop" / "N/A".
 ///

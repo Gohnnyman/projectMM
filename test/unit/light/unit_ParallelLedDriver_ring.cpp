@@ -108,15 +108,28 @@ public:
     // buffers, then refill in ring order until the slice that reaches totalRows. Returns the frame
     // reassembled in ROW order (buffer contents concatenated in the order the DMA would clock them),
     // WITHOUT the pad, so it lines up with a whole-frame encode's row region for a byte compare.
-    std::vector<uint8_t> driveRingFrame() {
+    std::vector<uint8_t> driveRingFrame() { return driveRingFrameCoalesced(1); }
+
+    /// The v2 (clock-oracle) refill contract: the ISR may be invoked LATE — several drains coalesced
+    /// into one firing — and then BATCH-encodes every slice the window allows. The wire content must be
+    /// byte-identical whatever the grouping: batching changes WHEN slices are written, never WHAT. This
+    /// drives the same per-slice body in groups of `batch` per simulated firing, pinning the prefill /
+    /// short-slice / recycle lifecycle across batch boundaries (the coalesced-EOF regression the
+    /// one-refill-per-interrupt design could not pass).
+    std::vector<uint8_t> driveRingFrameCoalesced(uint32_t batch) {
         REQUIRE(ringActive_);
+        REQUIRE(batch >= 1);
         std::vector<uint8_t> assembled;
         uint32_t row = 0;
         uint8_t slot = 0;
         int32_t lastSlot = -1;
+        uint32_t inBatch = 0;
         // The row region of one buffer (pad excluded), in bytes, for a `count`-row slice.
         auto rowBytesOf = [&](uint32_t count) { return static_cast<size_t>(count) * ringRowBytes_; };
         while (row < ringTotalRows_) {
+            // Group boundary: nothing observable happens between groups (the real ISR just returns and
+            // fires again later) — the loop structure below is one slice of the batch.
+            inBatch = (inBatch + 1u) % batch;
             uint32_t count = kMockRingRows;
             bool last = false;
             if (row + count >= ringTotalRows_) { count = ringTotalRows_ - row; last = true; }
@@ -667,6 +680,38 @@ TEST_CASE("MoonI80 ring: a ragged frame tiles byte-identically (a strand ending 
 
     REQUIRE(assembled.size() == whole.size());
     CHECK(std::memcmp(assembled.data(), whole.data(), whole.size()) == 0);
+}
+
+// 9a2. COALESCED EOFs — THE v2 REGRESSION TEST. The GDMA EOF interrupt is a latch, not a queue: under
+//      load two drains arrive as ONE firing, and the clock-oracle ISR then batch-refills both slices in
+//      that single invocation. The old one-refill-per-firing design shifted every later slice by one
+//      position when this happened (the shifted-region / wrong-color wall artifact); the batch contract
+//      requires the wire bytes to be IDENTICAL whatever the grouping. Deep-lapping geometry so batches
+//      cross the recycle boundary repeatedly.
+TEST_CASE("MoonI80 ring v2: coalesced EOFs (batched refill) are byte-identical to one-per-EOF") {
+    MockRingDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wireShift(d, src, corr, 200, "1,2", "");   // 16 uniform strands, 200 rows: 13 slices over the mock pool
+    uint8_t* s = src.data();
+    for (nrOfLightsType i = 0; i < src.count(); i++) {
+        s[i * 3 + 0] = static_cast<uint8_t>(i * 5 + 3);
+        s[i * 3 + 1] = static_cast<uint8_t>(i * 11 + 7);
+        s[i * 3 + 2] = static_cast<uint8_t>(i * 23 + 1);
+    }
+    const uint8_t outCh = corr.outChannels;
+    const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
+
+    d.setWantRing(true);
+    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    std::vector<uint8_t> onePerEof = d.driveRingFrame();          // the reference grouping
+    std::vector<uint8_t> coalesced2 = d.driveRingFrameCoalesced(2);   // every firing carries 2 drains
+    std::vector<uint8_t> coalesced5 = d.driveRingFrameCoalesced(5);   // deep coalescing (a long stall)
+
+    REQUIRE(coalesced2.size() == onePerEof.size());
+    REQUIRE(coalesced5.size() == onePerEof.size());
+    CHECK(std::memcmp(coalesced2.data(), onePerEof.data(), onePerEof.size()) == 0);
+    CHECK(std::memcmp(coalesced5.data(), onePerEof.data(), onePerEof.size()) == 0);
 }
 
 // 9b. EMPTY LANES ARE NOT RAGGED. The prefill-skip gate (uniformLaneCounts) requires a frame-constant

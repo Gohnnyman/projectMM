@@ -4,6 +4,11 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # CPU at the chip's rated maximum (IDF defaults to 160 MHz) — the render loop and the ring ISR's
 # encode deadline are compute-bound, and the P4 ignores this symbol (its own 360 MHz default applies).
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# GDMA control functions in IRAM: the streaming ring's EOF ISR is registered cache-safe (it keeps
+# refilling during SPI-flash writes) and calls gdma_stop at frame end — a flash-resident gdma_stop
+# would fault exactly then. The IDF option that exists for this case.
+CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_LWIP_SO_REUSE=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

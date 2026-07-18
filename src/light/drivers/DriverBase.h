@@ -416,13 +416,21 @@ protected:
     // (callers set info LAST, only when there's nothing more urgent to show). No-op if the buffer
     // can't allocate. The format literal lives here (not a caller-passed fmt) so the message is
     // defined once and both drivers share it verbatim.
-    void setDrivingInfo(unsigned driven, unsigned total, unsigned channels = 1) {
+    // `mode` is an optional one-word transport qualifier a driver may append — e.g. the streaming ring's
+    // "primed" (whole frame encoded before arming: no deadline, pixel-perfect at any load) vs "lapping"
+    // (the ISR refills behind the DMA: the deadline regime) — so the user can see which side of a
+    // behavioral boundary a config sits on without reading a diagnostic control. Empty/null = no suffix.
+    void setDrivingInfo(unsigned driven, unsigned total, unsigned channels = 1,
+                        const char* mode = nullptr) {
         if (char* buf = failBufEnsure()) {
+            int n;
             if (channels > 1)
-                std::snprintf(buf, kFailBufLen, "driving %u of %u lights (%u channels)",
-                              driven, total, driven * channels);
+                n = std::snprintf(buf, kFailBufLen, "driving %u of %u lights (%u channels)",
+                                  driven, total, driven * channels);
             else
-                std::snprintf(buf, kFailBufLen, "driving %u of %u lights", driven, total);
+                n = std::snprintf(buf, kFailBufLen, "driving %u of %u lights", driven, total);
+            if (mode && mode[0] && n > 0 && static_cast<size_t>(n) < kFailBufLen)
+                std::snprintf(buf + n, kFailBufLen - static_cast<size_t>(n), ", %s", mode);
             setStatus(buf, Severity::Status);
         }
     }

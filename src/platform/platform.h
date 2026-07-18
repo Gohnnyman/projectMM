@@ -802,16 +802,24 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
 // per caller) so the driver's control defaults and the platform's own use cannot drift apart.
 constexpr uint8_t kRingRowsDefault = 16;   // lights per DMA buffer
 constexpr uint8_t kRingBufsDefault = 12;   // buffers the DMA circulates
+// Per-slice zero-pad ceiling, µs. A LOW gap under ~150 µs inside a WS2812 stream reads as a PAUSE, not a
+// latch (the strand latches at ~300 µs measured), so an inter-buffer pad up to this bound stretches the
+// refill deadline without ending the frame — hpwit's _DMA_EXTENSTION mechanism, sized to stay well under
+// the latch threshold. The pad's fps cost is linear (frame += nSlices × padUs), which is why the value is
+// a driver CONTROL bounded by this constant, not a platform constant applied unconditionally.
+constexpr uint8_t kRingPadMaxUs = 120;
 
 // `rowsPerBuf` (lights per DMA buffer) and `ringBufs` (pool depth) are the ring's GEOMETRY, and they are
 // the caller's choice because the optimum is a measurement, not a derivation. RAM is the only axis that
 // wants a small rowsPerBuf — it alone stops scaling with strand length at 1 (the only way a 48x256 frame
 // is reachable at all); per-call encode overhead, interrupt rate and lap-time runway all want it big.
+// `padUs` (0..kRingPadMaxUs) inserts a shared zero-pad node after every buffer, stretching the per-slice
+// refill deadline by that many µs at a linear frame-time cost; 0 = no pad nodes at all.
 // Returns false (caller falls back to whole-frame) if the pool won't fit, if rowsPerBuf is 0, or if
 // ringBufs is outside the platform's supported depth.
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
                            uint16_t wrGpio, size_t rowBytes, uint32_t totalRows,
-                           uint32_t rowsPerBuf, uint8_t ringBufs,
+                           uint32_t rowsPerBuf, uint8_t ringBufs, uint8_t padUs,
                            uint8_t clockMultiplier, MoonI80EncodeFn encode, void* user);
 
 // Start one frame on the ring: prime the buffers, fire the DMA, and let the refill task (woken by the
@@ -850,6 +858,9 @@ struct MoonI80RingStats {
     uint32_t descErr = 0;        // GDMA descriptor-error count (>0 == the in-ISR encode corrupted the chain: B1)
     uint32_t maxEncodeUs = 0;    // worst ISR refill-encode time (the producer)
     uint32_t maxIsrGapUs = 0;    // worst gap between EOFs = DMA buffer-drain time (the deadline)
+    uint32_t late = 0;           // slices refilled AFTER the clock oracle said their drain began — each
+                                 // one was stale on the wire. The machine's scatter meter: a clean soak
+                                 // is late == 0; any increment is a deadline miss the eye may not catch.
     // Ring-diagnosis fields — the instruments that isolated the three prime-only bugs (mount re-link,
     // multi-node buffers, EOF coalescing); the lapping work reads them the same way. Their scope lives in
     // backlog-light § MoonI80 streaming ring.
