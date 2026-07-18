@@ -129,6 +129,19 @@ public:
     /// measured against, not as a fallback the ring degrades into.
     bool useRing = true;
 
+    /// Compute `ringRows`/`ringBufs` automatically from the live config (ON, the default), writing the
+    /// chosen values INTO those controls so the user always sees the real numbers — the DHCP pattern
+    /// (an "automatic" toggle whose fields fill with the derived values). While ON, a manual edit to
+    /// ringRows/ringBufs is recomputed away at the next rebuild (the value visibly snaps back) — switch
+    /// this OFF to tune by hand. Explicit, not edit-triggered: persistence restore fires the same
+    /// control-change path as a user edit, so an auto-flip-on-edit would trip on every boot. The derivation, per the
+    /// wall-validated viability rule ((nSlices − ringBufs) × refill ≤ frame wire time): rows = the
+    /// one-descriptor-node maximum (fewest slices), bufs = as deep as fits (min of nSlices+1 — which IS
+    /// prime-only when it fits — the platform max, and the internal-RAM budget after its reserve). Deeper
+    /// is strictly better: more prime coverage, less ISR load. `ringPadUs` stays manual — the strip's
+    /// latch threshold is a hardware fact no derivation can know.
+    bool ringAuto = true;
+
     /// Lights per DMA buffer — the ring's grain. **Who tunes the three ring controls:** a config at or
     /// under the prime-only boundary (`ceil(lights/strand ÷ ringRows) ≤ ringBufs`, ~224 lights/strand at
     /// the defaults) never needs any of them — the whole frame is encoded before arming, the pad is not
@@ -223,9 +236,11 @@ public:
         // meaningless on the whole-frame one. (Gating on wantsRing() is safe here, unlike ringSnapshot's:
         // it reads `useRing`, a plain member, not frameBytes_, which is still 0 when the schema is first
         // built.)
+        controls_.addBool("ringAuto", ringAuto);
+        controls_.setHidden(controls_.count() - 1, !wantsRing());
         controls_.addUint8("ringRows", ringRows, 1, 64);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
-        controls_.addUint8("ringBufs", ringBufs, 2, 32);
+        controls_.addUint8("ringBufs", ringBufs, platform::kRingBufsMin, platform::kRingBufsMax);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
         controls_.addUint8("ringPadUs", ringPadUs, 0, platform::kRingPadMaxUs);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
@@ -241,18 +256,25 @@ public:
     void refreshBusKpi() {
         const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
         if (!s.isRing) return;
+        // Read-and-clear the segment sums each 1 s window — a free-running uint32 sum wraps every
+        // ~20 s at the ring's accumulation rate, which silently garbles the averages (measured: se "64").
+        const uint32_t segGather = dbgSegGatherCy, segEmit = dbgSegEmitCy, segRows = dbgSegRows;
+        dbgSegGatherCy = 0; dbgSegEmitCy = 0; dbgSegRows = 0;
         // The extended fields (ld/tx/ipb/ci/tn) are the LAPPING-phase instruments — the same readouts that
         // isolated the prime-only bugs (ld = drain progress, tx = real wire time vs the physical frame
         // minimum, ipb/ci/tn = node accounting + the terminator). Their scope lives in the backlog's ring
         // entry.
-        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u gap%u",
+        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u ea%u sg%u se%u gap%u",
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
                       static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.lastDrain),
                       static_cast<unsigned>(s.late),
                       static_cast<unsigned>(platform::moonI80Ws2812LastTransmitUs(bus_)),
                       static_cast<unsigned>(s.itemsPerBuf), static_cast<unsigned>(s.consumedItems),
                       static_cast<int>(s.termNodeDiag), static_cast<unsigned>(s.descErr),
-                      static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.maxIsrGapUs));
+                      static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.avgEncodeUs),
+                      static_cast<unsigned>(segRows ? segGather / segRows : 0),   // avg gather cycles/row (last window)
+                      static_cast<unsigned>(segRows ? segEmit / segRows : 0),     // avg emit cycles/row (last window)
+                      static_cast<unsigned>(s.maxIsrGapUs));
                       // lt = slices refilled AFTER their drain began (stale on the wire) — the scatter
                       // meter; a clean soak is lt frozen at its arm-time value.
                       // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
@@ -264,6 +286,7 @@ public:
     bool busControlTriggersBuild(const char* name) const {
         return std::strcmp(name, "clockPin") == 0
             || std::strcmp(name, "useRing") == 0      // path switch: rebuild the bus on the new path
+            || std::strcmp(name, "ringAuto") == 0     // re-derive (or stop deriving) the geometry
             || std::strcmp(name, "ringRows") == 0     // geometry: buffers are sized and the chain mounted
             || std::strcmp(name, "ringBufs") == 0     // at build time, so a change is a rebuild
             || std::strcmp(name, "ringPadUs") == 0;   // the pad is a mounted DMA node — same rebuild
@@ -321,6 +344,28 @@ public:
     /// trampoline below is the encode seam. Returns false if even the small ring won't fit — the base
     /// then falls back to busInit (whole-frame), which idles with a status if IT can't fit either.
     bool busInitRing(size_t rowBytes, uint32_t totalRows) {
+        // AUTO geometry (see ringAuto): derive the winning combination for THIS config and write it into
+        // the visible controls — rows = one-node max (fewest slices), bufs = as deep as fits. The RAM
+        // budget takes free internal MINUS a reserve (WiFi/HTTP need their share; same spirit as the
+        // platform's own HEAP_RESERVE floor).
+        if (ringAuto && rowBytes > 0) {
+            const uint32_t maxRows = static_cast<uint32_t>(platform::kRingNodeMaxBytes / rowBytes);
+            ringRows = static_cast<uint8_t>(maxRows > 64 ? 64 : (maxRows ? maxRows : 1));
+            const uint32_t slices = (totalRows + ringRows - 1u) / ringRows;
+            const size_t bufBytes = static_cast<size_t>(ringRows) * rowBytes;
+            const size_t freeInt = platform::freeInternalHeap();
+            constexpr size_t kReserve = 64 * 1024;   // leave WiFi/HTTP/stacks their internal share
+            // Spend the full post-reserve budget: a deep pool is the whole win (each buffer of depth
+            // removes one slice from the ISR's per-frame load), and the proven 48x256 config runs a
+            // ~121 KB pool alongside WiFi+HTTP. The snapshot falls back to PSRAM when squeezed (a
+            // measured ~10% encode cost — far cheaper than a shallow pool's stale slices).
+            const size_t budget = freeInt > kReserve ? (freeInt - kReserve) : 0;
+            const uint32_t byRam = bufBytes ? static_cast<uint32_t>(budget / bufBytes) : 0;
+            uint32_t bufs = slices + 1u;             // prime-only when it fits — the ideal
+            if (bufs > platform::kRingBufsMax) bufs = platform::kRingBufsMax;
+            if (bufs > byRam) bufs = byRam;
+            ringBufs = static_cast<uint8_t>(bufs >= platform::kRingBufsMin ? bufs : platform::kRingBufsMin);
+        }
         return platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
                                                ringRows, ringBufs, ringPadUs, this->busClockMultiplier(),

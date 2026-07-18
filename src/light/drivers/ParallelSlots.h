@@ -299,13 +299,17 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
         // would drive the pulse-start HIGH on a cycle whose strand is inactive: two strands sharing
         // a '595 (one long, one short) would make the short one flash white on every WS2812 pulse.
         Slot activePins[kPinExpanderOutputs] = {};
+        // 32-bit halves — a runtime-v 64-bit shift is a library call on Xtensa (see encodeWs2812ShiftData).
+        const uint32_t maskLo = static_cast<uint32_t>(activeMask);
+        const uint32_t maskHi = static_cast<uint32_t>(activeMask >> 32);
         for (uint8_t c = 0; c < outPerPin; c++) {
             // '595 shifts MSB-first: the first bit clocked in lands on the last output.
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
             uint8_t lanes[kLanes] = {};
             for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
                 const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
-                if (!(activeMask & (uint64_t(1) << v))) continue;   // inactive: idle LOW
+                const uint32_t live = (v < 32) ? (maskLo >> v) : (maskHi >> (v - 32));
+                if (!(live & 1u)) continue;   // inactive: idle LOW
                 lanes[p] = wire[static_cast<size_t>(v) * channels + ch];
                 activePins[c] |= static_cast<Slot>(Slot(1) << p);
             }
@@ -400,12 +404,16 @@ template <class Slot>
 inline void MM_RAMFUNC shiftActivePins(uint64_t activeMask, uint8_t physPins, uint8_t outPerPin,
                             Slot (&out)[kPinExpanderOutputs]) {
     constexpr uint8_t kLanes = sizeof(Slot) * 8;
+    // 32-bit halves — a runtime-v 64-bit shift is a library call on Xtensa (see encodeWs2812ShiftData).
+    const uint32_t maskLo = static_cast<uint32_t>(activeMask);
+    const uint32_t maskHi = static_cast<uint32_t>(activeMask >> 32);
     for (uint8_t c = 0; c < outPerPin; c++) {
         const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);   // '595 shifts MSB-first
         Slot bits = 0;
         for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
             const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
-            if (activeMask & (uint64_t(1) << v)) bits |= static_cast<Slot>(Slot(1) << p);
+            const uint32_t live = (v < 32) ? (maskLo >> v) : (maskHi >> (v - 32));
+            if (live & 1u) bits |= static_cast<Slot>(Slot(1) << p);
         }
         out[c] = bits;
     }
@@ -453,6 +461,13 @@ inline void MM_RAMFUNC encodeWs2812ShiftData(const uint8_t* wire, uint64_t activ
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
     // Words per WS2812 bit: each bit is one 3-word slot per shift cycle.
     const size_t bitStride = static_cast<size_t>(3) * outPerPin;
+    // The 64-bit mask split into 32-bit halves ONCE: every strand test below is then a 32-bit
+    // variable shift — a single Xtensa instruction — instead of `activeMask & (1ULL << v)` with a
+    // runtime v, which the 32-bit Xtensa compiles to a __ashldi3 LIBRARY CALL (~50 cycles). At 144
+    // tests per row that call was ~7,000 cycles/row — the encoder's dominant cost, cycle-attributed
+    // on the bench (the sibling of the 32-bit SWAR lesson: 64-bit ops synthesize on this target).
+    const uint32_t maskLo = static_cast<uint32_t>(activeMask);
+    const uint32_t maskHi = static_cast<uint32_t>(activeMask >> 32);
 
     // **The transpose IS the emit: each shift cycle's eight bit-planes are stored the moment they are
     // computed, while they are still in registers.** Staging them in a planes[] array first cannot work
@@ -476,7 +491,9 @@ inline void MM_RAMFUNC encodeWs2812ShiftData(const uint8_t* wire, uint64_t activ
             uint32_t loA = 0, loB = 0, hiA = 0, hiB = 0;
             for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
                 const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);
-                if (!(activeMask & (uint64_t(1) << v))) continue;   // exhausted strand: idle LOW
+                // 32-bit half test — see the maskLo/maskHi split above.
+                const uint32_t live = (v < 32) ? (maskLo >> v) : (maskHi >> (v - 32));
+                if (!(live & 1u)) continue;   // exhausted strand: idle LOW
                 const uint32_t b = wire[static_cast<size_t>(v) * channels + ch];
                 if (p < 8) { if (p < 4) loA |= b << (8 * p); else loB |= b << (8 * (p - 4)); }
                 else       { const uint8_t q = static_cast<uint8_t>(p - 8);

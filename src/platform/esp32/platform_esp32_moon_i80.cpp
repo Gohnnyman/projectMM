@@ -120,7 +120,8 @@ constexpr uint32_t kClockPreScale = 2;
 
 // Max bytes one GDMA descriptor carries (LCD_DMA_DESCRIPTOR_BUFFER_MAX_SIZE, same private header).
 // A 144 KB frame therefore needs ~37 nodes ≈ 444 B of descriptor memory — the chain is free.
-constexpr size_t kDmaNodeMaxBytes = 4095;
+// The value itself lives in platform.h (kRingNodeMaxBytes) — the driver's auto geometry shares it.
+constexpr size_t kDmaNodeMaxBytes = kRingNodeMaxBytes;
 
 // The LCD_CAM i80 bus index. Both the S3 and the P4 have exactly one (LCD_LL_I80_BUS_NUM == 1), and
 // the whole point of this backend is that WE own the peripheral for the frame's duration.
@@ -170,7 +171,8 @@ constexpr int kBusId = 0;
 // A depth of 2 (IDF's RGB-LCD bounce-buffer count) BROKE transport: the loopback failed at bit 0, because
 // our chain runs owner_check=false and lacks the owner gate IDF's 2-buffer scheme relies on. Hence the
 // floor of 2 is a hard minimum, not a useful setting.
-constexpr uint8_t kRingBufsMax = 32;   // array bound only; the live count is MoonI80State::ringBufs
+// kRingBufsMax/kRingBufsMin live in platform.h — the shared bounds the driver's auto geometry and
+// control range must agree with; here they size ring[] and gate InitRing's depth check.
 
 // Backstop for a transmit that arrives while the previous frame is still on the wire (the async
 // double-buffer's normal case — see moonI80Ws2812Transmit). It bounds a WEDGED peripheral, nothing
@@ -306,6 +308,11 @@ struct MoonI80State {
     // If dbgMaxEncodeUs approaches/exceeds dbgMaxIsrGapUs, the refill can't keep pace (a PACE problem);
     // if it's well under and 256 still fails, it's a LOGIC/off-by-one (a CURSOR problem, not timing).
     volatile uint32_t dbgMaxEncodeUs = 0;
+    // The AVERAGE is the pace number (can the producer keep up?); the MAX above is the jitter number
+    // (how bad is the worst spike?). Conflating them cost a day: a 63 µs max read as "the encode floor"
+    // when the typical refill may be far cheaper. Sum+count, divided at readout — no ISR division.
+    volatile uint32_t dbgEncSumUs = 0;
+    volatile uint32_t dbgEncCount = 0;
     volatile uint32_t dbgMaxIsrGapUs = 0;
     volatile int64_t  dbgLastEofUs = 0;
     // The machine's scatter meter: slices the batch refill wrote AFTER the oracle said their drain had
@@ -422,6 +429,8 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
                     encodeRingSlice(st, static_cast<uint8_t>(slot), firstRow, count);
                     const uint32_t encUs = static_cast<uint32_t>(esp_timer_get_time() - encStart);
                     if (encUs > st->dbgMaxEncodeUs) st->dbgMaxEncodeUs = encUs;
+                    st->dbgEncSumUs = st->dbgEncSumUs + encUs;   // average = sum/count at readout
+                    st->dbgEncCount = st->dbgEncCount + 1u;
                     // AFTER the encode (encodeRingSlice consumed this use's flag): the memset above erased
                     // the tail rows' constants, so the buffer's NEXT full refill must re-prefill.
                     if (shortSlice) st->bufNeedsPrefill[slot] = true;
@@ -912,6 +921,10 @@ void IRAM_ATTR encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow
 bool startRingTransfer(MoonI80State* st) {
     lcd_cam_dev_t* dev = st->hal.dev;
     st->drainCount = 0;
+    // Per-frame window for the encode average: a free-running sum wraps uint32 in hours and silently
+    // garbles the pace number (the exact bug the sg/se windows fixed) — reset per frame instead.
+    st->dbgEncSumUs = 0;
+    st->dbgEncCount = 0;
     st->busy = true;
 
     // Prime the first min(nSlices, ringBufs) buffers in slice order — node i of the loop points at ring[i],
@@ -1428,6 +1441,7 @@ MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h) {
     s.consumedItems = st->consumedItems;
     s.descErr       = st->dbgDescErr;
     s.maxEncodeUs   = st->dbgMaxEncodeUs;
+    s.avgEncodeUs   = st->dbgEncCount ? st->dbgEncSumUs / st->dbgEncCount : 0;
     s.maxIsrGapUs   = st->dbgMaxIsrGapUs;
     s.itemsPerBuf   = st->itemsPerBuf;
     s.termNodeDiag  = st->termNode;

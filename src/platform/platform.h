@@ -40,6 +40,12 @@ void free(void* ptr);
 // Free with the ordinary free().
 void* allocInternal(size_t bytes);
 
+// CPU cycle counter (Xtensa CCOUNT / RISC-V mcycle; 0-based, wraps at 2^32 — callers difference two
+// reads). The standard fine-grained profiling primitive (ARM's DWT_CYCCNT, x86's rdtsc): a 1-instruction
+// read, safe in ISRs, used by bench diagnostics to attribute hot-path cycles. Desktop returns a
+// nanosecond-scaled clock so differences are still meaningful.
+uint32_t cycleCount();
+
 // Executable memory for JIT-emitted native code (MoonLive). Distinct from alloc()
 // because code must live in memory the CPU can FETCH from, not just read/write:
 // IRAM on ESP32 (MALLOC_CAP_EXEC), an mmap'd PROT_EXEC page on desktop. Returns
@@ -800,14 +806,25 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t
 // the next slice. Returns false if the ring cannot be built (then the caller falls back to whole-frame).
 // The ring geometry the driver ships with, and the values its self-test uses. Named here (not duplicated
 // per caller) so the driver's control defaults and the platform's own use cannot drift apart.
-constexpr uint8_t kRingRowsDefault = 16;   // lights per DMA buffer
-constexpr uint8_t kRingBufsDefault = 12;   // buffers the DMA circulates
+// The bench-tuned defaults: wall-verified clean at 256 lights/strand on 16 strands (rows=7 is the
+// one-descriptor-node maximum at the 16-strand row size, so larger values clamp to it anyway; bufs=16
+// rides the measured pool knee; the matching pad default lives on the driver's ringPadUs control).
+constexpr uint8_t kRingRowsDefault = 7;    // lights per DMA buffer
+constexpr uint8_t kRingBufsDefault = 16;   // buffers the DMA circulates
 // Per-slice zero-pad ceiling, µs. A LOW gap under ~150 µs inside a WS2812 stream reads as a PAUSE, not a
 // latch (the strand latches at ~300 µs measured), so an inter-buffer pad up to this bound stretches the
 // refill deadline without ending the frame — hpwit's _DMA_EXTENSTION mechanism, sized to stay well under
 // the latch threshold. The pad's fps cost is linear (frame += nSlices × padUs), which is why the value is
 // a driver CONTROL bounded by this constant, not a platform constant applied unconditionally.
 constexpr uint8_t kRingPadMaxUs = 120;
+// Max bytes one GDMA descriptor node carries (LCD_DMA_DESCRIPTOR_BUFFER_MAX_SIZE). Shared here because
+// BOTH sides derive geometry from it: the platform clamps a ring buffer to one node, and the driver's
+// auto geometry computes the same rows-per-node ceiling to SHOW the user real values (see ringAuto).
+constexpr size_t kRingNodeMaxBytes = 4095;
+// The ring pool's depth bounds — shared for the same reason as kRingNodeMaxBytes: the platform enforces
+// them (array bound / bounce floor) and the driver's auto geometry + control range must agree or drift.
+constexpr uint8_t kRingBufsMax = 32;
+constexpr uint8_t kRingBufsMin = 2;
 
 // `rowsPerBuf` (lights per DMA buffer) and `ringBufs` (pool depth) are the ring's GEOMETRY, and they are
 // the caller's choice because the optimum is a measurement, not a derivation. RAM is the only axis that
@@ -856,7 +873,9 @@ struct MoonI80RingStats {
     uint32_t numItems = 0;       // descriptor pool capacity
     uint32_t consumedItems = 0;  // items the mount loop actually used (== numItems when sized right)
     uint32_t descErr = 0;        // GDMA descriptor-error count (>0 == the in-ISR encode corrupted the chain: B1)
-    uint32_t maxEncodeUs = 0;    // worst ISR refill-encode time (the producer)
+    uint32_t maxEncodeUs = 0;    // worst ISR refill-encode time (the producer's JITTER number)
+    uint32_t avgEncodeUs = 0;    // average refill-encode time (the producer's PACE number — the one that
+                                 // decides whether the ring keeps up; the max only sizes the pool's margin)
     uint32_t maxIsrGapUs = 0;    // worst gap between EOFs = DMA buffer-drain time (the deadline)
     uint32_t late = 0;           // slices refilled AFTER the clock oracle said their drain began — each
                                  // one was stale on the wire. The machine's scatter meter: a clean soak

@@ -6,7 +6,6 @@
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared)
 #include "platform/platform.h"
 
-
 namespace mm {
 
 template <class Derived>
@@ -730,14 +729,18 @@ public:
         nrOfLightsType row = firstRow;
         while (row < lastRow) {
             // The active set for this row, and how many rows keep it (until the next strand ends).
-            uint64_t mask = 0;
+            // 32-bit halves: `1ULL << lane` with a runtime lane is a library call on Xtensa (see
+            // encodeWs2812ShiftData's maskLo/maskHi note); this runs per refill on ragged configs.
+            uint32_t mLo = 0, mHi = 0;
             nrOfLightsType runEnd = lastRow;
             for (uint8_t lane = 0; lane < laneCount_; lane++) {
                 if (row < laneCounts_[lane]) {
-                    mask |= uint64_t(1) << lane;
+                    if (lane < 32) mLo |= uint32_t(1) << lane;
+                    else           mHi |= uint32_t(1) << (lane - 32);
                     if (laneCounts_[lane] < runEnd) runEnd = laneCounts_[lane];   // this strand ends first
                 }
             }
+            const uint64_t mask = mLo | (static_cast<uint64_t>(mHi) << 32);   // constant shift: cheap
             if (runEnd <= row) runEnd = lastRow;   // no strand ends ahead in range: one run to lastRow
             const uint32_t rows = static_cast<uint32_t>(runEnd - row);
             // dst-relative: row `firstRow` is at out+0, so offset by (row - firstRow).
@@ -792,30 +795,48 @@ public:
         std::memset(wire_, 0, wireCap_);
         const size_t stride = outCh;
         const bool shift = pinExpanderMode();
+        // BENCH DIAGNOSTIC: attribute the refill's cycles per segment — gather+mask vs the
+        // transpose+emit — read out via ringDbg's sg/se fields (scope: the backlog's ring entry).
+        uint32_t segT0 = platform::cycleCount();
         // The active-strand mask is 64-bit because a '595 expander drives more strands than the bus
         // is wide (up to kMaxStrands); in direct mode only the low `laneCount_` bits are ever set,
         // and it narrows to Slot for the direct encoder.
         for (nrOfLightsType row = firstRow; row < lastRow; row++) {
-            uint64_t mask = 0;
+            // Built as 32-bit halves (combined once below): `1ULL << lane` with a runtime lane is a
+            // library call on Xtensa — 48 of them per row was a measured chunk of the refill cost.
+            uint32_t maskLo32 = 0, maskHi32 = 0;
             for (uint8_t lane = 0; lane < laneCount_; lane++) {
                 if (row >= laneCounts_[lane]) continue;   // short strand: idle LOW
-                mask |= uint64_t(1) << lane;
+                if (lane < 32) maskLo32 |= uint32_t(1) << lane;
+                else           maskHi32 |= uint32_t(1) << (lane - 32);
                 // winStart_ shifts this driver's whole slice; laneStart_ is the
                 // per-lane offset within it.
                 if (preCorrected) {
                     // Snapshot mode: the bytes are already corrected wire bytes at outCh stride — gather only.
-                    std::memcpy(wire_ + lane * stride,
-                                src + (winStart_ + laneStart_[lane] + row) * stride, stride);
+                    // Explicit byte moves, NOT std::memcpy: `stride` is a runtime value, and a runtime-size
+                    // memcpy compiles to a LIBRARY call on Xtensa — ~100 cycles of call/dispatch to move 3
+                    // bytes, once per strand per row, which measured as ~1.2 µs/strand of the ring refill
+                    // (the dominant per-strand term at 48 strands). A bounded byte loop inlines flat.
+                    uint8_t* dst = wire_ + lane * stride;
+                    const uint8_t* s = src + (winStart_ + laneStart_[lane] + row) * stride;
+                    for (uint8_t b = 0; b < stride; b++) dst[b] = s[b];
                 } else {
                     correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
                                        wire_ + lane * stride);
                 }
             }
+            const uint64_t mask = maskLo32 | (static_cast<uint64_t>(maskHi32) << 32);   // constant shift: cheap
             if (shift) {
                 // DATA WORDS ONLY. The pulse-start and pulse-tail words of every slot are frame
                 // constants and were written once by prefillShiftFrame() — two thirds of the stores,
                 // hoisted straight out of the hot path (see prefillWs2812ShiftConstants).
+                const uint32_t segT1 = platform::cycleCount();   // TEMP DIAGNOSTIC
                 encodeWs2812ShiftData<Slot>(wire_, mask, physPins_, latchBit_, outputsPerPin(), outCh, out);
+                const uint32_t segT2 = platform::cycleCount();   // TEMP DIAGNOSTIC
+                dbgSegGatherCy += segT1 - segT0;   // memset+mask+gather (since segT0 / previous row's end)
+                dbgSegEmitCy   += segT2 - segT1;   // the transpose+emit
+                dbgSegRows     += 1;
+                segT0 = segT2;                     // next row's gather starts here
                 out += static_cast<size_t>(outCh) * 8 * 3 * outputsPerPin();
             } else {
                 encodeWs2812ParallelSlots<Slot>(wire_, static_cast<Slot>(mask), outCh, out);
@@ -883,6 +904,13 @@ public:
     /// a source that fills 15 of 16 expander strands is as cheap as a full uniform wall, not "ragged".)
     /// A truly ragged config re-prefills every refill (the mask varies per row region). Computed live —
     /// a handful of integer compares against the ~1/3-of-encode prefill it saves.
+    // BENCH DIAGNOSTIC: per-segment cycle accumulators encodeRows fills at the shift branch —
+    // gather+mask vs transpose+emit, per row. Static (shared across instances; one hot driver on the
+    // bench) + volatile (ISR-written, KPI-read). Scope: the backlog's ring entry.
+    static inline volatile uint32_t dbgSegGatherCy = 0;
+    static inline volatile uint32_t dbgSegEmitCy = 0;
+    static inline volatile uint32_t dbgSegRows = 0;
+
     bool MM_RAMFUNC uniformLaneCounts() const {
         nrOfLightsType ref = 0;
         for (uint8_t i = 0; i < laneCount_; i++) {

@@ -368,6 +368,12 @@ const char* chipModel() {
     return "desktop";
 }
 
+uint32_t cycleCount() {
+    return static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 const char* cpuInfo() {
     // Cores only: the host's clock speed has no portable query (and boosts dynamically anyway).
     static char buf[16] = {};
@@ -1201,7 +1207,8 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
 bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                            uint8_t /*laneCount*/, uint16_t /*wrGpio*/, size_t /*rowBytes*/,
                            uint32_t /*totalRows*/, uint32_t /*rowsPerBuf*/, uint8_t /*ringBufs*/,
-                           uint8_t /*clockMultiplier*/, MoonI80EncodeFn /*encode*/, void* /*user*/) {
+                           uint8_t /*padUs*/, uint8_t /*clockMultiplier*/, MoonI80EncodeFn /*encode*/,
+                           void* /*user*/) {
     return false;
 }
 bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& /*h*/) { return false; }

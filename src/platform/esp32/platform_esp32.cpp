@@ -24,6 +24,7 @@
 #include "esp_cache.h"        // esp_cache_msync — I-cache sync after writing MoonLive code to IRAM
 #include "esp_system.h"
 #include "esp_chip_info.h"
+#include "esp_cpu.h"       // esp_cpu_get_cycle_count — the cycleCount() seam
 #include "esp_mac.h"
 #include "esp_idf_version.h"
 #include "esp_partition.h"
@@ -260,6 +261,8 @@ const char* chipModel() {
         default:           return "ESP32-?";
     }
 }
+
+uint32_t IRAM_ATTR cycleCount() { return esp_cpu_get_cycle_count(); }
 
 const char* cpuInfo() {
     // Frequency from the running clock (esp_rom_get_cpu_ticks_per_us == MHz), not the sdkconfig macro,
