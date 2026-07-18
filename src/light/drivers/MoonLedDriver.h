@@ -346,7 +346,8 @@ public:
                                                static_cast<uint16_t>(clockPin),
                                                static_cast<uint16_t>(loopbackRxPin),
                                                frame, frameBytes, dataBytes, rowBits,
-                                               this->busClockMultiplier());
+                                               this->busClockMultiplier(),
+                                               ringRows, ringBufs, useRing);
     }
 
     /// WR is part of the bus identity, so a change to it rebuilds the bus — not just a data-pin edit.

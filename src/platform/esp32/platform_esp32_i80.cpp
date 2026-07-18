@@ -480,7 +480,7 @@ namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
-                           RmtLoopbackResult& r);
+                           RmtLoopbackResult& r, bool rideMode = false);
 }
 
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,

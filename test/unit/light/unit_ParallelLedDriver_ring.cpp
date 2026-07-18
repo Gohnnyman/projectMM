@@ -17,7 +17,8 @@
 //   1. TILING — the slices, concatenated in frame-row order, are byte-identical to one whole-frame
 //      encode. (A slice writes to dst+0 for any firstRow, so a tiling bug shows as a shifted/duplicated
 //      block — exactly the "domino" artifact of the stashed attempt.)
-//   2. LAST-SLICE-CLOSES — only the final slice appends the latch pad; the others must not.
+//   2. ROWS-ONLY — no slice appends a latch pad; a buffer is zero past its rows. The reset comes from
+//      stopping the peripheral, never a pad in a circulating buffer, so a pad byte would overrun.
 //   3. RECYCLED == FRESH — driving the same buffers a SECOND time yields identical bytes. Ring buffers
 //      are recycled, not zeroed, so a stale-constant bug (the prefill/pad not re-laid) shows only on the
 //      second frame. This is the invariant most likely to break, and the one no whole-frame test covers.
@@ -116,7 +117,13 @@ public:
             uint32_t count = kMockRingRows;
             bool last = false;
             if (row + count >= ringTotalRows_) { count = ringTotalRows_ - row; last = true; }
-            // The platform calls the trampoline with (dst, firstRow, count, closeFrame=last).
+            // Short last slice into a rows-only, RECYCLED buffer: zero rows [count, kMockRingRows) first —
+            // exactly as the platform ISR does (moonI80EofCb) before encodeRingSlice. Those mounted bytes
+            // still hold this buffer's EARLIER full slice and would clock as ghost rows otherwise.
+            if (count < kMockRingRows)
+                std::memset(ring_[slot].data() + static_cast<size_t>(count) * ringRowBytes_, 0,
+                            (static_cast<size_t>(kMockRingRows) - count) * ringRowBytes_);
+            // The platform calls the trampoline with (dst, firstRow, count) — closeFrame is always false.
             MockRingDriver::ringEncodeTrampolineHost(this, ring_[slot].data(), row, count, last);
             // Reassemble the row region in DMA order.
             assembled.insert(assembled.end(), ring_[slot].begin(),
@@ -129,82 +136,64 @@ public:
         return assembled;
     }
 
-    // Was the latch pad written in the LAST slice's buffer (and NOWHERE else)? The pad region begins
-    // right after each buffer's actual rows: the last slice may be SHORT (lastRows < kMockRingRows), so
-    // its pad starts at lastRows*rowBytes — checking from the full kMockRingRows offset would miss the
-    // stale-row window a short slice recycles. Two assertions: (1) the last-slice buffer HAS a latch byte
-    // in its pad (the frame was actually closed), and (2) no OTHER ring buffer has any pad byte set (a
-    // non-last slice was encoded closeFrame=false, so its pad stays zero).
-    bool onlyLastSliceClosedFrame() const {
+    // NO ring buffer appends a latch pad — the buffers are rows-only, so past each buffer's actual rows
+    // every byte must be zero. The seam is called closeFrame=false for EVERY slice (encodeRingSlice), so
+    // the frame's reset comes from stopping the peripheral, never from a pad in a circulating buffer; a
+    // stray non-zero byte past a slice's rows would overrun the rows-only allocation on hardware. The last
+    // slice may be SHORT (lastRows < kMockRingRows), so its rows end at lastRows*rowBytes; a non-last slice
+    // always fills kMockRingRows rows. Everything past that must be zero.
+    bool noSliceWritesPad() const {
         if (lastSlot_ < 0) return false;
         const size_t lastRows = ringTotalRows_ - (nSlicesForTest() - 1) * kMockRingRows;
         for (uint8_t s = 0; s < kMockRingBufs; s++) {
-            // For the last-slice buffer the pad starts after its (short) rows; for the others, after a
-            // full slice — a non-last slice always fills kMockRingRows rows before its (unwritten) pad.
-            const size_t padStart = (static_cast<int32_t>(s) == lastSlot_)
-                                        ? lastRows * ringRowBytes_
-                                        : static_cast<size_t>(kMockRingRows) * ringRowBytes_;
-            bool padNonZero = false;
-            for (size_t i = padStart; i < ring_[s].size(); i++)
-                if (ring_[s][i] != 0) { padNonZero = true; break; }
-            if (static_cast<int32_t>(s) == lastSlot_) {
-                if (!padNonZero) return false;   // the last slice MUST close the frame (latch byte present)
-            } else if (padNonZero) {
-                return false;                    // no other buffer may have a written pad
-            }
+            const size_t rowRegion = (static_cast<int32_t>(s) == lastSlot_)
+                                         ? lastRows * ringRowBytes_
+                                         : static_cast<size_t>(kMockRingRows) * ringRowBytes_;
+            for (size_t i = rowRegion; i < ring_[s].size(); i++)
+                if (ring_[s][i] != 0) return false;   // a buffer wrote past its rows — a pad overrun
         }
         return true;
     }
 
-    // After driveRingFrame(), the LAST slice's buffer must have a clean pad: past its (possibly short)
-    // row region, only the ONE latch word may be non-zero — the ≥300 µs LOW reset the DMA clocks at
-    // frame end. This is what a non-multiple-of-16 strand length (a short last slice into a REUSED
-    // buffer) breaks without the pad-zero: the buffer's earlier full slice would still sit in the pad.
-    // Returns the count of non-zero bytes in the pad window BEYOND the first latch word — 0 = clean.
+    // After driveRingFrame(), the LAST slice's buffer must be clean past its (possibly short) rows: the
+    // buffers are rows-only, so a short last slice's tail (rows [lastRows, kMockRingRows) of a REUSED
+    // buffer) must have been zeroed — otherwise its EARLIER full slice still sits there and clocks as
+    // ghost rows in place of the ≥300 µs LOW reset. The encoder never writes at or past rowRegion
+    // (closeFrame=false → no latch word), so the whole window [lastRows*rowBytes, buffer_end) must be
+    // zero. Returns the count of non-zero bytes in that window — 0 = clean.
     size_t lastSliceStalePadBytes() const {
         if (lastSlot_ < 0) return SIZE_MAX;
         const size_t lastRows = ringTotalRows_ - (nSlicesForTest() - 1) * kMockRingRows;
-        const size_t rowRegion = lastRows * ringRowBytes_;   // where this slice's pad window begins
+        const size_t rowRegion = lastRows * ringRowBytes_;   // this slice's rows end here; the rest is tail
         const auto& b = ring_[static_cast<size_t>(lastSlot_)];
-        // Only the DMA-VISIBLE window matters: the last node is mounted at lastRows*rowBytes + padBytes,
-        // so the DMA clocks [0, rowRegion + ringPad_) and NOTHING beyond it — bytes past that (the tail of
-        // an oversized recycled buffer) are never on the wire. Within the visible pad, only the first
-        // latch word may be non-zero; count any OTHER non-zero byte in that window.
-        const size_t visibleEnd = rowRegion + ringPad_;
         size_t stale = 0;
-        for (size_t i = rowRegion + slotBytesForTest(); i < visibleEnd && i < b.size(); i++)
+        for (size_t i = rowRegion; i < b.size(); i++)
             if (b[i] != 0) stale++;
         return stale;
     }
     uint32_t nSlicesForTest() const {
         return (ringTotalRows_ + kMockRingRows - 1) / kMockRingRows;
     }
-    size_t slotBytesForTest() const { return this->slotBytes(); }
 
     // The trampoline the real driver registers is MoonLedDriver::ringEncodeTrampoline; the mock
     // reproduces its body (recover `this`, branch on bus width, call encodeRows) so the host drives the
-    // identical encode the seam does on device.
+    // identical encode the seam does on device. `closeFrame` is ALWAYS false to the encoder: the platform
+    // (encodeRingSlice) never appends a latch pad to a rows-only ring buffer — the WS2812 reset comes from
+    // stopping the peripheral, not from a pad inside a circulating buffer.
     static void ringEncodeTrampolineHost(void* user, uint8_t* dst, uint32_t firstRow,
-                                         uint32_t count, bool closeFrame) {
+                                         uint32_t count, bool /*last*/) {
         auto* self = static_cast<MockRingDriver*>(user);
         const uint8_t outCh = self->correction_.outChannels;
         const auto first = static_cast<nrOfLightsType>(firstRow);
         const auto cnt = static_cast<nrOfLightsType>(count);
-        // Zero the pad window before a LAST slice into a recycled buffer — mirrors encodeRingSlice in the
-        // platform. A short last slice (count < kMockRingRows) leaves this buffer's EARLIER full slice in
-        // the pad region; without this the encoder's "rest of the pad is zero" contract breaks and ghost
-        // rows clock in place of the reset. (This is the fix for the non-multiple-of-16 stale-pad bug.)
-        if (closeFrame && self->ringPad_) {
-            std::memset(dst + static_cast<size_t>(count) * self->ringRowBytes_, 0, self->ringPad_);
-        }
         // Prefill THEN encode, exactly as MoonLedDriver::ringEncodeTrampoline does — the recycled
         // buffer needs its constants re-laid, and encodeRows writes only the data word in shift mode.
         if (self->slotBytes() == 1) {
             if (self->pinExpanderMode()) self->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
-            self->template encodeRows<uint8_t>(outCh, dst, first, cnt, closeFrame);
+            self->template encodeRows<uint8_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
         } else {
             if (self->pinExpanderMode()) self->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
-            self->template encodeRows<uint16_t>(outCh, dst, first, cnt, closeFrame);
+            self->template encodeRows<uint16_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
         }
     }
 
@@ -232,9 +221,9 @@ public:
     ClockedFrame driveRingFrameWithTermination(uint8_t bufs, uint8_t kTailBufs = 1) {
         REQUIRE(ringActive_);
         REQUIRE(bufs >= 1);
-        // Physical buffers, sized like the platform's ring[] (rows + pad), refilled in place.
+        // Physical buffers, sized like the platform's ring[] (rows only), refilled in place.
         std::vector<std::vector<uint8_t>> pool(bufs);
-        const size_t bufBytes = static_cast<size_t>(kMockRingRows) * ringRowBytes_ + ringPad_;
+        const size_t bufBytes = static_cast<size_t>(kMockRingRows) * ringRowBytes_;
         for (auto& b : pool) b.assign(bufBytes, 0);
         const uint32_t nSlices = nSlicesForTest();
 
@@ -246,7 +235,7 @@ public:
                 count = ringTotalRows_ - firstRow;
                 if (count < kMockRingRows)   // short last slice: zero the rest so no stale rows clock
                     std::memset(pool[slot].data() + static_cast<size_t>(count) * ringRowBytes_, 0,
-                                (static_cast<size_t>(kMockRingRows) - count) * ringRowBytes_ + ringPad_);
+                                (static_cast<size_t>(kMockRingRows) - count) * ringRowBytes_);
             }
             const bool last = (firstRow + count >= ringTotalRows_);
             ringEncodeTrampolineHost(this, pool[slot].data(), firstRow, count, last);
@@ -307,7 +296,6 @@ private:
     size_t cap_ = 0;
     std::vector<uint8_t> ring_[kMockRingBufs];
     size_t ringRowBytes_ = 0;
-    size_t ringPad_ = 0;
     uint32_t ringTotalRows_ = 0;
     bool ringActive_ = false;
     bool wantRing_ = false;
@@ -379,9 +367,10 @@ TEST_CASE("MoonI80 ring: sliced encode tiles into a byte-identical whole frame")
     CHECK(std::memcmp(assembled.data(), whole.data(), whole.size()) == 0);
 }
 
-// 2. LAST-SLICE-CLOSES — only the final slice writes the latch pad; every earlier slice leaves its
-//    buffer's pad region zero. A frame that closed early (or on every slice) would latch mid-frame.
-TEST_CASE("MoonI80 ring: only the last slice closes the frame") {
+// 2. ROWS-ONLY — no slice appends a latch pad; every buffer is zero past its rows. The buffers are
+//    allocated rows-only (the WS2812 reset comes from stopping the peripheral, not a pad in a circulating
+//    buffer), so a slice that wrote a latch word past its rows would overrun the allocation on hardware.
+TEST_CASE("MoonI80 ring: no slice writes past its rows (buffers are rows-only)") {
     MockRingDriver d;
     mm::Buffer src;
     mm::Correction corr;
@@ -392,7 +381,7 @@ TEST_CASE("MoonI80 ring: only the last slice closes the frame") {
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
     REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
     d.driveRingFrame();
-    CHECK(d.onlyLastSliceClosedFrame());
+    CHECK(d.noSliceWritesPad());
 }
 
 // 3. RECYCLED == FRESH — a second frame through the SAME (recycled, not zeroed) ring buffers produces
@@ -444,7 +433,7 @@ TEST_CASE("MoonI80 ring: a short last slice in a reused buffer has a clean pad (
     // Drive TWICE so the last-slice buffer is genuinely recycled (held an earlier frame's full slice).
     d.driveRingFrame();
     d.driveRingFrame();
-    CHECK(d.lastSliceStalePadBytes() == 0);   // pad clean past the one latch word — no ghost rows
+    CHECK(d.lastSliceStalePadBytes() == 0);   // tail past the short slice's rows is zero — no ghost rows
 }
 
 // 5. SOURCE SNAPSHOT — the ring encodes off the render thread across the ~6 ms wire, so it must read a

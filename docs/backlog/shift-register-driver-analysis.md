@@ -166,7 +166,7 @@ W mm_i80: CLOCK SPIKE: request 20000000 Hz -> GRANTED (prescale 4 -> granted 200
 | | source | bus resolution | prescale | granted |
 |---|---|---|---|---|
 | today (direct) | PLL160M | 80 MHz | 30 | 2.667 MHz (exact) |
-| **pin expander mode** | PLL160M | 80 MHz | **4** | **20.000 MHz (exact)** |
+| **pin expander mode** | PLL160M | 80 MHz | **3** | **26.67 MHz (exact, 300 ns slot)** |
 
 Both S3 and P4 default to `LCD_CLK_SRC_PLL160M` with `LCD_PERIPH_CLOCK_PRE_SCALE = 2` → an 80 MHz bus resolution, and both cap the prescale at 64. hpwit's 19.2 MHz is an artifact of the **classic I2S fractional divider** (`div_num`/`div_a`/`div_b`), which LCD_CAM does not share. So the rate must be an exact divide AND land in the in-spec slot band (290–380 ns → 21.1–27.6 MHz): **26.67 MHz** (prescale 3) is the only one that does, giving a 300 ns slot — T0H 300 ns, T1H 600 ns, both comfortably inside spec. This is the same reasoning that already picked the exact `/30` for `kPclkHz`.
 
@@ -380,9 +380,9 @@ The module header reports the **tick** rate (252 fps) while `frameTime` reports 
 
 ### Where to start next
 
-**Begin from the PO's observation (#4), not from a new theory.** `asyncTransmit` OFF works far better — find out *why*, and the mechanism will likely fall out. Concretely: with async OFF the driver waits for each transfer before starting the next, so only one transfer is ever outstanding; with it ON, two buffers are in flight against a pool sized for one. That *sounds* like the answer — but doubling the pool did not fix it and made it worse, so the simple version of that story is already wrong. Instrument what the descriptors actually do across a transfer boundary before changing any more code.
+**The scatter is diagnosed — see § 7.6 and [backlog-light.md](backlog-light.md).** The ring is clean iff `ringBufs − nSlices ≥ ~2` (a producer/consumer headroom margin, bench-bisected on the wall 2026-07-18). "More buffers" cannot reach 48×256 (the headroom RAM is ~145 KB regardless of geometry, the whole-frame wall); the fix is a refill that structurally TRAILS the DMA read head (hpwit's model), so headroom holds at any `nSlices` at constant RAM.
 
-Also still unproven: **the loopback RX path** (the divider → GPIO 16 → RMT capture chain has never captured a single symbol, on any strand, even on a fresh bus whose transfer completes). Until it does, we have no closed-loop instrument, and every conclusion rests on serial logs and the PO's eyes.
+**The loopback RX path CAPTURES and bit-verifies** (fixed 2026-07-15, `2873ec9d`: "captures it back off the strand, bit-verifies 2304/2304 bits, textbook 300/600 ns pulse widths"; the R14 bit-0 settling artifact was measured on a captured strand, independent proof). But the current loopback builds a PRIVATE frame and transmits it — it does NOT go through the render ring, so it proves the peripheral, not the pipeline, and cannot observe a ring-scatter. An **intrusive** mode — capture what the LIVE ring actually put on the wire (via `captureAndVerifyFrame`, already decoupled from the transmit) — is the closed-loop instrument the ring fix needs, so a machine can bit-verify the frame reached the LEDs intact instead of relying on the PO's eyes.
 
 ## 8. Open questions for the PO
 

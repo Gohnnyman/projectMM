@@ -45,6 +45,7 @@
 #include "esp_log.h"
 #include "esp_memory_utils.h"
 #include "esp_rom_gpio.h"
+#include "soc/gpio_sig_map.h"   // SIG_GPIO_OUT_IDX — detaches a matrix route (destroyState)
 #include "esp_rom_sys.h"     // esp_rom_delay_us — the DMA-to-FIFO settle before lcd_ll_start
 #include "esp_timer.h"       // esp_timer_get_time — ISR-safe wire-time stamp
 #include "driver/gpio.h"
@@ -103,6 +104,12 @@ constexpr uint32_t kPclkHz = 2'666'666;
 // further past 380 ns. If the waveform needs adjusting, adjust it *up*.
 constexpr uint32_t kShiftPclkHz = 26'666'666;   // prescale 3 of 80 MHz -> 300 ns WS2812 slots
 
+// WS2812 latch/reset LOW: the spec is >=280-300 us; hpwit's rule is anything <150 us is read as a PAUSE
+// (data continues) not a reset. 350 us clears both with margin. The ring guarantees this as idle-LOW time
+// between the frame's stop (lastStopUs) and the next arm, NOT as clocked zero buffers — so it holds at ANY
+// ringRows (a small-ringRows tail buffer is far under this) with ZERO extra RAM (see MoonI80State::lastStopUs).
+constexpr int64_t kResetLowUs = 350;
+
 // The LCD_CAM group clock divider esp_lcd applies (LCD_PERIPH_CLOCK_PRE_SCALE in
 // esp_lcd/priv_include/esp_lcd_common.h:28 — a PRIVATE header, so the constant is restated here
 // rather than included). It is the minimum divider the peripheral accepts, and with the default
@@ -145,9 +152,20 @@ constexpr int kBusId = 0;
 //
 // Bench history worth keeping: at rowsPerBuf=16 the pool only ever held ~12 buffers (~140 KB; 16 buffers
 // = 176 KB never fit the S3's ~160 KB free internal DMA heap), which caps that geometry near 240
-// lights/strand — nSlices must stay under ringBufs to avoid reuse, and reuse is where the wrap re-latch
-// bug lived. A per-light ring is necessarily a DEEP-REUSE configuration (nSlices == totalRows), and it has
-// run 160 refills/frame with descErr=0 — so reuse works; it is the ISR deadline that decides, not the wrap.
+// lights/strand.
+//
+// **OPEN BUG — the frame breaks somewhere between 8 and 16 SLICES, and no mechanism is known.** Confirmed
+// on the wall (2026-07-17), one variable at a time, at a FIXED light count: 8 slices renders clean (as does
+// whole-frame), 16 slices scatters — with any buffer count, whether or not the DMA laps, and whether or not
+// the ISR encodes at all. Ruled out ON THE LEDS: buffer reuse (16 slices into 17 buffers never laps, still
+// scatters), the refill order, the encode deadline (`enc0` scatters; 65 µs/light at 3x over budget renders
+// fine), and the descriptor pool (36 nodes in both a clean and a scattered config).
+//
+// **The counters cannot see it**: with owner_check=false there is no handshake, so a torn or short read
+// raises NO error — descErr stays 0 and the timings look healthy while the frame is visibly broken. The
+// symptom is a CORRECT geometry drawn in SCATTERED DOTS (right bytes, chopped frame), which reads as a
+// latch/reset fault rather than a data fault. Do not trust a ring counter here; the wall is the instrument.
+// See docs/backlog/backlog-light.md for the full table and what to try next.
 // A depth of 2 (IDF's RGB-LCD bounce-buffer count) BROKE transport: the loopback failed at bit 0, because
 // our chain runs owner_check=false and lacks the owner gate IDF's 2-buffer scheme relies on. Hence the
 // floor of 2 is a hard minimum, not a useful setting.
@@ -192,6 +210,11 @@ struct MoonI80State {
     size_t busWidth = 8;        // 8 or 16 data lines
     uint32_t prescale = 1;      // pixel-clock prescale off the 80 MHz bus resolution
     bool clockAcquired = false; // the PERIPH_RCC bus-clock reference this state holds
+    // The GPIO-matrix routes configureGpio established, kept so destroyState can tear them down — a
+    // deleted driver (not rebuilt) must not leave data/WR signals routed to a freed peripheral.
+    uint16_t routedPins[16] = {};   // data GPIOs routed to the bus (first `routedPinCount`)
+    uint8_t  routedPinCount = 0;
+    int32_t  routedWrGpio = -1;      // WR GPIO if routed (shift mode), else -1
     // In-order completion FIFO of started buffer indices (0/1). The transmit pushes at head; the
     // EOF ISR pops at tail. Only ever 0..2 entries (one per buffer).
     volatile uint8_t fifo[2] = {0, 0};
@@ -201,6 +224,12 @@ struct MoonI80State {
     // duration. Paired with the FIFO, so it tracks the transfer the next EOF completes.
     volatile int64_t txStartUs[2] = {0, 0};
     volatile uint32_t lastTransmitUs = 0;
+    // Absolute time (esp_timer) the ring peripheral was last STOPPED — the moment the strand starts idling
+    // LOW, i.e. the WS2812 reset begins. startRingTransfer holds the next arm until >=kResetLowUs has
+    // elapsed since this, so the reset is a real >=300 us LOW at ANY ringRows (a small ringRows tail buffer
+    // alone is < the 150 us the WS2812 reads as a reset — hpwit: "less than 150us ... like it was sent just
+    // after"; below that the strand never latches and the frame FREEZES). Zero extra RAM, pool-size-safe.
+    volatile int64_t lastStopUs = 0;
     volatile bool busy = false;      // a transfer is clocking out right now
 
     // --- Ring mode. Null/zero on a whole-frame handle; populated only by moonI80Ws2812InitRing. ------
@@ -211,6 +240,19 @@ struct MoonI80State {
     uint32_t totalRows = 0;          // strand length in rows — the frame ends after this many
     size_t   linkItemCap = 0;        // descriptor-pool capacity — the mount loop must not exceed it (IDF wraps silently)
     uint32_t consumedItems = 0;      // descriptor items the mount loop actually used (diagnostic; == linkItemCap when sized right)
+    // Descriptor nodes per ring buffer (a buffer larger than kDmaNodeMaxBytes spans >1 node). Buffer b's LAST
+    // node is (b+1)*itemsPerBuf - 1 — the ISR needs this to splice the self-terminating NULL at the right node.
+    uint8_t  itemsPerBuf = 1;
+    // Self-terminating chain (hpwit): the node whose `next` was spliced to NULL to end THIS frame, so the next
+    // arm can restore its loop link. -1 = no splice active (looping chain). The prime-only path splices at arm
+    // time (hazard-free); the DMA self-terminates there instead of a mid-frame gdma_stop racing the prefetcher.
+    int32_t  termNode = -1;
+    // Each buffer's ACTUAL last descriptor node, captured from gdma_link_mount_buffers' endIdx during the
+    // mount. The splice keys off THIS, not arithmetic: gdma_link_mount_buffers may allocate a different node
+    // count than esp_dma_calculate_node_count predicts (alignment/rounding), so `(b+1)*itemsPerBuf-1` was
+    // WRONG — it terminated a buffer early (bench: ld=7 for a 10-slice frame, node 21 landed in buffer 7 not
+    // 10). The mount's own endIdx is the ground truth.
+    int32_t  bufLastNode[kRingBufsMax] = {};
     size_t   ringRowBytes = 0;       // encoded bytes per row (encode writes rowsPerBuf × this per buffer)
     MoonI80EncodeFn   encode = nullptr;   // the domain's slice encoder (platform.h seam)
     void*             encodeUser = nullptr;
@@ -328,10 +370,18 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
             const uint32_t encUs = static_cast<uint32_t>(esp_timer_get_time() - encStart);
             if (encUs > st->dbgMaxEncodeUs) st->dbgMaxEncodeUs = encUs;
             st->refilledRow = firstRow + count;
-        } else {
-            // Past the last real slice: refill this buffer with ZEROS so the loop's tail clocks a clean LOW
-            // (the WS2812 reset), not stale pixel rows (which would render as ghost/bright/shifted LEDs — the
-            // "too bright + shifted" symptom). hpwit does the same with a self-looping zero terminator node.
+        } else if (st->nSlices > st->ringBufs) {
+            // LAPPING frame only (nSlices > ringBufs): the DMA will re-read this buffer on a later lap, so
+            // once past the last real slice it must clock ZEROS (a clean LOW tail), not the stale pixel rows
+            // it still holds (which render as ghost/bright/shifted LEDs). hpwit uses a self-looping zero
+            // terminator node for the same reason.
+            //
+            // PRIME-ONLY frame (nSlices <= ringBufs): DON'T touch the buffer here. Priming already laid the
+            // trailing zeros in buffers nSlices..ringBufs-1, and the DMA never re-reads a buffer this frame —
+            // so this write only lands BEHIND the read head, on the buffer whose FIFO tail may still be
+            // shifting out. That torn write is the intermittent per-strand garbage seen at small ringRows
+            // (rows=6: 10 slices in 16 bufs). The refill must never write a buffer the DMA could still be
+            // draining — hpwit's rule that the write always TRAILS the read by the pool depth, never leads it.
             std::memset(st->ring[slot], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
         }
         st->refillSlot = (slot + 1u) % st->ringBufs;
@@ -349,6 +399,7 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
             gdma_stop(st->dma);
             st->busy = false;
             const int64_t now = esp_timer_get_time();
+            st->lastStopUs = now;   // the strand begins idling LOW here — the reset clock starts (see the field)
             st->lastTransmitUs = static_cast<uint32_t>(now - st->txStartUs[0]);
             st->dbgDoneGiven = st->dbgDoneGiven + 1u;    // ISR INSTRUMENTATION (temporary)
             xSemaphoreGiveFromISR(st->done[0], &high);   // the ring reports completion on slot 0
@@ -382,6 +433,15 @@ void destroyState(MoonI80State* st) {
         gdma_del_channel(st->dma);
     }
     if (st->link) gdma_del_link_list(st->link);
+    // Detach the GPIO-matrix routes configureGpio established, so a deleted driver leaves no data/WR
+    // signal pointing at this (now torn-down) peripheral. Route each back to plain GPIO (SIG_GPIO_OUT_IDX
+    // = no peripheral). Safe after the GDMA barrier above — nothing is clocking these pins any more, and
+    // a route that was never made (routedPinCount 0, routedWrGpio -1) is simply skipped.
+    for (uint8_t i = 0; i < st->routedPinCount; i++)
+        esp_rom_gpio_connect_out_signal(st->routedPins[i], SIG_GPIO_OUT_IDX, false, false);
+    if (st->routedWrGpio >= 0)
+        esp_rom_gpio_connect_out_signal(static_cast<uint16_t>(st->routedWrGpio), SIG_GPIO_OUT_IDX,
+                                        false, false);
     if (st->hal.dev) {
         lcd_ll_stop(st->hal.dev);
         PERIPH_RCC_ATOMIC() {
@@ -498,15 +558,20 @@ bool initPeripheral(MoonI80State* st, uint32_t pclkHz) {
 // on a pin (`routeWr`). A direct-mode board therefore spends its GPIOs on strands alone — the same
 // budget hpwit's hand-rolled driver has always had, and the reason an LCD-derived driver looked two
 // pins more expensive than it is.
-void configureGpio(const uint16_t* dataPins, uint8_t laneCount, uint16_t wrGpio, bool routeWr) {
+void configureGpio(MoonI80State* st, const uint16_t* dataPins, uint8_t laneCount, uint16_t wrGpio,
+                   bool routeWr) {
+    const uint8_t n = laneCount < 16 ? laneCount : 16;
     for (size_t i = 0; i < laneCount; i++) {
         gpio_func_sel(static_cast<gpio_num_t>(dataPins[i]), PIN_FUNC_GPIO);
         esp_rom_gpio_connect_out_signal(dataPins[i], soc_lcd_i80_signals[kBusId].data_sigs[i],
                                         false, false);
+        if (i < n) st->routedPins[i] = dataPins[i];   // recorded for teardown (see destroyState)
     }
+    st->routedPinCount = n;
     if (routeWr) {
         gpio_func_sel(static_cast<gpio_num_t>(wrGpio), PIN_FUNC_GPIO);
         esp_rom_gpio_connect_out_signal(wrGpio, soc_lcd_i80_signals[kBusId].wr_sig, false, false);
+        st->routedWrGpio = wrGpio;
     }
 }
 
@@ -597,7 +662,7 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     }
     // WR reaches a pad only when a '595 needs it as the shift clock; a direct-mode strand ignores it,
     // and DC never reaches a pad at all. See configureGpio.
-    configureGpio(dataPins, laneCount, wrGpio, /*routeWr=*/clockMultiplier > 1);
+    configureGpio(st, dataPins, laneCount, wrGpio, /*routeWr=*/clockMultiplier > 1);
 
     st->done[0] = xSemaphoreCreateBinary();
     st->wireFree = xSemaphoreCreateBinary();
@@ -807,6 +872,17 @@ bool startRingTransfer(MoonI80State* st) {
     lcd_ll_reset(dev);
     lcd_ll_fifo_reset(dev);
 
+    // Guarantee the WS2812 reset: hold the arm until the strand has idled LOW for >=kResetLowUs since the
+    // last frame stopped. At normal frame rates the render loop's own inter-frame gap already exceeds this
+    // (frames are ms apart), so this waits ZERO in the common case — it only busy-waits the tiny remainder
+    // when frames come back-to-back at small ringRows, exactly the case whose short tail buffer would
+    // otherwise read as a PAUSE not a reset (the frozen-frame wedge). Sizing the reset by TIME here, not by
+    // tail-buffer count, is what makes small ringRows (the small-pool 48x256 path) render at all.
+    if (st->lastStopUs != 0) {
+        const int64_t lowSoFar = esp_timer_get_time() - st->lastStopUs;
+        if (lowSoFar < kResetLowUs) esp_rom_delay_us(static_cast<uint32_t>(kResetLowUs - lowSoFar));
+    }
+
     st->txStartUs[0] = esp_timer_get_time();
     if (gdma_start(st->dma, gdma_link_get_head_addr(st->link)) != ESP_OK) {
         st->busy = false;
@@ -867,6 +943,7 @@ bool initRingDma(MoonI80State* st) {
     // the lines idle LOW until the next frame arms — hpwit's exact mechanism (studied, written fresh).
     const size_t rowsOnlyBytes = static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes;
     const size_t itemsPerBuf = esp_dma_calculate_node_count(rowsOnlyBytes, intAlign, kDmaNodeMaxBytes);
+    st->itemsPerBuf = static_cast<uint8_t>(itemsPerBuf);   // the ISR splices the self-terminating NULL by node index
     const size_t numItems = itemsPerBuf * st->ringBufs;
 
     st->linkItemCap = numItems;
@@ -906,7 +983,7 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
 
     const uint32_t pclkHz = (clockMultiplier > 1) ? kShiftPclkHz : kPclkHz;
     if (!initPeripheral(st, pclkHz) || !initRingDma(st)) { destroyState(st); return nullptr; }
-    configureGpio(dataPins, laneCount, wrGpio, /*routeWr=*/clockMultiplier > 1);
+    configureGpio(st, dataPins, laneCount, wrGpio, /*routeWr=*/clockMultiplier > 1);
 
     st->done[0] = xSemaphoreCreateBinary();   // the render thread's frame-complete wait (given on the last slice)
     if (!st->done[0]) { destroyState(st); return nullptr; }
@@ -940,6 +1017,7 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
         int endIdx = 0;
         if (idx >= static_cast<int>(st->linkItemCap)) mountOk = false;
         else if (gdma_link_mount_buffers(st->link, idx, &mount, 1, &endIdx) != ESP_OK) mountOk = false;
+        else st->bufLastNode[b] = endIdx;   // buffer b's real last node — the self-terminate splices here
         idx = endIdx + 1;
     }
     st->consumedItems = static_cast<uint32_t>(idx);   // diagnostic: exposed via moonI80Ws2812RingStats
@@ -1175,14 +1253,16 @@ namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
-                           RmtLoopbackResult& r);
+                           RmtLoopbackResult& r, bool rideMode = false);
 }
 
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                         uint16_t wrGpio, uint16_t rxGpio,
                                         const uint8_t* frame, size_t frameBytes,
                                         size_t dataBytes, uint8_t rowBits,
-                                        uint8_t clockMultiplier) {
+                                        uint8_t clockMultiplier,
+                                        uint32_t ringRows, uint32_t ringBufs,
+                                        bool useRingArg) {
     RmtLoopbackResult r;
     r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;  // pattern in every row
     if (!dataPins || laneCount == 0 || !frame || frameBytes == 0
@@ -1215,11 +1295,14 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     // The ring's encode seam is a slice PRODUCER; the loopback already holds the whole pre-encoded frame,
     // so its "encode" is a COPY of the matching slice out of `frame`. Deriving the ring geometry from the
     // loopback's parameters: rowBytes = the per-row encoded size, totalRows = the light count.
-    const bool useRing = pinExpanderMode && !moonI80Ws2812InternalFits(frameBytes);
+    // Ride the ring when the driver asked for it (useRingArg — the render path is on the ring, so the
+    // self-test must be too), OR legacy auto: when the frame would overflow internal RAM. Either way only
+    // in expander mode — direct mode has no ring.
+    const bool useRing = pinExpanderMode && (useRingArg || !moonI80Ws2812InternalFits(frameBytes));
     const uint8_t sb = laneCount <= 8 ? 1 : 2;
     // rowBytes = outCh(=rowBits/8) × 8 × 3 × slotBytes × outputsPerPin(=clockMultiplier in shift mode).
     const size_t loopRowBytes = static_cast<size_t>(rowBits) * 3u * sb * clockMultiplier;
-    const uint32_t loopRows = loopRowBytes ? static_cast<uint32_t>(dataBytes / (static_cast<size_t>(rowBits) * 3u)) : 0;
+    const uint32_t loopRows = loopRowBytes ? static_cast<uint32_t>(dataBytes / loopRowBytes) : 0;
 
     MoonI80State* st = nullptr;
     // The copy-slice "encoder": the frame is already encoded, so a ring slice is a straight memcpy out of
@@ -1237,11 +1320,14 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
                         static_cast<size_t>(count) * c->rowBytes);
         };
         MoonI80Ws2812Handle h;
-        // Geometry: the self-test proves TRANSPORT, not the encode deadline (its "encode" is a memcpy), so
-        // it takes the platform's own defaults rather than the driver's swept values — the bit-verify must
-        // mean the same thing whatever geometry the render path is currently tuned to.
+        // Geometry: use the driver's LIVE ringRows/ringBufs so the self-test streams through the SAME
+        // ring the render path is tuned to — then a scattered margin (bufs − nSlices < ~2) shows here as
+        // a bit fault at the same slice boundary the eyes see on the wall. 0 → the platform default, so a
+        // caller that does not care (direct-mode continuity) still works.
+        const uint32_t loopRingRows = ringRows ? ringRows : kRingRowsDefault;
+        const uint32_t loopRingBufs = ringBufs ? ringBufs : kRingBufsDefault;
         if (moonI80Ws2812InitRing(h, dataPins, laneCount, wrGpio, loopRowBytes, loopRows,
-                                  kRingRowsDefault, kRingBufsDefault, clockMultiplier, copySlice, &ctx)) {
+                                  loopRingRows, loopRingBufs, clockMultiplier, copySlice, &ctx)) {
             st = static_cast<MoonI80State*>(h.impl);
         }
     }
@@ -1321,7 +1407,7 @@ MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle&) { return {};
 void moonI80Ws2812Deinit(MoonI80Ws2812Handle&) {}
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t*, uint8_t, uint16_t, uint16_t,
                                         uint16_t, const uint8_t*, size_t, size_t, uint8_t,
-                                        uint8_t) {
+                                        uint8_t, uint32_t, uint32_t, bool) {
     return {};
 }
 

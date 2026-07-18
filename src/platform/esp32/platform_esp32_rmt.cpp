@@ -285,7 +285,7 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
-                           RmtLoopbackResult& r) {
+                           RmtLoopbackResult& r, bool rideMode) {
     // Capture at 40 MHz. The decode threshold is DERIVED from the strand's slot rate, not a
     // constant: a "0" is HIGH for one slot, a "1" for two, so the midpoint (1.5 slots) separates
     // them at ANY rate — 375 ns direct slots give 15/30 ticks (threshold 22), the shift expander's
@@ -307,12 +307,23 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
     }
 
     struct Cap {
-        uint8_t rxGpio; uint32_t* buf; size_t max;
-        volatile size_t got = 0; volatile bool done = false;
-    } cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax};
+        uint8_t rxGpio; uint32_t* buf; size_t max; size_t need;
+        bool ride; volatile size_t got = 0; volatile bool done = false;
+    } cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax, kBits, rideMode};
+    // Each rmt_receive captures ONE run of pulses ending at the next >100 µs gap (the WS2812 reset). With a
+    // controlled transmit the run starts at frame start, so one arm yields the whole frame. RIDING a
+    // free-running pipeline, an arm lands mid-frame and captures only the tail (< kBits) before the reset —
+    // so re-arm until a run of >= kBits arrives, i.e. an arm that happened to land at/before a frame start.
+    // The ring transmits continuously (~100 fps), so a full frame is caught within a few arms; bounded so a
+    // dead wire still times out instead of looping forever.
     auto rxTask = [](void* arg) {
         auto* c = static_cast<Cap*>(arg);
-        c->got = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, 1000);
+        const int attempts = c->ride ? 40 : 1;   // ~40 × up-to-1-frame arms ≈ well inside the 4 s outer wait
+        for (int a = 0; a < attempts; a++) {
+            const size_t g = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, 1000);
+            if (g > c->got) c->got = g;           // keep the fullest capture seen
+            if (g >= c->need) break;              // a complete frame — stop
+        }
         c->done = true;
         vTaskDelete(nullptr);
     };
@@ -337,7 +348,11 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         }
         // Back-to-back frames, exactly the render loop's transmit/wait cadence.
         for (int i = 0; i < 100 && !cap.done; i++) transmitOnce();
-        for (int i = 0; i < 200 && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
+        // Wait for the capture task. Ride mode re-arms internally (each arm returns in ~1 frame when the
+        // pipeline is live), so give it a longer ceiling than the controlled-transmit path — a live frame is
+        // caught in well under this, and a dead wire still ends when the task exhausts its bounded retries.
+        const int waitTicks = rideMode ? 600 : 200;   // ×10 ms = 6 s (ride) / 2 s (controlled)
+        for (int i = 0; i < waitTicks && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
     }
     r.capturedSymbols = static_cast<uint32_t>(cap.got);
     r.rxIdleLevel = static_cast<int8_t>(gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
@@ -396,6 +411,32 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
 }
 
 } // namespace detail
+
+// INTRUSIVE loopback (driver-agnostic; see platform.h). No bus, no transmit of our own — the live pipeline
+// is already clocking `sent` past `rxGpio` every frame, so we only arm the RMT-RX (a NO-OP transmitOnce) and
+// let one of those live frames land in the capture, then bit-verify it. Shares detail::captureAndVerifyFrame
+// with every family's own loopback, so the decode/threshold/verdict logic is identical whatever drove the
+// wire. Zero extra RAM — the reason this exists over the private-bus loopback that fragments the heap.
+RmtLoopbackResult ws2812LoopbackRide(uint16_t rxGpio, const uint8_t* sent, uint8_t sentLen,
+                                     size_t dataBytes, uint8_t rowBits, uint8_t clockMultiplier) {
+    RmtLoopbackResult r;
+    if (!sent || sentLen == 0 || sentLen > 3 || dataBytes < 3 || rowBits < 8 || clockMultiplier == 0)
+        return r;
+    for (uint8_t i = 0; i < sentLen; i++) r.sent[i] = sent[i];   // the per-light pattern to verify
+    r.jumperDetected = true;   // proven by the bit-verify itself, not a plain-GPIO continuity pre-check
+    // The STRAND's slot rate (what the RX sees), from the WS2812 physical timing every family shares: direct
+    // slots at kSlotHz; an expander fits `clockMultiplier` bus words per slot, so the slot rate is the fast
+    // bus clock ÷ multiplier. Same values the per-family loopbacks derive from their own kPclkHz/kShiftPclkHz
+    // — canonical WS2812 timing, so the driver-agnostic ride carries them here rather than taking a family's.
+    constexpr uint32_t kSlotHz = 2'666'666;         // direct-mode WS2812 slot (375 ns)
+    constexpr uint32_t kShiftBusHz = 26'666'666;    // expander bus clock (300 ns slot at ÷8)
+    const bool pinExpanderMode = clockMultiplier > 1;
+    const uint32_t slotHz = pinExpanderMode ? (kShiftBusHz / clockMultiplier) : kSlotHz;
+    auto noTransmit = []() {};  // the render loop is the transmitter
+    detail::captureAndVerifyFrame(rxGpio, dataBytes, dataBytes, rowBits, slotHz, pinExpanderMode,
+                                  "ws2812-ride", noTransmit, r, /*rideMode=*/true);
+    return r;
+}
 
 RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     RmtLoopbackResult r;

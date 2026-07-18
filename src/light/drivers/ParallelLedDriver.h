@@ -174,6 +174,13 @@ public:
     /// shows up as a bit FAIL, and walking this control 0..N-1 until the test PASSES *identifies*
     /// the strand empirically — turning "which output is Q7?" from a guess into a measurement.
     uint8_t  loopbackStrand = 0;
+    /// Loopback mode: OFF (default) tears the output down and transmits a PRIVATE test frame on a rebuilt
+    /// bus — proves the peripheral in isolation, but on the ring path it must re-allocate the whole pool,
+    /// which fails on a fragmented heap, and it tests a replica. ON rides the LIVE pipeline: it pins the
+    /// pattern into the running source, arms the RX on the wire the pipeline already drives, and verifies —
+    /// no teardown, no alloc, and it sees the real render (a scattered ring shows as a bit fault at a slice
+    /// boundary). Driver-agnostic; the coming loopbackMode dropdown folds this + loopbackTest into one.
+    bool     loopbackIntrusive = false;
     /// Jumper this to the TX lane for the self-test (unset = -1 by default).
     ///
     /// **With a 74HCT595 expander (`pinExpander` on) the jumper comes from a DIFFERENT place, and
@@ -286,6 +293,9 @@ public:
         // Lets the jumper come off ANY '595 output, including a spare one that drives no panel.
         controls_.addUint8("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
         controls_.setHidden(controls_.count() - 1, !loopbackTest || !pinExpanderMode());
+        // Intrusive: ride the live pipeline instead of a private replica (see the member doc).
+        controls_.addBool("loopbackIntrusive", loopbackIntrusive);
+        controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
     /// A change to the pins, per-lane counts, the window, a derived bus control (clockPin/dcPin on
@@ -326,7 +336,7 @@ public:
             clearStatus();
             parseConfig();
             reinit();
-        } else if (loopbackTest && (isTestControl || isPinControl)) {
+        } else if (loopbackTest && (isTestControl || isPinControl || isTestParamControl(name))) {
             // A pin edit changes laneList_/laneCount_/frameBytes_, but onControlChanged runs
             // BEFORE the prepare() sweep (and loopbackRxPin doesn't trigger that
             // sweep at all), so refresh the lane config here before testing it —
@@ -338,6 +348,13 @@ public:
         // rebuilds this driver's correction LUT — without this the LED driver's brightness/preset
         // controls were dead (only the global-brightness push reached the LUT).
         DriverBase::onControlChanged(name);
+    }
+
+    /// Loopback PARAMETER controls: not pins (no bus rebuild), but a change must re-run a running test so
+    /// the verdict tracks the new setting (e.g. walk loopbackStrand to find the jumper, flip intrusive).
+    static bool isTestParamControl(const char* name) {
+        return std::strcmp(name, "loopbackStrand") == 0
+            || std::strcmp(name, "loopbackIntrusive") == 0;
     }
 
     /// One-time wiring only (parse the lane lists into members); the bus acquire lives in
@@ -955,11 +972,30 @@ protected:
         if (bytes > snapshotCap_) bytes = snapshotCap_;   // never overrun the buffer sized in reinit
         if (bytes == 0) return false;
         std::memcpy(snapshotBuf_, sourceBuffer_->data() + static_cast<size_t>(winStart_) * srcCh, bytes);
+        // INTRUSIVE loopback pattern hold: overwrite the tapped strand's rows in the snapshot with the test
+        // pattern, so EVERY frame the ring encodes clocks the known bytes on that strand (whatever the effect
+        // wrote), while the rest of the wall keeps rendering. Window-relative index (the snapshot starts at
+        // winStart_), clamped to the snapshot's byte count. Reuses the snapshot path — no per-frame race, no
+        // second buffer, no effect coupling. Off (-1) is the normal render path.
+        if (patternHoldStrand_ >= 0 && static_cast<uint8_t>(patternHoldStrand_) < laneCount_) {
+            const uint8_t lane = static_cast<uint8_t>(patternHoldStrand_);
+            const nrOfLightsType laneRows = laneCounts_[lane];
+            for (nrOfLightsType row = 0; row < laneRows; row++) {
+                const size_t off = (static_cast<size_t>(laneStart_[lane]) + row) * srcCh;
+                if (off + srcCh > bytes) break;   // clamp to the snapshot the copy actually filled
+                for (uint8_t ch = 0; ch < srcCh; ch++)
+                    snapshotBuf_[off + ch] = ch < 3 ? kPatternRGB_[ch] : uint8_t{0};
+            }
+        }
         // Bias so the unchanged index (winStart_ + laneStart_ + row) * srcCh addresses into the windowed
         // copy: snapshotBuf_[0] holds the light at winStart_, so subtract winStart_ * srcCh.
         encodeSrc_ = snapshotBuf_ - static_cast<size_t>(winStart_) * srcCh;
         return true;
     }
+    // INTRUSIVE loopback pattern hold: which strand carries the pinned pattern (-1 = off), and the RGB bytes
+    // (the recognisable 0xA5/0x00/0xFF the bit-verify expects). Set around the capture in runIntrusiveLoopback.
+    int16_t patternHoldStrand_ = -1;
+    uint8_t kPatternRGB_[3] = {0xA5, 0x00, 0xFF};
 
     /// The two wirings that exist: strands on the GPIOs, or a 74HCT595 per GPIO.
     uint16_t busPins_[kMaxLanes] = {};   // data pins the live bus/unit was built
@@ -1333,6 +1369,43 @@ protected:
     // hands the platform a private TX path + RMT-RX capture that transmits the
     // genuine frame back to back and verifies every bit. ---
 
+    /// INTRUSIVE ride — arm the RX on the live wire and bit-verify (no bus, no transmit of our own). Base
+    /// default because it is driver-agnostic: `platform::ws2812LoopbackRide` only opens the RMT-RX, so every
+    /// family shares this one path (unlike busLoopback, which each driver overrides to build its own bus).
+    platform::RmtLoopbackResult busLoopbackRide(const uint8_t* sent, uint8_t sentLen,
+                                                size_t dataBytes, uint8_t rowBits) {
+        return platform::ws2812LoopbackRide(static_cast<uint16_t>(loopbackRxPin), sent, sentLen,
+                                            dataBytes, rowBits, busClockMultiplier());
+    }
+
+    /// INTRUSIVE loopback — verify the LIVE pipeline's wire, building NO bus and freeing NO ring (see the
+    /// loopbackIntrusive member doc + platform::ws2812LoopbackRide). Pins the pattern onto the tapped strand
+    /// via the snapshot hold, lets the running ring clock a few frames so the hold takes, then arms the RX to
+    /// catch one and bit-verify. `lights`/`outCh` come from runLoopbackSelfTest (its cap + channel count).
+    void runIntrusiveLoopback(nrOfLightsType lights, uint8_t outCh) {
+        if (loopbackRxPin < 0) {
+            clearFailBuf();
+            setStatus("loopback: set loopbackRxPin (jumper it to the tapped strand)", Severity::Status);
+            return;
+        }
+        // The tapped strand: loopbackStrand in expander mode (any '595 output), else lane 0 (direct).
+        const uint8_t strand = pinExpanderMode() && loopbackStrand < laneCount_ ? loopbackStrand
+                                                                                : uint8_t{0};
+        // dataBytes = the tapped strand's WS2812 byte count = lights × channels × 24 bits (÷ nothing here;
+        // the capture derives kBits = dataBytes/3). Width-independent, exactly like the private-bus path.
+        const size_t dataBytes = static_cast<size_t>(lights) * outCh * 24;
+        // Pin the pattern onto the strand and let the ring pick it up over a few frames (the snapshot hold
+        // stamps it every transmit). No deinit, no alloc — the running pipeline keeps rendering.
+        patternHoldStrand_ = static_cast<int16_t>(strand);
+        platform::delayMs(40);   // a handful of 100 fps frames so the held pattern is on the wire before capture
+        const uint8_t pat[3] = {kPatternRGB_[0], kPatternRGB_[1], kPatternRGB_[2]};
+        const auto r = derived()->busLoopbackRide(pat, outCh < 3 ? outCh : uint8_t{3}, dataBytes,
+                                                  static_cast<uint8_t>(outCh * 8));
+        patternHoldStrand_ = -1;   // release the hold — the strand returns to the live effect next frame
+        // Report with the shared verdict formatter (same status strings as the private-bus path).
+        reportLoopbackResult(r, outCh);
+    }
+
     void runLoopbackSelfTest() {
         if constexpr (Derived::lanesAvailable() == 0) {
             clearFailBuf();
@@ -1361,6 +1434,14 @@ protected:
         // overruns the P4 Parlio transfer limit + the RMT-RX capture buffer).
         const nrOfLightsType lights =
             maxLaneLights_ < kLoopbackTestLights ? maxLaneLights_ : kLoopbackTestLights;
+
+        // INTRUSIVE loopback — verify the LIVE pipeline instead of a private replica. This branch NEVER
+        // deinits or builds a bus: it pins a known pattern into the running source for the tapped strand,
+        // arms the RX on the wire the pipeline is already driving, and bit-verifies. It reaches the ring
+        // (a scattered ring shows as a bit fault at a slice boundary) at ZERO extra RAM — the private-bus
+        // path below can't, because rebuilding the ring's ~150 KB pool fails on a fragmented heap. Runs the
+        // same on every driver: the ride is driver-agnostic (platform::ws2812LoopbackRide arms only the RX).
+        if (loopbackIntrusive) { runIntrusiveLoopback(lights, outCh); return; }
         // The loopback frame width is per-driver (kLoopbackFullWidth): the i80 loopback rebuilds
         // the FULL-WIDTH private bus (it can't do a 1-lane bus), so a 16-lane driver's frame must
         // be 16-bit slots to match — and this then genuinely exercises the 16-bit transpose+DMA on
@@ -1447,6 +1528,15 @@ protected:
         // Loopback result first, then reinit: if rebuilding the real bus fails
         // afterwards, kInitFailMsg overwrites the verdict — an unusable driver
         // matters more than a passed self-test.
+        reportLoopbackResult(r, outCh);
+        reinit();
+    }
+
+    /// Turn a loopback result into a status string — shared by the private-bus self-test and the intrusive
+    /// ride so the verdict reads identically whatever drove the wire. Names the fault CLASS: no-jumper, PASS,
+    /// an empty capture (transport/wiring — reports symbols/idle/tx-time, not a misleading "bad bit"), or a
+    /// decoded mismatch (the first bad bit → which light). `outCh` maps firstBadBit to a light (rowBits = ×8).
+    void reportLoopbackResult(const platform::RmtLoopbackResult& r, uint8_t outCh) {
         if (!r.jumperDetected) {
             clearFailBuf();
             setStatus("loopback: jumper not detected", Severity::Warning);
@@ -1455,11 +1545,6 @@ protected:
             setStatus("loopback PASS", Severity::Status);
         } else if (failBufEnsure()) {
             if (r.bitsChecked == 0) {
-                // The capture came up short — the verify never ran, so "bad bit" would blame the
-                // waveform for what is a transport/wiring/capture fault. Report the numbers that
-                // separate those: symbols captured, the RX line's idle level, and the first
-                // transmit's wall-vs-expected time (a wall time far above expected is a stalled or
-                // underrun transfer, measured — not inferred).
                 std::snprintf(failBuf_, kFailBufLen,
                               "no capture: %u sym idle=%d tx %u/%uus",
                               static_cast<unsigned>(r.capturedSymbols),
@@ -1467,8 +1552,6 @@ protected:
                               static_cast<unsigned>(r.txWallUs),
                               static_cast<unsigned>(r.txExpectUs));
             } else {
-                // Name the first corrupted light: the loopback reports the first
-                // mismatching bit; rowBits = outCh*8, so light = firstBadBit / rowBits.
                 const unsigned rowBits = static_cast<unsigned>(outCh) * 8u;
                 const unsigned badLight = rowBits ? r.firstBadBit / rowBits : 0u;
                 std::snprintf(failBuf_, kFailBufLen,
@@ -1480,7 +1563,6 @@ protected:
         } else {
             setStatus("loopback FAIL", Severity::Error);
         }
-        reinit();
     }
 };
 

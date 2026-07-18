@@ -830,11 +830,33 @@ struct MoonI80RingStats {
 MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h);
 
 void moonI80Ws2812Deinit(MoonI80Ws2812Handle& h);
+// `useRing` makes the self-test ride the ring exactly when the render path does, so it verifies the SAME
+// transport the driver is tuned to (not "only when the frame won't fit internal") — the instrument the
+// ring's margin bug needs. `ringRows`/`ringBufs` are that ring's geometry (0 → the platform default). The
+// bit-verify then measures the ACTUAL ring: a margin the eyes see scattered on the wall shows here as a
+// bit fault at the same slice boundary — the machine reproduction of the wall (the margin rule,
+// `ring-reuse-is-the-blocker`). `useRing=false` keeps the legacy auto-gate (ring iff the frame overflows
+// internal RAM), which is what direct-mode continuity callers want.
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                         uint16_t wrGpio, uint16_t rxGpio,
                                         const uint8_t* frame, size_t frameBytes,
                                         size_t dataBytes, uint8_t rowBits,
-                                        uint8_t clockMultiplier = 1);
+                                        uint8_t clockMultiplier = 1,
+                                        uint32_t ringRows = 0, uint32_t ringBufs = 0,
+                                        bool useRing = false);
+
+// INTRUSIVE loopback — DRIVER-AGNOSTIC, so it lives here (not per-family): bit-verify what the LIVE
+// pipeline is ALREADY clocking on `rxGpio`, building no bus and leaving the running peripheral untouched
+// (unlike the per-driver `*Loopback`, which tears the output down and rebuilds a private copy — a large
+// contiguous alloc that fragments the heap and tests a replica). Because it only arms the RMT-RX (the
+// render loop is the transmitter), it needs nothing driver-specific — every driver family (i80, esp_lcd,
+// Parlio, RMT) shares this one entry, the same way they share `detail::captureAndVerifyFrame`. The caller
+// pins a known per-light pattern (`sent`, `sentLen` channels) into the driver's source so the tapped
+// strand's expected wire is deterministic. `dataBytes` = the tapped strand's WS2812 byte count (lights ×
+// channels × 24 → kBits = dataBytes/3); `slotHz` = the STRAND's slot rate (bus rate ÷ expander multiplier,
+// or the direct pixel-clock). A scattered ring shows as a bit fault at a slice boundary; a clean one PASSes.
+RmtLoopbackResult ws2812LoopbackRide(uint16_t rxGpio, const uint8_t* sent, uint8_t sentLen,
+                                     size_t dataBytes, uint8_t rowBits, uint8_t clockMultiplier);
 
 // ---------------------------------------------------------------------------
 // Parlio (Parallel IO) WS2812 output — the ESP32-P4's parallel LED path, a

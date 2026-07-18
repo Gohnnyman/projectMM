@@ -171,13 +171,21 @@ def main():
 
 
 def _record_flash_event(port: str, firmware: str, mac: str) -> None:
-    """Drop a `moondeck/.last_flash.json` breadcrumb so MoonDeck can link the
-    just-flashed serial port to the exact device. `mac` (the board's efuse MAC,
-    parsed from esptool's flash output) is the stable identity MoonDeck matches
-    on — a firmware-only match is ambiguous when two boards share a firmware.
-    MoonDeck's discover/refresh consumes it and clears it. Stored beside
-    moondeck.json so the whole "MoonDeck state" lives in one place."""
+    """Record the just-flashed serial port against the exact device, keyed by `mac`
+    (the board's efuse MAC parsed from esptool's flash output — the stable identity,
+    unambiguous when two boards share a firmware).
+
+    Two writes, because two callers consume this:
+    - `moondeck.json` `last_port` is set DIRECTLY here, so a CLI flash (no MoonDeck
+      GUI running) still records the port. Without this, `last_port` only ever got
+      written by MoonDeck's discover/refresh, so a board flashed purely from the CLI
+      (the agent path) never gained a `last_port` and every later flash had to
+      re-probe every serial port to find it.
+    - the `moondeck/.last_flash.json` breadcrumb is still dropped for MoonDeck's
+      discover/refresh, which additionally records the drift-immune `usbSerial` and
+      strips the port from stale holders (see moondeck.py `_link_last_flash`)."""
     import json, time
+    _set_last_port_in_catalog(mac, port)
     marker = ROOT / "moondeck" / ".last_flash.json"
     marker.write_text(json.dumps({
         "port": port,
@@ -185,6 +193,35 @@ def _record_flash_event(port: str, firmware: str, mac: str) -> None:
         "mac": mac,
         "ts": time.time(),
     }))
+
+
+def _set_last_port_in_catalog(mac: str, port: str) -> None:
+    """Set `last_port` on the moondeck.json device with this MAC, and strip the port
+    from any OTHER device that still carries it (a physical port maps to exactly one
+    board at a time; boards get swapped on the same USB port). No MAC, or no matching
+    device, is a no-op — the breadcrumb path still covers the MoonDeck-GUI case."""
+    import json
+    if not mac:
+        return
+    catalog = ROOT / "moondeck" / "moondeck.json"
+    try:
+        data = json.loads(catalog.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    mac = mac.strip().upper()
+    changed = False
+    for network in data.get("networks", []):
+        for device in network.get("devices", []):
+            same = (device.get("mac", "") or "").strip().upper() == mac
+            if same:
+                if device.get("last_port") != port:
+                    device["last_port"] = port
+                    changed = True
+            elif device.get("last_port") == port:   # stale link on a swapped-out board
+                device.pop("last_port", None)
+                changed = True
+    if changed:
+        catalog.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

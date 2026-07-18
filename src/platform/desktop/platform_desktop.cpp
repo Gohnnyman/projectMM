@@ -1144,6 +1144,11 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
                                          uint16_t /*lights*/, uint8_t /*channels*/) {
     return {};   // not supported off ESP32
 }
+RmtLoopbackResult ws2812LoopbackRide(uint16_t /*rxGpio*/, const uint8_t* /*sent*/, uint8_t /*sentLen*/,
+                                     size_t /*dataBytes*/, uint8_t /*rowBits*/,
+                                     uint8_t /*clockMultiplier*/) {
+    return {};   // no RMT-RX capture off ESP32
+}
 
 // ---------------------------------------------------------------------------
 // LCD_CAM WS2812 — no-op stubs. Desktop has no i80 peripheral; the LCD LED
@@ -1201,7 +1206,14 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*
                                         uint16_t /*wrGpio*/,
                                         uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                         size_t /*frameBytes*/, size_t /*dataBytes*/,
-                                        uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/) {
+                                        uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/,
+                                        uint32_t /*ringRows*/, uint32_t /*ringBufs*/,
+                                        bool /*useRing*/) {
+    return {};   // not supported off LCD_CAM
+}
+RmtLoopbackResult moonI80Ws2812LoopbackRide(uint16_t /*rxGpio*/, const uint8_t* /*sent*/,
+                                            uint8_t /*sentLen*/, size_t /*dataBytes*/,
+                                            uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/) {
     return {};   // not supported off LCD_CAM
 }
 

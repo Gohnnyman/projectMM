@@ -119,6 +119,38 @@ TEST_CASE("shift register: lanes = pins x 8") {
     CHECK(d.maxLaneLights() == 256);     // 12288 lights spread over 48 strands
 }
 
+// ROBUSTNESS INVARIANT: a driver consumes only what IT drives (pins x ledsPerPin) and ignores any
+// EXCESS the layout declares. A layout can legitimately publish more lights than one driver covers
+// (a 2D panel grid the driver only partly maps, or several drivers splitting one big source), so the
+// driver must clamp to its own lane capacity and keep every source read in-bounds — never encode past
+// its share into unmapped source (which shows as frozen/garbage LEDs on the uncovered region). This
+// pins the clamp: source = 1920, but 2 pins x 8 x 60 = 960, so the driver drives EXACTLY 960 and its
+// furthest read is < 1920.
+TEST_CASE("shift register: driver clamps to pins x ledsPerPin, ignoring a larger layout") {
+    MockShiftDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    // Source is 1920 lights (a 5x3 grid of 8x16 panels); the driver only drives 2 pins x 8 x 60 = 960.
+    wire(d, src, corr, /*lights=*/1920, "9,10", /*shiftOn=*/true, /*latch=*/11, /*ledsPerPin=*/"60");
+
+    CHECK(d.laneCount() == 16);           // 2 pins x 8 outputs
+    CHECK(d.maxLaneLights() == 60);       // clamped to ledsPerPin, NOT the 1920/16 the source could feed
+
+    // Every lane drives exactly ledsPerPin, and the total the driver consumes is its capacity (960),
+    // not the source's 1920 — the excess is ignored.
+    nrOfLightsType total = 0;
+    for (uint8_t i = 0; i < d.laneCount(); i++) {
+        CHECK(d.laneLightCount(i) == 60);
+        total += d.laneLightCount(i);
+    }
+    CHECK(total == 960);
+
+    // The furthest source light the encode can address is laneStart_[last] + (maxLaneLights - 1). With
+    // 16 lanes of 60 packed from 0, that is 960*... capped at 959 — strictly inside the 1920 source, so
+    // no read runs past the buffer into unmapped lights.
+    CHECK(total <= src.count());
+}
+
 // Direct mode is unchanged: one strand per pin, no latch. Pins the no-regression half —
 // the expander must not have altered the existing behaviour.
 TEST_CASE("shift register: direct mode still drives one strand per pin") {

@@ -219,13 +219,25 @@ def main():
                 # the latch waveform emits garbage on that strand.
                 latch = controls.get("latchPin")
                 if latch is not None:
-                    for other in ("clockPin", "dcPin"):
-                        if controls.get(other) == latch:
-                            errors.append(f"{where}: latchPin ({latch}) collides with {other} — "
+                    # Normalize to int before every collision test: a control value may be a JSON number
+                    # (20) or a string ("20"), and a raw == would let 20 and "20" slip past as "different"
+                    # GPIOs when they are the same pad. `pins` are already strings from the split above.
+                    def _gpio(v):
+                        try:
+                            return int(str(v).strip())
+                        except (TypeError, ValueError):
+                            return None
+                    latch_n = _gpio(latch)
+                    if latch_n is None:
+                        errors.append(f"{where}: latchPin ({latch!r}) is not a valid GPIO number")
+                    else:
+                        for other in ("clockPin", "dcPin"):
+                            if _gpio(controls.get(other)) == latch_n:
+                                errors.append(f"{where}: latchPin ({latch_n}) collides with {other} — "
+                                              f"the latch needs its own GPIO")
+                        if latch_n in [_gpio(pn) for pn in pins]:
+                            errors.append(f"{where}: latchPin ({latch_n}) is also a data pin — "
                                           f"the latch needs its own GPIO")
-                    if str(latch) in pins:
-                        errors.append(f"{where}: latchPin ({latch}) is also a data pin — "
-                                      f"the latch needs its own GPIO")
 
             # Ethernet is explicit, not defaulted: a board that turns Ethernet ON (NetworkModule with
             # a non-None ethType) must declare its board-wiring GPIOs, so the firmware never falls
