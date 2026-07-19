@@ -264,6 +264,8 @@ const char* chipModel() {
 
 uint32_t IRAM_ATTR cycleCount() { return esp_cpu_get_cycle_count(); }
 
+uint8_t currentCore() { return static_cast<uint8_t>(xPortGetCoreID()); }
+
 const char* cpuInfo() {
     // Frequency from the running clock (esp_rom_get_cpu_ticks_per_us == MHz), not the sdkconfig macro,
     // so a config/hardware mismatch shows up. Cores from esp_chip_info, same source chipModel uses.

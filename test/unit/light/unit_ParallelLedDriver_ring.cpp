@@ -53,6 +53,13 @@ public:
     static constexpr const char* kInitFailMsg = "mock init failed";
 
     void addBusControls() {}
+    // A ring-capable backend adds its ring cluster here (the base's default addRingControls is a no-op for
+    // whole-frame-only backends). Mirror the real driver: the source-snapshot knob under the path, gated
+    // on wantsRing() — this mock's controllable wantRing_ drives the visibility the hide test checks.
+    void addRingControls() {
+        controls_.addBool("ringSnapshot", ringSnapshot);
+        controls_.setHidden(controls_.count() - 1, !wantsRing());
+    }
     bool busControlTriggersBuild(const char*) const { return false; }
     void recordBusPins() {}
     bool extraBusPinsCurrent() const { return true; }
@@ -325,6 +332,24 @@ public:
     // Mirror production's reinit(): size the snapshot OFF the hot path (ensureSnapshotCap) THEN take the
     // per-frame copy (snapshotSourceForRing, memcpy-only). tickRing does exactly this split on device.
     bool snapshotForTest() { this->ensureSnapshotCap(); return this->snapshotSourceForRing(); }
+
+    // Test hooks for the PARALLEL-snapshot split: expose the snapshot buffer + a manual range-copy so a
+    // test can prove copyRange(0,N) == copyRange(0,half)+copyRange(half,N) byte-for-byte (the fork-join's
+    // correctness oracle — the device runs the two halves on two cores; here one thread runs both ranges,
+    // which must land the identical bytes). setSnapCopyForTest mirrors what snapshotSourceForRing sets
+    // before splitting (the snapshot is now a raw memcpy at srcCh stride; correction fuses into encodeRows).
+    uint8_t* snapshotBufForTest() { return this->snapshotBuf_; }
+    void setSnapCopyForTest() {
+        this->snapCopySrc_ = this->sourceBuffer_->data()
+                           + static_cast<size_t>(this->winStart_) * this->sourceBuffer_->channelsPerLight();
+        this->snapCopyCh_ = static_cast<uint8_t>(this->sourceBuffer_->channelsPerLight());
+    }
+    void copyRangeForTest(mm::nrOfLightsType lo, mm::nrOfLightsType hi) { this->copyRange(lo, hi); }
+    mm::nrOfLightsType winLenForTest() const { return this->winLen_; }
+    size_t snapshotCapForTest() const { return this->snapshotCap_; }
+    static mm::nrOfLightsType snapHalfForTest(mm::nrOfLightsType n, size_t outCh) {
+        return snapLineAlignedHalf(n, outCh);
+    }
 
 private:
     std::vector<uint8_t> buf_;
@@ -837,4 +862,117 @@ TEST_CASE("MoonI80 ring: a failed ring build tears the bus down (no leaked ring)
     // false here, exactly as it is in production on this path.
     d.busDeinit();
     CHECK_FALSE(d.busIsRing());   // the ring is gone, not merely unreferenced
+}
+
+TEST_CASE("MoonI80 ring: the PARALLEL snapshot's range-split is byte-identical to the whole-range serial") {
+    // The fork-join correctness oracle. On device the two [lo,hi) halves run on two cores; the bytes must
+    // be identical to one serial pass. Here one thread runs both ranges — same requirement, since the
+    // ranges are disjoint and stateless: copyRange(0,half)+copyRange(half,N) == copyRange(0,N). The
+    // snapshot is now a raw memcpy at SOURCE channel stride (correction fuses into encodeRows downstream).
+    MockRingDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wireShift(d, src, corr, 200, "1,2");   // 16 strands × 200, a real window
+    // Distinctive per-light source so a mis-split (gap/overlap/wrong stride) can't accidentally match.
+    uint8_t* s = src.data();
+    for (mm::nrOfLightsType i = 0; i < src.count(); i++) {
+        s[i * 3 + 0] = static_cast<uint8_t>(i * 7 + 1);
+        s[i * 3 + 1] = static_cast<uint8_t>(i * 13 + 5);
+        s[i * 3 + 2] = static_cast<uint8_t>(i * 29 + 3);
+    }
+    const uint8_t outCh = corr.outChannels;
+    const uint8_t srcCh = static_cast<uint8_t>(src.channelsPerLight());
+    const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
+    d.setWantRing(true);
+    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    // snapshotForTest sizes snapshotBuf_ (ensureSnapshotCap) and runs one full serial snapshot — after it,
+    // the snapshot state (snapCopy*) is set and the buffer exists, so the manual re-runs below are safe.
+    REQUIRE(d.snapshotForTest());
+
+    const mm::nrOfLightsType N = d.winLenForTest();
+    REQUIRE(N > 4);
+    const size_t bufBytes = static_cast<size_t>(N) * srcCh;   // snapshot is srcCh-stride now
+
+    // Reference: one whole-range copy over the (now-allocated) snapshot buffer.
+    d.setSnapCopyForTest();
+    std::memset(d.snapshotBufForTest(), 0xEE, bufBytes);
+    d.copyRangeForTest(0, N);
+    std::vector<uint8_t> whole(d.snapshotBufForTest(), d.snapshotBufForTest() + bufBytes);
+
+    // Split at the cache-line-aligned midpoint, exactly as the production path picks it (srcCh stride).
+    const mm::nrOfLightsType half = MockRingDriver::snapHalfForTest(N, srcCh);
+    REQUIRE(half > 0);
+    REQUIRE(half < N);
+    std::memset(d.snapshotBufForTest(), 0xEE, bufBytes);
+    d.copyRangeForTest(0, half);        // "core 0" half
+    d.copyRangeForTest(half, N);        // "core 1" half
+    std::vector<uint8_t> split(d.snapshotBufForTest(), d.snapshotBufForTest() + bufBytes);
+
+    REQUIRE(split.size() == whole.size());
+    CHECK(std::memcmp(split.data(), whole.data(), bufBytes) == 0);
+}
+
+// The snapshot window clamp must key on the SOURCE stride (srcCh), not outCh — the buffer is a raw
+// srcCh-strided memcpy. With outCh > srcCh (an RGB source through an RGBW correction: srcCh=3, outCh=4)
+// an outCh-based clamp would compute winLen*4 > winLen*3 and silently drop ~1/4 of the window, leaving
+// its tail reading stale bytes. This pins the full window survives.
+TEST_CASE("MoonI80 ring: snapshot keeps the whole window when outCh > srcCh (RGBW correction on RGB source)") {
+    MockRingDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wireShift(d, src, corr, 200, "1,2");            // 16 strands × 200, RGB source (srcCh=3)
+    // Swap in an RGBW correction (outCh=4) so outCh > the source's 3 channels — the failing condition.
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::RGBW);
+    d.correctionForTest() = corr;
+    d.applyState();
+    REQUIRE(corr.outChannels == 4);
+    REQUIRE(src.channelsPerLight() == 3);
+
+    d.setWantRing(true);
+    const uint8_t outCh = corr.outChannels;
+    const uint8_t srcCh = static_cast<uint8_t>(src.channelsPerLight());
+    const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
+    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+
+    // Paint the source window's LAST light a distinct value; the snapshot must copy it. With the buggy
+    // outCh clamp the window shrinks to winLen*3/4, so the last quarter (including this light) is never
+    // copied and its snapshot bytes stay at the 0xEE sentinel below — the assertion then fails.
+    const mm::nrOfLightsType N = d.winLenForTest();
+    REQUIRE(N > 4);
+    uint8_t* s = src.data();
+    const size_t last = static_cast<size_t>(N - 1) * srcCh;
+    s[last + 0] = 0x11; s[last + 1] = 0x22; s[last + 2] = 0x33;
+
+    REQUIRE(d.snapshotForTest());                   // sizes (winLen×srcCh) + takes the memcpy snapshot
+    std::memset(d.snapshotBufForTest(), 0xEE, static_cast<size_t>(N) * srcCh);
+    REQUIRE(d.snapshotForTest());                   // re-copy over the sentinel (state is set from above)
+
+    // The window's last light must be present in the snapshot at srcCh stride — proof the clamp didn't
+    // truncate the tail. (snapshotBuf_ is window-relative: light i at offset i×srcCh.)
+    const uint8_t* snap = d.snapshotBufForTest();
+    CHECK(snap[last + 0] == 0x11);
+    CHECK(snap[last + 1] == 0x22);
+    CHECK(snap[last + 2] == 0x33);
+    CHECK(d.snapshotCapForTest() == static_cast<size_t>(N) * srcCh);
+}
+
+// ringSnapshot is meaningful ONLY when a ring runs (wantsRing()); the schema must hide it otherwise so the
+// user never sees a control that does nothing on their config. wantsRing() reads plain flags (not the
+// source buffer), so the gate resolves correctly even at defineControls() time before the buffer is wired.
+TEST_CASE("MoonI80 ring: ringSnapshot control is hidden unless the ring is active") {
+    auto ringSnapshotHidden = [](MockRingDriver& d) -> bool {
+        d.defineControls();
+        const auto& cl = d.controls();
+        for (uint8_t i = 0; i < cl.count(); i++)
+            if (cl[i].name && std::strcmp(cl[i].name, "ringSnapshot") == 0) return cl[i].hidden;
+        FAIL("ringSnapshot control not found");
+        return false;
+    };
+    MockRingDriver ringing;
+    ringing.setWantRing(true);
+    CHECK_FALSE(ringSnapshotHidden(ringing));   // ring active → visible
+
+    MockRingDriver whole;
+    whole.setWantRing(false);
+    CHECK(ringSnapshotHidden(whole));           // no ring → hidden
 }

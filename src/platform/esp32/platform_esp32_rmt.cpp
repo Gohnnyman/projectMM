@@ -282,10 +282,19 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
 // private TX bus on the data pins; it passes `transmitOnce` (transmit the frame
 // AND wait for its done-callback) and the params needed to size the capture and
 // log the granted clock. `r` is filled in place (jumperDetected already set).
+// The capture buffer: one symbol per WS2812 bit plus slack, 64-aligned, DMA-capable internal — the
+// single biggest contiguous block the loopback needs, which is why callers may allocate it FIRST
+// (before their private bus fragments the heap) and hand it in via `rxSymbols`.
+uint32_t* allocLoopbackCapture(size_t dataBytes) {
+    const size_t capMax = dataBytes / 3 + 16;
+    return static_cast<uint32_t*>(heap_caps_aligned_alloc(
+        64, capMax * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+}
+
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
-                           RmtLoopbackResult& r, bool rideMode) {
+                           RmtLoopbackResult& r, bool rideMode, uint32_t* rxSymbols) {
     // Capture at 40 MHz. The decode threshold is DERIVED from the strand's slot rate, not a
     // constant: a "0" is HIGH for one slot, a "1" for two, so the midpoint (1.5 slots) separates
     // them at ANY rate — 375 ns direct slots give 15/30 ticks (threshold 22), the shift expander's
@@ -298,8 +307,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
     const uint16_t threshTicks = static_cast<uint16_t>(slotTicks + slotTicks / 2);
     const size_t kBits = dataBytes / 3;
     const size_t capMax = kBits + 16;
-    auto* rxSymbols = static_cast<uint32_t*>(heap_caps_aligned_alloc(
-        64, capMax * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    if (!rxSymbols) rxSymbols = allocLoopbackCapture(dataBytes);   // caller didn't pre-allocate
     if (!rxSymbols) {
         ESP_LOGE(tag, "loopback: capture buffer alloc failed (%u B)",
                  (unsigned)(capMax * sizeof(uint32_t)));
@@ -456,7 +464,7 @@ RmtLoopbackResult ws2812LoopbackRide(uint16_t rxGpio, const uint8_t* sent, uint8
     const uint32_t slotHz = pinExpanderMode ? (kShiftBusHz / clockMultiplier) : kSlotHz;
     auto noTransmit = []() {};  // the render loop is the transmitter
     detail::captureAndVerifyFrame(rxGpio, dataBytes, dataBytes, rowBits, slotHz, pinExpanderMode,
-                                  "ws2812-ride", noTransmit, r, /*rideMode=*/true);
+                                  "ws2812-ride", noTransmit, r, /*rideMode=*/true, /*rxSymbols=*/nullptr);
     return r;
 }
 

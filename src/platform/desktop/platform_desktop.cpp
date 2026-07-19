@@ -368,6 +368,8 @@ const char* chipModel() {
     return "desktop";
 }
 
+uint8_t currentCore() { return 0; }
+
 uint32_t cycleCount() {
     return static_cast<uint32_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1212,6 +1214,8 @@ bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPin
     return false;
 }
 bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& /*h*/) { return false; }
+void moonI80Ws2812PrimeRange(MoonI80Ws2812Handle& /*h*/, uint8_t /*bufLo*/, uint8_t /*bufHi*/) {}
+bool moonI80Ws2812ArmRing(MoonI80Ws2812Handle& /*h*/) { return false; }
 bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& /*h*/) { return false; }
 bool moonI80Ws2812InternalFits(size_t /*bytes*/) { return false; }
 uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }

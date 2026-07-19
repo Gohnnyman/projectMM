@@ -480,7 +480,14 @@ namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
-                           RmtLoopbackResult& r, bool rideMode = false);
+                           RmtLoopbackResult& r, bool rideMode = false,
+                           uint32_t* rxSymbols = nullptr);
+// Pre-allocate the capture buffer captureAndVerifyFrame needs (one contiguous DMA-capable internal
+// block, sized from dataBytes) so a caller can grab it BEFORE its own allocations fragment the heap
+// (largest-first allocation order). Pass the result as `rxSymbols`; ownership transfers to
+// captureAndVerifyFrame regardless of outcome. nullptr on alloc failure is fine to pass through —
+// the helper then retries the alloc itself and reports the failure.
+uint32_t* allocLoopbackCapture(size_t dataBytes);
 }
 
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,

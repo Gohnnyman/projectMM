@@ -65,6 +65,15 @@ void  freeExec(void* ptr, size_t bytes);
 void  writeExec(void* dst, const void* src, size_t len);
 
 void yield();
+
+// Which CPU core the caller runs on (0 or 1 on the S3; always 0 on single-core parts and desktop). The
+// render loop is core 0; the multicore render/encode split runs a driver's tick on core 1 — so a driver
+// seeing core 1 here KNOWS the split is engaged and core 0 is the idle helper (xPortGetCoreID's role).
+uint8_t currentCore();
+// Upper bound on cores that run driver code concurrently — sizes per-CPU scratch (the textbook
+// per-CPU-data pattern: one slice per core, no hot-path locking). A cap, not the exact count:
+// single-core parts and desktop simply leave slice 1 unused.
+inline constexpr uint8_t kMaxCores = 2;
 void delayMs(uint32_t ms);  // blocking sleep; only use outside the hot path
 void delayUs(uint32_t us);  // blocking busy-wait for sub-ms protocol gaps (e.g.
                             // the WS2812 inter-frame latch); fine for a few
@@ -793,6 +802,12 @@ struct MoonI80Ws2812Handle { void* impl = nullptr; };
 // knows those events, so it computes the flag; the domain decides what "prefill" means (and may still
 // prefill unconditionally when its lane masks vary per row — ragged strands). Measured: the per-refill
 // prefill was ~1/3 of the ISR encode cost.
+// The FRAME-CLOSE call: `rowCount == 0 && closeFrame` asks the domain to write ONLY its frame-closing
+// word (the shift expander's latch-only word) at `dst` — the platform makes this call for the first
+// zero-lap slice past the frame, whose head then presents the register's final slot on the strand (a
+// '595 output only changes when LATCHED, so a frame that ends without one more latch pulse leaves the
+// strand frozen on its second-to-last slot through the reset). Encoders with no close word (direct
+// mode) do nothing — the zeroed buffer is already a clean LOW.
 using MoonI80EncodeFn = void (*)(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
                                  bool closeFrame, bool needsPrefill);
 
@@ -842,6 +857,11 @@ bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uin
 // Start one frame on the ring: prime the buffers, fire the DMA, and let the refill task (woken by the
 // EOF ISR) refill behind it. Pair with moonI80Ws2812Wait(h, 0, …) — the ring reports completion on slot 0.
 bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& h);
+// The dual-core split of TransmitRing: prime a SUB-RANGE of the pool's buffers (each independent, so two
+// cores prime disjoint ranges concurrently), then arm once EVERYTHING is primed — the caller's join is
+// the fence. TransmitRing remains the serial combo (prime all + arm) for the single-core path.
+void moonI80Ws2812PrimeRange(MoonI80Ws2812Handle& h, uint8_t bufLo, uint8_t bufHi);
+bool moonI80Ws2812ArmRing(MoonI80Ws2812Handle& h);
 
 // True when the handle was brought up as a ring (so the driver knows which transmit to call).
 bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& h);

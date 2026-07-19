@@ -3,6 +3,8 @@
 #include "light/drivers/ParallelLedDriver.h"   // shared CRTP body
 #include "platform/platform.h"
 
+#include <atomic>   // the parallel-snapshot helper join flags
+
 namespace mm {
 
 /// Output driver: parallel WS2812B on the **LCD_CAM** peripheral (ESP32-S3 / -P4), driven by **our own
@@ -232,10 +234,15 @@ public:
         // question stays testable on the same board and content.
         controls_.addBool("useRing", useRing);
         controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
-        // The geometry + the instrument, shown only when the RING is the chosen path — all three are
-        // meaningless on the whole-frame one. (Gating on wantsRing() is safe here, unlike ringSnapshot's:
-        // it reads `useRing`, a plain member, not frameBytes_, which is still 0 when the schema is first
-        // built.)
+        // The source-snapshot A/B knob, directly under useRing (the path it belongs to): the ring reads
+        // its source through an immutable snapshot (ON, the safe default) or the live buffer (OFF, a bench
+        // lever). Meaningful only when the ring is the chosen path, so hidden on wantsRing() like the
+        // geometry below. `ringSnapshot` lives on the base (ParallelLedDriver); the control binds it here.
+        controls_.addBool("ringSnapshot", ringSnapshot);
+        controls_.setHidden(controls_.count() - 1, !wantsRing());
+        // The geometry + the instrument, shown only when the RING is the chosen path — all meaningless on
+        // the whole-frame one. (Gating on wantsRing() is safe: it reads plain members, pinExpanderMode +
+        // useRing, not frameBytes_, so it resolves even before the source buffer is wired at boot.)
         controls_.addBool("ringAuto", ringAuto);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
         controls_.addUint8("ringRows", ringRows, 1, 64);
@@ -264,7 +271,7 @@ public:
         // isolated the prime-only bugs (ld = drain progress, tx = real wire time vs the physical frame
         // minimum, ipb/ci/tn = node accounting + the terminator). Their scope lives in the backlog's ring
         // entry.
-        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u ea%u sg%u se%u gap%u",
+        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u ea%u sg%u se%u tw%u ts%u tp%u gap%u",
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
                       static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.lastDrain),
                       static_cast<unsigned>(s.late),
@@ -274,6 +281,9 @@ public:
                       static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.avgEncodeUs),
                       static_cast<unsigned>(segRows ? segGather / segRows : 0),   // avg gather cycles/row (last window)
                       static_cast<unsigned>(segRows ? segEmit / segRows : 0),     // avg emit cycles/row (last window)
+                      static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickWaitUs),   // wire-wait µs
+                      static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickSnapUs),   // snapshot µs
+                      static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickPrimeUs),  // prime µs
                       static_cast<unsigned>(s.maxIsrGapUs));
                       // lt = slices refilled AFTER their drain began (stale on the wire) — the scatter
                       // meter; a clean soak is lt frozen at its arm-time value.
@@ -289,7 +299,8 @@ public:
             || std::strcmp(name, "ringAuto") == 0     // re-derive (or stop deriving) the geometry
             || std::strcmp(name, "ringRows") == 0     // geometry: buffers are sized and the chain mounted
             || std::strcmp(name, "ringBufs") == 0     // at build time, so a change is a rebuild
-            || std::strcmp(name, "ringPadUs") == 0;   // the pad is a mounted DMA node — same rebuild
+            || std::strcmp(name, "ringPadUs") == 0    // the pad is a mounted DMA node — same rebuild
+            || std::strcmp(name, "ringSnapshot") == 0; // the snapshot buffer is (de)allocated at build time
     }
 
     /// WR only reaches a pad in shift mode, so it can only COLLIDE in shift mode. In direct mode the
@@ -366,13 +377,31 @@ public:
             if (bufs > byRam) bufs = byRam;
             ringBufs = static_cast<uint8_t>(bufs >= platform::kRingBufsMin ? bufs : platform::kRingBufsMin);
         }
-        return platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
+        const bool ok = platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
                                                ringRows, ringBufs, ringPadUs, this->busClockMultiplier(),
                                                &MoonLedDriver::ringEncodeTrampoline, this);
+        // Ring up → bring the parallel-snapshot helper up too (idempotent; parks in waitNotify). Torn down
+        // in busDeinit with the bus. Spawned here (cold reinit path) so kick()/join() only ever notify.
+        if (ok) ensureSnapHelper();
+        return ok;
     }
     /// Send one frame on the ring: prime the pool, fire the DMA, and let the EOF ISR refill behind it.
-    bool busTransmitRing()          { return platform::moonI80Ws2812TransmitRing(bus_); }
+    // The ring's per-frame kick. With the core-0 helper up (dual-core split active), fork-join the PRIME:
+    // ring buffers are independent (each derives its rows from its index), so the helper primes the bottom
+    // half of the pool on core 0 while this core primes the top half, the join fences both, then the arm
+    // starts the DMA. Serial fallback: the platform's prime-all-then-arm combo.
+    bool busTransmitRing() {
+        if (snapHelperReady() && ringBufs >= 2) {
+            const uint8_t half = static_cast<uint8_t>(ringBufs / 2);
+            primeLo_ = 0; primeHi_ = half;
+            helperKick(HelperJob::primeHalf);                          // core 0: buffers [0, half)
+            platform::moonI80Ws2812PrimeRange(bus_, half, ringBufs);   // this core: [half, ringBufs)
+            helperJoin();                                              // fence: every buffer primed
+            return platform::moonI80Ws2812ArmRing(bus_);
+        }
+        return platform::moonI80Ws2812TransmitRing(bus_);
+    }
     /// The ring's regime for the driving-status suffix: "primed" (whole frame encoded before arming —
     /// no deadline, pixel-perfect) vs "lapping" (the ISR refills behind the DMA — the deadline regime).
     const char* busRingMode() const {
@@ -402,6 +431,12 @@ public:
         const uint8_t outCh = self->correction_.outChannels;
         const auto first = static_cast<nrOfLightsType>(firstRow);
         const auto count = static_cast<nrOfLightsType>(rowCount);
+        if (rowCount == 0) {
+            // The FRAME-CLOSE call (see MoonI80EncodeFn): write only the latch-only word, which presents
+            // the register's final slot on the strand. Direct mode has no close word — zeros are LOW.
+            if (closeFrame) self->encodeFrameClose(dst);
+            return;
+        }
         // Prefill only when the buffer's constants are actually gone (`needsPrefill` — the platform's
         // buffer-lifecycle fact: first use, or after a platform memset; see MoonI80EncodeFn). A recycled
         // buffer's constants survive a data-only refill byte-identically, and the per-refill prefill was
@@ -431,8 +466,10 @@ public:
     /// the encode is compared against.
     uint32_t  busLastTransmitUs() const         { return platform::moonI80Ws2812LastTransmitUs(bus_); }
     /// Tear the bus down: stop the DMA before freeing anything it could still read. Safe on a
-    /// half-built bus, so a failed init and a live one release through the same path.
-    void      busDeinit()                       { platform::moonI80Ws2812Deinit(bus_); }
+    /// half-built bus, so a failed init and a live one release through the same path. The snapshot helper
+    /// task goes down FIRST — it reads snapshotBuf_, which the base frees on release, so no wake may land
+    /// after; stopPinnedTask joins, so once it returns the helper is provably gone.
+    void      busDeinit()                       { stopSnapHelper(); platform::moonI80Ws2812Deinit(bus_); }
 
     /// Drive `frame` on a private bus and capture the wire back on `loopbackRxPin` (jumpered), so the
     /// self-test bit-verifies what the peripheral ACTUALLY emitted — the one instrument that does not
@@ -453,7 +490,95 @@ public:
     /// rebuilds when this goes false rather than routing a stale clock.
     bool extraBusPinsCurrent() const { return lastClockPin_ == clockPin; }
 
+    // --- Fork-join helper (CRTP overrides of the base's default no-op hooks) ---
+    // The ring frame's two biggest costs — the snapshot correction (~18 ms at 48×256) and the pool prime
+    // (~14 ms) — are both embarrassingly parallel. Under the render/encode split the ring's tick runs on
+    // core 1 while core 0 is idle after its effect — so one core-0 helper task takes the bottom half of
+    // each, per frame: first the snapshot's light range, then the prime's buffer range. The task is
+    // spawned once at ring engage (kept parked in waitNotify between kicks) and torn down with the bus.
+    // ready() gates on the split actually running: the WHOLE point is the idle second core, so with the
+    // split off (single-core) both stages stay serial and the helper never engages.
+
+    /// True when the fork-join should engage: the helper task is up AND this caller is running on core 1
+    /// — i.e. the render/encode split is active and core 0 is the idle one to hand the bottom half. On
+    /// core 0 (single-core, or the split disengaged), there is no idle second core, so stay serial and
+    /// avoid spawning contention onto the very core doing the render.
+    bool snapHelperReady() const {
+        return snapHelper_.impl != nullptr && !snapHelperBroken_ && platform::currentCore() == 1;
+    }
+
+    // The two fork-join jobs the core-0 helper runs — both embarrassingly parallel halves of the frame's
+    // output stage: the snapshot's color-correction range, and the ring prime's buffer range.
+    enum class HelperJob : uint8_t { snapshotHalf, primeHalf };
+
+    void snapHelperKick() { helperKick(HelperJob::snapshotHalf); }
+    void snapHelperJoin() { helperJoin(); }
+
+    void helperKick(HelperJob job) {
+        if (!snapHelper_.impl) return;
+        helperJob_ = job;   // published by the notify (FreeRTOS task-notify is the sync point)
+        snapHelperDone_.store(false, std::memory_order_release);
+        platform::notifyTask(snapHelper_);
+    }
+
+    void helperJoin() {
+        if (!snapHelper_.impl) return;
+        // Acquire-poll on the helper's release with a REAL-TIME deadline — the Drivers::quiesceEncode
+        // idiom (a spin COUNT is meaningless: yield() may return instantly, turning a count into a hot
+        // burn). A healthy half takes single-digit ms; 100 ms means the helper is broken.
+        const uint32_t t0 = platform::millis();
+        while (!snapHelperDone_.load(std::memory_order_acquire)) {
+            if (platform::millis() - t0 > kSnapJoinTimeoutMs) {
+                // SELF-HEAL, never wedge: do the helper's half OURSELVES (both jobs are idempotent —
+                // same inputs, same bytes — so even a late helper write is identical, not torn) and stop
+                // using the helper from now on. One degraded frame beats a stuck render loop.
+                runHelperJob();
+                snapHelperBroken_ = true;
+                return;
+            }
+            platform::yield();
+        }
+    }
+
+    void runHelperJob() {
+        if (helperJob_ == HelperJob::snapshotHalf) this->copyHelperRange();
+        else platform::moonI80Ws2812PrimeRange(bus_, primeLo_, primeHi_);
+    }
+
+    /// Bring the helper task up (idempotent). Called at ring engage — see busInitRing's tail. Pinned to
+    /// CORE 0: the ring's tick runs on core 1 under the split, so the helper takes the OTHER core.
+    void ensureSnapHelper() {
+        if (snapHelper_.impl) return;
+        snapHelperBroken_ = false;   // a rebuild gets a fresh chance
+        snapHelperStop_.store(false, std::memory_order_release);
+        platform::spawnPinnedTask(snapHelper_, "mmSnap", &MoonLedDriver::snapHelperTramp, this,
+                                  4096, 5, /*core=*/0);
+    }
+    void stopSnapHelper() {
+        if (!snapHelper_.impl) return;
+        snapHelperStop_.store(true, std::memory_order_release);
+        platform::stopPinnedTask(snapHelper_);
+    }
+
+    static void snapHelperTramp(void* user) {
+        auto* self = static_cast<MoonLedDriver*>(user);
+        while (!self->snapHelperStop_.load(std::memory_order_acquire)) {
+            if (!platform::waitNotify(self->snapHelper_, 100)) continue;   // re-check stop on timeout
+            if (self->snapHelperStop_.load(std::memory_order_acquire)) break;
+            self->runHelperJob();                                           // this core-0 frame's bottom half
+            self->snapHelperDone_.store(true, std::memory_order_release);
+        }
+    }
+
 private:
+    static constexpr uint32_t kSnapJoinTimeoutMs = 100;   // a half is single-digit ms; 100 = broken
+    platform::WorkerTask snapHelper_{};
+    std::atomic<bool> snapHelperDone_{true};
+    std::atomic<bool> snapHelperStop_{false};
+    bool snapHelperBroken_ = false;   // self-heal latch: a timed-out join disables the helper (serial from then on)
+    HelperJob helperJob_ = HelperJob::snapshotHalf;
+    uint8_t primeLo_ = 0, primeHi_ = 0;   // the helper's prime-job buffer range
+
     platform::MoonI80Ws2812Handle bus_;
     int8_t lastClockPin_ = -1;
     char ringDbgStr_[128] = "—";   // TEMP DIAGNOSTIC: ring counters incl. the lapping-phase fields (refreshed in refreshBusKpi via tick1s)

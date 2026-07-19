@@ -192,11 +192,28 @@ protected:
         wire_ = static_cast<uint8_t*>(platform::allocInternal(bytes));
         if (!wire_) wire_ = static_cast<uint8_t*>(platform::alloc(bytes));
         wireCap_ = wire_ ? bytes : 0;
+        publishHeapBytes();   // the scratch grew — refresh the memory readout
     }
     /// Release the scratch (on the true teardown — release(), not a mid-life reinit).
     void freeWire() {
-        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; }
+        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; publishHeapBytes(); }
     }
+
+    // --- Driver heap accounting (the per-module memory readout) ---
+    // A driver owns several raw-alloc buffers off the ScratchBuffer path — the correction scratch, the
+    // streaming snapshot, the RMT symbol buffer, the preview stage. `ScratchBuffer` auto-accounts its
+    // own resizes, but these raw allocs don't, so without this they were INVISIBLE to dynamicBytes()
+    // (a 36 KB snapshot reading as 0). Rather than paste setDynamicBytes into every alloc site (the
+    // per-module duplication CLAUDE.md forbids — one forgotten site and the readout drifts), each driver
+    // reports its live heap total HERE, and DriverBase publishes it once. driverHeapBytes() is the one
+    // hook a driver overrides to sum its buffers; publishHeapBytes() pushes that sum to the module readout
+    // (setDynamicBytes, the same channel Drivers uses for its output buffer). Called on every (re)alloc
+    // and free — all cold-path — so the readout tracks the real footprint with no per-site bookkeeping.
+    //
+    // Base sum: the shared correction scratch, the one buffer DriverBase itself owns. A subclass override
+    // ADDS its own buffers and chains to this (`DriverBase::driverHeapBytes() + snapshotCap_ + …`).
+    virtual size_t driverHeapBytes() const { return wireCap_; }
+    void publishHeapBytes() { setDynamicBytes(driverHeapBytes()); }
 
     // --- Per-driver output correction (references a shared preset; brightness + white are local) ---
     // Each physical driver owns its Correction — the flat hot-path cache apply() reads — but the

@@ -55,12 +55,17 @@ public:
     /// interface, not the concrete HTTP server.
     void setBroadcaster(BinaryBroadcaster* b) { broadcaster_ = b; }
 
+    /// Test-only: flip the resumableFrames A/B directly (production toggles it through the control +
+    /// affectsPrepare path). Lets a test drive the buffer alloc/free without a control write.
+    void setResumableFramesForTest(bool on) { resumableFrames = on; }
+
     /// Preview shows the raw logical buffer, no correction.
     bool hasCorrectionControls() const override { return false; }
 
-    /// Bind the one control, `fps` (1-60).
+    /// Bind the controls: `fps` (1-60) and `resumableFrames` (the downsampled-frame transport A/B).
     void defineDriverControls() override {
         controls_.addUint8("fps", fps, 1, 60);
+        controls_.addBool("resumableFrames", resumableFrames);
     }
 
     /// Point the driver at the sparse driver buffer the LED/ArtNet drivers also read
@@ -80,8 +85,24 @@ public:
         // A resize frees+reallocs the producer buffer, so any in-flight resumable colour send holds
         // a pointer that's about to dangle — cancel it BEFORE the rebuild (the browser discards the
         // half-sent message and gets the fresh table + frame next tick). Guards a use-after-free.
+        // The cancel also covers stage_: with no drain in flight, the grow below can't dangle it.
         if (broadcaster_) broadcaster_->cancelBufferedSend();
+        if (resumableFrames) ensureStage();   // allocate the staging buffer only when the A/B wants it
+        else freePreviewBuffers();            // OFF: release the ~24 KB (readout drops to match)
         buildAndSendCoordTable();
+        refreshStatus();   // surface any resumable-path degradation (alloc miss) in the tab
+    }
+
+    void release() override {
+        freePreviewBuffers();
+        DriverBase::release();
+    }
+
+    /// The `resumableFrames` A/B flips the transport AND which buffers exist, so a change re-runs prepare
+    /// (which allocates them when ON, frees them when OFF) — the standard "config change applies live"
+    /// path, off the render thread. `fps` doesn't change structure, so it stays a plain control edit.
+    bool affectsPrepare(const char* name) const override {
+        return name && std::strcmp(name, "resumableFrames") == 0;
     }
 
     /// Per-tick: (re)stream the coordinate table when the geometry or client set
@@ -242,6 +263,24 @@ public:
                 if (x % p->s == 0 && y % p->s == 0 && z % p->s == 0) p->out++;
             }, &cc);
             coordCount_ = cc.out;
+            // Size the kept-index cache to EXACTLY this count (grow-only) BEFORE the emit pass fills it,
+            // so the cache can never truncate: coordCount_ is recomputed every rebuild (adaptive stride,
+            // memory-driven cap), so sizing it here — not lazily to a stale point-cap — is what keeps
+            // keptCount_ == coordCount_ and the per-frame gather complete. An alloc miss leaves the
+            // cache too small; the gather then falls back to the full lattice walk (correct, slower).
+            // Only under resumableFrames — the synchronous path pushes as it walks, no index map needed.
+            if (resumableFrames && keptIdxCap_ < coordCount_) {
+                auto* grown = static_cast<nrOfLightsType*>(platform::alloc(coordCount_ * sizeof(nrOfLightsType)));
+                if (grown) {
+                    if (keptIdx_) platform::free(keptIdx_);
+                    keptIdx_ = grown;
+                    keptIdxCap_ = coordCount_;
+                    keptIdxAllocFailed_ = false;
+                    publishHeapBytes();   // the index cache grew — refresh the memory readout
+                } else {
+                    keptIdxAllocFailed_ = true;   // degraded — the gather walks forEachCoord per frame
+                }
+            }
         }
         if (coordCount_ == 0) { coordPending_ = false; return; }
 
@@ -275,14 +314,22 @@ public:
             }
         };
         PosCtx pc{this, broadcaster_, s, {}, 0};
+        keptCount_ = 0;   // rebuilt below for the sparse path; dense gathers closed-form, no index map
         if (denseGrid()) {
             for (lengthType z = 0; z < az; z += s)
                 for (lengthType y = 0; y < ay; y += s)
                     for (lengthType x = 0; x < ax; x += s) pc.emit(x, y, z);
         } else {
-            layouts->forEachCoord([](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+            // While emitting coords, CACHE the kept lights' buffer indices — the per-frame colour
+            // gather then loops this index map instead of re-walking forEachCoord over every light
+            // (an O(total-lights) callback walk per firing, measured ~8 ms at 12K lights on the
+            // encode worker). The map's lifecycle IS the coord table's: same pass, same invalidation.
+            layouts->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<PosCtx*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
+                PreviewDriver* self = p->self;
+                if (self->keptIdx_ && self->keptCount_ < self->keptIdxCap_)
+                    self->keptIdx_[self->keptCount_++] = idx;
                 p->emit(x, y, z);
             }, &pc);
         }
@@ -323,27 +370,45 @@ public:
                                                    src, static_cast<size_t>(coordCount_) * 3);
         }
 
-        // Downsampled (s>1) or non-RGB (cpl≠3): build the kept lights' colours into the synchronous
-        // begin/push/end stream (no stable contiguous body for the resumable path). The kept subset
-        // + order MUST match the coord table's, so colour[k] ↔ coord[k] line up (the browser drops a
-        // count/stride-mismatched frame). A dense grid strides its box directly — light (x,y,z) is at
-        // buffer index z·H·W + y·W + x, closed-form, no walk over skipped cells (this is the cost the
-        // forEachCoord walk used to pay every frame). A sparse/mapped layout walks forEachCoord with
-        // the same lattice predicate (its index↔position map is arbitrary — no formula).
-        broadcaster_->beginBinaryFrame(sizeof(header) + static_cast<size_t>(coordCount_) * 3);
-        broadcaster_->pushBinaryFrame(header, sizeof(header));
+        // Downsampled (s>1) or non-RGB (cpl≠3): the producer buffer is not the payload, so gather the
+        // kept lights' RGB into the staging buffer and hand THAT to the same RESUMABLE buffered send
+        // the full-res path uses — the gather is a few thousand byte moves (cheap on this thread), and
+        // the socket drain happens on the transport's ticks, not here. Building + pushing this payload
+        // through the synchronous begin/push/end stream instead measured ~17 ms per firing on the
+        // encode worker at 12K lights — a sub-hot-path violation this resumable handoff removes. The
+        // kept subset + order MUST match the coord table's, so colour[k] ↔ coord[k] line up (the
+        // browser drops a count/stride-mismatched frame). A dense grid strides its box directly —
+        // light (x,y,z) is at buffer index z·H·W + y·W + x, closed-form, no walk over skipped cells. A
+        // sparse/mapped layout walks forEachCoord with the same lattice predicate (its index↔position
+        // map is arbitrary — no formula). tick()'s idle gate means no drain holds stage_ right now.
+        // TRANSPORT A/B (resumableFrames): ON gathers into the staging buffer and hands it to the
+        // RESUMABLE sender (drains on tick20ms, off the render thread — the sub-hot-path fix). OFF is
+        // the SYNCHRONOUS begin/push/end stream (blocking socket writes on THIS thread, ~17 ms at 12K
+        // lights), kept as the proven-correct reference to A/B the resumable path against on hardware.
+        const size_t bodyBytes = static_cast<size_t>(coordCount_) * 3;
+        const bool resumable = resumableFrames && stage_ && stageCap_ >= bodyBytes;
+        // The gather sink: the staging buffer (resumable) or, per push, the synchronous stream's chunk
+        // buffer. `emit` is shared; the sink is chosen once here so the walk/loop below is path-agnostic.
         struct ColCtx {
-            mm::BinaryBroadcaster* bc; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
-            uint8_t buf[1536]; uint16_t fill;
+            mm::BinaryBroadcaster* bc; uint8_t* stage; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
+            bool resumable; uint8_t buf[1536]; uint16_t fill; size_t staged;
+            void put(uint8_t b) {
+                if (resumable) { stage[staged++] = b; return; }
+                buf[fill++] = b;
+                if (fill > sizeof(buf) - 1) { bc->pushBinaryFrame(buf, fill); fill = 0; }
+            }
             void emit(nrOfLightsType idx) {
                 const uint8_t* px = (idx < n) ? src + static_cast<size_t>(idx) * cpl : nullptr;
-                buf[fill++] = px ? px[0] : 0;
-                buf[fill++] = (px && cpl >= 2) ? px[1] : 0;
-                buf[fill++] = (px && cpl >= 3) ? px[2] : 0;
-                if (fill > sizeof(buf) - 3) { bc->pushBinaryFrame(buf, fill); fill = 0; }
+                put(px ? px[0] : 0);
+                put((px && cpl >= 2) ? px[1] : 0);
+                put((px && cpl >= 3) ? px[2] : 0);
             }
         };
-        ColCtx col{broadcaster_, src, n, cpl, {}, 0};
+        if (!resumable) {
+            broadcaster_->beginBinaryFrame(sizeof(header) + bodyBytes);
+            broadcaster_->pushBinaryFrame(header, sizeof(header));
+        }
+        ColCtx col{broadcaster_, stage_, src, n, cpl, resumable, {}, 0, 0};
         if (denseGrid()) {
             const lengthType W = layer_->physicalWidth(), H = layer_->physicalHeight();
             const lengthType az = layer_->physicalDepth() > 0 ? layer_->physicalDepth() : 1;
@@ -353,8 +418,12 @@ public:
                     for (lengthType x = 0; x < ax; x += s)
                         col.emit(static_cast<nrOfLightsType>(static_cast<size_t>(z) * H * W
                                                              + static_cast<size_t>(y) * W + x));
+        } else if (keptIdx_ && keptCount_ == coordCount_) {
+            // The index map cached at coord-table build: a tight gather over the kept lights only.
+            for (nrOfLightsType k = 0; k < keptCount_; k++) col.emit(keptIdx_[k]);
         } else {
-            // s as the FULL lattice stride (not clamped) — must match buildAndSendCoordTable's.
+            // Fallback (index-map alloc miss): the full lattice walk, s as the FULL stride (not
+            // clamped) — must match buildAndSendCoordTable's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
             layer_->layouts()->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<Skip*>(c);
@@ -362,11 +431,72 @@ public:
                 p->col->emit(idx);
             }, &sk);
         }
+        if (resumable) return broadcaster_->sendBufferedFrame(header, sizeof(header), stage_, bodyBytes);
         if (col.fill) broadcaster_->pushBinaryFrame(col.buf, col.fill);
         return broadcaster_->endBinaryFrame();
     }
 
 private:
+    /// (Re)size the staging buffer the downsampled/non-RGB colour path gathers into — the stable body
+    /// the resumable buffered send drains across transport ticks. Sized to the point cap (grow-only,
+    /// off the hot path, from prepare). An alloc miss degrades to skipped frames, never a stall.
+    /// Free the resumable-path buffers + refresh the memory readout. Cancels any in-flight send first —
+    /// its body IS stage_, so a drain must not outlive it (the use-after-free guard). Shared by release()
+    /// and the resumableFrames-off toggle.
+    void freePreviewBuffers() {
+        if (broadcaster_) broadcaster_->cancelBufferedSend();
+        if (stage_) { platform::free(stage_); stage_ = nullptr; stageCap_ = 0; }
+        if (keptIdx_) { platform::free(keptIdx_); keptIdx_ = nullptr; keptIdxCap_ = 0; keptCount_ = 0; }
+        publishHeapBytes();
+    }
+
+    void ensureStage() {
+        stageAllocFailed_ = false;
+        const size_t bytes = static_cast<size_t>(maxPreviewPoints()) * 3;
+        if (bytes == 0 || stageCap_ >= bytes) return;
+        uint8_t* grown = static_cast<uint8_t*>(platform::alloc(bytes));
+        if (!grown) { stageAllocFailed_ = true; return; }   // degraded — status surfaced in refreshStatus
+        if (stage_) platform::free(stage_);
+        stage_ = grown;
+        stageCap_ = bytes;
+        publishHeapBytes();   // the staging buffer grew — refresh the memory readout
+        // keptIdx_ is sized in buildAndSendCoordTable to the exact per-rebuild coordCount_ — not here,
+        // because the point-cap is an UPPER bound a sparse layout stays under (kept ≤ box-lattice cells).
+    }
+
+    /// Publish the preview's operating status: PLAIN "previewing N points" normally, or a WARNING naming
+    /// the degradation when a resumable-path buffer could not allocate (RAM-tight board) so the tab shows
+    /// WHY it fell back — the synchronous send returns (blocking socket writes on the encode thread, the
+    /// LED-hitch this optimization removed) or the sparse gather walks forEachCoord per frame. Called from
+    /// the cold path (prepare) and refreshed on the coord rebuild, never the render loop.
+    void refreshStatus() {
+        if (resumableFrames && stageAllocFailed_) {
+            setStatus("preview degraded — staging buffer alloc failed, frames send synchronously "
+                      "(may hitch LEDs); disable resumableFrames or free RAM", Severity::Warning);
+        } else if (resumableFrames && keptIdxAllocFailed_) {
+            setStatus("preview degraded — index cache alloc failed, gathering per frame (slower)",
+                      Severity::Warning);
+        } else {
+            clearStatus();
+        }
+    }
+    bool resumableFrames = true;   // A/B: downsampled frame via resumable send (ON) vs synchronous (OFF)
+    bool stageAllocFailed_ = false;    // resumable staging buffer couldn't allocate → synchronous fallback
+    bool keptIdxAllocFailed_ = false;  // index cache couldn't allocate → per-frame lattice walk
+    uint8_t* stage_ = nullptr;   // gathered colour payload for the resumable send (see ensureStage)
+    size_t stageCap_ = 0;
+    nrOfLightsType* keptIdx_ = nullptr;   // sparse layouts: kept lights' buffer indices, coord-table order
+    nrOfLightsType keptIdxCap_ = 0, keptCount_ = 0;
+
+    /// This driver's heap = the base scratch + the two preview buffers (the resumable-send staging buffer
+    /// and the kept-index cache). Both live only under resumableFrames; summed for the per-module memory
+    /// readout (see DriverBase::driverHeapBytes). PreviewDriver holds no wire_ scratch, but chaining to
+    /// the base keeps the rule uniform.
+    size_t driverHeapBytes() const override {
+        return DriverBase::driverHeapBytes() + stageCap_
+             + static_cast<size_t>(keptIdxCap_) * sizeof(nrOfLightsType);
+    }
+
     // Frame cap: the most points one preview frame carries before the spatial-lattice downsample
     // engages — derived at runtime from free contiguous memory, not a fixed per-board constant
     // (architecture.md § Scaling to available memory: "sizes determined at runtime based on

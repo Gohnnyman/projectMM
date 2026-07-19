@@ -419,10 +419,18 @@ private:
         freeSymbols();
         symbols_ = static_cast<uint32_t*>(platform::alloc(need * sizeof(uint32_t)));
         symbolCap_ = symbols_ ? need : 0;
+        publishHeapBytes();   // the symbol buffer grew — refresh the memory readout
     }
 
     void freeSymbols() {
-        if (symbols_) { platform::free(symbols_); symbols_ = nullptr; symbolCap_ = 0; }
+        if (symbols_) { platform::free(symbols_); symbols_ = nullptr; symbolCap_ = 0; publishHeapBytes(); }
+    }
+
+    /// This driver's heap = the base scratch + the RMT symbol buffer (one word per WS2812 data bit,
+    /// the driver's largest buffer). Summed for the per-module memory readout — see
+    /// DriverBase::driverHeapBytes.
+    size_t driverHeapBytes() const override {
+        return DriverBase::driverHeapBytes() + static_cast<size_t>(symbolCap_) * sizeof(uint32_t);
     }
 
     // --- loopback self-test (control-driven) ---
