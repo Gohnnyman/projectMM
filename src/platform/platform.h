@@ -783,13 +783,12 @@ struct MoonI80Ws2812Handle { void* impl = nullptr; };
 // drains, the ISR encodes the next slice into it at interrupt priority, so the refill always finishes
 // before the DMA laps back into that buffer `kRingBufs` slices later. That is the reuse-race guarantee: a
 // lower-priority task (the original design) could lose the buffer-reuse race to task-wake latency at >8
-// slices (≥192 lights/strand), stalling the frame; an ISR cannot. The domain encode it calls lives in
-// FLASH, which is safe here because the channel does NOT set `isr_cache_safe` — the interrupt is not
-// `ESP_INTR_FLAG_IRAM`, so a flash-resident callback is permitted and only faults if the ISR fires while
-// the flash cache is disabled (a SPI-flash write: OTA/NVS), which never overlaps rendering. This is
-// exactly how esp_lcd_panel_rgb.c behaves by default (its ISR-refill is forced into IRAM only under the
-// opt-in CONFIG_LCD_RGB_ISR_IRAM_SAFE). Full-flash-write hardening (isr_cache_safe + an IRAM encode via a
-// neutral MM_HOT macro) is a later increment, not needed for the reuse-race fix.
+// slices (≥192 lights/strand), stalling the frame; an ISR cannot. The ring channel sets
+// `isr_cache_safe = true` and the whole encode chain is IRAM-resident (MM_RAMFUNC) — the shipped
+// hardening, because a flash-cache miss inside a wire-rate ISR would blow the refill deadline. Being
+// cache-safe, the ISR can fire while the flash cache is disabled (a SPI-flash write: OTA/NVS), so the
+// refill DEFERS when `spi_flash_cache_enabled()` is false and the batch catches up afterward — never
+// touching flash from the ISR. Prior art: esp_lcd_panel_rgb.c's ISR-refill under CONFIG_LCD_RGB_ISR_IRAM_SAFE.
 //
 // `MoonI80EncodeFn` is the seam: the platform owns the ring, the descriptors and the completion; the
 // domain owns the encode. The callback runs from the EOF ISR (and once from the priming call).
@@ -860,6 +859,11 @@ bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& h);
 // The dual-core split of TransmitRing: prime a SUB-RANGE of the pool's buffers (each independent, so two
 // cores prime disjoint ranges concurrently), then arm once EVERYTHING is primed — the caller's join is
 // the fence. TransmitRing remains the serial combo (prime all + arm) for the single-core path.
+// Set the '595 shift-clock prescale off the 80 MHz bus resolution (4 = 20 MHz default — the reliability
+// point; 3 = 26.67 MHz overclock; 5 = 16 MHz is past the WS2812 0-vs-1 threshold, all-white). A slower
+// clock gives the shift register more setup margin on marginal strand wiring, at a longer WS2812 T0H.
+// Takes effect on the next bus (re)build. See kShiftClockDivDefault in the i80 driver.
+void moonI80SetShiftClockDiv(uint8_t div);
 void moonI80Ws2812PrimeRange(MoonI80Ws2812Handle& h, uint8_t bufLo, uint8_t bufHi);
 bool moonI80Ws2812ArmRing(MoonI80Ws2812Handle& h);
 

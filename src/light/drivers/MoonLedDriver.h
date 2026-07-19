@@ -35,8 +35,8 @@ namespace mm {
 ///
 /// **What streaming costs.** The whole-frame path has no CPU deadline once a transfer is armed; the ring
 /// does. Its refill runs from the DMA's end-of-buffer interrupt and must beat the wire — 576 B per light
-/// at 26.67 MHz is **21.6 µs/light** — or the strands see a gap. That trade is the reason both paths ship
-/// and `useRing` is a switch, not a constant.
+/// is **28.8 µs/light** at the default 20 MHz shift clock (21.6 at the div-3 overclock) — or the strands
+/// see a gap. That trade is the reason both paths ship and `useRing` is a switch, not a constant.
 ///
 /// **Both drivers ship, deliberately.** `MultiPinLedDriver` is the **reference**: correct, memory-capped,
 /// and what this one is measured against. This is the **challenger**. Both are registered module types, so
@@ -87,15 +87,15 @@ namespace mm {
 ///
 /// **Why the expander needs the ring.** The fan-out costs 8 bus words per WS2812 bit, so a light is 576 B
 /// and a **48 x 256** frame is ~144 KB — more contiguous internal RAM than an S3 has, and from PSRAM the
-/// DMA cannot sustain the expander's 26.67 MHz clock (both measured). Streaming is the only route to that
-/// target, which is why these two features are one story.
+/// DMA cannot sustain the expander's shift clock (measured at 26.67 MHz). Streaming is the only route to
+/// that target, which is why these two features are one story.
 ///
 /// **Prior art.** The '595 expander and the per-light streaming ring are hpwit's ideas, from
 /// [I2SClocklessVirtualLedDriver](https://github.com/hpwit/I2SClocklessVirtualLedDriver) and his expander
 /// board — studied hard, credited, and then written fresh against our own architecture and layout (his
-/// `putdefaultones()` prefill has our own counterpart; the transpose is our own SWAR). He runs a PLL240M
-/// clock tree (19.2 MHz, a 30 µs/light encode budget); we run PLL160M, where the only in-spec integer
-/// prescale is 26.67 MHz — a **21.6 µs/light** budget.
+/// `putdefaultones()` prefill has our own counterpart; the transpose is our own SWAR). He runs the S3
+/// shift clock at ~19.2 MHz; we default to the same reliability point (20 MHz, a 28.8 µs/light budget)
+/// with the `shiftOverclock` switch (26.67 MHz, 21.6 µs/light) for short-wired rigs (see the control).
 class MoonLedDriver : public ParallelLedDriver<MoonLedDriver> {
 public:
     // Data pins + loopback pin default to UNSET, for the same reason as the sibling: they are
@@ -191,6 +191,16 @@ public:
     /// mounted DMA node).
     uint8_t ringPadUs = 0;
 
+    /// Overclock the '595 shift clock: OFF (default) = 20 MHz — the reliability point, wall-verified on
+    /// two rigs and the rate hpwit ships (~19.2 MHz). ON = 26.67 MHz, for short-wired rigs chasing the
+    /// higher fps ceiling (151 vs 118 at 48×256) — but a 74HCT595 driving long/loaded strands can't
+    /// always sample cleanly that fast: specific strands scramble (random colors on some panels) while
+    /// clean ones survive, and drive strength does NOT help — turn this OFF if any panel misbehaves.
+    /// A switch, not a divider: slower than 20 MHz is never useful (16 MHz pushes T0H past the WS2812's
+    /// 0-vs-1 threshold — every strand goes all-white), so the only real choice is safe vs fast.
+    /// Shift-mode only; a bus-rebuild trigger.
+    bool shiftOverclock = false;
+
     // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
 
     /// LCD_CAM lanes on this chip (0 = none, and then the base's guards make the driver inert).
@@ -228,6 +238,11 @@ public:
     /// base can place these AFTER latchPin — clockPin and latchPin are one '595 wiring pair and belong
     /// together in the UI, not split by a mode selector.
     void addRingControls() {
+        // The shift-clock speed switch, below the clockPin/latchPin wiring pair (the base places this
+        // hook right after latchPin): OFF = 20 MHz (safe default), ON = 26.67 MHz (overclock). The fix
+        // for per-strand '595 corruption is OFF; see the member doc. Shift-mode only.
+        controls_.addBool("shiftOverclock", shiftOverclock);
+        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
         // Path selector (pin-expander mode only): the ring, or the whole frame. A distinct axis from
         // ringSnapshot — this picks the PATH, ringSnapshot tunes how the RING reads its source; they
         // compose. Whole-frame is the A/B reference: it is how the whole-frame-PSRAM-at-the-expander-clock
@@ -300,7 +315,8 @@ public:
             || std::strcmp(name, "ringRows") == 0     // geometry: buffers are sized and the chain mounted
             || std::strcmp(name, "ringBufs") == 0     // at build time, so a change is a rebuild
             || std::strcmp(name, "ringPadUs") == 0    // the pad is a mounted DMA node — same rebuild
-            || std::strcmp(name, "ringSnapshot") == 0; // the snapshot buffer is (de)allocated at build time
+            || std::strcmp(name, "ringSnapshot") == 0  // the snapshot buffer is (de)allocated at build time
+            || std::strcmp(name, "shiftOverclock") == 0; // the peripheral clock is set at bus (re)build
     }
 
     /// WR only reaches a pad in shift mode, so it can only COLLIDE in shift mode. In direct mode the
@@ -330,6 +346,7 @@ public:
     /// `busClockMultiplier()` tells the platform how many bus words one WS2812 slot is shifted out
     /// over, so it can scale the pixel clock and the slot keeps its wire duration.
     bool busInit(size_t frameBytes, bool wantSecondBuffer) {
+        platform::moonI80SetShiftClockDiv(shiftOverclock ? 3 : 4);   // ON = 26.67 MHz, OFF = 20 MHz
         return platform::moonI80Ws2812Init(bus_, this->busPinList(), this->busPinCount(),
                                            static_cast<uint16_t>(clockPin), frameBytes,
                                            wantSecondBuffer, this->busClockMultiplier());
@@ -377,6 +394,7 @@ public:
             if (bufs > byRam) bufs = byRam;
             ringBufs = static_cast<uint8_t>(bufs >= platform::kRingBufsMin ? bufs : platform::kRingBufsMin);
         }
+        platform::moonI80SetShiftClockDiv(shiftOverclock ? 3 : 4);   // ON = 26.67 MHz, OFF = 20 MHz
         const bool ok = platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
                                                ringRows, ringBufs, ringPadUs, this->busClockMultiplier(),

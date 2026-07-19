@@ -21,7 +21,7 @@ A map of everything in the three files, by theme.
 ### Core ([backlog-core.md](backlog-core.md))
 
 - **Distribution** — remaining platforms (Linux, Teensy, RPi), code-signing (macOS/Windows), live RMII Ethernet reconfigure, installer UX polish, P4 DHCP-hostname recheck, S31 web-flash (waiting on esptool-js); DevicesModule interop growth (more plugins, the command half, live peer state).
-- **ESP32 performance & memory** — E1.31 multicast (IGMP), WiFi ArtNet perf matrix, async ArtNet send (PSRAM-only), network round-trip drop/reorder test, slow eth bring-up, non-PSRAM memory ceiling + boot-time buffer degradation, task core-pinning; ops: static IP on STA, MoonDeck doc-asset hardening, CI SHA-pinning.
+- **ESP32 performance & memory** — E1.31 multicast (IGMP), WiFi ArtNet perf matrix, async ArtNet send (PSRAM-only), network round-trip drop/reorder test, slow eth bring-up, non-PSRAM memory ceiling + boot-time buffer degradation; ops: static IP on STA, MoonDeck doc-asset hardening, CI SHA-pinning.
 - **Architecture** — disable-releases-resources, cross-module pin-uniqueness check, Improv-child-of-NetworkModule, `std::span` platform API, Improv-as-REST follow-ups, **live scripting** (on-device authored effects/layouts/modifiers/drivers/sensor logic — design phase, see the bottom-up survey); composition/config: runtime board presets, per-layout coordinate offset.
 - **HTTP & OTA** — HTTP file serving off the render tick; generic control + state topics over MQTT (the automation escape hatch beside the semantic HomeKit surface).
 - **Testing** — additional coverage (UI load time, teardown memory, JS harness), live full-suite state leak.
@@ -30,15 +30,15 @@ A map of everything in the three files, by theme.
 
 ### Light ([backlog-light.md](backlog-light.md))
 
-- **Drivers** — extract shared lane-driver scaffolding (on the 3rd backend), 1..8-pin LCD output, classic ESP32 I2S 16-lane driver.
-- **LED drivers — deferred** — sigrok flicker cross-check, core-1 driver task, fuller RMT error handling, per-driver buffer window, 16-bit/dither, moving-head preview interpreter.
+- **Drivers** — MoonI80 ring open instruments (multi-strand loopback, teardown leak/fragmentation, white-flash soak, shift-mode host coverage), classic-ESP32 shift ring on raw I2S (WANTED), P4 Parlio streaming ring (WANTED), shared lane-driver scaffolding (on the 3rd backend), ArtPoll discovery, RS-485/DMX wired output.
+- **LED drivers — deferred** — sigrok flicker cross-check, chunked/staged transfer (the 16K lever), fuller RMT error handling, per-driver buffer window, 16-bit/dither, moving-head preview interpreter.
 - **LCD / DMA driver work** — drop the i80 WR/DC sacrificial pins, LCD/Parlio DMA buffer → PSRAM.
 - **Effects & preview** — real z-axis in 2D effects, full-density interpolated preview, self-describing frame header, RGBW preview, fixture model (moving heads/beams), extract the resumable transport.
 - **Sensors & audio-reactive input** — audio follow-ups (per-band noise floor, adaptive gate), GyroDriver → core Peripheral move, Raspberry Pi 5 sensor input (mic/IMU/line-in).
 
 ### Mixed ([backlog-mixed.md](backlog-mixed.md))
 
-- MultiplyModifier mapping-LUT memory at large grids; intermittent ~0.5 s RMT LED pauses; NoiseEffect simplex cost on ESP32.
+- MultiplyModifier mapping-LUT memory at large grids; NoiseEffect simplex cost on ESP32.
 
 ## In-flight draft specs
 

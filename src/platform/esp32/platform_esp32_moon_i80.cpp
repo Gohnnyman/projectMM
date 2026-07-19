@@ -101,9 +101,22 @@ constexpr uint32_t kPclkHz = 2'666'666;
 // 26.67 MHz (prescale 3 off the 80 MHz bus resolution — still an exact divide):
 //     slot = 8 / 26.67 MHz  = 300 ns   T0H 300 (spec 200-380 ✓)  T1H 600 (spec 580-1000 ✓)
 //
-// **Do NOT "fix" flicker by lowering this clock** — a lower pclk makes the slot LONGER, pushing T0H
-// further past 380 ns. If the waveform needs adjusting, adjust it *up*.
-constexpr uint32_t kShiftPclkHz = 26'666'666;   // prescale 3 of 80 MHz -> 300 ns WS2812 slots
+// The '595 shift clock (SRCLK = the i80 WR) is the RUNTIME `shiftClockDiv` prescale off the 80 MHz bus
+// resolution. **Default 4 = 20 MHz — the reliability point, wall-verified on two rigs.** The window:
+//   div 3 (26.67 MHz): T0H 300 ns (strict spec) but a 28%-short bit (900 ns) and a shift rate marginal
+//     '595 strands (long runs, capacitive load) can't track — specific panels scramble while clean ones
+//     survive, and drive-strength CAP_3 does NOT help (bandwidth-bound, not edge-bound; both measured).
+//     The overclock option for short-wired rigs chasing the higher fps ceiling (151 vs 118 at 48×256).
+//   div 4 (20 MHz): T0H 400 ns (soft-max +6%, fine on modern WS2812), bit 1200 ns (near-spec), and the
+//     '595 gets 1.33× more shift margin — Yves (hpwit) ships his S3 driver at ~19.2 MHz for this reason.
+//   div 5 (16 MHz): T0H 500 ns crosses the WS2812's 0-vs-1 threshold — every bit reads "1", all-white.
+// Per-wall calibration: sweep up from the default until marginal strands are clean; all-white = one too far.
+constexpr uint8_t  kShiftClockDivDefault = 4;   // 80 MHz / 4 = 20 MHz
+constexpr uint32_t kShiftBusResolutionHz = 80'000'000;   // PLL160M / kClockPreScale — the prescale base
+// The live shift-clock prescale off the 80 MHz bus resolution, set per-build via moonI80SetShiftClockDiv
+// before an init. A file-static (not threaded through every Init signature) — it is a single global
+// peripheral-tuning knob, like a clock register, that the one MoonLed driver owns.
+uint8_t g_shiftClockDiv = kShiftClockDivDefault;
 
 // WS2812 latch/reset LOW: the spec is >=280-300 us; hpwit's rule is anything <150 us is read as a PAUSE
 // (data continues) not a reset. 350 us clears both with margin. The ring guarantees this as idle-LOW time
@@ -156,18 +169,15 @@ constexpr int kBusId = 0;
 // = 176 KB never fit the S3's ~160 KB free internal DMA heap), which caps that geometry near 240
 // lights/strand.
 //
-// **OPEN BUG — the frame breaks somewhere between 8 and 16 SLICES, and no mechanism is known.** Confirmed
-// on the wall (2026-07-17), one variable at a time, at a FIXED light count: 8 slices renders clean (as does
-// whole-frame), 16 slices scatters — with any buffer count, whether or not the DMA laps, and whether or not
-// the ISR encodes at all. Ruled out ON THE LEDS: buffer reuse (16 slices into 17 buffers never laps, still
-// scatters), the refill order, the encode deadline (`enc0` scatters; 65 µs/light at 3x over budget renders
-// fine), and the descriptor pool (36 nodes in both a clean and a scattered config).
-//
-// **The counters cannot see it**: with owner_check=false there is no handshake, so a torn or short read
-// raises NO error — descErr stays 0 and the timings look healthy while the frame is visibly broken. The
-// symptom is a CORRECT geometry drawn in SCATTERED DOTS (right bytes, chopped frame), which reads as a
-// latch/reset fault rather than a data fault. Do not trust a ring counter here; the wall is the instrument.
-// See docs/backlog/backlog-light.md for the full table and what to try next.
+// **The "scatter above ~8 slices" hunt (2026-07-17) — RESOLVED.** It read as an unknown mechanism at the
+// time, but it was two knowable, per-hardware faults the ring counters are structurally blind to: the
+// inter-slice pad LATCHING the strand (a LOW gap over the strip's reset threshold resets the address
+// pointer, repainting LEDs 0..ringRows-1 per slice — see ringPadUs), and the producer/consumer headroom
+// (bufs must lead slices; the near-prime pool is the fix). With ringAuto's geometry + a latch-safe pad,
+// 48×256 streams clean (wall-verified). The lasting lesson: with owner_check=false there is no handshake,
+// so a torn/short read raises NO error (descErr stays 0, timings look healthy) — a correct geometry drawn
+// in SCATTERED DOTS reads as a latch/reset fault, not a data fault. Do not trust a ring counter for that
+// class; the wall (or the loopback bit-verify) is the instrument.
 // A depth of 2 (IDF's RGB-LCD bounce-buffer count) BROKE transport: the loopback failed at bit 0, because
 // our chain runs owner_check=false and lacks the owner gate IDF's 2-buffer scheme relies on. Hence the
 // floor of 2 is a hard minimum, not a useful setting.
@@ -246,9 +256,11 @@ struct MoonI80State {
     // Descriptor nodes per ring buffer (a buffer larger than kDmaNodeMaxBytes spans >1 node). Buffer b's LAST
     // node is (b+1)*itemsPerBuf - 1 — the ISR needs this to splice the self-terminating NULL at the right node.
     uint8_t  itemsPerBuf = 1;
-    // Self-terminating chain (hpwit): the node whose `next` was spliced to NULL to end THIS frame, so the next
-    // arm can restore its loop link. -1 = no splice active (looping chain). The prime-only path splices at arm
-    // time (hazard-free); the DMA self-terminates there instead of a mid-frame gdma_stop racing the prefetcher.
+    // Self-terminating chain (hpwit): the descriptor node the prime-only path mounts NULL-terminated to end
+    // THIS frame (`bufLastNode[termBuf]`), captured for the `termNodeDiag` stat. -1 = no terminator (the
+    // lapping path's looping chain, stopped clock-keyed). The prime-only chain is mounted terminated at arm
+    // time (hazard-free): the DMA self-terminates there instead of a mid-frame gdma_stop racing the
+    // prefetcher. Diagnostic only — no splice/restore reads this; the chain is rebuilt each arm.
     int32_t  termNode = -1;
     // Each buffer's ACTUAL last descriptor node, captured from gdma_link_mount_buffers' endIdx during the
     // mount. The splice keys off THIS, not arithmetic: gdma_link_mount_buffers may allocate a different node
@@ -337,6 +349,10 @@ bool IRAM_ATTR moonI80DescErrCb(gdma_channel_handle_t, gdma_event_data_t*, void*
 // Forward decl: the ring branch of the EOF ISR below refills the drained buffer inline by calling this
 // (defined further down with the ring code). The move to an ISR-driven refill is the reuse-race fix.
 void encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t count);
+// The shared slice-fill (IRAM, defined with the ring code below); the EOF ISR refill calls it too. The
+// IRAM_ATTR goes on the DEFINITION only — repeating it here conflicts the .iram1 section (matches
+// encodeRingSlice's forward decl above). Returns true iff it ran a real encode (the ISR times only those).
+bool fillSlice(MoonI80State* st, uint8_t slot, uint32_t sliceIdx);
 
 // GDMA transfer-EOF callback: the descriptor chain hit its EOF node — pop the oldest started buffer
 // index, record the wire duration, and release THAT buffer's waiter.
@@ -348,16 +364,17 @@ void encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow, uint32_t
 // buffer at EOF, which is exactly the question the caller asks. The residual few-hundred-nanosecond
 // error in the wire-time KPI is far below its resolution.
 //
-// IRAM_ATTR: this runs in the GDMA interrupt. **The RING branch now calls encodeRingSlice → the domain
-// encode, which lives in FLASH** — so this handler is no longer purely IRAM-safe. That is deliberate and
-// safe: the channel does NOT set `isr_cache_safe`, so the interrupt is not `ESP_INTR_FLAG_IRAM` and a
-// flash-resident callback is permitted; it only faults if the ISR fires while the flash cache is disabled
-// (a SPI-flash write — OTA/NVS), which never overlaps rendering. This mirrors IDF's own RGB-LCD
-// bounce-buffer refill (esp_lcd_panel_rgb.c), whose EOF handler does the same real refill work and is only
-// forced into IRAM under the opt-in CONFIG_LCD_RGB_ISR_IRAM_SAFE (default off). The IRAM_ATTR is kept on
-// the handler ENTRY (cheap, keeps the dispatch + the whole-frame path's semaphore give resident); the
-// heavy encode it tail-calls is the part that stays in flash. The whole-frame branch below remains fully
-// IRAM-safe (esp_timer_get_time reads a hardware counter, xSemaphoreGiveFromISR, plain member stores).
+// IRAM_ATTR: this runs in the GDMA interrupt, and the RING branch calls encodeRingSlice → the domain
+// encode. That whole chain is IRAM-resident (MM_RAMFUNC), and the ring channel sets
+// `chanCfg.flags.isr_cache_safe = true` (see initRingDma) — a deliberate, shipped hardening: the ISR
+// fires at the wire rate, so a flash-cache miss inside it would blow the refill deadline. Because it is
+// cache-safe, the ISR may fire *while the flash cache is disabled* (a SPI-flash write — OTA/NVS), so the
+// slice encode MUST NOT touch flash-resident code/data: `startRingTransfer`/the refill defer when
+// `spi_flash_cache_enabled()` is false (see the guard below), and the batch catches up afterward. Do NOT
+// remove that guard or move the encode back to flash — either reintroduces the measured Cache-error panic.
+// The whole-frame branch is also IRAM-safe (esp_timer_get_time reads a hardware counter,
+// xSemaphoreGiveFromISR, plain member stores). Prior art: IDF's RGB-LCD bounce-buffer EOF refill
+// (esp_lcd_panel_rgb.c) does the same real work in-ISR under CONFIG_LCD_RGB_ISR_IRAM_SAFE.
 bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* user) {
     auto* st = static_cast<MoonI80State*>(user);
 
@@ -415,45 +432,18 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
                 const uint32_t s = st->lastWrittenSlice + 1u;
                 if (s > windowEnd || s > lastSliceEver) break;
                 const uint32_t slot = s % st->ringBufs;
-                const uint32_t firstRow = s * st->rowsPerBuf;
-                if (firstRow < st->totalRows) {
-                    uint32_t count = st->rowsPerBuf;
-                    bool shortSlice = false;
-                    if (firstRow + count >= st->totalRows) {
-                        // Short last real slice: encode `count` rows, then ZERO the rest of this rows-only
-                        // node so no stale rows clock as ghost pixels.
-                        count = st->totalRows - firstRow;
-                        if (count < st->rowsPerBuf) {
-                            std::memset(st->ring[slot] + static_cast<size_t>(count) * st->ringRowBytes, 0,
-                                        static_cast<size_t>(st->rowsPerBuf - count) * st->ringRowBytes);
-                            shortSlice = true;
-                        }
-                    }
-                    const int64_t encStart = esp_timer_get_time();   // REUSE-RACE INSTRUMENTATION (diagnostic)
-                    encodeRingSlice(st, static_cast<uint8_t>(slot), firstRow, count);
+                // Stale-on-the-wire detector: the drain of slice s begins at drainPos == s, so filling at
+                // or after that moment means the wire already clocked (part of) the OLD contents.
+                if (drainPos >= s) st->dbgLate = st->dbgLate + 1u;
+                const int64_t encStart = esp_timer_get_time();   // REUSE-RACE INSTRUMENTATION (diagnostic)
+                const bool realEncode = fillSlice(st, static_cast<uint8_t>(slot), s);
+                // Time only REAL encodes (fillSlice==true) — the `ea`/max pace numbers must reflect the
+                // refill that has to beat the slice deadline, not the cheap past-frame zero-fills.
+                if (realEncode) {
                     const uint32_t encUs = static_cast<uint32_t>(esp_timer_get_time() - encStart);
                     if (encUs > st->dbgMaxEncodeUs) st->dbgMaxEncodeUs = encUs;
-                    st->dbgEncSumUs = st->dbgEncSumUs + encUs;   // average = sum/count at readout
+                    st->dbgEncSumUs = st->dbgEncSumUs + encUs;    // average = sum/count at readout
                     st->dbgEncCount = st->dbgEncCount + 1u;
-                    // AFTER the encode (encodeRingSlice consumed this use's flag): the memset above erased
-                    // the tail rows' constants, so the buffer's NEXT full refill must re-prefill.
-                    if (shortSlice) st->bufNeedsPrefill[slot] = true;
-                    // Stale-on-the-wire detector: the drain of slice s begins at drainPos == s. Writing at
-                    // or after that moment means the wire already clocked (part of) the OLD contents.
-                    if (drainPos >= s) st->dbgLate = st->dbgLate + 1u;
-                } else {
-                    // Past the last real slice: the DMA will re-read this buffer on a later lap, so it must
-                    // clock ZEROS (a clean LOW tail), not stale pixel rows. The zero-fill erases the shift
-                    // constants — flag the re-prefill for the buffer's next frame.
-                    std::memset(st->ring[slot], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
-                    st->bufNeedsPrefill[slot] = true;
-                    // The FIRST slice past the frame carries the frame-closing word at its head (the
-                    // count==0 close call — see MoonI80EncodeFn): one more latch pulse so the register's
-                    // final slot actually presents on the strand before the idle-LOW reset. Later laps
-                    // stay pure zeros. Pinned by the loopback bit-verify (last bit of the last light).
-                    if (s == st->nSlices)
-                        st->encode(st->encodeUser, st->ring[slot], st->totalRows, 0,
-                                   /*closeFrame=*/true, /*needsPrefill=*/false);
                 }
                 st->lastWrittenSlice = s;
             }
@@ -653,12 +643,19 @@ void configureGpio(MoonI80State* st, const uint16_t* dataPins, uint8_t laneCount
         gpio_func_sel(static_cast<gpio_num_t>(dataPins[i]), PIN_FUNC_GPIO);
         esp_rom_gpio_connect_out_signal(dataPins[i], soc_lcd_i80_signals[kBusId].data_sigs[i],
                                         false, false);
+        // MAX drive strength (~40 mA) on every routed pin — data AND the '595 latch (which rides a data
+        // lane). Strong pads = sharp edges, which is what a 74HCT595 needs to sample cleanly at the
+        // shift-clock rate over real strand wiring: marginal strands (long runs, capacitive load) lose the
+        // most signal margin, and the strongest edge buys it back. hpwit sets GPIO_DRIVE_CAP_3 on all
+        // '595 pins for the same reason.
+        gpio_set_drive_capability(static_cast<gpio_num_t>(dataPins[i]), GPIO_DRIVE_CAP_3);
         if (i < n) st->routedPins[i] = dataPins[i];   // recorded for teardown (see destroyState)
     }
     st->routedPinCount = n;
     if (routeWr) {
         gpio_func_sel(static_cast<gpio_num_t>(wrGpio), PIN_FUNC_GPIO);
         esp_rom_gpio_connect_out_signal(wrGpio, soc_lcd_i80_signals[kBusId].wr_sig, false, false);
+        gpio_set_drive_capability(static_cast<gpio_num_t>(wrGpio), GPIO_DRIVE_CAP_3);   // SRCLK edge
         st->routedWrGpio = wrGpio;
     }
 }
@@ -742,8 +739,11 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     st->busWidth = laneCount <= 8 ? 8 : 16;
 
     // A '595 expander shifts each WS2812 slot out over `clockMultiplier` bus words, so the bus must
-    // clock proportionally faster to keep the slot inside the WS2812 bit window. See kShiftPclkHz.
-    const uint32_t pclkHz = (clockMultiplier > 1) ? kShiftPclkHz : kPclkHz;
+    // clock proportionally faster to keep the slot inside the WS2812 bit window. See kShiftClockDivDefault.
+    // Shift mode: the '595 SRCLK = the 80 MHz bus resolution / the runtime shiftClockDiv (default 3 =
+    // 26.67 MHz). initPeripheral recomputes the exact prescale from the clock tree, so this only needs
+    // to be the intended rate. Direct mode is unaffected (kPclkHz).
+    const uint32_t pclkHz = (clockMultiplier > 1) ? (kShiftBusResolutionHz / g_shiftClockDiv) : kPclkHz;
     if (!initPeripheral(st, pclkHz) || !initDma(st, bufferBytes)) {
         destroyState(st);
         return nullptr;
@@ -934,40 +934,49 @@ void IRAM_ATTR encodeRingSlice(MoonI80State* st, uint8_t slot, uint32_t firstRow
 // refills each drained buffer with the next slice and STOPS the engine once nSlices slices have drained.
 // Re-arming from the head each frame restarts the loop (the previous frame's ISR stopped the DMA on its
 // drain counter, so gdma_start here is a clean re-arm).
-// Prime ring buffers [bufLo, bufHi) with their slices — each buffer is INDEPENDENT (its rows derive
-// from its index: buffer b holds rows [b·rowsPerBuf, …)), so two cores may prime DISJOINT ranges
-// concurrently — the dual-core fork-join the driver orchestrates. A buffer holding a real slice gets its
-// rows encoded (tail zeroed on the short last slice); a buffer past the frame's slices is fully zeroed so
-// the loop clocks clean LOW there. No latch pad: the reset comes from the stop, never a pad in a node.
+// Fill buffer `slot` with slice `sliceIdx` — the ONE place the slice-fill rule lives, called by both the
+// prime (buffer b = slice b, one lap) and the EOF-ISR refill (slot = s % ringBufs, slice s, any lap). A
+// buffer holding a real slice gets its rows encoded (tail zeroed on the short last slice, flagged for
+// re-prefill); a buffer PAST the frame's slices is fully zeroed so the loop clocks clean LOW, and the
+// FIRST past-frame buffer (sliceIdx == nSlices) carries the frame-closing latch word at its head — one
+// more latch so the register's final slot presents before the idle-LOW reset (see MoonI80EncodeFn's
+// close call; pinned by the loopback bit-verify). IRAM: reached from the ISR encode chain.
+// Returns TRUE when it ran a REAL encode (not a zero-fill) — the ISR times only those (the `ea` pace
+// number is "average real refill cost", which must beat the slice deadline; cheap zero-fills would dilute it).
+bool IRAM_ATTR fillSlice(MoonI80State* st, uint8_t slot, uint32_t sliceIdx) {
+    const uint32_t firstRow = sliceIdx * st->rowsPerBuf;
+    if (firstRow < st->totalRows) {
+        uint32_t count = st->rowsPerBuf;
+        bool shortSlice = false;
+        if (firstRow + count >= st->totalRows) {
+            count = st->totalRows - firstRow;
+            if (count < st->rowsPerBuf) {
+                std::memset(st->ring[slot] + static_cast<size_t>(count) * st->ringRowBytes, 0,
+                            static_cast<size_t>(st->rowsPerBuf - count) * st->ringRowBytes);
+                shortSlice = true;
+            }
+        }
+        encodeRingSlice(st, slot, firstRow, count);
+        // AFTER the encode (it consumed this use's prefill flag): the tail memset erased those rows'
+        // constants, so the buffer's next full use must re-prefill.
+        if (shortSlice) st->bufNeedsPrefill[slot] = true;
+        return true;
+    }
+    std::memset(st->ring[slot], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
+    st->bufNeedsPrefill[slot] = true;   // zero-filled: constants gone until re-prefilled
+    if (sliceIdx == st->nSlices)
+        st->encode(st->encodeUser, st->ring[slot], st->totalRows, 0,
+                   /*closeFrame=*/true, /*needsPrefill=*/false);
+    return false;
+}
+
+// Prime ring buffers [bufLo, bufHi) — each buffer is INDEPENDENT (buffer b holds slice b's rows), so two
+// cores prime DISJOINT ranges concurrently (the dual-core fork-join). No latch pad: the reset comes from
+// the stop, never a pad in a node.
 void primeRingRange(MoonI80State* st, uint8_t bufLo, uint8_t bufHi) {
     if (bufHi > st->ringBufs) bufHi = st->ringBufs;
-    for (uint8_t primed = bufLo; primed < bufHi; primed++) {
-        const uint32_t firstRow = static_cast<uint32_t>(primed) * st->rowsPerBuf;
-        if (firstRow < st->totalRows) {
-            uint32_t count = st->rowsPerBuf;
-            bool shortSlice = false;
-            if (firstRow + count >= st->totalRows) {
-                count = st->totalRows - firstRow;
-                if (count < st->rowsPerBuf) {
-                    std::memset(st->ring[primed] + static_cast<size_t>(count) * st->ringRowBytes, 0,
-                                static_cast<size_t>(st->rowsPerBuf - count) * st->ringRowBytes);
-                    shortSlice = true;
-                }
-            }
-            encodeRingSlice(st, primed, firstRow, count);
-            // The tail memset erased those rows' constants — the buffer's next (full) use must re-prefill.
-            // Set AFTER the encode, which consumed this use's flag (same order as the ISR refill).
-            if (shortSlice) st->bufNeedsPrefill[primed] = true;
-        } else {
-            std::memset(st->ring[primed], 0, static_cast<size_t>(st->rowsPerBuf) * st->ringRowBytes);
-            st->bufNeedsPrefill[primed] = true;   // zero-filled: constants gone until re-prefilled
-            // First past-frame buffer: the frame-closing word at its head (same rule as the ISR's
-            // zero-lap — see MoonI80EncodeFn's close call).
-            if (primed == st->nSlices)
-                st->encode(st->encodeUser, st->ring[primed], st->totalRows, 0,
-                           /*closeFrame=*/true, /*needsPrefill=*/false);
-        }
-    }
+    for (uint8_t primed = bufLo; primed < bufHi; primed++)
+        fillSlice(st, primed, primed);   // first lap: buffer index IS the slice index
 }
 
 // Arm the primed ring: peripheral setup, the timed WS2812-reset guard, the oracle epoch, gdma_start.
@@ -1128,7 +1137,10 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
     st->encodeUser = user;
     st->cap = st->rowsPerBuf * rowBytes;   // reported buffer capacity (one ring buffer — ROWS ONLY, no pad)
 
-    const uint32_t pclkHz = (clockMultiplier > 1) ? kShiftPclkHz : kPclkHz;
+    // Shift mode: the '595 SRCLK = the 80 MHz bus resolution / the runtime shiftClockDiv (default 3 =
+    // 26.67 MHz). initPeripheral recomputes the exact prescale from the clock tree, so this only needs
+    // to be the intended rate. Direct mode is unaffected (kPclkHz).
+    const uint32_t pclkHz = (clockMultiplier > 1) ? (kShiftBusResolutionHz / g_shiftClockDiv) : kPclkHz;
     // The clock oracle's tick: one slice's exact wire duration in ns. The bus clocks busWidth/8 bytes per
     // pclk, so ns = bytes × 8e9 / (busWidth × pclkHz); the inter-buffer pad (below) extends every slice's
     // slot by padUs. Exact integer math — the oracle's only error source is esp_timer resolution (µs).
@@ -1370,6 +1382,16 @@ bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uin
     if (!st) return false;
     h.impl = st;
     return true;
+}
+
+// Set the '595 shift-clock prescale (off the 80 MHz bus resolution) for the NEXT init: 3 = 26.67 MHz
+// (default), 4 = 20 MHz, 5 = 16 MHz. A strip whose '595s can't shift reliably at the default steps this
+// up (slower clock = more shift margin, longer T0H). Takes effect on the next bus (re)build; the driver
+// makes its shiftClockDiv control a rebuild trigger. Clamped to the valid prescale range.
+void moonI80SetShiftClockDiv(uint8_t div) {
+    if (div < 3) div = 3;                      // 80/3 = 26.67 MHz is the fastest in-spec-T0H rate
+    if (div > LCD_LL_PCLK_DIV_MAX) div = LCD_LL_PCLK_DIV_MAX;
+    g_shiftClockDiv = div;
 }
 
 void moonI80Ws2812PrimeRange(MoonI80Ws2812Handle& h, uint8_t bufLo, uint8_t bufHi) {
@@ -1701,7 +1723,10 @@ RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCo
     // (26.67 MHz ÷ 8 = 3.33 MHz → a 300 ns slot). Passing the bus rate here makes the capture expect
     // the wrong pulse width and size the window for a frame 8× too short — a decode that matches
     // nothing on a strand whose LEDs are visibly lighting.
-    const uint32_t slotHz = pinExpanderMode ? (kShiftPclkHz / clockMultiplier) : kPclkHz;
+    // The verifier's slot rate must match the LIVE wire — derive it from the runtime divider, not a
+    // constant, or a non-default shiftClockDiv makes the capture expect the wrong pulse widths.
+    const uint32_t slotHz = pinExpanderMode
+        ? (kShiftBusResolutionHz / g_shiftClockDiv / clockMultiplier) : kPclkHz;
     detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, slotHz, pinExpanderMode,
                                   MOON_I80_TAG, transmitOnce, r, /*rideMode=*/false, rxSymbols);
     destroyState(st);
@@ -1723,6 +1748,7 @@ bool moonI80Ws2812InitRing(MoonI80Ws2812Handle&, const uint16_t*, uint8_t, uint1
     return false;
 }
 bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle&) { return false; }
+void moonI80SetShiftClockDiv(uint8_t) {}
 void moonI80Ws2812PrimeRange(MoonI80Ws2812Handle&, uint8_t, uint8_t) {}
 bool moonI80Ws2812ArmRing(MoonI80Ws2812Handle&) { return false; }
 bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle&) { return false; }

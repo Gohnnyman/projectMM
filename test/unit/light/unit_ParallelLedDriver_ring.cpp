@@ -347,8 +347,8 @@ public:
     void copyRangeForTest(mm::nrOfLightsType lo, mm::nrOfLightsType hi) { this->copyRange(lo, hi); }
     mm::nrOfLightsType winLenForTest() const { return this->winLen_; }
     size_t snapshotCapForTest() const { return this->snapshotCap_; }
-    static mm::nrOfLightsType snapHalfForTest(mm::nrOfLightsType n, size_t outCh) {
-        return snapLineAlignedHalf(n, outCh);
+    static mm::nrOfLightsType snapHalfForTest(mm::nrOfLightsType n, size_t chStride) {
+        return snapLineAlignedHalf(n, chStride);
     }
 
 private:

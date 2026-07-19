@@ -78,11 +78,11 @@ public:
     /// A rebuild (layout add/replace/remove, resize, modifier change) ran — the
     /// light set / positions may have changed, so rebuild + broadcast the coordinate
     /// table (the MoonLight "positions once at mapping time"). Cancels any in-flight
-    /// resumable colour send *first*: a resize frees+reallocs the producer buffer, so
+    /// resumable color send *first*: a resize frees+reallocs the producer buffer, so
     /// a half-sent frame would read freed memory — a use-after-free guard pinned by a
     /// test. This coupling spans PreviewDriver ↔ HttpServerModule ↔ the Layer buffer.
     void prepare() override {
-        // A resize frees+reallocs the producer buffer, so any in-flight resumable colour send holds
+        // A resize frees+reallocs the producer buffer, so any in-flight resumable color send holds
         // a pointer that's about to dangle — cancel it BEFORE the rebuild (the browser discards the
         // half-sent message and gets the fresh table + frame next tick). Guards a use-after-free.
         // The cancel also covers stage_: with no drain in flight, the grow below can't dangle it.
@@ -106,7 +106,7 @@ public:
     }
 
     /// Per-tick: (re)stream the coordinate table when the geometry or client set
-    /// changed, then stream one colour frame if the previous one finished draining.
+    /// changed, then stream one color frame if the previous one finished draining.
     /// The frame rate self-limits to what the link sustains (sheds rate first, then
     /// spatial resolution via adaptive downscale), so a large grid never stalls the
     /// loop or tears — it always delivers a complete frame.
@@ -133,14 +133,14 @@ public:
         // resize / LUT rebuild), when a new client connects (clientGeneration bump, so a page
         // refresh gets positions immediately), when the adaptive factor changes, or while a
         // previous stream didn't reach every client (coordPending_ retry). NOT per frame: the
-        // colour frames below reference the last-streamed positions. coordCount_==0 = cold start.
+        // color frames below reference the last-streamed positions. coordCount_==0 = cold start.
         uint32_t gen = broadcaster_ ? broadcaster_->clientGeneration() : 0;
         if (coordCount_ == 0 || gen != lastClientGen_ || coordPending_) {
             lastClientGen_ = gen;
             buildAndSendCoordTable();   // streams positions; sets coordPending_ if not all clients got it
         }
 
-        // ADAPTIVE FRAME RATE. The full-res colour frame streams resumably (sendBufferedFrame drains
+        // ADAPTIVE FRAME RATE. The full-res color frame streams resumably (sendBufferedFrame drains
         // across transport ticks), so a frame only starts once the previous one fully drained. We
         // gate on that: idle → send the next frame now; still draining → skip this slot. The
         // EFFECTIVE fps therefore self-limits to what the link sustains — fast links hit the fps
@@ -250,7 +250,7 @@ public:
         // Count the lights the lattice keeps. A dense grid in natural order (no LUT) is a regular
         // box, so the kept count is closed-form: ceil(size/s) per axis — no walk. A sparse/mapped
         // layout (LUT) has an arbitrary index↔position map, so it's counted by one forEachCoord
-        // pass applying the same lattice predicate the colour/coord passes use (colour[k] ↔ coord[k]
+        // pass applying the same lattice predicate the color/coord passes use (color[k] ↔ coord[k]
         // line up by shared order, no stored index map).
         if (denseGrid()) {
             const nrOfLightsType cx = (ax + s - 1) / s, cy = (ay + s - 1) / s, cz = (az + s - 1) / s;
@@ -301,7 +301,7 @@ public:
         // Push the kept lights' scaled positions in small slices through a stack scratch. A dense
         // grid strides its box directly (closed-form, no walk over skipped cells); a sparse/mapped
         // layout walks forEachCoord with the lattice predicate. BOTH visit the kept lights in the
-        // SAME order the colour pass uses, so colour[k] ↔ coord[k] line up. The C callback can't
+        // SAME order the color pass uses, so color[k] ↔ coord[k] line up. The C callback can't
         // capture, so it shares PosCtx (used by both the dense loop and the sparse callback).
         struct PosCtx {
             PreviewDriver* self; mm::BinaryBroadcaster* bc; nrOfLightsType s;
@@ -320,7 +320,7 @@ public:
                 for (lengthType y = 0; y < ay; y += s)
                     for (lengthType x = 0; x < ax; x += s) pc.emit(x, y, z);
         } else {
-            // While emitting coords, CACHE the kept lights' buffer indices — the per-frame colour
+            // While emitting coords, CACHE the kept lights' buffer indices — the per-frame color
             // gather then loops this index map instead of re-walking forEachCoord over every light
             // (an O(total-lights) callback walk per firing, measured ~8 ms at 12K lights on the
             // encode worker). The map's lifecycle IS the coord table's: same pass, same invalidation.
@@ -334,9 +334,9 @@ public:
             }, &pc);
         }
         if (pc.fill) broadcaster_->pushBinaryFrame(pc.buf, pc.fill);
-        // The coord table must reach the browser before colour frames carrying the new count (the
+        // The coord table must reach the browser before color frames carrying the new count (the
         // browser skips a count-mismatched 0x02). endBinaryFrame() reports whether every client got
-        // it; tick() retries while coordPending_ and withholds colour frames until it lands.
+        // it; tick() retries while coordPending_ and withholds color frames until it lands.
         coordPending_ = !broadcaster_->endBinaryFrame();
     }
 
@@ -376,7 +376,7 @@ public:
         // the socket drain happens on the transport's ticks, not here. Building + pushing this payload
         // through the synchronous begin/push/end stream instead measured ~17 ms per firing on the
         // encode worker at 12K lights — a sub-hot-path violation this resumable handoff removes. The
-        // kept subset + order MUST match the coord table's, so colour[k] ↔ coord[k] line up (the
+        // kept subset + order MUST match the coord table's, so color[k] ↔ coord[k] line up (the
         // browser drops a count/stride-mismatched frame). A dense grid strides its box directly —
         // light (x,y,z) is at buffer index z·H·W + y·W + x, closed-form, no walk over skipped cells. A
         // sparse/mapped layout walks forEachCoord with the same lattice predicate (its index↔position
@@ -437,7 +437,7 @@ public:
     }
 
 private:
-    /// (Re)size the staging buffer the downsampled/non-RGB colour path gathers into — the stable body
+    /// (Re)size the staging buffer the downsampled/non-RGB color path gathers into — the stable body
     /// the resumable buffered send drains across transport ticks. Sized to the point cap (grow-only,
     /// off the hot path, from prepare). An alloc miss degrades to skipped frames, never a stall.
     /// Free the resumable-path buffers + refresh the memory readout. Cancels any in-flight send first —
@@ -483,7 +483,7 @@ private:
     bool resumableFrames = true;   // A/B: downsampled frame via resumable send (ON) vs synchronous (OFF)
     bool stageAllocFailed_ = false;    // resumable staging buffer couldn't allocate → synchronous fallback
     bool keptIdxAllocFailed_ = false;  // index cache couldn't allocate → per-frame lattice walk
-    uint8_t* stage_ = nullptr;   // gathered colour payload for the resumable send (see ensureStage)
+    uint8_t* stage_ = nullptr;   // gathered color payload for the resumable send (see ensureStage)
     size_t stageCap_ = 0;
     nrOfLightsType* keptIdx_ = nullptr;   // sparse layouts: kept lights' buffer indices, coord-table order
     nrOfLightsType keptIdxCap_ = 0, keptCount_ = 0;
@@ -501,14 +501,14 @@ private:
     // engages — derived at runtime from free contiguous memory, not a fixed per-board constant
     // (architecture.md § Scaling to available memory: "sizes determined at runtime based on
     // available memory"). There is no per-frame buffer; the cap bounds the transient work the coord
-    // table build (3 bytes/point in flight to the socket) and the resumable colour send impose. So
+    // table build (3 bytes/point in flight to the socket) and the resumable color send impose. So
     // a fragmented classic downscales SOONER (less contiguous RAM) while a roomy PSRAM board goes
     // far higher — one rule, every board, measured not assumed. The spatial-lattice downsample is
     // the graceful fallback above the cap.
     // True when the source is a dense grid in natural box order (no mapping LUT): driver index i is
     // exactly box cell i, so the kept-light set + each light's buffer index are CLOSED-FORM from the
     // box dimensions and the stride — no forEachCoord walk needed (the count, the coord positions,
-    // and the downsampled colours all stride the box directly). A LUT means a sparse / serpentine /
+    // and the downsampled colors all stride the box directly). A LUT means a sparse / serpentine /
     // modified layout whose index↔position map is arbitrary, so those paths must walk forEachCoord.
     // Mirrors the Layer's own dense-vs-LUT decision (Layer::isNaturalOrder gates lut_.setIdentity),
     // so the two agree: no LUT ⇔ Drivers passed the dense box buffer ⇔ closed-form is valid here.
@@ -570,7 +570,7 @@ private:
     uint32_t lastClientGen_ = 0;   // last seen broadcaster_->clientGeneration() — re-send coords on change
 
     // Adaptive downscaling. The preview streams at the finest resolution the link sustains.
-    // The streamed send is all-or-nothing per client, so a frame (colour or coord table) that
+    // The streamed send is all-or-nothing per client, so a frame (color or coord table) that
     // doesn't reach every client means the link can't keep up at this resolution: coarsen
     // (downscale_++) after a short run of such frames so the rebuilt lattice sends fewer points.
     // A sustained run of fully-sent frames refines back toward full resolution (downscale_--).

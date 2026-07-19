@@ -374,7 +374,12 @@ public:
         // Step 2b trigger metric: ~0 when render ≈ encode (heavy effect), large when render ≪ encode.
         if (renderSplitActive_) {
             uint32_t s0 = platform::micros();
-            quiesceEncode();
+            // A TIMED-OUT quiesce means the worker is wedged — quiesceEncode() cleared renderSplitActive_
+            // so future ticks run inline, but THIS tick is about to composite outputBuffer_ and tick every
+            // driver inline on core 0 while the wedged worker may STILL be inside a driver's tick() on core
+            // 1 (two cores in one driver → double transmit, corrupted inFlight_). So JOIN it first, exactly
+            // as prepare() and quiesce() do — the join is slow, but this is the declared-broken path.
+            if (!quiesceEncode()) stopEncodeTask();
             renderWaitUs_ = static_cast<uint32_t>(platform::micros() - s0);
             if (renderWaitUs_ > renderWaitPeakUs_) renderWaitPeakUs_ = renderWaitUs_;   // the 1 s window's worst, for the KPI
         }

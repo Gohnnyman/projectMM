@@ -6,6 +6,8 @@
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared)
 #include "platform/platform.h"
 
+#include <numeric>  // std::gcd — the snapshot split's cache-line alignment
+
 namespace mm {
 
 template <class Derived>
@@ -430,8 +432,6 @@ public:
         if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
         // Loopback mode owns the peripheral EXCLUSIVELY. While it is on, the render loop must not
         // transmit — the loopback tears the bus down, drives its own private frame, and rebuilds it.
-        // KNOWN BUG (backlog): after toggling OFF, the shift-mode bus does not deliver frames until a
-        // reboot ("output stalled") — a no-reboot-principle violation still under investigation.
         if (loopbackTest) return;
         if (!inited_ || !dmaBuf_ || !sourceBuffer_ || !sourceBuffer_->data()
             || laneCount_ == 0 || maxLaneLights_ == 0) return;
@@ -1137,12 +1137,16 @@ protected:
     /// half then owns whole lines, so the two cores never write into a shared line (false sharing). The
     /// line holds `64 / outCh` lights (rounded down); align the boundary to a whole number of them.
     static nrOfLightsType snapLineAlignedHalf(nrOfLightsType winLights, size_t chStride) {
-        const nrOfLightsType lightsPerLine = static_cast<nrOfLightsType>(64u / (chStride ? chStride : 1));
-        if (lightsPerLine < 2) return winLights / 2;                 // wide pixels: plain halve
+        if (chStride == 0) return winLights / 2;
+        // The MINIMAL light count whose byte extent is a whole number of 64-byte cache lines is
+        // 64 / gcd(64, stride) lights (stride 3 → 64 lights = 3 lines; stride 4 → 16 lights = 1 line).
+        // A plain 64/stride rounds DOWN (stride 3 → 21 lights = 63 bytes) and misses the line boundary,
+        // silently re-introducing the false sharing this split exists to avoid.
+        const auto lightsPerAlign = static_cast<nrOfLightsType>(64 / std::gcd(size_t{64}, chStride));
         nrOfLightsType half = winLights / 2;
-        half -= half % lightsPerLine;                                 // round DOWN to a line boundary
-        if (half == 0) half = lightsPerLine;                          // never give the helper nothing
-        return half < winLights ? half : winLights / 2;
+        half -= half % lightsPerAlign;                                // round DOWN to a line boundary
+        if (half == 0) half = lightsPerAlign;                         // never give the helper nothing
+        return half < winLights ? half : winLights / 2;               // tiny window: plain (unaligned) halve
     }
     // INTRUSIVE loopback pattern hold: which strand carries the pinned pattern (-1 = off), and the RGB bytes
     // (the recognisable 0xA5/0x00/0xFF the bit-verify expects). Set around the capture in runIntrusiveLoopback.
