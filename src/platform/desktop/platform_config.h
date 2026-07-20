@@ -4,6 +4,10 @@
 
 #include <cstdint>
 
+// MM_RAMFUNC — RAM-resident code attribute for deadline-bound ISR paths (see the ESP32
+// platform_config.h for the rationale). Desktop code always executes from RAM; empty.
+#define MM_RAMFUNC
+
 namespace mm::platform {
 
 constexpr bool hasPsram = true;
@@ -22,7 +26,7 @@ constexpr uint8_t lcdLanes = 0;
 // No Parlio peripheral — the Parlio LED driver guards on this and is inert too.
 constexpr uint8_t parlioLanes = 0;
 
-// No I2S-i80 peripheral — I80LedDriver's lanesAvailable() reads lcdLanes + i2sLanes;
+// No I2S-i80 peripheral — MultiPinLedDriver's lanesAvailable() reads lcdLanes + i2sLanes;
 // both 0 on desktop, so the driver is inert (host tests exercise only its parse/slice math).
 constexpr uint8_t i2sLanes = 0;
 

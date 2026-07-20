@@ -21,9 +21,11 @@
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_memory_utils.h"   // esp_ptr_external_ram — the ptrIsPsram residency probe
 #include "esp_cache.h"        // esp_cache_msync — I-cache sync after writing MoonLive code to IRAM
 #include "esp_system.h"
 #include "esp_chip_info.h"
+#include "esp_cpu.h"       // esp_cpu_get_cycle_count — the cycleCount() seam
 #include "esp_mac.h"
 #include "esp_idf_version.h"
 #include "esp_partition.h"
@@ -105,6 +107,16 @@ void* alloc(size_t bytes) {
     if (ptr) return ptr;
 #endif
     return heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
+}
+
+void* allocInternal(size_t bytes) {
+    // Internal only, no PSRAM fallback here — the caller chose this seam because PSRAM latency breaks it
+    // (an ISR-read buffer); a silent PSRAM grant would hand back the exact problem. Caller falls back.
+    return heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+bool ptrIsPsram(const void* p) {
+    return p != nullptr && esp_ptr_external_ram(p);
 }
 
 void free(void* ptr) {
@@ -253,6 +265,24 @@ const char* chipModel() {
         case CHIP_ESP32P4: return "ESP32-P4";
         default:           return "ESP32-?";
     }
+}
+
+uint32_t IRAM_ATTR cycleCount() { return esp_cpu_get_cycle_count(); }
+
+uint8_t currentCore() { return static_cast<uint8_t>(xPortGetCoreID()); }
+
+const char* cpuInfo() {
+    // Frequency from the running clock (esp_rom_get_cpu_ticks_per_us == MHz), not the sdkconfig macro,
+    // so a config/hardware mismatch shows up. Cores from esp_chip_info, same source chipModel uses.
+    static char buf[24] = {};
+    if (!buf[0]) {
+        esp_chip_info_t info;
+        esp_chip_info(&info);
+        std::snprintf(buf, sizeof(buf), "%u MHz, %u cores",
+                      static_cast<unsigned>(esp_rom_get_cpu_ticks_per_us()),
+                      static_cast<unsigned>(info.cores));
+    }
+    return buf;
 }
 
 const char* hostIp() {
@@ -774,16 +804,53 @@ void ethGetIPv4(uint8_t out[4])         { out[0] = out[1] = out[2] = out[3] = 0;
 
 #ifndef MM_NO_WIFI
 
+// Set while a deliberate teardown (wifiStaStop) is in progress, so the disconnect it provokes is
+// not answered with a reconnect — that would race esp_wifi_deinit() with an in-flight connect.
+// Atomic, not volatile: it is written from a task and read from IDF's event-loop task, and volatile
+// carries no atomicity or ordering guarantee — only the compiler's promise not to elide the access.
+static std::atomic<bool> wifiStaStopping_{false};
+
+// How many stations are associated with our SoftAP right now. Written from IDF's event-loop task,
+// read from the render task, so it is atomic.
+static std::atomic<uint32_t> apClients_{0};
+
 // WiFi event handler
 static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                              int32_t id, void* data) {
     if (base == WIFI_EVENT) {
         if (id == WIFI_EVENT_STA_DISCONNECTED) {
-            ESP_LOGI(NET_TAG, "WiFi STA disconnected");
             wifiStaConnected_ = false;
+            // **The reconnect must be explicit — IDF does not do it for us.** Without this
+            // esp_wifi_connect(), a dropped association is permanent: the device keeps rendering but
+            // is unreachable until it is power-cycled, which for a controller in a ceiling is a real
+            // failure. Espressif's own wifi_station example has the same call in the same place.
+            //
+            // The retry is unbounded by design: the recoverable causes (a router rebooting, a device
+            // briefly out of range) outlast any retry count, and self-healing is the entire point.
+            if (!wifiStaStopping_.load(std::memory_order_relaxed)) {
+                // Reconnect immediately, and do NOT sleep to pace it: this runs on IDF's event-loop
+                // task, which also carries the Ethernet and IP events, so blocking here stalls the
+                // whole networking stack. The pacing is free — a failing association takes its own
+                // ~1-2 s to time out before the next DISCONNECTED event arrives, so even a wrong
+                // credential retries at a sane rate rather than spinning. (The counter is diagnostic;
+                // it does not gate the retry.)
+                static uint32_t attempts = 0;
+                if (attempts < UINT32_MAX) attempts++;
+                ESP_LOGI(NET_TAG, "WiFi STA disconnected — reconnecting (attempt %u)",
+                         (unsigned)attempts);
+                esp_wifi_connect();
+            } else {
+                ESP_LOGI(NET_TAG, "WiFi STA disconnected");
+            }
         } else if (id == WIFI_EVENT_AP_STACONNECTED) {
+            // Track the count so the AP-fallback's periodic STA retry can hold off while somebody is
+            // actually using the portal: re-initialising STA switches the radio to WIFI_MODE_STA,
+            // which drops the AP. See NetworkModule's State::AP retry.
+            apClients_.fetch_add(1, std::memory_order_relaxed);
             ESP_LOGI(NET_TAG, "WiFi AP client connected");
         } else if (id == WIFI_EVENT_AP_STADISCONNECTED) {
+            uint32_t n = apClients_.load(std::memory_order_relaxed);
+            if (n > 0) apClients_.fetch_sub(1, std::memory_order_relaxed);
             ESP_LOGI(NET_TAG, "WiFi AP client disconnected");
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -919,6 +986,9 @@ void wifiStaGetIPv4(uint8_t out[4]) {
 }
 
 void wifiStaStop() {
+    // Tell the event handler this disconnect is deliberate, so it does not answer with a
+    // reconnect that would then race esp_wifi_deinit() below.
+    wifiStaStopping_.store(true, std::memory_order_relaxed);
     esp_wifi_disconnect();
     esp_wifi_stop();
     // Unregister event handlers before deinit so subsequent init/stop cycles
@@ -935,6 +1005,7 @@ void wifiStaStop() {
     }
     wifiStaConnected_ = false;
     wifiInitDone_ = false;
+    wifiStaStopping_.store(false, std::memory_order_relaxed);   // a later wifiStaInit() reconnects normally
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
 }
 
@@ -1005,6 +1076,7 @@ bool wifiApInit(const char* apName, const char* ip) {
     }
 
     wifiApActive_ = true;
+    apClients_.store(0, std::memory_order_relaxed);
     ESP_LOGI(NET_TAG, "WiFi AP started: %s @ %s", apName ? apName : "?", ip ? ip : "?");
     return true;
 }
@@ -1012,6 +1084,8 @@ bool wifiApInit(const char* apName, const char* ip) {
 bool wifiApConnected() {
     return wifiApActive_;
 }
+
+uint32_t wifiApClientCount() { return apClients_.load(std::memory_order_relaxed); }
 
 void wifiApStop() {
     esp_wifi_stop();
@@ -1027,6 +1101,7 @@ void wifiApStop() {
         apNetif_ = nullptr;
     }
     wifiApActive_ = false;
+    apClients_.store(0, std::memory_order_relaxed);
     wifiInitDone_ = false;
     ESP_LOGI(NET_TAG, "WiFi AP stopped + deinit");
 }
@@ -1072,6 +1147,7 @@ int wifiStaChannel() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+uint32_t wifiApClientCount() { return 0; }
 int wifiTxPower() { return 0; }
 // Match the API contract: 0 is a successful no-op even when WiFi isn't
 // compiled in. Any non-zero value (actual cap attempt) returns false

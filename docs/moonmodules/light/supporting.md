@@ -48,12 +48,11 @@ The container of driver modules — owns the shared driver buffer and the per-li
 
 <img src="../../assets/light/Drivers.png" width="300" alt="Drivers container with the on/off + brightness controls">
 
-- `on` — master power (default on). Turning it off scales the whole output to black while preserving `brightness`, so on restores the exact level. The single power control every consumer drives (the UI toggle, IR's on/off, the WLED app / Home Assistant, MQTT/Homebridge) through `Scheduler::setControl`.
-- `brightness` — global output brightness (0–255).
-- `lightPreset` — the output-correction preset (colour order, gamma, brightness) every driver applies.
+- `on` — master power (default on). Off scales the output to black while preserving `brightness`, so on restores the exact level. The one power control every consumer drives (the UI, IR, the WLED app / Home Assistant, MQTT).
+- `brightness` — global output brightness (0–255), multiplied with each driver's own `localBrightness`.
 - `palette` — the active palette effects sample from.
-- `multicore` — run the whole output stage on the second core (default on). Every driver's per-frame work — the LED encode, the ArtNet packet build, the preview frame build — moves to a core-1 task while the render loop draws the next frame on core 0, so a frame costs `max(render, output)` instead of `render + output`. The encode alone is ~3 µs/light (≈50 ms at 16K lights), so this both lifts fps and stops the output work starving the network stack, which shares core 0. It costs one frame buffer (the stable frame core 1 reads while core 0 renders the next); if that buffer doesn't fit, the split simply doesn't engage and everything runs on one core exactly as before — the switch stays on, and the split re-engages by itself when the memory is there. **On is simply the better configuration** — the switch is there to A/B it (and as an escape hatch), not because some setups should run it off. Turning it off forces the single-core path. A driver that writes a socket still hands the bytes to lwIP on core 0 (that's where the network stack is pinned) — the CPU half offloads, the send doesn't move.
-- `stall` — read-only, shown only while `multicore` is on (with no split there is no boundary to wait at, so the number would be meaningless). How long core 0 waited at the frame boundary for core 1 to finish. Near zero means render and output overlap well (the split is paying off fully); a large value means the effect is far cheaper than the output work, so core 0 idles.
+- `multicore` — run the output stage on the second core (default on), so a frame costs `max(render, output)` instead of `render + output`. Falls back to single-core by itself if the extra frame buffer won't fit. On is the better configuration; the switch is there to A/B it.
+- `renderWait` — read-only: how long core 0 waited for core 1 at the frame boundary. Near zero means render and output overlap well; a large value means core 0 is idling on a slow output stage. Shown only while `multicore` is on.
 
 Detail: [technical](moxygen/Drivers.md)
 
@@ -63,7 +62,7 @@ Detail: [technical](moxygen/Drivers.md)
 
 ### LightPresets
 
-The reusable light-preset library — a Drivers submodule that owns the named channel-role wirings drivers reference. A light preset is a channel layout (which channel carries Red, Green, Blue, White, WarmWhite, Yellow, UV, or a fixture role like Pan/Tilt); a curated set of real fixtures is seeded as read-only entries — the colour orders (RGB, GRB, BGR, RGBW, GRBW, WRGB), multi-channel LED/par fixtures (Curtain GRB6, Lightbar RGBWYP, RGBCCT, IRGB), and moving heads (MH BeeEyes 15, MH BeTopper 32, MH 19x15W-24) — and a user adds custom named wirings alongside them. A driver stores only a preset's stable id and resolves it here at rebuild time, so one wiring is reusable across every driver and reordering/deleting other presets never disturbs a reference. Built on the editable-list control primitive (add/delete/reorder/edit rows), which custom palettes reuse later.
+The named channel wirings drivers reference — which channel carries Red, Green, Blue, White, or a fixture role like Pan/Tilt. Real fixtures ship read-only (the color orders, multi-channel pars, moving heads); add your own alongside them. A driver stores a preset's stable id, not its name, so renaming or reordering never breaks a reference.
 
 - `presets` — the editable list of preset definitions. Each row: a name, a channel count, and one role picker per channel. Built-in rows are read-only; custom rows are fully editable and persist across reboot.
 
@@ -99,7 +98,7 @@ Detail: [technical](moxygen/ModifierBase.md)
 
 ### Driver base
 
-The `DriverBase` class every driver derives from — the shared surface (the driver window, the source buffer, the output correction) a driver reads before sending its slice. It plays the same zero-state role for drivers that Effect base does for effects.
+The `DriverBase` class every driver derives from — the shared surface (the driver window, the source buffer, the output correction) a driver reads before sending its slice.
 
 Detail: [technical](moxygen/DriverBase.md)
 
@@ -109,8 +108,20 @@ The `LayoutBase` class every layout derives from — the shared surface a layout
 
 Detail: [technical](moxygen/LayoutBase.md)
 
+### Slot encoder
+
+Turns lights into WS2812 bus words: each data bit becomes three bus slots (pulse start / data / tail), and the data slot is an 8×8 bit transpose — lanes in, bit-planes out. Shared by every parallel driver, and the render loop's measured hot spot.
+
+Detail: [technical](moxygen/ParallelSlots.md)
+
+### Pin list
+
+Parses the `pins` and `ledsPerPin` controls: GPIO lists, and the broadcasting rule that spreads a window over strands (empty = even split, one number = that many each, a list = one per strand).
+
+Detail: [technical](moxygen/PinList.md)
+
 ### Parallel LED driver base
 
-The `ParallelLedDriver` CRTP base shared by the two parallel WS2812 drivers (the S3's LCD_CAM and the P4's Parlio) — the one copy of the common body they were ~250 lines of byte-for-byte identical over: pin slicing, the fused correct+encode, the latch pad, and the single-shot autonomous-DMA transfer. Each derived driver supplies only its peripheral-specific pieces.
+The `ParallelLedDriver` base every parallel WS2812 driver derives from — the shared body: strand slicing, the fused correct+encode, the latch pad, and the single-shot DMA transfer. Each driver adds only its peripheral's pieces.
 
 Detail: [technical](moxygen/ParallelLedDriver.md)

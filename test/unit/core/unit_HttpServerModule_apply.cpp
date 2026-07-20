@@ -407,6 +407,12 @@ TEST_CASE("buildStatePatch: a status change rides the patch (no resync needed)")
     CHECK(std::strstr(sink.data(), "bus init failed") != nullptr);
     CHECK(std::strstr(sink.data(), "\"K/@severity\"") != nullptr);
     CHECK(std::strstr(sink.data(), "error") != nullptr);
+    // The status value must be VALID JSON: singly-quoted, not `""bus init failed""`. The double-quote bug
+    // (writeJsonString self-quotes, plus a manual quote wrap) produced invalid JSON that made the browser
+    // drop the WHOLE patch — so the status never updated live. A strstr for the text alone missed it (the
+    // text is still a substring of the malformed form), so assert the value's exact quoting here.
+    CHECK(std::strstr(sink.data(), "\"value\":\"bus init failed\"") != nullptr);  // correct single quotes
+    CHECK(std::strstr(sink.data(), "\"\"bus init failed\"\"") == nullptr);        // NOT double-quoted
 
     s.deleteTree(root);
 }

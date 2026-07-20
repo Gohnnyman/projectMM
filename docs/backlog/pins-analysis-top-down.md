@@ -74,7 +74,7 @@ Unclaimed GPIOs need not be listed (or a compact "free: …" summary), the way T
 
 ### What phase 1 is NOT
 
-No arbitration, no reassignment, no writing. It *shows* the picture the pin-uniqueness check computes; it does not own or enforce it. That authority is phase 2. Keeping phase 1 read-only is what makes it a small, safe first increment (the same staging the [PinsModule backlog entry](backlog-core.md#pinsmodule--strict-reject-on-add-mode-the-one-remaining-increment) already draws).
+No arbitration, no reassignment, no writing. It *shows* the picture the pin-uniqueness check computes; it does not own or enforce it. That authority is phase 2. Keeping phase 1 read-only is what makes it a small, safe first increment (the same staging the [PinsModule backlog entry](backlog-core.md#pinsmodule-strict-reject-on-add-mode-the-one-remaining-increment) already draws).
 
 ## 4. The conflict authority (phase 2)
 
@@ -87,7 +87,7 @@ Today two modules can claim the same GPIO and nothing stops it (`RmtLedDriver.pi
 
 **Recommendation: soft-flag as the default** (robustness), with the map making the conflict loud, plus an ESPHome-style **explicit shared-pin opt-out** (`allow_other_uses`) for the rare legitimate case (two consumers reading one input). Reject-on-add stays available for the installer/catalog path where a clean tree is wanted.
 
-**Later still**: live pin *reassignment* — the "swap two drivers' pins" case the uniqueness item flags as needing a free intermediate; a coordinator can broker the swap. And it pairs with [disabling-releases-resources](backlog-core.md#disabling-a-module-should-release-its-resources-not-just-stop-its-loop-backlog) so a disabled module's pins show as freed.
+**Later still**: live pin *reassignment* — the "swap two drivers' pins" case the uniqueness item flags as needing a free intermediate; a coordinator can broker the swap. And it pairs with the shipped "disabling releases resources" work so a disabled module's pins show as freed.
 
 ## 5. Validity: wiring `gpio-usage.md` to a check
 

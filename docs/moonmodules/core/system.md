@@ -14,6 +14,7 @@ The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftA
 
 - `deviceName` — the device identity behind mDNS `<name>.local`, the SoftAP SSID, and the DHCP hostname.
 - `deviceModel` — the board model (drives the installer catalog entry).
+- `expertMode` — reveals advanced tuning/diagnostic controls (marked 🔧) across the UI; off by default.
 - read-only vitals — `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
 
 Detail: [technical](moxygen/SystemModule.md)

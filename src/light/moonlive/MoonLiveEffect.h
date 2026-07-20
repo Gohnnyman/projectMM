@@ -74,7 +74,12 @@ public:
     }
 
     void tick() override {
-        if (engine_.ok()) engine_.run(buffer(), nrOfLights(), channelsPerLight(), elapsed());
+        // The native emitter stores R,G,B at offsets +0/+1/+2 with channelsPerLight() only as the
+        // stride (moonlive_lower_*: addr = index * cpl, then 3 writes). A 0/1/2-channel layer would
+        // let the last light's +1/+2 write run past the buffer, so a sub-RGB layout renders dark.
+        const auto cpl = channelsPerLight();
+        if (cpl < 3) return;
+        if (engine_.ok()) engine_.run(buffer(), nrOfLights(), cpl, elapsed());
     }
 
     void release() override {

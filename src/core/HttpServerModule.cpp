@@ -889,9 +889,12 @@ void HttpServerModule::visitModuleLeaves(MoonModule* mod, Fn&& fn) {
     // emits (a null status is the empty string, which the UI treats as "no status").
     {
         JsonSink sv;
-        sv.append("\"");
+        // writeJsonString ALREADY emits the surrounding quotes (and escapes). Wrapping it in manual
+        // quotes double-quoted the value (`""driving…""`), which is invalid JSON — the browser rejected
+        // the WHOLE patch frame, so the @status change it carried never applied (the UI only updated on a
+        // manual /api/state refresh). A status with no special chars just happened to look fine in the
+        // full-state path; the patch is where it broke. One writeJsonString, no manual quotes.
         sv.writeJsonString(mod->status() ? mod->status() : "");
-        sv.append("\"");
         std::snprintf(path, sizeof(path), "%s/@status", mod->name());
         leaf(path, sv.data());
     }
@@ -1007,8 +1010,13 @@ void HttpServerModule::writeStatus(JsonSink& sink, MoonModule* mod) {
     const char* s = mod->status();
     if (!s) return;
     static const char* sevStr[] = {"status", "warning", "error"};
-    sink.appendf(",\"status\":\"%s\",\"severity\":\"%s\"",
-                 s, sevStr[static_cast<int>(mod->severity())]);
+    // Escape the status value through writeJsonString (it emits its own quotes) rather than a raw %s in
+    // manual quotes — a status with a `"` or `\` would otherwise produce invalid JSON. Severity is a fixed
+    // vocabulary (no special chars), so it stays a plain %s. Mirrors the patch path (@status leaf), which
+    // hit exactly this: a manually-quoted value broke the frame. See writeMetricsPatch.
+    sink.append(",\"status\":");
+    sink.writeJsonString(s);
+    sink.appendf(",\"severity\":\"%s\"", sevStr[static_cast<int>(mod->severity())]);
 }
 
 void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
@@ -1048,6 +1056,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         writeControlMetadata(sink, c);
         // Emit optional flags only when set (common case is false; omit to save bytes).
         if (c.readonly) sink.append(",\"readonly\":true");
+        if (c.advanced) sink.append(",\"advanced\":true");   // UI shows it only in expert mode
         // An editable List (the CRUD primitive) tells the UI to show add/delete/reorder + inline
         // row editors; a plain List stays read-only. The row objects carry a stable "id" the
         // /api/list/* ops address, and each editable row's detail carries its field descriptors.

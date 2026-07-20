@@ -147,7 +147,7 @@ public:
     /// own when no driver exists or
     /// the handoff buffer won't fit (memory-tight board): allocate-and-degrade, never a crash. Toggling
     /// applies live (it re-runs prepare(), which quiesces core 1 before it reallocates and spawns or
-    /// stops the task) — no reboot. Sibling of the driver's `asyncTransmit`: that hides the WIRE wait
+    /// stops the task) — no reboot. Sibling of the driver's `doubleBuffer`: that hides the WIRE wait
     /// behind DMA on one core; this hides the ENCODE behind the render on the other core. They stack.
     bool multicore = true;
     // The physical wire format (channel order, RGBW white, per-driver brightness) is owned
@@ -186,13 +186,13 @@ public:
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
         controls_.addBool("multicore", multicore);   // render↔encode split on/off (see the member's doc)
-        // Read-only KPI, the multicore sibling of the driver's wireUs: how long core 0 waited at the
+        // Read-only KPI, the multicore sibling of the driver's frameTime: how long core 0 waited at the
         // frame boundary for core 1's encode. ~0 = render and encode overlap perfectly (the split pays
         // off fully). A large value = the effect is far cheaper than the encode, so core 0 idles — the
         // measured signal that a second (ping-pong) handoff buffer would recover that time. Refreshed
         // in tick1s(). Hidden while `multicore` is off: with no split there is no boundary to wait at,
         // so the number is meaningless — the same add-then-setHidden shape the loopback fields use.
-        controls_.addReadOnly("stall", stallStr_, sizeof(stallStr_));
+        controls_.addReadOnly("renderWait", renderWaitStr_, sizeof(renderWaitStr_));
         controls_.setHidden(controls_.count() - 1, !multicore);
         MoonModule::defineControls();  // cascade to driver children (each owns its lightPreset/whiteMode)
     }
@@ -207,7 +207,7 @@ public:
             return;
         }
         if (std::strcmp(controlName, "multicore") == 0) {
-            // `stall` is only meaningful while the split runs, so it's a conditional-hidden control:
+            // `renderWait` is only meaningful while the split runs, so it's a conditional-hidden control:
             // re-derive the schema so the row appears/disappears with the switch, live (the one
             // rebuildControls chokepoint, which also fires the WS resync). The split itself engages
             // via affectsPrepare → the prepare sweep; this is purely the visible control set.
@@ -228,16 +228,16 @@ public:
         return std::strcmp(name, "multicore") == 0;
     }
 
-    /// Refresh the read-only `stall` KPI once a second (off the hot path, same tier as the driver's
-    /// wireUs). Reports the PEAK core-0 wait at the handoff boundary over the last second, not a
+    /// Refresh the read-only `renderWait` KPI once a second (off the hot path, same tier as the driver's
+    /// frameTime). Reports the PEAK core-0 wait at the handoff boundary over the last second, not a
     /// single frame's — a lone sample lands wherever tick1s happens to fall and reads ~0 even when the
     /// core is idling most frames. The peak is the number the Step 2b (ping-pong buffer) decision
     /// wants: how much time core 0 gives up at worst. A dash when the split isn't running.
     void tick1s() override {
-        if (renderSplitActive_) std::snprintf(stallStr_, sizeof(stallStr_), "%u µs",
-                                              static_cast<unsigned>(stallPeakUs_));
-        else                    std::snprintf(stallStr_, sizeof(stallStr_), "—");
-        stallPeakUs_ = 0;   // start a fresh window
+        if (renderSplitActive_) std::snprintf(renderWaitStr_, sizeof(renderWaitStr_), "%u µs",
+                                              static_cast<unsigned>(renderWaitPeakUs_));
+        else                    std::snprintf(renderWaitStr_, sizeof(renderWaitStr_), "—");
+        renderWaitPeakUs_ = 0;   // start a fresh window
         MoonModule::tick1s();
     }
 
@@ -322,7 +322,7 @@ public:
         // buffer actually allocated. Decided from the alloc OUTCOME (no if constexpr(hasPsram)) — so a
         // memory-tight board that can't claim the buffer never enters a half-split state: no task is
         // spawned, every driver ticks inline on core 0, and the driver reads the layer buffer
-        // (zero-copy). It still keeps asyncTransmit's DMA overlap, which needs no handoff buffer.
+        // (zero-copy). It still keeps doubleBuffer's DMA overlap, which needs no handoff buffer.
         // This is a live-reconfigure — a grid resize, a layer add/delete, or the `multicore` switch
         // flips it, applied here with no reboot:
         //   - newly engaged: spawn the core-1 task.
@@ -374,9 +374,14 @@ public:
         // Step 2b trigger metric: ~0 when render ≈ encode (heavy effect), large when render ≪ encode.
         if (renderSplitActive_) {
             uint32_t s0 = platform::micros();
-            quiesceEncode();
-            stallUs_ = static_cast<uint32_t>(platform::micros() - s0);
-            if (stallUs_ > stallPeakUs_) stallPeakUs_ = stallUs_;   // the 1 s window's worst, for the KPI
+            // A TIMED-OUT quiesce means the worker is wedged — quiesceEncode() cleared renderSplitActive_
+            // so future ticks run inline, but THIS tick is about to composite outputBuffer_ and tick every
+            // driver inline on core 0 while the wedged worker may STILL be inside a driver's tick() on core
+            // 1 (two cores in one driver → double transmit, corrupted inFlight_). So JOIN it first, exactly
+            // as prepare() and quiesce() do — the join is slow, but this is the declared-broken path.
+            if (!quiesceEncode()) stopEncodeTask();
+            renderWaitUs_ = static_cast<uint32_t>(platform::micros() - s0);
+            if (renderWaitUs_ > renderWaitPeakUs_) renderWaitPeakUs_ = renderWaitUs_;   // the 1 s window's worst, for the KPI
         }
         // Composite into outputBuffer_ when one is allocated (≥2 enabled layers,
         // or a single layer with a LUT — see prepare). A null data_ means
@@ -481,9 +486,9 @@ private:
                                            // (atomic, not volatile: volatile is not a thread primitive
                                            // in C++ — a cross-thread flag is a data race without it)
     bool renderSplitActive_ = false;       // the split is engaged (task spawned, boundary in effect)
-    uint32_t stallUs_ = 0;                 // last frame's core-0 wait at the boundary (the tick-line KPI)
-    uint32_t stallPeakUs_ = 0;             // worst wait in the current 1 s window (what the control shows)
-    char stallStr_[32] = {};               // the `stall` read-only control's text (refreshed in tick1s)
+    uint32_t renderWaitUs_ = 0;                 // last frame's core-0 wait at the boundary (the tick-line KPI)
+    uint32_t renderWaitPeakUs_ = 0;             // worst wait in the current 1 s window (what the control shows)
+    char renderWaitStr_[32] = {};               // the `renderWait` read-only control's text (refreshed in tick1s)
 
     // Core-1 body: block for a notify, run EVERY driver child's tick() against the finished frame in
     // outputBuffer_, signal done. Reached only while renderSplitActive_. One rule, no per-driver
@@ -504,7 +509,7 @@ private:
     static void encodeTrampoline(void* self) { static_cast<Drivers*>(self)->runEncodeLoop(); }
 
     // Wait for core 1 to finish the in-flight encode, so core 0 can safely overwrite / free
-    // outputBuffer_. Normally bounded by ONE encode (the `stall` KPI measures exactly this wait);
+    // outputBuffer_. Normally bounded by ONE encode (the `renderWait` KPI measures exactly this wait);
     // polled with a yield. No-op when the split is off. The render-side analog of
     // ParallelLedDriver::drainInFlight.
     //
@@ -547,16 +552,16 @@ public:
     /// allocated AND the core-1 task is live). Diagnostics / tests read it.
     bool renderSplitActive() const { return renderSplitActive_; }
     /// The WORST core-0 wait at the frame boundary in the current 1 s window (µs) — time given up
-    /// waiting for core 1 to finish the output stage. This is the number both the `stall` control and
+    /// waiting for core 1 to finish the output stage. This is the number both the `renderWait` control and
     /// the tick line report: a single frame's value lands wherever the once-a-second sample happens to
     /// fall and reads ~0 even when the core idles most frames, so the peak is the honest signal. It is
     /// the Step 2b (ping-pong 2nd buffer) trigger: ~0 = render ≈ output, a 2nd buffer gains nothing;
     /// large = the effect is far cheaper than the output work, so core 0 idles and 2b would recover it.
-    uint32_t stallPeakUs() const { return stallPeakUs_; }
+    uint32_t renderWaitPeakUs() const { return renderWaitPeakUs_; }
     /// Test-only: the frame-boundary wait in isolation (false = it timed out and disengaged the split).
     /// tick() reaches it inline; a test needs it separately to time the boundary WITHOUT also running
     /// the fallback inline tick that follows a timeout. Same public-for-tests convention as
-    /// renderSplitActive() / stallPeakUs().
+    /// renderSplitActive() / renderWaitPeakUs().
     bool quiesceEncodeForTest() { return quiesceEncode(); }
 
 private:

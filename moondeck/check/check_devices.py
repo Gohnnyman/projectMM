@@ -198,6 +198,47 @@ def main():
             if isinstance(controls, dict) and "pins" in controls and not str(mtype).endswith("LedDriver"):
                 errors.append(f"{where}: module '{mtype}' has a 'pins' control but is not a *LedDriver")
 
+            # 74HCT595 pin expander (pinExpander = is the board fitted?). The wiring
+            # invariants are what a bad catalog entry gets wrong, and they fail on a bench with dark
+            # LEDs rather than loudly, so pin them here.
+            if isinstance(controls, dict) and controls.get("pinExpander"):
+                if "latchPin" not in controls:
+                    errors.append(f"{where}: pinExpander (74HCT595) needs a 'latchPin'")
+                # The data-pin count is a property of the BOARD (how many '595 sockets are
+                # populated), not of the bus: the driver pads the bus width itself. The ceiling is the
+                # runtime's, not an arbitrary one — every pin fans out to 8 strands through its register,
+                # and ParallelLedDriver refuses more than kMaxStrands (64), so 8 pins is the most that can
+                # ever be driven ("too many strands (pins x 8 through the expander)").
+                pins = [p.strip() for p in str(controls.get("pins", "")).split(",") if p.strip()]
+                if not 1 <= len(pins) <= 8:
+                    errors.append(f"{where}: pinExpander (74HCT595) needs 1..8 data pins "
+                                  f"(one per populated register; 8 x 8 taps = the 64-strand ceiling), "
+                                  f"got {len(pins)}")
+                # The latch rides a DATA LANE (the peripheral gives only one clock), so it must not share a
+                # GPIO with anything the bus drives — the bus controls OR a data pin. A data pin carrying
+                # the latch waveform emits garbage on that strand.
+                latch = controls.get("latchPin")
+                if latch is not None:
+                    # Normalize to int before every collision test: a control value may be a JSON number
+                    # (20) or a string ("20"), and a raw == would let 20 and "20" slip past as "different"
+                    # GPIOs when they are the same pad. `pins` are already strings from the split above.
+                    def _gpio(v):
+                        try:
+                            return int(str(v).strip())
+                        except (TypeError, ValueError):
+                            return None
+                    latch_n = _gpio(latch)
+                    if latch_n is None:
+                        errors.append(f"{where}: latchPin ({latch!r}) is not a valid GPIO number")
+                    else:
+                        for other in ("clockPin", "dcPin"):
+                            if _gpio(controls.get(other)) == latch_n:
+                                errors.append(f"{where}: latchPin ({latch_n}) collides with {other} — "
+                                              f"the latch needs its own GPIO")
+                        if latch_n in [_gpio(pn) for pn in pins]:
+                            errors.append(f"{where}: latchPin ({latch_n}) is also a data pin — "
+                                          f"the latch needs its own GPIO")
+
             # Ethernet is explicit, not defaulted: a board that turns Ethernet ON (NetworkModule with
             # a non-None ethType) must declare its board-wiring GPIOs, so the firmware never falls
             # back to a per-chip default that is really one specific board's pins. (The Dig-Octa is

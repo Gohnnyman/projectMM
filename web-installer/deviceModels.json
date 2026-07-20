@@ -867,8 +867,8 @@
         }
       },
       {
-        "type": "I80LedDriver",
-        "id": "I80Led",
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
         "parent_id": "Drivers",
         "controls": {
           "pins": "47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48",
@@ -925,8 +925,8 @@
         }
       },
       {
-        "type": "I80LedDriver",
-        "id": "I80Led",
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
         "parent_id": "Drivers",
         "controls": {
           "pins": "47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1",
@@ -1227,6 +1227,90 @@
       {
         "type": "MqttModule",
         "id": "Mqtt"
+      }
+    ]
+  },
+  {
+    "name": "hpwit shift-register board",
+    "chip": "ESP32-S3",
+    "firmwares": [
+      "esp32s3-n16r8"
+    ],
+    "image": "assets/deviceModels/hpwit-shift-register-board.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "hpwit shift-register board"
+        }
+      },
+      {
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "9,10,12,8,18,17",
+          "pinExpander": true,
+          "latchPin": 46,
+          "clockPin": 3,
+          "ledsPerPin": "96",
+          "dcPin": 13,
+          "doubleBuffer": false
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
+      }
+    ]
+  },
+  {
+    "name": "hpwit shift-register 15",
+    "chip": "ESP32-S3",
+    "firmwares": [
+      "esp32s3-n16r8"
+    ],
+    "image": "assets/deviceModels/hpwit-shift-register-board.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "hpwit shift-register 15"
+        }
+      },
+      {
+        "type": "MultiPinLedDriver",
+        "id": "MultiPinLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "9,10",
+          "pinExpander": true,
+          "latchPin": 46,
+          "clockPin": 3,
+          "ledsPerPin": "96",
+          "dcPin": 21,
+          "doubleBuffer": false
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
       }
     ]
   }

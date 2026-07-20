@@ -182,16 +182,38 @@ protected:
 
     /// Grow `wire_` to at least `bytes`. Keeps the existing block when it is already big enough.
     /// Leaves `wire_` null on allocation failure (the caller's tick() then idles).
+    /// Internal-RAM-first: this scratch is the encoder's hottest data — written AND read back per light
+    /// (a parallel encoder touches ~100 of its bytes per light), so a PSRAM-resident block multiplies
+    /// the whole encode by PSRAM latency. It is tiny (≤ kMaxStrands × channels), so internal always
+    /// has room; plain alloc() is only the degraded fallback.
     void ensureWire(size_t bytes) {
         if (wire_ && wireCap_ >= bytes) return;
         freeWire();
-        wire_ = static_cast<uint8_t*>(platform::alloc(bytes));
+        wire_ = static_cast<uint8_t*>(platform::allocInternal(bytes));
+        if (!wire_) wire_ = static_cast<uint8_t*>(platform::alloc(bytes));
         wireCap_ = wire_ ? bytes : 0;
+        publishHeapBytes();   // the scratch grew — refresh the memory readout
     }
     /// Release the scratch (on the true teardown — release(), not a mid-life reinit).
     void freeWire() {
-        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; }
+        if (wire_) { platform::free(wire_); wire_ = nullptr; wireCap_ = 0; publishHeapBytes(); }
     }
+
+    // --- Driver heap accounting (the per-module memory readout) ---
+    // A driver owns several raw-alloc buffers off the ScratchBuffer path — the correction scratch, the
+    // streaming snapshot, the RMT symbol buffer, the preview stage. `ScratchBuffer` auto-accounts its
+    // own resizes, but these raw allocs don't, so without this they were INVISIBLE to dynamicBytes()
+    // (a 36 KB snapshot reading as 0). Rather than paste setDynamicBytes into every alloc site (the
+    // per-module duplication CLAUDE.md forbids — one forgotten site and the readout drifts), each driver
+    // reports its live heap total HERE, and DriverBase publishes it once. driverHeapBytes() is the one
+    // hook a driver overrides to sum its buffers; publishHeapBytes() pushes that sum to the module readout
+    // (setDynamicBytes, the same channel Drivers uses for its output buffer). Called on every (re)alloc
+    // and free — all cold-path — so the readout tracks the real footprint with no per-site bookkeeping.
+    //
+    // Base sum: the shared correction scratch, the one buffer DriverBase itself owns. A subclass override
+    // ADDS its own buffers and chains to this (`DriverBase::driverHeapBytes() + snapshotCap_ + …`).
+    virtual size_t driverHeapBytes() const { return wireCap_; }
+    void publishHeapBytes() { setDynamicBytes(driverHeapBytes()); }
 
     // --- Per-driver output correction (references a shared preset; brightness + white are local) ---
     // Each physical driver owns its Correction — the flat hot-path cache apply() reads — but the
@@ -353,7 +375,9 @@ protected:
     const char* configErr_ = nullptr;
     const char* configWarn_ = nullptr;
     char* failBuf_ = nullptr;
-    static constexpr size_t kFailBufLen = 48;
+    // 64: the widest verdict is the loopback's worst-case "bad bit N/M (light K)" with
+    // full-range counters — GCC's -Wformat-truncation proves 48 can clip it.
+    static constexpr size_t kFailBufLen = 64;
 
     // Record a parse/config error: set the status and remember it so clearConfigErr
     // can later retract exactly this one.
@@ -409,13 +433,21 @@ protected:
     // (callers set info LAST, only when there's nothing more urgent to show). No-op if the buffer
     // can't allocate. The format literal lives here (not a caller-passed fmt) so the message is
     // defined once and both drivers share it verbatim.
-    void setDrivingInfo(unsigned driven, unsigned total, unsigned channels = 1) {
+    // `mode` is an optional one-word transport qualifier a driver may append — e.g. the streaming ring's
+    // "primed" (whole frame encoded before arming: no deadline, pixel-perfect at any load) vs "lapping"
+    // (the ISR refills behind the DMA: the deadline regime) — so the user can see which side of a
+    // behavioral boundary a config sits on without reading a diagnostic control. Empty/null = no suffix.
+    void setDrivingInfo(unsigned driven, unsigned total, unsigned channels = 1,
+                        const char* mode = nullptr) {
         if (char* buf = failBufEnsure()) {
+            int n;
             if (channels > 1)
-                std::snprintf(buf, kFailBufLen, "driving %u of %u lights (%u channels)",
-                              driven, total, driven * channels);
+                n = std::snprintf(buf, kFailBufLen, "driving %u of %u lights (%u channels)",
+                                  driven, total, driven * channels);
             else
-                std::snprintf(buf, kFailBufLen, "driving %u of %u lights", driven, total);
+                n = std::snprintf(buf, kFailBufLen, "driving %u of %u lights", driven, total);
+            if (mode && mode[0] && n > 0 && static_cast<size_t>(n) < kFailBufLen)
+                std::snprintf(buf + n, kFailBufLen - static_cast<size_t>(n), ", %s", mode);
             setStatus(buf, Severity::Status);
         }
     }

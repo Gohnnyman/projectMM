@@ -1,5 +1,14 @@
 # Common defaults
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# CPU at the chip's rated maximum (IDF defaults to 160 MHz) — the render loop and the ring ISR's
+# encode deadline are compute-bound, and the P4 ignores this symbol (its own 360 MHz default applies).
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# GDMA control functions in IRAM: the streaming ring's EOF ISR is registered cache-safe (it keeps
+# refilling during SPI-flash writes) and calls gdma_stop at frame end — a flash-resident gdma_stop
+# would fault exactly then. The IDF option that exists for this case.
+CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_LWIP_SO_REUSE=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
@@ -11,8 +20,19 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32dev.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
-# Task watchdog disabled — we use platform::yield() for cooperative scheduling
-CONFIG_ESP_TASK_WDT_EN=n
+# Task watchdog: PANIC on a wedged task so the device self-heals (reboot + backtrace) instead of hanging
+# SILENTLY forever — a silent hang looks dead and needs a physical power-cycle, the worst failure mode
+# (it cost a whole debugging session). A reboot-and-recover is strictly better (robustness: restarting >
+# wedged). Idle-task checking is deliberately OFF: at a large grid a core can be legitimately SATURATED
+# (the 48×256 engage runs the render + encode flat-out for a few frames), and checking idle would panic a
+# HEALTHY-but-busy core — the very false positive that surfaced this setting. So the WDT watches only that
+# subscribed tasks aren't wedged, not that a core has spare time. 12 s is well above any real frame/engage.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=12
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_ESP_TASK_WDT_PANIC=y
 
 # lwIP core locking — socket calls take the TCP/IP core mutex and run inline
 # instead of context-switching to the tcpip_thread per call. Large win for the
@@ -38,3 +58,15 @@ CONFIG_ESP_WIFI_ENABLED=y
 # behind the MM_TASK_CPU_STATS build flag for profiling builds only.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+
+# Optimize for performance (-O2). IDF's default is COMPILER_OPTIMIZATION_DEBUG (-Og), which is the wrong
+# trade for this firmware: the WS2812 shift encoder is SWAR bit-twiddling (delta-swaps, inlined templates)
+# on a 32-bit Xtensa — code whose whole performance is register allocation across inlined calls, which -Og
+# does not do — and it carries the tightest deadline in the system, since the streaming ring's EOF ISR must
+# re-encode a slice before the DMA drains the next buffer. Measured on an S3: -O2 is 1.5x on that encode.
+#
+# The trade is the usual one: -O2 is harder to step through in a debugger and grows flash somewhat.
+# Neither costs an end user anything, and a debug build remains one menuconfig away for the rare case
+# that wants it. ASSERTIONS stay ENABLED (IDF's default): they are cheap next to the codegen win and
+# they are what turns a silent corruption into a loud abort.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y

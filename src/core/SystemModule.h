@@ -12,9 +12,9 @@ namespace mm {
 
 /// System-level diagnostics and device identity — always loaded, always visible in the
 /// UI. Surfaces the live tick metrics (uptime, fps, tick time, free heap, PSRAM, largest
-/// allocatable block), the static hardware facts (chip, SDK/IDF version, flash size,
-/// boot/reset reason, WiFi co-processor state), and owns the device's identity: its
-/// network name and its physical-hardware model.
+/// allocatable block), the static hardware facts (chip, CPU clock + cores, SDK/IDF version,
+/// flash size, boot/reset reason, WiFi co-processor state), and owns the device's identity:
+/// its network name and its physical-hardware model.
 ///
 /// **Controls (ordered by change frequency):**
 /// - *Dynamic (every second):* `uptime` (progress), `fps` (derived from the Scheduler's
@@ -23,7 +23,9 @@ namespace mm {
 ///   (largest contiguous allocatable block).
 /// - *Configurable:* `deviceName` (default `MM-XXXX`, XXXX = last 4 hex of the MAC) and
 ///   `deviceModel` (display-only in the UI, pushed by tooling).
-/// - *Static (set at boot):* `chip`, `sdk`, `flash`, `bootReason`, `wifiCoproc`, and
+/// - *Static (set at boot):* `chip`, `cpu` (core count, plus the running clock on ESP32 — read from the
+///   hardware so a misconfigured frequency is visible; desktop reports cores only), `sdk`, `flash`,
+///   `bootReason`, `wifiCoproc`, and
 ///   `psramType` (quad / octal, shown only on a PSRAM board — the interface mode the firmware
 ///   drives the PSRAM in). On desktop the hardware-specific fields read "desktop" / "N/A".
 ///
@@ -180,8 +182,13 @@ public:
         // bufSize is unused for a ReadOnly (never written), so the default is fine.
         controls_.addReadOnly("mac", const_cast<char*>(platform::macString()));   // stable per-chip identity (tooling keys on it)
         controls_.addReadOnly("chip", const_cast<char*>(platform::chipModel()));
+        controls_.addReadOnly("cpu", const_cast<char*>(platform::cpuInfo()));   // running clock + cores ("240 MHz, 2 cores")
         controls_.addReadOnly("sdk", const_cast<char*>(platform::sdkVersion()));
         controls_.addReadOnly("bootReason", const_cast<char*>(platform::resetReason()));
+        // Expert mode: reveals controls tagged `advanced` (ring diagnostics, tuning knobs) across the UI.
+        // Persisted so it survives a reboot; the UI honors it client-side (see the `advanced` flag on
+        // Control) — nothing in the firmware reads it, so it needs no rebuild trigger.
+        controls_.addBool("expertMode", expertMode_);
         // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
         // cost — vanishes on native-radio builds (classic/S3/desktop) and the
@@ -293,6 +300,10 @@ private:
 
     // Configurable
     char deviceName_[24] = {};
+    // Global "expert mode": persisted, default off. The UI reads it to show controls tagged `advanced`
+    // (dev/tuning readouts and knobs a casual user doesn't need — e.g. MoonLed's ring diagnostics and
+    // manual geometry). One flag the whole system's UI composes against; no module reads System's state.
+    bool expertMode_ = false;
     // Physical-hardware identity (catalog entry name). 32-byte buffer fits the longest
     // entry ("Olimex ESP32-Gateway Rev G" = 26) with headroom; the Improv RPC handler
     // caps str_len against this size dynamically.

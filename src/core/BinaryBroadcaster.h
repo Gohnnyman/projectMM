@@ -43,15 +43,16 @@ struct BinaryBroadcaster {
     //                            new-client connect, which also bumps clientGeneration() and re-sends
     //                            a fresh coordinate table — so a client that got a partial frame is
     //                            re-primed by the next full message.
-    // Only PreviewDriver uses this today (the full-res colour frame, whose payload is the producer
-    // buffer). The coord table / downsampled frames keep the begin/push/end path.
+    // Only PreviewDriver uses this today (the color frames: full-res hands the producer buffer,
+    // downsampled hands its gathered staging buffer). The coord table keeps the begin/push/end path
+    // (rare — geometry/client changes only).
     virtual bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                                    const uint8_t* body, size_t bodyLen) = 0;
     virtual bool bufferedSendIdle() const = 0;
     virtual void cancelBufferedSend() = 0;
 
     // A counter that increments each time a new client connects. A producer whose
-    // first message is stateful (e.g. PreviewDriver's coordinate table, which colour
+    // first message is stateful (e.g. PreviewDriver's coordinate table, which color
     // frames then reference) watches this: when it changes, a fresh client just joined
     // and needs that priming message re-sent NOW, rather than waiting for the producer's
     // periodic re-broadcast. Cheap, broadcast-only (no per-client send / inbound routing):

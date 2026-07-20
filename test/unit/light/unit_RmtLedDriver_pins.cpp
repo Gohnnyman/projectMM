@@ -10,7 +10,7 @@
 #include <cstring>
 
 // These tests pin the MULTI-PIN surface: the `pins` / `ledsPerPin` text-control
-// parsing (shared free functions in PinList.h, used by RmtLedDriver and I80LedDriver
+// parsing (shared free functions in PinList.h, used by RmtLedDriver and MultiPinLedDriver
 // precedent) and the slice arithmetic down to per-pin symbol offsets. All pure
 // host logic — the RMT peripheral is never touched; on desktop the channel init
 // is inert but parsing and slicing must behave identically, which is exactly
@@ -402,7 +402,7 @@ TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slic
 //
 // tick()'s transmit-all/wait-all concurrency body is gated out on the desktop
 // (platform::rmtTxChannels == 0 → it returns at the top), exactly as
-// I80LedDriver::tick() is. So the host can pin only the reachable contract:
+// MultiPinLedDriver::tick() is. So the host can pin only the reachable contract:
 // tick() must never crash or overrun for any pin configuration, grid size, or
 // uninitialised state. The concurrency path itself (parallel transmit, longest-
 // strand cost) is proven on hardware by the real-frame loopback self-test —

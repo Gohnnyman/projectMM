@@ -370,6 +370,29 @@ TEST_CASE("PreviewDriver buffered send uses the sparse driver buffer, not the de
     CHECK(rig.cap.lastBody != rig.layer.buffer().data());    // NOT the dense box — the mapped output
 }
 
+// The per-module memory readout (dynamicBytes) must ACCOUNT the resumable-path buffers — the staging
+// buffer and the kept-index cache — not read 0 while ~24 KB is allocated (the bug: raw platform::alloc
+// buffers bypass ScratchBuffer's auto-accounting, so they were invisible). With resumableFrames ON and a
+// downsampled layout, dynamicBytes is non-zero and covers both buffers; OFF frees them and it drops to 0.
+TEST_CASE("PreviewDriver reports its resumable-path buffers in dynamicBytes") {
+    mm::GridLayout g; g.width = 200; g.height = 200; g.depth = 1;   // 40000 > cap → downsamples (sparse gather)
+    PreviewRig rig(&g);
+    rig.produce();
+    // ON (the default): the staging buffer is sized to the point cap; dynamicBytes covers it.
+    const size_t on = rig.preview->dynamicBytes();
+    CHECK(on > 0);
+
+    // OFF: prepare frees both buffers, so the readout drops to 0 (nothing lingers idle).
+    rig.preview->setResumableFramesForTest(false);
+    rig.preview->prepare();
+    CHECK(rig.preview->dynamicBytes() == 0);
+
+    // Back ON: prepare re-allocates, the readout returns.
+    rig.preview->setResumableFramesForTest(true);
+    rig.preview->prepare();
+    CHECK(rig.preview->dynamicBytes() > 0);
+}
+
 // Dense-grid CLOSED-FORM downsample, exact colour placement: a 200×1 strip pinned over a small cap
 // strides in x only, so the kept lights are columns 0,s,2s,… The colour pass must read each from its
 // dense buffer index (closed-form x for a 1-row grid) and pack them in the SAME order as the coord

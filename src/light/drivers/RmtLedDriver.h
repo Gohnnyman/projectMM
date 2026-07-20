@@ -3,7 +3,7 @@
 #include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
 
 #include "light/drivers/LedDriverConfig.h"
-#include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with I80LedDriver)
+#include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with MultiPinLedDriver)
 #include "light/drivers/RmtSymbol.h"       // encodeWs2812Symbols (host-testable)
 #include "platform/platform.h"
 
@@ -100,7 +100,7 @@ public:
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
     // The pin/count list parsing (parsePinList / assignCounts) lives in
-    // PinList.h, shared with I80LedDriver — both drivers slice the source
+    // PinList.h, shared with MultiPinLedDriver — both drivers slice the source
     // buffer from the same two text controls.
 
     /// Bind the driver's controls: the window (start/count), the `pins` and
@@ -419,10 +419,18 @@ private:
         freeSymbols();
         symbols_ = static_cast<uint32_t*>(platform::alloc(need * sizeof(uint32_t)));
         symbolCap_ = symbols_ ? need : 0;
+        publishHeapBytes();   // the symbol buffer grew — refresh the memory readout
     }
 
     void freeSymbols() {
-        if (symbols_) { platform::free(symbols_); symbols_ = nullptr; symbolCap_ = 0; }
+        if (symbols_) { platform::free(symbols_); symbols_ = nullptr; symbolCap_ = 0; publishHeapBytes(); }
+    }
+
+    /// This driver's heap = the base scratch + the RMT symbol buffer (one word per WS2812 data bit,
+    /// the driver's largest buffer). Summed for the per-module memory readout — see
+    /// DriverBase::driverHeapBytes.
+    size_t driverHeapBytes() const override {
+        return DriverBase::driverHeapBytes() + static_cast<size_t>(symbolCap_) * sizeof(uint32_t);
     }
 
     // --- loopback self-test (control-driven) ---

@@ -25,6 +25,7 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_worker.cpp"
         "../../src/platform/esp32/platform_esp32_gpio.cpp"
         "../../src/platform/esp32/platform_esp32_i80.cpp"
+        "../../src/platform/esp32/platform_esp32_moon_i80.cpp"
         "../../src/platform/esp32/platform_esp32_parlio.cpp"
         "../../src/platform/esp32/platform_esp32_i2s.cpp"
         "../../src/platform/esp32/platform_esp32_i2c.cpp"
@@ -42,6 +43,15 @@ idf_component_register(
 # compile line via the common set, so platform_esp32_rmt.cpp finds driver/rmt_*.h.
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
+
+# Xtensa: interleave literal pools into the text section (-mauto-litpools). Required by MM_RAMFUNC
+# (IRAM_ATTR) on TEMPLATE functions: a comdat instantiation's code lands in `.iram1.*` but its literal
+# pool in `.literal._Z…`, which the IDF linker script keeps in flash — out of l32r's backward reach
+# ("dangerous relocation: literal placed after use"). Auto-litpools makes each function self-contained.
+# RISC-V targets (P4) place constants inline natively and don't know the flag.
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    target_compile_options(${COMPONENT_LIB} PRIVATE -mauto-litpools)
+endif()
 
 # Firmware-variant defines, set by moondeck/build/build_esp32.py via firmware_cmake_args().
 # See docs/architecture.md § Firmware vs board — "firmware" is the compiled
@@ -135,14 +145,22 @@ add_custom_command(
 )
 add_custom_target(ui_embed DEPENDS ${UI_DIR}/ui_embedded.h)
 
-# Generate build_info.h from library.json (carries version, build date, board name).
+# Generate build_info.h from library.json + git (carries version, build id, build date, board name).
+#
+# **Deliberately ALWAYS out-of-date** — the target runs the generator on every build, not just when
+# library.json changes. MM_BUILD_ID is the git hash the binary is built from, and it is the only
+# trustworthy answer to "which code is on this board?": MM_BUILD_DATE cannot be, because __DATE__
+# expands when the *including* TU compiles, so editing a driver .cpp leaves the date frozen and a
+# freshly flashed board reports the OLD one, which reads as "the flash didn't take" and sends debugging
+# at the wrong binary. Pinning the rule to library.json's mtime has the same failure. The generator is a
+# sub-second script and rewrites the header only when its content changes, so an unchanged tree still
+# costs nothing downstream.
 set(BUILD_INFO_DIR ${COMPONENT_DIR}/../../src/core)
-add_custom_command(
-    OUTPUT ${BUILD_INFO_DIR}/build_info.h
+add_custom_target(build_info_gen ALL
     COMMAND ${Python3_EXECUTABLE} ${COMPONENT_DIR}/../../moondeck/build/generate_build_info.py
-    DEPENDS ${COMPONENT_DIR}/../../library.json ${COMPONENT_DIR}/../../moondeck/build/generate_build_info.py
-    COMMENT "Generating build_info.h"
+    BYPRODUCTS ${BUILD_INFO_DIR}/build_info.h
+    COMMENT "Generating build_info.h (git build id)"
+    VERBATIM
 )
-add_custom_target(build_info_gen DEPENDS ${BUILD_INFO_DIR}/build_info.h)
 
 add_dependencies(${COMPONENT_LIB} ui_embed build_info_gen)

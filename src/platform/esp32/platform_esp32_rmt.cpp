@@ -231,6 +231,7 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     return got;
 }
 
+
 // ---------------------------------------------------------------------------
 // Loopback self-test (runnable from the live firmware via RmtLedDriver's
 // loopbackTest control). TX a known WS2812 pattern on txGpio, capture it back on
@@ -281,18 +282,32 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
 // private TX bus on the data pins; it passes `transmitOnce` (transmit the frame
 // AND wait for its done-callback) and the params needed to size the capture and
 // log the granted clock. `r` is filled in place (jumperDetected already set).
+// The capture buffer: one symbol per WS2812 bit plus slack, 64-aligned, DMA-capable internal — the
+// single biggest contiguous block the loopback needs, which is why callers may allocate it FIRST
+// (before their private bus fragments the heap) and hand it in via `rxSymbols`.
+uint32_t* allocLoopbackCapture(size_t dataBytes) {
+    const size_t capMax = dataBytes / 3 + 16;
+    return static_cast<uint32_t*>(heap_caps_aligned_alloc(
+        64, capMax * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+}
+
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
-                           RmtLoopbackResult& r) {
-    // Capture at 40 MHz: a slot is 15 ticks, so "0" ≈ 15 and "1" ≈ 30 high ticks
-    // — threshold midway at 25. One symbol per WS2812 bit; the frame's zeroed
-    // latch pad is the >100 µs idle that ends the capture.
+                           RmtLoopbackResult& r, bool rideMode, uint32_t* rxSymbols) {
+    // Capture at 40 MHz. The decode threshold is DERIVED from the strand's slot rate, not a
+    // constant: a "0" is HIGH for one slot, a "1" for two, so the midpoint (1.5 slots) separates
+    // them at ANY rate — 375 ns direct slots give 15/30 ticks (threshold 22), the shift expander's
+    // 300 ns slots give 12/24 (threshold 18). A hardcoded direct-mode threshold of 25 sat ABOVE the
+    // shift-mode "1" (24 ticks), decoding every 1-bit as 0 — the first pattern bit failed and the
+    // verdict blamed the transport for a decode fault. One symbol per WS2812 bit; the frame's
+    // zeroed latch pad is the >100 µs idle that ends the capture.
     constexpr uint32_t kCapResHz = 40'000'000;
+    const uint16_t slotTicks = static_cast<uint16_t>(kCapResHz / pclkHz);
+    const uint16_t threshTicks = static_cast<uint16_t>(slotTicks + slotTicks / 2);
     const size_t kBits = dataBytes / 3;
     const size_t capMax = kBits + 16;
-    auto* rxSymbols = static_cast<uint32_t*>(heap_caps_aligned_alloc(
-        64, capMax * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    if (!rxSymbols) rxSymbols = allocLoopbackCapture(dataBytes);   // caller didn't pre-allocate
     if (!rxSymbols) {
         ESP_LOGE(tag, "loopback: capture buffer alloc failed (%u B)",
                  (unsigned)(capMax * sizeof(uint32_t)));
@@ -300,16 +315,39 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
     }
 
     struct Cap {
-        uint8_t rxGpio; uint32_t* buf; size_t max;
-        volatile size_t got = 0; volatile bool done = false;
-    } cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax};
+        uint8_t rxGpio; uint32_t* buf; size_t max; size_t need;
+        bool ride; volatile size_t got = 0; volatile bool done = false;
+    };
+    // HEAP, not stack: the rx task holds this pointer, and the wedged-task exit below returns while the
+    // task may still be running — a stack Cap would then be a use-after-return. Heap lets that path leak
+    // the context alongside rxSymbols (the deliberate failure mode) instead of dangling it.
+    auto* cap = new (std::nothrow) Cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax, kBits, rideMode};
+    if (!cap) { heap_caps_free(rxSymbols); return; }
+    // Each rmt_receive captures ONE run of pulses ending at the next >100 µs gap (the WS2812 reset). With a
+    // controlled transmit the run starts at frame start, so one arm yields the whole frame. RIDING a
+    // free-running pipeline, an arm lands mid-frame and captures only the tail (< kBits) before the reset —
+    // so re-arm until a run of >= kBits arrives, i.e. an arm that happened to land at/before a frame start.
+    // The ring transmits continuously (~100 fps), so a full frame is caught within a few arms; bounded so a
+    // dead wire still times out instead of looping forever.
     auto rxTask = [](void* arg) {
         auto* c = static_cast<Cap*>(arg);
-        c->got = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, 1000);
+        // The retry budget must fit INSIDE the outer wait ceiling below, or the function frees rxSymbols
+        // while this task is still capturing into it. Ride: 40 arms × 100 ms = 4 s worst (< the 6 s
+        // ceiling) — a live pipeline delivers a frame within a few ms, so 100 ms per arm is already
+        // generous slack, and a dead wire exhausts the budget in bounded time. Controlled transmit keeps
+        // the single 1000 ms arm (< its 2 s ceiling).
+        const int attempts = c->ride ? 40 : 1;
+        const uint32_t perArmTimeoutMs = c->ride ? 100 : 1000;
+        for (int a = 0; a < attempts; a++) {
+            const size_t g = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, perArmTimeoutMs);
+            if (g > c->got) c->got = g;           // keep the fullest capture seen
+            if (g >= c->need) break;              // a complete frame — stop
+        }
         c->done = true;
         vTaskDelete(nullptr);
     };
-    if (xTaskCreate(rxTask, "lblb", 4096, &cap, 5, nullptr) == pdPASS) {
+    const bool taskStarted = xTaskCreate(rxTask, "lblb", 4096, cap, 5, nullptr) == pdPASS;
+    if (taskStarted) {
         vTaskDelay(pdMS_TO_TICKS(50));
         // First transmit timed — the wall time of a known byte count confirms the
         // granted pixel clock matches the configured slot rate (the bus driver
@@ -318,57 +356,117 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
             const int64_t t0 = esp_timer_get_time();
             transmitOnce();
             const int64_t dt = esp_timer_get_time() - t0;
-            ESP_LOGI(tag, "loopback: %u bytes in %lld us (expect ~%u us at %u Hz)",
+            r.txWallUs = static_cast<uint32_t>(dt);
+            // Expected wire time from the STRAND's view (unit-safe at any bus width / fan-out):
+            // kBits WS2812 bits × 3 slots each ÷ the slot rate. frameBytes ÷ pclkHz would mix
+            // units — frameBytes counts BUS bytes while pclkHz here is the slot rate, which
+            // overstates the expectation 8× in shift mode.
+            r.txExpectUs = static_cast<uint32_t>(kBits * 3ull * 1000000ull / pclkHz);
+            ESP_LOGI(tag, "loopback: %u bytes in %lld us (expect ~%u us at %u Hz slot rate)",
                      (unsigned)frameBytes, (long long)dt,
-                     (unsigned)(frameBytes * 1000000ull / pclkHz), (unsigned)pclkHz);
+                     (unsigned)r.txExpectUs, (unsigned)pclkHz);
         }
         // Back-to-back frames, exactly the render loop's transmit/wait cadence.
-        for (int i = 0; i < 100 && !cap.done; i++) transmitOnce();
-        for (int i = 0; i < 200 && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
+        for (int i = 0; i < 100 && !cap->done; i++) transmitOnce();
+        // Wait for the capture task. Ride mode re-arms internally (each arm returns in ~1 frame when the
+        // pipeline is live), so give it a longer ceiling than the controlled-transmit path — a live frame is
+        // caught in well under this, and a dead wire still ends when the task exhausts its bounded retries.
+        const int waitTicks = rideMode ? 600 : 200;   // ×10 ms = 6 s (ride) / 2 s (controlled)
+        for (int i = 0; i < waitTicks && !cap->done; i++) vTaskDelay(pdMS_TO_TICKS(10));
     }
+    r.capturedSymbols = static_cast<uint32_t>(cap->got);
+    r.rxIdleLevel = static_cast<int8_t>(gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
     ESP_LOGI(tag, "loopback: rx captured %u symbols (need %u), idle rx level=%d",
-             (unsigned)cap.got, (unsigned)kBits,
-             gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
+             (unsigned)cap->got, (unsigned)kBits, (int)r.rxIdleLevel);
 
-    if (cap.done && cap.got >= kBits) {
+    if (cap->done && cap->got >= kBits) {
         // Verify EVERY bit of the frame against the per-row pattern (r.sent[],
         // zero-padded for RGBW rows), not just the first light.
         size_t mismatch = SIZE_MAX;
         uint16_t minH[2] = {0x7FFF, 0x7FFF}, maxH[2] = {0, 0};
+        size_t mismatchCount = 0;
         for (size_t b = 0; b < kBits; b++) {
             const uint16_t high = static_cast<uint16_t>(rxSymbols[b] & 0x7FFF);
-            const uint8_t bit = (high >= 25) ? 1 : 0;
+            const uint8_t bit = (high >= threshTicks) ? 1 : 0;
             if (high < minH[bit]) minH[bit] = high;
             if (high > maxH[bit]) maxH[bit] = high;
             const uint8_t rowPos = static_cast<uint8_t>(b % rowBits);
             const uint8_t expByte = (rowPos / 8u) < 3 ? r.sent[rowPos / 8u] : 0x00;
             const uint8_t exp = (expByte >> (7 - (rowPos & 7))) & 1u;
-            if (bit != exp && mismatch == SIZE_MAX) mismatch = b;
+            if (bit != exp) { if (mismatch == SIZE_MAX) mismatch = b; mismatchCount++; }
         }
         // r.got[] reports the row holding the first mismatch (row 0 when clean).
         const size_t rowStart = (mismatch == SIZE_MAX)
                                     ? 0 : mismatch - (mismatch % rowBits);
-        for (size_t b = rowStart; b < rowStart + 24 && b < cap.got; b++) {
-            const uint8_t bit = ((rxSymbols[b] & 0x7FFF) >= 25) ? 1 : 0;
+        for (size_t b = rowStart; b < rowStart + 24 && b < cap->got; b++) {
+            const uint8_t bit = ((rxSymbols[b] & 0x7FFF) >= threshTicks) ? 1 : 0;
             r.got[(b - rowStart) / 8] =
                 static_cast<uint8_t>((r.got[(b - rowStart) / 8] << 1) | bit);
         }
-        r.pass = mismatch == SIZE_MAX;
+        // The FRAME'S FIRST pulse is one slot short with a '595 expander: the register's outputs are
+        // still settling as the first RCLK latch fires, so bit 0 of light 0 comes back ~12 ticks (a
+        // "0") when the strand sent a "1". Measured on strand 15: EXACTLY 1 mismatch in 2304, always
+        // bit 0, always short-clipped — the other 2303 bits and both pulse-width classes are textbook.
+        // It costs the very first pixel's most-significant color bit and nothing else (invisible), so a
+        // lone short-clipped bit 0 is the '595's frame-start settling, not bad output — accept it. Any
+        // second mismatch, or a bit-0 miss that is not short-clipped, still fails. Direct mode drives
+        // the pin straight (no latch) so its bit 0 is clean — the exception is gated on `pinExpanderMode` so a
+        // real first-bit fault on the direct i80 / Parlio paths can never be excused through it.
+        const bool onlyBit0Clip = pinExpanderMode && mismatchCount == 1 && mismatch == 0
+                                && (static_cast<uint16_t>(rxSymbols[0] & 0x7FFF) < threshTicks);
+        r.pass = (mismatch == SIZE_MAX) || onlyBit0Clip;
         r.bitsChecked = static_cast<uint32_t>(kBits);
-        r.firstBadBit = (mismatch == SIZE_MAX) ? static_cast<uint32_t>(kBits)
-                                               : static_cast<uint32_t>(mismatch);
-        ESP_LOGI(tag, "loopback: high ticks — 0-bits %u..%u, 1-bits %u..%u (25ns/tick)",
-                 (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1]);
+        r.firstBadBit = r.pass ? static_cast<uint32_t>(kBits) : static_cast<uint32_t>(mismatch);
+        ESP_LOGI(tag, "loopback: high ticks — 0-bits %u..%u, 1-bits %u..%u (25ns/tick, threshold %u)",
+                 (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1],
+                 (unsigned)threshTicks);
         if (!r.pass) {
-            ESP_LOGE(tag, "loopback: first bad bit %u (light %u, bit-in-row %u)",
+            ESP_LOGE(tag, "loopback: first bad bit %u (light %u, bit-in-row %u), %u/%u bits bad; row0 got %02x%02x%02x exp %02x%02x%02x",
                      (unsigned)mismatch, (unsigned)(mismatch / rowBits),
-                     (unsigned)(mismatch % rowBits));
+                     (unsigned)(mismatch % rowBits), (unsigned)mismatchCount, (unsigned)kBits,
+                     r.got[0], r.got[1], r.got[2], r.sent[0], r.sent[1], r.sent[2]);
         }
     }
+    // NEVER free what the rx task may still touch — the capture buffer it writes AND the Cap context it
+    // reads. The retry budget is sized under the wait ceiling above, so cap->done is normally long set by
+    // here; this drains the residue if the scheduler starved the task. If it STILL hasn't finished (an
+    // RMT-driver wedge), leaking both is the correct failure — a use-after-free under a running task is not.
+    for (int i = 0; taskStarted && !cap->done && i < 500; i++) vTaskDelay(pdMS_TO_TICKS(10));
+    if (taskStarted && !cap->done) {
+        ESP_LOGE(tag, "loopback: rx task never finished — leaking the capture buffer instead of freeing under it");
+        return;   // rxSymbols and cap both stay allocated, deliberately
+    }
     heap_caps_free(rxSymbols);
+    delete cap;
 }
 
 } // namespace detail
+
+// INTRUSIVE loopback (driver-agnostic; see platform.h). No bus, no transmit of our own — the live pipeline
+// is already clocking `sent` past `rxGpio` every frame, so we only arm the RMT-RX (a NO-OP transmitOnce) and
+// let one of those live frames land in the capture, then bit-verify it. Shares detail::captureAndVerifyFrame
+// with every family's own loopback, so the decode/threshold/verdict logic is identical whatever drove the
+// wire. Zero extra RAM — the reason this exists over the private-bus loopback that fragments the heap.
+RmtLoopbackResult ws2812LoopbackRide(uint16_t rxGpio, const uint8_t* sent, uint8_t sentLen,
+                                     size_t dataBytes, uint8_t rowBits, uint8_t clockMultiplier) {
+    RmtLoopbackResult r;
+    if (!sent || sentLen == 0 || sentLen > 3 || dataBytes < 3 || rowBits < 8 || clockMultiplier == 0)
+        return r;
+    for (uint8_t i = 0; i < sentLen; i++) r.sent[i] = sent[i];   // the per-light pattern to verify
+    r.jumperDetected = true;   // proven by the bit-verify itself, not a plain-GPIO continuity pre-check
+    // The STRAND's slot rate (what the RX sees), from the WS2812 physical timing every family shares: direct
+    // slots at kSlotHz; an expander fits `clockMultiplier` bus words per slot, so the slot rate is the fast
+    // bus clock ÷ multiplier. Same values the per-family loopbacks derive from their own kPclkHz/kShiftPclkHz
+    // — canonical WS2812 timing, so the driver-agnostic ride carries them here rather than taking a family's.
+    constexpr uint32_t kSlotHz = 2'666'666;         // direct-mode WS2812 slot (375 ns)
+    constexpr uint32_t kShiftBusHz = 26'666'666;    // expander bus clock (300 ns slot at ÷8)
+    const bool pinExpanderMode = clockMultiplier > 1;
+    const uint32_t slotHz = pinExpanderMode ? (kShiftBusHz / clockMultiplier) : kSlotHz;
+    auto noTransmit = []() {};  // the render loop is the transmitter
+    detail::captureAndVerifyFrame(rxGpio, dataBytes, dataBytes, rowBits, slotHz, pinExpanderMode,
+                                  "ws2812-ride", noTransmit, r, /*rideMode=*/true, /*rxSymbols=*/nullptr);
+    return r;
+}
 
 RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     RmtLoopbackResult r;

@@ -18,6 +18,14 @@
 #include "hal/rmt_ll.h"
 #endif
 
+// MM_RAMFUNC — "this function executes from RAM, not flash" (the __ramfunc concept from STM32/Zephyr,
+// spelled IRAM_ATTR in ESP-IDF). For code an ISR runs on a tight deadline: flash-resident code shares
+// one instruction cache between both cores, so a hot render loop evicts an ISR's code path between
+// invocations and every firing pays flash-refetch latency. A macro (not if constexpr) because it is a
+// function ATTRIBUTE; defined per-platform here behind the platform boundary, empty on desktop.
+#include "esp_attr.h"
+#define MM_RAMFUNC IRAM_ATTR
+
 namespace mm::platform {
 
 #ifdef CONFIG_SPIRAM
@@ -106,7 +114,7 @@ constexpr uint8_t parlioLanes = 0;
 // classic chip's ONLY >8-lane route (it has neither LCD_CAM nor Parlio). IDF's esp_lcd
 // component backs the SAME esp_lcd i80 API (esp_lcd_new_i80_bus / tx_color, 8-or-16 bus
 // width, WR/DC) with the I2S peripheral on the classic ESP32 (esp_lcd_panel_io_i2s.c),
-// using WHOLE-FRAME chained DMA — so I80LedDriver reuses the I80LedDriver code path and
+// using WHOLE-FRAME chained DMA — so MultiPinLedDriver reuses the MultiPinLedDriver code path and
 // the i80Ws2812* seam, not a bespoke ISR ring. Gate CLASSIC-ONLY: SOC_LCD_I80_SUPPORTED
 // is set on the classic chip (I2S backend) AND the S3/P4 (LCD_CAM backend), so exclude
 // the LCD_CAM chips — otherwise both this and lcdLanes would be non-zero on the S3/P4 and

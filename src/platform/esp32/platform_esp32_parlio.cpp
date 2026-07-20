@@ -84,7 +84,7 @@ bool IRAM_ATTR parlioDoneCb(parlio_tx_unit_handle_t, const parlio_tx_done_event_
     st->fifoTail = (st->fifoTail + 1u) & 1u;
     // In-order queue: if another buffer is already queued behind this one, the hardware starts it the
     // instant this transfer ends — stamp its true start here, since parlioWs2812Transmit deliberately
-    // skipped stamping it (the wire was busy). This is what keeps the second buffer's wireUs honest.
+    // skipped stamping it (the wire was busy). This is what keeps the second buffer's frameTime honest.
     if (st->fifoTail != st->fifoHead) st->txStartUs[st->fifoTail] = now;
     BaseType_t high = pdFALSE;
     xSemaphoreGiveFromISR(st->done[b], &high);
@@ -267,7 +267,7 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     // Stamp the wire-time start only when the wire is IDLE — then enqueue == hardware-start. When a
     // transfer is already clocking out, this one does not start until that one finishes, so stamping
     // here would fold the predecessor's remaining wire time into this buffer's measured duration
-    // (inflating wireUs for the second buffer of the double-buffer pair). In that case the done-callback
+    // (inflating frameTime for the second buffer of the double-buffer pair). In that case the done-callback
     // stamps this slot's start as it completes the predecessor — the moment the hardware really starts it.
     if (wireIdle) st->txStartUs[slot] = esp_timer_get_time();
     st->fifoHead = (st->fifoHead + 1u) & 1u;
@@ -317,9 +317,16 @@ void parlioWs2812Deinit(ParlioWs2812Handle& h) {
 namespace detail {
 bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio);
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
-                           uint8_t rowBits, uint32_t pclkHz, const char* tag,
+                           uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
-                           RmtLoopbackResult& r);
+                           RmtLoopbackResult& r, bool rideMode = false,
+                           uint32_t* rxSymbols = nullptr);
+// Pre-allocate the capture buffer captureAndVerifyFrame needs (one contiguous DMA-capable internal
+// block, sized from dataBytes) so a caller can grab it BEFORE its own allocations fragment the heap
+// (largest-first allocation order). Pass the result as `rxSymbols`; ownership transfers to
+// captureAndVerifyFrame regardless of outcome. nullptr on alloc failure is fine to pass through —
+// the helper then retries the alloc itself and reports the failure.
+uint32_t* allocLoopbackCapture(size_t dataBytes);
 }
 
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
@@ -367,7 +374,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
         if (xSemaphoreTake(st->done[0], pdMS_TO_TICKS(1000)) != pdTRUE)
             ESP_LOGE(PAR_TAG, "loopback: tx done-callback timed out");
     };
-    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz,
+    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz, /*pinExpanderMode=*/false,
                                   PAR_TAG, transmitOnce, r);
     destroyState(st);
     return r;

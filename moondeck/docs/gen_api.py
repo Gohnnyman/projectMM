@@ -107,7 +107,28 @@ def _doxyfile(headers: list[str], xml_out: str) -> str:
 # the .md directly, the same as any other doc source.
 DOCS_MOONMODULES = ROOT / "docs" / "moonmodules"
 
-_BLOB_BASE = "https://github.com/MoonModules/projectMM/blob/main"
+def _blob_base() -> str:
+    """The GitHub blob URL every source link is built on, pinned to the branch being
+    documented rather than a hard-coded `main`.
+
+    `main` is the wrong constant on its own: the deployed site is built from main (so it
+    resolves there), but a page generated on a feature branch links a file that main may
+    not have yet — a 404 on every source link for any not-yet-merged module. Ask git for
+    the current branch and fall back to main when there is no git (a release tarball) or
+    the branch is detached."""
+    branch = "main"
+    try:
+        out = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                             cwd=ROOT, capture_output=True, text=True, timeout=5)
+        name = out.stdout.strip()
+        if out.returncode == 0 and name and name != "HEAD":
+            branch = name
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return f"https://github.com/MoonModules/projectMM/blob/{branch}"
+
+
+_BLOB_BASE = _blob_base()
 
 
 def _source_header(header_rel: str, domain: str, stem: str) -> str:
@@ -123,6 +144,12 @@ def _source_header(header_rel: str, domain: str, stem: str) -> str:
 # — so every such link must be repointed (or dropped for the namespace file, which has
 # no single per-header home).
 _CLS_LINK_RE = re.compile(r'\]\(cls_(?P<key>mm(?:-[\w-]+)?)\.md(?P<frag>#[\w-]+)?\)')
+
+# The same cross-reference, as emitted from a GROUP page. moxygen names a link by the output
+# pattern of the file it is CURRENTLY rendering, so a class reference inside a group comes out
+# `grp_undefined.md#classmm_1_1_rmt_led_driver` — the filename is a dead end, but the anchor is
+# Doxygen's class refid and still says which class it meant. Recover the class from the anchor.
+_GRP_CLS_LINK_RE = re.compile(r'\]\(grp_undefined\.md#class(?P<refid>[\w_]+)\)')
 
 
 def _rewrite_cls_links(md: str, from_domain: str, cls_to_page: dict) -> str:
@@ -146,6 +173,21 @@ def _rewrite_cls_links(md: str, from_domain: str, cls_to_page: dict) -> str:
     return _CLS_LINK_RE.sub(_sub, md)
 
 
+def _rewrite_grp_cls_links(md: str, from_domain: str, cls_to_page: dict,
+                           refid_to_key: dict) -> str:
+    """The group-page counterpart of _rewrite_cls_links: resolve `grp_undefined.md#class<refid>`
+    to the class's real page via the refid, or drop the target if it has none."""
+    def _sub(m: re.Match) -> str:
+        key = refid_to_key.get(m.group("refid"))
+        page = cls_to_page.get(key) if key else None
+        if page is None:
+            return "]"          # no page for that class → keep the label, drop the dead target
+        domain, stem = page
+        rel = f"{stem}.md" if domain == from_domain else f"../../{domain}/moxygen/{stem}.md"
+        return f"]({rel})"
+    return _GRP_CLS_LINK_RE.sub(_sub, md)
+
+
 # moxygen in-page `](#anchor)` self-links that don't survive recombination:
 #   - `#_..._8h_source`  — Doxygen's per-header source-file anchor (never rendered here)
 #   - `#name-<n>`         — moxygen's numbered member anchor (`#onbuildstate-13`); the
@@ -158,9 +200,42 @@ _BAD_ANCHOR_RE = re.compile(r'\]\(#(?:_\w+_8h_source|[\w-]+-\d+)\)')
 
 
 def _strip_bad_anchor_links(md: str) -> str:
-    """Drop moxygen self-links whose anchor doesn't exist on the recombined page
-    (source-file anchors + numbered member anchors), leaving the link label as text."""
+    """Drop the always-dead moxygen self-link shapes (`#_..._8h_source`, numbered `#name-<n>`), keeping
+    the `[label]` text. The general 'does this bare `#anchor` resolve to a heading?' check runs LATER, in
+    `_strip_unresolved_anchor_links`, once `@moreinfo`/`@xref` have added their headings/links."""
     return _BAD_ANCHOR_RE.sub("]", md)
+
+
+def _strip_unresolved_anchor_links(md: str) -> str:
+    """Final pass: drop any same-page `[label](#anchor)` whose `#anchor` doesn't match a real heading id
+    on the finished page, keeping the `[label]` text. Doxygen auto-links a bare method mention
+    (`defineDriverControls()`) to a clean `#definedrivercontrols`, but the member's rendered id is
+    numbered (or the member lives on a base-class page), so that anchor resolves to nothing → strip it. A
+    bare anchor that DOES match a heading (a `@moreinfo` subsection, a manual `## Section`) is kept. Runs
+    AFTER `@moreinfo`/`@xref` so their headings and links are already in place."""
+    try:
+        from markdown.extensions.toc import slugify   # MkDocs' own slugifier — always present in the build env
+    except ImportError:
+        return md   # no markdown (a bare `python3` outside the docs env) → skip the pass, don't crash the generator
+    heading_ids = {slugify(re.sub(r'[`*]', '', h), '-')
+                   for h in re.findall(r'^#{1,6}\s+(.+)$', md, re.MULTILINE)}
+    return re.sub(r'\]\(#([\w-]+)\)',
+                  lambda m: m.group(0) if m.group(1) in heading_ids else "]", md)
+
+
+# A link moxygen auto-inserted INSIDE a code span: `[label](target)`. Markdown does not
+# render links within `code`, so these emit as literal brackets-and-parens in a code chip
+# (`[frameBytes](ParallelLedDriver.md)`) — noise at best, and actively wrong when the
+# "link" is really notation: a half-open interval `[a, b)` in a `///` comment comes out
+# mangled the same way. Either way the target is unreachable, so keep the label text and
+# drop the target. Only touches text between backticks; prose links are untouched.
+_CODE_SPAN_RE = re.compile(r'`[^`\n]*`')
+_LINK_IN_SPAN_RE = re.compile(r'\[([^\]\n]+)\]\([^)\n]*\)')
+
+
+def _unlink_inside_code_spans(md: str) -> str:
+    """Reduce `[label](target)` to `label` wherever it sits inside a code span."""
+    return _CODE_SPAN_RE.sub(lambda m: _LINK_IN_SPAN_RE.sub(r'\1', m.group(0)), md)
 
 
 # A `@card <file>` directive in a class `///` comment — the module's UI-card screenshot.
@@ -174,6 +249,56 @@ def _strip_bad_anchor_links(md: str) -> str:
 # render to an <img> on its own block (a leading newline lifts it out of the trailing paragraph).
 _CARD_RE = re.compile(r'[ \t]*@card\s+(?P<file>\S+\.(?:png|jpe?g|gif))[ \t]*')
 _ASSETS = ROOT / "docs" / "assets"
+
+
+# A `@moreinfo` directive in a class `///` comment splits the class description: everything BEFORE it is
+# the lead description (renders first, above the attribute/method lists — Doxygen's fixed order), and
+# everything AFTER it is deep-dive reference that belongs at the BOTTOM of the page, under the members.
+# Doxygen has no "trailing section" slot, so we relocate it here on the rendered markdown, the same
+# post-process layer `@card` uses. Like `@card`, the plain-text marker survives Doxygen → moxygen as-is.
+_MOREINFO_RE = re.compile(r'^[ \t]*@moreinfo[ \t]*$', re.MULTILINE)
+# The first member-section heading moxygen emits (### Public Attributes / Public Methods / …). The
+# detailed-description ends where the first such heading begins.
+_FIRST_SECTION_RE = re.compile(r'^### (?:Public|Protected|Private|Static) ', re.MULTILINE)
+
+
+# An in-`///` cross-reference: `@xref{<anchor>|<label>}` (or `@xref{<anchor>}` — the anchor doubles as the
+# label). Renders to a real Markdown link `[label](#anchor)` pointing at a heading on the SAME page (a
+# More-info subsection). Doxygen strips relative `[text](../x.md)` links from its XML-only output, so an
+# in-text page-local anchor can't be written directly in a `///`; this marker survives Doxygen as plain
+# text and becomes the link here. NB: the marker is `@xref`, NOT `@ref` — `@ref` is a real Doxygen command
+# (Doxygen consumes the keyword and mangles it); `@xref` is not a command, so it passes through verbatim
+# like `@card`. `<anchor>` is the target heading's MkDocs slug (lowercased, spaces→`-`, punctuation
+# dropped) — e.g. `@xref{the-ringdbg-instrument-expert-mode-read-only|the ringDbg legend}`.
+# The `|` separator may arrive escaped as `\|` — moxygen escapes pipes when the marker lands inside a
+# member's brief (a Markdown table cell in the attribute list). Accept either form.
+_REF_RE = re.compile(r'@xref\{(?P<anchor>[a-z0-9-]+)(?:\\?\|(?P<label>[^}]+))?\}')
+
+
+def _render_ref_directives(md: str) -> str:
+    """Turn `@xref{anchor|label}` markers into `[label](#anchor)` page-local links (the label defaults to
+    the anchor when omitted)."""
+    def repl(m: re.Match) -> str:
+        anchor = m.group("anchor")
+        label = (m.group("label") or anchor).strip()
+        return f"[{label}](#{anchor})"
+    return _REF_RE.sub(repl, md)
+
+
+def _relocate_moreinfo(md: str) -> str:
+    """Move the class description's `@moreinfo` tail below the member sections, under a `## More info`
+    heading. No marker → unchanged. The tail is cut from `@moreinfo` up to the first member-section
+    heading (the end of the class description) and re-appended at the end of the page."""
+    marker = _MOREINFO_RE.search(md)
+    if not marker:
+        return md
+    # The class description runs until the first member section (or end of page if a class has no members).
+    sect = _FIRST_SECTION_RE.search(md, marker.end())
+    tail_end = sect.start() if sect else len(md)
+    tail = md[marker.end():tail_end].strip()
+    # Excise the marker + its tail from the description, then append it (relabelled) after everything else.
+    body = (md[:marker.start()] + md[tail_end:]).rstrip()
+    return f"{body}\n\n## More info\n\n{tail}\n"
 
 
 def _render_card_directives(md: str, domain: str, stem: str) -> str:
@@ -258,6 +383,52 @@ def _class_to_header(xml_dir: Path) -> dict[str, str]:
     return mapping
 
 
+def _refid_to_class_key(xml_dir: Path) -> dict[str, str]:
+    """Map Doxygen's class refid (`classmm_1_1_rmt_led_driver` minus the `class` prefix) →
+    moxygen's class-file key (`mm-RmtLedDriver`). A GROUP page's class cross-references carry
+    only the refid (see _GRP_CLS_LINK_RE), so this is what turns one back into a real page."""
+    mapping: dict[str, str] = {}
+    for cx in list(xml_dir.glob("class*.xml")) + list(xml_dir.glob("struct*.xml")):
+        try:
+            root = ET.parse(cx).getroot()
+        except ET.ParseError:
+            continue
+        cd = root.find("compounddef")
+        if cd is None:
+            continue
+        refid = cd.get("id") or ""
+        name = cd.findtext("compoundname") or ""
+        if refid and name:
+            # the XML id already carries the `class`/`struct` prefix moxygen strips into the anchor
+            mapping[re.sub(r'^(class|struct)', '', refid)] = name.replace("::", "-")
+    return mapping
+
+
+def _group_to_header(xml_dir: Path) -> dict[str, str]:
+    """Map each moxygen GROUP-file key → its source header, the free-function counterpart
+    of _class_to_header.
+
+    A group compound has no `<location>` of its own (a group is a label, not an entity), so
+    read it from the group's MEMBERS instead and take the header they agree on. A group that
+    spans headers has no single home — skip it rather than guess, and it simply gets no page.
+    The key is moxygen's `--groups` filename stem: the group id as written in `@defgroup`."""
+    mapping: dict[str, str] = {}
+    for gx in xml_dir.glob("group__*.xml"):
+        try:
+            root = ET.parse(gx).getroot()
+        except ET.ParseError:
+            continue
+        cd = root.find("compounddef")
+        if cd is None:
+            continue
+        name = cd.findtext("compoundname") or ""      # the @defgroup id
+        files = {loc.get("file") for loc in cd.iterfind(".//memberdef/location")
+                 if loc.get("file")}
+        if name and len(files) == 1:
+            mapping[name] = files.pop()
+    return mapping
+
+
 def generate() -> dict[str, str]:
     """Write a generated technical page for every documented module under
     src/{core,light} into docs/moonmodules/{domain}/moxygen/<Module>.md (gitignored),
@@ -288,7 +459,7 @@ def generate() -> dict[str, str]:
         xml_dir = tdp / "xml"
         (tdp / "Doxyfile").write_text(_doxyfile(headers, str(xml_dir)))
         r = subprocess.run(["doxygen", str(tdp / "Doxyfile")],
-                           cwd=tdp, capture_output=True, text=True)
+                           cwd=tdp, capture_output=True, text=True, check=False)
         if r.returncode != 0 or not xml_dir.exists():
             raise GenApiError(f"doxygen failed (rc={r.returncode}): {r.stderr[-500:]}")
 
@@ -297,13 +468,30 @@ def generate() -> dict[str, str]:
             ["npx", "--yes", "moxygen@2.1.10",
              "--templates", str(TEMPLATES), "--classes", "--noindex",
              "--output", str(tdp / "cls_%s.md"), str(xml_dir)],
-            cwd=tdp, capture_output=True, text=True,
+            cwd=tdp, capture_output=True, text=True, check=False,
         )
         if m.returncode != 0:
             # npx couldn't fetch/run moxygen (registry outage, yanked version, no net).
             raise GenApiError(f"npx moxygen failed (rc={m.returncode}): {m.stderr[-500:]}")
 
+        # A second moxygen call for GROUPS. A header of free functions (the WS2812 slot
+        # encoder, the pin parsers) has no class for `--classes` to find, so it would get
+        # no page at all — Doxygen files those members under the NAMESPACE compound, which
+        # the class→header map never reads. `@defgroup`/`@ingroup` is Doxygen's own answer
+        # for "these free functions are one unit", and moxygen renders a group per file the
+        # same way it renders a class, so the recombine below treats both alike.
+        g = subprocess.run(
+            ["npx", "--yes", "moxygen@2.1.10",
+             "--templates", str(TEMPLATES), "--groups", "--noindex",
+             "--output", str(tdp / "grp_%s.md"), str(xml_dir)],
+            cwd=tdp, capture_output=True, text=True, check=False,
+        )
+        if g.returncode != 0:
+            raise GenApiError(f"npx moxygen --groups failed (rc={g.returncode}): {g.stderr[-500:]}")
+
         cls_to_header = _class_to_header(xml_dir)
+        cls_to_header.update(_group_to_header(xml_dir))
+        refid_to_key = _refid_to_class_key(xml_dir)
 
         # moxygen's `--classes` cross-references link to its OWN per-class filenames
         # (`cls_mm-<Class>.md#anchor`). We recombine classes into per-header pages, so
@@ -319,20 +507,32 @@ def generate() -> dict[str, str]:
         # Group the per-class markdown by owning header (in header order, so a page's
         # classes appear top-down as declared).
         by_header: dict[str, list[str]] = {}
-        for cls_md in sorted(tdp.glob("cls_*.md")):
-            key = cls_md.name[len("cls_"):-len(".md")]   # "mm-ControlList"
-            header = cls_to_header.get(key)
-            if header is None or domain_of(header) is None:
-                continue
-            by_header.setdefault(header, []).append(cls_md.read_text(encoding="utf-8"))
+        for prefix in ("cls_", "grp_"):                  # classes, then free-function groups
+            for part_md in sorted(tdp.glob(f"{prefix}*.md")):
+                key = part_md.name[len(prefix):-len(".md")]   # "mm-ControlList" / "parallelslots"
+                header = cls_to_header.get(key)
+                if header is None or domain_of(header) is None:
+                    continue
+                by_header.setdefault(header, []).append(part_md.read_text(encoding="utf-8"))
 
         pages: dict[str, str] = {}
         for header, blocks in by_header.items():
             domain = domain_of(header)
             stem = Path(header).stem
             body = _rewrite_cls_links("".join(blocks), domain, cls_to_page)
+            body = _rewrite_grp_cls_links(body, domain, cls_to_page, refid_to_key)
             body = _strip_bad_anchor_links(body)
+            # After the link rewrites (so it catches their output too): a link inside a
+            # code span can't render — keep the label, drop the target.
+            body = _unlink_inside_code_spans(body)
             body = _render_card_directives(body, domain, stem)
+            body = _render_ref_directives(body)   # @xref{anchor|label} → page-local [label](#anchor)
+            # After card rendering (so a @card inside the More-info tail moves with it): relocate the
+            # class description's @moreinfo tail to a `## More info` section below the member lists.
+            body = _relocate_moreinfo(body)
+            # LAST link pass — now every heading (incl. @moreinfo subsections) and every @xref link is in
+            # place, so this can honestly check which bare `#anchor`s resolve and drop the ones that don't.
+            body = _strip_unresolved_anchor_links(body)
             body = _highlight_signature_names(body)
             md = _source_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"

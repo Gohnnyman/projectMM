@@ -391,8 +391,8 @@ public:
                 if constexpr (platform::hasWiFi) {
                     if (platform::wifiStaConnected()) {
                         onConnected("WiFi STA");
-                    } else if (elapsed > 10000) {
-                        // WiFi STA didn't connect in 10s, start AP
+                    } else if (elapsed > kStaGraceMs) {
+                        // WiFi STA didn't connect within the grace window, start AP
                         platform::wifiStaStop();
                         noteRadioStopped();
                         startAP();
@@ -436,12 +436,29 @@ public:
                         platform::mdnsStop();
                         onConnected("Ethernet");
                     } else if (!platform::wifiStaConnected()) {
-                        std::printf("NetworkModule: WiFi STA dropped, starting AP\n");
-                        platform::mdnsStop();
-                        platform::wifiStaStop();
-                        noteRadioStopped();
-                        startAP();
+                        // **A dropout is not a divorce.** The radio reconnects itself (the platform's
+                        // STA_DISCONNECTED handler calls esp_wifi_connect), and the common causes — a
+                        // router rebooting, a roam, a few lost beacons — heal within seconds. So a
+                        // link that reads down gets a grace window to come back before we give up on
+                        // the network; only if it stays down do we fall back to AP. The window is
+                        // WaitingSta's kStaGraceMs: the question ("has STA had its chance?") is the
+                        // same for an initial connect and a mid-session drop, so the answer is too.
+                        if (staLostTime_ == 0) {
+                            staLostTime_ = now;
+                            std::printf("NetworkModule: WiFi STA dropped, reconnecting\n");
+                            std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi reconnecting…");
+                            setStatus(statusBuf_, Severity::Warning);
+                        } else if (now - staLostTime_ > kStaGraceMs) {
+                            std::printf("NetworkModule: WiFi STA gone for %us, starting AP\n",
+                                        (unsigned)(kStaGraceMs / 1000));
+                            platform::mdnsStop();
+                            platform::wifiStaStop();
+                            noteRadioStopped();
+                            staLostTime_ = 0;
+                            startAP();
+                        }
                     } else {
+                        staLostTime_ = 0;   // reconnected within the grace window: back to normal
                         updateStatusIP();
                     }
                 }
@@ -454,6 +471,31 @@ public:
                         onConnected("Ethernet");
                     } else if (ssid_[0] != 0 && platform::wifiStaConnected()) {
                         onConnected("WiFi STA");
+                    } else if (ssid_[0] != 0 && now - stateChangeTime_ > kApRetryStaMs
+                               && platform::wifiApClientCount() == 0) {
+                        // **AP is a fallback, not a destination.** Falling back stops the STA radio, so
+                        // wifiStaConnected() cannot become true on its own and the promote check above
+                        // would wait forever — a device that lost its network would stay on its own AP
+                        // until power-cycled. The canonical case is a router rebooting: the network
+                        // comes back, and the device must find its way home unattended. So go and look
+                        // periodically: re-init STA and let WaitingSta run its normal grace. A failure
+                        // drops straight back here and retries later — an idle loop, not a dead end.
+                        //
+                        // **Gated on the AP being EMPTY, because the retry is not free.** The platform
+                        // has no concurrent AP+STA mode: wifiStaInit() puts the radio in STA mode,
+                        // which drops the SoftAP. Retrying while somebody is on the captive portal
+                        // would kick them off every interval. So we only look for the network when
+                        // nobody is using the AP — a user mid-setup is never interrupted, and an
+                        // unattended device (nobody connected, which is the router-reboot case) still
+                        // heals itself.
+                        std::printf("NetworkModule: AP — retrying WiFi STA (%s)\n", ssid_);
+                        if (platform::wifiStaInit(ssid_, password_)) {
+                            state_ = State::WaitingSta;
+                            stateChangeTime_ = now;
+                            syncTxPower();   // see setWifiCredentials's syncTxPower comment
+                        } else {
+                            stateChangeTime_ = now;   // init refused; wait out another interval
+                        }
                     }
                 }
                 break;
@@ -527,6 +569,19 @@ private:
 
     State state_ = State::Idle;
     uint32_t stateChangeTime_ = 0;
+    /// When the STA link was first seen down while in ConnectedSta (0 = up). The radio reconnects
+    /// itself; this is how long we let it try before giving up on the network and falling back to AP.
+    uint32_t staLostTime_ = 0;
+    /// How long WiFi STA gets to (re)connect before we fall back to AP. One constant for both the
+    /// initial connect (WaitingSta) and a mid-session dropout (ConnectedSta) — the question is the
+    /// same in both places, so the answer should be too.
+    static constexpr uint32_t kStaGraceMs = 10000;
+    /// How often the AP fallback goes back and retries WiFi STA. Long, because each attempt
+    /// re-inits the radio and briefly bounces the AP (a user mid-setup on 4.3.2.1 sees a blip), and
+    /// because the causes it recovers from — a rebooting router, a device carried back into range —
+    /// play out over minutes, not seconds. The device heals itself without anyone noticing; it just
+    /// does not do it instantly.
+    static constexpr uint32_t kApRetryStaMs = 60000;
     bool apShutdownPending_ = false;
     bool mdnsRunning_ = false;
     // The device name last registered with mDNS, so syncMdns() can detect a live

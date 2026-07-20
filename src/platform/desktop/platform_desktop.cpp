@@ -124,6 +124,12 @@ void* alloc(size_t bytes) {
     return std::malloc(bytes);
 }
 
+bool ptrIsPsram(const void* /*p*/) { return false; }   // desktop has no PSRAM
+
+void* allocInternal(size_t bytes) {
+    return std::malloc(bytes);   // desktop has one flat RAM — internal == ordinary
+}
+
 void free(void* ptr) {
     std::free(ptr);
 }
@@ -291,6 +297,7 @@ void stopPinnedTask(WorkerTask& t) {
     t.impl = nullptr;
 }
 
+void taskWdtSubscribe() {}   // no watchdog on the host
 void taskWdtReset() {}   // no watchdog on the host
 
 
@@ -362,6 +369,22 @@ const char* macString() {
 
 const char* chipModel() {
     return "desktop";
+}
+
+uint8_t currentCore() { return 0; }
+
+uint32_t cycleCount() {
+    return static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+const char* cpuInfo() {
+    // Cores only: the host's clock speed has no portable query (and boosts dynamically anyway).
+    static char buf[16] = {};
+    if (!buf[0])
+        std::snprintf(buf, sizeof(buf), "%u cores", std::thread::hardware_concurrency());
+    return buf;
 }
 
 const char* hostIp() {
@@ -643,6 +666,7 @@ int wifiStaChannel() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+uint32_t wifiApClientCount() { return 0; }
 
 // Host sockets work regardless of the (stubbed) link predicates above, and there is
 // no lwip-style init race — always socket-safe.
@@ -1143,6 +1167,11 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
                                          uint16_t /*lights*/, uint8_t /*channels*/) {
     return {};   // not supported off ESP32
 }
+RmtLoopbackResult ws2812LoopbackRide(uint16_t /*rxGpio*/, const uint8_t* /*sent*/, uint8_t /*sentLen*/,
+                                     size_t /*dataBytes*/, uint8_t /*rowBits*/,
+                                     uint8_t /*clockMultiplier*/) {
+    return {};   // no RMT-RX capture off ESP32
+}
 
 // ---------------------------------------------------------------------------
 // LCD_CAM WS2812 — no-op stubs. Desktop has no i80 peripheral; the LCD LED
@@ -1151,7 +1180,8 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
 // ---------------------------------------------------------------------------
 bool i80Ws2812Init(I80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
                    uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
-                   size_t /*bufferBytes*/, bool /*wantSecondBuffer*/) {
+                   size_t /*bufferBytes*/, bool /*wantSecondBuffer*/,
+                   uint8_t /*clockMultiplier*/) {
     return false;
 }
 uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
@@ -1164,8 +1194,54 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
                                     uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
                                     uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                     size_t /*frameBytes*/, size_t /*dataBytes*/,
-                                    uint8_t /*rowBits*/) {
+                                    uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/) {
     return {};   // not supported off the S3
+}
+
+// MoonI80 (our own LCD_CAM DMA driver, ADR-0014) — no-op stubs, same as the esp_lcd-backed family
+// above. Desktop has no LCD_CAM, so the driver instantiates (lanesAvailable() == 0) and idles, which
+// is what lets its config/validation half be tested on the host.
+bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                       uint8_t /*laneCount*/, uint16_t /*wrGpio*/,
+                       size_t /*bufferBytes*/, bool /*wantSecondBuffer*/,
+                       uint8_t /*clockMultiplier*/) {
+    return false;
+}
+// Ring mode is a GDMA construct with no host equivalent — inert here, bench-verified on the S3, exactly
+// like the whole-frame path above. A driver that would pick the ring on device stays whole-frame on host.
+bool moonI80Ws2812InitRing(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                           uint8_t /*laneCount*/, uint16_t /*wrGpio*/, size_t /*rowBytes*/,
+                           uint32_t /*totalRows*/, uint32_t /*rowsPerBuf*/, uint8_t /*ringBufs*/,
+                           uint8_t /*padUs*/, uint8_t /*clockMultiplier*/, MoonI80EncodeFn /*encode*/,
+                           void* /*user*/) {
+    return false;
+}
+bool moonI80Ws2812TransmitRing(MoonI80Ws2812Handle& /*h*/) { return false; }
+void moonI80SetShiftClockDiv(uint8_t /*div*/) {}
+void moonI80Ws2812PrimeRange(MoonI80Ws2812Handle& /*h*/, uint8_t /*bufLo*/, uint8_t /*bufHi*/) {}
+bool moonI80Ws2812ArmRing(MoonI80Ws2812Handle& /*h*/) { return false; }
+bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& /*h*/) { return false; }
+bool moonI80Ws2812InternalFits(size_t /*bytes*/) { return false; }
+uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
+size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& /*h*/) { return 0; }
+bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+bool moonI80Ws2812Wait(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
+uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& /*h*/) { return 0; }
+MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& /*h*/) { return {}; }
+void moonI80Ws2812Deinit(MoonI80Ws2812Handle& /*h*/) {}
+RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+                                        uint16_t /*wrGpio*/,
+                                        uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
+                                        size_t /*frameBytes*/, size_t /*dataBytes*/,
+                                        uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/,
+                                        uint32_t /*ringRows*/, uint32_t /*ringBufs*/,
+                                        bool /*useRing*/) {
+    return {};   // not supported off LCD_CAM
+}
+RmtLoopbackResult moonI80Ws2812LoopbackRide(uint16_t /*rxGpio*/, const uint8_t* /*sent*/,
+                                            uint8_t /*sentLen*/, size_t /*dataBytes*/,
+                                            uint8_t /*rowBits*/, uint8_t /*clockMultiplier*/) {
+    return {};   // not supported off LCD_CAM
 }
 
 // Parlio WS2812 — no-op stubs. Desktop has no Parlio peripheral; the driver

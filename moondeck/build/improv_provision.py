@@ -291,7 +291,15 @@ def main() -> int:
             print(f"ERROR: deviceModel {args.device_model!r} not in deviceModels.json ({names})",
                   file=sys.stderr)
             return 2
-        cap = entry.get("controls", {}).get("Network", {}).get("txPowerSetting")
+        # The cap lives on the NetworkModule entry inside the board's `modules` list — the same
+        # shape the web installer and check_devices.py read. (It was looked up as a flat
+        # entry["controls"]["Network"] dict, which no catalog entry has, so it silently resolved to
+        # None and the cap was NEVER applied: a board needing a reduced TX power would associate at
+        # full power, get dropped by the AP, and fall back to its own AP — bench-diagnosed on the
+        # hpwit shift-register board, 2026-07-14.)
+        cap = next((m.get("controls", {}).get("txPowerSetting")
+                    for m in entry.get("modules", [])
+                    if m.get("type") == "NetworkModule"), None)
         if args.tx_power is None and isinstance(cap, int):
             args.tx_power = cap
             print(f"==> deviceModel {args.device_model!r}: TX-power cap {cap} dBm from deviceModels.json")
