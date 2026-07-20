@@ -1113,13 +1113,17 @@ protected:
         if (patternHoldStrand_ >= 0 && static_cast<uint8_t>(patternHoldStrand_) < laneCount_) {
             const uint8_t lane = static_cast<uint8_t>(patternHoldStrand_);
             uint8_t patSrc[8] = {};   // pattern in SOURCE channels (corrected downstream like every light)
-            for (size_t ch = 0; ch < srcCh && ch < sizeof(patSrc); ch++)
+            // Clamp to patSrc's capacity: a fixture with srcCh > 8 (multi-channel modes) would otherwise
+            // memcpy past the pattern buffer. The extra channels stay zero in the snapshot, which is the
+            // intended hold value for anything past RGB anyway.
+            const size_t patCh = srcCh < sizeof(patSrc) ? srcCh : sizeof(patSrc);
+            for (size_t ch = 0; ch < patCh; ch++)
                 patSrc[ch] = ch < 3 ? kPatternRGB_[ch] : uint8_t{0};
             const nrOfLightsType laneRows = laneCounts_[lane];
             for (nrOfLightsType row = 0; row < laneRows; row++) {
                 if (static_cast<nrOfLightsType>(laneStart_[lane] + row) >= winLights) break;
                 std::memcpy(snapshotBuf_ + (static_cast<size_t>(laneStart_[lane]) + row) * srcCh,
-                            patSrc, srcCh);
+                            patSrc, patCh);
             }
         }
         // Bias so the unchanged index (winStart_ + laneStart_ + row) — at srcCh stride — addresses into

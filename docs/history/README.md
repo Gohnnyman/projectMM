@@ -52,7 +52,7 @@ Reading across the friend-repo digests, the themes the wider ESP32-LED ecosystem
 
 Observational — where the landscape is ahead of projectMM. These are *not* commitments; real adoption decisions live in the [`../backlog/`](../backlog/README.md), cross-referenced where one already exists.
 
-- **Parallel multi-strip output on S3/P4** (PARLIO/LCD_CAM, and hpwit's I2S/shift-register drivers) — projectMM's driver story is ArtNet-out today; native parallel LED output is unbuilt. See the [LED-driver analysis](leddriver-analysis-top-down.md).
+- **Parallel multi-strip output on S3/P4** (PARLIO/LCD_CAM, and hpwit's I2S/shift-register drivers) — the direct parallel drivers ship (MultiPin/Moon on LCD_CAM, Parlio on P4, driving up to 16 strands and 12,288+ lights). The shift-register/'595 expander path also ships but is dormant: it works at prime-only geometries yet has a known lapping-ring sparkle at the largest configs, so it stays off by default. See the [LED-driver analysis](leddriver-analysis-top-down.md).
 - **Audio-reactive input** — none of projectMM's effects are audio- or motion-reactive yet. The Peripheral role + the Pi-sensor backlog entry are the foundation; the producer→effect wiring is backlog.
 - **A guided setup/installer wizard on-device** (NightDriverStrip's Setup Wizard, WLED's installer) — projectMM has the web installer + Improv, but no on-device first-run wizard.
 - **A large built-in effect library** — projectMM ships a focused set (concrete-first); the WLED family ships dozens. Breadth is a deliberate non-goal until the core is proven.

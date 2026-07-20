@@ -176,9 +176,9 @@ The P4 additionally exposes `LCD_CLK_SRC_APLL`, which could hit a true 21.33 MHz
 
 ## 6. Module shape
 
-### 6.1 Recommendation: a `pinExpanderMode` checkbox + `latchPin` on the existing parallel drivers
+### 6.1 Recommendation: a `pinExpander` checkbox + `latchPin` on the existing parallel drivers
 
-Three shapes were on the table. Recommending **(c)**: two controls on `ParallelLedDriver` — `pinExpanderMode` (a checkbox: is the expander board fitted?) and `latchPin` (a GPIO) — with the ×8 as a hardware constant, not a user control. The '595's width is the chip's, not a setting, so there are exactly two wirings and a boolean says which.
+Three shapes were on the table. Recommending **(c)**: two controls — `pinExpander` (a checkbox: is the expander board fitted? shipped as `MoonLedDriver::pinExpander`; this analysis originally proposed the name `pinExpanderMode`) and `latchPin` (a GPIO) — with the ×8 as a hardware constant, not a user control. The '595's width is the chip's, not a setting, so there are exactly two wirings and a boolean says which.
 
 - **(a) A separate `ShiftRegisterLedDriver` class** — rejected. It would duplicate the lane parsing, the window slicing, the correction LUT, the DMA double-buffer, the loopback self-test, the `wireUs` KPI: the ~250 lines `ParallelLedDriver` exists specifically to hold once. Adding a driver class to change *how bits are packed into an existing bus* is the sibling-class mistake.
 - **(b) A submodule/child of an LED driver** — rejected. The fan-out is not a separable unit of behaviour with its own lifecycle; it is an *encoding mode* of the parent's DMA frame. A child module that reaches into its parent's DMA buffer is worse than a flag.
@@ -204,14 +204,14 @@ Minimal, and no new module:
 | File | Change |
 |---|---|
 | `src/light/drivers/ParallelSlots.h` | **New encode entry point** for the shift-register wire format: 24 bus words/bit, the latch lane, the 8-position shift. Reuses `transposeLanes8x8` with a different lane gather. Host-testable, no platform include — pin it in `unit_ParallelSlots.cpp`. |
-| `src/light/drivers/ParallelLedDriver.h` | Two controls (`pinExpanderMode`, `latchPin`); `frameBytesFor` gains the ×8 factor; `encodeRows` branches to the shift encoder; `parseConfig` maps strands → physical pins (`ceil(lanes/8)`) and validates `latchPin` against the data pins + `clockPin`. Both `affectsPrepare` triggers. |
+| `src/light/drivers/ParallelLedDriver.h` | Two controls (`pinExpander`, `latchPin`); `frameBytesFor` gains the ×8 factor; `encodeRows` branches to the shift encoder; `parseConfig` maps strands → physical pins (`ceil(lanes/8)`) and validates `latchPin` against the data pins + `clockPin`. Both `affectsPrepare` triggers. |
 | `src/light/drivers/I80LedDriver.h` | Likely **nothing** — its `clockPin` (WR) already *is* the shift clock, which is a genuinely lucky fit. |
 | `src/platform/esp32/platform_esp32_i80.cpp` | The bus clock must run **8× faster** in pin expander mode: **26.67 MHz** (prescale 3, exact, 300 ns slots) rather than the 2.667 MHz `kPclkHz`. Granted on both S3 and P4 — a `pclk_hz` the driver selects per mode, not a platform risk. |
 | `docs/moonmodules/light/drivers.md` | Document the mode + the wiring + the memory cost. |
 
 ## 7.5 STATUS — shipped dormant; the transport bug is NOT yet understood (2026-07-14)
 
-**The feature is in the tree but OFF by default** (`pinExpanderMode` unchecked). Direct mode is proven unchanged on four boards: zero GDMA errors, all driving.
+**The feature is in the tree but OFF by default** (`pinExpander` unchecked). Direct mode is proven unchanged across the bench boards it was regression-tested on: zero GDMA errors, all driving.
 
 **Read this section as a list of things that are TRUE, and a list of things that were guessed and are FALSE.** Six hypotheses have now died on this bug, several of them written up here as if settled. The pattern is the lesson: each one explained the symptom, none survived a real test. Do not add a seventh theory before making a measurement that could refute it.
 
@@ -228,7 +228,9 @@ Minimal, and no new module:
 
 The sharpest measurement of the whole investigation, and it was made **without knowing which memory the frame was in**: with pin expander mode preferring internal RAM, the PO swept `ledsPerPin` and reported
 
-| leds/pin | frame | verdict |
+The `frame` column here is the **per-strand source-buffer size** (the internal-RAM copy the sweep was watching, at ~561 B/light), NOT the fully-encoded shift frame — the § "PHASE 2 DESIGN" table below counts the encoded 16-bit frame (~1,152 B/light) and so shows larger KB for the same light counts. Both are correct for what they measure; the cap analysis uses the **encoded-frame** figure.
+
+| leds/pin | source buffer | verdict |
 |---|---|---|
 | 64 | 36 KB | smooth, flicker-free |
 | **96** | **54 KB** | **smooth — the highest good value** |
@@ -268,6 +270,8 @@ It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time 
 ### PHASE 2 DESIGN — the encode-into-the-ring (2026-07-14, arithmetic done, not yet built)
 
 **The cap is now understood exactly**, and the fix follows from it. The frame scales with *lights per strand* (all strands clock in parallel), and in pin expander mode the encoder emits **1,152 bytes per light** (3 ch × 8 bits × 3 slots × 8 shift-words × 2 bytes on a 16-bit bus):
+
+The `encoded frame` column is the **fully-encoded shift frame** (~1,152 B/light on the 16-bit bus) — the number the DMA actually streams, and the one the cap depends on. (The § 7.6 sweep table above reports the smaller per-strand *source* buffer instead, hence its lower KB for the same light counts.)
 
 | lights/strand | encoded frame | |
 |---|---|---|

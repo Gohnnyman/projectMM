@@ -459,7 +459,7 @@ def generate() -> dict[str, str]:
         xml_dir = tdp / "xml"
         (tdp / "Doxyfile").write_text(_doxyfile(headers, str(xml_dir)))
         r = subprocess.run(["doxygen", str(tdp / "Doxyfile")],
-                           cwd=tdp, capture_output=True, text=True)
+                           cwd=tdp, capture_output=True, text=True, check=False)
         if r.returncode != 0 or not xml_dir.exists():
             raise GenApiError(f"doxygen failed (rc={r.returncode}): {r.stderr[-500:]}")
 
@@ -468,7 +468,7 @@ def generate() -> dict[str, str]:
             ["npx", "--yes", "moxygen@2.1.10",
              "--templates", str(TEMPLATES), "--classes", "--noindex",
              "--output", str(tdp / "cls_%s.md"), str(xml_dir)],
-            cwd=tdp, capture_output=True, text=True,
+            cwd=tdp, capture_output=True, text=True, check=False,
         )
         if m.returncode != 0:
             # npx couldn't fetch/run moxygen (registry outage, yanked version, no net).
@@ -484,7 +484,7 @@ def generate() -> dict[str, str]:
             ["npx", "--yes", "moxygen@2.1.10",
              "--templates", str(TEMPLATES), "--groups", "--noindex",
              "--output", str(tdp / "grp_%s.md"), str(xml_dir)],
-            cwd=tdp, capture_output=True, text=True,
+            cwd=tdp, capture_output=True, text=True, check=False,
         )
         if g.returncode != 0:
             raise GenApiError(f"npx moxygen --groups failed (rc={g.returncode}): {g.stderr[-500:]}")

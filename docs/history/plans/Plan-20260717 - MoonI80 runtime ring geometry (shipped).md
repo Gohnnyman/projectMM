@@ -24,7 +24,7 @@ RAM is the only axis that favours a SMALL `ringRows`; every other axis favours a
 
 | axis | favours | detail |
 |---|---|---|
-| **RAM** | **small** | `ringRows × ringBufs × rowBytes`. Only at `ringRows=1` does it stop scaling with strand length (18 KB flat) — **the sole reason the per-light ring exists**, since 48×256 has no other route. |
+| **RAM** | **small** | `ringRows × ringBufs × rowBytes` — constant in strand length for ANY fixed `ringRows`/`ringBufs` (the pool size is absolute, not per-light). This plan initially reached for `ringRows=1` to minimize that constant, but the near-prime pool that shipped keeps RAM flat at a larger, safer `ringRows`; the per-light `ringRows=1` branch was tried and abandoned (see the lean-rows=1 plan). Smaller pool = less RAM, at the cost of the runway/overhead/interrupt axes below. |
 | **Per-call overhead** | big | Fixed cost per `encode` call (`slotBytes()`/`pinExpanderMode()` branches, 2 calls, 2 loop setups) amortizes over `ringRows`. At 1 it is paid **every light, inside the ISR**. |
 | **Interrupt rate** | big | One EOF per buffer → `lights/ringRows` interrupts per frame. At 1 row, 256 lights, 100 fps = **25,600 int/s**; at 16 rows, 1,600. Measured precedent: a ~19 ms core-0 encode starved the W5500 ethernet on the LC16 (HTTP died, render ticks fine). |
 | **Lap-time runway** | big | Runway before the DMA laps a buffer the ISR is still refilling = `ringRows × ringBufs × 21.6 µs`. At 1×32 ≈ **690 µs**; at 16×12 ≈ **4.1 ms**. A per-light ring is far less forgiving of a WiFi preemption — which is why `da67edf9` needed `ringBufs=32`. |
