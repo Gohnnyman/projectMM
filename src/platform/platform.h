@@ -40,6 +40,13 @@ void free(void* ptr);
 // Free with the ordinary free().
 void* allocInternal(size_t bytes);
 
+// True when the pointer resolves to external (PSRAM) memory — the standard residency probe (IDF's
+// esp_ptr_external_ram). Diagnostic companion to allocInternal's internal-first-PSRAM-fallback pattern:
+// the caller of that pattern cannot otherwise tell which way an allocation landed, and for buffers an
+// ISR reads the difference is a measured 4-8x per-byte cost plus cache-contention exposure. Desktop has
+// no PSRAM; always false.
+bool ptrIsPsram(const void* p);
+
 // CPU cycle counter (Xtensa CCOUNT / RISC-V mcycle; 0-based, wraps at 2^32 — callers difference two
 // reads). The standard fine-grained profiling primitive (ARM's DWT_CYCCNT, x86's rdtsc): a 1-instruction
 // read, safe in ISRs, used by bench diagnostics to attribute hot-path cycles. Desktop returns a
@@ -139,8 +146,13 @@ void notifyTask(WorkerTask& t);
 bool waitNotify(WorkerTask& t, uint32_t timeoutMs);
 // Signal stop + wake, then block until the worker fn has returned and the task is torn down.
 void stopPinnedTask(WorkerTask& t);
-// Reset THIS task's watchdog (esp_task_wdt_reset) from inside a worker doing a long encode. No-op
-// on desktop. Keeps the vTaskDelay(1)/WDT discipline the single render loop has today.
+// Subscribe THIS task to the task watchdog (esp_task_wdt_add), so a wedge on it panics-and-reboots (the
+// self-heal) instead of hanging silently — called once by the render loop before it starts ticking. The
+// sdkconfig has idle-task checking OFF (a saturated core is healthy, not a bug), so nothing is watched
+// unless a task subscribes explicitly; this is that subscription. No-op on desktop.
+void taskWdtSubscribe();
+// Reset THIS task's watchdog (esp_task_wdt_reset) — called each render tick to feed the subscription
+// above. No-op on desktop, and no-op on ESP32 if the task never subscribed.
 void taskWdtReset();
 
 // --- GPIO capability introspection (PinsModule) ---------------------------------------------
@@ -837,7 +849,9 @@ constexpr uint8_t kRingPadMaxUs = 120;
 constexpr size_t kRingNodeMaxBytes = 4095;
 // The ring pool's depth bounds — shared for the same reason as kRingNodeMaxBytes: the platform enforces
 // them (array bound / bounce floor) and the driver's auto geometry + control range must agree or drift.
-constexpr uint8_t kRingBufsMax = 32;
+// 64 keeps the prime-only regime (ringBufs ≥ nSlices — every slice encoded before arm, no ISR deadline)
+// reachable at 48×256 (nSlices = 37 at 7 rows/slice); the pool arrays it bounds cost bytes, not KB.
+constexpr uint8_t kRingBufsMax = 64;
 constexpr uint8_t kRingBufsMin = 2;
 
 // `rowsPerBuf` (lights per DMA buffer) and `ringBufs` (pool depth) are the ring's GEOMETRY, and they are
@@ -909,6 +923,18 @@ struct MoonI80RingStats {
     // backlog-light § MoonI80 streaming ring.
     uint32_t itemsPerBuf = 0;    // descriptor nodes per ring buffer (1 by construction since the clamp)
     int32_t  termNodeDiag = -1;  // the mount-time NULL terminator node (-1 = looping/lapping chain)
+    uint32_t cacheOffDefers = 0; // lifetime EOF firings that refilled NOTHING because the flash cache was
+                                 // off (a flash/WiFi write). Expected background noise — the WiFi driver
+                                 // toggles the cache ~10/s even at idle; benign now (see stallAbandons).
+    uint32_t cacheOffMaxRun = 0; // worst run of CONSECUTIVE cache-off defers ≈ how many buffers the DMA
+                                 // drained un-refilled during one write. When it exceeds the pool's lead the
+                                 // DMA reaches the frontier terminator and HALTS (no stale replay) — counted
+                                 // as a stallAbandon, not corruption. High here + low stallAbandons = the
+                                 // pool absorbed every window; high both = the walls will show a held frame.
+    uint32_t stallAbandons = 0;  // lifetime frames finalized by the wait backstop because a cache-off window
+                                 // outlasted the pool's lead and the DMA self-terminated at the frontier
+                                 // (moonI80Ws2812Wait). Each = one partially-updated frame held for one
+                                 // frame period — the DESIGNED benign outcome (vs. the old stale-slice burst).
 };
 MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& h);
 

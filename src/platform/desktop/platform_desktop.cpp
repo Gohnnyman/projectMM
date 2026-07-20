@@ -124,6 +124,8 @@ void* alloc(size_t bytes) {
     return std::malloc(bytes);
 }
 
+bool ptrIsPsram(const void* /*p*/) { return false; }   // desktop has no PSRAM
+
 void* allocInternal(size_t bytes) {
     return std::malloc(bytes);   // desktop has one flat RAM — internal == ordinary
 }
@@ -295,6 +297,7 @@ void stopPinnedTask(WorkerTask& t) {
     t.impl = nullptr;
 }
 
+void taskWdtSubscribe() {}   // no watchdog on the host
 void taskWdtReset() {}   // no watchdog on the host
 
 

@@ -20,8 +20,19 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32dev.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
-# Task watchdog disabled — we use platform::yield() for cooperative scheduling
-CONFIG_ESP_TASK_WDT_EN=n
+# Task watchdog: PANIC on a wedged task so the device self-heals (reboot + backtrace) instead of hanging
+# SILENTLY forever — a silent hang looks dead and needs a physical power-cycle, the worst failure mode
+# (it cost a whole debugging session). A reboot-and-recover is strictly better (robustness: restarting >
+# wedged). Idle-task checking is deliberately OFF: at a large grid a core can be legitimately SATURATED
+# (the 48×256 engage runs the render + encode flat-out for a few frames), and checking idle would panic a
+# HEALTHY-but-busy core — the very false positive that surfaced this setting. So the WDT watches only that
+# subscribed tasks aren't wedged, not that a core has spare time. 12 s is well above any real frame/engage.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=12
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_ESP_TASK_WDT_PANIC=y
 
 # lwIP core locking — socket calls take the TCP/IP core mutex and run inline
 # instead of context-switching to the tcpip_thread per call. Large win for the

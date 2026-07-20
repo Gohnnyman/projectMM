@@ -10,6 +10,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_task_wdt.h"   // the render loop subscribes itself so a wedge self-heals (reboot) not hangs
 
 #include <atomic>
 #include <new>
@@ -120,8 +121,25 @@ void stopPinnedTask(WorkerTask& t) {
     t.impl = nullptr;
 }
 
-// No-op: the worker isn't registered with the task WDT (it yields via waitNotify between bounded
-// per-frame encodes). Kept as a seam so the domain code can call it uniformly across platforms.
-void taskWdtReset() {}
+// Whether taskWdtSubscribe succeeded — so taskWdtReset only feeds a real subscription. Written once at
+// render-loop start, read each tick on the same (render) task, so no synchronization is needed.
+static bool s_renderWdtSubscribed = false;
+
+// Subscribe the CURRENT (render-loop) task to the task WDT. The sdkconfig runs the TWDT with idle-task
+// checking OFF (a saturated core is healthy), so nothing is watched unless a task subscribes — this is
+// that one subscription: if the render loop stops feeding the WDT (a genuine wedge, not a busy frame),
+// it panics and reboots (the self-heal) instead of hanging silently, and leaves a backtrace. Idempotent
+// enough for one caller; a failure (WDT not inited) just leaves s_renderWdtSubscribed false and reset a
+// no-op, degrading to today's unwatched behavior rather than crashing.
+void taskWdtSubscribe() {
+    if (s_renderWdtSubscribed) return;
+    if (esp_task_wdt_add(nullptr) == ESP_OK) s_renderWdtSubscribed = true;
+}
+
+// Feed the render task's WDT subscription (esp_task_wdt_reset), called each render tick. No-op until/unless
+// taskWdtSubscribe ran, so a build/config without the WDT (or a worker that never subscribed) is unaffected.
+void taskWdtReset() {
+    if (s_renderWdtSubscribed) esp_task_wdt_reset();
+}
 
 }  // namespace mm::platform

@@ -145,7 +145,7 @@ This vocabulary is defined **once on `MoonModule`** and inherited by every modul
 
 - One hook per commit, mechanical: rename the base virtual, all overrides across `src/` (core + light), the `applyState`/`Scheduler` call sites, then regenerate moxygen docs and update the guide + architecture + coding-standards.
 - `check_specs` + the full test suite are the safety net (a missed call site fails to compile; a missed doc reference fails the spec check).
-- Suggested order: `loop`→`tick` first (self-contained, no acquire/release entanglement), then `teardown`→`release` (coordinate with the [ScratchBuffer plan](Plan-20260710%20-%20Scratch%20buffer%20helper%20for%20memory-holding%20effects.md)'s private-`release` removal so the two `release`s don't clash), then `onBuildState`→`prepare`, then `onBuildControls`→`defineControls`, then `onUpdate`→`onControlChanged`. Each is independently shippable and behaviour-neutral.
+- Suggested order: `loop`→`tick` first (self-contained, no acquire/release entanglement), then `teardown`→`release` (coordinate with the [ScratchBuffer plan](Plan-20260710%20-%20Scratch%20buffer%20helper%20for%20memory-holding%20effects%20(shipped).md)'s private-`release` removal so the two `release`s don't clash), then `onBuildState`→`prepare`, then `onBuildControls`→`defineControls`, then `onUpdate`→`onControlChanged`. Each is independently shippable and behaviour-neutral.
 - Update the guide's hook table + examples to the new names in the same sweep, including the one-line beginner aside for `tick()` ("runs once per frame, like a tick of a clock — do a little each time, don't write your own loop").
 
 ## Scope guard

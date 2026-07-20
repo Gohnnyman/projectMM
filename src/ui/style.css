@@ -639,6 +639,17 @@ body {
     color: var(--fg-muted);
 }
 
+/* Expert-only controls (ctrl.advanced, shown only in expert mode): a small wrench glyph after the label
+   marks them as a distinct "tuning/dev" tier at a glance — semantically clearer than a bare accent stripe.
+   The same glyph sits on the expertMode toggle itself (see .control-label--expert), tying cause to effect. */
+.control-advanced > .control-label::after,
+.control-label--expert::after {
+    content: "🔧";
+    font-size: 10px;
+    margin-left: 4px;
+    opacity: 0.7;
+}
+
 /* List control (ControlType::List) — a column of clickable rows, each
    expanding to a read-only detail panel. The row stretches full width, so it
    overrides the flex layout to stack the label above the list. */

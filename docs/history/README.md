@@ -28,6 +28,8 @@ One-time surveys of earlier projects, used to decide what to harvest into projec
 - [moonlight-inventory.md](moonlight-inventory.md) — MoonLight (the closest prior art; CSR mapping, layer model, control mechanisms).
 - [v1-inventory.md](v1-inventory.md) — projectMM v1 (release 1.4.0).
 - [v2-inventory.md](v2-inventory.md) — projectMM v2.
+- [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) / [leddriver-analysis-top-down.md](leddriver-analysis-top-down.md) — the LED-driver design analyses (landscape survey + protocol-first study). The drivers shipped (RMT/MultiPin/Moon/Parlio on a shared base); kept as the how-we-got-there record.
+- [shift-register-driver-analysis.md](shift-register-driver-analysis.md) — the 74HCT595 pin-expander design analysis + lab-notebook of the ring's early transport bugs. The expander + streaming ring shipped; §7.5 records what NOT to re-try.
 
 ### Our own lessons
 
@@ -50,7 +52,7 @@ Reading across the friend-repo digests, the themes the wider ESP32-LED ecosystem
 
 Observational — where the landscape is ahead of projectMM. These are *not* commitments; real adoption decisions live in the [`../backlog/`](../backlog/README.md), cross-referenced where one already exists.
 
-- **Parallel multi-strip output on S3/P4** (PARLIO/LCD_CAM, and hpwit's I2S/shift-register drivers) — projectMM's driver story is ArtNet-out today; native parallel LED output is unbuilt. See the [LED-driver analysis](../backlog/leddriver-analysis-top-down.md) in backlog.
+- **Parallel multi-strip output on S3/P4** (PARLIO/LCD_CAM, and hpwit's I2S/shift-register drivers) — projectMM's driver story is ArtNet-out today; native parallel LED output is unbuilt. See the [LED-driver analysis](leddriver-analysis-top-down.md).
 - **Audio-reactive input** — none of projectMM's effects are audio- or motion-reactive yet. The Peripheral role + the Pi-sensor backlog entry are the foundation; the producer→effect wiring is backlog.
 - **A guided setup/installer wizard on-device** (NightDriverStrip's Setup Wizard, WLED's installer) — projectMM has the web installer + Improv, but no on-device first-run wizard.
 - **A large built-in effect library** — projectMM ships a focused set (concrete-first); the WLED family ships dozens. Breadth is a deliberate non-goal until the core is proven.

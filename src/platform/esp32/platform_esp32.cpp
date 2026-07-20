@@ -21,6 +21,7 @@
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_memory_utils.h"   // esp_ptr_external_ram — the ptrIsPsram residency probe
 #include "esp_cache.h"        // esp_cache_msync — I-cache sync after writing MoonLive code to IRAM
 #include "esp_system.h"
 #include "esp_chip_info.h"
@@ -112,6 +113,10 @@ void* allocInternal(size_t bytes) {
     // Internal only, no PSRAM fallback here — the caller chose this seam because PSRAM latency breaks it
     // (an ISR-read buffer); a silent PSRAM grant would hand back the exact problem. Caller falls back.
     return heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+bool ptrIsPsram(const void* p) {
+    return p != nullptr && esp_ptr_external_ram(p);
 }
 
 void free(void* ptr) {

@@ -10,7 +10,7 @@ MoonLight's `DriverNode.cpp` (@ `6586921770`) defines 17 `lightPreset_*` fixture
 - **Intensity/Brightness master channel → `Dimmer`** (existing role; inert until moving-head effect writers land — a correct map that nothing animates yet).
 - **Extend the colour vocabulary with `WarmWhite`, `Yellow`, `UV`** so RGBCCT (cold+warm white) and RGBWYP (adds Y+UV) migrate fully rather than half-dark. The existing `White` is kept as-is (a normal/cold white) — NOT renamed to ColdWhite — so existing RGBW/GRBW presets' persisted role bytes and labels are unchanged; the second white is the new `WarmWhite`. Industry naming (CW/WW), our PascalCase (`White`/`WarmWhite`), option strings `"W"`/`"WW"`.
 
-Design record for the LightPresets library itself: [Plan-20260711 - LightPresets reusable named-preset library.md](Plan-20260711%20-%20LightPresets%20reusable%20named-preset%20library.md).
+Design record for the LightPresets library itself: [Plan-20260711 - LightPresets reusable named-preset library (shipped).md](Plan-20260711%20-%20LightPresets%20reusable%20named-preset%20library%20(shipped).md).
 
 ## Verified current state (file:line)
 

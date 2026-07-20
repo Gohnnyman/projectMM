@@ -12,7 +12,7 @@ They are projectMM's **Task Manager / Activity Monitor / Device Manager** — th
 |---|---|---|
 | Processes / Details (per-process CPU, memory) | **Tasks** — RTOS tasks, modules nested, per-module cost | shipped |
 | Performance → Memory (`free`, `vmstat`: used/free by type, largest block) | **Memory** — internal vs PSRAM, used/free/largest, per-module `dynamicBytes` | proposed |
-| Device Manager (what hardware is present + how it's wired) | **Pins** — the GPIO map, who owns each pin | [backlogged](backlog-core.md#pinsmodule-one-place-that-coordinates-gpio-assignment-backlog) |
+| Device Manager (what hardware is present + how it's wired) | **Pins** — the GPIO map, who owns each pin | [backlogged](backlog-core.md#pinsmodule-strict-reject-on-add-mode-the-one-remaining-increment) |
 
 The load-bearing lesson from those tools: **they sample existing OS accounting cheaply and always-on; the heavy per-event tracking (UMDH, `malloc_history`, Valgrind, ESP-IDF `heap_trace`) is a separate opt-in profiler.** projectMM already learned this on TasksModule (CPU% is ~5% tick → build-flag opt-in; the task list is a cheap sample → always-on). The same tier applies to Memory (below).
 

@@ -21,7 +21,7 @@
 **The capture primitive already exists and is decoupled:** `captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, ...)` (`platform_esp32_rmt.cpp:285`) captures on `rxGpio` and bit-verifies against an expected frame — independent of who transmitted. Intrusive mode = point that at a live-pipeline strand while the ring renders, and compare against the ring's own source snapshot. No new capture code; a new *wiring* of the existing one.
 
 Steps:
-1. **Correct the stale doc**: `docs/backlog/shift-register-driver-analysis.md:385` ("never captured a single symbol") — the RX path was fixed 2026-07-15 (`2873ec9d`, "captures it back off the strand, bit-verifies 2304/2304"). Present-tense: the loopback captures and bit-verifies in expander mode; R14's bit-0 settling is the one tolerated artifact.
+1. **Correct the stale doc**: `docs/history/shift-register-driver-analysis.md:385` ("never captured a single symbol") — the RX path was fixed 2026-07-15 (`2873ec9d`, "captures it back off the strand, bit-verifies 2304/2304"). Present-tense: the loopback captures and bit-verifies in expander mode; R14's bit-0 settling is the one tolerated artifact.
 2. **Confirm non-intrusive still PASSes** on a spare-strand jumper (reproduce `2873ec9d`) — proves the wiring + capture are sound before building intrusive.
 3. **Add intrusive mode** — the smallest shape: a control (e.g. `loopbackIntrusive`, or a mode on the existing `loopbackTest`) that, instead of a private transmit, arms `captureAndVerifyFrame` on `loopbackRxPin` for ONE live render frame and verifies the captured wire against the ring's source snapshot (or a known test pattern the effect is set to). Design the seam with the PO: which strand it taps, whether it pauses the effect or captures a live one, how it reports `firstBadBit` + the slice it falls in.
 4. **Acceptance**: with intrusive mode, a `+1`-margin config (scattered on the wall) must report a bit-fault AT a slice boundary, and a `+3` config a clean PASS — the instrument reproduces the PO's eye observations. Then Step B's fix is measurable by machine.
@@ -50,7 +50,7 @@ The pool is a small fixed size (~12 buffers, ~7–110 KB depending on `ringRows`
 ## Files
 - `src/platform/esp32/platform_esp32_moon_i80.cpp` — the ISR refill (trailing cursor + sentinel splice), `initRingDma`/`createRingState` (sentinel node, pool sizing), `startRingTransfer` (re-arm), `destroyState`, the heap guard, `MoonI80State`. Also the stale mount comment (~945-960, describes a removed latch pad).
 - `test/unit/light/unit_ParallelLedDriver_ring.cpp` — the mock must mirror the new termination + trailing-refill order (its `driveRingFrameWithTermination` pins the drain-count stop, which changes). **Run ASan** (this session shipped a heap overflow only ASan caught).
-- `docs/backlog/shift-register-driver-analysis.md` — Step A doc fix.
+- `docs/history/shift-register-driver-analysis.md` — Step A doc fix.
 - `docs/backlog/backlog-light.md` — replace the "8 vs 16 slices, no mechanism" entry with the margin rule + the trailing-refill fix.
 
 ## Verification
@@ -183,7 +183,7 @@ Risk: a wrong node index = a hang (DMA walks into a NULL early, or never termina
 rows=6 (prime-only, itemsPerBuf=1) FIRST, then rows=13/16 (itemsPerBuf>1), then the lapping 256-light case.
 
 ### hpwit's ACTUAL termination — read from his source (de-risks the splice)
-Read /Users/ewoud/Developer/GitHub/hpwit/I2SClocklessVirtualLedDriver/src/I2SClocklessVirtualLedDriver.h.
+Read hpwit's `src/I2SClocklessVirtualLedDriver.h` (upstream: https://github.com/hpwit/I2SClocklessVirtualLedDriver).
 His structure:
 - `__NB_DMA_BUFFER`(=10) circular working buffers [0->1->..->9->0], PLUS two extra: [N] a prime/arm node
   (next=[0], suc_eof=0 so no interrupt), and [N+1] a PERMANENT NULL-terminator node (next=NULL), which

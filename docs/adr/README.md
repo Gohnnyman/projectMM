@@ -24,3 +24,4 @@ Agents do not read this directory automatically, only when a decision's rational
 | [0012](0012-ha-discovery-wled-default-mqtt-opt-in.md) | HA discovery: WLED by default, MQTT discovery opt-in | Accepted |
 | [0013](0013-no-migration-code-robust-persistence-plus-documented-breaks.md) | No migration code — robust persistence + documented breaks | Accepted |
 | [0014](0014-own-i80-dma-driver-below-esp-lcd.md) | Our own i80 DMA driver, one level below esp_lcd | Accepted |
+| [0015](0015-library-is-a-tag-not-a-folder.md) | The source tree splits by domain/type; library origin is a tag, not a folder | Accepted |

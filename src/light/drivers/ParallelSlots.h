@@ -45,7 +45,7 @@ namespace mm {
 ///
 /// The data slot is an 8×8 BIT-MATRIX TRANSPOSE: 8 lane bytes (rows) → 8 bus
 /// bytes (one per data bit, the columns), byte b bit L = lane L's bit b. This
-/// is the measured render-loop hot spot (docs/backlog/multicore-analysis-*: the
+/// is the measured render-loop hot spot (docs/performance.md (multi-pin driving): the
 /// transpose is ~85% of the driver frame at 16K lights), so it uses the
 /// branch-free SWAR transpose (Warren, *Hacker's Delight* §7-3 "delta swap";
 /// the same 3-step 64-bit trick FastLED's transpose8x1 uses) instead of a

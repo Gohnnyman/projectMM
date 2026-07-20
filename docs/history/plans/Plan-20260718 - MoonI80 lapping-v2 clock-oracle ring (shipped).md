@@ -153,7 +153,7 @@ Two findings the plan didn't predict, both resolved:
   kRingPadMaxUs stays 120 for tolerant strips, the control is the hardware knob.
 
 **Phase C: the 48-strand encode does not fit — measured, not guessed.** At 6 pins × 8 × 256 (all 12288
-lights): worst refill 466 µs vs the 181 µs padded deadline, `late` climbing ~120/s (~17% of slices) —
+lights): worst refill 466 µs vs the 181 µs padded deadline, `late` climbing ~120/s (~17% of the slices/s at this measurement's ~15 fps ≈ 706 slices/s) —
 a SUSTAINED capacity deficit the pool cannot absorb. Per this plan's own branch: the compile-time
 lane-count unroll is the named next lever (its own plan), with the 19.2 MHz clock (+78 µs/slice budget,
 ~110 fps ceiling) as the second stage. The 100 fps goal remains feasible on measured numbers.

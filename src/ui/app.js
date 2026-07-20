@@ -210,6 +210,9 @@ async function sendControl(moduleName, controlName, value) {
         const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
     }
+    // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value — so
+    // re-render the cards. Structural change, same as an add/remove; the value write above already landed.
+    if (moduleName === "System" && controlName === "expertMode") renderCards();
     // Best-effort by design — failures are not retried here. Non-ok responses +
     // network errors are logged to console so a user with devtools open can see
     // what went wrong (e.g. a control value the device-side validator rejected).
@@ -485,6 +488,15 @@ function findModule(name, modules) {
         }
     }
     return null;
+}
+
+// Global "expert mode": the System module's expertMode control. Controls tagged `advanced` (dev/tuning
+// readouts + knobs) render only when this is on. Read live from state so a toggle takes effect on the
+// next render with no reload; default off if System or the control isn't present yet.
+function isExpertMode() {
+    const sys = state ? findModule("System") : null;
+    const c = sys && sys.controls && sys.controls.find(c => c.name === "expertMode");
+    return !!(c && c.value);
 }
 
 function renderCards() {
@@ -1163,16 +1175,25 @@ function emojiTagsForMod(mod) {
 // the C++ side, so the generic list skips it and the value never shows twice. Used by BOTH render
 // paths (renderCards's initial build + updateModuleControls's WS live-patch) so they agree.
 function controlRendersGenerically(mod, ctrl) {
-    return !ctrl.hidden;
+    if (ctrl.hidden) return false;
+    if (ctrl.advanced && !isExpertMode()) return false;   // expert-only control, expert mode is off
+    return true;
 }
 
 function createControl(moduleName, moduleType, ctrl) {
     const row = document.createElement("div");
     row.className = "control-row";
+    // Expert-only controls (only reachable here when expert mode is on — see controlRendersGenerically)
+    // get a distinct treatment so they read as a different tier: a left accent stripe + muted label.
+    if (ctrl.advanced) row.classList.add("control-advanced");
     row.dataset.key = ctrl.name;
 
     const label = document.createElement("label");
     label.className = "control-label";
+    // The expertMode toggle itself carries the wrench glyph (via CSS ::before), so it reads as the switch
+    // that governs the 🔧 controls — the toggle is never `advanced` (it must always be reachable), so key
+    // it by name rather than the flag.
+    if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
     label.textContent = ctrl.name;
     row.appendChild(label);
 

@@ -1056,6 +1056,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         writeControlMetadata(sink, c);
         // Emit optional flags only when set (common case is false; omit to save bytes).
         if (c.readonly) sink.append(",\"readonly\":true");
+        if (c.advanced) sink.append(",\"advanced\":true");   // UI shows it only in expert mode
         // An editable List (the CRUD primitive) tells the UI to show add/delete/reorder + inline
         // row editors; a plain List stays read-only. The row objects carry a stable "id" the
         // /api/list/* ops address, and each editable row's detail carries its field descriptors.

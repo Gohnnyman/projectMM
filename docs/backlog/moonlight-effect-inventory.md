@@ -1,6 +1,6 @@
 # MoonLight effect inventory (migration reference)
 
-The full set of MoonLight effects to migrate, grouped by **origin library** (a *section* within the shipped `effects.md` catalog page; a per-library page `effects_<library>.md` only when a section outgrows it — see the [folder-structure decision](folder-structure-proposal.md)), with audio/3D markers. Source: [MoonLight effects.md](https://github.com/MoonModules/MoonLight/blob/main/docs/moonlight/effects.md) + the `E_*.h` source files — studied for *behaviour*, reimplemented fresh per the migration plan's *Industry standards, our own code* rule. This reference feeds the [migration plan's](../history/plans/Plan-20260630%20-%20MoonLight%20migration%20(multi-stage).md) Stage-3 batches; it is *what to build*, not a copy of how.
+The full set of MoonLight effects to migrate, grouped by **origin library** (a *section* within the shipped `effects.md` catalog page; a per-library page `effects_<library>.md` only when a section outgrows it — see the [folder-structure decision](../adr/0015-library-is-a-tag-not-a-folder.md)), with audio/3D markers. Source: [MoonLight effects.md](https://github.com/MoonModules/MoonLight/blob/main/docs/moonlight/effects.md) + the `E_*.h` source files — studied for *behaviour*, reimplemented fresh per the migration plan's *Industry standards, our own code* rule. This reference feeds the [migration plan's](../history/plans/Plan-20260630%20-%20MoonLight%20migration%20(multi-stage).md) Stage-3 batches; it is *what to build*, not a copy of how.
 
 **Markers:** ♫ / ♪ audio-reactive · 🧊 native 3D. **Status:** ✅ already in projectMM · ⬜ to migrate.
 
@@ -62,7 +62,7 @@ The full set of MoonLight effects to migrate, grouped by **origin library** (a *
 Already in projectMM, our own (not from a MoonLight library — kept here so the inventory is complete):
 AudioSpectrumEffect ♫, AudioVolumeEffect ♫, FireEffect, GlowParticlesEffect, LavaLampEffect, MetaballsEffect, NetworkReceiveEffect, PlasmaEffect, PlasmaPaletteEffect, RingsEffect, SpiralEffect, CheckerboardEffect.
 
-*(Several have a MoonLight/WLED lineage in their prior-art notes; "origin" here is the page they'll file under — settle per-effect at migration time, per the [folder-structure decision](folder-structure-proposal.md): the page is the primary-steward bucket, the `tags()` emoji carries full lineage.)*
+*(Several have a MoonLight/WLED lineage in their prior-art notes; "origin" here is the page they'll file under — settle per-effect at migration time, per the [folder-structure decision](../adr/0015-library-is-a-tag-not-a-folder.md): the page is the primary-steward bucket, the `tags()` emoji carries full lineage.)*
 
 ## Tally
 

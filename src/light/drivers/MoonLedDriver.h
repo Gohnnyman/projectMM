@@ -8,48 +8,48 @@
 namespace mm {
 
 /// Output driver: parallel WS2812B on the **LCD_CAM** peripheral (ESP32-S3 / -P4), driven by **our own
-/// DMA code** instead of ESP-IDF's `esp_lcd`. Same peripheral, same pins and same wire contract as
-/// [MultiPinLedDriver](MultiPinLedDriver.md) — the difference is underneath, and it buys two things
-/// `esp_lcd` cannot give: a frame **streamed** rather than held whole, and a **74HCT595 pin expander**
-/// (one GPIO driving 8 strands — see the last section; skip it if you drive strands directly).
+/// DMA code** instead of ESP-IDF's `esp_lcd`. Same peripheral, pins and wire contract as
+/// [MultiPinLedDriver](MultiPinLedDriver.md); the difference is underneath, and it buys two things
+/// `esp_lcd` cannot give — a frame **streamed** rather than held whole, and a **74HCT595 pin expander**
+/// (one GPIO driving 8 strands).
 ///
-/// **A frame STREAMED, not held.** The DMA refills a small pool of internal buffers behind the read head,
-/// so **RAM stops scaling with strand length**: at one light per buffer the pool is ~18 KB whether a
-/// strand is 128 lights or 1024. `useRing` picks this path; `ringRows`/`ringBufs` size it.
+/// **Streamed, not held:** the DMA refills a small pool of internal buffers behind the read head, so RAM
+/// stops scaling with strand length (`useRing` picks this path; `ringRows`/`ringBufs` size it). **Both
+/// paths ship:** `MultiPinLedDriver` is the memory-capped **reference**, this is the streaming
+/// **challenger**, and `useRing` A/Bs them on the same board with no reflash. LCD_CAM only — the classic
+/// ESP32's i80 is the I2S peripheral, a different backend. Everything above the DMA (slicing, the fused
+/// 3-slot encode, the async double-buffer, loopback, the `frameTime` KPI, the dead-frame guard) is
+/// inherited from ParallelLedDriver, so this class is nearly all one-liners.
 ///
-/// **Why `esp_lcd` cannot do it.** It re-arms the peripheral on every transaction:
-/// `lcd_start_transaction()` does `lcd_ll_reset()` + `lcd_ll_fifo_reset()` + a hard-coded 4 µs busy-wait
-/// before each one. An LCD panel does not care — it is addressed, not clocked continuously. WS2812 is one
-/// unbroken self-clocked bit stream, so a reset mid-frame corrupts everything after it: a frame cannot be
-/// split across transactions at ANY chunk size, which forces the whole frame into ONE transaction, from
-/// ONE contiguous DMA-reachable block. That is the cap this driver exists to lift.
+/// The deep dives are under *More info*, below the attribute/method lists:
+/// @xref{why-our-own-dma-driver-below-the-read-head|why our own DMA driver},
+/// @xref{the-74hct595-pin-expander-skip-unless-one-is-fitted|the 74HCT595 pin expander}, and
+/// @xref{the-ringdbg-instrument-expert-mode-read-only|the ringDbg instrument legend}.
 ///
-/// **The hardware never demanded it.** The LCD peripheral has **no data-length register**
+/// @moreinfo
+///
+/// ## Why our own DMA driver (below the read head)
+///
+/// `esp_lcd` re-arms the peripheral on every transaction: `lcd_start_transaction()` does `lcd_ll_reset()`
+/// + `lcd_ll_fifo_reset()` + a hard-coded 4 µs busy-wait before each one. An LCD panel does not care — it
+/// is addressed, not clocked continuously. WS2812 is one unbroken self-clocked bit stream, so a reset
+/// mid-frame corrupts everything after it: a frame cannot be split across transactions at ANY chunk size,
+/// which forces the whole frame into ONE transaction from ONE contiguous DMA-reachable block. That is the
+/// cap this driver exists to lift.
+///
+/// The hardware never demanded that cap. The LCD peripheral has **no data-length register**
 /// (`lcd_ll_set_phase_cycles()` sets `lcd_dout` as a boolean *enable*; IDF's own comment reads "Number of
 /// data phase cycles are controlled by DMA buffer length"). It clocks exactly what the DMA feeds it and
 /// stops when the chain ends. So **one `gdma_start()` over an arbitrarily long descriptor chain plus one
-/// `lcd_ll_start()` is a single gapless stream across as many buffers as we like.** This driver takes
-/// that, on IDF's HAL + GDMA link-list APIs — one level below `esp_lcd`, not raw registers; IDF's own
-/// drivers use the same APIs. Rationale + what we give up:
+/// `lcd_ll_start()` is a single gapless stream across as many buffers as we like** — built on IDF's HAL +
+/// GDMA link-list APIs, one level below `esp_lcd` (not raw registers; IDF's own drivers use these APIs).
+/// Rationale + what we give up:
 /// [ADR-0014](https://github.com/MoonModules/projectMM/blob/main/docs/adr/0014-own-i80-dma-driver-below-esp-lcd.md).
 ///
-/// **What streaming costs.** The whole-frame path has no CPU deadline once a transfer is armed; the ring
-/// does. Its refill runs from the DMA's end-of-buffer interrupt and must beat the wire — 576 B per light
-/// is **28.8 µs/light** at the default 20 MHz shift clock (21.6 at the div-3 overclock) — or the strands
-/// see a gap. That trade is the reason both paths ship and `useRing` is a switch, not a constant.
-///
-/// **Both drivers ship, deliberately.** `MultiPinLedDriver` is the **reference**: correct, memory-capped,
-/// and what this one is measured against. This is the **challenger**. Both are registered module types, so
-/// switching is a swap in the UI — the A/B needs no reflash, same board, same effect. The reference is
-/// retired only if and when the challenger demonstrably beats it.
-///
-/// Everything above the DMA is inherited unchanged from ParallelLedDriver: the slicing, the fused 3-slot
-/// encode (ParallelSlots.h), the async double-buffer, the loopback self-test, the
-/// `frameTime` KPI, and the dead-frame guard. This class adds only what is i80-specific — WR, the ring's
-/// geometry, and the platform forwards — which is why it is nearly all one-liners. LCD_CAM only: the
-/// classic ESP32's i80 is the I2S peripheral, a different backend entirely.
-///
-/// ---
+/// What streaming costs: the whole-frame path has no CPU deadline once armed; the ring does. Its refill
+/// runs from the DMA's end-of-buffer interrupt and must beat the wire — 576 B per light is **28.8 µs/light**
+/// at the default 20 MHz shift clock (21.6 at the div-3 overclock) — or the strands see a gap. That trade
+/// is why `useRing` is a switch, not a constant.
 ///
 /// ## The 74HCT595 pin expander (skip unless one is fitted)
 ///
@@ -89,6 +89,46 @@ namespace mm {
 /// and a **48 x 256** frame is ~144 KB — more contiguous internal RAM than an S3 has, and from PSRAM the
 /// DMA cannot sustain the expander's shift clock (measured at 26.67 MHz). Streaming is the only route to
 /// that target, which is why these two features are one story.
+///
+/// ## The `ringDbg` instrument (expert-mode read-only)
+///
+/// A one-line raw readout of the ring's health + timing, refreshed each second — the field it backs is
+/// expert-only in the UI. A whole line reads, e.g.:
+///
+///     sl37/bf31 co671 cr5 ab0 dn4403 ld13 lt0 tx7459 ipb1 ci31 tn-1 de0 enc536 ea369 sg5815 se11239 tw23 ts7740 tp9425 gap1469854
+///
+/// Each token is `<abbr><value>` (µs = microseconds, cy = CPU cycles):
+///
+/// | Field | Name | What it measures |
+/// |---|---|---|
+/// | `sn` | snapshot residency | where the ring's snapshot buffer lives: `I` internal, `P` PSRAM (the internal-first alloc fell back), `-` absent. The ISR reads it per byte, so `P` under lapping means the measured 4-8x encode cost plus cache-contention exposure. |
+/// | `lv` | live-source residency | same probe for the live source buffer (what the encode reads when `ringSnapshot` is off). |
+/// | `sl` | slices | frame length in DMA slices (`nSlices`). Geometry. |
+/// | `bf` | buffers | ring pool depth (`ringBufs`). `bf < sl` ⇒ the *lapping* regime (the ISR refills behind the DMA); `bf ≥ sl` ⇒ *prime-only* (whole frame encoded before arm). |
+/// | `co` | cache-off defers | lifetime EOF firings that skipped their refill because the flash cache was off (a flash/WiFi write). ~10/s at idle is normal and harmless. |
+/// | `cr` | cache-off run | worst run of *consecutive* cache-off defers ≈ buffers the DMA drained un-refilled in one window. Healthy while `< bf`. |
+/// | `ab` | stall abandons | lifetime frames the DMA self-terminated at the frontier because a cache-off window outlasted the pool — each is one *held* (not corrupted) frame. `0` ideal; climbing = held frames the eye may catch. |
+/// | `dn` | done | lifetime completed frames. Should climb steadily; frozen = the ring stalled. |
+/// | `ld` | last drain | oracle drain position (slice index) observed at the last EOF. Diagnostic. |
+/// | `lt` | late | lifetime slices refilled *after* their drain began (stale on the wire) — the scatter meter. A clean run holds `lt` at its arm-time value; any climb is a deadline miss. |
+/// | `tx` | transmit µs | last frame's measured wire time. |
+/// | `ipb` | items per buffer | DMA descriptor nodes per ring buffer (`1` by design — a buffer that spans nodes breaks the terminator). |
+/// | `ci` | consumed items | descriptor nodes the mount actually used. Diagnostic. |
+/// | `tn` | terminator node | the fixed NULL-terminator node index (prime-only); `-1` = the lapping chain (no fixed terminator). |
+/// | `de` | descriptor errors | GDMA fetched a bad descriptor = memory corruption. `0` = clean; `> 0` is a real fault. |
+/// | `enc` | encode max µs | worst single ISR refill-encode (the jitter number). Compare to `gap`. |
+/// | `ea` | encode avg µs | average refill-encode (the pace number — the one that must beat the slice deadline). |
+/// | `sg` | seg gather cy | avg CPU cycles/row spent gathering source pixels (encode profiling). |
+/// | `se` | seg emit cy | avg CPU cycles/row spent emitting bus words — the '595 transpose (encode profiling). |
+/// | `tw` | tick wait µs | the ring tick's wire-wait segment (waiting the previous frame out). |
+/// | `ts` | tick snapshot µs | the per-frame source-snapshot copy. |
+/// | `tp` | tick prime µs | the pool-prime segment (encode the first `bf` slices + arm). |
+/// | `gap` | max EOF gap µs | worst inter-interrupt gap = the per-buffer drain deadline the encode must beat. |
+///
+/// Reading it: a healthy lapping run has `lt`/`de`/`ab` flat at zero, `cr < bf`, `dn` climbing, and
+/// `ea < gap` (the average refill beats the deadline). `co` climbing is normal (WiFi). `enc ≥ gap` means
+/// the worst refill can't keep pace (a *pace* problem); `enc ≪ gap` but `lt` climbing means a cursor/logic
+/// miss (a *timing* problem, not throughput).
 ///
 /// **Prior art.** The '595 expander and the per-light streaming ring are hpwit's ideas, from
 /// [I2SClocklessVirtualLedDriver](https://github.com/hpwit/I2SClocklessVirtualLedDriver) and his expander
@@ -201,6 +241,15 @@ public:
     /// Shift-mode only; a bus-rebuild trigger.
     bool shiftOverclock = false;
 
+    /// Backing store for the read-only `ringDbg` control — the ring's raw instrument (a one-line
+    /// health + timing dump), legend under
+    /// @xref{the-ringdbg-instrument-expert-mode-read-only|More info → the ringDbg instrument}.
+    ///
+    /// Refreshed each second (`refreshBusKpi` via `tick1s`), expert-only in the UI. Public like the other
+    /// controls' backing members (the control framework reads it by pointer). Grows-once static size;
+    /// `sizeof` bounds the `snprintf`.
+    char ringDbgStr_[176] = "—";
+
     // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
 
     /// LCD_CAM lanes on this chip (0 = none, and then the base's guards make the driver inert).
@@ -243,6 +292,7 @@ public:
         // for per-strand '595 corruption is OFF; see the member doc. Shift-mode only.
         controls_.addBool("shiftOverclock", shiftOverclock);
         controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
+        controls_.setAdvanced(controls_.count() - 1);   // a '595 clock tuning knob — expert only
         // Path selector (pin-expander mode only): the ring, or the whole frame. A distinct axis from
         // ringSnapshot — this picks the PATH, ringSnapshot tunes how the RING reads its source; they
         // compose. Whole-frame is the A/B reference: it is how the whole-frame-PSRAM-at-the-expander-clock
@@ -260,16 +310,24 @@ public:
         // useRing, not frameBytes_, so it resolves even before the source buffer is wired at boot.)
         controls_.addBool("ringAuto", ringAuto);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
+        // ringRows/ringBufs/ringPadUs are DEV TUNING — ringAuto derives them for the end user (kept
+        // visible above); the manual knobs are expert-only. (Once ringAuto is verified to always pick the
+        // right geometry, ringAuto itself could go advanced too — for now it stays visible as the recourse.)
         controls_.addUint8("ringRows", ringRows, 1, 64);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
+        controls_.setAdvanced(controls_.count() - 1);
         controls_.addUint8("ringBufs", ringBufs, platform::kRingBufsMin, platform::kRingBufsMax);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
+        controls_.setAdvanced(controls_.count() - 1);
         controls_.addUint8("ringPadUs", ringPadUs, 0, platform::kRingPadMaxUs);
         controls_.setHidden(controls_.count() - 1, !wantsRing());
+        controls_.setAdvanced(controls_.count() - 1);
         // Ring internals, so the streaming can be diagnosed by polling /api/state (reliable) rather than
-        // scraping serial: "sl<slices>/bf<bufs> dn<done> de<descErr> enc<worst refill µs> gap<worst EOF-to-EOF µs>".
+        // scraping serial. The raw instrument — expert only; the full field-by-field legend lives on the
+        // ringDbgStr_ member below (rendered into the technical page).
         controls_.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
         controls_.setHidden(controls_.count() - 1, !wantsRing());
+        controls_.setAdvanced(controls_.count() - 1);
     }
 
     /// Refresh the ringDbg diagnostic string once a second (base tick1s chains here via refreshBusKpi).
@@ -286,8 +344,18 @@ public:
         // isolated the prime-only bugs (ld = drain progress, tx = real wire time vs the physical frame
         // minimum, ipb/ci/tn = node accounting + the terminator). Their scope lives in the backlog's ring
         // entry.
-        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sl%u/bf%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u ea%u sg%u se%u tw%u ts%u tp%u gap%u",
+        // sn/lv: memory residency of the two encode sources — snapshotBuf_ (sn) and the live source (lv);
+        // P = PSRAM, I = internal, '-' = absent. The ISR reads one of these per byte, and a PSRAM 'sn'
+        // under a lapping ring is the measured 4-8x encode cost + the cache-contention corruption exposure.
+        const char snapWhere = this->snapshotBuf_
+            ? (platform::ptrIsPsram(this->snapshotBuf_) ? 'P' : 'I') : '-';
+        const char liveWhere = (this->sourceBuffer_ && this->sourceBuffer_->data())
+            ? (platform::ptrIsPsram(this->sourceBuffer_->data()) ? 'P' : 'I') : '-';
+        std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sn%c lv%c sl%u/bf%u co%u cr%u ab%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u ea%u sg%u se%u tw%u ts%u tp%u gap%u",
+                      snapWhere, liveWhere,
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
+                      static_cast<unsigned>(s.cacheOffDefers), static_cast<unsigned>(s.cacheOffMaxRun),
+                      static_cast<unsigned>(s.stallAbandons),
                       static_cast<unsigned>(s.doneGiven), static_cast<unsigned>(s.lastDrain),
                       static_cast<unsigned>(s.late),
                       static_cast<unsigned>(platform::moonI80Ws2812LastTransmitUs(bus_)),
@@ -300,6 +368,11 @@ public:
                       static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickSnapUs),   // snapshot µs
                       static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickPrimeUs),  // prime µs
                       static_cast<unsigned>(s.maxIsrGapUs));
+                      // co = lifetime cache-off ISR defers (flash/WiFi write; ~10/s at idle is normal). cr =
+                      // worst consecutive-defer run ≈ buffers drained un-refilled in one window. ab = frames
+                      // the DMA self-terminated at the frontier because a window outlasted the pool's lead
+                      // (moonI80Ws2812Wait) — each is one held (not corrupted) frame. cr climbing while ab
+                      // stays 0 = the pool absorbed every window; ab climbing = held frames the eye may catch.
                       // lt = slices refilled AFTER their drain began (stale on the wire) — the scatter
                       // meter; a clean soak is lt frozen at its arm-time value.
                       // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
@@ -411,9 +484,13 @@ public:
     // starts the DMA. Serial fallback: the platform's prime-all-then-arm combo.
     bool busTransmitRing() {
         if (snapHelperReady() && ringBufs >= 2) {
+            // `done` is written-gated (leads the wire drain); the prime itself takes the wire barrier —
+            // each prime call waits out the previous frame's deterministic wire end before writing (see
+            // waitWireDrained/primeRingRange in the i80 platform driver), so neither fork half can repaint
+            // a buffer the DMA is still draining.
             const uint8_t half = static_cast<uint8_t>(ringBufs / 2);
             primeLo_ = 0; primeHi_ = half;
-            helperKick(HelperJob::primeHalf);                          // core 0: buffers [0, half)
+            helperKick();                                             // core 0: buffers [0, half)
             platform::moonI80Ws2812PrimeRange(bus_, half, ringBufs);   // this core: [half, ringBufs)
             helperJoin();                                              // fence: every buffer primed
             return platform::moonI80Ws2812ArmRing(bus_);
@@ -508,14 +585,16 @@ public:
     /// rebuilds when this goes false rather than routing a stale clock.
     bool extraBusPinsCurrent() const { return lastClockPin_ == clockPin; }
 
-    // --- Fork-join helper (CRTP overrides of the base's default no-op hooks) ---
-    // The ring frame's two biggest costs — the snapshot correction (~18 ms at 48×256) and the pool prime
-    // (~14 ms) — are both embarrassingly parallel. Under the render/encode split the ring's tick runs on
-    // core 1 while core 0 is idle after its effect — so one core-0 helper task takes the bottom half of
-    // each, per frame: first the snapshot's light range, then the prime's buffer range. The task is
-    // spawned once at ring engage (kept parked in waitNotify between kicks) and torn down with the bus.
-    // ready() gates on the split actually running: the WHOLE point is the idle second core, so with the
-    // split off (single-core) both stages stay serial and the helper never engages.
+    // --- Fork-join helper (CRTP override of the base's default no-op hook) ---
+    // The pool PRIME (~14 ms at 48×256) is embarrassingly parallel — each ring buffer derives its rows from
+    // its own index — so under the render/encode split (ring tick on core 1) one core-0 helper task primes
+    // the bottom half of the pool while core 1 primes the top, per frame. The task is spawned once at ring
+    // engage (kept parked in waitNotify between kicks) and torn down with the bus. ready() gates on the
+    // split running: with it off (single-core) the prime stays serial and the helper never engages.
+    // NOTE: the SNAPSHOT is NOT forked (it copies serially on core 1). Forking it too stacked a second
+    // core-0 job on the render's composite and SATURATED core 0 at 48×256 — the idle task starved and the
+    // board hung (whole-session freeze); it also raced the prime fork's shared helper state (the bottom-16
+    // flicker). Priming alone keeps the parallel win without either failure.
 
     /// True when the fork-join should engage: the helper task is up AND this caller is running on core 1
     /// — i.e. the render/encode split is active and core 0 is the idle one to hand the bottom half. On
@@ -525,22 +604,32 @@ public:
         return snapHelper_.impl != nullptr && !snapHelperBroken_ && platform::currentCore() == 1;
     }
 
-    // The two fork-join jobs the core-0 helper runs — both embarrassingly parallel halves of the frame's
-    // output stage: the snapshot's color-correction range, and the ring prime's buffer range.
-    enum class HelperJob : uint8_t { snapshotHalf, primeHalf };
 
-    void snapHelperKick() { helperKick(HelperJob::snapshotHalf); }
-    void snapHelperJoin() { helperJoin(); }
-
-    void helperKick(HelperJob job) {
+    void helperKick() {
         if (!snapHelper_.impl) return;
-        helperJob_ = job;   // published by the notify (FreeRTOS task-notify is the sync point)
+        // Wait for the helper to be PARKED before notifying it for the next job. What actually keeps the
+        // bounds (primeLo_/primeHi_) race-free is the strict ordering, not this wait: the caller only writes
+        // new bounds AFTER the previous helperJoin() returned, and join returns only once the helper stored
+        // snapHelperDone_ (which happens strictly after runHelperJob finished reading the old bounds). So the
+        // helper is never reading bounds the caller is writing. The park-wait is belt-and-braces on top of
+        // that: it ensures the helper is back in waitNotify (not still between "set done" and "re-park")
+        // before this notify, so the notify can't be lost or double-counted. Single-producer/consumer
+        // discipline. Bounded — a stuck helper self-heals to serial (do the prime ourselves, stop using it).
+        const uint32_t t0 = platform::millis();
+        while (!snapHelperParked_.load(std::memory_order_acquire)) {
+            if (platform::millis() - t0 > kSnapJoinTimeoutMs) { snapHelperBroken_ = true; runHelperJob(); return; }
+            platform::yield();
+        }
+        snapHelperParked_.store(false, std::memory_order_release);   // consume the park; helper re-sets it
         snapHelperDone_.store(false, std::memory_order_release);
         platform::notifyTask(snapHelper_);
     }
 
     void helperJoin() {
         if (!snapHelper_.impl) return;
+        // A degraded kick (helper never parked → snapHelperBroken_, ran serially) already did the work and
+        // left snapHelperDone_ untouched; nothing to wait for.
+        if (snapHelperBroken_) return;
         // Acquire-poll on the helper's release with a REAL-TIME deadline — the Drivers::quiesceEncode
         // idiom (a spin COUNT is meaningless: yield() may return instantly, turning a count into a hot
         // burn). A healthy half takes single-digit ms; 100 ms means the helper is broken.
@@ -558,10 +647,7 @@ public:
         }
     }
 
-    void runHelperJob() {
-        if (helperJob_ == HelperJob::snapshotHalf) this->copyHelperRange();
-        else platform::moonI80Ws2812PrimeRange(bus_, primeLo_, primeHi_);
-    }
+    void runHelperJob() { platform::moonI80Ws2812PrimeRange(bus_, primeLo_, primeHi_); }
 
     /// Bring the helper task up (idempotent). Called at ring engage — see busInitRing's tail. Pinned to
     /// CORE 0: the ring's tick runs on core 1 under the split, so the helper takes the OTHER core.
@@ -569,6 +655,10 @@ public:
         if (snapHelper_.impl) return;
         snapHelperBroken_ = false;   // a rebuild gets a fresh chance
         snapHelperStop_.store(false, std::memory_order_release);
+        // The fresh task parks once (setting snapHelperParked_=true) before any kick; seed it true so the
+        // very first kick doesn't wait on a park signal the helper only emits after it starts running.
+        snapHelperParked_.store(true, std::memory_order_release);
+        snapHelperDone_.store(true, std::memory_order_release);
         platform::spawnPinnedTask(snapHelper_, "mmSnap", &MoonLedDriver::snapHelperTramp, this,
                                   4096, 5, /*core=*/0);
     }
@@ -581,9 +671,14 @@ public:
     static void snapHelperTramp(void* user) {
         auto* self = static_cast<MoonLedDriver*>(user);
         while (!self->snapHelperStop_.load(std::memory_order_acquire)) {
+            // Announce PARKED before blocking, so helperKick knows the previous job is fully done and the
+            // helper is no longer reading helperJob_/the bounds — only then does it publish the next job.
+            // This closes the fast-path window where the trampoline had set snapHelperDone_ but not yet
+            // returned to waitNotify, during which the next kick would overwrite the inputs under it.
+            self->snapHelperParked_.store(true, std::memory_order_release);
             if (!platform::waitNotify(self->snapHelper_, 100)) continue;   // re-check stop on timeout
             if (self->snapHelperStop_.load(std::memory_order_acquire)) break;
-            self->runHelperJob();                                           // this core-0 frame's bottom half
+            self->runHelperJob();                                           // this core-0 frame's half
             self->snapHelperDone_.store(true, std::memory_order_release);
         }
     }
@@ -593,13 +688,16 @@ private:
     platform::WorkerTask snapHelper_{};
     std::atomic<bool> snapHelperDone_{true};
     std::atomic<bool> snapHelperStop_{false};
+    // Set by the trampoline right before it blocks in waitNotify; cleared by helperKick when it publishes a
+    // new job. The kick waits for this before mutating the bounds (primeLo_/primeHi_) — so the helper is
+    // provably done reading the PREVIOUS job's inputs. Starts true: the helper parks once at spawn before
+    // any kick.
+    std::atomic<bool> snapHelperParked_{true};
     bool snapHelperBroken_ = false;   // self-heal latch: a timed-out join disables the helper (serial from then on)
-    HelperJob helperJob_ = HelperJob::snapshotHalf;
     uint8_t primeLo_ = 0, primeHi_ = 0;   // the helper's prime-job buffer range
 
     platform::MoonI80Ws2812Handle bus_;
     int8_t lastClockPin_ = -1;
-    char ringDbgStr_[128] = "—";   // TEMP DIAGNOSTIC: ring counters incl. the lapping-phase fields (refreshed in refreshBusKpi via tick1s)
 };
 
 } // namespace mm

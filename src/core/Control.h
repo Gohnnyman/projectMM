@@ -245,6 +245,13 @@ struct ControlDescriptor {
                             // users (e.g. SystemModule.deviceModel, which MoonDeck and the web installer
                             // inject via POST /api/control). HTTP writes still succeed — the flag
                             // is a UI rendering hint, not a write gate. Set via setReadOnly().
+    bool advanced = false;  // "Expert only" UI flag, INDEPENDENT of hidden. A permanent property of the
+                            // control (a dev/tuning readout or knob a casual user doesn't need); the UI
+                            // shows it only when System.expertMode is on. Like `hidden`, it's a pure
+                            // rendering hint — the control still persists and still accepts HTTP writes,
+                            // so tooling and the API reach it regardless. Set via setAdvanced(). (The
+                            // client composes the two: expertMode is one global toggle in SystemModule,
+                            // read UI-side, so no module needs to reach into System's state.)
     // Optional per-control input validator (Text/Password only; nullptr = accept anything
     // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
     // write and returns ApplyResult::Malformed on reject, so the check covers EVERY write
@@ -346,7 +353,7 @@ public:
     void addText(const char* name, char* var, uint16_t bufSize = 16,
                  bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, validate};
     }
 
     // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
@@ -354,7 +361,7 @@ public:
     void addTextArea(const char* name, char* var, uint16_t bufSize = 16,
                      bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, validate};
     }
 
     // Like addText but the value is a secret: the API serializes it
@@ -441,6 +448,13 @@ public:
     // The UI renders the control display-only; HTTP /api/control writes still apply.
     void setReadOnly(uint8_t i, bool readonly) {
         if (i < count_) controls_[i].readonly = readonly;
+    }
+
+    // Flip the "expert only" flag on a previously-added control. Typical use: call addX() then
+    // setAdvanced(count() - 1) for a dev/tuning readout or knob (e.g. MoonLed.ringDbg). The UI shows
+    // it only when System.expertMode is on; it still persists and still accepts HTTP writes.
+    void setAdvanced(uint8_t i, bool advanced = true) {
+        if (i < count_) controls_[i].advanced = advanced;
     }
 
 private:

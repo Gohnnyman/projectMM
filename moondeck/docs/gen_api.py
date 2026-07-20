@@ -200,9 +200,27 @@ _BAD_ANCHOR_RE = re.compile(r'\]\(#(?:_\w+_8h_source|[\w-]+-\d+)\)')
 
 
 def _strip_bad_anchor_links(md: str) -> str:
-    """Drop moxygen self-links whose anchor doesn't exist on the recombined page
-    (source-file anchors + numbered member anchors), leaving the link label as text."""
+    """Drop the always-dead moxygen self-link shapes (`#_..._8h_source`, numbered `#name-<n>`), keeping
+    the `[label]` text. The general 'does this bare `#anchor` resolve to a heading?' check runs LATER, in
+    `_strip_unresolved_anchor_links`, once `@moreinfo`/`@xref` have added their headings/links."""
     return _BAD_ANCHOR_RE.sub("]", md)
+
+
+def _strip_unresolved_anchor_links(md: str) -> str:
+    """Final pass: drop any same-page `[label](#anchor)` whose `#anchor` doesn't match a real heading id
+    on the finished page, keeping the `[label]` text. Doxygen auto-links a bare method mention
+    (`defineDriverControls()`) to a clean `#definedrivercontrols`, but the member's rendered id is
+    numbered (or the member lives on a base-class page), so that anchor resolves to nothing → strip it. A
+    bare anchor that DOES match a heading (a `@moreinfo` subsection, a manual `## Section`) is kept. Runs
+    AFTER `@moreinfo`/`@xref` so their headings and links are already in place."""
+    try:
+        from markdown.extensions.toc import slugify   # MkDocs' own slugifier — always present in the build env
+    except ImportError:
+        return md   # no markdown (a bare `python3` outside the docs env) → skip the pass, don't crash the generator
+    heading_ids = {slugify(re.sub(r'[`*]', '', h), '-')
+                   for h in re.findall(r'^#{1,6}\s+(.+)$', md, re.MULTILINE)}
+    return re.sub(r'\]\(#([\w-]+)\)',
+                  lambda m: m.group(0) if m.group(1) in heading_ids else "]", md)
 
 
 # A link moxygen auto-inserted INSIDE a code span: `[label](target)`. Markdown does not
@@ -231,6 +249,56 @@ def _unlink_inside_code_spans(md: str) -> str:
 # render to an <img> on its own block (a leading newline lifts it out of the trailing paragraph).
 _CARD_RE = re.compile(r'[ \t]*@card\s+(?P<file>\S+\.(?:png|jpe?g|gif))[ \t]*')
 _ASSETS = ROOT / "docs" / "assets"
+
+
+# A `@moreinfo` directive in a class `///` comment splits the class description: everything BEFORE it is
+# the lead description (renders first, above the attribute/method lists — Doxygen's fixed order), and
+# everything AFTER it is deep-dive reference that belongs at the BOTTOM of the page, under the members.
+# Doxygen has no "trailing section" slot, so we relocate it here on the rendered markdown, the same
+# post-process layer `@card` uses. Like `@card`, the plain-text marker survives Doxygen → moxygen as-is.
+_MOREINFO_RE = re.compile(r'^[ \t]*@moreinfo[ \t]*$', re.MULTILINE)
+# The first member-section heading moxygen emits (### Public Attributes / Public Methods / …). The
+# detailed-description ends where the first such heading begins.
+_FIRST_SECTION_RE = re.compile(r'^### (?:Public|Protected|Private|Static) ', re.MULTILINE)
+
+
+# An in-`///` cross-reference: `@xref{<anchor>|<label>}` (or `@xref{<anchor>}` — the anchor doubles as the
+# label). Renders to a real Markdown link `[label](#anchor)` pointing at a heading on the SAME page (a
+# More-info subsection). Doxygen strips relative `[text](../x.md)` links from its XML-only output, so an
+# in-text page-local anchor can't be written directly in a `///`; this marker survives Doxygen as plain
+# text and becomes the link here. NB: the marker is `@xref`, NOT `@ref` — `@ref` is a real Doxygen command
+# (Doxygen consumes the keyword and mangles it); `@xref` is not a command, so it passes through verbatim
+# like `@card`. `<anchor>` is the target heading's MkDocs slug (lowercased, spaces→`-`, punctuation
+# dropped) — e.g. `@xref{the-ringdbg-instrument-expert-mode-read-only|the ringDbg legend}`.
+# The `|` separator may arrive escaped as `\|` — moxygen escapes pipes when the marker lands inside a
+# member's brief (a Markdown table cell in the attribute list). Accept either form.
+_REF_RE = re.compile(r'@xref\{(?P<anchor>[a-z0-9-]+)(?:\\?\|(?P<label>[^}]+))?\}')
+
+
+def _render_ref_directives(md: str) -> str:
+    """Turn `@xref{anchor|label}` markers into `[label](#anchor)` page-local links (the label defaults to
+    the anchor when omitted)."""
+    def repl(m: re.Match) -> str:
+        anchor = m.group("anchor")
+        label = (m.group("label") or anchor).strip()
+        return f"[{label}](#{anchor})"
+    return _REF_RE.sub(repl, md)
+
+
+def _relocate_moreinfo(md: str) -> str:
+    """Move the class description's `@moreinfo` tail below the member sections, under a `## More info`
+    heading. No marker → unchanged. The tail is cut from `@moreinfo` up to the first member-section
+    heading (the end of the class description) and re-appended at the end of the page."""
+    marker = _MOREINFO_RE.search(md)
+    if not marker:
+        return md
+    # The class description runs until the first member section (or end of page if a class has no members).
+    sect = _FIRST_SECTION_RE.search(md, marker.end())
+    tail_end = sect.start() if sect else len(md)
+    tail = md[marker.end():tail_end].strip()
+    # Excise the marker + its tail from the description, then append it (relabelled) after everything else.
+    body = (md[:marker.start()] + md[tail_end:]).rstrip()
+    return f"{body}\n\n## More info\n\n{tail}\n"
 
 
 def _render_card_directives(md: str, domain: str, stem: str) -> str:
@@ -458,6 +526,13 @@ def generate() -> dict[str, str]:
             # code span can't render — keep the label, drop the target.
             body = _unlink_inside_code_spans(body)
             body = _render_card_directives(body, domain, stem)
+            body = _render_ref_directives(body)   # @xref{anchor|label} → page-local [label](#anchor)
+            # After card rendering (so a @card inside the More-info tail moves with it): relocate the
+            # class description's @moreinfo tail to a `## More info` section below the member lists.
+            body = _relocate_moreinfo(body)
+            # LAST link pass — now every heading (incl. @moreinfo subsections) and every @xref link is in
+            # place, so this can honestly check which bare `#anchor`s resolve and drop the ones that don't.
+            body = _strip_unresolved_anchor_links(body)
             body = _highlight_signature_names(body)
             md = _source_header(header, domain, stem) + body
             uri = f"moonmodules/{domain}/moxygen/{stem}.md"

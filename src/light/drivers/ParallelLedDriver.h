@@ -14,20 +14,13 @@ template <class Derived>
 /// Base for the parallel WS2812B LED-output drivers — the S3's LCD_CAM i80 bus (MultiPinLedDriver) and
 /// the P4's Parlio peripheral (ParlioLedDriver). Both drive up to 16 strands that clock out
 /// SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of the source buffer (see kMaxLanes).
-///
-/// **The words this page uses.** A **strand** is one chain of LEDs. A **lane** is one bus data line —
-/// in the normal case, one GPIO driving one strand. A **slot** is one WS2812 bit on the wire, and a
-/// **row** is one light across every strand at once (so a frame is `maxLaneLights` rows).
+/// (Vocabulary — strand / lane / slot / row — under @xref{terminology|More info → Terminology}.)
 ///
 /// **How it works: encode the whole frame, then hand it to the DMA and walk away.** Every WS2812 bit of
 /// every strand is written into one buffer up front — including a zeroed ≥300 µs pad at the end, the
 /// reset that tells the strands the frame is over — and then shipped as a single autonomous transfer.
-///
-/// The encode is a **fused correct + transpose, per row** (ParallelSlots.h). Transpose is the heart of
-/// it: the source has each light's bytes together, but the wire needs each bus WORD to carry one bit of
-/// EVERY strand at the same instant (bit L of the word = data line L). So the encoder turns 8 lights'
-/// bytes on their side — an 8x8 bit matrix transpose — and writes one word per slot. Both peripherals
-/// take the identical bytes: a Parlio bus word and an i80 bus word have the same meaning.
+/// The encode is a **fused correct + transpose, per row** (ParallelSlots.h; the transpose mechanism is
+/// under @xref{the-frame-transpose-correct-transpose-per-row|More info → the frame transpose}).
 ///
 /// **Why single-shot matters:** there is NO CPU deadline while a frame is on the wire. A driver that
 /// refills buffers as the DMA drains them must beat the clock on every refill, and a WiFi interrupt at
@@ -47,6 +40,22 @@ template <class Derived>
 /// `kPowerOfTwoBus` (the i80 bus rounds to 8 or 16; Parlio's width IS its pin count), the slot rate
 /// `kClockHz`, and any extra bus pins it owns. The two drivers were ~250 of ~370 lines byte-for-byte
 /// identical before this base existed.
+///
+/// @moreinfo
+///
+/// ## Terminology
+///
+/// A **strand** is one chain of LEDs. A **lane** is one bus data line — in the normal case, one GPIO
+/// driving one strand. A **slot** is one WS2812 bit on the wire, and a **row** is one light across every
+/// strand at once (so a frame is `maxLaneLights` rows).
+///
+/// ## The frame transpose (correct + transpose, per row)
+///
+/// The source has each light's bytes together, but the wire needs each bus WORD to carry one bit of EVERY
+/// strand at the same instant (bit L of the word = data line L). So the encoder turns 8 lights' bytes on
+/// their side — an 8x8 bit matrix transpose — and writes one word per slot, fused with the per-light
+/// correction in one pass (ParallelSlots.h). Both peripherals take the identical bytes: a Parlio bus word
+/// and an i80 bus word have the same meaning.
 class ParallelLedDriver : public DriverBase {
 public:
     /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its MultiPinLedDriver
@@ -231,7 +240,7 @@ public:
     /// i80.
     ///
     /// Full status, the reuse-race + concurrency follow-ups, and the measurements behind these limits:
-    /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/backlog/shift-register-driver-analysis.md)
+    /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/history/shift-register-driver-analysis.md)
     /// and the ring items in `docs/backlog/backlog-light.md`.
     bool     pinExpander = false;
     /// The 74HCT595 LATCH (RCLK) line — pulsed once the shifted byte is in, presenting it on the
@@ -278,22 +287,29 @@ public:
         // A ring-capable backend's geometry, AFTER latchPin so the bus pins stay one unbroken group
         // (clockPin and latchPin are a wiring pair). Default no-op; only MoonI80 rings.
         derived()->addRingControls();
+        // The on-device loopback self-test + its wiring — a dev/bring-up instrument (jumper a lane to the
+        // rx pin), not a casual-user setting, so the whole cluster is expert-only.
         controls_.addBool("loopbackTest", loopbackTest);
+        controls_.setAdvanced(controls_.count() - 1);
         // Always bound, shown only in test mode — the conditional-control shape.
         controls_.addPin("loopbackTxPin", loopbackTxPin);
         // Direct mode only. In shift mode the captured strand is decided by which '595 OUTPUT the
         // jumper is on (loopbackStrand), not by which GPIO transmits — runLoopbackSelfTest ignores
         // the override there — so showing it would only invite a mis-set control.
         controls_.setHidden(controls_.count() - 1, !loopbackTest || pinExpanderMode());
+        controls_.setAdvanced(controls_.count() - 1);
         controls_.addPin("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
+        controls_.setAdvanced(controls_.count() - 1);
         // Which strand carries the pattern — shift mode only (in direct mode it is always lane 0).
         // Lets the jumper come off ANY '595 output, including a spare one that drives no panel.
         controls_.addUint8("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
         controls_.setHidden(controls_.count() - 1, !loopbackTest || !pinExpanderMode());
+        controls_.setAdvanced(controls_.count() - 1);
         // Intrusive: ride the live pipeline instead of a private replica (see the member doc).
         controls_.addBool("loopbackIntrusive", loopbackIntrusive);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
+        controls_.setAdvanced(controls_.count() - 1);
     }
 
     /// A change to the pins, per-lane counts, the window, a derived bus control (clockPin/dcPin on
@@ -1010,13 +1026,11 @@ protected:
     /// DriverBase::driverHeapBytes. The DMA ring buffers are platform-owned (not driver heap), so they
     /// are not counted here.
     size_t driverHeapBytes() const override { return DriverBase::driverHeapBytes() + snapshotCap_; }
-    // Parallel-snapshot state: the copy inputs copyRange reads, set once by the orchestrator before
-    // either core touches the loop, so both cores see the same immutable setup. The helper's [lo,hi) is
-    // separate so it survives the cross-core wake without a shared param.
+    // The snapshot copy's inputs, set before copyRange runs. The snapshot is serial (on the ring's core-1
+    // tick); only the ring PRIME still forks to the core-0 helper (busTransmitRing), so no cross-core copy
+    // bounds live here.
     const uint8_t* snapCopySrc_ = nullptr;
     uint8_t  snapCopyCh_ = 0;
-    nrOfLightsType snapHelperLo_ = 0;
-    nrOfLightsType snapHelperHi_ = 0;
     const uint8_t* encodeSrc_ = nullptr;  // when non-null, encodeRows reads this (bias-corrected) instead of sourceBuffer_
 
     /// (Re)size the ring snapshot to hold this driver's whole window (`winLen_ × srcCh`), OFF the hot path.
@@ -1085,16 +1099,14 @@ protected:
         // Line-aligned split so neither core writes into a cache line the other also writes.
         snapCopySrc_ = sourceBuffer_->data() + static_cast<size_t>(winStart_) * srcCh;
         snapCopyCh_ = static_cast<uint8_t>(srcCh);
-        if (derived()->snapHelperReady()) {
-            const nrOfLightsType half = snapLineAlignedHalf(winLights, srcCh);
-            snapHelperLo_ = 0;
-            snapHelperHi_ = half;
-            derived()->snapHelperKick();          // core-0 helper: copy [0, half)
-            copyRange(half, winLights);            // this core (core 1 under the split): [half, winLights)
-            derived()->snapHelperJoin();           // wait the helper out — the acquire pairing its release
-        } else {
-            copyRange(0, winLights);               // serial: the whole window on this core
-        }
+        // SERIAL copy, always — on core 1 under the split (the whole ring tick runs there). The snapshot is
+        // a ~3 ms memcpy; forking its bottom half onto the core-0 helper saved ~1.5 ms but cost far more: the
+        // helper is core-0 priority-5 work stacked on the render's composite, and at 48×256 the two SATURATE
+        // core 0 (measured: the idle task starved for >5 s at engage → a silent hang, the whole-session
+        // freeze). It was ALSO a correctness hazard — the snapshot and prime forks shared one helper's job
+        // and bounds, and a mid-frame re-kick tore the last lanes (the bottom-16 flicker). Only the PRIME
+        // still forks (busTransmitRing): the prime buffers are independent and the prime is the real win.
+        copyRange(0, winLights);
         // INTRUSIVE loopback pattern hold: overwrite the tapped strand's rows in the snapshot with the test
         // pattern in RAW SOURCE bytes (correction runs later in encodeRows, uniformly). Window-relative
         // index, clamped to the lights the copy filled. Off (-1) is the normal render path.
@@ -1128,10 +1140,6 @@ protected:
                         static_cast<size_t>(hi - lo) * ch);
     }
 
-    /// The core-0 helper's half — [snapHelperLo_, snapHelperHi_) — as the derived driver's worker fn calls
-    /// it. Separate from copyRange only so the helper reads its own bounds (set before the kick) rather
-    /// than sharing lo/hi params across the wake.
-    void copyHelperRange() { copyRange(snapHelperLo_, snapHelperHi_); }
 
     /// Split winLights near the middle, rounded so the second half starts on a 64-byte cache line — each
     /// half then owns whole lines, so the two cores never write into a shared line (false sharing). The
@@ -1194,14 +1202,11 @@ protected:
     /// The ring's regime as a one-word status suffix ("primed" / "lapping"), or null when not ringing —
     /// so the driving-status line shows which side of the streaming boundary a config sits on.
     const char* busRingMode() const { return nullptr; }
-    /// Parallel-snapshot helper hooks (default: no helper, snapshot runs serial). Only the ring driver
-    /// overrides these, spawning a core-0 worker whose fn calls back into copyHelperRange(). ready() is
-    /// true only when the render/encode split is engaged AND the helper task is up; kick() wakes it for
-    /// its half; join() waits it out. The base's snapshot uses them exactly as the split's own quiesce
-    /// pattern — a notify + an acquire-spin on a done flag.
+    /// Core-0 helper hook (default: no helper). Only the ring driver overrides it, spawning a core-0
+    /// worker that primes half the ring pool while core 1 primes the other half (busTransmitRing's
+    /// fork-join). ready() is true only when the render/encode split is engaged AND the helper task is up.
+    /// (The snapshot copy is always serial — forking it saturated core 0; see snapshotSourceForRing.)
     bool snapHelperReady() const { return false; }
-    void snapHelperKick() {}
-    void snapHelperJoin() {}
 
     /// CRTP hook: the GPIO a SPARE bus lane is parked on when the pin list is narrower than the bus
     /// width (shift mode — the board decides the data-pin count, the peripheral decides the width).

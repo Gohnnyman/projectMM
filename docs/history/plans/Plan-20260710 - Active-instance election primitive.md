@@ -15,7 +15,7 @@ This is duplicated today across:
 - **`AudioService`** ([AudioService.h](../../../src/core/AudioService.h)) — `active_` is the live mic; consumers read `AudioService::latestFrame()`.
 - **`DevicesModule`** ([DevicesModule.h](../../../src/core/DevicesModule.h)) — `active_` is the boot device-registry; a light-domain Hue driver reaches it via `DevicesModule::active()`.
 
-It's the same *[Complexity lives in core](../../../CLAUDE.md#principles)* smell the [ScratchBuffer plan](Plan-20260710%20-%20Scratch%20buffer%20helper%20for%20memory-holding%20effects.md) catches, one level up: non-trivial election bookkeeping repeated per module, each copy a chance to get the dangling-static or the self-elect wrong (both were real bugs the disable-releases-resources work fixed). A core primitive removes the four moves from the module — it just declares "I participate in this election" and reads the winner.
+It's the same *[Complexity lives in core](../../../CLAUDE.md#principles)* smell the [ScratchBuffer plan](Plan-20260710%20-%20Scratch%20buffer%20helper%20for%20memory-holding%20effects%20(shipped).md) catches, one level up: non-trivial election bookkeeping repeated per module, each copy a chance to get the dangling-static or the self-elect wrong (both were real bugs the disable-releases-resources work fixed). A core primitive removes the four moves from the module — it just declares "I participate in this election" and reads the winner.
 
 ## Design sketch (resolve details in review)
 
@@ -48,7 +48,7 @@ An effect/service then holds `ActiveInstance<AudioService> seat_{*this};` and ca
 
 **Open decisions:**
 1. **How much does the module still write?** Ideal is zero — the base claims on build (when effectively-enabled) and vacates on teardown, mirroring how `applyState()` already routes those. The self-elect-in-tick (a survivor grabbing an empty seat) is the one bit that may need to stay a one-liner in the module, or move into the base tick. Resolve by trying AudioService first.
-2. **Naming under the hook-rename.** This lands after (or with) the [prepare/tick/release rename](Plan-20260710%20-%20Rename%20module%20hooks%20to%20prepare-tick-release%20(decided).md) — so "claim in `onBuildState`" becomes "claim in `prepare`", "vacate in `teardown`" becomes "vacate in `release`". Author against the new names if the rename ships first.
+2. **Naming under the hook-rename.** This lands after (or with) the [prepare/tick/release rename](Plan-20260710%20-%20Rename%20module%20hooks%20to%20prepare-tick-release%20(shipped).md) — so "claim in `onBuildState`" becomes "claim in `prepare`", "vacate in `teardown`" becomes "vacate in `release`". Author against the new names if the rename ships first.
 3. **Coordinate with ScratchBuffer's owner tie.** Both primitives want a `MoonModule&`/owner reference to hook the lifecycle. Consider whether they share one mechanism (a module holds a small list of "lifecycle participants" the base drives) or stay two independent RAII members. Lean: two independent members — simpler, and they're genuinely different concerns; only unify if a third participant appears.
 
 ## Files

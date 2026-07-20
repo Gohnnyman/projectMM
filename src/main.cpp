@@ -530,8 +530,15 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     const uint32_t bootMillis = lastLog;   // window start for the MM_IP serial token
     bool mmIpWindowClosed = false;         // latches true once the 60 s window elapses
 
+    // Subscribe THIS (render-loop) task to the task watchdog: a genuine wedge here now panics-and-reboots
+    // (the self-heal, with a backtrace) instead of hanging silently. The sdkconfig runs the TWDT with
+    // idle-task checking OFF (a saturated core is healthy, not a bug), so this explicit subscription is
+    // what the watchdog actually watches. Reset it each tick below; a heavy-but-live frame keeps feeding it.
+    mm::platform::taskWdtSubscribe();
+
     while (keepRunning) {
         scheduler.tick();
+        mm::platform::taskWdtReset();   // feed the render-loop WDT subscription — a live tick is not a wedge
 
         // Log every second
         uint32_t now = mm::platform::millis();
