@@ -941,10 +941,13 @@ public:
     /// a handful of integer compares against the ~1/3-of-encode prefill it saves.
     // BENCH DIAGNOSTIC: per-segment cycle accumulators encodeRows fills at the shift branch —
     // gather+mask vs transpose+emit, per row. Static (shared across instances; one hot driver on the
-    // bench) + volatile (ISR-written, KPI-read). Scope: the backlog's ring entry.
-    static inline volatile uint32_t dbgSegGatherCy = 0;
-    static inline volatile uint32_t dbgSegEmitCy = 0;
-    static inline volatile uint32_t dbgSegRows = 0;
+    // bench). Plain uint32_t, NOT volatile: these are best-effort counters read-and-cleared once a second
+    // by refreshBusKpi, so a lost/torn update under the two-core prime is harmless — and `volatile` is
+    // both the wrong tool for cross-thread visibility (that is std::atomic's job) and, on a compound
+    // assignment, deprecated in C++20 (-Wdeprecated-volatile). Scope: the backlog's ring entry.
+    static inline uint32_t dbgSegGatherCy = 0;
+    static inline uint32_t dbgSegEmitCy = 0;
+    static inline uint32_t dbgSegRows = 0;
 
     bool MM_RAMFUNC uniformLaneCounts() const {
         nrOfLightsType ref = 0;
