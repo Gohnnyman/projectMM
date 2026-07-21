@@ -56,6 +56,39 @@ TEST_CASE("parsePinList accepts a single pin and spaces around tokens") {
     CHECK(pins[1] == 17);
 }
 
+// A "lo-hi" token expands to the inclusive range — the same idiom as the IP-destination list, so a
+// human types consecutive pins once. Single pins and ranges mix freely in one CSV.
+TEST_CASE("parsePinList expands inclusive ranges and mixes them with single pins") {
+    uint16_t pins[16] = {};
+    uint8_t n = 0;
+    // "20-23" → 20,21,22,23.
+    CHECK(mm::parsePinList("20-23", pins, 16, n) == nullptr);
+    REQUIRE(n == 4);
+    CHECK(pins[0] == 20);
+    CHECK(pins[3] == 23);
+    // Combo: two ranges plus a single pin, in order → 20,21,22,35,38,39,40 (3 + 1 + 3 = 7 pins).
+    CHECK(mm::parsePinList("20-22,35,38-40", pins, 16, n) == nullptr);
+    REQUIRE(n == 7);
+    CHECK(pins[0] == 20); CHECK(pins[2] == 22);
+    CHECK(pins[3] == 35);
+    CHECK(pins[4] == 38); CHECK(pins[6] == 40);
+    // A single-value "range" (lo==hi) is one pin, not an error.
+    CHECK(mm::parsePinList("7-7", pins, 16, n) == nullptr);
+    REQUIRE(n == 1);
+    CHECK(pins[0] == 7);
+}
+
+// A range that runs backwards, or overlaps an existing pin, or overruns the cap, is rejected — the
+// same guards a flat list gets, applied to each expanded pin.
+TEST_CASE("parsePinList rejects a backwards range, a range duplicate, and a range over the cap") {
+    uint16_t pins[16] = {};
+    uint8_t n = 0;
+    CHECK(mm::parsePinList("23-20", pins, 16, n) != nullptr);      // hi < lo
+    CHECK(mm::parsePinList("20-22,21", pins, 16, n) != nullptr);   // 21 already in the range
+    CHECK(mm::parsePinList("18-", pins, 16, n) != nullptr);        // no hi after the dash
+    CHECK(mm::parsePinList("0-5", pins, 4, n) != nullptr);         // 6 pins over a cap of 4
+}
+
 TEST_CASE("parsePinList rejects bad input with a static error message") {
     uint16_t pins[8] = {};
     uint8_t n = 0;

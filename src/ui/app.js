@@ -55,10 +55,19 @@ const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
 const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
+const LS_EXPANDED  = "mm_expanded";       // [moduleName, …] — modules whose "controls" <details> is open
 
 // The open tab per container, persisted so a reload doesn't dump you back on the first child.
 let selectedTabs = {};
 try { selectedTabs = JSON.parse(lsRead(LS_TABS, "{}")) || {}; } catch { selectedTabs = {}; }
+
+// Which modules have their "controls" disclosure open — VIEW-ONLY state the backend knows nothing about, so
+// it lives here (like selectedTabs), NOT in the module state. Persisting it means a full-state rebuild (or a
+// page reload) restores the open/closed expander instead of snapping it shut. Value/structure/picker state
+// all come from the backend, so those need no client persistence.
+let expandedSet = new Set();
+try { expandedSet = new Set(JSON.parse(lsRead(LS_EXPANDED, "[]")) || []); } catch { expandedSet = new Set(); }
+function saveExpanded() { localStorage.setItem(LS_EXPANDED, JSON.stringify([...expandedSet])); }
 
 function lsRead(key, defaultVal) {
     const v = localStorage.getItem(key);
@@ -588,12 +597,14 @@ function applyTabDot(tab, mod) {
     tab.appendChild(dot);
 }
 
-// Patch-path twin of applyTabDot: the tab strip is built in renderCards(), which the WS value patch
-// deliberately never re-runs — so without this a fault appearing on a background tab would stay
-// invisible until the next full render. (The UI has two render paths; a rule must live in both.)
+// Patch-path twin of applyTabDot + the disabled greying: the tab strip is built in renderCards(), which the
+// WS value patch deliberately never re-runs — so without this, a fault (or an enable/disable) on a background
+// tab would stay invisible until the next full render. (The UI has two render paths; a rule must live in both.)
 function updateTabDot(mod) {
     const tab = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
-    if (tab) applyTabDot(tab, mod);
+    if (!tab) return;
+    applyTabDot(tab, mod);
+    tab.classList.toggle("tab--disabled", mod.enabled === false);   // grey a disabled module's tab title
 }
 
 // Tab strip + the one selected child. `active` falls back to the first child whenever the remembered
@@ -609,7 +620,10 @@ function renderChildTabs(mod, childrenEl, depth) {
 
     for (const child of mod.children) {
         const tab = document.createElement("button");
-        tab.className = "tab" + (child.name === active ? " tab-active" : "");
+        // Grey a disabled child's tab title (mirrors the card's card--disabled), so it reads as inactive
+        // from the strip without opening it. Derived purely from child.enabled — no backend round-trip.
+        tab.className = "tab" + (child.name === active ? " tab-active" : "")
+                              + (child.enabled === false ? " tab--disabled" : "");
         tab.type = "button";
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", child.name === active ? "true" : "false");
@@ -687,6 +701,12 @@ function createCard(mod, depth) {
         enabled.classList.toggle("module-enabled--off", !on);
         enabled.setAttribute("aria-pressed", on ? "true" : "false");
         card.classList.toggle("card--disabled", !on);
+        // Grey this module's TAB in the same click, alongside its card — so the tab title dims INSTANTLY
+        // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
+        // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
+        // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
+        const tabEl = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
+        if (tabEl) tabEl.classList.toggle("tab--disabled", !on);
     };
     setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
     enabled.addEventListener("click", () => {
@@ -792,6 +812,14 @@ function createCard(mod, depth) {
     const controlsHost = wrapInDetails ? (() => {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
+        // Restore the open/closed state from localStorage, so a full-state rebuild (or a page reload) keeps
+        // the expander as the user left it instead of snapping shut. Persist it on toggle — same pattern as
+        // the selected tab (LS_TABS). VIEW-only state; nothing to do with the module's backend state.
+        d.open = expandedSet.has(mod.name);
+        d.addEventListener("toggle", () => {
+            if (d.open) expandedSet.add(mod.name); else expandedSet.delete(mod.name);
+            saveExpanded();
+        });
         const s = document.createElement("summary");
         s.textContent = "controls";
         d.appendChild(s);

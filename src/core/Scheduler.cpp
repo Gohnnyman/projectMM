@@ -221,6 +221,10 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
         target->markDirty();
         if (noteDirtyHook_) noteDirtyHook_();
         prepareTree();
+        // `enabled` rides the FULL state, not the per-leaf value patch — so the client only learns the new
+        // value from a full resync. Request one (the same signal a schema change sends); without it the
+        // client's cached state keeps the old `enabled` and reverts the toggle a second later.
+        MoonModule::notifySchemaChanged();
         return SetControlResult::Ok;
     }
 

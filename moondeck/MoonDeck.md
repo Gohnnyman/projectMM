@@ -23,13 +23,23 @@ Below: the UI behaviours common to every card, described once, then one section 
 
 ### build_desktop
 
-Build the desktop target using CMake.
+Build the desktop firmware binary using CMake.
 
 ```bash
 uv run moondeck/build/build_desktop.py
 ```
 
-Runs `cmake -B build/<host> -DCMAKE_BUILD_TYPE=Release` then `cmake --build build/<host>`, where `<host>` is `macos`, `linux`, or `windows` depending on the OS this script runs on. The per-host directory keeps an experimental Linux build from clobbering a macOS one on the same machine, and mirrors the ESP32 side's `build/esp32-<board>/` shape.
+Runs `cmake -B build/<host> -DCMAKE_BUILD_TYPE=Release` then `cmake --build build/<host> --target projectMM`, where `<host>` is `macos`, `linux`, or `windows` depending on the OS this script runs on. It builds ONLY the firmware binary — not the ~130-file test suite — so the "just give me the binary to run" path stays fast; compile the tests separately (see `compile_tests`). The per-host directory keeps an experimental Linux build from clobbering a macOS one on the same machine, and mirrors the ESP32 side's `build/esp32-<board>/` shape.
+
+### compile_tests
+
+Compile the test binaries (unit + scenario) without running them.
+
+```bash
+uv run moondeck/build/build_desktop.py --tests
+```
+
+Builds `mm_tests` + `mm_scenarios` (the `--tests` target set of `build_desktop.py`), in the same per-host build dir. Separate from `build_desktop` so a firmware build doesn't drag the ~130 test translation units through the compiler; run the compiled binaries afterward with `test_desktop` (unit) and `scenario_pipeline` (scenarios).
 
 ### test_desktop
 

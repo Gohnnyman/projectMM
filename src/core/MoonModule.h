@@ -268,6 +268,11 @@ public:
     /// schema change without depending on the WS layer. Null until wired (unit tests run without it).
     using SchemaChangedFn = void (*)();
     static void setSchemaChangedHook(SchemaChangedFn fn) { schemaChangedHook_ = fn; }
+    /// Fire the schema-changed hook directly — for a change that rebuildControls() doesn't cover but that
+    /// the client must still full-resync for. The one case: toggling a module's `enabled` (which rides the
+    /// FULL state, never the value patch), so without this the client's cached state never learns the new
+    /// enabled and reverts the toggle a second later. Safe when unwired (null hook → no-op).
+    static void notifySchemaChanged() { if (schemaChangedHook_) schemaChangedHook_(); }
     void clearControlsRecursive() {
         controls_.clear();
         for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
