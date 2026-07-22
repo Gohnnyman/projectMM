@@ -1,15 +1,20 @@
 # MHC-WLED ESP32-P4 shield — hardware reference
 
-Terminal pinout and onboard features for the **MHC-WLED ESP32-P4 shield** (myhome-control), the P4-NANO carrier used on the bench (catalog `deviceModel: "MHC-WLED ESP32-P4 shield"`, `esp32p4-eth` firmware). Read from the board silkscreen so projectMM work reads this instead of the marketing render. The shield sits on a **Waveshare ESP32-P4-NANO**; GPIO numbers are the P4's.
+Terminal pinout and onboard features for the **MHC-WLED ESP32-P4 shield** (myhome-control), the P4-NANO carrier used on the bench (catalog `deviceModel: "MHC-WLED ESP32-P4 shield"`, `esp32p4-eth` firmware). Read from the board silkscreen + the builder's schematics so projectMM work reads this instead of the marketing render. The shield sits on a **Waveshare ESP32-P4-NANO**; GPIO numbers are the P4's.
 
 **Sources**
 - Overview render (board V2): [`docs/assets/deviceModels/mhc-wled-esp32-p4-shield.jpg`](../assets/deviceModels/mhc-wled-esp32-p4-shield.jpg)
-- Silkscreen (photographed, 2026-07-09): the terminal labels below are transcribed from the physical board, which supersedes the render where they differ (the render's RS-485 "GPIOs 3,4,6,53" is wrong — the board reads 4, 22, 24, 3).
-- Builder: myhome-control (Wladi).
+- Silkscreen (photographed) + the builder's schematics and terminal maps (myhome-control / Wladi, 2026-07-16); the transcriptions below come from those. The schematics supersede the marketing render where they differ.
 
 ## Pinout
 
-![MHC-WLED ESP32-P4 shield terminal pinout](../assets/reference/mhc-wled-esp32-p4-shield-pinout.svg)
+### GPIO ↔ screw-terminal map (V1 board)
+
+The output/RS-485 terminals, left to right, with the P4 GPIO each carries:
+
+![MHC-WLED ESP32-P4 shield GPIO terminal map](../assets/reference/mhc-wled-esp32-p4-shield-gpio-terminal-map.png)
+
+`O21 O20 O25 O5 O7 O23 O8 O27 O3 O22 O24 O4` — the level-shifted single-ended LED outputs, then the four RS-485 differential pairs.
 
 **Nothing on this shield is a bare GPIO.** Every terminal routes through protection or level-shifting — the reason a direct drive-and-read WS2812 loopback jumper fails on it (see below). Four terminal groups:
 
@@ -27,20 +32,37 @@ The LED-data outputs. Each terminal is `O<gpio>` on the silkscreen; a level shif
 
 > **GPIO 3, 4, 22, 24 each appear TWICE** — once here (level-shifted single-ended output, `O<n>`) and once in the RS-485 block (`A-<n>-B`). It's the *same* P4 GPIO fanned out to two output forms: driving the pin lights up **both** its `O<n>` terminal and its `A-<n>-B` transceiver at once. Wire to whichever form you need. GPIO 21/20/25/5/23/27 have **only** the level-shifted path (no RS-485), which is why the LED-driver default uses those + 22/24 for strips and leaves 3/4 free.
 
-### 4x RS-485 — differential A/B pairs
+### 4x RS-485 — differential A/B pairs (range extender + DMX)
 
-Each channel is `A-<gpio>-B` on the silkscreen: an **RS-485 transceiver** (not a bare GPIO) driven by that GPIO. **Each channel occupies TWO screw terminals — an `A` and a `B`** (the differential pair), so the 4 channels are 8 terminals total. Channels on **GPIO 4, 22, 24, 3**. The render mentions "switch GPIO 3 as input/output," but there's **no physical switch on the board** — GPIO 3 is just a GPIO, and projectMM sets its direction in firmware (an output when driving, an input when `loopbackRxPin` reads it).
+Each channel is `A-<gpio>-B` on the silkscreen: an **RS-485 transceiver** (an SP3485EN-L/TR, not a bare GPIO) driven by that GPIO, with 120 Ω termination, resettable fuses (nSMD010), and TVS protection (CDSOT23-SM712-ES) on the line. **Each channel occupies TWO screw terminals — an `A` and a `B`** (the differential pair), so the 4 channels are 8 terminals total. Channels on **GPIO 4, 22, 24, 3**.
 
-| Channel | GPIO | Terminals |
-|---|---|---|
-| A-4-B | 4 | A4, B4 |
-| A-22-B | 22 | A22, B22 |
-| A-24-B | 24 | A24, B24 |
-| A-3-B | 3 | A3, B3 |
+RS-485 is here for two purposes:
+
+- **Range extender** — RS-485's differential pair carries LED data far past what a single-ended 5 V line manages. At the LED end you need an **RS-485 receiver with a 5 V data output** to convert the differential signal back to the WS2812 single-ended waveform.
+- **DMX-512 output** — DMX's physical layer *is* RS-485, so these channels double as DMX outputs. Wire an XLR connector to `GND`, `<n>A`, `<n>B`; in DMX nomenclature **A is Data− (Signal−), B is Data+ (Signal+)**.
+
+**Three channels are transmit-only; one (GPIO 3) is switchable.** On the transmit-only channels (GPIO 4, 22, 24) the transceiver's `RE#`/`DE` direction pins are hard-wired to transmit (`DI` in, `RO` disconnected):
+
+![RS-485 transmit-only channel schematic (GPIO 4)](../assets/reference/mhc-wled-esp32-p4-shield-rs485-transmit-schematic.png)
+
+The **GPIO 3 channel adds a mechanical slide switch** (SW5, MSK12C02) that ties the transceiver's `RE#`/`DE` to 3V3 or GND — i.e. it selects **transmit mode** (`DI`, GPIO 3 drives the line) or **receive mode** (`RO`, GPIO 3 reads the line):
+
+![RS-485 GPIO 3 switchable channel schematic](../assets/reference/mhc-wled-esp32-p4-shield-rs485-gpio3-switchable-schematic.png)
+
+| Channel | GPIO | Terminals | Direction |
+|---|---|---|---|
+| A-4-B | 4 | A4, B4 | transmit only |
+| A-22-B | 22 | A22, B22 | transmit only |
+| A-24-B | 24 | A24, B24 | transmit only |
+| A-3-B | 3 | A3, B3 | transmit **or** receive (board switch) |
 
 ### 4x in/out header
 
-The `O46 O47 O2 O48` header plus power (`GND`, `In5V`, `Out3V3`). Inputs are **diode-protected with a ~16 kHz low-pass filter** — designed for robust button-style inputs, not high-speed signals. GPIO 2 and 46 are P4 **boot straps**. This header is *not* usable for a WS2812 loopback (the filter and protection destroy the ~800 kHz waveform — the `hi=0 lo=0` continuity result that pinned this).
+The `O46 O47 O2 O48` header plus power (`GND`, `In5V`, `Out3V3`):
+
+![MHC-WLED ESP32-P4 shield in/out header](../assets/reference/mhc-wled-esp32-p4-shield-inout-header.png)
+
+Inputs are **diode-protected with a ~16 kHz low-pass filter** — designed for robust button-style inputs, not high-speed signals. GPIO 2 and 46 are P4 **boot straps**. This header is *not* usable for a WS2812 loopback (the filter and protection destroy the ~800 kHz waveform).
 
 ### Line-In audio (PCM1808 → I²S)
 
@@ -52,12 +74,16 @@ The P4-NANO's RMII PHY: **MDC 31 · MDIO 52 · RST 51 · CLK 50 (external-in) ·
 
 ## Loopback self-test on this shield
 
-The loopback self-test drives a WS2812 frame out one pin and reads it back on a jumpered pin — so it needs a **bare GPIO pair**. This shield exposes none: every terminal is buffered (level shifter, RS-485 transceiver, or diode + low-pass). **The self-test therefore does not apply to this shield — that's by design, not a firmware gap.**
+The loopback self-test drives a WS2812 frame out one pin and reads it back on a jumpered pin — so it needs a signal path from a Tx pin to an Rx pin. The bare-GPIO terminals can't provide it (every one is buffered), but the **GPIO 3 switchable RS-485 channel can**, because its board switch turns GPIO 3 into a data *input*:
 
-- The frame-size fix the test exercises is **already proven** on the bare P4-NANO (direct GPIO 32↔33, PASS at every grid size), so the shield doesn't need to re-prove it.
-- To verify LED output *on the shield*, the honest test is to wire a real **WS2812 strip to an `O<n>` output** and watch it light — that exercises the true path (GPIO → level shifter → strip), which is what the shield is built for.
-- The RS-485 channels (the builder's suggested loopback path, Tx=GPIO 4 `A-4-B` → Rx=GPIO 3 `A-3-B`, wired A4→A3 / B4→B3) are **unlikely to work as a loopback**: projectMM drives pins as plain GPIO with **no RS-485 direction control** (no DE/RE driver-enable / receiver-enable toggling), so the transceivers won't reliably switch Tx↔Rx, and the differential path is slew-limited for an ~800 kHz WS2812 waveform anyway. Half-duplex RS-485 (DE/RE) is a real feature, not something the loopback path gets for free — see the [RS-485 / DMX-512 wired-output future extension](../backlog/backlog-light.md#rs-485-dmx-512-wired-output-future-the-physical-dmx-driver).
+- **Set the GPIO 3 board switch to the receive (input) position**, then jumper the RS-485 differential pairs `A4→A3` and `B4→B3` (the wiring the builder shows):
+
+  ![RS-485 loopback wiring: A4→A3, B4→B3, GPIO 3 switch in input position](../assets/reference/mhc-wled-esp32-p4-shield-rs485-loopback-wiring.png)
+
+- The signal path is: **GPIO 4 emits the WS2812 frame → the first RS-485 transceiver drives it as a differential signal on `A4`/`B4` → the second transceiver reads it back → GPIO 3 receives it as a 3.3 V data input.** So the loopback runs **Tx = GPIO 4, Rx = GPIO 3** with the switch in the input position.
+- The bare P4-NANO already proves the frame-size fix directly (GPIO 32↔33, PASS at every grid size), so the shield doesn't need to re-prove it — but this RS-485 path is the builder's intended on-shield loopback, distinct from the bare-GPIO jumper the self-test defaults to.
+- To verify LED output *on the shield*, the other honest test is to wire a real **WS2812 strip to an `O<n>` output** and watch it light — that exercises the true path (GPIO → level shifter → strip), which is what the shield is built for.
 
 ## Cross-reference
 
-Chip-level GPIO constraints (straps, flash/PSRAM) for the P4 are in [gpio-usage.md § ESP32-P4](gpio-usage.md#esp32-p4); this page is the *board* wiring. The catalog entry is [`web-installer/deviceModels.json`](../../web-installer/deviceModels.json) (`MHC-WLED ESP32-P4 shield`).
+Chip-level GPIO constraints (straps, flash/PSRAM) for the P4 are in [gpio-usage.md § ESP32-P4](gpio-usage.md#esp32-p4); this page is the *board* wiring. The catalog entry is [`web-installer/deviceModels.json`](../../web-installer/deviceModels.json) (`MHC-WLED ESP32-P4 shield`). RS-485 / DMX-512 as a first-class projectMM output is tracked in the [RS-485 / DMX-512 wired-output backlog item](../backlog/backlog-light.md#rs-485-dmx-512-wired-output-future-the-physical-dmx-driver).

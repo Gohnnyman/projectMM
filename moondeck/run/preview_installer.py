@@ -76,13 +76,18 @@ PORT = 8421
 
 
 def _stage_runtime_files(src_dir: Path, dst_dir: Path):
-    """Copy every browser-loadable file (.html/.js/.css/.json/.png/.ico) from
-    src_dir to dst_dir — mirrors release.yml's `cp -r docs/<dir>/. pages/<dir>/`.
-    README.md / other .md are docs, skipped."""
-    dst_dir.mkdir(parents=True, exist_ok=True)
-    for src in src_dir.iterdir():
-        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css", ".json", ".png", ".ico"):
-            shutil.copy(src, dst_dir / src.name)
+    """Copy every browser-loadable file (.html/.js/.css/.json/.png/.ico/.svg) from
+    src_dir to dst_dir — mirrors release.yml's `cp -r web-installer/. pages/install/`.
+    README.md / other .md are docs, skipped. The deploy's `cp -r` is recursive, so a
+    subdirectory of static assets (web-installer/assets/, the app-store badges) is
+    staged too — walk the tree rather than just the top level, or those 404 in preview
+    while working in production."""
+    exts = (".html", ".js", ".css", ".json", ".png", ".ico", ".svg")
+    for src in src_dir.rglob("*"):
+        if src.is_file() and src.suffix.lower() in exts:
+            out = dst_dir / src.relative_to(src_dir)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, out)
 
 
 def _stage_referenced_board_images(dst_dir: Path):

@@ -107,6 +107,7 @@ public:
         downscale_ = 1;
         slowStreak_ = 0;
         cleanStreak_ = 0;
+        framesWaiting_ = 0;   // the old grid's drain count must not make the new grid's first frame read slow
         buildAndSendCoordTable();
         refreshStatus();   // surface any resumable-path degradation (alloc miss) in the tab
     }
@@ -188,7 +189,7 @@ public:
         // frames eventually send (the slow-but-complete case a pure all-sent signal misses — a
         // full-res 128² frame that delivers at ~2 fps). On a sustained run of slow frames, coarsen
         // the lattice (downscale_++) so frames shrink and the rate climbs; a sustained run of
-        // prompt, fully-sent frames refines back toward full res (downscale_--). The streaks only
+        // prompt, fully-sent frames refines back toward full res (downscale_ >>= 1, halving). The streaks only
         // advance on slots where a frame completed (sentThisSlot), so a long drain counts as ONE
         // slow frame, not many — making kDownscaleAfterSlow a count of slow frames, not ticks.
         // Hysteresis stops oscillation; the factor rides the wire stride field to the status line.
@@ -606,7 +607,7 @@ private:
     // The streamed send is all-or-nothing per client, so a frame (color or coord table) that
     // doesn't reach every client means the link can't keep up at this resolution: coarsen
     // (downscale_++) after a short run of such frames so the rebuilt lattice sends fewer points.
-    // A sustained run of fully-sent frames refines back toward full resolution (downscale_--).
+    // A sustained run of fully-sent frames refines back toward full resolution (downscale_ >>= 1, halving).
     // downscale_ is an extra floor on the per-axis lattice stride, composing with the cap
     // downsample; it rides the wire stride field to the browser's "preview 1/N · link limited"
     // status. (≥1; 1 = full resolution.) Hysteresis via the streak thresholds stops oscillation.

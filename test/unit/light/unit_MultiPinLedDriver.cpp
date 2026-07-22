@@ -105,7 +105,7 @@ TEST_CASE("MultiPinLedDriver frame grows on RGBW preset") {
 // watchdog reset on hardware). On desktop / PSRAM chips the budget is 0 (no bound), so the frame-fit
 // gate NEVER triggers regardless of grid size: a large frame is never rejected for its size here (the
 // classic-i80 branch is compiled out). Pins the "budget 0 = no bound" contract — the gate is inert off
-// the classic chip, so this refactor changes nothing on every non-classic target. The hardware behaviour
+// the classic chip, so this refactor changes nothing on every non-classic target. The hardware behavior
 // (a too-big frame on the real classic i80 idles with the clear "over DMA" status) is proven on the Olimex.
 TEST_CASE("MultiPinLedDriver: the DMA-fit gate is inert off the classic i80 (budget 0)") {
     mm::MultiPinLedDriver d;
@@ -120,6 +120,24 @@ TEST_CASE("MultiPinLedDriver: the DMA-fit gate is inert off the classic i80 (bud
     // the status may be the plain init-fail, but never the size gate — that only fires on the classic.)
     CHECK(d.frameBytes() > 0);
     CHECK(std::strstr(d.status() ? d.status() : "", "over i80 DMA") == nullptr);
+}
+
+// frameFitsDmaBudget() is the pure predicate the classic-i80 gate leans on; its logic is compiled out on
+// desktop (budget always 0), so exercise it directly with synthetic budgets. A FINITE budget rejects an
+// oversized frame and accepts one that fits; a ZERO budget ("no bound", the LCD_CAM/PSRAM/desktop case)
+// never rejects, whatever the frame size.
+TEST_CASE("MultiPinLedDriver::frameFitsDmaBudget rejects only over a finite budget") {
+    // frameFitsDmaBudget is a protected static on the CRTP base; a tiny subclass exposes it for the
+    // test without widening the production class surface.
+    struct Expose : mm::MultiPinLedDriver {
+        using mm::MultiPinLedDriver::frameFitsDmaBudget;
+    };
+    // finite budget: reject strictly-larger, accept equal-or-smaller
+    CHECK_FALSE(Expose::frameFitsDmaBudget(1025, 1024));
+    CHECK(Expose::frameFitsDmaBudget(1024, 1024));
+    CHECK(Expose::frameFitsDmaBudget(512, 1024));
+    // zero budget = no bound: never rejects, however large the frame
+    CHECK(Expose::frameFitsDmaBudget(1u << 30, 0));
 }
 
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
@@ -330,7 +348,9 @@ TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
     for (uint8_t i = 0; i < d.controls().count(); i++) {
         if (std::strcmp(d.controls()[i].name, "pinExpander") == 0) {
             found = true;
-            CHECK(d.controls()[i].hidden == true);   // hidden on a chip without expander support
+            // Hidden exactly when the chip can't host the expander — ties the assertion to the flag
+            // rather than to the desktop's happens-to-be-unsupported value, so it stays correct on any target.
+            CHECK(d.controls()[i].hidden == !mm::MultiPinLedDriver::kSupportsPinExpander);
         }
     }
     CHECK(found);   // still BOUND (a saved value survives), just not shown

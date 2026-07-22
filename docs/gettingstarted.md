@@ -19,16 +19,16 @@ support).
 
 ---
 
-# Chapter 1 — Install projectMM
+## Chapter 1 — Install projectMM
 
-## 1. Open the installer and plug in
+### 1. Open the installer and plug in
 
 Open the **[web installer](https://moonmodules.org/projectMM/install/)** in
 Chrome or Edge, then plug your ESP32 into a USB port.
 
 ![The web installer](assets/gettingstarted/01-01-installer-start.png)
 
-## 2. Pick the USB port
+### 2. Pick the USB port
 
 Click **USB Port → Pick a port…**. Your browser shows a small list of connected
 devices — choose the one that appeared when you plugged in the ESP32. (Not sure
@@ -48,7 +48,7 @@ devices match it, so you know you're on the right track before you pick one.
 
 ![Port selected, chip detected](assets/gettingstarted/01-03-port-selected.png)
 
-## 3. Pick your device
+### 3. Pick your device
 
 Choose your device from the **Device** picker. Each card shows a picture, the
 chip, and what the device can do (LEDs, WiFi, a button, a microphone…); click
@@ -85,7 +85,7 @@ Leave **Release** and **Firmware** at their suggested values (the newest stable
 build, and the firmware that matches your device). Tick **Erase chip first** only
 if you're starting clean or switching firmware.
 
-## 4. Click Install
+### 4. Click Install
 
 The installer erases (if you asked it to) and writes the firmware. Just watch —
 it takes under a minute.
@@ -93,7 +93,7 @@ it takes under a minute.
 ![Erasing](assets/gettingstarted/01-07-erasing.png)
 ![Installing](assets/gettingstarted/01-08-installing.png)
 
-## 5. Get it on your network
+### 5. Get it on your network
 
 What happens next depends on your device:
 
@@ -104,7 +104,7 @@ What happens next depends on your device:
 
 - **Ethernet:** plug in the cable — it connects on its own, no password needed.
 
-## 6. Open your device
+### 6. Open your device
 
 When it's online, the installer shows a link — your device's address on your
 network. Click it.
@@ -122,14 +122,14 @@ device's own web interface, served straight from the ESP32. Let's look around.
 
 ---
 
-# Chapter 2 — Your projectMM interface
+## Chapter 2 — Your projectMM interface
 
 Everything below runs **in your browser, live from the device**. There's no app,
 no account, no cloud — the ESP32 itself serves this page, and every change you
 make takes effect on the lights immediately. Open the link from step 6 and follow
 along; you can't break anything by exploring.
 
-## The layout: list, preview, controls
+### The layout: list, preview, controls
 
 ![The full projectMM interface](assets/gettingstarted/02-01-UI-large.png)
 
@@ -162,7 +162,7 @@ phone, standing next to your lights:
 
 ![Small width — single column](assets/gettingstarted/02-03-UI-small.png)
 
-## The 3D preview
+### The 3D preview
 
 ![The 3D preview, lights numbered](assets/gettingstarted/02-04-UI-Preview.png)
 
@@ -175,7 +175,7 @@ updates, then fewer points) on a slow connection rather than stalling.
 > More on how the preview streams from the device:
 > [PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md).
 
-## The system modules
+### The system modules
 
 The top of the list is your device's "about" section — read-outs and connection
 settings. You rarely need to touch these, but they're the first place to look if
@@ -218,7 +218,41 @@ other.
 > is an example, driving its LEDs with [FastLED](https://github.com/FastLED/FastLED) (on
 > hold until projectMM ships as a reusable library).
 
-## Building a light show: layouts → layers → drivers
+### Control it from your phone with WLED Native
+
+The device's own web UI works on a phone, but for quick on/off and brightness from
+your pocket there's a nicer option: **WLED Native**, the open-source mobile app for
+the WLED ecosystem. projectMM speaks the WLED JSON API and announces itself over the
+network the same way a WLED device does, so the app finds your projectMM controllers
+automatically — no setup, no pairing. Each one shows up as a card with a power toggle
+and a brightness slider, so a roomful of controllers is a scroll and a tap away.
+
+![projectMM devices discovered in WLED Native](assets/core/WLED%20Native%20discovers%20projectMM.jpeg){ width="300" }
+
+Get it free for your phone:
+
+- **iPhone / iPad:** [WLED Native on the App Store](https://apps.apple.com/us/app/wled-native/id6446207239)
+- **Android:** [WLED Native on Google Play](https://play.google.com/store/apps/details?id=ca.cgagnier.wlednativeandroid)
+
+For the full picture and controls, the device's web interface is always there at
+`http://<devicename>.local` — WLED Native is the fast everyday remote alongside it.
+
+### Bring it into your smart home with Home Assistant
+
+Want your lights in the same dashboard as the rest of your house — and in
+automations, voice assistants, and Apple Home? projectMM adopts into **Home
+Assistant** like any other light: point the device at your HA setup and it appears
+as a light entity with on/off and brightness, alongside a floor of other devices.
+
+![projectMM devices as lights in a Home Assistant dashboard](assets/core/ha-integration.png){ width="600" }
+
+There are two ways in — zeroconf (HA finds the device on its own) or MQTT
+auto-discovery (for a broker-only or cross-subnet setup) — and from there you can
+bridge the entity into Apple Home too. The step-by-step, including installing HA
+and the MQTT broker if you don't have them, is in the
+[home automation guide](usecases/home-automation.md).
+
+### Building a light show: layouts → layers → drivers
 
 The bottom three modules are where the fun is. They form a simple pipeline: a
 **layout** says where your lights are, **layers** decide what colours play on
@@ -257,7 +291,7 @@ keep going.
 
 ---
 
-## Where to go next
+### Where to go next
 
 - **Understand the pipeline** — how layouts, layers, effects, modifiers and
   drivers fit together: [architecture overview](architecture.md#the-pipeline).

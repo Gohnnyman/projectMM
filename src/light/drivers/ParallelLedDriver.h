@@ -1271,8 +1271,8 @@ protected:
 
     // Whether a whole-frame DMA buffer of `frameBytes` fits the internal-DMA budget of a driver whose
     // DMA can't reach PSRAM (the classic i80's I2S peripheral) and holds the whole frame (no ring).
-    // A driver that IS so bounded calls this in parseConfig; if false it idles with a clear status
-    // instead of choking the bus init on an allocation the peripheral can never satisfy. `budgetBytes`
+    // A driver that IS so bounded calls this in reinit() (before busInit); if false it idles with a clear
+    // status instead of choking the bus init on an allocation the peripheral can never satisfy. `budgetBytes`
     // 0 means "no bound" (PSRAM-capable / ring drivers) → always fits.
     static bool frameFitsDmaBudget(size_t frameBytes, size_t budgetBytes) {
         return budgetBytes == 0 || frameBytes <= budgetBytes;

@@ -434,6 +434,11 @@ const char* resetReason() {
     return "OK";
 }
 
+void setLogLevel(LogLevel) {
+    // Desktop logs to the terminal unconditionally; the KPI-line gate reads the level directly,
+    // so there is nothing to apply to a platform logger here.
+}
+
 size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }

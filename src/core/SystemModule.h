@@ -115,10 +115,26 @@ public:
                           static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
         }
 
+        // Apply the persisted (or default) log level to the platform logger now, so a device that
+        // booted with a saved Warn/Error level is quiet from the first tick rather than only after
+        // the user touches the control. The main loop's first-60 s override keeps Info-level output
+        // (the installer's MM_IP read) alive regardless of this.
+        applyLogLevel();
+
         // Chain to base so children (the wired-by-code System modules — Tasks, I2cScan)
         // get their setup() — a child initialises its state here. Overriding
         // setup() shadows the base default that would otherwise propagate.
         MoonModule::setup();
+    }
+
+    /// The persisted serial log level. The main loop reads this to decide whether to emit the
+    /// once-a-second KPI tick line (Info or above), so a resting device at Warn stays off the wire.
+    platform::LogLevel logLevel() const { return static_cast<platform::LogLevel>(logLevel_); }
+
+    /// A live log-level change applies immediately (no rebuild): push it to the platform logger.
+    /// Changing verbosity does not reshape any derived state, so this is onControlChanged, not prepare.
+    void onControlChanged(const char* controlName) override {
+        if (std::strcmp(controlName, "logLevel") == 0) applyLogLevel();
     }
 
     void defineControls() override {
@@ -189,6 +205,12 @@ public:
         // Persisted so it survives a reboot; the UI honors it client-side (see the `advanced` flag on
         // Control) — nothing in the firmware reads it, so it needs no rebuild trigger.
         controls_.addBool("expertMode", expertMode_);
+        // Serial log level: how chatty the device is on the UART. Default Warn keeps the once-a-second
+        // KPI tick line off (a status LED that blinks on serial TX rests quiet) while real warnings and
+        // errors still print. Applied to the platform logger on change (see applyLogLevel); the KPI line
+        // is gated in the main loop. Advanced — a diagnostics knob, not a casual-user control.
+        controls_.addSelect("logLevel", logLevel_, logLevelOptions_, 6);
+        controls_.setAdvanced(controls_.count() - 1);
         // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
         // cost — vanishes on native-radio builds (classic/S3/desktop) and the
@@ -304,6 +326,22 @@ private:
     // (dev/tuning readouts and knobs a casual user doesn't need — e.g. MoonLed's ring diagnostics and
     // manual geometry). One flag the whole system's UI composes against; no module reads System's state.
     bool expertMode_ = false;
+    // Push the current level to the platform logger. Clamps to the valid enum range so a corrupt
+    // persisted value can't index past Verbose.
+    void applyLogLevel() {
+        uint8_t lvl = logLevel_ > static_cast<uint8_t>(platform::LogLevel::Verbose)
+                          ? static_cast<uint8_t>(platform::LogLevel::Verbose) : logLevel_;
+        platform::setLogLevel(static_cast<platform::LogLevel>(lvl));
+    }
+
+    // Serial log verbosity, persisted, default Warn. Controls how chatty the device is on the wire:
+    // at Warn the once-a-second KPI tick line is suppressed (no serial write, so a status LED that
+    // flickers on UART TX rests quiet) while ESP_LOGW/ESP_LOGE warnings and errors still print. The
+    // main loop reads logLevel() to gate the KPI line; affectsPrepare re-applies it to the platform
+    // logger on change. The first 60 s of uptime always logs at Info regardless (the web installer
+    // reads MM_IP off the tick line just after flash). Stored as the raw enum value for addSelect.
+    uint8_t logLevel_ = static_cast<uint8_t>(platform::LogLevel::Warn);
+    static constexpr const char* logLevelOptions_[] = {"None", "Error", "Warn", "Info", "Debug", "Verbose"};
     // Physical-hardware identity (catalog entry name). 32-byte buffer fits the longest
     // entry ("Olimex ESP32-Gateway Rev G" = 26) with headroom; the Improv RPC handler
     // caps str_len against this size dynamically.

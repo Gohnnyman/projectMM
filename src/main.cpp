@@ -548,6 +548,17 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             lastLog = now;
             if (scheduler.tickTimeUs() == 0) continue; // no measurement yet
 
+            // The KPI tick line is a plain stdout printf, not an ESP_LOG, so the platform log level
+            // doesn't suppress it — we gate it here on the same level. At Info or above it prints; at
+            // Warn/Error/None it's silenced so a device resting quietly makes no periodic serial write
+            // (a status LED that blinks on UART TX stops flickering). The first 60 s of uptime always
+            // prints regardless: the web installer reads MM_IP off this line just after flash, and the
+            // window latches the same way the MM_IP token below does (a plain `< 60000` re-opens every
+            // ~49.7 days at the millis() wrap). Real ESP_LOGW/ESP_LOGE warnings and errors are a
+            // separate stream that setLogLevel governs independently, so they still surface at Warn.
+            const bool inBootWindow = !mmIpWindowClosed && (now - bootMillis < 60000);
+            if (systemModule->logLevel() < mm::platform::LogLevel::Info && !inBootWindow) continue;
+
             heap = mm::platform::freeHeap();
             std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),
                         static_cast<unsigned>(scheduler.fps()));

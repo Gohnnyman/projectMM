@@ -100,15 +100,18 @@ public:
     /// INTERNAL-RAM only (no PSRAM) and it holds the whole frame (no streaming ring), so a frame larger
     /// than the free internal DMA block simply cannot allocate — and the failing esp_lcd path can busy-
     /// wait to a watchdog reset. reinit() pre-checks against this and idles with a clear status instead.
-    /// Budget = HALF the largest free internal block (doubleBuffer may need two frames) minus a fixed
-    /// reserve for the bus descriptors + other allocations that land between this query and the alloc.
+    /// Budget = the largest free internal block minus a fixed reserve for the bus descriptors + other
+    /// allocations that land between this query and the alloc; sized for ONE frame, since busInit()
+    /// downgrades the optional second (doubleBuffer) buffer on its own when only one fits. The classic
+    /// path is bounded by construction, so it never returns 0 (which means "no bound"): when the block
+    /// is at or under the reserve, it reports a small positive floor so the fit gate still rejects.
     /// On the LCD_CAM chips (S3/P4) the DMA reaches PSRAM → 0 = no bound (the base default). COLD PATH.
     size_t dmaBudgetBytes() const {
         if constexpr (platform::i2sLanes > 0) {
             const size_t block = platform::maxInternalAllocBlock();
             constexpr size_t kReserve = 16 * 1024;   // descriptors + headroom for allocs after this query
-            const size_t usable = block > kReserve ? block - kReserve : 0;
-            return usable / 2;                        // halve: doubleBuffer allocates the frame twice
+            constexpr size_t kMinBudget = 1;         // never 0 on the bounded path (0 == "no bound")
+            return block > kReserve ? block - kReserve : kMinBudget;
         } else {
             return 0;   // LCD_CAM (S3/P4): PSRAM DMA, no whole-frame ceiling
         }
