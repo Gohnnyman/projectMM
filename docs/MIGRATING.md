@@ -20,6 +20,19 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### `AudioService`: the `sync` control becomes `mode` + `send audio`, and `simulate` is renumbered (2026-07-22)
+
+The audio module's identity is now a single `mode` control (Local audio / Receive network / Simulate), each showing only its own detail controls, replacing the separate `sync` (off / send / receive) toggle. Broadcasting the locally-analyzed frame moved to a `send audio` switch, meaningful only in Local mode. `simulate` was also renumbered, from a five-option list to two.
+
+| Old | New |
+|---|---|
+| control `sync` (Select: `off`/`send`/`receive`) | `mode` (Select: `local audio`/`receive network`/`simulate`) + `send audio` (a switch, Local mode only) |
+| control `simulate` (Select, 5 options incl. a mic-fill-on-silence mode) | `simulate` (Select: 2 options) — used only when `mode` is Simulate |
+
+**Action: re-set `mode` (and `send audio`) if you had `sync` on `send` or `receive`; re-set `simulate` if you had chosen a non-default option.**
+
+`sync` and the old `simulate` value read as absent → ignored, so `mode` takes its default (**Local audio**) and `send audio` its default (**off**). A device that was on `sync=receive` therefore comes up as Local audio — set `mode` to Receive network again. One that broadcast (`sync=send`) comes up not broadcasting — turn `send audio` on. The five-option `simulate` collapsed to two, so a device on one of the dropped options (e.g. the mic-fill-on-silence mode, a removed capability) takes the new default; re-pick if needed. Receive network and every sync control exist only on network-capable targets.
+
 ### `MoonLedDriver`: `forceRing` → `useRing`, and the ring's geometry is now settable (2026-07-17)
 
 The pin-expander path selector was a three-option Select (`auto` / `ring` / `wholeFrame`) named for a *diagnostic override*. The auto-router is gone — at the size the expander exists for (48 strands × 256 lights) a whole frame never fits internal DMA RAM, so "auto" had exactly one right answer while presenting itself as a choice, and its silent fallback hid which path was actually running. What remains is the honest question, as a switch:

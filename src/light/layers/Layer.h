@@ -378,7 +378,10 @@ public:
         // so each physical light contributes at most ONE destination — maxDest is
         // exactly driverCount, no product, no overflow ceiling.
         if (!buildFoldedLUT(logical, logicalCount, driverCount)) {
-            // OOM in the fold build — degrade to identity (correct, not crash).
+            // OOM in the fold build — degrade to identity (safe, not crash). One visual caveat: a
+            // gapped layout's dark columns light up in this degraded state (the identity map has no
+            // way to drop them), but a Warning is surfaced and the device keeps running — the
+            // robustness principle's "degraded, not crashed" applied to an out-of-memory build.
             lutSkipped_ = true;
             setStatus("modifier mapping skipped — not enough memory", Severity::Warning);
             width_ = physicalWidth_; height_ = physicalHeight_; depth_ = physicalDepth_;

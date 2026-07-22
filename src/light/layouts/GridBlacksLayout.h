@@ -17,7 +17,6 @@ namespace mm {
 // tells the Layer to build the folded LUT (which drops the gap slots) instead of the dense identity map
 // (which would light them). See CoordSink for the two-kinds-of-pixel model.
 /// Layout of a dense 3D grid with mid-strand dark columns (a spacer).
-/// @card GridBlacksLayout.png
 class GridBlacksLayout : public LayoutBase {
 public:
     lengthType width = 16;

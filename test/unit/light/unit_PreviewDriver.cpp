@@ -375,21 +375,14 @@ TEST_CASE("PreviewDriver buffered send uses the sparse driver buffer, not the de
 // buffers bypass ScratchBuffer's auto-accounting, so they were invisible). With resumableFrames ON and a
 // downsampled layout, dynamicBytes is non-zero and covers both buffers; OFF frees them and it drops to 0.
 //
-// SKIPPED: this case was written when resumableFrames defaulted ON — its first assertion relies on the rig
-// constructor's applyState() allocating the staging buffer via that default. resumableFrames now defaults
-// OFF (the synchronous transport is the shipped default; the resumable path tears the preview). Toggling
-// the flag ON post-construction + calling prepare() does NOT re-allocate the buffers in this rig the way
-// the constructor path did, so the "ON" assertions read 0. Rewriting it to exercise the resumable
-// accounting under the OFF default is backlogged (docs/backlog/backlog-light.md § "PreviewDriver
-// dynamicBytes test"). The accounting itself is unchanged; only this test's assumption about the default
-// broke. TODO: restore once the rig can allocate the resumable buffers deterministically with the flag OFF.
-// SKIPPED (doctest::skip) pending the un-skip described in docs/backlog/backlog-light.md
-// § "PreviewDriver `resumableFrames` default OFF". Its ON assertions relied on resumableFrames defaulting
-// ON (the rig constructor's applyState allocated the staging buffer); with the default now OFF and the
-// post-construction toggle not re-allocating in this rig, they read 0. The dynamicBytes accounting itself
-// (driverHeapBytes sums stageCap_ + keptIdxCap_) is unchanged and correct — only this test's default
-// assumption broke. The original body is in git history (this file at HEAD before the default flip) and the
-// backlog names the fix: wire the flag ON into the rig BEFORE its first applyState so the acquire path runs.
+// SKIPPED (doctest::skip): this case was written when resumableFrames defaulted ON — its ON assertions
+// relied on the rig constructor's applyState() allocating the staging buffer via that default. resumableFrames
+// now defaults OFF (the synchronous transport is the shipped default; the resumable path tears the preview),
+// and toggling the flag ON post-construction + prepare() does NOT re-allocate the buffers in this rig the way
+// the constructor path did, so the ON reads drop to 0. The dynamicBytes accounting itself (driverHeapBytes
+// sums stageCap_ + keptIdxCap_) is unchanged and correct — only this test's default assumption broke. The
+// un-skip is backlogged (docs/backlog/backlog-light.md § "PreviewDriver `resumableFrames` default OFF"): wire
+// the flag ON into the rig BEFORE its first applyState so the acquire path runs. Original body is in git history.
 TEST_CASE("PreviewDriver reports its resumable-path buffers in dynamicBytes" * doctest::skip()) {
     MESSAGE("skipped — see docs/backlog/backlog-light.md (resumableFrames default OFF)");
 }

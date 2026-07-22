@@ -94,10 +94,17 @@ void HttpServerModule::tick20ms() {
     // so one tick can't serve an unbounded run of requests (the hot-path rule): accept() returns an invalid
     // connection the instant the backlog is empty, which breaks the loop early in the common idle case.
     constexpr int kAcceptsPerTick = 8;
+    // Bound the batch by WALL-CLOCK too, not just count: each handleConnection serves synchronously and a
+    // stalled peer can burn up to the write deadline (TcpConnection::write's ~2 s) per connection, so 8
+    // stalled clients in one tick could stack to ~16 s — past the task WDT. Break once the batch has spent
+    // this budget; the remaining backlog drains on the next tick. Subtraction-based compare, rollover-safe.
+    constexpr uint32_t kAcceptBudgetMs = 100;
+    const uint32_t batchStart = platform::millis();
     for (int i = 0; i < kAcceptsPerTick; i++) {
         auto conn = server_.accept();
         if (!conn.valid()) break;   // backlog drained (the usual case: 0 or 1 pending)
         handleConnection(conn);
+        if (platform::millis() - batchStart >= kAcceptBudgetMs) break;   // a slow client stalled the batch
     }
 }
 
