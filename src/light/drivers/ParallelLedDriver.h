@@ -276,6 +276,11 @@ public:
         // A checkbox: the expander is fitted or it isn't. The '595's width (8) is the chip's, not a
         // setting, so there is nothing to type — and a boolean can't be half-configured.
         controls_.addBool("pinExpander", pinExpander);
+        // Hidden where the silicon can't host the '595 (the classic ESP32 i80 is the I2S peripheral,
+        // whose DMA can't read PSRAM, so the expander's ×8 frame has nowhere to live — see
+        // kSupportsPinExpander). Turning it on there only ever produces a config error, so don't offer
+        // the switch. A compile-time property of the chip; the control stays for S3/P4 (LCD_CAM).
+        controls_.setHidden(controls_.count() - 1, !Derived::kSupportsPinExpander);
         // The bus pins sit UNDER the expander toggle because for a driver that owns its own GPIO
         // routing they are '595 pins: MoonI80 routes WR only when a shift register needs it as SRCLK,
         // and hides the control otherwise. (I80 goes through esp_lcd, which mandates a valid WR *and*
@@ -1210,6 +1215,12 @@ protected:
     /// The ring's regime as a one-word status suffix ("primed" / "lapping"), or null when not ringing —
     /// so the driving-status line shows which side of the streaming boundary a config sits on.
     const char* busRingMode() const { return nullptr; }
+    /// Byte ceiling on a whole-frame DMA buffer, or 0 for "no bound". Default 0: the PSRAM-DMA chips
+    /// (S3/P4 LCD_CAM) and the streaming ring (never materialises a whole frame) have no such limit.
+    /// Only a driver whose DMA is internal-RAM-only AND holds the whole frame overrides it (MultiPin on
+    /// the classic ESP32). reinit() pre-checks frameBytes_ against this and idles with a clear status if
+    /// it won't fit, rather than choking the bus init on an impossible allocation. Cold path.
+    size_t dmaBudgetBytes() const { return 0; }
     /// Core-0 helper hook (default: no helper). Only the ring driver overrides it, spawning a core-0
     /// worker that primes half the ring pool while core 1 primes the other half (busTransmitRing's
     /// fork-join). ready() is true only when the render/encode split is engaged AND the helper task is up.
@@ -1256,6 +1267,15 @@ protected:
         const size_t bytes = static_cast<size_t>(maxLights) * rowBytesFor(outCh, slotBytes, outPerPin)
                              + padBytesFor(slotBytes, outPerPin);
         return (bytes + 63) & ~static_cast<size_t>(63);
+    }
+
+    // Whether a whole-frame DMA buffer of `frameBytes` fits the internal-DMA budget of a driver whose
+    // DMA can't reach PSRAM (the classic i80's I2S peripheral) and holds the whole frame (no ring).
+    // A driver that IS so bounded calls this in parseConfig; if false it idles with a clear status
+    // instead of choking the bus init on an allocation the peripheral can never satisfy. `budgetBytes`
+    // 0 means "no bound" (PSRAM-capable / ring drivers) → always fits.
+    static bool frameFitsDmaBudget(size_t frameBytes, size_t budgetBytes) {
+        return budgetBytes == 0 || frameBytes <= budgetBytes;
     }
 
     // Bytes per bus slot: 1 for the 8-bit bus, 2 for the 16-bit bus. Keys on the PHYSICAL
@@ -1382,12 +1402,12 @@ protected:
         if (!err && lanes > kMaxStrands) err = "too many strands (pins × 8 through the expander)";
         if (!err) {
             // Distribute over this driver's window slice, not the whole buffer.
-            // assignCounts clamps each lane to kMaxWs2812LedsPerPin (drives that many
-            // rather than choking a whole grid onto one WS2812 line). Its own warning
-            // (a clamped lane) wins over the WR/DC one only if it sets warn non-null.
             const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
             windowSlice(bufN, winStart_, winLen_);
             const char* clampWarn = nullptr;
+            // assignCounts clamps each lane to kMaxWs2812LedsPerPin (drives that many
+            // rather than choking a whole grid onto one WS2812 line). Its own warning
+            // (a clamped lane) wins over the WR/DC one only if it sets warn non-null.
             err = assignCounts(ledsPerPin, lanes, winLen_, laneCounts_, kMaxWs2812LedsPerPin,
                                &clampWarn);
             if (clampWarn) warn = clampWarn;
@@ -1525,6 +1545,25 @@ protected:
             return;
         }
         deinit();
+        // Pre-check the frame against the driver's DMA budget BEFORE attempting the bus init. A
+        // whole-frame driver whose DMA can't reach PSRAM (the classic ESP32 i80 = the I2S peripheral,
+        // internal-RAM-only) simply cannot allocate a frame larger than its internal DMA block — and on
+        // that chip the failing esp_lcd path can BUSY-WAIT to a watchdog reset rather than return an
+        // error. So refuse cleanly with a clear, actionable status instead of choking the init. Budget 0
+        // (PSRAM-capable chips, or the streaming ring) means "no bound" → always passes. Cold path.
+        if (const size_t budget = derived()->dmaBudgetBytes();
+            !frameFitsDmaBudget(frameBytes_, budget)) {
+            // deinit() above already cleared the bus and inited_ — just report and bail.
+            if (char* b = failBufEnsure()) {
+                std::snprintf(b, kFailBufLen, "frame %uKB over i80 DMA %uKB: fewer lights/pin",
+                              static_cast<unsigned>(frameBytes_ / 1024),
+                              static_cast<unsigned>(budget / 1024));
+                setStatus(b, Severity::Error);
+            } else {
+                setStatus(Derived::kInitFailMsg, Severity::Error);
+            }
+            return;
+        }
         // Pass doubleBuffer so busInit allocates the second buffer only when the double-buffer is
         // wanted — OFF (default) costs exactly one DMA buffer, no async overhead, no second alloc.
         inited_ = derived()->busInit(frameBytes_, doubleBuffer);

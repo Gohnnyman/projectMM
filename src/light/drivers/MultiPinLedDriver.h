@@ -95,6 +95,25 @@ public:
     /// exclusive per chip (at most one is non-zero), so the sum picks the right one.
     static constexpr uint8_t lanesAvailable() { return platform::lcdLanes + platform::i2sLanes; }
     static constexpr bool kPowerOfTwoBus = true;   // the BUS rounds to 8/16; the pin count is free
+
+    /// Whole-frame DMA byte budget. On the classic ESP32 the i80 is the I2S peripheral: its DMA is
+    /// INTERNAL-RAM only (no PSRAM) and it holds the whole frame (no streaming ring), so a frame larger
+    /// than the free internal DMA block simply cannot allocate — and the failing esp_lcd path can busy-
+    /// wait to a watchdog reset. reinit() pre-checks against this and idles with a clear status instead.
+    /// Budget = HALF the largest free internal block (doubleBuffer may need two frames) minus a fixed
+    /// reserve for the bus descriptors + other allocations that land between this query and the alloc.
+    /// On the LCD_CAM chips (S3/P4) the DMA reaches PSRAM → 0 = no bound (the base default). COLD PATH.
+    size_t dmaBudgetBytes() const {
+        if constexpr (platform::i2sLanes > 0) {
+            const size_t block = platform::maxInternalAllocBlock();
+            constexpr size_t kReserve = 16 * 1024;   // descriptors + headroom for allocs after this query
+            const size_t usable = block > kReserve ? block - kReserve : 0;
+            return usable / 2;                        // halve: doubleBuffer allocates the frame twice
+        } else {
+            return 0;   // LCD_CAM (S3/P4): PSRAM DMA, no whole-frame ceiling
+        }
+    }
+
     // The i80 loopback can't build a 1-lane private bus, so it rebuilds the FULL-WIDTH bus and
     // carries the pattern on lane 0 — the loopback frame must be encoded at the operational bus
     // width (16-bit for a 16-lane driver) to match. (Parlio can do a 1-lane unit, so it sets false.)

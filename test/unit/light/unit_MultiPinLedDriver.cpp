@@ -100,6 +100,28 @@ TEST_CASE("MultiPinLedDriver frame grows on RGBW preset") {
     CHECK(d.frameBytes() == expectFrame(50, 4));
 }
 
+// A whole-frame driver with a bounded DMA (the classic ESP32 i80 = internal-RAM-only I2S, no ring)
+// must REFUSE cleanly when the frame won't fit — never choke the bus init (which can busy-wait to a
+// watchdog reset on hardware). On desktop / PSRAM chips the budget is 0 (no bound), so the frame-fit
+// gate NEVER triggers regardless of grid size: a large frame is never rejected for its size here (the
+// classic-i80 branch is compiled out). Pins the "budget 0 = no bound" contract — the gate is inert off
+// the classic chip, so this refactor changes nothing on every non-classic target. The hardware behaviour
+// (a too-big frame on the real classic i80 idles with the clear "over DMA" status) is proven on the Olimex.
+TEST_CASE("MultiPinLedDriver: the DMA-fit gate is inert off the classic i80 (budget 0)") {
+    mm::MultiPinLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.pins, "1");            // one lane → the whole grid lands on it, a big frame
+    std::strcpy(d.ledsPerPin, "");       // even-split all onto the one pin
+    wire(d, src, corr, 4096);            // a large grid, far past any real classic i80 DMA budget
+
+    // The frame was computed (a real size), and the status is NOT the size-rejection message — desktop
+    // dmaBudgetBytes() is 0, so frameFitsDmaBudget() always passes. (The desktop bus stub is inert, so
+    // the status may be the plain init-fail, but never the size gate — that only fires on the classic.)
+    CHECK(d.frameBytes() > 0);
+    CHECK(std::strstr(d.status() ? d.status() : "", "over i80 DMA") == nullptr);
+}
+
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
 TEST_CASE("MultiPinLedDriver bad pins → status error → recovery") {
     mm::MultiPinLedDriver d;
@@ -291,4 +313,25 @@ TEST_CASE("MultiPinLedDriver loopbackTxPin tracks the loopbackTest toggle") {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);
     };
     mm::test::checkConditionalControl(d, "loopbackTxPin", setTest, /*visibleWhenTrue=*/true);
+}
+
+// The pinExpander switch is HIDDEN where the silicon can't host the '595 (kSupportsPinExpander false:
+// the classic ESP32 i80 = the I2S peripheral, whose DMA can't read PSRAM, so the ×8 expander frame has
+// nowhere to live). Desktop has lcdLanes==0 too, so the control is hidden here — the same compile-time
+// gate the classic build takes. On the LCD_CAM chips (S3/P4) the flag is true and the control shows;
+// that path is exercised on-device. Turning it on where unsupported only ever yields a config error, so
+// not offering the switch is the honest UI. (Before this, the toggle was shown on every chip.)
+TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
+    CHECK_FALSE(mm::MultiPinLedDriver::kSupportsPinExpander);   // desktop lcdLanes==0 → unsupported
+
+    mm::MultiPinLedDriver d;
+    d.defineControls();
+    bool found = false;
+    for (uint8_t i = 0; i < d.controls().count(); i++) {
+        if (std::strcmp(d.controls()[i].name, "pinExpander") == 0) {
+            found = true;
+            CHECK(d.controls()[i].hidden == true);   // hidden on a chip without expander support
+        }
+    }
+    CHECK(found);   // still BOUND (a saved value survives), just not shown
 }

@@ -566,6 +566,10 @@ bool IRAM_ATTR moonI80EofCb(gdma_channel_handle_t, gdma_event_data_t*, void* use
     }
 
     // Whole-frame mode: pop the oldest started buffer, record its wire time, release its waiter.
+    // Guard on a non-empty FIFO: if the wait-timeout backstop already drained this entry (fifoTail ==
+    // fifoHead) and the lost EOF then arrives late, popping would read a stale slot, hand out a spurious
+    // `done`, and desync tail past head — so a firing against a structurally empty FIFO is dropped.
+    if (st->fifoTail == st->fifoHead) return false;
     const uint8_t slot = st->fifoTail;
     const uint8_t b = st->fifo[slot] & 1u;
     const int64_t now = esp_timer_get_time();
@@ -1417,6 +1421,23 @@ MoonI80State* createRingState(const uint16_t* dataPins, uint8_t laneCount, uint1
     return st;
 }
 
+// Abandon the in-flight transfer and return the peripheral to a clean idle — the ONE recovery both the
+// ring and whole-frame wait-timeout backstops share. A lost/coalesced EOF leaves `busy` stuck true with
+// no interrupt coming to clear it; without this the bus wedges permanently (every later transmit blocks
+// its full timeout on the stuck busy, and the driver's give-up retry re-arms into the same stuck state).
+// The single owner of "the EOF didn't come, unstick the bus": stop the LCD + GDMA, clear busy, and mark
+// the strand as idling LOW now (the WS2812 reset begins here) so the next arm holds the reset window.
+// The CONDITION for finalizing, and any mode-specific residue (the ring re-links its chain and latches
+// encode stats on the next arm; the whole-frame path drains its completion FIFO), stay at the call sites —
+// only the shared stop-and-clear lives here, so the two paths can't drift in how they leave the hardware.
+void finalizeStalledTransfer(MoonI80State* st) {
+    lcd_ll_stop(st->hal.dev);
+    gdma_stop(st->dma);
+    st->busy = false;
+    st->lastStopUs = esp_timer_get_time();
+    st->dbgStallAbandons = st->dbgStallAbandons + 1u;
+}
+
 } // namespace
 
 bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
@@ -1649,16 +1670,25 @@ bool moonI80Ws2812Wait(MoonI80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutM
         && st->lastWrittenSlice < st->nSlices + kTailBufs) {   // kTailBufs (file scope), not a bare +1
         const int64_t frameWireUs = (static_cast<int64_t>(st->nSlices) * st->sliceNs) / 1000;
         if (esp_timer_get_time() - st->armUs >= frameWireUs) {
-            lcd_ll_stop(st->hal.dev);
-            gdma_stop(st->dma);
-            st->busy = false;
-            st->lastStopUs = esp_timer_get_time();   // the strand idles LOW → the WS2812 reset begins
-            st->dbgStallAbandons = st->dbgStallAbandons + 1u;
+            finalizeStalledTransfer(st);   // the shared stop-and-clear; the next arm re-links the chain
             // Latch whatever this frame's refills managed, so the ea readout isn't stuck at a half window.
             st->dbgEncAvgUs = st->dbgEncCount ? st->dbgEncSumUs / st->dbgEncCount : st->dbgEncAvgUs;
             st->dbgEncSumUs = 0;
             st->dbgEncCount = 0;
         }
+    }
+
+    // STALL BACKSTOP (whole-frame path). The EOF interrupt is a latch that can, very rarely, be lost —
+    // two firings coalescing, or one racing the next frame's reset — leaving `busy` stuck true with no
+    // EOF coming to clear it. Without recovery the bus wedges permanently: every later transmit sees busy
+    // and blocks its full wire-free timeout, so the driver's give-up retry re-arms into the same stuck
+    // state (the ~5 s-then-dark wedge on a direct strand). The ring branch above finalizes its own stall
+    // on the oracle's condition; here the condition is simply "the wait timed out with a transfer in
+    // flight." Shared stop-and-clear via finalizeStalledTransfer; the whole-frame residue is draining the
+    // completion FIFO so the abandoned entry can't be popped by a late EOF against the next frame.
+    if (!st->isRing && st->busy) {
+        finalizeStalledTransfer(st);   // stop LCD + GDMA FIRST, so no EOF can fire during the drain below
+        st->fifoTail = st->fifoHead;   // then drop the un-completed entry; the ISR guard ignores a late EOF
     }
     return false;   // the caller keeps the buffer in-flight for this frame; the next frame arms fresh
 }
