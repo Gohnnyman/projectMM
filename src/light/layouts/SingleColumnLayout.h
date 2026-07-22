@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 // Prior art: MoonLight SingleColumnLayout (MoonModules/MoonLight, layout nodes).
 // A vertical line of lights at a fixed x, running along y. Geometry reproduced

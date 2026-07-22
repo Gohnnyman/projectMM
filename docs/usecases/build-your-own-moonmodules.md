@@ -65,7 +65,7 @@ Here is a complete, real effect — a diagonal rainbow that scrolls over time. R
 ```cpp
 #pragma once
 
-#include "light/effects/Effect.h"   // one include: the base + draw / palette / maths helpers
+#include "light/effects/EffectBase.h"   // one include: the base + draw / palette / maths helpers
 
 namespace mm {
 
@@ -109,7 +109,7 @@ That's the *entire* effect — just `defineControls()` and `tick()`. A simple ef
 
 ### One include gets you everything
 
-`#include "light/effects/Effect.h"` is the umbrella header for effects: it pulls in the base class, the render-context accessors (`buffer()`, `width()`, …), and the common helpers (`draw::*`, the palette system, the `math8` animation helpers, `RGB`). Include that one file and start writing. The other kinds have the same convention — `light/layouts/Layout.h`, `light/modifiers/Modifier.h`, `light/drivers/Driver.h`. If you reach for a helper it doesn't bundle (audio input, say), add that one extra `#include`; nothing forces the set.
+`#include "light/effects/EffectBase.h"` is the base header you subclass, and it bundles everything an effect needs: the render-context accessors (`buffer()`, `width()`, …) and the common helpers (`draw::*`, the palette system, the `math8` animation helpers, `RGB`). Include that one file and start writing. The other kinds follow the same convention — `light/layouts/LayoutBase.h`, `light/modifiers/ModifierBase.h`, `light/drivers/DriverBase.h`. If you reach for a helper it doesn't bundle (audio input, say), add that one extra `#include`; nothing forces the set.
 
 ### Reading the grid every frame
 

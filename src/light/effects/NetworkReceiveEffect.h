@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
+#include "light/effects/EffectBase.h"
 
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format
@@ -159,11 +159,14 @@ private:
     static constexpr int kMaxPacketsPerTick = 128;
     static constexpr const char* kBindFailMsg = "UDP bind failed — port in use?";
     // The receiving-status buffer: "receiving <protocol> from <ip>", the ONE writable status this effect
-    // shows (the protocol was three static literals before; folding the sender IP in means the same field
-    // now also answers "who is driving me"). setStatus holds the pointer (doesn't copy), so the string must
-    // outlive the call, hence a member, not a stack buffer. Sized for the longest form
-    // ("receiving Art-Net from 255.255.255.255" = 38 chars + NUL). A bind error uses its own static literal.
+    // shows — the same field reports the protocol AND the sender IP, so it answers "who is driving me".
+    // setStatus holds the pointer (doesn't copy), so the string must outlive the call, hence a member, not
+    // a stack buffer. Sized for the longest form ("receiving Art-Net from 255.255.255.255" = 38 chars +
+    // NUL). A bind error uses its own static literal. lastProto_/lastIp_ cache the last-formatted source so
+    // noteReceiving can early-out on the common case (same sender + protocol) without even formatting.
     char recvStatus_[40] = "";
+    const char* lastProto_ = nullptr;   // last protocol pointer the status was built from (literal, stable)
+    uint8_t     lastIp_[4] = {};        // last sender IP the status was built from
 
     platform::UdpSocket artnetSocket_;
     platform::UdpSocket e131Socket_;
@@ -174,18 +177,20 @@ private:
     ScratchBuffer<uint8_t> staging_{*this};
 
     // Update the "receiving <protocol> from <ip>" diagnostic, but never clobber a bind error (its status is
-    // the kBindFailMsg literal, so status() != recvStatus_). Rebuild into recvStatus_ only when the source
-    // changed: format into a stack scratch, compare, and snprintf into recvStatus_ only on a real change, so
-    // the common case (same sender, same protocol, every packet) writes nothing and costs one strcmp.
-    // snprintf (not strncpy) does the copy: it always NUL-terminates and truncates cleanly.
+    // the kBindFailMsg literal, so status() != recvStatus_). The common case is the same sender + protocol
+    // every packet, so short-circuit on the cached lastProto_/lastIp_ FIRST — no formatting at all — and
+    // only snprintf + setStatus when the source actually changes. proto is always one of the same three
+    // string literals, so a pointer compare identifies it. This runs on the receive hot path.
     void noteReceiving(const char* proto, const uint8_t ip[4]) {
         const char* s = status();
         if (s != nullptr && s != recvStatus_) return;   // a bind error (or foreign status) wins
-        char next[40];
-        std::snprintf(next, sizeof(next), "receiving %s from %u.%u.%u.%u",
-                      proto, ip[0], ip[1], ip[2], ip[3]);
-        if (s == recvStatus_ && std::strcmp(recvStatus_, next) == 0) return;   // unchanged, no write
-        std::snprintf(recvStatus_, sizeof(recvStatus_), "%s", next);
+        // Already showing this exact source? nothing to do (skip the format + the setStatus).
+        if (s == recvStatus_ && proto == lastProto_ && std::memcmp(ip, lastIp_, 4) == 0) return;
+        lastProto_ = proto;
+        std::memcpy(lastIp_, ip, 4);
+        std::snprintf(recvStatus_, sizeof(recvStatus_), "receiving %s from %u.%u.%u.%u", proto,
+                      static_cast<unsigned>(ip[0]), static_cast<unsigned>(ip[1]),
+                      static_cast<unsigned>(ip[2]), static_cast<unsigned>(ip[3]));
         setStatus(recvStatus_, Severity::Status);
     }
 

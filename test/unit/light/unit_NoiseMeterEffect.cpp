@@ -59,7 +59,7 @@ TEST_CASE("NoiseMeterEffect fades to dark without an audio frame") {
 TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     mm::AudioService audio;
     audio.defineControls();
-    audio.mode = 2;        // simulate mode (network build: kSimMode=2)
+    audio.mode = mm::AudioService::kSimMode;   // simulate mode
     audio.simulate = 0;    // music pattern
     audio.setup();
 
@@ -112,7 +112,7 @@ TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
 TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
     mm::AudioService audio;
     audio.defineControls();
-    audio.mode = 2;        // simulate mode (network build: kSimMode=2)
+    audio.mode = mm::AudioService::kSimMode;   // simulate mode
     audio.simulate = 0;    // music pattern
     audio.setup();
 
@@ -150,7 +150,7 @@ TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
 TEST_CASE("NoiseMeterEffect survives degenerate grid sizes") {
     mm::AudioService audio;
     audio.defineControls();
-    audio.mode = 2;        // simulate mode (network build: kSimMode=2)
+    audio.mode = mm::AudioService::kSimMode;   // simulate mode
     audio.simulate = 0;    // music pattern
     audio.setup();
 

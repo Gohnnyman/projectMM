@@ -1,7 +1,27 @@
 #pragma once
 
+// Include this one file to write a modifier: it brings ModifierBase plus the maths helpers a coordinate
+// fold commonly reaches for, so a modifier is a single include:
+//
+//   #pragma once
+//   #include "light/modifiers/ModifierBase.h"
+//   namespace mm {
+//   class MyModifier : public ModifierBase { ... };
+//   }
+//
+// A modifier overrides one or more of modifyLogicalSize / modifyLogical / modifyLive to transform
+// coordinates. The helper set below is the whole surface a modifier commonly uses — the integer trig, the
+// float trig, and the small standard helpers coordinate folds use. Unused declarations cost zero firmware
+// bytes; a modifier needing something outside this surface adds that one extra include.
+
 #include "core/MoonModule.h"
 #include "light/light_types.h" // lengthType, nrOfLightsType, Dim
+#include "core/math8.h"        // sin8/cos8 — integer trig for a rotate/affine modifier
+
+#include <cmath>              // std::sqrt / sin / cos — float trig (circle/pinwheel folds)
+#include <cstdint>           // fixed-width ints
+#include <cstdlib>          // std::abs
+#include <algorithm>       // std::max / std::min / std::clamp
 
 namespace mm {
 

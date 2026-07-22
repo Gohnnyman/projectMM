@@ -266,12 +266,54 @@ body {
     min-width: 0;
 }
 .mode-docked #main {
-    flex: 0 0 480px;
-    max-width: 480px;
+    /* Width is driven by --cards-width (default 480px), set by the drag handle and
+       restored from localStorage; clamped so it can't crowd out the preview or vanish. */
+    flex: 0 0 clamp(280px, var(--cards-width, 480px), 900px);
+    max-width: clamp(280px, var(--cards-width, 480px), 900px);
     /* Cards own their scroll — the page itself doesn't scroll in docked mode, so
        the preview beside them stays fixed. 44px status bar + 12px padding above. */
     max-height: calc(100vh - 56px);
     overflow-y: auto;
+}
+
+/* Card-column resize handle: a thin vertical grab bar between the preview and the cards.
+   Only meaningful in docked mode (side-by-side); hidden otherwise. */
+.cards-resize {
+    display: none;
+}
+.mode-docked .cards-resize {
+    display: block;
+    flex: 0 0 6px;
+    align-self: stretch;
+    margin: 0 -6px;              /* sit in the flex gap without adding width */
+    cursor: col-resize;
+    background: transparent;
+    position: relative;
+    z-index: 2;
+    touch-action: none;         /* we handle the drag; don't let the browser scroll/zoom */
+}
+/* A centered rule that is INVISIBLE by default and only appears (accent-colored) while the handle is
+   hovered or being dragged. The 6px hit area still catches the pointer, so the handle stays grabbable
+   even though nothing is drawn until you reach for it. */
+.cards-resize::before {
+    content: "";
+    position: absolute;
+    top: 60px; bottom: 12px;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.12s ease;
+}
+.cards-resize:hover::before,
+.cards-resize.dragging::before {
+    background: var(--accent, #6c8cff);
+}
+/* While dragging, kill selection + iframe/canvas pointer capture jitter across the page. */
+body.cards-resizing {
+    cursor: col-resize;
+    user-select: none;
 }
 
 #preview {

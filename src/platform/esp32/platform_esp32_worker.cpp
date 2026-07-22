@@ -39,9 +39,11 @@ struct EspWorker {
 };
 
 // Trampoline: run the caller's fn (which owns its own loop and returns when it observes the stop flag
-// via a woken waitNotify), then self-delete the RTOS task. The worker isn't registered with the task
-// watchdog — it blocks in waitNotify between frames (a natural yield), and each encode is one bounded
-// frame, so it never trips the idle-task WDT the way a busy-spin would; taskWdtReset() is a no-op.
+// via a woken waitNotify), then self-delete the RTOS task. The fn manages its own WDT membership: the
+// encode worker subscribes itself via taskWdtSubscribe() at loop start, feeds it with taskWdtReset() each
+// frame, and unsubscribes via taskWdtUnsubscribe() before returning (the subscription is per-task, so it
+// can't ride the render task's — see taskWdtSubscribe). A fn that never subscribes leaves taskWdtReset() a
+// no-op, so this trampoline stays generic.
 void workerTrampoline(void* arg) {
     auto* w = static_cast<EspWorker*>(arg);
     w->fn(w->user);                     // runs until stopPinnedTask flips w->stop and wakes it

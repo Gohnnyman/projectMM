@@ -40,6 +40,7 @@ const WS_RETRY_MIN_MS = 200;     // first reconnect is quick so a dropped initia
                                  // whose first attempt can lose a contended socket) comes back near-instantly
 let wsRetryMs = WS_RETRY_MIN_MS; // exponential backoff: 200 → 400 → 800 → … → 5000 ceiling
 let wsHeartbeat = null;
+let wsReconnectTimer = null;     // the pending reconnect setTimeout — tracked so pagehide can cancel it
 let wsPaused = false;            // gated by document.visibilityState
 let wsUnloading = false;         // true once the page starts unloading (refresh/navigate) — suppresses the
                                  // reconnect on the closing socket so the departing page doesn't error-log
@@ -61,6 +62,7 @@ const LS_TIMING    = "mm_timing_mode";
 const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
 const LS_EXPANDED  = "mm_expanded";       // [moduleName, …] — modules whose "controls" <details> is open
 const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx } — user-dragged textarea heights
+const LS_CARDS_W   = "mm_cardsWidth";     // px — dragged width of the docked card column (right side)
 
 // The open tab per container, persisted so a reload doesn't dump you back on the first child.
 let selectedTabs = {};
@@ -81,6 +83,60 @@ let textareaSizes = {};
 try { textareaSizes = JSON.parse(lsRead(LS_TA_SIZE, "{}")) || {}; } catch { textareaSizes = {}; }
 function saveTextareaSize(key, heightPx) { textareaSizes[key] = heightPx; localStorage.setItem(LS_TA_SIZE, JSON.stringify(textareaSizes)); }
 
+// The width the user dragged the docked card column to — VIEW-ONLY state (like the tab/expander/textarea
+// state above). Applied as the --cards-width CSS custom property (the #main flex-basis reads it, clamped in
+// CSS so it can't crowd out the preview or vanish); restored on boot. Only meaningful in docked mode, where
+// the cards sit beside the preview; PiP/narrow mode makes them full-width and hides the handle.
+function applyCardsWidth(px) { document.documentElement.style.setProperty("--cards-width", px + "px"); }
+(function restoreCardsWidth() {
+    const w = parseInt(lsRead(LS_CARDS_W, ""), 10);
+    if (Number.isFinite(w) && w > 0) applyCardsWidth(w);
+})();
+
+// Wire the card-column resize handle (index.html #cards-resize). Dragging it left/right sets --cards-width
+// live and persists the final value. The handle sits at the LEFT edge of #main, so dragging left widens the
+// cards (they grow toward the preview); width = the pane's right edge minus the pointer x. Bounded by the
+// same clamp the CSS enforces, and coalesced through requestAnimationFrame so a drag doesn't thrash layout.
+function setupCardsResize() {
+    const handle = document.getElementById("cards-resize");
+    const main = document.getElementById("main");
+    if (!handle || !main) return;
+    const MIN = 280, MAX = 900;
+    let dragging = false, raf = 0, pendingW = 0;
+    const onMove = (clientX) => {
+        // #main's right edge is fixed (the workspace's right edge); width grows as the pointer moves left.
+        const right = main.getBoundingClientRect().right;
+        pendingW = Math.max(MIN, Math.min(MAX, Math.round(right - clientX)));
+        if (raf) return;
+        raf = requestAnimationFrame(() => { raf = 0; applyCardsWidth(pendingW); });
+    };
+    const stop = () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove("dragging");
+        document.body.classList.remove("cards-resizing");
+        if (pendingW > 0) localStorage.setItem(LS_CARDS_W, String(pendingW));
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
+    };
+    const onPointerMove = (e) => { if (dragging) onMove(e.clientX); };
+    handle.addEventListener("pointerdown", (e) => {
+        // Only resize in docked mode — the handle is CSS-hidden otherwise, but guard anyway.
+        if (!document.querySelector(".workspace")?.classList.contains("mode-docked")) return;
+        e.preventDefault();
+        dragging = true;
+        pendingW = main.getBoundingClientRect().width;
+        handle.classList.add("dragging");
+        document.body.classList.add("cards-resizing");
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", stop);
+        window.addEventListener("pointercancel", stop);
+    });
+    // Double-click resets to the default width (a common resize-handle affordance).
+    handle.addEventListener("dblclick", () => { applyCardsWidth(480); localStorage.setItem(LS_CARDS_W, "480"); });
+}
+
 function lsRead(key, defaultVal) {
     const v = localStorage.getItem(key);
     return v !== null ? v : defaultVal;
@@ -94,15 +150,18 @@ let theme      = lsRead(LS_THEME, "dark");
 // ---------------------------------------------------------------------------
 
 function connectWs() {
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
     if (ws) {
         try { ws.close(); } catch {}
         ws = null;
     }
     const url = `ws://${location.host}/ws`;
     ws = new WebSocket(url);
+    const sock = ws;   // captured so a stale socket's late callback (after a reconnect swapped `ws`) is a no-op
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+        if (sock !== ws) return;   // a newer socket already took over — ignore this stale open
         wsRetryMs = WS_RETRY_MIN_MS;                        // reset backoff
         setWsDot(true);
         // Keepalive ping every 25s — Safari kills idle WebSockets otherwise
@@ -113,7 +172,7 @@ function connectWs() {
     };
 
     ws.onmessage = (e) => {
-        if (wsPaused) return;
+        if (sock !== ws || wsPaused) return;   // ignore a stale socket's late frame
         if (e.data instanceof ArrayBuffer) {
             preview.onBinaryMessage(e.data);
             return;
@@ -144,12 +203,13 @@ function connectWs() {
     };
 
     ws.onclose = () => {
+        if (sock !== ws) return;   // a stale socket closing after we already moved on — leave the live one alone
         clearInterval(wsHeartbeat);
         wsHeartbeat = null;
         if (wsUnloading) return;   // the page is going away — don't reconnect (and don't touch the DOM)
         setWsDot(false);
-        // Exponential backoff with 5s ceiling
-        setTimeout(connectWs, wsRetryMs);
+        // Exponential backoff with 5s ceiling; track the timer so pagehide can cancel a pending reconnect.
+        wsReconnectTimer = setTimeout(connectWs, wsRetryMs);
         wsRetryMs = Math.min(wsRetryMs * 2, 5000);
     };
 
@@ -181,6 +241,7 @@ window.addEventListener("pageshow", (e) => {
 window.addEventListener("pagehide", () => {
     wsUnloading = true;
     clearInterval(wsHeartbeat);
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }   // no reconnect after unload
     if (ws) { try { ws.close(1000); } catch { /* already closing */ } }
 });
 
@@ -192,6 +253,7 @@ async function init() {
     applyTheme(theme);
     setupStatusBarButtons();
     setupUpdateBadge();
+    setupCardsResize();
     // Open the WebSocket FIRST, before any HTTP fetch. The device pushes a full {modules} state on connect
     // (handleWebSocketUpgrade → requestFullResync), so the WS is the primary state source — the /api/state
     // fetch below is only a first-paint shortcut. Connecting first matters most on Safari: it opens more
@@ -205,24 +267,37 @@ async function init() {
     preview.setupLayout();
     // First-paint shortcut: render from a one-shot /api/state so the cards appear immediately instead of
     // waiting for the WS's first full-state push. The WS then keeps everything live. If this fetch fails
-    // (a contended slot), it's non-fatal — the WS full state fills in the moment it lands.
+    // (a contended slot), it's non-fatal — the WS full state fills in the moment it lands. Since the WS is
+    // opened FIRST, its full-state push can beat this await; when it has (state already set), DON'T let the
+    // REST snapshot overwrite the newer, live WS state — just skip the commit.
     try {
         const resp = await fetch("/api/state");
-        state = await resp.json();
-        const savedSel = lsRead(LS_SELECTED, null);
-        if (state.modules && state.modules.length > 0) {
-            const exists = savedSel && state.modules.some(m => m.name === savedSel);
-            selectedModule = exists ? savedSel : state.modules[0].name;
+        if (resp.ok && (!state || !Array.isArray(state.modules))) {
+            const snap = await resp.json();
+            if (snap && Array.isArray(snap.modules)) {
+                state = snap;
+                const savedSel = lsRead(LS_SELECTED, null);
+                if (state.modules.length > 0) {
+                    const exists = savedSel && state.modules.some(m => m.name === savedSel);
+                    selectedModule = exists ? savedSel : state.modules[0].name;
+                }
+                renderNav();
+                renderCards();
+                updateStatusBar();
+            }
         }
-        renderNav();
-        renderCards();
-        updateStatusBar();
     } catch { /* non-fatal — the WS full state renders the UI when it arrives */ }
-    // /api/types arrived in plan-11; fetch in parallel. When it arrives, re-render so reset-to-default
-    // buttons (whose defaults come from this payload) appear.
+    // /api/types arrived in plan-11; fetch in parallel. When it arrives, the reset-to-default buttons (whose
+    // defaults come from this payload) need to appear — but a full renderCards() rebuilds the DOM, which
+    // would blow away a control the user is mid-edit (this fires ~1 s after first paint, so that's rare but
+    // possible). Skip the re-render while an editable field is focused / a native select is open; the reset
+    // buttons then appear on the next structural render instead of interrupting the edit.
     fetch("/api/types").then(r => r.json()).then(j => {
         availableTypes = j.types || [];
-        if (state) renderCards();
+        const el = document.activeElement;
+        const editing = el && (el.matches("input, textarea") || el.closest("select")
+                               || document.querySelector('select[data-open="true"]'));
+        if (state && !editing) renderCards();
     }).catch(() => {});
 }
 
@@ -1477,15 +1552,16 @@ function createControl(moduleName, moduleType, ctrl) {
             const savedH = textareaSizes[key];
             if (typeof savedH === "number" && savedH > 0) input.style.height = savedH + "px";
             // Persist the height whenever the user drags the resize grip. A <textarea> has no native resize
-            // event, so a ResizeObserver is the standard way to observe the grip drag; store the pixel
-            // height keyed by "<module>:<control>". Coalesced by rAF so a drag doesn't thrash localStorage.
-            let taRaf = 0;
-            const taObserver = new ResizeObserver(() => {
-                if (taRaf) return;
-                taRaf = requestAnimationFrame(() => {
-                    taRaf = 0;
-                    if (input.style.height) saveTextareaSize(key, Math.round(input.getBoundingClientRect().height));
-                });
+            // event, so a ResizeObserver is the standard way to observe it; store the pixel height keyed by
+            // "<module>:<control>". Use the observed height (not the inline style, which the initial observe
+            // fire and a layout-driven change wouldn't set), track the last saved value, and write only on a
+            // real change — so the initial fire and idle re-observations don't thrash localStorage. rAF-
+            // coalesced so a drag saves once per frame at most.
+            let taRaf = 0, taPrevH = Math.round(savedH > 0 ? savedH : 0);
+            const taObserver = new ResizeObserver((entries) => {
+                const h = Math.round(entries[0].contentRect.height);
+                if (taRaf || h <= 0 || h === taPrevH) return;
+                taRaf = requestAnimationFrame(() => { taRaf = 0; taPrevH = h; saveTextareaSize(key, h); });
             });
             taObserver.observe(input);
             if (ctrl.readonly) {

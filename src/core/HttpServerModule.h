@@ -41,7 +41,7 @@ class Scheduler;
 /// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serializes correctly.
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
-/// base64), up to 4 concurrent clients. Binary frames take two paths, both without a frame-sized
+/// base64), up to `MAX_WS_CLIENTS` (8) concurrent clients. Binary frames take two paths, both without a frame-sized
 /// buffer: a synchronous stream (`beginBinaryFrame` / `pushBinaryFrame` / `endBinaryFrame`) for a
 /// forward-only producer, and a resumable buffered send (`sendBufferedFrame`) that drains a
 /// memory-adaptive chunk per client per `tick20ms` from a stable caller-owned buffer — so a large

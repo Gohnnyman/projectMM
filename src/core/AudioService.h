@@ -156,10 +156,12 @@ public:
     bool     send = false;
     /// The three source/sink states the sync machinery keys off, derived from mode + send so the
     /// socket/tick logic stays a single 0/1/2 switch (0 = no socket, 1 = broadcast, 2 = network sink):
-    /// Local+send → send, Local alone → off (local-only, no socket), Receive → receive. The `hasNetwork`
-    /// guard on the Receive leg matters on a no-network build: there mode 1 is Simulate (not Receive — see
-    /// kSimMode), so without the guard a Simulate device would wrongly read as "network sink" (2).
-    uint8_t  sync() const { return (platform::hasNetwork && mode == 1) ? 2 : (send ? 1 : 0); }
+    /// Local+send → send, Local alone → off (local-only, no socket), Receive → receive, Simulate → off.
+    /// `send` counts ONLY in Local mode (mode 0): a persisted send=true must not broadcast in Simulate
+    /// mode, which has no captured frame worth sending. The `hasNetwork` guard on the Receive leg matters
+    /// on a no-network build: there mode 1 is Simulate (not Receive — see kSimMode), so without it a
+    /// Simulate device would wrongly read as "network sink" (2).
+    uint8_t  sync() const { return (platform::hasNetwork && mode == 1) ? 2 : (mode == 0 && send ? 1 : 0); }
     /// The sync UDP port — the Send destination and the Receive listen port. Defaults
     /// to WLED's 11988 (interop with WLED/MoonLight); set it the same on both ends to
     /// run a private projectMM-only sync group on a non-WLED port.

@@ -581,14 +581,16 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
     const int hn = std::snprintf(header, sizeof(header),
         "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %ld\r\n"
         "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", size);
-    conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn));
+    if (!conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn))) return;
     char chunk[1024];
     for (long offset = 0; offset < size;) {
         const size_t want = static_cast<size_t>(size - offset) < sizeof(chunk)
                           ? static_cast<size_t>(size - offset) : sizeof(chunk);
         const int got = platform::fsReadAt(path, offset, chunk, want);
         if (got <= 0) break;   // read error / early EOF — the client sees a short (truncated) body
-        conn.write(reinterpret_cast<const uint8_t*>(chunk), static_cast<size_t>(got));
+        // write() returns false on a real socket error or its bounded deadline (a stalled client); STOP
+        // then — retrying every remaining chunk would burn deadline-worth of render-thread time per chunk.
+        if (!conn.write(reinterpret_cast<const uint8_t*>(chunk), static_cast<size_t>(got))) return;
         offset += got;
     }
 }
@@ -768,14 +770,16 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
             "Cache-Control: no-cache\r\n"
             "\r\n",
             contentType, size);
-        conn.write(reinterpret_cast<const uint8_t*>(header), headerLen);
+        if (!conn.write(reinterpret_cast<const uint8_t*>(header), headerLen)) { std::fclose(f); return; }
 
         uint8_t chunk[1024];
         while (size > 0) {
             size_t toRead = size > static_cast<long>(sizeof(chunk)) ? sizeof(chunk) : static_cast<size_t>(size);
             size_t bytesRead = std::fread(chunk, 1, toRead, f);
             if (bytesRead == 0) break;
-            conn.write(chunk, bytesRead);
+            // Stop on a write failure (socket error or the bounded deadline for a stalled client) — else
+            // every remaining chunk retries and burns deadline-worth of render-thread time each.
+            if (!conn.write(chunk, bytesRead)) break;
             size -= static_cast<long>(bytesRead);
         }
         std::fclose(f);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
+#include "light/effects/EffectBase.h"
 
 
 namespace mm {

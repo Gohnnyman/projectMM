@@ -1,5 +1,20 @@
 #pragma once
 
+// Include this one file to write a driver: it brings DriverBase plus the output-buffer, correction, and
+// platform pieces a driver needs to push the finished image to hardware or the network, so a driver is a
+// single include:
+//
+//   #pragma once
+//   #include "light/drivers/DriverBase.h"
+//   namespace mm {
+//   class MyDriver : public DriverBase { ... };
+//   }
+//
+// DriverBase reads the source buffer (Layer/Buffer) and applies the output Correction over the platform
+// layer, plus the small standard headers every driver's status / control-name / buffer handling uses. A
+// hardware driver adds its peripheral seam (platform::rmt* / platform::parlio* / a socket); a network
+// driver adds its packet header — those stay per-driver, since they differ by transport.
+
 #include "core/MoonModule.h"
 #include "core/ScratchBuffer.h"
 #include "light/layers/Buffer.h"
@@ -8,8 +23,10 @@
 #include "light/drivers/LightPresetsModule.h"   // the shared preset library a driver references by id
 #include "platform/platform.h"
 
-#include <cstdio>
-#include <cstring>
+#include <cstdio>       // std::snprintf for status strings
+#include <cstring>     // std::strcmp (onControlChanged) / memset (buffer clears)
+#include <cstdint>    // fixed-width ints
+#include <algorithm> // std::min / max / clamp (chunk loops, size clamps)
 
 namespace mm {
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
+#include "light/drivers/DriverBase.h"
 
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 #include "core/BinaryBroadcaster.h"
@@ -63,9 +63,13 @@ public:
     bool hasCorrectionControls() const override { return false; }
 
     /// Bind the controls: `fps` (1-60) and `resumableFrames` (the downsampled-frame transport A/B).
+    /// resumableFrames is an EXPERT control — a dev/tuning A/B, not a knob a normal user should touch (its
+    /// ON leg tears the preview until the slot-sharing fix lands), so it shows only when System.expertMode
+    /// is on. It still persists and still accepts API writes; only the default UI hides it.
     void defineDriverControls() override {
         controls_.addUint8("fps", fps, 1, 60);
         controls_.addBool("resumableFrames", resumableFrames);
+        controls_.setAdvanced(controls_.count() - 1);
     }
 
     /// Point the driver at the sparse driver buffer the LED/ArtNet drivers also read

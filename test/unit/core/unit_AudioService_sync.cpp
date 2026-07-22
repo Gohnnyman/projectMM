@@ -88,7 +88,7 @@ TEST_CASE("AudioService Local+send: broadcasts are throttled to ~kSyncSendInterv
     a.release();
 }
 
-TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then auto-blends back") {
+TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then holds it and reports listening") {
     FrozenClock clk(1);
     AudioService a;
     a.mode = 1;   // receive network
@@ -177,5 +177,26 @@ TEST_CASE("AudioService Local (not sending): no socket, reports off") {
     a.tick();
     CHECK_FALSE(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "off") == 0);
+    a.release();
+}
+
+// Regression: a persisted `send` must NOT broadcast once the module switches to Simulate mode — Simulate
+// has no captured frame worth sending, so sync() (and thus the socket) must go quiet. Pins the mode==0
+// guard on the send leg of sync().
+TEST_CASE("AudioService Local+send → Simulate: send stops, no socket") {
+    FrozenClock clk(1);
+    AudioService a;
+    a.mode = 0; a.send = true;   // local audio, broadcasting
+    a.syncPort = kTestSyncPort;
+    a.applyState();
+    a.tick();                    // opens the send socket
+    REQUIRE(a.syncOpenForTest());
+
+    // Switch to Simulate WITHOUT clearing the persisted send flag.
+    a.mode = AudioService::kSimMode;
+    a.applyState();              // re-prepare: syncReinit closes the socket for the new (no-socket) mode
+    a.tick();
+    CHECK_FALSE(a.syncOpenForTest());          // socket closed — nothing broadcasting
+    CHECK(std::strcmp(status(a), "off") == 0); // sync status quiet in Simulate
     a.release();
 }
