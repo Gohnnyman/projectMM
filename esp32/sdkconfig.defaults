@@ -1,5 +1,11 @@
 # Common defaults
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# Main-task stack. The HTTP server runs on this task, and its deepest path stacks a 2 KB request buffer
+# (handleConnection) UNDER a recursive module-tree JSON serialize (writeModuleJson recurses per tree level)
+# UNDER a ~1 KB stack JsonSink — a UI refresh fires a page-load burst that drives this path repeatedly.
+# 8 KB overflowed it on the classic ESP32 (smallest stack of the targets) with a "stack overflow in task
+# main" panic-reboot on refresh. 12 KB gives the serialize path comfortable headroom; the classic has ~170
+# KB free RAM, so the extra 4 KB is cheap, and the S3/P4 have even more.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
 # CPU at the chip's rated maximum (IDF defaults to 160 MHz) — the render loop and the ring ISR's
 # encode deadline are compute-bound, and the P4 ignores this symbol (its own 360 MHz default applies).
@@ -43,6 +49,18 @@ CONFIG_LWIP_TCPIP_CORE_LOCKING=y
 # finest detail level) fits in one non-blocking write with comfortable headroom
 # — avoids partial sends that would drop and reconnect the preview connection.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
+
+# A browser page-load opens the HTML + several JS/CSS files + the persistent WebSocket all at once, and
+# every refresh churns that whole set. The default 10-socket ceiling can't hold one burst (6 files + WS +
+# the listen socket + WiFi/mDNS internals) once a few closed sockets sit in TIME_WAIT, so lwIP RSTs the
+# excess connections BEFORE the app's accept() ever sees them — the "load it a few times before the UI
+# shows / the socket connects" symptom, with no server-side log because the app never got the connection.
+# Raise the ceiling to lwIP's max (16) so a full burst fits, and cut TCP_MSL from 60 s to 5 s so a closed
+# socket frees its slot in seconds instead of a minute — TIME_WAIT from rapid refreshes no longer piles up
+# to the ceiling. (5 s is ample on a trusted LAN; the 2×MSL wait only guards against delayed duplicate
+# segments, which a LAN doesn't produce.)
+CONFIG_LWIP_MAX_SOCKETS=16
+CONFIG_LWIP_TCP_MSL=5000
 
 # WiFi
 CONFIG_ESP_WIFI_ENABLED=y

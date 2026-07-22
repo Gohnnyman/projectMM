@@ -36,9 +36,13 @@ let state = null;
 let selectedModule = null;
 let availableTypes = [];        // populated from GET /api/types after first connection
 let ws = null;
-let wsRetryMs = 500;             // exponential backoff: 500 → 1000 → 2000 → 4000 → 5000
+const WS_RETRY_MIN_MS = 200;     // first reconnect is quick so a dropped initial connect (common on Safari,
+                                 // whose first attempt can lose a contended socket) comes back near-instantly
+let wsRetryMs = WS_RETRY_MIN_MS; // exponential backoff: 200 → 400 → 800 → … → 5000 ceiling
 let wsHeartbeat = null;
 let wsPaused = false;            // gated by document.visibilityState
+let wsUnloading = false;         // true once the page starts unloading (refresh/navigate) — suppresses the
+                                 // reconnect on the closing socket so the departing page doesn't error-log
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
 const dragTs = {};               // per-control last-touched timestamp (ms) — a short post-interaction cooldown
@@ -56,6 +60,7 @@ const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
 const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
 const LS_EXPANDED  = "mm_expanded";       // [moduleName, …] — modules whose "controls" <details> is open
+const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx } — user-dragged textarea heights
 
 // The open tab per container, persisted so a reload doesn't dump you back on the first child.
 let selectedTabs = {};
@@ -68,6 +73,13 @@ try { selectedTabs = JSON.parse(lsRead(LS_TABS, "{}")) || {}; } catch { selected
 let expandedSet = new Set();
 try { expandedSet = new Set(JSON.parse(lsRead(LS_EXPANDED, "[]")) || []); } catch { expandedSet = new Set(); }
 function saveExpanded() { localStorage.setItem(LS_EXPANDED, JSON.stringify([...expandedSet])); }
+
+// The height a user dragged each textarea to — again VIEW-ONLY state the backend doesn't own (like the tab
+// and expander state above), keyed by "<module>:<control>". Persisting it means a resized script/config box
+// keeps its size across a full-state rebuild and a page reload instead of snapping back to the 2-row default.
+let textareaSizes = {};
+try { textareaSizes = JSON.parse(lsRead(LS_TA_SIZE, "{}")) || {}; } catch { textareaSizes = {}; }
+function saveTextareaSize(key, heightPx) { textareaSizes[key] = heightPx; localStorage.setItem(LS_TA_SIZE, JSON.stringify(textareaSizes)); }
 
 function lsRead(key, defaultVal) {
     const v = localStorage.getItem(key);
@@ -91,7 +103,7 @@ function connectWs() {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-        wsRetryMs = 500;                                    // reset backoff
+        wsRetryMs = WS_RETRY_MIN_MS;                        // reset backoff
         setWsDot(true);
         // Keepalive ping every 25s — Safari kills idle WebSockets otherwise
         clearInterval(wsHeartbeat);
@@ -132,9 +144,10 @@ function connectWs() {
     };
 
     ws.onclose = () => {
-        setWsDot(false);
         clearInterval(wsHeartbeat);
         wsHeartbeat = null;
+        if (wsUnloading) return;   // the page is going away — don't reconnect (and don't touch the DOM)
+        setWsDot(false);
         // Exponential backoff with 5s ceiling
         setTimeout(connectWs, wsRetryMs);
         wsRetryMs = Math.min(wsRetryMs * 2, 5000);
@@ -157,8 +170,18 @@ window.addEventListener("pageshow", (e) => {
     if (e.persisted) {
         // Safari restored from bfcache: re-establish state
         wsPaused = false;
+        wsUnloading = false;   // a bfcache-restored page is live again — allow reconnects
         if (!ws || ws.readyState !== WebSocket.OPEN) connectWs();
     }
+});
+// Close the socket cleanly as the page unloads (a refresh, a navigation, or a bfcache suspend). Without
+// this the departing page's socket is torn down abnormally by the browser, which logs a "connection lost"
+// error to the console every refresh. Sending a normal (1000) close first, and marking wsUnloading so
+// onclose skips its reconnect, makes the handover silent. pagehide (not beforeunload) fires for bfcache too.
+window.addEventListener("pagehide", () => {
+    wsUnloading = true;
+    clearInterval(wsHeartbeat);
+    if (ws) { try { ws.close(1000); } catch { /* already closing */ } }
 });
 
 // ---------------------------------------------------------------------------
@@ -169,6 +192,20 @@ async function init() {
     applyTheme(theme);
     setupStatusBarButtons();
     setupUpdateBadge();
+    // Open the WebSocket FIRST, before any HTTP fetch. The device pushes a full {modules} state on connect
+    // (handleWebSocketUpgrade → requestFullResync), so the WS is the primary state source — the /api/state
+    // fetch below is only a first-paint shortcut. Connecting first matters most on Safari: it opens more
+    // parallel connections up front and is quicker to give up on a contended one, so if the WS is opened
+    // LAST (after several awaited fetches + the page's file loads) it lands in the most-saturated moment of
+    // the device's small socket pool and Safari abandons it — the "basic UI shows but the WS never goes
+    // live" symptom. Opening it first lets it grab an uncontended slot; Chrome tolerated the old order, so
+    // this fixes Safari without regressing Chrome.
+    connectWs();
+    preview.init();
+    preview.setupLayout();
+    // First-paint shortcut: render from a one-shot /api/state so the cards appear immediately instead of
+    // waiting for the WS's first full-state push. The WS then keeps everything live. If this fetch fails
+    // (a contended slot), it's non-fatal — the WS full state fills in the moment it lands.
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
@@ -180,18 +217,13 @@ async function init() {
         renderNav();
         renderCards();
         updateStatusBar();
-        // /api/types arrived in plan-11; fetch in parallel. When it arrives, re-render
-        // so reset-to-default buttons (whose defaults come from this payload) appear.
-        fetch("/api/types").then(r => r.json()).then(j => {
-            availableTypes = j.types || [];
-            if (state) renderCards();
-        }).catch(() => {});
-    } catch (err) {
-        document.getElementById("main").textContent = "Error: " + err.message;
-    }
-    connectWs();
-    preview.init();
-    preview.setupLayout();
+    } catch { /* non-fatal — the WS full state renders the UI when it arrives */ }
+    // /api/types arrived in plan-11; fetch in parallel. When it arrives, re-render so reset-to-default
+    // buttons (whose defaults come from this payload) appear.
+    fetch("/api/types").then(r => r.json()).then(j => {
+        availableTypes = j.types || [];
+        if (state) renderCards();
+    }).catch(() => {});
 }
 
 // The message for a failed fetch Response: the server's own `{"error": …}` body (JSON, e.g.
@@ -1440,6 +1472,22 @@ function createControl(moduleName, moduleType, ctrl) {
             input.dataset.key = ctrl.name;
             input.rows = 2;            // default 2 lines; CSS height + resize grip control size
             input.spellcheck = false;
+            // Restore a previously dragged height (view-state, see textareaSizes). A stored px height
+            // overrides the 2-row default; an untouched textarea has no entry and keeps the default.
+            const savedH = textareaSizes[key];
+            if (typeof savedH === "number" && savedH > 0) input.style.height = savedH + "px";
+            // Persist the height whenever the user drags the resize grip. A <textarea> has no native resize
+            // event, so a ResizeObserver is the standard way to observe the grip drag; store the pixel
+            // height keyed by "<module>:<control>". Coalesced by rAF so a drag doesn't thrash localStorage.
+            let taRaf = 0;
+            const taObserver = new ResizeObserver(() => {
+                if (taRaf) return;
+                taRaf = requestAnimationFrame(() => {
+                    taRaf = 0;
+                    if (input.style.height) saveTextareaSize(key, Math.round(input.getBoundingClientRect().height));
+                });
+            });
+            taObserver.observe(input);
             if (ctrl.readonly) {
                 input.readOnly = true;
             } else {

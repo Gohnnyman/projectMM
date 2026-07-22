@@ -237,7 +237,13 @@ private:
     Scheduler* scheduler_ = nullptr;
     const char* uiPath_ = "src/ui";
 
-    static constexpr int MAX_WS_CLIENTS = 4;
+    // Sized for a few concurrent viewers PLUS the transient overlap when one refreshes: the browser opens
+    // the new WS before the OS delivers the old socket's FIN, so both briefly hold a slot (a dead one is
+    // reaped within a tick or two on its next failed send/poll). At 4 a couple of quick refreshes could
+    // fill every slot with not-yet-reaped connections and the new upgrade was rejected ("WebSocket closed
+    // before the connection is established"); 8 leaves headroom so a refresh always lands a slot. Each slot
+    // is just an fd + a small cursor, so the array stays tiny.
+    static constexpr int MAX_WS_CLIENTS = 8;
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
     uint32_t wsClientGeneration_ = 0;   // ++ on each new WS client; see clientGeneration()
 

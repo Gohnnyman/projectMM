@@ -212,7 +212,7 @@ def main():
 
     if not RUNNER.exists():
         print(f"Scenario runner not found: {RUNNER}")
-        print("Compile it first: build_desktop.py --tests (MoonDeck → desktop → Compile Tests).")
+        print("Compile it first: uv run moondeck/build/build_desktop.py --tests (MoonDeck → desktop → Compile Tests).")
         sys.exit(1)
 
     module_filter = args.module if (args.module and args.module.lower() != "all") else None

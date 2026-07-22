@@ -1495,15 +1495,23 @@ int TcpConnection::read(uint8_t* buf, size_t maxLen) {
 
 bool TcpConnection::write(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
-    // Send every byte, retrying on a full send buffer — an HTTP response must arrive complete.
-    // Blocks the caller until the peer drains, which suits a one-shot response on a per-request
-    // connection; a healthy interface drains in microseconds, so the retry rarely spins.
+    // Send every byte, retrying on a full send buffer — a response/frame must arrive complete. A healthy
+    // interface drains in microseconds, so the retry rarely spins. BUT this runs on the render thread (WS
+    // frames via sendWsTextFrame, HTTP responses via handleConnection), and a stalled peer (a slow or
+    // half-open client whose TCP receive window is full) makes lwip_write return EWOULDBLOCK indefinitely.
+    // An UNBOUNDED retry would then hang the render loop until the Task-WDT (12 s) panic-reboots the whole
+    // device — observed as a WS client connect making the board reboot every few seconds. So bound the wait
+    // by a wall-clock deadline well above a healthy drain (µs) and well below the WDT: on timeout, return
+    // false so the caller closes that client (the browser reconnects) instead of taking the device down.
+    constexpr uint32_t kWriteDeadlineMs = 2000;
+    const uint32_t start = millis();
     size_t sent = 0;
     while (sent < len) {
         auto n = lwip_write(fd_, data + sent, len - sent);
         if (n > 0) {
             sent += static_cast<size_t>(n);
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (millis() - start >= kWriteDeadlineMs) return false;   // stalled peer — don't hang the render loop
             vTaskDelay(pdMS_TO_TICKS(1)); // wait for send buffer space
         } else {
             return false; // real error
@@ -1594,7 +1602,12 @@ bool TcpServer::open(uint16_t port) {
         return false;
     }
 
-    if (listen(fd_, 4) < 0) {
+    // Backlog sized for a browser page-load burst: a fresh load opens the HTML + several JS/CSS files +
+    // the WebSocket upgrade all at once (~8 parallel connections). With a small backlog the excess SYNs
+    // are dropped and the browser must retry — the "load it a few times before the UI shows / the socket
+    // connects" symptom. 8 covers a whole first-load burst so nothing is dropped. (lwIP caps this at
+    // CONFIG_LWIP_MAX_LISTENING_TCP; 8 is within the default 16.)
+    if (listen(fd_, 8) < 0) {
         lwip_close(fd_);
         fd_ = -1;
         return false;

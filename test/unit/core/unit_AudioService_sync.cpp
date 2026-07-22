@@ -5,7 +5,7 @@
 // tick() — the same entry the scheduler calls on-device. Covers: lazy open once per mode
 // (syncEnsureSocket latches), the send path reaching "sending", send throttling, and the
 // receive path over a real localhost UDP round-trip (frame replacement + the fresh→stale
-// auto-blend fallback). platform::networkReady() is true on desktop, so the lazy open fires
+// listening fallback of the pure sink). platform::networkReady() is true on desktop, so the lazy open fires
 // on the first tick — mirroring a device once its interface is up.
 //
 // Time is driven deterministically with platform::setTestNowMs() (the animation-test idiom)
@@ -41,10 +41,11 @@ struct FrozenClock {
 };
 }  // namespace
 
-TEST_CASE("AudioService sync=Send: lazy-opens once and reports sending") {
+TEST_CASE("AudioService Local+send: lazy-opens once and reports sending") {
     FrozenClock clk(1);
     AudioService a;
-    a.sync = 1;
+    a.mode = 0;
+    a.send = true;   // local audio, broadcasting
     a.syncPort = kTestSyncPort;
     a.applyState();                  // build: syncReinit() — socket NOT opened here (boot-safe)
     CHECK(std::strstr(status(a), "waiting") != nullptr);   // no tick() yet → still waiting
@@ -62,10 +63,11 @@ TEST_CASE("AudioService sync=Send: lazy-opens once and reports sending") {
     CHECK_FALSE(a.syncOpenForTest());
 }
 
-TEST_CASE("AudioService sync=Send: broadcasts are throttled to ~kSyncSendIntervalMs") {
+TEST_CASE("AudioService Local+send: broadcasts are throttled to ~kSyncSendIntervalMs") {
     FrozenClock clk(1);
     AudioService a;
-    a.sync = 1;
+    a.mode = 0;
+    a.send = true;   // local audio, broadcasting
     a.syncPort = kTestSyncPort;
     a.applyState();
     a.tick();                        // opens + first send (frameCounter bumps once)
@@ -86,10 +88,10 @@ TEST_CASE("AudioService sync=Send: broadcasts are throttled to ~kSyncSendInterva
     a.release();
 }
 
-TEST_CASE("AudioService sync=Receive: a localhost WLED packet drives frame_, then auto-blends back") {
+TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then auto-blends back") {
     FrozenClock clk(1);
     AudioService a;
-    a.sync = 2;
+    a.mode = 1;   // receive network
     a.syncPort = kTestSyncPort;
     a.applyState();
     a.tick();                        // binds kTestSyncPort
@@ -120,9 +122,9 @@ TEST_CASE("AudioService sync=Receive: a localhost WLED packet drives frame_, the
     CHECK(a.audioFrame()->levelSmoothed == 111);
     CHECK(std::strcmp(status(a), "receiving") == 0);   // fresh peer audio
 
-    // Auto-blend: advance virtual time past the fallback window with no new packet — the
-    // peer goes stale and the status falls back to "listening" (the local mic resumes
-    // on-device). Deterministic: no real sleep.
+    // Receive is a pure network sink: advance virtual time past the fallback window with no new
+    // packet — the peer goes stale and the status falls back to "listening" (bound, no fresh peer).
+    // The last frame is held; the local mic never runs in this mode. Deterministic: no real sleep.
     clk.advance(AudioService::syncFallbackMsForTest() + 20);
     a.tick();
     CHECK(std::strcmp(status(a), "listening") == 0);
@@ -131,7 +133,7 @@ TEST_CASE("AudioService sync=Receive: a localhost WLED packet drives frame_, the
     a.release();
 }
 
-TEST_CASE("AudioService sync=Receive: a failed bind backs off instead of retrying every tick") {
+TEST_CASE("AudioService Receive: a failed bind backs off instead of retrying every tick") {
     FrozenClock clk(1);
     // Force the bind to fail deterministically. The obvious approach — hog the port with a second
     // socket — is NOT portable: on Linux, SO_REUSEADDR on a UDP socket bound to INADDR_ANY permits
@@ -142,7 +144,7 @@ TEST_CASE("AudioService sync=Receive: a failed bind backs off instead of retryin
     platform::setTestBindFails(true);
 
     AudioService a;
-    a.sync = 2;
+    a.mode = 1;   // receive network
     a.syncPort = kTestSyncPort;
     a.applyState();
     a.tick();                        // first bring-up attempt → bind fails
@@ -167,10 +169,10 @@ TEST_CASE("AudioService sync=Receive: a failed bind backs off instead of retryin
     a.release();
 }
 
-TEST_CASE("AudioService sync=Off: no socket, reports off") {
+TEST_CASE("AudioService Local (not sending): no socket, reports off") {
     FrozenClock clk(1);
     AudioService a;
-    a.sync = 0;
+    a.mode = 0;   // local audio, not sending (sync == off)
     a.applyState();
     a.tick();
     CHECK_FALSE(a.syncOpenForTest());

@@ -128,23 +128,38 @@ public:
                                  ///< ambient room dark, lower for a quiet room.
     uint8_t  gain = 222;         ///< sensitivity — HIGHER = more (a narrower dB window
                                  ///< so a given sound fills more of the bar).
-    /// Simulated audio: fill the frame with a synthesized signal so audio-reactive effects are demoable
-    /// (and testable) without a mic or music, such as a preview/demo device with no microphone. Two patterns:
+    /// Simulated-audio pattern (only shown, and only used, in Simulate mode — see `mode`). The synthesized
+    /// signal drives audio-reactive effects with no mic or music, for a preview/demo device or a test:
     ///   `music` — a plausible song: multi-sine bands + a swelling volume + a periodic beat + a
     ///             sweeping peak. Nice for demos (bars dance, VU breathes, peaks move).
     ///   `sweep` — a single band lit, marching bass→treble on a timer, with the peak frequency and a
     ///             steady volume tracking it. Deterministic — the clean test pattern to check that each
     ///             effect responds across the whole spectrum.
-    /// A real mic always wins: when `mode` is a fill-in ("silence") mode it only runs while there's no real signal.
-    uint8_t  simulate = 0;       ///< 0 = off, 1 = music (fill silence), 2 = sweep (fill silence),
-                                 ///< 3 = music (always), 4 = sweep (always)
-    /// WLED audio-sync over UDP (port 11988, broadcast, WLED v2 wire format —
-    /// light/WLEDAudioSyncPacket.h). 0 = Off (local audio only, no socket bound);
-    /// 1 = Send (broadcast this device's AudioFrame for WLED/MoonLight receivers);
-    /// 2 = Receive (bind 11988; a peer's audio overwrites frame_ so effects react to
-    /// it, auto-falling-back to the local mic when packets stop for ~1 s). The socket
-    /// is bound only in Send/Receive — Off costs nothing. Changing it re-binds live.
-    uint8_t  sync = 0;           ///< 0 = off, 1 = send, 2 = receive
+    uint8_t  simulate = 0;       ///< 0 = music, 1 = sweep (the pattern; Simulate mode only)
+    /// The module's audio SOURCE, the first thing to pick (below status). Three either/or modes, each with
+    /// its own detail controls (the others hide): 0 = Local audio (its own peripheral — the on-board mic /
+    /// line-in; analyze it here and optionally broadcast it, so pins, rate, floor/gain and "send audio"
+    /// show). 1 = Receive network (a pure network sink: bind the sync port and let a peer's AudioFrame drive
+    /// the effects — no local peripheral). 2 = Simulate (a synthesized source for demos/tests — only the
+    /// `simulate` pattern picker shows). A device is exactly one of these at a time. Changing it re-runs
+    /// prepare() (acquires/releases the mic, rebinds/unbinds the socket) and re-toggles which controls
+    /// show, all live.
+    uint8_t  mode = 0;           ///< 0 = local audio, 1 = receive network, 2 = simulate
+    /// The `mode` value that means Simulate. "receive network" (index 1) only exists where the network
+    /// does, so Simulate is index 2 with a network stack and index 1 without — the whole mode set shifts,
+    /// and every mode comparison uses this constant rather than a bare literal (defineControls + tick).
+    static constexpr uint8_t kSimMode = platform::hasNetwork ? 2 : 1;
+    /// Broadcast this device's AudioFrame over UDP (WLED v2 wire format) for WLED / MoonLight
+    /// receivers. Only meaningful, and only shown, in Local mode (there's nothing to send when
+    /// you're a network sink). Off by default: a fresh module analyzes locally and broadcasts
+    /// nothing until you opt in.
+    bool     send = false;
+    /// The three source/sink states the sync machinery keys off, derived from mode + send so the
+    /// socket/tick logic stays a single 0/1/2 switch (0 = no socket, 1 = broadcast, 2 = network sink):
+    /// Local+send → send, Local alone → off (local-only, no socket), Receive → receive. The `hasNetwork`
+    /// guard on the Receive leg matters on a no-network build: there mode 1 is Simulate (not Receive — see
+    /// kSimMode), so without the guard a Simulate device would wrongly read as "network sink" (2).
+    uint8_t  sync() const { return (platform::hasNetwork && mode == 1) ? 2 : (send ? 1 : 0); }
     /// The sync UDP port — the Send destination and the Receive listen port. Defaults
     /// to WLED's 11988 (interop with WLED/MoonLight); set it the same on both ends to
     /// run a private projectMM-only sync group on a non-WLED port.
@@ -156,40 +171,60 @@ public:
                                                        ? sampleRateSel : 2]; }
 
     void defineControls() override {
-        controls_.addPin("sckPin", sckPin);
-        controls_.addPin("wsPin", wsPin);
-        controls_.addPin("sdPin", sdPin);
-        controls_.addPin("mclkPin", mclkPin);
+        // `mode` is the module's identity, so it's the first control (below status). Everything else is
+        // its detail: the local-audio group shows only in Local mode, the simulate pattern only in Simulate
+        // mode, the sync group only when there's a socket. Registration order follows the dependency (the
+        // coding-standards rule): the gate first, the controls it gates under it, mutually-exclusive groups
+        // sharing a gate grouped after it. The "receive network" option only exists where the network does
+        // (Local + Simulate always; Receive added when platform::hasNetwork), so Simulate is index 1 on a
+        // no-network build and 2 with network — the class constant kSimMode carries that shift.
+        const bool localMode = (mode == 0);
+        const bool simMode = (mode == kSimMode);
+        if constexpr (platform::hasNetwork) {
+            static constexpr const char* kModeOptions[] = {"local audio", "receive network", "simulate"};
+            controls_.addSelect("mode", mode, kModeOptions, 3);
+        } else {
+            static constexpr const char* kModeOptions[] = {"local audio", "simulate"};
+            controls_.addSelect("mode", mode, kModeOptions, 2);
+        }
+        // --- Local-audio group: the on-board mic / line-in and its analysis. Shown only in Local mode. The
+        // pins default UNSET (-1) so adding the module can't grab GPIOs; order follows the I2S datasheet
+        // (clocks, data, optional MCLK). ---
+        controls_.addPin("sckPin", sckPin);        controls_.setHidden(controls_.count() - 1, !localMode);
+        controls_.addPin("wsPin", wsPin);          controls_.setHidden(controls_.count() - 1, !localMode);
+        controls_.addPin("sdPin", sdPin);          controls_.setHidden(controls_.count() - 1, !localMode);
+        controls_.addPin("mclkPin", mclkPin);      controls_.setHidden(controls_.count() - 1, !localMode);
         static constexpr const char* kRateOptions[] = {"8000", "16000", "22050", "44100"};
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
-        // floor/gain condition the LOCAL FFT/level mapping. They stay visible in every sync
-        // mode — including Receive, because auto-blend falls back to the local mic when the
-        // peer goes quiet, and floor/gain govern that fallback. (They're only transiently
-        // dead while a peer's audio is actively driving the frame — not permanently, so
-        // hiding them by the sync setting would wrongly hide a control the fallback needs.)
-        controls_.addUint8("floor", floor, 0, 255);
-        controls_.addUint8("gain", gain, 1, 255);
-        static constexpr const char* kSimulateOptions[] = {
-            "off", "music (silence)", "sweep (silence)", "music (always)", "sweep (always)"};
-        controls_.addSelect("simulate", simulate, kSimulateOptions, 5);
-        // WLED audio sync — only on builds with an IP stack (WiFi OR Ethernet: the UDP
-        // send/receive works over either, so an Ethernet-only board like the MHC-WLED
-        // shield still gets it). A no-network build hides the controls entirely.
+        controls_.setHidden(controls_.count() - 1, !localMode);
+        // floor/gain condition the local FFT/level mapping.
+        controls_.addUint8("floor", floor, 0, 255); controls_.setHidden(controls_.count() - 1, !localMode);
+        controls_.addUint8("gain", gain, 1, 255);   controls_.setHidden(controls_.count() - 1, !localMode);
+        // "send audio": broadcast the locally-analyzed frame. Only meaningful in Local mode.
         if constexpr (platform::hasNetwork) {
-            static constexpr const char* kSyncOptions[] = {"off", "send", "receive"};
-            controls_.addSelect("sync", sync, kSyncOptions, 3);
-            // The UDP port — the Send destination and the Receive listen port. Defaults to
-            // WLED's 11988 (interop with WLED/MoonLight); change it on BOTH ends to run a
-            // private projectMM-only sync group on a non-WLED port. Shown whenever sync is on
-            // (Send or Receive), hidden in Off. A `sync` change re-runs this method (it's in
-            // affectsPrepare) so the row toggles live.
-            controls_.addUint16("syncPort", syncPort, 1, 65535);
-            controls_.setHidden(controls_.count() - 1, sync == 0);
-            controls_.addReadOnly("sync status", syncStr_, sizeof(syncStr_));
+            controls_.addBool("send audio", send);
+            controls_.setHidden(controls_.count() - 1, !localMode);
         }
-        // Read-only live read-outs (formatted in tick1s). Derived every second,
-        // nothing to persist, so ReadOnly (the display-only type) not a flipped
-        // Text — same idiom as SystemModule's uptime/fps.
+        // --- Simulate group: the synthesized-pattern picker, shown only in Simulate mode. ---
+        static constexpr const char* kSimulateOptions[] = {"music", "sweep"};
+        controls_.addSelect("simulate", simulate, kSimulateOptions, 2);
+        controls_.setHidden(controls_.count() - 1, !simMode);
+        // --- Sync group: only relevant when a socket is bound, i.e. sending (Local + send) or receiving.
+        // Both the port and the live status hide when there's no socket. A mode/send change re-runs this
+        // method (both are in affectsPrepare) so the rows toggle live. ---
+        if constexpr (platform::hasNetwork) {
+            const bool hasSocket = (sync() != 0);
+            // The UDP port — the Send destination and the Receive listen port. Defaults to WLED's
+            // 11988 (interop with WLED/MoonLight); change it on BOTH ends to run a private
+            // projectMM-only sync group on a non-WLED port.
+            controls_.addUint16("syncPort", syncPort, 1, 65535);
+            controls_.setHidden(controls_.count() - 1, !hasSocket);
+            controls_.addReadOnly("sync status", syncStr_, sizeof(syncStr_));
+            controls_.setHidden(controls_.count() - 1, !hasSocket);
+        }
+        // Read-only live read-outs (formatted in tick1s). These show the audio actually driving the
+        // effects, so they stay visible in Receive too (there the frame comes off the network, not a
+        // mic). Derived every second, nothing to persist, so ReadOnly not a flipped Text.
         // "level RMS" = the RMS loudness; the DISPLAYED number is its peak over the 1-second window
         // (tick1s publishes levelPeak_, the max of the per-block RMS level, then resets it), so a
         // beat that lands between samples still registers. The live frame_.level the LEDs use is the
@@ -200,24 +235,27 @@ public:
         MoonModule::defineControls();
     }
 
-    /// A pin or rate change rebuilds the I2S channel (live, no reboot); a `sync` /
-    /// `syncPort` change re-binds/unbinds the UDP socket AND re-toggles the port row's
-    /// visibility (all flow through prepare → rebuildControls).
+    /// A pin or rate change rebuilds the I2S channel (live, no reboot); a `mode` / `send` /
+    /// `syncPort` change re-binds/unbinds the UDP socket AND re-toggles which control rows show
+    /// (all flow through prepare → rebuildControls).
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "wsPin") == 0 || std::strcmp(name, "sdPin") == 0
             || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "mclkPin") == 0
-            || std::strcmp(name, "sampleRate") == 0 || std::strcmp(name, "sync") == 0
-            || std::strcmp(name, "syncPort") == 0;
+            || std::strcmp(name, "sampleRate") == 0 || std::strcmp(name, "mode") == 0
+            || std::strcmp(name, "send audio") == 0 || std::strcmp(name, "syncPort") == 0;
     }
 
-    /// Pure build (see MoonModule::prepare): claim the mic election (first live mic wins) and
-    /// (re)acquire the I²S mic + sync socket. No enabled() check — core's applyState() calls this only
-    /// when effectively-enabled and routes to release() otherwise, which releases the mic + sync
-    /// socket and vacates the election, so a disabled service (or one under a disabled parent) frees
-    /// its pins for another module.
+    /// Pure build (see MoonModule::prepare): claim the frame election (this instance's frame_ drives the
+    /// effects in EVERY mode — a live mic, a received peer frame, or a synthesized one), then acquire only
+    /// the hardware the current `mode` needs. Only Local runs a real peripheral, so only Local inits the
+    /// I²S mic; Receive (a network sink) and Simulate (a synthetic source) free the I²S channel and its
+    /// pins. The sync socket is rebound in every mode (syncReinit is a no-op unless there's a socket to
+    /// bind). No enabled() check — core's applyState() calls this only when effectively-enabled and routes
+    /// to release() otherwise.
     void prepare() override {
-        micSeat_.claim();   // first live mic wins the seat; a 2nd is captured but not read (claim-if-empty)
-        reinit();
+        micSeat_.claim();       // first live instance wins the frame seat (claim-if-empty), any mode
+        if (mode == 0) reinit();   // Local only: (re)acquire the I²S mic
+        else deinit();             // Receive / Simulate: no peripheral — free the I²S channel + its pins
         syncReinit();
     }
     /// One-time wiring only; the mic acquire + election live in prepare(), the sole gate.
@@ -270,30 +308,31 @@ public:
         // seat is held, the reclaim once it's empty.
         micSeat_.claim();
 
-        // WLED audio sync. Send broadcasts the current frame_ (throttled). Receive drains
-        // the socket into frame_ and, while a peer's audio is fresh, RETURNS so the local
-        // mic analysis below is skipped (the received frame drives the effects); once the
-        // peer goes quiet (~1 s) it falls through and the local mic resumes (auto-blend).
+        // WLED audio sync. Send (Local + send audio) broadcasts the current frame_ (throttled),
+        // then falls through to run the local mic analysis that produces that frame_. Receive is a
+        // pure network sink: drain the socket into frame_ and RETURN unconditionally so the local
+        // mic path never runs (there is no peripheral in this mode), holding the last frame while a
+        // peer is quiet rather than blending to a mic.
         if constexpr (platform::hasNetwork) {
-            if (sync != 0 && syncEnsureSocket()) {   // lazy-open once the network is up
-                if (sync == 1) syncSend();
-                else if (sync == 2 && syncReceive()) return;
+            const uint8_t s = sync();
+            if (s != 0 && syncEnsureSocket()) {   // lazy-open once the network is up
+                if (s == 1) syncSend();
+                else if (s == 2) { syncReceive(); return; }
             }
+            if (s == 2) return;   // sink with no socket yet: still never runs the local mic
         }
 
-        // Simulated audio (see the `simulate` control): 0=off, 1=music-on-silence, 2=sweep-on-silence,
-        // 3=music-always, 4=sweep-always. Real mic input always wins in the "on-silence" modes — the
-        // mic path below resets realQuietMs_ whenever a block carries signal, and synthesizeFrame()
-        // no-ops while that timer says the mic is live. Off I2S (desktop / mic-less) or on a bad init
-        // there's no mic, so the sim is the only possible source: run it and return.
-        const bool simSweep = (simulate == 2 || simulate == 4);
-        const bool simAlways = (simulate >= 3);
+        // Simulate mode (see `mode`): a synthesized source, driven by the `simulate` pattern (0 = music,
+        // 1 = sweep). It's a whole mode, not a mic fill-in, so it always runs and returns — the mic path
+        // below never executes in Simulate mode.
+        if (mode == kSimMode) { synthesizeFrame(simulate == 1); return; }
+
+        // From here on it's Local mode. Off I2S (desktop / mic-less) or before a good init there's no mic,
+        // so nothing is produced — the last frame is held (no synthetic fallback; that's Simulate mode's job).
         if constexpr (!platform::hasI2sMic) {
-            if (simulate != 0) synthesizeFrame(simSweep);   // the only possible source off I2S
             return;
         } else {
-            if (!inited_) { if (simulate != 0) synthesizeFrame(simSweep); return; }
-            if (simAlways) { synthesizeFrame(simSweep); return; }   // forced: skip the mic entirely
+            if (!inited_) return;
         }
 
         // Drain whatever the DMA holds this tick (non-blocking) into the free tail
@@ -348,15 +387,6 @@ public:
         // live every render tick) move with the music. The window peak is the representative reading.
         // Display-only — the live frame_.level the effects/LEDs use is untouched.
         if (frame_.level > levelPeak_) levelPeak_ = frame_.level;
-
-        // Auto fill-in (simulate 1/2): if the mic has been quiet for a bit, synthesize so the effects
-        // still have something to react to. `level` this block re-arms the "real audio" grace period;
-        // once it lapses, the sim takes over and yields again the instant real sound returns.
-        if (simulate == 1 || simulate == 2) {
-            if (frame_.level > kSimRealThreshold) realBlocks_ = kSimRealGraceBlocks;
-            else if (realBlocks_ > 0) realBlocks_--;
-            if (realBlocks_ == 0) synthesizeFrame(simulate == 2);
-        }
     }
 
     /// Fill frame_ with a synthesized signal. sweep=false → a plausible "song" (each band its own
@@ -414,7 +444,8 @@ public:
         //   no samples at all  → the I2S clocks aren't running — check sckPin / wsPin.
         //   samples, all zero  → clocks fine, data line dead — check sdPin (SD/DOUT) + power.
         //   samples, non-zero  → data is flowing; clear any prior diagnosis.
-        const bool directMicLive = inited_ && sync != 2
+        // Only Local mode has a real mic to diagnose — Receive and Simulate produce frame_ without one.
+        const bool directMicLive = inited_ && mode == 0
                                    && platform::audioCodecType == platform::CodecType::None;
         if (directMicLive) {
             if (micSamples1s_ == 0)
@@ -432,9 +463,10 @@ public:
         // syncReinit/syncEnsureSocket set ("waiting for network" / "…failed"); only once
         // open do we report the moment-to-moment send/receive state.
         if constexpr (platform::hasNetwork) {
-            if (sync == 0) std::snprintf(syncStr_, sizeof(syncStr_), "off");
+            const uint8_t s = sync();
+            if (s == 0) std::snprintf(syncStr_, sizeof(syncStr_), "off");
             else if (syncOpen_) {
-                if (sync == 1) std::snprintf(syncStr_, sizeof(syncStr_), "sending");
+                if (s == 1) std::snprintf(syncStr_, sizeof(syncStr_), "sending");
                 else std::snprintf(syncStr_, sizeof(syncStr_),
                               (lastSyncRecv_ != 0
                                && platform::millis() - lastSyncRecv_ < kSyncFallbackMs)
@@ -475,12 +507,6 @@ private:
     uint32_t micSamples1s_ = 0;
     uint32_t micNonzero1s_ = 0;
     bool     micStatusStale_ = false;
-
-    // Auto fill-in (simulate 1/2): treat the mic as "live" for a grace window after any block above
-    // the threshold, so brief gaps between beats don't flip to the sim. ~2 s of blocks (≈86/block·23ms).
-    static constexpr uint16_t kSimRealThreshold  = 4;    // a block level above this counts as real sound
-    static constexpr uint16_t kSimRealGraceBlocks = 86;  // ~2 s at ~23 ms/block before the sim takes over
-    uint16_t realBlocks_ = 0;   // grace countdown: >0 = mic was recently live, hold off the sim
 
     // WLED audio sync (light/WLEDAudioSyncPacket.h). One socket, bound only in Send/Receive.
     platform::UdpSocket syncSock_;
@@ -581,9 +607,10 @@ private:
         syncOpen_ = false;
         lastSyncOpenFailMs_ = 0;           // a mode change retries bring-up immediately (no stale backoff)
         lastSyncRecv_ = 0;
+        const uint8_t s = sync();
         std::snprintf(syncStr_, sizeof(syncStr_),
-                      sync == 1 ? "send: waiting for network"
-                      : sync == 2 ? "receive: waiting for network"
+                      s == 1 ? "send: waiting for network"
+                      : s == 2 ? "receive: waiting for network"
                       : "off");
     }
 
@@ -595,7 +622,8 @@ private:
     /// past boot so a boot-present AudioService can't touch lwip before it exists.
     bool syncEnsureSocket() {
         if constexpr (!platform::hasNetwork) return false;
-        if (sync == 0) return false;
+        const uint8_t s = sync();
+        if (s == 0) return false;
         if (syncOpen_) return true;
         if (!platform::networkReady()) return false;   // interface not up yet — try again next tick
         // Back off between failed bring-ups: tick() runs every tick, so without this a
@@ -604,7 +632,7 @@ private:
         // failure; hold off until kSyncOpenRetryMs has passed (same throttle form as syncSend).
         const uint32_t now = platform::millis();
         if (lastSyncOpenFailMs_ != 0 && now - lastSyncOpenFailMs_ < kSyncOpenRetryMs) return false;
-        if (sync == 1) {                   // send → broadcast destination (configurable port)
+        if (s == 1) {                      // send → broadcast destination (configurable port)
             char bcast[16]; formatDottedQuad(bcast, kBroadcast_);
             if (syncSock_.open() && syncSock_.connect(bcast, syncPort)) {
                 syncOpen_ = true;

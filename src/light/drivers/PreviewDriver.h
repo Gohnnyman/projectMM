@@ -480,7 +480,15 @@ private:
             clearStatus();
         }
     }
-    bool resumableFrames = true;   // A/B: downsampled frame via resumable send (ON) vs synchronous (OFF)
+    // A/B for the downsampled-frame transport: OFF = synchronous begin/push/end stream (blocking socket
+    // writes on the render thread, proven-correct); ON = gather-then-resumable-send that drains off the
+    // render thread. Defaults OFF: the resumable path shares the single-occupancy send slot with the ~1 Hz
+    // full-state push and the next preview frame, so a preempted mid-drain frame reaches the browser
+    // spliced — a visibly TORN preview (top rows new, the rest stale). The off-thread send is only worth it
+    // to avoid the ~17 ms render hitch at very large grids with the preview open; until the slot-sharing
+    // tear is fixed (give preview its own send slot, or drop a preempted drain cleanly), the correct
+    // synchronous path is the default. Kept in-tree as the A/B reference for that fix.
+    bool resumableFrames = false;
     bool stageAllocFailed_ = false;    // resumable staging buffer couldn't allocate → synchronous fallback
     bool keptIdxAllocFailed_ = false;  // index cache couldn't allocate → per-frame lattice walk
     uint8_t* stage_ = nullptr;   // gathered color payload for the resumable send (see ensureStage)
