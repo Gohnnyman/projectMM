@@ -46,25 +46,43 @@ public:
         return total;
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const {
+    void forEachCoord(const CoordSink& sink) const {
         if (!enabled()) return;
         nrOfLightsType offset = 0;
         for (uint8_t i = 0; i < childCount(); i++) {
             if (!child(i)->enabled()) continue;
             auto* layout = static_cast<LayoutBase*>(child(i));
-            // Wrap callback to add physical index offset
+            // Wrap the sink to add this child's physical index offset, so children stitch into one
+            // flat address space. Both kinds pass through their own offsetting relay — a gap in a
+            // child stays a gap in the container's stream (its wire slot just shifts by the offset).
             struct WrapCtx {
-                CoordCallback cb;
-                void* ctx;
+                const CoordSink* sink;
                 nrOfLightsType offset;
             };
-            WrapCtx wctx{cb, ctx, offset};
-            layout->forEachCoord([](void* wc, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
-                auto* w = static_cast<WrapCtx*>(wc);
-                w->cb(w->ctx, idx + w->offset, x, y, z);
-            }, &wctx);
+            WrapCtx wctx{&sink, offset};
+            layout->forEachCoord(CoordSink{
+                [](void* wc, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+                    auto* w = static_cast<WrapCtx*>(wc);
+                    w->sink->pixel(idx + w->offset, x, y, z);
+                },
+                [](void* wc, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+                    auto* w = static_cast<WrapCtx*>(wc);
+                    w->sink->blackPixel(idx + w->offset, x, y, z);
+                },
+                &wctx});
             offset += layout->lightCount();
         }
+    }
+
+    /// Whether any enabled child declares dark gaps (black pixels). Gates the Layer's dense-identity
+    /// fast path off: a gap needs the folded LUT (which drops the gap slot from the mapping), so an
+    /// identity map — which would light the gap — must not be used when this is true.
+    bool hasBlackPixels() const {
+        if (!enabled()) return false;
+        for (uint8_t i = 0; i < childCount(); i++) {
+            if (child(i)->enabled() && static_cast<LayoutBase*>(child(i))->hasBlackPixels()) return true;
+        }
+        return false;
     }
 
     /// Status line: total physical lights + the physical bounding box (the extent
@@ -77,13 +95,15 @@ public:
         const nrOfLightsType lights = totalLightCount();
         // One forEachCoord pass for the bounding box: max coordinate + 1 per axis.
         struct Extent { lengthType x, y, z; bool any; } e{0, 0, 0, false};
-        forEachCoord([](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+        // Gaps count toward the physical box (a black pixel is a real position at (x,y,z)), so the
+        // extent walk uses one callback for both kinds — blackCb null → blackPixel falls back to it.
+        forEachCoord(CoordSink{[](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
             auto* ex = static_cast<Extent*>(ctx);
             if (x > ex->x) ex->x = x;
             if (y > ex->y) ex->y = y;
             if (z > ex->z) ex->z = z;
             ex->any = true;
-        }, &e);
+        }, nullptr, &e});
         const lengthType w = e.any ? e.x + 1 : 0;
         const lengthType h = e.any ? e.y + 1 : 0;
         const lengthType d = e.any ? e.z + 1 : 0;

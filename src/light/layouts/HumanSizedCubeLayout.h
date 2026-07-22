@@ -49,7 +49,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         const uint32_t limit = lightCount();
         uint32_t idx = 0;
 
@@ -60,20 +60,20 @@ public:
         // front: z = 0  — for x { for y }
         for (lengthType x = 0; x < width && idx < limit; x++)
             for (lengthType y = 0; y < height && idx < limit; y++)
-                cb(ctx, static_cast<nrOfLightsType>(idx++),
+                sink.pixel(static_cast<nrOfLightsType>(idx++),
                    static_cast<lengthType>(x + 1), static_cast<lengthType>(y + 1), 0);
 
         // back: z = depth+1  — for x { for y }
         for (lengthType x = 0; x < width && idx < limit; x++)
             for (lengthType y = 0; y < height && idx < limit; y++)
-                cb(ctx, static_cast<nrOfLightsType>(idx++),
+                sink.pixel(static_cast<nrOfLightsType>(idx++),
                    static_cast<lengthType>(x + 1), static_cast<lengthType>(y + 1),
                    static_cast<lengthType>(depth + 1));
 
         // above: y = 0  — for x { for z }
         for (lengthType x = 0; x < width && idx < limit; x++)
             for (lengthType z = 0; z < depth && idx < limit; z++)
-                cb(ctx, static_cast<nrOfLightsType>(idx++),
+                sink.pixel(static_cast<nrOfLightsType>(idx++),
                    static_cast<lengthType>(x + 1), 0, static_cast<lengthType>(z + 1));
 
         // below (y = height+1) is intentionally omitted — commented out in the
@@ -82,13 +82,13 @@ public:
         // left: x = 0  — for z { for y }
         for (lengthType z = 0; z < depth && idx < limit; z++)
             for (lengthType y = 0; y < height && idx < limit; y++)
-                cb(ctx, static_cast<nrOfLightsType>(idx++),
+                sink.pixel(static_cast<nrOfLightsType>(idx++),
                    0, static_cast<lengthType>(y + 1), static_cast<lengthType>(z + 1));
 
         // right: x = width+1  — for z { for y }
         for (lengthType z = 0; z < depth && idx < limit; z++)
             for (lengthType y = 0; y < height && idx < limit; y++)
-                cb(ctx, static_cast<nrOfLightsType>(idx++),
+                sink.pixel(static_cast<nrOfLightsType>(idx++),
                    static_cast<lengthType>(width + 1), static_cast<lengthType>(y + 1),
                    static_cast<lengthType>(z + 1));
     }

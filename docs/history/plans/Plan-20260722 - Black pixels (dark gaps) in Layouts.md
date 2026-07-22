@@ -18,16 +18,16 @@ The whole light pipeline funnels through one `forEachCoord` seam, and the holed 
 - **The LED driver clocks its window LINEARLY** ([ParallelLedDriver.h:899](src/light/drivers/ParallelLedDriver.h)): `src + (winStart_ + laneStart_ + sourceRow)`, every position in order, whatever color is there. It does NOT walk the LUT or skip positions - so an unmapped (black) position between mapped ones is clocked BLACK IN PLACE. Data flows through. This is exactly what a dark-gap strand needs.
 - **`PreviewDriver` walks `forEachCoord`** ([PreviewDriver.h:432](src/light/drivers/PreviewDriver.h)) and emits each physical `idx`'s color; a black position reads its zero-init (black) buffer slot and draws dark AT ITS (x,y). The hole shows for free.
 
-**Net:** the driver buffer is already physical-sized and zero-init; the scatter already leaves unmapped positions black; the driver already clocks all positions; the preview already renders physical positions. The ONLY missing piece is a way for a layout to emit a physical/wire position that carries NO logical source (no LUT entry). Everything else falls out.
+**Net:** the driver buffer is already physical-sized and zero-init; the scatter already leaves un-scattered positions black; the driver already clocks all positions; the preview already renders physical positions. The ONLY missing piece is a way for a layout to mark a physical/wire position as a GAP (a real physical pixel that must stay black, carrying no logical source), and for the buffer-copy step to honor that mark. Everything else falls out.
 
 ## The model: two kinds of pixel (the PO's framing)
 
-A layout is a sequence of pixel emissions, of which there are now TWO kinds (instead of one):
+A layout is a sequence of pixel emissions, of which there are now TWO kinds (instead of one). **Both are real physical pixels the driver clocks** - the difference is only whether a color reaches them:
 
-- **`addPixel(x,y,z)`** - a WIRE position that maps to a logical cell. The LUT gets an entry (logical cell scatters its color here); the driver clocks it lit.
-- **`addBlackPixel(x,y,z)`** - a WIRE position with NO logical mapping. No LUT entry, so the scatter never writes it and it stays black; the driver STILL clocks it (data flows through the physical LED); the preview draws it dark at (x,y).
+- **`addPixel(x,y,z)`** - a WIRE position that maps to a logical cell. The scatter writes the cell's color here; the driver clocks it lit.
+- **`addBlackPixel(x,y,z)`** - a WIRE position that is a GAP: **a physical pixel that must stay black**. The scatter writes nothing to it (it carries no logical source), so it stays black; the driver STILL clocks it (data flows through the physical LED to reach lit LEDs beyond); the preview draws it dark at (x,y).
 
-Both ADVANCE the physical/wire index (the dark LED is physically on the strand - "physical LED, forced off" - so it occupies a real wire slot the driver must clock through to reach lit LEDs beyond). The difference is purely whether a LUT entry is created. This is the existing sparse mapping, with the sparseness declared per-emission instead of emerging from a rejecting modifier.
+The earlier framing "a black pixel has no physical pixel" was wrong: it DOES have a physical pixel (a real wire slot on a continuous strand - "physical LED, forced off"), it just must not receive a color. Both kinds ADVANCE the physical/wire index. This is the existing sparse-mapping shape, with the gap declared per-emission instead of emerging from a rejecting modifier.
 
 ### Realized as a `black` flag on the shared coordinate emission
 
@@ -38,10 +38,14 @@ Both ADVANCE the physical/wire index (the dark LED is physically on the strand -
 
 The signature change is mechanical across the fixed set of `CoordCallback` lambdas; each either forwards or ignores `black`:
 - **[Layouts.h:62](src/light/layouts/Layouts.h)** wrapper: forward `black` through (keep `offset += layout->lightCount()`, physical/wire count, unchanged - black pixels ARE counted, they occupy wire slots).
-- **[Layer.h:449](src/light/layers/Layer.h)** `onCoord` (the LUT fold): `if (black) return;` at the top - a black wire position gets no LUT entry (adds no logical->physical mapping). It still consumed its physical index in the walk.
+- **[Layer.h:449](src/light/layers/Layer.h)** `onCoord` (the LUT fold): `if (black) return;` at the top - a black wire position gets no logical->physical mapping in the LUT (no cell scatters to it). It still consumed its physical index in the walk, so its wire slot exists.
 - **[Layer.h:107](src/light/layers/Layer.h)** dimension lambda: ignore `black` (a black pixel still expands the physical bounding box - it occupies a real wire position at (x,y)).
 - **[Layer.h:399](src/light/layers/Layer.h)** `isNaturalOrder` lambda: ignore `black` (see fast-path note).
 - **[PreviewDriver.h:432](src/light/drivers/PreviewDriver.h)** and its coord-table builder (~:322): ignore `black` (the real coordinate already draws the hole; the black wire slot reads its zero-init color).
+
+### Where the gap becomes black: the buffer-copy step
+
+The PO's framing pins WHERE the black is applied: **the buffer-copy step** that copies the Layer's virtual buffer to the driver output buffer - that is `blendMap` ([BlendMap.h:54](src/light/layers/BlendMap.h)). It SCATTERS (walks logical cells, writes each to its physical destination), so a black wire slot - one no cell maps to - is simply never written. Because `blendMap` does `dst.clear()` first for the bottom layer ([BlendMap.h:88](src/light/layers/BlendMap.h)), that slot stays black. So on the common single-layer path the gap is honored FOR FREE by the existing clear; no new code in the copy. **To verify during implementation:** a black slot in a NON-bottom composited layer (a second Layer alpha/additive over the first) is not re-cleared, so confirm it either can't receive stale data or add the one guard in the copy loop (skip/zero a destination flagged as a gap). This is the "add it in the buffer-copying code" the PO called out - present only if the clear doesn't already cover the composite case.
 
 ## Authoring surface: a black-region control on GridLayout
 

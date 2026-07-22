@@ -16,9 +16,9 @@ struct Pt { mm::lengthType x, y, z; };
 
 std::vector<Pt> collectPoints(const mm::SphereLayout& s) {
     std::vector<Pt> pts;
-    s.forEachCoord([](void* ctx, mm::nrOfLightsType, mm::lengthType x, mm::lengthType y, mm::lengthType z) {
+    s.forEachCoord(mm::CoordSink{[](void* ctx, mm::nrOfLightsType, mm::lengthType x, mm::lengthType y, mm::lengthType z) {
         static_cast<std::vector<Pt>*>(ctx)->push_back({x, y, z});
-    }, &pts);
+    }, nullptr, &pts});
     return pts;
 }
 
@@ -96,9 +96,9 @@ TEST_CASE("SphereLayout emits sequential physical indices") {
     mm::SphereLayout s;
     s.radius = 3;
     std::vector<mm::nrOfLightsType> idxs;
-    s.forEachCoord([](void* ctx, mm::nrOfLightsType idx, mm::lengthType, mm::lengthType, mm::lengthType) {
+    s.forEachCoord(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType, mm::lengthType, mm::lengthType) {
         static_cast<std::vector<mm::nrOfLightsType>*>(ctx)->push_back(idx);
-    }, &idxs);
+    }, nullptr, &idxs});
     REQUIRE(idxs.size() == s.lightCount());
     for (size_t i = 0; i < idxs.size(); i++) CHECK(idxs[i] == static_cast<mm::nrOfLightsType>(i));
 }

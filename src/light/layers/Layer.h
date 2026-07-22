@@ -101,15 +101,16 @@ public:
             return;   // applyState() recurses to the effects next
         }
 
-        // Compute physical dimensions from layout
+        // Compute physical dimensions from layout. Gaps count toward the box (a black pixel occupies a
+        // real position), so one callback handles both kinds — blackCb null → blackPixel falls back.
         struct DimCtx { lengthType maxX, maxY, maxZ; };
         DimCtx dctx{0, 0, 0};
-        layouts_->forEachCoord([](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+        layouts_->forEachCoord(CoordSink{[](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
             auto* d = static_cast<DimCtx*>(ctx);
             if (x > d->maxX) d->maxX = x;
             if (y > d->maxY) d->maxY = y;
             if (z > d->maxZ) d->maxZ = z;
-        }, &dctx);
+        }, nullptr, &dctx});
         physicalWidth_ = dctx.maxX + 1;
         physicalHeight_ = dctx.maxY + 1;
         physicalDepth_ = dctx.maxZ + 1;
@@ -357,11 +358,15 @@ public:
         const nrOfLightsType logicalCount = cellCount(logical);
         const nrOfLightsType driverCount = physicalLightCount();   // == Layouts::totalLightCount()
         const bool dense = (driverCount == boxCount);
+        // A gap fills a box cell (dense stays true) but must NOT receive that cell's color, so the
+        // identity map — which lights every cell — is wrong when gaps exist. Route to the folded
+        // build, which drops the gap slots from the LUT (they stay black). No gaps → unchanged.
+        const bool anyGap = layouts_ && layouts_->hasBlackPixels();
 
-        // Fast path — no static modifiers, dense grid in natural order: box cell i
+        // Fast path — no static modifiers, dense grid in natural order, no gaps: box cell i
         // IS driver light i, so the mapping is the identity memcpy. This is the FPS
         // floor for the common case; keep it before any allocation.
-        if (staticCount == 0 && dense && isNaturalOrder()) {
+        if (staticCount == 0 && dense && !anyGap && isNaturalOrder()) {
             lut_.setIdentity(boxCount);
             allocateBuffer(boxCount);
             return;
@@ -396,13 +401,15 @@ public:
     bool isNaturalOrder() const {
         struct Ctx { lengthType w, h; bool ok; };
         Ctx ctx{physicalWidth_, physicalHeight_, true};
-        layouts_->forEachCoord([](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
+        // Only reached for a gap-free layout (a gap routes to the folded build before this is asked),
+        // so blackCb is null and gaps, were there any, would fall back to the same order check.
+        layouts_->forEachCoord(CoordSink{[](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
             auto* k = static_cast<Ctx*>(c);
             if (!k->ok) return;   // once a mismatch is found the answer is settled; skip the rest
             nrOfLightsType box = static_cast<nrOfLightsType>(z) * k->w * k->h
                                + static_cast<nrOfLightsType>(y) * k->w + x;
             if (driverIdx != box) k->ok = false;
-        }, &ctx);
+        }, nullptr, &ctx});
         return ctx.ok;
     }
 
@@ -467,8 +474,16 @@ public:
             else            f->counts[li]++;                        // pass A: bump the count
         };
 
+        // A GAP (black pixel) is DROPPED from the LUT: its physical slot is already counted in
+        // driverCount, but no logical cell maps to it, so the scatter never writes it and it stays
+        // black (blendMap clears first). The black handler is therefore a no-op — this is exactly the
+        // "physical pixel that stays black" the feature is: a wire slot present, but no source. So both
+        // passes use one sink whose blackCb does nothing.
+        static constexpr CoordCallback kDropGap =
+            [](void*, nrOfLightsType, lengthType, lengthType, lengthType) {};
+
         // Pass A — count.
-        layouts_->forEachCoord(onCoord, &fctx);
+        layouts_->forEachCoord(CoordSink{onCoord, kDropGap, &fctx});
 
         // Prefix-sum counts → offsets (counts[li] becomes the start of cell li's run).
         nrOfLightsType running = 0;
@@ -481,7 +496,7 @@ public:
 
         // Pass B — scatter. counts[] is now the per-cell write cursor (offsets advance).
         fctx.scatter = true;
-        layouts_->forEachCoord(onCoord, &fctx);
+        layouts_->forEachCoord(CoordSink{onCoord, kDropGap, &fctx});
 
         // Pass B advanced each cell's cursor to the END of its run, so counts[i] now
         // holds the end offset of cell i — which equals the START offset of cell i+1.

@@ -37,8 +37,8 @@ public:
         return n;
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
-        forEachShellPoint(cb, ctx, nullptr);
+    void forEachCoord(const CoordSink& sink) const override {
+        forEachShellPoint(sink.cb, sink.ctx, nullptr);
     }
 
 private:

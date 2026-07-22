@@ -37,7 +37,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     // Both enabled: 6 lights total, A occupies 0..3, B occupies 4..5.
     CHECK(layouts.totalLightCount() == 6);
     std::vector<Sample> samples;
-    layouts.forEachCoord(collect, &samples);
+    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
     REQUIRE(samples.size() == 6);
     CHECK(samples[0].idx == 0);
     CHECK(samples[3].idx == 3);
@@ -48,7 +48,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     a.setEnabled(false);
     CHECK(layouts.totalLightCount() == 2);
     samples.clear();
-    layouts.forEachCoord(collect, &samples);
+    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
     REQUIRE(samples.size() == 2);
     CHECK(samples[0].idx == 0);
     CHECK(samples[1].idx == 1);
@@ -60,7 +60,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     b.setEnabled(false);
     CHECK(layouts.totalLightCount() == 0);
     samples.clear();
-    layouts.forEachCoord(collect, &samples);
+    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
     CHECK(samples.empty());
 
     // Re-enable both: original layout restored.
@@ -68,7 +68,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     b.setEnabled(true);
     CHECK(layouts.totalLightCount() == 6);
     samples.clear();
-    layouts.forEachCoord(collect, &samples);
+    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
     REQUIRE(samples.size() == 6);
     CHECK(samples[0].idx == 0);
     CHECK(samples[5].idx == 5);
@@ -89,7 +89,7 @@ TEST_CASE("Disabling the Layouts container reports zero lights and an empty iter
     layouts.setEnabled(false);
     CHECK(layouts.totalLightCount() == 0);
     std::vector<Sample> samples;
-    layouts.forEachCoord(collect, &samples);
+    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
     CHECK(samples.empty());
 
     layouts.setEnabled(true);

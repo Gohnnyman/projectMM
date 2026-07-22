@@ -7,6 +7,7 @@
 #include "core/Control.h"
 #include "core/JsonSink.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/GridBlacksLayout.h"
 #include "light/layouts/SphereLayout.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
@@ -174,6 +175,7 @@ static void registerScenarioTypes() {
     if (done) return;
     mm::ModuleFactory::registerType<mm::Layouts>("Layouts");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
+    mm::ModuleFactory::registerType<mm::GridBlacksLayout>("GridBlacksLayout");
     mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout");
     mm::ModuleFactory::registerType<mm::Layers>("Layers");
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
@@ -348,6 +350,13 @@ struct ScenarioContext {
                 // and the grid stayed at GridLayout's default — masking the real
                 // scenario size.
                 auto* grid = static_cast<mm::GridLayout*>(mod);
+                if (props.has("width"))  grid->width  = static_cast<mm::lengthType>(props["width"].num);
+                if (props.has("height")) grid->height = static_cast<mm::lengthType>(props["height"].num);
+                if (props.has("depth"))  grid->depth  = static_cast<mm::lengthType>(props["depth"].num);
+            } else if (std::strcmp(type, "GridBlacksLayout") == 0) {
+                // Same construct-time dimension apply as GridLayout (the dark-column controls
+                // blackStart/blackCount are set later via set_control, which works post-start).
+                auto* grid = static_cast<mm::GridBlacksLayout*>(mod);
                 if (props.has("width"))  grid->width  = static_cast<mm::lengthType>(props["width"].num);
                 if (props.has("height")) grid->height = static_cast<mm::lengthType>(props["height"].num);
                 if (props.has("depth"))  grid->depth  = static_cast<mm::lengthType>(props["depth"].num);

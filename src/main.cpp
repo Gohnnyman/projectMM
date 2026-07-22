@@ -1,6 +1,7 @@
 #include "core/Scheduler.h"
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/GridBlacksLayout.h"
 #include "light/layouts/SphereLayout.h"
 #include "light/layouts/WheelLayout.h"
 #include "light/layouts/SingleRowLayout.h"
@@ -140,6 +141,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::PanelsLayout>("PanelsLayout", "light/layouts.md#panels");
     mm::ModuleFactory::registerType<mm::TorontoBarGourdsLayout>("TorontoBarGourdsLayout", "light/layouts.md#torontobargourds");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts.md#grid");
+    mm::ModuleFactory::registerType<mm::GridBlacksLayout>("GridBlacksLayout", "light/layouts.md#gridblacks");
     mm::ModuleFactory::registerType<mm::PanelLayout>("PanelLayout", "light/layouts.md#panel");
     mm::ModuleFactory::registerType<mm::RingLayout>("RingLayout", "light/layouts.md#ring");
     mm::ModuleFactory::registerType<mm::Rings241Layout>("Rings241Layout", "light/layouts.md#rings241");

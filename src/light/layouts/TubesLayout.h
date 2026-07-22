@@ -46,7 +46,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         // uint32_t idx so it never wraps on a uint16_t nrOfLightsType; stop at the
         // clamped lightCount() so emitted indices stay within the buffer.
         const uint32_t limit = lightCount();
@@ -60,7 +60,7 @@ public:
                 const lengthType y = reversed
                     ? static_cast<lengthType>(ledsPerTube - 1 - i)
                     : i;
-                cb(ctx, static_cast<nrOfLightsType>(idx++), x, y, 0);
+                sink.pixel(static_cast<nrOfLightsType>(idx++), x, y, 0);
             }
         }
     }

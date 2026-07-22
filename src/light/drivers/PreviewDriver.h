@@ -262,10 +262,12 @@ public:
         } else {
             struct CountCtx { nrOfLightsType s, out; };
             CountCtx cc{s, 0};
-            layouts->forEachCoord([](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+            // A gap is a real preview position (drawn dark at its (x,y,z)), so count/emit it like any
+            // light — blackCb null → blackPixel falls back to the same handler.
+            layouts->forEachCoord(CoordSink{[](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<CountCtx*>(c);
                 if (x % p->s == 0 && y % p->s == 0 && z % p->s == 0) p->out++;
-            }, &cc);
+            }, nullptr, &cc});
             coordCount_ = cc.out;
             // Size the kept-index cache to EXACTLY this count (grow-only) BEFORE the emit pass fills it,
             // so the cache can never truncate: coordCount_ is recomputed every rebuild (adaptive stride,
@@ -328,14 +330,14 @@ public:
             // gather then loops this index map instead of re-walking forEachCoord over every light
             // (an O(total-lights) callback walk per firing, measured ~8 ms at 12K lights on the
             // encode worker). The map's lifecycle IS the coord table's: same pass, same invalidation.
-            layouts->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+            layouts->forEachCoord(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<PosCtx*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 PreviewDriver* self = p->self;
                 if (self->keptIdx_ && self->keptCount_ < self->keptIdxCap_)
                     self->keptIdx_[self->keptCount_++] = idx;
                 p->emit(x, y, z);
-            }, &pc);
+            }, nullptr, &pc});
         }
         if (pc.fill) broadcaster_->pushBinaryFrame(pc.buf, pc.fill);
         // The coord table must reach the browser before color frames carrying the new count (the
@@ -429,11 +431,11 @@ public:
             // Fallback (index-map alloc miss): the full lattice walk, s as the FULL stride (not
             // clamped) — must match buildAndSendCoordTable's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
-            layer_->layouts()->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+            layer_->layouts()->forEachCoord(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<Skip*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 p->col->emit(idx);
-            }, &sk);
+            }, nullptr, &sk});
         }
         if (resumable) return broadcaster_->sendBufferedFrame(header, sizeof(header), stage_, bodyBytes);
         if (col.fill) broadcaster_->pushBinaryFrame(col.buf, col.fill);

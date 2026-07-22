@@ -53,8 +53,8 @@ public:
         return n;
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
-        walk(cb, ctx, nullptr);
+    void forEachCoord(const CoordSink& sink) const override {
+        walk(sink.cb, sink.ctx, nullptr);
     }
 
 private:
