@@ -29,6 +29,26 @@
           "set_by": "2026-07-06",
           "reason": "initial contract — pending first hardware capture"
         }
+      },
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            34,
+            38
+          ],
+          "free_heap": [
+            132472,
+            137912
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-07-22",
+            "2026-07-22"
+          ]
+        }
       }
     },
     {
@@ -46,6 +66,26 @@
           "set_by": "2026-07-06",
           "reason": "initial contract — pending first hardware capture"
         }
+      },
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            36,
+            38
+          ],
+          "free_heap": [
+            131556,
+            139408
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-07-22",
+            "2026-07-22"
+          ]
+        }
       }
     },
     {
@@ -62,6 +102,26 @@
           "free_heap": 90000,
           "set_by": "2026-07-06",
           "reason": "initial contract — pending first hardware capture"
+        }
+      },
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            35,
+            38
+          ],
+          "free_heap": [
+            131524,
+            139712
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-07-22",
+            "2026-07-22"
+          ]
         }
       }
     }

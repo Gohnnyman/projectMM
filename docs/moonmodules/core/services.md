@@ -14,17 +14,19 @@ Detail: [technical](moxygen/Services.md)
 
 ### Audio
 
-A Service (added by the user, not auto-wired): an I²S microphone (or line-in ADC) feeding the FFT that audio-reactive effects consume via `AudioService::latestFrame()`. It also syncs audio over UDP, WLED-compatible: broadcast the local analysis for the WLED ecosystem, or receive a peer's audio to drive effects with no local mic. Idle until real GPIOs are entered.
+A Service (added by the user, not auto-wired): the audio source that feeds the FFT audio-reactive effects consume via `AudioService::latestFrame()`. `mode` is the first choice, the module's identity, and each mode shows only its own detail controls: Local audio runs its own peripheral (an I²S microphone or line-in ADC) and analyzes it locally, Receive network is a pure network sink a peer's WLED-compatible audio drives, and Simulate is a synthesized source for demos and tests. Idle until real GPIOs are entered in Local mode. The Receive network mode and every network-sync control (`send audio`, `syncPort`, `sync status`) exist only on network-capable targets (`platform::hasNetwork`); a no-network build offers just Local audio and Simulate, without a mode picker if those are the only two.
 
 <img src="../../assets/core/AudioService.png" width="300" alt="Audio module controls">
 
-- `sckPin` / `wsPin` / `sdPin` — the I²S GPIOs (bit clock / word-select / data; unset until entered).
-- `mclkPin` — master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
-- `sampleRate` — mic/ADC sample rate.
-- `floor` / `gain` — noise floor and input gain for the analysis.
-- `simulate` — feed a synthetic signal instead of the mic (for testing without hardware).
-- `sync` — Off / Send / Receive: broadcast or receive WLED audio-sync packets. `syncPort` sets the UDP port (default 11988, the WLED standard); Receive auto-blends back to the local mic ~1 s after a peer goes quiet.
-- read-only — `level` (RMS), `peakHz`, `sync status`.
+- `mode` — Local audio / Receive network / Simulate: analyze the on-board mic/line-in, consume a peer's audio off the network (WLED-compatible), or feed a synthesized signal. Receive network appears only on a network build; the controls below are its detail, shown per mode.
+- `sckPin` / `wsPin` / `sdPin` — (Local) the I²S GPIOs (bit clock / word-select / data; unset until entered).
+- `mclkPin` — (Local) master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
+- `sampleRate` — (Local) mic/ADC sample rate.
+- `floor` / `gain` — (Local) noise floor and input gain for the analysis.
+- `send audio` — (Local, network build) broadcast the local analysis as WLED audio-sync packets for the WLED ecosystem.
+- `simulate` — (Simulate) the synthetic pattern: `music` (a plausible song) or `sweep` (a deterministic band-marching test pattern).
+- `syncPort` — (network build) the UDP port (default 11988, the WLED standard), shown when sending or receiving; set it the same on both ends. `sync status` reports the live send/receive state.
+- read-only — `level` (RMS), `peakHz` (the audio driving effects, from any source).
 
 Detail: [technical](moxygen/AudioService.md)
 

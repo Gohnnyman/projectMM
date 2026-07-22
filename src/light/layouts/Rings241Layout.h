@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -47,7 +47,7 @@ public:
         return total;  // 1+8+12+16+24+32+40+48+60 = 241
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         // Shared centre — MoonLight: leftMargin = 1.1 * getRadius(60), assigned to
         // a uint8_t (implicit truncation), stored as ringCenter's integer x/y, then
         // scaled per LED: x = scale * ringCenter.x.
@@ -71,7 +71,7 @@ public:
                 }
                 // MoonLight truncates each axis with a (int) cast (toward zero);
                 // z is scale * ringCenter.z = scale * 0 = 0. Preserve exactly.
-                cb(ctx, idx++,
+                sink.pixel(idx++,
                    static_cast<lengthType>(static_cast<int>(x)),
                    static_cast<lengthType>(static_cast<int>(y)),
                    0);

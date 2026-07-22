@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/effects/Effect.h"   // umbrella: EffectBase + render context + draw/palette/math/noise/color/crc/ScratchBuffer/audio + cstring/cmath
+#include "light/effects/EffectBase.h"
 
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format
@@ -99,25 +99,25 @@ public:
             if (n <= 0) break;
             if (parseArtDmxPacket(pkt_, static_cast<size_t>(n), universe, data, dataLen)) {
                 applyDmx(universe, data, dataLen);
-                noteReceiving(kStatusArtnet);
+                noteReceiving("Art-Net", srcIp);
             } else if (isArtPoll(pkt_, static_cast<size_t>(n))) {
                 replyToPoll(srcIp);   // make the device show up in controller node lists
             }
         }
         for (int i = 0; i < kMaxPacketsPerTick; i++) {
-            const int n = e131Socket_.recvFrom(pkt_, sizeof(pkt_));
+            const int n = e131Socket_.recvFrom(pkt_, sizeof(pkt_), srcIp);
             if (n <= 0) break;
             if (parseE131Packet(pkt_, static_cast<size_t>(n), universe, data, dataLen)) {
                 applyDmx(universe, data, dataLen);
-                noteReceiving(kStatusE131);
+                noteReceiving("E1.31", srcIp);
             }
         }
         for (int i = 0; i < kMaxPacketsPerTick; i++) {
-            const int n = ddpSocket_.recvFrom(pkt_, sizeof(pkt_));
+            const int n = ddpSocket_.recvFrom(pkt_, sizeof(pkt_), srcIp);
             if (n <= 0) break;
             if (parseDdpPacket(pkt_, static_cast<size_t>(n), byteOffset, data, dataLen)) {
                 applyBytes(byteOffset, data, dataLen);
-                noteReceiving(kStatusDdp);
+                noteReceiving("DDP", srcIp);
             }
         }
         // Staging → layer buffer (the layer cleared it at tick start).
@@ -158,9 +158,15 @@ public:
 private:
     static constexpr int kMaxPacketsPerTick = 128;
     static constexpr const char* kBindFailMsg = "UDP bind failed — port in use?";
-    static constexpr const char* kStatusArtnet = "receiving Art-Net";
-    static constexpr const char* kStatusE131 = "receiving E1.31";
-    static constexpr const char* kStatusDdp = "receiving DDP";
+    // The receiving-status buffer: "receiving <protocol> from <ip>", the ONE writable status this effect
+    // shows — the same field reports the protocol AND the sender IP, so it answers "who is driving me".
+    // setStatus holds the pointer (doesn't copy), so the string must outlive the call, hence a member, not
+    // a stack buffer. Sized for the longest form ("receiving Art-Net from 255.255.255.255" = 38 chars +
+    // NUL). A bind error uses its own static literal. lastProto_/lastIp_ cache the last-formatted source so
+    // noteReceiving can early-out on the common case (same sender + protocol) without even formatting.
+    char recvStatus_[40] = "";
+    const char* lastProto_ = nullptr;   // last protocol pointer the status was built from (literal, stable)
+    uint8_t     lastIp_[4] = {};        // last sender IP the status was built from
 
     platform::UdpSocket artnetSocket_;
     platform::UdpSocket e131Socket_;
@@ -170,13 +176,22 @@ private:
     // freed on disable via MoonModule::release() (the release() override chains to it).
     ScratchBuffer<uint8_t> staging_{*this};
 
-    // Swap the "receiving <protocol>" diagnostic — but never clobber a bind
-    // error. Pointer compares only (all four strings are static literals).
-    void noteReceiving(const char* lit) {
+    // Update the "receiving <protocol> from <ip>" diagnostic, but never clobber a bind error (its status is
+    // the kBindFailMsg literal, so status() != recvStatus_). The common case is the same sender + protocol
+    // every packet, so short-circuit on the cached lastProto_/lastIp_ FIRST — no formatting at all — and
+    // only snprintf + setStatus when the source actually changes. proto is always one of the same three
+    // string literals, so a pointer compare identifies it. This runs on the receive hot path.
+    void noteReceiving(const char* proto, const uint8_t ip[4]) {
         const char* s = status();
-        if (s == nullptr || s == kStatusArtnet || s == kStatusE131 || s == kStatusDdp) {
-            if (s != lit) setStatus(lit, Severity::Status);
-        }
+        if (s != nullptr && s != recvStatus_) return;   // a bind error (or foreign status) wins
+        // Already showing this exact source? nothing to do (skip the format + the setStatus).
+        if (s == recvStatus_ && proto == lastProto_ && std::memcmp(ip, lastIp_, 4) == 0) return;
+        lastProto_ = proto;
+        std::memcpy(lastIp_, ip, 4);
+        std::snprintf(recvStatus_, sizeof(recvStatus_), "receiving %s from %u.%u.%u.%u", proto,
+                      static_cast<unsigned>(ip[0]), static_cast<unsigned>(ip[1]),
+                      static_cast<unsigned>(ip[2]), static_cast<unsigned>(ip[3]));
+        setStatus(recvStatus_, Severity::Status);
     }
 
     // Answer an ArtPoll with our IP/MAC/name so controllers list the device.

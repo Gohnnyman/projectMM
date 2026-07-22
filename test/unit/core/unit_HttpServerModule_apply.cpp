@@ -416,3 +416,48 @@ TEST_CASE("buildStatePatch: a status change rides the patch (no resync needed)")
 
     s.deleteTree(root);
 }
+
+// A spy for the schema-changed hook: HttpServerModule wires this hook to requestFullResync(), so counting its
+// fires is exactly "how many full-state resyncs would this control change request." A static counter because
+// the hook is a plain function pointer (MoonModule::setSchemaChangedHook), mirroring the production wiring.
+static int g_schemaFires = 0;
+static void countSchemaFire() { g_schemaFires++; }
+
+// REGRESSION GUARD for the front/back-end sync class of bug that recurred several times: a control change the
+// UI can only learn from the FULL state (never the per-second value patch) MUST request a full resync, or the
+// client's cached state keeps the stale value and reverts the change ~1 s later. The canonical case is the
+// module `enabled` toggle (it rides the full state, not the patch). The counterpart is equally load-bearing:
+// an ORDINARY value change must NOT request a resync, or every slider drag nukes+rebuilds the whole UI (the
+// "expander collapses / picker closes" symptom). This test pins BOTH directions at the one seam where they
+// broke — Scheduler::setControl, via applySetControl — using the schema-changed hook as the resync signal.
+TEST_CASE("apply-core: enabled toggle requests a full resync; a plain value change does not") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box();
+    root->setName("Root");
+    s.addModule(root);
+    mm::HttpServerModule http;
+    http.setScheduler(&s);
+    using OpResult = mm::HttpServerModule::OpResult;
+    REQUIRE(http.applyAddModule("Knob", "K", "Root") == OpResult::Ok);
+
+    mm::MoonModule::setSchemaChangedHook(&countSchemaFire);
+
+    // (1) A plain value change must NOT fire the resync (its value rides the patch — a resync here would be
+    // the over-rebuild that collapses open UI state). Knob.value has no conditional-visibility schema effect.
+    g_schemaFires = 0;
+    REQUIRE(http.applySetControl("K", "value", "{\"value\":42}") == OpResult::Ok);
+    CHECK(g_schemaFires == 0);
+
+    // (2) Toggling `enabled` MUST fire the resync (the fix): enabled rides the full state only, so without a
+    // resync the client never learns the new value and reverts the toggle. Both directions of the toggle.
+    g_schemaFires = 0;
+    REQUIRE(http.applySetControl("K", "enabled", "{\"value\":false}") == OpResult::Ok);
+    CHECK(g_schemaFires >= 1);   // disable → resync requested
+    g_schemaFires = 0;
+    REQUIRE(http.applySetControl("K", "enabled", "{\"value\":true}") == OpResult::Ok);
+    CHECK(g_schemaFires >= 1);   // re-enable → resync requested
+
+    mm::MoonModule::setSchemaChangedHook(nullptr);   // don't leak the spy into other tests
+    s.deleteTree(root);
+}

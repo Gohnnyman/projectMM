@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -34,7 +34,7 @@ public:
         return static_cast<nrOfLightsType>(spokes) * static_cast<nrOfLightsType>(ledsPerSpoke);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         const int32_t maxR = ledsPerSpoke;             // outermost radius (centre shift)
         nrOfLightsType idx = 0;
         for (uint16_t s = 0; s < spokes; s++) {
@@ -47,7 +47,7 @@ public:
                 // offset = radius * component / 128, then shift so coords are ≥ 0.
                 const int32_t x = maxR + ((radius * cx) >> 7);
                 const int32_t y = maxR + ((radius * sy) >> 7);
-                cb(ctx, idx,
+                sink.pixel(idx,
                    static_cast<lengthType>(x),
                    static_cast<lengthType>(y),
                    0);

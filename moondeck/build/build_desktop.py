@@ -5,6 +5,11 @@
 on Windows — so a single machine could (in principle) build multiple host
 flavours without one wiping the other, and so the layout matches the
 ESP32 side (``build/esp32-<board>/``, one dir per target).
+
+Builds ONE target, not the whole project: the firmware binary (``projectMM``) by
+default, or the test binaries (``--tests`` → ``mm_tests`` + ``mm_scenarios``).
+Keeping them separate means the "just give me the binary" build doesn't wait on
+the ~130-file test suite (and vice-versa).
 """
 
 import argparse
@@ -52,6 +57,10 @@ def main():
     ap.add_argument("--gcc", action="store_true",
                     help="build with GCC instead of the default compiler — the toolchain CI uses. "
                          "Catches the warnings clang does not emit.")
+    ap.add_argument("--tests", action="store_true",
+                    help="compile the test binaries (mm_tests + mm_scenarios) instead of the firmware. "
+                         "The default build makes only projectMM; the ~130 test units are a separate, "
+                         "slower compile, run afterwards by test_desktop.py / run_scenario.py.")
     args = ap.parse_args()
 
     bdir = host_build_dir()
@@ -67,7 +76,8 @@ def main():
         build_type = "Debug"
         extra = [f"-DCMAKE_C_COMPILER={cc}", f"-DCMAKE_CXX_COMPILER={cxx}"]
         print(f"Using GCC ({cxx}) in Debug — the exact toolchain + build type CI uses.")
-    print(f"Building desktop target into {bdir}/ ...")
+    what = "test binaries" if args.tests else "desktop target"
+    print(f"Building {what} into {bdir}/ ...")
     # CMAKE_BUILD_TYPE is honoured by single-config generators (Ninja, Make).
     # Visual Studio is multi-config and ignores it — we pass --config Release at
     # build time below. Setting CMAKE_BUILD_TYPE on multi-config is harmless.
@@ -78,7 +88,12 @@ def main():
     if r.returncode != 0:
         sys.exit(r.returncode)
 
-    build_cmd = ["cmake", "--build", bdir]
+    # Build a SPECIFIC target, never the whole "all" — the firmware and the ~130 test translation units are
+    # separate concerns. Default builds only projectMM (the "just give me the desktop binary" path stays
+    # fast; a header edit no longer drags the test suite through the compiler). `--tests` builds the test
+    # binaries instead, which test_desktop.py runs (mm_tests) and run_scenario.py runs (mm_scenarios).
+    targets = ["mm_tests", "mm_scenarios"] if args.tests else ["projectMM"]
+    build_cmd = ["cmake", "--build", bdir, "--target", *targets]
     if is_windows:
         build_cmd += ["--config", "Release"]
     r = subprocess.run(build_cmd, cwd=ROOT)

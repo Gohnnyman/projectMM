@@ -194,6 +194,23 @@ Detail: [technical](moxygen/GridLayout.md)
 
 [Tests](../../tests/unit-tests.md#gridlayout)
 
+<a id="gridblacks"></a>
+
+### GridBlacks
+
+A [Grid](#grid) with **mid-strand dark columns (a spacer)**. Columns `[blackStart, blackStart+blackCount)` are held black in every row, for a sealed/continuous panel that must stay dark down a strip, or a slat wall. A dark column is still a physical wire position the driver clocks, so WS2812 data flows *through* the unlit LEDs to reach the lit columns beyond; the lit columns keep their true positions (the picture is holed, not squeezed), so an effect maps straight across the gap. Use plain [Grid](#grid) when you need no dark columns.
+
+- `width` / `height` / `depth` — grid extent on each axis in lights (1–512).
+- `serpentine` — boustrophedon-wire alternate rows.
+- `blackCount` — number of dark columns; `0` (the default) means no gap, so it renders exactly like a Grid.
+- `blackStart` — first dark column (shown only once `blackCount` is set).
+
+Origin: projectMM
+
+Detail: [technical](moxygen/GridBlacksLayout.md)
+
+[Tests](../../tests/unit-tests.md#gridblackslayout)
+
 <a id="sphere"></a>
 
 ### Sphere

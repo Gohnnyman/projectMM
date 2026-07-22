@@ -10,7 +10,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_task_wdt.h"   // the render loop subscribes itself so a wedge self-heals (reboot) not hangs
+#include "esp_task_wdt.h"   // the render loop and the encode worker each subscribe themselves so a wedge self-heals (reboot) not hangs
 
 #include <atomic>
 #include <new>
@@ -39,9 +39,11 @@ struct EspWorker {
 };
 
 // Trampoline: run the caller's fn (which owns its own loop and returns when it observes the stop flag
-// via a woken waitNotify), then self-delete the RTOS task. The worker isn't registered with the task
-// watchdog — it blocks in waitNotify between frames (a natural yield), and each encode is one bounded
-// frame, so it never trips the idle-task WDT the way a busy-spin would; taskWdtReset() is a no-op.
+// via a woken waitNotify), then self-delete the RTOS task. The fn manages its own WDT membership: the
+// encode worker subscribes itself via taskWdtSubscribe() at loop start, feeds it with taskWdtReset() each
+// frame, and unsubscribes via taskWdtUnsubscribe() before returning (the subscription is per-task, so it
+// can't ride the render task's — see taskWdtSubscribe). A fn that never subscribes leaves taskWdtReset() a
+// no-op, so this trampoline stays generic.
 void workerTrampoline(void* arg) {
     auto* w = static_cast<EspWorker*>(arg);
     w->fn(w->user);                     // runs until stopPinnedTask flips w->stop and wakes it
@@ -121,25 +123,36 @@ void stopPinnedTask(WorkerTask& t) {
     t.impl = nullptr;
 }
 
-// Whether taskWdtSubscribe succeeded — so taskWdtReset only feeds a real subscription. Written once at
-// render-loop start, read each tick on the same (render) task, so no synchronization is needed.
-static bool s_renderWdtSubscribed = false;
+// Whether the CALLING task subscribed to the WDT — so taskWdtReset only feeds a real subscription. The
+// WDT subscription is per-task (esp_task_wdt_add/_reset act on the current task), so this flag is
+// thread_local, NOT one global: the render loop AND the core-1 encode worker each feed the WDT, and a
+// single global would let the worker call esp_task_wdt_reset() on a task the render loop subscribed —
+// which the IDF rejects as "task not found", flooding the log every tick and starving the network stack.
+// Each task reads/writes its own copy, on its own task, so no synchronization is needed.
+static thread_local bool s_wdtSubscribed = false;
 
-// Subscribe the CURRENT (render-loop) task to the task WDT. The sdkconfig runs the TWDT with idle-task
-// checking OFF (a saturated core is healthy), so nothing is watched unless a task subscribes — this is
-// that one subscription: if the render loop stops feeding the WDT (a genuine wedge, not a busy frame),
-// it panics and reboots (the self-heal) instead of hanging silently, and leaves a backtrace. Idempotent
-// enough for one caller; a failure (WDT not inited) just leaves s_renderWdtSubscribed false and reset a
-// no-op, degrading to today's unwatched behavior rather than crashing.
+// Subscribe the CURRENT task to the task WDT. The sdkconfig runs the TWDT with idle-task checking OFF (a
+// saturated core is healthy), so nothing is watched unless a task subscribes. Both the render loop and the
+// encode worker call this on their own task: if either stops feeding the WDT (a genuine wedge, not a busy
+// frame), it panics and reboots (the self-heal) instead of hanging silently, and leaves a backtrace.
+// Idempotent per task; a failure (WDT not inited) just leaves s_wdtSubscribed false and reset a no-op,
+// degrading to unwatched behavior rather than crashing.
 void taskWdtSubscribe() {
-    if (s_renderWdtSubscribed) return;
-    if (esp_task_wdt_add(nullptr) == ESP_OK) s_renderWdtSubscribed = true;
+    if (s_wdtSubscribed) return;
+    if (esp_task_wdt_add(nullptr) == ESP_OK) s_wdtSubscribed = true;
 }
 
-// Feed the render task's WDT subscription (esp_task_wdt_reset), called each render tick. No-op until/unless
-// taskWdtSubscribe ran, so a build/config without the WDT (or a worker that never subscribed) is unaffected.
+// Unsubscribe THIS task before it exits (esp_task_wdt_delete), so a torn-down task leaves no stale WDT
+// entry the IDF would keep checking. No-op if this task never subscribed.
+void taskWdtUnsubscribe() {
+    if (!s_wdtSubscribed) return;
+    if (esp_task_wdt_delete(nullptr) == ESP_OK) s_wdtSubscribed = false;
+}
+
+// Feed THIS task's WDT subscription (esp_task_wdt_reset). No-op until/unless taskWdtSubscribe ran on this
+// same task, so a task that never subscribed (or a build/config without the WDT) is unaffected.
 void taskWdtReset() {
-    if (s_renderWdtSubscribed) esp_task_wdt_reset();
+    if (s_wdtSubscribed) esp_task_wdt_reset();
 }
 
 }  // namespace mm::platform

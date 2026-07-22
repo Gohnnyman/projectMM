@@ -4,6 +4,7 @@
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/GridBlacksLayout.h"
 #include "light/layouts/SphereLayout.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/RegionModifier.h"
@@ -231,4 +232,68 @@ TEST_CASE("Layer: RegionModifier carves the logical box to a sub-region") {
     CHECK(total == 16);          // 4×4 region, 1:1, nothing outside
     CHECK(insideRegion);
     CHECK_FALSE(duplicate);      // 16 distinct physical lights — no cell collapses onto another
+}
+
+// Black pixels (mid-strand dark gaps): a GridLayout with a dark column run leaves the
+// identity fast path (an identity map would light the gap) and builds a LUT that maps
+// only the LIT cells. The gap's physical index is a real wire slot (counted in the
+// physical/driver total) but is NO logical cell's destination, so the scatter never
+// writes it and it stays black — a "physical pixel that stays black". This is the
+// GridLayout-native form of the sparse mapping the sphere/region tests above pin.
+TEST_CASE("Layer: GridBlacks black columns build a gap-dropping LUT") {
+    mm::GridBlacksLayout g;
+    g.width = 8; g.height = 4; g.depth = 1;   // 32-cell box
+    g.blackStart = 3; g.blackCount = 2;       // columns 3,4 dark → 8 gap cells, 24 lit
+    LayerRig rig(&g);
+
+    // A gap forces the folded LUT (the identity map would light the gap).
+    CHECK(rig.layer.lut().hasLUT());
+    // Physical/driver buffer is the FULL box — every wire slot exists, gaps included,
+    // so the driver clocks the dark LEDs and data flows through them.
+    CHECK(rig.layer.physicalLightCount() == 32);
+    // The effect renders the full box (holed model): logical box == physical box.
+    CHECK(rig.layer.buffer().count() == 32);
+
+    // The LUT maps only the 24 lit cells; NO destination is a gap physical index. A gap
+    // index is one whose column x is in [3,5): idx%8 in {3,4}, for every row.
+    const mm::MappingLUT& lut = rig.layer.lut();
+    std::size_t total = 0;
+    bool anyGapDest = false;
+    bool inRange = true;
+    for (mm::nrOfLightsType li = 0; li < lut.logicalCount(); li++) {
+        lut.forEachDestination(li, [&](mm::nrOfLightsType d) {
+            total++;
+            if (d >= 32) inRange = false;
+            const mm::nrOfLightsType col = d % 8;
+            if (col == 3 || col == 4) anyGapDest = true;   // a gap slot must never be a destination
+        });
+    }
+    CHECK(total == 24);            // exactly the lit cells reach a physical light
+    CHECK(inRange);
+    CHECK_FALSE(anyGapDest);       // the 8 dark slots carry no color — they stay black
+
+    // Clearing the run returns to the dense identity fast path (no LUT), byte-identical
+    // to a plain grid — the gap machinery must not perturb the common case (regression).
+    g.blackCount = 0;
+    rig.layer.applyState();
+    CHECK_FALSE(rig.layer.lut().hasLUT());
+    CHECK(rig.layer.physicalLightCount() == 32);
+}
+
+// Robustness: an ALL-black grid (every column dark) is a valid degenerate config — every
+// physical slot is a real wire position the driver still clocks, but NO cell maps to a light,
+// so the LUT has zero destinations. Must build and run (buffer stays black), never crash.
+TEST_CASE("Layer: an all-black GridBlacks builds an empty LUT without crashing") {
+    mm::GridBlacksLayout g;
+    g.width = 8; g.height = 4; g.depth = 1;
+    g.blackStart = 0; g.blackCount = 8;       // every column dark → 32 gap slots, 0 lit
+    LayerRig rig(&g);
+
+    CHECK(rig.layer.physicalLightCount() == 32);   // all 32 wire slots exist and are clocked
+    // Every logical cell maps to nothing: the LUT has zero destinations (a valid empty map).
+    const mm::MappingLUT& lut = rig.layer.lut();
+    std::size_t total = 0;
+    for (mm::nrOfLightsType li = 0; li < lut.logicalCount(); li++)
+        lut.forEachDestination(li, [&](mm::nrOfLightsType) { total++; });
+    CHECK(total == 0);                              // no cell reaches a light — the whole grid is dark
 }

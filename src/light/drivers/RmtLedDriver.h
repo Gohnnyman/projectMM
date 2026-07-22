@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
+#include "light/drivers/DriverBase.h"
 
 #include "light/drivers/LedDriverConfig.h"
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with MultiPinLedDriver)

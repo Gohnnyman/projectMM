@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
+#include "light/drivers/DriverBase.h"
 
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 #include "core/BinaryBroadcaster.h"
@@ -63,9 +63,13 @@ public:
     bool hasCorrectionControls() const override { return false; }
 
     /// Bind the controls: `fps` (1-60) and `resumableFrames` (the downsampled-frame transport A/B).
+    /// resumableFrames is an EXPERT control — a dev/tuning A/B, not a knob a normal user should touch (its
+    /// ON leg tears the preview until the slot-sharing fix lands), so it shows only when System.expertMode
+    /// is on. It still persists and still accepts API writes; only the default UI hides it.
     void defineDriverControls() override {
         controls_.addUint8("fps", fps, 1, 60);
         controls_.addBool("resumableFrames", resumableFrames);
+        controls_.setAdvanced(controls_.count() - 1);
     }
 
     /// Point the driver at the sparse driver buffer the LED/ArtNet drivers also read
@@ -258,10 +262,12 @@ public:
         } else {
             struct CountCtx { nrOfLightsType s, out; };
             CountCtx cc{s, 0};
-            layouts->forEachCoord([](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+            // A gap is a real preview position (drawn dark at its (x,y,z)), so count/emit it like any
+            // light — blackCb null → blackPixel falls back to the same handler.
+            layouts->forEachCoord(CoordSink{[](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<CountCtx*>(c);
                 if (x % p->s == 0 && y % p->s == 0 && z % p->s == 0) p->out++;
-            }, &cc);
+            }, nullptr, &cc});
             coordCount_ = cc.out;
             // Size the kept-index cache to EXACTLY this count (grow-only) BEFORE the emit pass fills it,
             // so the cache can never truncate: coordCount_ is recomputed every rebuild (adaptive stride,
@@ -324,14 +330,14 @@ public:
             // gather then loops this index map instead of re-walking forEachCoord over every light
             // (an O(total-lights) callback walk per firing, measured ~8 ms at 12K lights on the
             // encode worker). The map's lifecycle IS the coord table's: same pass, same invalidation.
-            layouts->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+            layouts->forEachCoord(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<PosCtx*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 PreviewDriver* self = p->self;
                 if (self->keptIdx_ && self->keptCount_ < self->keptIdxCap_)
                     self->keptIdx_[self->keptCount_++] = idx;
                 p->emit(x, y, z);
-            }, &pc);
+            }, nullptr, &pc});
         }
         if (pc.fill) broadcaster_->pushBinaryFrame(pc.buf, pc.fill);
         // The coord table must reach the browser before color frames carrying the new count (the
@@ -425,11 +431,11 @@ public:
             // Fallback (index-map alloc miss): the full lattice walk, s as the FULL stride (not
             // clamped) — must match buildAndSendCoordTable's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
-            layer_->layouts()->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+            layer_->layouts()->forEachCoord(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<Skip*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 p->col->emit(idx);
-            }, &sk);
+            }, nullptr, &sk});
         }
         if (resumable) return broadcaster_->sendBufferedFrame(header, sizeof(header), stage_, bodyBytes);
         if (col.fill) broadcaster_->pushBinaryFrame(col.buf, col.fill);
@@ -480,7 +486,15 @@ private:
             clearStatus();
         }
     }
-    bool resumableFrames = true;   // A/B: downsampled frame via resumable send (ON) vs synchronous (OFF)
+    // A/B for the downsampled-frame transport: OFF = synchronous begin/push/end stream (blocking socket
+    // writes on the render thread, proven-correct); ON = gather-then-resumable-send that drains off the
+    // render thread. Defaults OFF: the resumable path shares the single-occupancy send slot with the ~1 Hz
+    // full-state push and the next preview frame, so a preempted mid-drain frame reaches the browser
+    // spliced — a visibly TORN preview (top rows new, the rest stale). The off-thread send is only worth it
+    // to avoid the ~17 ms render hitch at very large grids with the preview open; until the slot-sharing
+    // tear is fixed (give preview its own send slot, or drop a preempted drain cleanly), the correct
+    // synchronous path is the default. Kept in-tree as the A/B reference for that fix.
+    bool resumableFrames = false;
     bool stageAllocFailed_ = false;    // resumable staging buffer couldn't allocate → synchronous fallback
     bool keptIdxAllocFailed_ = false;  // index cache couldn't allocate → per-frame lattice walk
     uint8_t* stage_ = nullptr;   // gathered color payload for the resumable send (see ensureStage)

@@ -1,5 +1,29 @@
 #pragma once
 
+// Include this one file to write an effect: it brings EffectBase, the render context accessors, and the
+// common drawing / palette / maths / noise / colour / scratch / audio helpers, so a new effect is a single
+// include:
+//
+//   #pragma once
+//   #include "light/effects/EffectBase.h"
+//   namespace mm {
+//   class MyEffect : public EffectBase { ... };
+//   }
+//
+// The helper set is the WHOLE surface available to an effect — the render context, the draw/palette/math/
+// noise primitives, scratch memory (ScratchBuffer), the audio spectrum (AudioService/AudioFrame), the crc
+// fingerprint, and the <cstring>/<cmath> the bodies use. This is also the surface a scripted MoonLive effect
+// gets uniformly, and it costs zero firmware bytes (unused declarations emit no code). An effect that needs a
+// helper genuinely OUTSIDE this surface — a font table, the module factory, a network packet format, a
+// platform primitive — adds that one extra include; nothing else should appear at the top of an effect header.
+//
+// Note the layout: the helper includes (chiefly light/layers/Layer.h, which defines EffectBase's accessor
+// bodies) are pulled in at the BOTTOM of this file, AFTER the EffectBase class. Layer.h includes EffectBase.h
+// (a Layer holds effect children), so EffectBase.h can only forward-declare Layer up here; putting Layer.h
+// after the class lets it re-enter (a no-op via the include guard) with EffectBase already complete, so its
+// out-of-line accessor definitions compile — the standard forward-declare-then-include-the-definer pattern
+// that breaks the cycle.
+
 #include "core/MoonModule.h"
 #include "light/light_types.h" // lengthType, nrOfLightsType, Dim
 
@@ -7,7 +31,7 @@
 
 namespace mm {
 
-class Layer; // forward declaration
+class Layer; // forward declaration (defined in light/layers/Layer.h, included at the bottom)
 
 // Dim enum lives in light/light_types.h so both EffectBase and ModifierBase can
 // refer to it without including each other. Used by Layer::extrude to fill unused
@@ -86,3 +110,20 @@ public:
 };
 
 } // namespace mm
+
+// --- The effect author's helper surface (see the file header). Pulled in AFTER the EffectBase class so
+// Layer.h — which includes this file — re-enters harmlessly and completes EffectBase's accessor bodies. ---
+#include "light/layers/Layer.h"   // EffectBase's out-of-line accessors (layer/buffer/width/height/…)
+#include "light/draw.h"           // draw::pixel / fill / line / fade / blur — write pixels by coordinate
+#include "light/Palette.h"        // colorFromPalette, Palettes::active — the palette system
+#include "core/math8.h"           // beat8 / beatsin8 / sin8 / random8 — the integer animation helpers
+#include "core/noise.h"           // inoise8 — the shared value-noise field
+#include "core/color.h"           // RGB
+#include "core/crc.h"             // crc16 — grid/state fingerprints (stasis detection)
+#include "core/ScratchBuffer.h"   // ScratchBuffer<T> — self-sizing scratch memory for stateful effects
+#include "core/AudioService.h"    // AudioService::latestFrame() — the shared audio source
+#include "core/AudioFrame.h"      // AudioFrame — level + 16-band spectrum an audio-reactive effect reads
+
+#include <cstring>                // memset / memcpy / strcmp — buffer + control-name handling
+#include <cmath>                  // sqrtf / sinf / log10f — per-frame float maths (never per-light)
+#include <array>                  // std::array — fixed-size effect state tables (cube faces, LUTs)

@@ -496,6 +496,11 @@ private:
     // dominant CPU cost) and the network send (ArtNet at 16K is the other big one) both leave the
     // render core. Each driver's tick() is unchanged; only which core calls it differs.
     void runEncodeLoop() {
+        // Subscribe THIS (core-1) task to the WDT before feeding it: the subscription is per-task, so the
+        // taskWdtReset() calls below only count once this task itself is added. Without this, feeding a
+        // subscription the render task made on a DIFFERENT task is rejected as "task not found" and floods
+        // the log every frame, starving the network stack (the WS drops → reconnect → full-state → UI churn).
+        platform::taskWdtSubscribe();
         while (!encodeStop_.load(std::memory_order_acquire)) {
             if (!platform::waitNotify(encodeTask_, 100)) { platform::taskWdtReset(); continue; }
             if (encodeStop_.load(std::memory_order_acquire)) break;
@@ -505,6 +510,7 @@ private:
             platform::taskWdtReset();
             encodeDone_.store(true, std::memory_order_release);
         }
+        platform::taskWdtUnsubscribe();   // leave the WDT clean before the task exits (no dangling entry)
     }
     static void encodeTrampoline(void* self) { static_cast<Drivers*>(self)->runEncodeLoop(); }
 

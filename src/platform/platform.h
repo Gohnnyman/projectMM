@@ -147,12 +147,18 @@ bool waitNotify(WorkerTask& t, uint32_t timeoutMs);
 // Signal stop + wake, then block until the worker fn has returned and the task is torn down.
 void stopPinnedTask(WorkerTask& t);
 // Subscribe THIS task to the task watchdog (esp_task_wdt_add), so a wedge on it panics-and-reboots (the
-// self-heal) instead of hanging silently — called once by the render loop before it starts ticking. The
-// sdkconfig has idle-task checking OFF (a saturated core is healthy, not a bug), so nothing is watched
-// unless a task subscribes explicitly; this is that subscription. No-op on desktop.
+// self-heal) instead of hanging silently. Called by each task that feeds the WDT before it starts ticking:
+// the render loop, and the core-1 encode worker. The subscription is per-task (so is the feed and the flag
+// behind it), which is why a task must subscribe itself rather than inherit another task's subscription.
+// The sdkconfig has idle-task checking OFF (a saturated core is healthy, not a bug), so nothing is watched
+// unless a task subscribes explicitly. No-op on desktop.
 void taskWdtSubscribe();
-// Reset THIS task's watchdog (esp_task_wdt_reset) — called each render tick to feed the subscription
-// above. No-op on desktop, and no-op on ESP32 if the task never subscribed.
+// Unsubscribe THIS task from the watchdog (esp_task_wdt_delete) before it exits, so a torn-down task (the
+// encode worker when the render split disengages) leaves no dangling WDT entry. No-op on desktop, and
+// no-op on ESP32 if the task never subscribed.
+void taskWdtUnsubscribe();
+// Reset THIS task's watchdog (esp_task_wdt_reset) — called each tick to feed the subscription above. No-op
+// on desktop, and no-op on ESP32 if the task never subscribed.
 void taskWdtReset();
 
 // --- GPIO capability introspection (PinsModule) ---------------------------------------------

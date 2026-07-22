@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 // Prior art: MoonLight SingleColumnLayout (MoonModules/MoonLight, layout nodes).
 // A vertical line of lights at a fixed x, running along y. Geometry reproduced
@@ -35,7 +35,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         // Emit the column in wiring order. The COORDINATE is (xposition, y, 0);
         // reversed_order walks y from the high end down, matching MoonLight's
         // addLight order. Stop at the clamped lightCount() so emitted indices
@@ -46,12 +46,12 @@ public:
         if (reversed_order) {
             for (int32_t y = static_cast<int32_t>(start_y) + static_cast<int32_t>(height) - 1;
                  y >= static_cast<int32_t>(start_y) && idx < limit; y--) {
-                cb(ctx, static_cast<nrOfLightsType>(idx++), x, static_cast<lengthType>(y), 0);
+                sink.pixel(static_cast<nrOfLightsType>(idx++), x, static_cast<lengthType>(y), 0);
             }
         } else {
             for (int32_t y = static_cast<int32_t>(start_y);
                  y < static_cast<int32_t>(start_y) + static_cast<int32_t>(height) && idx < limit; y++) {
-                cb(ctx, static_cast<nrOfLightsType>(idx++), x, static_cast<lengthType>(y), 0);
+                sink.pixel(static_cast<nrOfLightsType>(idx++), x, static_cast<lengthType>(y), 0);
             }
         }
     }

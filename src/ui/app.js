@@ -36,9 +36,14 @@ let state = null;
 let selectedModule = null;
 let availableTypes = [];        // populated from GET /api/types after first connection
 let ws = null;
-let wsRetryMs = 500;             // exponential backoff: 500 → 1000 → 2000 → 4000 → 5000
+const WS_RETRY_MIN_MS = 200;     // first reconnect is quick so a dropped initial connect (common on Safari,
+                                 // whose first attempt can lose a contended socket) comes back near-instantly
+let wsRetryMs = WS_RETRY_MIN_MS; // exponential backoff: 200 → 400 → 800 → … → 5000 ceiling
 let wsHeartbeat = null;
+let wsReconnectTimer = null;     // the pending reconnect setTimeout — tracked so pagehide can cancel it
 let wsPaused = false;            // gated by document.visibilityState
+let wsUnloading = false;         // true once the page starts unloading (refresh/navigate) — suppresses the
+                                 // reconnect on the closing socket so the departing page doesn't error-log
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
 const dragTs = {};               // per-control last-touched timestamp (ms) — a short post-interaction cooldown
@@ -55,10 +60,82 @@ const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
 const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
+const LS_EXPANDED  = "mm_expanded";       // [moduleName, …] — modules whose "controls" <details> is open
+const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx } — user-dragged textarea heights
+const LS_CARDS_W   = "mm_cardsWidth";     // px — dragged width of the docked card column (right side)
 
 // The open tab per container, persisted so a reload doesn't dump you back on the first child.
 let selectedTabs = {};
 try { selectedTabs = JSON.parse(lsRead(LS_TABS, "{}")) || {}; } catch { selectedTabs = {}; }
+
+// Which modules have their "controls" disclosure open — VIEW-ONLY state the backend knows nothing about, so
+// it lives here (like selectedTabs), NOT in the module state. Persisting it means a full-state rebuild (or a
+// page reload) restores the open/closed expander instead of snapping it shut. Value/structure/picker state
+// all come from the backend, so those need no client persistence.
+let expandedSet = new Set();
+try { expandedSet = new Set(JSON.parse(lsRead(LS_EXPANDED, "[]")) || []); } catch { expandedSet = new Set(); }
+function saveExpanded() { localStorage.setItem(LS_EXPANDED, JSON.stringify([...expandedSet])); }
+
+// The height a user dragged each textarea to — again VIEW-ONLY state the backend doesn't own (like the tab
+// and expander state above), keyed by "<module>:<control>". Persisting it means a resized script/config box
+// keeps its size across a full-state rebuild and a page reload instead of snapping back to the 2-row default.
+let textareaSizes = {};
+try { textareaSizes = JSON.parse(lsRead(LS_TA_SIZE, "{}")) || {}; } catch { textareaSizes = {}; }
+function saveTextareaSize(key, heightPx) { textareaSizes[key] = heightPx; localStorage.setItem(LS_TA_SIZE, JSON.stringify(textareaSizes)); }
+
+// The width the user dragged the docked card column to — VIEW-ONLY state (like the tab/expander/textarea
+// state above). Applied as the --cards-width CSS custom property (the #main flex-basis reads it, clamped in
+// CSS so it can't crowd out the preview or vanish); restored on boot. Only meaningful in docked mode, where
+// the cards sit beside the preview; PiP/narrow mode makes them full-width and hides the handle.
+function applyCardsWidth(px) { document.documentElement.style.setProperty("--cards-width", px + "px"); }
+(function restoreCardsWidth() {
+    const w = parseInt(lsRead(LS_CARDS_W, ""), 10);
+    if (Number.isFinite(w) && w > 0) applyCardsWidth(w);
+})();
+
+// Wire the card-column resize handle (index.html #cards-resize). Dragging it left/right sets --cards-width
+// live and persists the final value. The handle sits at the LEFT edge of #main, so dragging left widens the
+// cards (they grow toward the preview); width = the pane's right edge minus the pointer x. Bounded by the
+// same clamp the CSS enforces, and coalesced through requestAnimationFrame so a drag doesn't thrash layout.
+function setupCardsResize() {
+    const handle = document.getElementById("cards-resize");
+    const main = document.getElementById("main");
+    if (!handle || !main) return;
+    const MIN = 280, MAX = 900;
+    let dragging = false, raf = 0, pendingW = 0;
+    const onMove = (clientX) => {
+        // #main's right edge is fixed (the workspace's right edge); width grows as the pointer moves left.
+        const right = main.getBoundingClientRect().right;
+        pendingW = Math.max(MIN, Math.min(MAX, Math.round(right - clientX)));
+        if (raf) return;
+        raf = requestAnimationFrame(() => { raf = 0; applyCardsWidth(pendingW); });
+    };
+    const stop = () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove("dragging");
+        document.body.classList.remove("cards-resizing");
+        if (pendingW > 0) localStorage.setItem(LS_CARDS_W, String(pendingW));
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
+    };
+    const onPointerMove = (e) => { if (dragging) onMove(e.clientX); };
+    handle.addEventListener("pointerdown", (e) => {
+        // Only resize in docked mode — the handle is CSS-hidden otherwise, but guard anyway.
+        if (!document.querySelector(".workspace")?.classList.contains("mode-docked")) return;
+        e.preventDefault();
+        dragging = true;
+        pendingW = main.getBoundingClientRect().width;
+        handle.classList.add("dragging");
+        document.body.classList.add("cards-resizing");
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", stop);
+        window.addEventListener("pointercancel", stop);
+    });
+    // Double-click resets to the default width (a common resize-handle affordance).
+    handle.addEventListener("dblclick", () => { applyCardsWidth(480); localStorage.setItem(LS_CARDS_W, "480"); });
+}
 
 function lsRead(key, defaultVal) {
     const v = localStorage.getItem(key);
@@ -73,16 +150,19 @@ let theme      = lsRead(LS_THEME, "dark");
 // ---------------------------------------------------------------------------
 
 function connectWs() {
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
     if (ws) {
         try { ws.close(); } catch {}
         ws = null;
     }
     const url = `ws://${location.host}/ws`;
     ws = new WebSocket(url);
+    const sock = ws;   // captured so a stale socket's late callback (after a reconnect swapped `ws`) is a no-op
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-        wsRetryMs = 500;                                    // reset backoff
+        if (sock !== ws) return;   // a newer socket already took over — ignore this stale open
+        wsRetryMs = WS_RETRY_MIN_MS;                        // reset backoff
         setWsDot(true);
         // Keepalive ping every 25s — Safari kills idle WebSockets otherwise
         clearInterval(wsHeartbeat);
@@ -92,7 +172,7 @@ function connectWs() {
     };
 
     ws.onmessage = (e) => {
-        if (wsPaused) return;
+        if (sock !== ws || wsPaused) return;   // ignore a stale socket's late frame
         if (e.data instanceof ArrayBuffer) {
             preview.onBinaryMessage(e.data);
             return;
@@ -123,11 +203,13 @@ function connectWs() {
     };
 
     ws.onclose = () => {
-        setWsDot(false);
+        if (sock !== ws) return;   // a stale socket closing after we already moved on — leave the live one alone
         clearInterval(wsHeartbeat);
         wsHeartbeat = null;
-        // Exponential backoff with 5s ceiling
-        setTimeout(connectWs, wsRetryMs);
+        if (wsUnloading) return;   // the page is going away — don't reconnect (and don't touch the DOM)
+        setWsDot(false);
+        // Exponential backoff with 5s ceiling; track the timer so pagehide can cancel a pending reconnect.
+        wsReconnectTimer = setTimeout(connectWs, wsRetryMs);
         wsRetryMs = Math.min(wsRetryMs * 2, 5000);
     };
 
@@ -148,8 +230,19 @@ window.addEventListener("pageshow", (e) => {
     if (e.persisted) {
         // Safari restored from bfcache: re-establish state
         wsPaused = false;
+        wsUnloading = false;   // a bfcache-restored page is live again — allow reconnects
         if (!ws || ws.readyState !== WebSocket.OPEN) connectWs();
     }
+});
+// Close the socket cleanly as the page unloads (a refresh, a navigation, or a bfcache suspend). Without
+// this the departing page's socket is torn down abnormally by the browser, which logs a "connection lost"
+// error to the console every refresh. Sending a normal (1000) close first, and marking wsUnloading so
+// onclose skips its reconnect, makes the handover silent. pagehide (not beforeunload) fires for bfcache too.
+window.addEventListener("pagehide", () => {
+    wsUnloading = true;
+    clearInterval(wsHeartbeat);
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }   // no reconnect after unload
+    if (ws) { try { ws.close(1000); } catch { /* already closing */ } }
 });
 
 // ---------------------------------------------------------------------------
@@ -160,29 +253,52 @@ async function init() {
     applyTheme(theme);
     setupStatusBarButtons();
     setupUpdateBadge();
-    try {
-        const resp = await fetch("/api/state");
-        state = await resp.json();
-        const savedSel = lsRead(LS_SELECTED, null);
-        if (state.modules && state.modules.length > 0) {
-            const exists = savedSel && state.modules.some(m => m.name === savedSel);
-            selectedModule = exists ? savedSel : state.modules[0].name;
-        }
-        renderNav();
-        renderCards();
-        updateStatusBar();
-        // /api/types arrived in plan-11; fetch in parallel. When it arrives, re-render
-        // so reset-to-default buttons (whose defaults come from this payload) appear.
-        fetch("/api/types").then(r => r.json()).then(j => {
-            availableTypes = j.types || [];
-            if (state) renderCards();
-        }).catch(() => {});
-    } catch (err) {
-        document.getElementById("main").textContent = "Error: " + err.message;
-    }
+    setupCardsResize();
+    // Open the WebSocket FIRST, before any HTTP fetch. The device pushes a full {modules} state on connect
+    // (handleWebSocketUpgrade → requestFullResync), so the WS is the primary state source — the /api/state
+    // fetch below is only a first-paint shortcut. Connecting first matters most on Safari: it opens more
+    // parallel connections up front and is quicker to give up on a contended one, so if the WS is opened
+    // LAST (after several awaited fetches + the page's file loads) it lands in the most-saturated moment of
+    // the device's small socket pool and Safari abandons it — the "basic UI shows but the WS never goes
+    // live" symptom. Opening it first lets it grab an uncontended slot; Chrome tolerated the old order, so
+    // this fixes Safari without regressing Chrome.
     connectWs();
     preview.init();
     preview.setupLayout();
+    // First-paint shortcut: render from a one-shot /api/state so the cards appear immediately instead of
+    // waiting for the WS's first full-state push. The WS then keeps everything live. If this fetch fails
+    // (a contended slot), it's non-fatal — the WS full state fills in the moment it lands. Since the WS is
+    // opened FIRST, its full-state push can beat this await; when it has (state already set), DON'T let the
+    // REST snapshot overwrite the newer, live WS state — just skip the commit.
+    try {
+        const resp = await fetch("/api/state");
+        if (resp.ok && (!state || !Array.isArray(state.modules))) {
+            const snap = await resp.json();
+            if (snap && Array.isArray(snap.modules)) {
+                state = snap;
+                const savedSel = lsRead(LS_SELECTED, null);
+                if (state.modules.length > 0) {
+                    const exists = savedSel && state.modules.some(m => m.name === savedSel);
+                    selectedModule = exists ? savedSel : state.modules[0].name;
+                }
+                renderNav();
+                renderCards();
+                updateStatusBar();
+            }
+        }
+    } catch { /* non-fatal — the WS full state renders the UI when it arrives */ }
+    // /api/types arrived in plan-11; fetch in parallel. When it arrives, the reset-to-default buttons (whose
+    // defaults come from this payload) need to appear — but a full renderCards() rebuilds the DOM, which
+    // would blow away a control the user is mid-edit (this fires ~1 s after first paint, so that's rare but
+    // possible). Skip the re-render while an editable field is focused / a native select is open; the reset
+    // buttons then appear on the next structural render instead of interrupting the edit.
+    fetch("/api/types").then(r => r.json()).then(j => {
+        availableTypes = j.types || [];
+        const el = document.activeElement;
+        const editing = el && (el.matches("input, textarea") || el.closest("select")
+                               || document.querySelector('select[data-open="true"]'));
+        if (state && !editing) renderCards();
+    }).catch(() => {});
 }
 
 // The message for a failed fetch Response: the server's own `{"error": …}` body (JSON, e.g.
@@ -588,12 +704,14 @@ function applyTabDot(tab, mod) {
     tab.appendChild(dot);
 }
 
-// Patch-path twin of applyTabDot: the tab strip is built in renderCards(), which the WS value patch
-// deliberately never re-runs — so without this a fault appearing on a background tab would stay
-// invisible until the next full render. (The UI has two render paths; a rule must live in both.)
+// Patch-path twin of applyTabDot + the disabled greying: the tab strip is built in renderCards(), which the
+// WS value patch deliberately never re-runs — so without this, a fault (or an enable/disable) on a background
+// tab would stay invisible until the next full render. (The UI has two render paths; a rule must live in both.)
 function updateTabDot(mod) {
     const tab = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
-    if (tab) applyTabDot(tab, mod);
+    if (!tab) return;
+    applyTabDot(tab, mod);
+    tab.classList.toggle("tab--disabled", mod.enabled === false);   // grey a disabled module's tab title
 }
 
 // Tab strip + the one selected child. `active` falls back to the first child whenever the remembered
@@ -609,7 +727,10 @@ function renderChildTabs(mod, childrenEl, depth) {
 
     for (const child of mod.children) {
         const tab = document.createElement("button");
-        tab.className = "tab" + (child.name === active ? " tab-active" : "");
+        // Grey a disabled child's tab title (mirrors the card's card--disabled), so it reads as inactive
+        // from the strip without opening it. Derived purely from child.enabled — no backend round-trip.
+        tab.className = "tab" + (child.name === active ? " tab-active" : "")
+                              + (child.enabled === false ? " tab--disabled" : "");
         tab.type = "button";
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", child.name === active ? "true" : "false");
@@ -687,6 +808,12 @@ function createCard(mod, depth) {
         enabled.classList.toggle("module-enabled--off", !on);
         enabled.setAttribute("aria-pressed", on ? "true" : "false");
         card.classList.toggle("card--disabled", !on);
+        // Grey this module's TAB in the same click, alongside its card — so the tab title dims INSTANTLY
+        // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
+        // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
+        // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
+        const tabEl = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
+        if (tabEl) tabEl.classList.toggle("tab--disabled", !on);
     };
     setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
     enabled.addEventListener("click", () => {
@@ -792,6 +919,14 @@ function createCard(mod, depth) {
     const controlsHost = wrapInDetails ? (() => {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
+        // Restore the open/closed state from localStorage, so a full-state rebuild (or a page reload) keeps
+        // the expander as the user left it instead of snapping shut. Persist it on toggle — same pattern as
+        // the selected tab (LS_TABS). VIEW-only state; nothing to do with the module's backend state.
+        d.open = expandedSet.has(mod.name);
+        d.addEventListener("toggle", () => {
+            if (d.open) expandedSet.add(mod.name); else expandedSet.delete(mod.name);
+            saveExpanded();
+        });
         const s = document.createElement("summary");
         s.textContent = "controls";
         d.appendChild(s);
@@ -1412,6 +1547,23 @@ function createControl(moduleName, moduleType, ctrl) {
             input.dataset.key = ctrl.name;
             input.rows = 2;            // default 2 lines; CSS height + resize grip control size
             input.spellcheck = false;
+            // Restore a previously dragged height (view-state, see textareaSizes). A stored px height
+            // overrides the 2-row default; an untouched textarea has no entry and keeps the default.
+            const savedH = textareaSizes[key];
+            if (typeof savedH === "number" && savedH > 0) input.style.height = savedH + "px";
+            // Persist the height whenever the user drags the resize grip. A <textarea> has no native resize
+            // event, so a ResizeObserver is the standard way to observe it; store the pixel height keyed by
+            // "<module>:<control>". Use the observed height (not the inline style, which the initial observe
+            // fire and a layout-driven change wouldn't set), track the last saved value, and write only on a
+            // real change — so the initial fire and idle re-observations don't thrash localStorage. rAF-
+            // coalesced so a drag saves once per frame at most.
+            let taRaf = 0, taPrevH = Math.round(savedH > 0 ? savedH : 0);
+            const taObserver = new ResizeObserver((entries) => {
+                const h = Math.round(entries[0].contentRect.height);
+                if (taRaf || h <= 0 || h === taPrevH) return;
+                taRaf = requestAnimationFrame(() => { taRaf = 0; taPrevH = h; saveTextareaSize(key, h); });
+            });
+            taObserver.observe(input);
             if (ctrl.readonly) {
                 input.readOnly = true;
             } else {

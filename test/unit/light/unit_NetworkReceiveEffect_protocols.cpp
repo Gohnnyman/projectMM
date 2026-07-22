@@ -279,7 +279,12 @@ TEST_CASE("NetworkReceiveEffect receives all three protocols at once over localh
         if (!landed) mm::platform::delayMs(1);
     }
     CHECK(landed);
-    CHECK(r.fx.status() != nullptr);   // "receiving <protocol>" diagnostic is set
+    // The "receiving <protocol> from <ip>" diagnostic carries the sender's IP. This test's packets travel
+    // over loopback (the same round-trip `landed` above already relies on), so the source is 127.0.0.1 and
+    // the status names it — the direct check that the source IP surfaces in the status.
+    REQUIRE(r.fx.status() != nullptr);
+    CHECK(std::strstr(r.fx.status(), "receiving ") != nullptr);
+    CHECK(std::strstr(r.fx.status(), "from 127.0.0.1") != nullptr);
 
     artTx.close();
     e131Tx.close();

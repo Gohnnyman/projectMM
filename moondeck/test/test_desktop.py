@@ -52,7 +52,7 @@ def main():
     if test_exe is None:
         print(f"Test executable not found under "
               f"{build_dir.relative_to(ROOT)}/test/.")
-        print("Run build_desktop.py first.")
+        print("Compile it first: uv run moondeck/build/build_desktop.py --tests (MoonDeck → desktop → Compile Tests).")
         sys.exit(1)
 
     # Default: summary-only output (`-s` dumps every passing assertion, ~11k lines

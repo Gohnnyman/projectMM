@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -72,7 +72,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         // Choose the axis order (which loop slot drives which axis). axes[0] is
         // the OUTERMOST loop's axis, axes[2] the innermost (fastest). Verbatim
         // from MoonLight: index 0=X,1=Y,2=Z. Guard an out-of-range select.
@@ -116,7 +116,7 @@ public:
                     coords[a0] = v0;
                     coords[a1] = v1;
                     coords[a2] = v2;
-                    cb(ctx, static_cast<nrOfLightsType>(idx++),
+                    sink.pixel(static_cast<nrOfLightsType>(idx++),
                        coords[0], coords[1], coords[2]);
                 }
             }

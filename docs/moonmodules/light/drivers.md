@@ -37,7 +37,7 @@ Addressable WS2812B-class LEDs over a wire. Four drivers, same controls and same
 
 Plus the [shared controls](#shared-driver-controls) above:
 
-- `pins` — data GPIO list, e.g. `18,17,16`. One strand each — or, with Moon's pin expander, one *group of 8*. Empty idles until set; changing it re-inits live.
+- `pins` — data GPIO list, e.g. `18,17,16`, or inclusive ranges like `20-23` (= `20,21,22,23`) mixed freely (`20-22,35,38-40`). One strand each — or, with Moon's pin expander, one *group of 8*. Empty idles until set; changing it re-inits live.
 - `ledsPerPin` — lights per **strand**, following the broadcasting idiom (cf. NumPy / CSS shorthand): **empty** = even split of the window; **one number** = that many on *every* strand (`64` → 64 each); **a list** `3,4,5` = one per strand by position (a short list even-splits the remainder). Shorter strands go dark early while the longest finishes. Through an expander an entry is one strand, not one pin, so two strands on one '595 can differ.
 - **Expert-only** (🔧, shown when `System.expertMode` is on): `loopbackTest` — a TX→RX loopback self-test (jumper the first pin to `loopbackRxPin`), verdict in the status field, with `loopbackTxPin`/`loopbackRxPin` its wiring. Moon adds `shiftOverclock` and the manual `ring*` geometry knobs (below).
 

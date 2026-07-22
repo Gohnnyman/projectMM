@@ -54,6 +54,10 @@
                     <canvas id="preview"></canvas>
                     <canvas id="preview-labels"></canvas>
                 </div>
+                <!-- Grab handle to resize the card column (docked mode only, where cards sit
+                     beside the preview). Dragging it widens/narrows #main; the width persists
+                     to localStorage. Hidden in PiP mode (cards are full-width there). -->
+                <div id="cards-resize" class="cards-resize" role="separator" aria-orientation="vertical" aria-label="Resize module cards" title="Drag to resize the module cards"></div>
                 <main id="main"></main>
             </div>
             <!-- Re-show affordance: appears only when the PiP is dismissed. -->

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -35,7 +35,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         // Use uint32_t for idx so it never wraps on uint16_t nrOfLightsType
         // (e.g. no-PSRAM ESP32 where 512×512 > 65535). Stop at the clamped
         // lightCount() so emitted indices stay within the allocated buffer.
@@ -50,7 +50,7 @@ public:
                 const bool reverse = serpentine && (y & 1);
                 for (lengthType i = 0; i < width && idx < limit; i++) {
                     const lengthType x = reverse ? static_cast<lengthType>(width - 1 - i) : i;
-                    cb(ctx, static_cast<nrOfLightsType>(idx++), x, y, z);
+                    sink.pixel(static_cast<nrOfLightsType>(idx++), x, y, z);
                 }
             }
         }

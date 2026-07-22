@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -43,7 +43,7 @@ public:
         return static_cast<nrOfLightsType>(width);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         // The coordinate at index i is fixed at row yPosition, z=0; only the x walk
         // direction depends on reversedOrder — the two branches mirror MoonLight's
         // onLayout() forward/reverse loops exactly.
@@ -52,12 +52,12 @@ public:
         if (reversedOrder) {
             for (int32_t x = static_cast<int32_t>(startX) + width - 1;
                  x >= static_cast<int32_t>(startX); x--) {
-                cb(ctx, idx++, static_cast<lengthType>(x), y, 0);
+                sink.pixel(idx++, static_cast<lengthType>(x), y, 0);
             }
         } else {
             for (int32_t x = static_cast<int32_t>(startX);
                  x < static_cast<int32_t>(startX) + width; x++) {
-                cb(ctx, idx++, static_cast<lengthType>(x), y, 0);
+                sink.pixel(idx++, static_cast<lengthType>(x), y, 0);
             }
         }
     }

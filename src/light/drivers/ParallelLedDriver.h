@@ -110,7 +110,8 @@ public:
     static constexpr nrOfLightsType kLoopbackTestLights = 256;
 
     /// Comma-separated GPIO list, one parallel lane per pin — up to kMaxLanes strands clocked out
-    /// SIMULTANEOUSLY, fed consecutive slices of this driver's window. Shared control shape with
+    /// SIMULTANEOUSLY, fed consecutive slices of this driver's window. A token may be a single pin or an
+    /// inclusive range ("20-23" → 20,21,22,23), mixing freely ("20-22,35,38-40"). Shared control shape with
     /// RmtLedDriver (parsers in PinList.h). Defaults live on the derived (chip-specific safe pins),
     /// so the derived sets them after construction; the base just declares them. i80 needs exactly
     /// 8 OR 16 real pins (a partial bus is rejected — a sub-16 board parks unused lanes + WR/DC on

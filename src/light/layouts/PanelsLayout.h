@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -78,7 +78,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         // MoonLight: axes = axisOrders[wiringOrder]; XY(0) = {1,0} (Y outer, X inner),
         // YX(1) = {0,1} (X outer, Y inner). axes[0] is the outer axis, axes[1] the inner.
         // The SAME table drives both the panel-grid walk and the per-panel walk.
@@ -88,7 +88,7 @@ public:
         };
 
         const uint32_t limit = lightCount();
-        Emit e{cb, ctx, panelWidth, panelHeight, limit, 0};
+        Emit e{sink.cb, sink.ctx, panelWidth, panelHeight, limit, 0};
 
         // ---- Outer walk: the panel grid. ----
         // MoonLight: panels.iterate(0,0,a){ panels.iterate(1,a,b){ coordsP[axes[0]]=a; coordsP[axes[1]]=b; ... } }

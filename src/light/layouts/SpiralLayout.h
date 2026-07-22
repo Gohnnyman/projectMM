@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -42,7 +42,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void forEachCoord(const CoordSink& sink) const override {
         const uint32_t limit = lightCount();
         if (limit == 0) return;
 
@@ -76,7 +76,7 @@ public:
             const float y = currentHeight;
             const float z = currentRadius * cosf(radians);
 
-            cb(ctx, static_cast<nrOfLightsType>(i),
+            sink.pixel(static_cast<nrOfLightsType>(i),
                static_cast<lengthType>(x + middleX),
                static_cast<lengthType>(y),
                static_cast<lengthType>(z + middleZ));

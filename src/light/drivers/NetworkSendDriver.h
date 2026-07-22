@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/Driver.h"   // umbrella: DriverBase + Layer/Buffer/Correction/platform + cstring/cstdint/cstdio/algorithm
+#include "light/drivers/DriverBase.h"
 
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format

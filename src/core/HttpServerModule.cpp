@@ -86,9 +86,26 @@ void HttpServerModule::tick20ms() {
     // slider) by SENDING a {on,bri} text frame over /ws, not by HTTP POST — so we must read
     // the socket, not only push to it. Cheap (non-blocking, usually nothing pending).
     pollWledStateFromWebSockets();
-    // Accept one HTTP connection per tick.
-    auto conn = server_.accept();
-    if (conn.valid()) handleConnection(conn);
+    // Accept and serve a bounded BATCH of HTTP connections per tick, not one. A browser page-load opens
+    // the HTML + several JS/CSS files + the WS upgrade in parallel (~8 connections); accepting one per
+    // 20 ms tick drains that burst over ~160 ms and — worse — lets the accept backlog fill and drop the
+    // slower connections (the WS among them), so the page loads but the clock/preview never start until a
+    // refresh. Draining up to kAcceptsPerTick clears a whole first-load burst in ~2 ticks. It stays bounded
+    // so one tick can't serve an unbounded run of requests (the hot-path rule): accept() returns an invalid
+    // connection the instant the backlog is empty, which breaks the loop early in the common idle case.
+    constexpr int kAcceptsPerTick = 8;
+    // Bound the batch by WALL-CLOCK too, not just count: each handleConnection serves synchronously and a
+    // stalled peer can burn up to the write deadline (TcpConnection::write's ~2 s) per connection, so 8
+    // stalled clients in one tick could stack to ~16 s — past the task WDT. Break once the batch has spent
+    // this budget; the remaining backlog drains on the next tick. Subtraction-based compare, rollover-safe.
+    constexpr uint32_t kAcceptBudgetMs = 100;
+    const uint32_t batchStart = platform::millis();
+    for (int i = 0; i < kAcceptsPerTick; i++) {
+        auto conn = server_.accept();
+        if (!conn.valid()) break;   // backlog drained (the usual case: 0 or 1 pending)
+        handleConnection(conn);
+        if (platform::millis() - batchStart >= kAcceptBudgetMs) break;   // a slow client stalled the batch
+    }
 }
 
 void HttpServerModule::tick1s() {
@@ -571,14 +588,16 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
     const int hn = std::snprintf(header, sizeof(header),
         "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %ld\r\n"
         "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", size);
-    conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn));
+    if (!conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn))) return;
     char chunk[1024];
     for (long offset = 0; offset < size;) {
         const size_t want = static_cast<size_t>(size - offset) < sizeof(chunk)
                           ? static_cast<size_t>(size - offset) : sizeof(chunk);
         const int got = platform::fsReadAt(path, offset, chunk, want);
         if (got <= 0) break;   // read error / early EOF — the client sees a short (truncated) body
-        conn.write(reinterpret_cast<const uint8_t*>(chunk), static_cast<size_t>(got));
+        // write() returns false on a real socket error or its bounded deadline (a stalled client); STOP
+        // then — retrying every remaining chunk would burn deadline-worth of render-thread time per chunk.
+        if (!conn.write(reinterpret_cast<const uint8_t*>(chunk), static_cast<size_t>(got))) return;
         offset += got;
     }
 }
@@ -758,14 +777,16 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
             "Cache-Control: no-cache\r\n"
             "\r\n",
             contentType, size);
-        conn.write(reinterpret_cast<const uint8_t*>(header), headerLen);
+        if (!conn.write(reinterpret_cast<const uint8_t*>(header), headerLen)) { std::fclose(f); return; }
 
         uint8_t chunk[1024];
         while (size > 0) {
             size_t toRead = size > static_cast<long>(sizeof(chunk)) ? sizeof(chunk) : static_cast<size_t>(size);
             size_t bytesRead = std::fread(chunk, 1, toRead, f);
             if (bytesRead == 0) break;
-            conn.write(chunk, bytesRead);
+            // Stop on a write failure (socket error or the bounded deadline for a stalled client) — else
+            // every remaining chunk retries and burns deadline-worth of render-thread time each.
+            if (!conn.write(chunk, bytesRead)) break;
             size -= static_cast<long>(bytesRead);
         }
         std::fclose(f);
@@ -2147,7 +2168,7 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
         acceptKey);
     conn.write(reinterpret_cast<const uint8_t*>(response), respLen);
 
-    // Store connection as WebSocket client
+    // Store connection as WebSocket client.
     for (int i = 0; i < MAX_WS_CLIENTS; i++) {
         if (!wsClients_[i].valid()) {
             wsClients_[i] = std::move(conn);
@@ -2164,7 +2185,10 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
             return;
         }
     }
-    // No slot available — close
+    // No slot available — close. A slot frees when a dead client's next send/poll fails (reaped within a
+    // tick or two), so MAX_WS_CLIENTS is sized well above the realistic concurrent count PLUS the transient
+    // overlap of a refresh (the browser opens the new socket before the old socket's FIN lands, so both
+    // briefly hold slots). The browser's own WS backoff retries a genuinely-full moment.
     conn.close();
 }
 
@@ -2262,6 +2286,11 @@ void HttpServerModule::pollWledStateFromWebSockets() {
         if (!ws.valid()) continue;
         uint8_t f[512];
         int n = ws.read(f, sizeof(f));             // non-blocking (read() returns -1 if nothing)
+        // read() == 0 is a clean peer close (FIN): reap the slot NOW so it frees for a new client. Without
+        // this the dead slot lingers until the next SEND fails (up to a tick1s later), and a rapid
+        // refresh/reconnect burst could find every slot still "valid" and be rejected ("WebSocket closed
+        // before the connection is established"). read() == -1 (nothing pending) leaves a live client alone.
+        if (n == 0) { ws.close(); continue; }
         if (n < 6) continue;                       // a masked text frame is ≥6 bytes
         // A fast slider drag can land MULTIPLE small {on,bri} frames in one read; walk every
         // complete masked text frame in the chunk so none is dropped (apply each in order →

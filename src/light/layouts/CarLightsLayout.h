@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layouts/Layout.h"   // umbrella: LayoutBase + light_types + math8 + cmath/cstdint/limits/numbers
+#include "light/layouts/LayoutBase.h"
 
 namespace mm {
 
@@ -53,8 +53,8 @@ public:
         return n;
     }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
-        walk(cb, ctx, nullptr);
+    void forEachCoord(const CoordSink& sink) const override {
+        walk(sink.cb, sink.ctx, nullptr);
     }
 
 private:

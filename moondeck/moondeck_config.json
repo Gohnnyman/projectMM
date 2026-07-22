@@ -9,6 +9,15 @@
       "script": "build/build_desktop.py"
     },
     {
+      "id": "compile_tests",
+      "tab": "desktop",
+      "group": "test",
+      "label": "Compile Tests",
+      "help": "compile_tests",
+      "script": "build/build_desktop.py",
+      "args": ["--tests"]
+    },
+    {
       "id": "test_desktop",
       "tab": "desktop",
       "group": "test",

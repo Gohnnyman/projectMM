@@ -297,8 +297,9 @@ void stopPinnedTask(WorkerTask& t) {
     t.impl = nullptr;
 }
 
-void taskWdtSubscribe() {}   // no watchdog on the host
-void taskWdtReset() {}   // no watchdog on the host
+void taskWdtSubscribe() {}     // no watchdog on the host
+void taskWdtUnsubscribe() {}   // no watchdog on the host
+void taskWdtReset() {}         // no watchdog on the host
 
 
 // A host build has no real GPIOs to protect — every pin is valid, output-capable, and free of
@@ -978,8 +979,13 @@ int TcpConnection::read(uint8_t* buf, size_t maxLen) {
 
 bool TcpConnection::write(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
-    // Send ALL bytes (blocking retry on a full buffer) — an HTTP response must arrive complete.
-    // See the ESP32 impl: a healthy interface drains in microseconds so the retry rarely spins.
+    // Send ALL bytes (blocking retry on a full buffer) — an HTTP response / WS frame must arrive complete.
+    // A healthy interface drains in microseconds so the retry rarely spins. Bounded by a wall-clock
+    // deadline (mirrors the ESP32 impl): this runs on the render thread, and a stalled peer whose TCP
+    // receive window is full would otherwise make send() block forever and hang the loop. On timeout,
+    // return false so the caller closes that client instead of wedging the device.
+    constexpr uint32_t kWriteDeadlineMs = 2000;
+    const uint32_t start = millis();
     size_t sent = 0;
     while (sent < len) {
         auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data + sent),
@@ -987,6 +993,7 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
         if (n > 0) {
             sent += static_cast<size_t>(n);
         } else if (sockWouldBlock()) {
+            if (millis() - start >= kWriteDeadlineMs) return false;   // stalled peer — don't hang the loop
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #ifndef _WIN32
         } else if (errno == EINTR) {
