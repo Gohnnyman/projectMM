@@ -20,6 +20,7 @@
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/drivers/Correction.h"
+#include "light/drivers/LedPeripheral.h"         // LedHwBlock — the peripheral-block claim guard's vocabulary
 #include "light/drivers/LightPresetsModule.h"   // the shared preset library a driver references by id
 #include "platform/platform.h"
 
@@ -49,6 +50,12 @@ public:
     /// worker) first. TSan enforces this.
     ModuleRole role() const override { return ModuleRole::Driver; }
     virtual void setSourceBuffer(Buffer* buf) = 0;
+
+    /// The hardware peripheral block this driver drives, for the parallel-driver claim guard (two live
+    /// drivers on one block corrupt each other). Only ParallelLedDriver overrides it; every other driver
+    /// (RMT, NetworkSend, Hue, Preview) drives no shared parallel block and keeps None. Virtual, not
+    /// RTTI — ESP32 builds compile -fno-rtti, so the guard reads siblings through this, never a cast.
+    virtual LedHwBlock hwBlock() const { return LedHwBlock::None; }
 
     /// Template method: every driver card leads with the per-driver output correction
     /// (localBrightness / lightPreset / whiteMode / Custom offsets), added once here in the base

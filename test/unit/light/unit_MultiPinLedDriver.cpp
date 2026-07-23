@@ -15,11 +15,20 @@
 // growth), and the parse-error/recovery shape. The hardware half (bus init,
 // DMA transmit) is inert on the host — desktop stubs return false/nullptr —
 // and is proven on the S3.
+//
+// mm::ParallelLedDriver is the ONE registered driver; this file drives it with an
+// injected mm::I80Peripheral backend (the esp_lcd i80 bus), the backend this header
+// defines and registers under the "i80" peripheral label.
 
 namespace {
 
-void wire(mm::MultiPinLedDriver& d, mm::Buffer& src, mm::Correction& corr,
+// The peripheral is declared BEFORE the driver in every case below (via this helper's
+// parameter order + the caller's declaration order) so it outlives the driver — reverse
+// destruction order tears the driver down first, matching setPeripheralForTest's borrow
+// contract (see unit_ParallelLedDriver_doublebuffer.cpp's wire()).
+void wire(mm::ParallelLedDriver& d, mm::I80Peripheral& peripheral, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
+    d.setPeripheralForTest(&peripheral);
     // Pins default to UNSET now (the "default only when it cannot do harm" rule —
     // a user solders the strand to its own GPIOs), so a fresh driver idles until
     // configured. These slicing/frame tests exercise the lane logic, not the
@@ -52,11 +61,12 @@ size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotByte
 // LONGEST lane. The bus always has all 8 lanes — unused strands take the
 // 0-light remainder and idle LOW.
 TEST_CASE("MultiPinLedDriver slices lanes and sizes the frame by the longest") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.ledsPerPin, "50,20,20");   // lanes 3..7 share the remainder: 0
-    wire(d, src, corr, 90);
+    wire(d, peripheral, src, corr, 90);
 
     REQUIRE(d.laneCount() == 8);
     CHECK(d.laneLightCount(0) == 50);
@@ -73,10 +83,11 @@ TEST_CASE("MultiPinLedDriver slices lanes and sizes the frame by the longest") {
 
 // Empty ledsPerPin splits evenly — same PinList semantics the RMT driver uses.
 TEST_CASE("MultiPinLedDriver even split over the default 8 lanes") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 256);   // default pins: 8 lanes
+    wire(d, peripheral, src, corr, 256);   // default pins: 8 lanes
 
     REQUIRE(d.laneCount() == 8);
     CHECK(d.laneLightCount(0) == 32);
@@ -87,11 +98,12 @@ TEST_CASE("MultiPinLedDriver even split over the default 8 lanes") {
 
 // An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
 TEST_CASE("MultiPinLedDriver frame grows on RGBW preset") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.ledsPerPin, "50,50");   // lanes 2..7 idle
-    wire(d, src, corr, 100);
+    wire(d, peripheral, src, corr, 100);
     CHECK(d.frameBytes() == expectFrame(50, 3));
 
     // The driver owns its Correction, so mutate that copy (not the external one).
@@ -108,12 +120,13 @@ TEST_CASE("MultiPinLedDriver frame grows on RGBW preset") {
 // the classic chip, so this refactor changes nothing on every non-classic target. The hardware behavior
 // (a too-big frame on the real classic i80 idles with the clear "over DMA" status) is proven on the Olimex.
 TEST_CASE("MultiPinLedDriver: the DMA-fit gate is inert off the classic i80 (budget 0)") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.pins, "1");            // one lane → the whole grid lands on it, a big frame
     std::strcpy(d.ledsPerPin, "");       // even-split all onto the one pin
-    wire(d, src, corr, 4096);            // a large grid, far past any real classic i80 DMA budget
+    wire(d, peripheral, src, corr, 4096);            // a large grid, far past any real classic i80 DMA budget
 
     // The frame was computed (a real size), and the status is NOT the size-rejection message — desktop
     // dmaBudgetBytes() is 0, so frameFitsDmaBudget() always passes. (The desktop bus stub is inert, so
@@ -127,10 +140,10 @@ TEST_CASE("MultiPinLedDriver: the DMA-fit gate is inert off the classic i80 (bud
 // oversized frame and accepts one that fits; a ZERO budget ("no bound", the LCD_CAM/PSRAM/desktop case)
 // never rejects, whatever the frame size.
 TEST_CASE("MultiPinLedDriver::frameFitsDmaBudget rejects only over a finite budget") {
-    // frameFitsDmaBudget is a protected static on the CRTP base; a tiny subclass exposes it for the
-    // test without widening the production class surface.
-    struct Expose : mm::MultiPinLedDriver {
-        using mm::MultiPinLedDriver::frameFitsDmaBudget;
+    // frameFitsDmaBudget is a protected static on ParallelLedDriver; a tiny subclass exposes it for
+    // the test without widening the production class surface.
+    struct Expose : mm::ParallelLedDriver {
+        using mm::ParallelLedDriver::frameFitsDmaBudget;
     };
     // finite budget: reject strictly-larger, accept equal-or-smaller
     CHECK_FALSE(Expose::frameFitsDmaBudget(1025, 1024));
@@ -142,11 +155,12 @@ TEST_CASE("MultiPinLedDriver::frameFitsDmaBudget rejects only over a finite budg
 
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
 TEST_CASE("MultiPinLedDriver bad pins → status error → recovery") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.pins, "1,nope");
-    wire(d, src, corr, 64);
+    wire(d, peripheral, src, corr, 64);
 
     CHECK(d.laneCount() == 0);
     CHECK(d.frameBytes() == 0);
@@ -165,9 +179,11 @@ TEST_CASE("MultiPinLedDriver bad pins → status error → recovery") {
 // the 8 data GPIOs on its own. (wire() back-fills empty pins for the slicing
 // cases, so this one wires the buffer directly to keep pins empty.)
 TEST_CASE("MultiPinLedDriver with the empty default pins idles cleanly") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
+    d.setPeripheralForTest(&peripheral);
     REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
     REQUIRE(src.allocate(64, 3));
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
@@ -191,9 +207,10 @@ TEST_CASE("MultiPinLedDriver drives any pin count; the bus rounds up around it")
     mm::Buffer src;
     mm::Correction corr;
     {   // 3 pins → 3 lanes on the 8-bit bus, the spare 5 parked on WR.
-        mm::MultiPinLedDriver d;
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
         std::strcpy(d.pins, "1,2,4");
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         CHECK(d.laneCount() == 3);
         CHECK(d.severity() != mm::MoonModule::Severity::Error);
         // 64 lights over 3 lanes → the longest is 22. ≤8 pins → the 8-bit bus → 1-byte slots, which is
@@ -202,11 +219,17 @@ TEST_CASE("MultiPinLedDriver drives any pin count; the bus rounds up around it")
         CHECK(d.frameBytes() == expectFrame(22, 3));
     }
     {   // 16 pins → the full 16-bit bus, nothing parked. clock/dc moved clear of the data set
-        // (defaults 10/11 would collide with data pins 10/11 → the collision guard).
-        mm::MultiPinLedDriver d;
-        d.clockPin = 20; d.dcPin = 21;
+        // (defaults 10/11 would collide with data pins 10/11 → the collision guard). clockPin/dcPin
+        // live on the I80Peripheral backend, so set them via the control API ParallelLedDriver
+        // binds (defineDriverControls -> peripheral_->addBusControls) rather than a direct member.
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
+        d.setPeripheralForTest(&peripheral);
+        d.defineControls();
+        mm::test::setControlValue<int8_t>(d, "clockPin", 20);
+        mm::test::setControlValue<int8_t>(d, "dcPin", 21);
         std::strcpy(d.pins, "1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17");
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         CHECK(d.laneCount() == 16);
         CHECK(d.severity() != mm::MoonModule::Severity::Error);
         CHECK(d.maxLaneLights() == 4);
@@ -214,10 +237,14 @@ TEST_CASE("MultiPinLedDriver drives any pin count; the bus rounds up around it")
     }
     {   // 10 pins — the case the old "exactly 8 or 16" rule rejected outright. It is a perfectly good
         // config: 10 data lanes on the 16-bit bus, the other 6 parked. This is the point of the change.
-        mm::MultiPinLedDriver d;
-        d.clockPin = 20; d.dcPin = 21;
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
+        d.setPeripheralForTest(&peripheral);
+        d.defineControls();
+        mm::test::setControlValue<int8_t>(d, "clockPin", 20);
+        mm::test::setControlValue<int8_t>(d, "dcPin", 21);
         std::strcpy(d.pins, "1,2,4,5,6,7,8,9,12,13");
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         CHECK(d.laneCount() == 10);
         CHECK(d.severity() != mm::MoonModule::Severity::Error);
         // 64 over 10 lanes → 6 each, the last taking the remainder (PinList's even-split rule) → 10.
@@ -237,19 +264,23 @@ TEST_CASE("MultiPinLedDriver warns (does not idle) when a data pin is on clockPi
     mm::Buffer src;
     mm::Correction corr;
     {   // lane on GPIO 10 == default clockPin → warns but still drives all 8 lanes
-        mm::MultiPinLedDriver d;
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
         std::strcpy(d.pins, "18,5,6,7,8,9,10,11");   // 10 == clockPin, 11 == dcPin
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         CHECK(d.laneCount() == 8);                    // still built + driving
         REQUIRE(d.status() != nullptr);               // a warning is present
         CHECK(std::strstr(d.status(), "clockPin") != nullptr);
     }
     {   // move clock/dc clear of the data set → no warning
-        mm::MultiPinLedDriver d;
-        d.clockPin = 12;
-        d.dcPin = 13;
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
+        d.setPeripheralForTest(&peripheral);
+        d.defineControls();
+        mm::test::setControlValue<int8_t>(d, "clockPin", 12);
+        mm::test::setControlValue<int8_t>(d, "dcPin", 13);
         std::strcpy(d.pins, "18,5,6,7,8,9,10,11");
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         CHECK(d.laneCount() == 8);
         // No collision warning → the neutral consumption info instead (not a null status).
         CHECK(d.severity() != mm::MoonModule::Severity::Error);
@@ -259,11 +290,14 @@ TEST_CASE("MultiPinLedDriver warns (does not idle) when a data pin is on clockPi
         // needs two distinct control lines, so this breaks the bus outright (unlike a data-lane
         // collision, which only corrupts that one lane and is a warn-and-run). Routed through the
         // error path (validateBusFatal), so the driver idles: laneCount 0, error severity.
-        mm::MultiPinLedDriver d;
-        d.clockPin = 20;
-        d.dcPin = 20;                                 // same as clockPin
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
+        d.setPeripheralForTest(&peripheral);
+        d.defineControls();
+        mm::test::setControlValue<int8_t>(d, "clockPin", 20);
+        mm::test::setControlValue<int8_t>(d, "dcPin", 20);   // same as clockPin
         std::strcpy(d.pins, "1,2,3,4,5,6,7,8");
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         REQUIRE(d.status() != nullptr);
         CHECK(std::strstr(d.status(), "same GPIO") != nullptr);
         CHECK(d.severity() == mm::MoonModule::Severity::Error);   // idles, not warn-and-run
@@ -273,10 +307,11 @@ TEST_CASE("MultiPinLedDriver warns (does not idle) when a data pin is on clockPi
 
 // A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
 TEST_CASE("MultiPinLedDriver tolerates a zero-light buffer") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 0);
+    wire(d, peripheral, src, corr, 0);
 
     CHECK(d.laneCount() == 8);       // pins parse fine
     CHECK(d.maxLaneLights() == 0);
@@ -287,9 +322,11 @@ TEST_CASE("MultiPinLedDriver tolerates a zero-light buffer") {
 
 // setup/release cycles leave no residue (status clean, ASAN-checked heap).
 TEST_CASE("MultiPinLedDriver setup/release is repeatable") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
+    d.setPeripheralForTest(&peripheral);
     src.allocate(64, 3);
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     std::strcpy(d.pins, "1,2,4,5,6,7,8,9");   // pins now default UNSET
@@ -307,7 +344,9 @@ TEST_CASE("MultiPinLedDriver setup/release is repeatable") {
 
 // loopbackRxPin is bound always, visible only while loopbackTest is on.
 TEST_CASE("MultiPinLedDriver loopbackRxPin tracks the loopbackTest toggle") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
+    d.setPeripheralForTest(&peripheral);
     d.defineControls();
     bool found = false;
     for (uint8_t i = 0; i < d.controls().count(); i++) {
@@ -325,7 +364,9 @@ TEST_CASE("MultiPinLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // contract is host-testable here via the shared helper (toggles loopbackTest both
 // ways and asserts the control stays bound while flipping visibility).
 TEST_CASE("MultiPinLedDriver loopbackTxPin tracks the loopbackTest toggle") {
-    mm::MultiPinLedDriver d;
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
+    d.setPeripheralForTest(&peripheral);
     d.defineControls();
     auto setTest = [&](bool on) {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);
@@ -333,16 +374,22 @@ TEST_CASE("MultiPinLedDriver loopbackTxPin tracks the loopbackTest toggle") {
     mm::test::checkConditionalControl(d, "loopbackTxPin", setTest, /*visibleWhenTrue=*/true);
 }
 
-// The pinExpander switch is HIDDEN where the silicon can't host the '595 (kSupportsPinExpander false:
+// The pinExpander switch is HIDDEN where the silicon can't host the '595 (supportsPinExpander() false:
 // the classic ESP32 i80 = the I2S peripheral, whose DMA can't read PSRAM, so the ×8 expander frame has
 // nowhere to live). Desktop has lcdLanes==0 too, so the control is hidden here — the same compile-time
 // gate the classic build takes. On the LCD_CAM chips (S3/P4) the flag is true and the control shows;
 // that path is exercised on-device. Turning it on where unsupported only ever yields a config error, so
 // not offering the switch is the honest UI. (Before this, the toggle was shown on every chip.)
+//
+// kSupportsPinExpander moved from a static constexpr on the driver to a virtual on the I80Peripheral
+// backend (supportsPinExpander()) — a bare I80Peripheral instance reaches it without needing a live
+// driver's peripheral_ (which is protected).
 TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
-    CHECK_FALSE(mm::MultiPinLedDriver::kSupportsPinExpander);   // desktop lcdLanes==0 → unsupported
+    mm::I80Peripheral peripheral;
+    CHECK_FALSE(peripheral.supportsPinExpander());   // desktop lcdLanes==0 → unsupported
 
-    mm::MultiPinLedDriver d;
+    mm::ParallelLedDriver d;
+    d.setPeripheralForTest(&peripheral);
     d.defineControls();
     bool found = false;
     for (uint8_t i = 0; i < d.controls().count(); i++) {
@@ -350,7 +397,7 @@ TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
             found = true;
             // Hidden exactly when the chip can't host the expander — ties the assertion to the flag
             // rather than to the desktop's happens-to-be-unsupported value, so it stays correct on any target.
-            CHECK(d.controls()[i].hidden == !mm::MultiPinLedDriver::kSupportsPinExpander);
+            CHECK(d.controls()[i].hidden == !peripheral.supportsPinExpander());
         }
     }
     CHECK(found);   // still BOUND (a saved value survives), just not shown

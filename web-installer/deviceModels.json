@@ -715,10 +715,11 @@
         }
       },
       {
-        "type": "ParlioLedDriver",
-        "id": "ParlioLed",
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
+          "peripheral": "Parlio",
           "pins": "21",
           "loopbackTxPin": 46,
           "loopbackRxPin": 47
@@ -867,10 +868,11 @@
         }
       },
       {
-        "type": "MultiPinLedDriver",
-        "id": "MultiPinLed",
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
+          "peripheral": "i80",
           "pins": "47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48",
           "clockPin": 5,
           "dcPin": 6
@@ -925,10 +927,11 @@
         }
       },
       {
-        "type": "MultiPinLedDriver",
-        "id": "MultiPinLed",
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
+          "peripheral": "i80",
           "pins": "47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1",
           "clockPin": 8,
           "dcPin": 9
@@ -984,10 +987,11 @@
         }
       },
       {
-        "type": "ParlioLedDriver",
-        "id": "ParlioLed",
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
+          "peripheral": "Parlio",
           "pins": "20,21,22,23,24,25,26,27"
         }
       },
@@ -1054,10 +1058,11 @@
         }
       },
       {
-        "type": "ParlioLedDriver",
-        "id": "ParlioLed",
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
+          "peripheral": "Parlio",
           "pins": "21,20,25,5,22,23,24,27"
         }
       },
@@ -1231,7 +1236,7 @@
     ]
   },
   {
-    "name": "hpwit shift-register board",
+    "name": "hpwit shift-register 48",
     "chip": "ESP32-S3",
     "firmwares": [
       "esp32s3-n16r8"
@@ -1246,14 +1251,27 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "hpwit shift-register board"
+          "deviceModel": "hpwit shift-register 48"
         }
       },
       {
-        "type": "MultiPinLedDriver",
-        "id": "MultiPinLed",
+        "type": "PanelsLayout",
+        "id": "Panels",
+        "parent_id": "Layouts",
+        "controls": {
+          "horizontalPanels": 8,
+          "verticalPanels": 6,
+          "panelWidth": 16,
+          "panelHeight": 16,
+          "snake": true
+        }
+      },
+      {
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
+          "peripheral": "i80",
           "pins": "9,10,12,8,18,17",
           "pinExpander": true,
           "latchPin": 46,
@@ -1292,17 +1310,33 @@
         }
       },
       {
-        "type": "MultiPinLedDriver",
-        "id": "MultiPinLed",
+        "type": "PanelsLayout",
+        "id": "Panels",
+        "parent_id": "Layouts",
+        "controls": {
+          "horizontalPanels": 5,
+          "verticalPanels": 3,
+          "panelWidth": 16,
+          "panelHeight": 16,
+          "snake": true
+        }
+      },
+      {
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
+          "peripheral": "i80",
           "pins": "9,10",
           "pinExpander": true,
           "latchPin": 46,
           "clockPin": 3,
           "ledsPerPin": "96",
           "dcPin": 21,
-          "doubleBuffer": false
+          "doubleBuffer": false,
+          "loopbackTest": true,
+          "loopbackStrand": 8,
+          "loopbackRxPin": 16
         }
       },
       {

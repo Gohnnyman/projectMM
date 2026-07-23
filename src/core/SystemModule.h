@@ -337,7 +337,7 @@ private:
     // Serial log verbosity, persisted, default Warn. Controls how chatty the device is on the wire:
     // at Warn the once-a-second KPI tick line is suppressed (no serial write, so a status LED that
     // flickers on UART TX rests quiet) while ESP_LOGW/ESP_LOGE warnings and errors still print. The
-    // main loop reads logLevel() to gate the KPI line; affectsPrepare re-applies it to the platform
+    // main loop reads logLevel() to gate the KPI line; onControlChanged re-applies it to the platform
     // logger on change. The first 60 s of uptime always logs at Info regardless (the web installer
     // reads MM_IP off the tick line just after flash). Stored as the raw enum value for addSelect.
     uint8_t logLevel_ = static_cast<uint8_t>(platform::LogLevel::Warn);

@@ -259,8 +259,11 @@ The project uses Claude Code agents in defined roles. The user is the **Product 
 | 👾 | **Reviewer** | **Fable** (Opus only if Fable is unavailable) | Pre-merge check | Runs at PR merge over the whole branch diff (Event 2, gate 5), and pre-commit on the staged diff when the commit is large or the product owner asks (see *Reviewer at commit-time*). The model is fixed, not a per-run choice. Complements CodeRabbit (which handles line-level bugs in the PR). |
 | 🛸 | **Tester** | Sonnet | Verification | Writes tests, verifies architectural rules in code |
 | 💀 | **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification |
+| 🔬 | **Researcher** | **Fable** (same as Reviewer) | Investigation | Read-only fan-out over the codebase (or friend repos / datasheets) to answer a scoped question before a design or change — an interface inventory, a blast-radius map, a prior-art survey. Returns the conclusion, not file dumps. Feeds the Architect's plan and the Developer's spec. |
 
 Agents work in parallel on independent steps. Agents never commit; only the product owner approves commits after testing.
+
+**Delegate the mechanical roles; don't absorb them.** The main loop tends to *become* the Runner/Tester/Researcher rather than spawning them — running every gate inline, writing every test itself. That is the right call for a **single fast check** (a lone `check_specs`, one `git status`) where the spawn round-trip costs more than the work. But **delegate when the work is parallelizable or substantial**: the pre-commit gate fan-out is textbook **Runner** work (Haiku, in parallel, cheaper and faster than serial-inline); pinning a fixed bug with a regression test through the real code path is a clean **Tester** spec (find the mechanism yourself, hand Tester the spec, verify the result); a broad "map the interface / blast radius / prior art before we design" is **Researcher** work (Fable, read-only fan-out). The heuristic: *parallelizable or substantial → delegate; a single fast check → inline.*
 
 ## Build
 

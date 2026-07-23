@@ -20,11 +20,19 @@
 // The one behavioural difference from the LCD driver pinned below: Parlio has
 // NO exactly-8-pins rule — 1..8 lanes are all valid (it takes the data GPIOs
 // directly, no all-lanes-required i80 bus).
+//
+// mm::ParallelLedDriver is the ONE registered driver; this file drives it with an
+// injected mm::ParlioPeripheral backend, the backend this header defines and registers
+// under the "Parlio" peripheral label.
 
 namespace {
 
-void wire(mm::ParlioLedDriver& d, mm::Buffer& src, mm::Correction& corr,
+// The peripheral is declared BEFORE the driver at every call site (see this helper's
+// parameter order) so it outlives the driver — setPeripheralForTest borrows, it does
+// not own (see unit_ParallelLedDriver_doublebuffer.cpp's wire()).
+void wire(mm::ParallelLedDriver& d, mm::ParlioPeripheral& peripheral, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
+    d.setPeripheralForTest(&peripheral);
     // Pins default to UNSET now (the "default only when it cannot do harm" rule —
     // the user solders the strand to its own GPIOs), so a fresh driver idles until
     // configured. These slicing/frame tests exercise the lane logic, not the
@@ -54,12 +62,13 @@ size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotByte
 // Three lanes (Parlio accepts any 1..8 count) slice the buffer consecutively;
 // the frame is sized by the LONGEST lane.
 TEST_CASE("ParlioLedDriver slices lanes and sizes the frame by the longest") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.pins, "36,37,38");
     std::strcpy(d.ledsPerPin, "50,20,20");
-    wire(d, src, corr, 90);
+    wire(d, peripheral, src, corr, 90);
 
     REQUIRE(d.laneCount() == 3);
     CHECK(d.laneLightCount(0) == 50);
@@ -75,10 +84,11 @@ TEST_CASE("ParlioLedDriver slices lanes and sizes the frame by the longest") {
 // Empty ledsPerPin (the default) splits evenly over the 8 lanes — shared PinList
 // semantics, same as the RMT/LCD drivers.
 TEST_CASE("ParlioLedDriver even split over 8 lanes") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 256);         // ledsPerPin empty (default) = even split
+    wire(d, peripheral, src, corr, 256);         // ledsPerPin empty (default) = even split
 
     REQUIRE(d.laneCount() == 8);
     CHECK(d.laneLightCount(0) == 32);
@@ -92,10 +102,11 @@ TEST_CASE("ParlioLedDriver accepts any lane count from 1 to 8") {
     mm::Correction corr;
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     for (const char* pinList : {"36", "36,37", "36,37,38,39,40", "36,37,38,39,40,41,42,43"}) {
-        mm::ParlioLedDriver d;
+        mm::ParlioPeripheral peripheral;
+        mm::ParallelLedDriver d;
         mm::Buffer src;
         std::strcpy(d.pins, pinList);
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         // count the commas+1 to know the expected lane count
         uint8_t expected = 1;
         for (const char* p = pinList; *p; p++) if (*p == ',') expected++;
@@ -110,19 +121,21 @@ TEST_CASE("ParlioLedDriver accepts any lane count from 1 to 8") {
 
 // 9..16 pins are accepted (Parlio drives 1..16, the 16-bit bus); more than 16 is rejected.
 TEST_CASE("ParlioLedDriver accepts 9..16 pins, rejects more than 16") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     {   // 12 pins → 12 lanes, valid (the 16-bit bus)
         std::strcpy(d.pins, "1,2,3,4,5,6,7,8,9,10,11,12");
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         CHECK(d.laneCount() == 12);
         CHECK(d.severity() != mm::MoonModule::Severity::Error);   // valid → info, not error
     }
     {   // 17 pins → rejected (over the 16-lane cap)
-        mm::ParlioLedDriver d2;
+        mm::ParlioPeripheral peripheral2;
+        mm::ParallelLedDriver d2;
         std::strcpy(d2.pins, "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17");
-        wire(d2, src, corr, 64);
+        wire(d2, peripheral2, src, corr, 64);
         CHECK(d2.laneCount() == 0);
         CHECK(d2.status() != nullptr);
     }
@@ -135,19 +148,21 @@ TEST_CASE("ParlioLedDriver 16-lane frame doubles the byte size (16-bit bus)") {
     mm::Buffer src;
     mm::Correction corr;
     {   // 8 lanes × 50 lights → 8-bit bus (slotBytes = 1)
-        mm::ParlioLedDriver d;
+        mm::ParlioPeripheral peripheral;
+        mm::ParallelLedDriver d;
         std::strcpy(d.pins, "1,2,3,4,5,6,7,8");
         std::strcpy(d.ledsPerPin, "50,50,50,50,50,50,50,50");
-        wire(d, src, corr, 400);
+        wire(d, peripheral, src, corr, 400);
         REQUIRE(d.laneCount() == 8);
         CHECK(d.maxLaneLights() == 50);
         CHECK(d.frameBytes() == expectFrame(50, 3, 1));
     }
     {   // 16 lanes × 50 lights → 16-bit bus (slotBytes = 2), same per-lane lights, DOUBLE bytes
-        mm::ParlioLedDriver d;
+        mm::ParlioPeripheral peripheral;
+        mm::ParallelLedDriver d;
         std::strcpy(d.pins, "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16");
         std::strcpy(d.ledsPerPin, "50,50,50,50,50,50,50,50,50,50,50,50,50,50,50,50");
-        wire(d, src, corr, 800);
+        wire(d, peripheral, src, corr, 800);
         REQUIRE(d.laneCount() == 16);
         CHECK(d.maxLaneLights() == 50);
         CHECK(d.frameBytes() == expectFrame(50, 3, 2));   // 16-bit slots → 2 bytes/slot
@@ -158,11 +173,12 @@ TEST_CASE("ParlioLedDriver 16-lane frame doubles the byte size (16-bit bus)") {
 
 // An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
 TEST_CASE("ParlioLedDriver frame grows on RGBW preset") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.ledsPerPin, "50,50");
-    wire(d, src, corr, 100);
+    wire(d, peripheral, src, corr, 100);
     CHECK(d.frameBytes() == expectFrame(50, 3));
 
     // The driver owns its Correction, so mutate that copy (not the external one).
@@ -184,13 +200,14 @@ TEST_CASE("ParlioLedDriver frame grows on RGBW preset") {
 // changes. Mirrors the platform constant.
 TEST_CASE("ParlioLedDriver frame at the Parlio single-transfer ceiling (byte limit, channel-relative)") {
     constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535, matches platform_esp32_parlio.cpp
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     // 896 RGB lights/lane — the HW-tested config — FITS one transfer.
     std::strcpy(d.pins, "20,21,22,23,24,25,26,27");
     std::strcpy(d.ledsPerPin, "896,896,896,896,896,896,896,896");
-    wire(d, src, corr, 896 * 8);
+    wire(d, peripheral, src, corr, 896 * 8);
     CHECK(d.maxLaneLights() == 896);
     CHECK(d.frameBytes() == expectFrame(896, 3));
     CHECK(d.frameBytes() <= kParlioMaxTransferBytes);          // fits one Parlio transfer
@@ -204,11 +221,12 @@ TEST_CASE("ParlioLedDriver frame at the Parlio single-transfer ceiling (byte lim
 
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
 TEST_CASE("ParlioLedDriver bad pins → status error → recovery") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
     std::strcpy(d.pins, "36,nope");
-    wire(d, src, corr, 64);
+    wire(d, peripheral, src, corr, 64);
 
     CHECK(d.laneCount() == 0);
     CHECK(d.frameBytes() == 0);
@@ -227,9 +245,11 @@ TEST_CASE("ParlioLedDriver bad pins → status error → recovery") {
 // GPIO. (wire() back-fills empty pins for the slicing cases, so this one wires
 // the buffer directly to keep pins empty.)
 TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
+    d.setPeripheralForTest(&peripheral);
     REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
     REQUIRE(src.allocate(64, 3));
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
@@ -246,10 +266,11 @@ TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
 
 // A 0×0×0 grid is a clean idle: zero counts, zero frame, no crash.
 TEST_CASE("ParlioLedDriver tolerates a zero-light buffer") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 0);
+    wire(d, peripheral, src, corr, 0);
 
     CHECK(d.laneCount() == 8);       // the default 8 pins parse fine
     CHECK(d.maxLaneLights() == 0);
@@ -265,20 +286,24 @@ TEST_CASE("ParlioLedDriver tick is crash-safe for every pin configuration") {
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
 
     SUBCASE("single pin, populated grid") {
-        mm::ParlioLedDriver d; mm::Buffer src;
+        mm::ParlioPeripheral peripheral;
+        mm::ParallelLedDriver d; mm::Buffer src;
         std::strcpy(d.pins, "36");
-        wire(d, src, corr, 64);
+        wire(d, peripheral, src, corr, 64);
         d.tick();
     }
     SUBCASE("multi-pin even split") {
-        mm::ParlioLedDriver d; mm::Buffer src;
+        mm::ParlioPeripheral peripheral;
+        mm::ParallelLedDriver d; mm::Buffer src;
         std::strcpy(d.pins, "36,37,38");
-        wire(d, src, corr, 90);
+        wire(d, peripheral, src, corr, 90);
         REQUIRE(d.laneCount() == 3);
         d.tick();
     }
     SUBCASE("tick before any buffer is wired") {
-        mm::ParlioLedDriver d;
+        mm::ParlioPeripheral peripheral;
+        mm::ParallelLedDriver d;
+        d.setPeripheralForTest(&peripheral);
         d.defineControls();
         d.tick();
     }
@@ -287,9 +312,11 @@ TEST_CASE("ParlioLedDriver tick is crash-safe for every pin configuration") {
 
 // setup/release cycles leave no residue (status clean, ASAN-checked heap).
 TEST_CASE("ParlioLedDriver setup/release is repeatable") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
+    d.setPeripheralForTest(&peripheral);
     src.allocate(64, 3);
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     std::strcpy(d.pins, "20,21,22,23,24,25,26,27");   // pins now default UNSET
@@ -307,7 +334,9 @@ TEST_CASE("ParlioLedDriver setup/release is repeatable") {
 
 // loopbackRxPin is bound always, visible only while loopbackTest is on.
 TEST_CASE("ParlioLedDriver loopbackRxPin tracks the loopbackTest toggle") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
+    d.setPeripheralForTest(&peripheral);
     d.defineControls();
     bool found = false;
     for (uint8_t i = 0; i < d.controls().count(); i++) {
@@ -325,7 +354,9 @@ TEST_CASE("ParlioLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // contract is host-testable here via the shared helper (toggles loopbackTest both
 // ways and asserts the control stays bound while flipping visibility).
 TEST_CASE("ParlioLedDriver loopbackTxPin tracks the loopbackTest toggle") {
-    mm::ParlioLedDriver d;
+    mm::ParlioPeripheral peripheral;
+    mm::ParallelLedDriver d;
+    d.setPeripheralForTest(&peripheral);
     d.defineControls();
     auto setTest = [&](bool on) {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);

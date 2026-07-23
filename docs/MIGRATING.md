@@ -20,6 +20,18 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### The three parallel LED drivers merge into one `ParallelLedDriver` with a `peripheral` selector (2026-07-23)
+
+`MultiPinLedDriver`, `MoonLedDriver`, and `ParlioLedDriver` are now one registered module, **`ParallelLedDriver`**, whose `peripheral` control picks which DMA peripheral drives the parallel WS2812 bus. They were always the same driver with a different bus backend; the merge makes that one card with a dropdown, offering only the peripherals the chip supports.
+
+| Old registered type | New |
+|---|---|
+| `MultiPinLedDriver` | `ParallelLedDriver` + `peripheral` = `i80` (esp_lcd: LCD_CAM on S3/P4, I2S on classic) |
+| `MoonLedDriver` | `ParallelLedDriver` + `peripheral` = `MoonI80` (own-GDMA below esp_lcd, LCD_CAM) |
+| `ParlioLedDriver` | `ParallelLedDriver` + `peripheral` = `Parlio` (P4) |
+
+**Action: re-add the driver.** A persisted module whose type is one of the three old names no longer resolves (the type isn't registered), so the robust loader drops it on boot — the driver, and its pins/settings, vanish from the tree. Add a **Parallel LED** driver again, choose the `peripheral` your board uses (the same backend the old type named — see the table), and re-enter its pins / lengths / clock pin. The web installer's board catalog already names the new type, so a fresh install or a catalog re-inject wires it correctly; only a device carrying an OLD persisted tree needs the manual re-add.
+
 ### `AudioService`: the `sync` control becomes `mode` + `send audio`, and `simulate` is renumbered (2026-07-22)
 
 The audio module's identity is now a single `mode` control (Local audio / Receive network / Simulate), each showing only its own detail controls, replacing the separate `sync` (off / send / receive) toggle. Broadcasting the locally-analyzed frame moved to a `send audio` switch, meaningful only in Local mode. `simulate` was also renumbered, from a five-option list to two.
@@ -62,7 +74,7 @@ The LED driver module types and several controls were renamed so the UI reads in
 
 **Action: re-add the module, then re-set `pinExpander` / `doubleBuffer` if you had changed them.**
 
-A device whose persisted config names the old module type loads a module type that no longer exists — the unknown type is ignored, so **the driver is absent from the tree on boot**. Re-add it (`MultiPinLedDriver` or `MoonLedDriver`) and re-enter its controls. Within a re-added driver, the two renamed *settable* controls (`pinExpander`, `doubleBuffer`) read as absent → they take their defaults (`pinExpander` off, `doubleBuffer` on); set them again if your board needs otherwise. `frameTime` and `renderWait` are read-only KPIs — nothing to restore.
+A device whose persisted config names the old module type loads a module type that no longer exists — the unknown type is ignored, so **the driver is absent from the tree on boot**. Re-add a **Parallel LED** driver (the single type the two later merged into — see the 2026-07-23 entry above for the `peripheral` value that matches the old `I80LedDriver` / `MoonI80LedDriver`) and re-enter its controls. Within a re-added driver, the two renamed *settable* controls (`pinExpander`, `doubleBuffer`) read as absent → they take their defaults (`pinExpander` off, `doubleBuffer` on); set them again if your board needs otherwise. `frameTime` and `renderWait` are read-only KPIs — nothing to restore.
 
 `RmtLedDriver` and `ParlioLedDriver` are unchanged. The `pins` / `ledsPerPin` / `clockPin` / `latchPin` / `loopback*` controls are unchanged.
 

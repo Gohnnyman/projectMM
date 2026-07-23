@@ -14,7 +14,7 @@ This is a roadmap/scope plan, not a single-feature `/plan`. Each item below gets
 
 This is the biggest lever and the explicit *"execution vehicle for the effect-breadth parity gate."* ~21 of the predecessor's 60+ effects are ported. Stage 1's prerequisites are the highest-value core work available, because every future effect leans on them:
 
-- **Shared palette** — hard prerequisite; many effects color via `ColorFromPalette`. Generalise the pattern `PlasmaPaletteEffect` hard-codes today.
+- **Shared palette** — hard prerequisite; many effects color via `ColorFromPalette`. Generalize the pattern `PlasmaPaletteEffect` hard-codes today.
 - **The shared primitive library** — FastLED-named, our own implementation, hot-path-tuned integer-only: `beatsin8`, `inoise8`, `qadd8`, `nscale8`, `random8`/`random16`, `ColorFromPalette`, and the dimension-agnostic draw set. Extends the existing `color.h` (`scale8`, `sin8`).
 - **Tag/emoji legend** — settle before batch-migrating so every module is consistent from batch one.
 - **Per-library doc model** — `effects_<library>.md` compact table rows (per [ADR 0015](../../adr/0015-library-is-a-tag-not-a-folder.md)); changes the `check_specs.py` contract.

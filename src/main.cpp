@@ -90,14 +90,17 @@
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
 #include "light/drivers/RmtLedDriver.h"
 #endif
+// The parallel-WS2812 driver + its peripheral backends. Each backend header self-registers its factory
+// into ParallelLedDriver's peripheral registry (gated by the chip's CONFIG_SOC_*), so including the ones
+// this silicon supports is what populates the `peripheral` control's options.
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
-#include "light/drivers/MultiPinLedDriver.h"
+#include "light/drivers/MultiPinLedDriver.h"      // esp_lcd i80 backend (I80Peripheral)
 #endif
 #if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-#include "light/drivers/MoonLedDriver.h"
+#include "light/drivers/MoonLedDriver.h"          // MoonI80 own-GDMA backend (MoonI80Peripheral)
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
-#include "light/drivers/ParlioLedDriver.h"
+#include "light/drivers/ParlioLedDriver.h"        // Parlio backend (ParlioPeripheral)
 #endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
@@ -214,19 +217,13 @@ static void registerModuleTypes() {
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers.md#rmtled");
 #endif
-    // MultiPinLedDriver — 8/16 parallel strands over IDF's esp_lcd i80 bus (LCD_CAM on S3/P4, I2S-i80
-    // on classic ESP32); IDF picks the backend by chip, so ONE driver serves all i80-capable silicon.
-#if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
-    mm::ModuleFactory::registerType<mm::MultiPinLedDriver>("MultiPinLedDriver", "light/drivers.md#multipinled");
-#endif
-#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-    // The same LCD_CAM output on our own DMA code instead of esp_lcd (ADR-0014). Registered ALONGSIDE
-    // MultiPinLedDriver, not instead of it: that one is the reference implementation and the default,
-    // this is the challenger, and having both registered makes the A/B a swap in the UI.
-    mm::ModuleFactory::registerType<mm::MoonLedDriver>("MoonLedDriver", "light/drivers.md#moonled");
-#endif
-#if defined(CONFIG_SOC_PARLIO_SUPPORTED)
-    mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers.md#parlioled");
+    // ParallelLedDriver — ONE driver for the parallel-WS2812 output, whatever the DMA peripheral. The
+    // three backends (esp_lcd i80, MoonI80 own-GDMA, Parlio) each self-register into the driver's
+    // peripheral registry when their header is included above (gated by the same CONFIG_SOC_* below), so
+    // the `peripheral` control offers exactly the ones this chip links. Registered once, on any chip that
+    // links at least one parallel backend.
+#if defined(CONFIG_SOC_LCD_I80_SUPPORTED) || defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED)
+    mm::ModuleFactory::registerType<mm::ParallelLedDriver>("ParallelLedDriver", "light/drivers.md#parallelled");
 #endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/system.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/system.md#system");

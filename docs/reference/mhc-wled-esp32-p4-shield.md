@@ -22,11 +22,11 @@ The output/RS-485 terminals, left to right, with the P4 GPIO each carries:
 
 ### 12x outputs — level-shifted, single-ended (LED data)
 
-The LED-data outputs. Each terminal is `O<gpio>` on the silkscreen; a level shifter drives the 5 V strand from the P4's 3.3 V. The catalog wires the ParlioLedDriver to the first eight (`21,20,25,5,22,23,24,27`).
+The LED-data outputs. Each terminal is `O<gpio>` on the silkscreen; a level shifter drives the 5 V strand from the P4's 3.3 V. The catalog wires the Parallel LED driver (peripheral `Parlio`) to the first eight (`21,20,25,5,22,23,24,27`).
 
 | Terminal | GPIO | Note |
 |---|---|---|
-| O21 O20 O25 O5 O23 O27 O22 O24 | 21 20 25 5 23 27 22 24 | LED lanes (ParlioLedDriver default) |
+| O21 O20 O25 O5 O23 O27 O22 O24 | 21 20 25 5 23 27 22 24 | LED lanes (Parallel LED, peripheral `Parlio`, default) |
 | O7 / O8 | 7 / 8 | also the I²C bus (SDA 7 / SCL 8, catalog I2cScan) |
 | O3 | 3 | also on RS-485 (`A-3-B`) — see note below |
 | O4 | 4 | also on RS-485 (`A-4-B`) — see note below |

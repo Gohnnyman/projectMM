@@ -2,7 +2,7 @@
 
 ## Context
 
-The parallel-LED output today is **five classes**: a CRTP base `ParallelLedDriver<Derived>` (1816 lines, all shared logic) and three concrete CRTP subclasses, each a full `MoonModule`: `MoonLedDriver` (703 lines, own-GDMA + streaming ring + 74HCT595 expander, LCD_CAM only), `MultiPinLedDriver` (256 lines, esp_lcd i80 on S3/P4 LCD_CAM + classic I2S), `ParlioLedDriver` (100 lines, P4 Parlio). Each is separately factory-registered, so the UI add-module picker offers all three on **every** board — including ones that can't run them (`lanesAvailable()==0`).
+The parallel-LED output today is **four classes**: a CRTP base `ParallelLedDriver<Derived>` (1816 lines, all shared logic) and three concrete CRTP subclasses, each a full `MoonModule`: `MoonLedDriver` (703 lines, own-GDMA + streaming ring + 74HCT595 expander, LCD_CAM only), `MultiPinLedDriver` (256 lines, esp_lcd i80 on S3/P4 LCD_CAM + classic I2S), `ParlioLedDriver` (100 lines, P4 Parlio). Each is separately factory-registered, so the UI add-module picker offers all three on **every** board — including ones that can't run them (`lanesAvailable()==0`).
 
 The product owner wants **one** user-facing "Parallel LED" module with a **peripheral dropdown** that surfaces the shared controls plus the selected peripheral's unique controls, allocating only the selected backend.
 
@@ -10,7 +10,7 @@ The product owner wants **one** user-facing "Parallel LED" module with a **perip
 
 **Hot path is safe:** every `busX()` call is per-frame or per-reinit, never per-light (the per-light encode operates on the raw `uint8_t*` from `busBuffer()`). One vcall/frame vs ~3500µs of frame work is negligible. CRTP's "no runtime indirection" protected per-*light* calls, which this design does not add.
 
-**Net effect — a subtraction refactor + a feature:** 5 classes → 1 module + 1 interface + 3 stripped backends; one control set, one lifecycle, one registry entry, one UI card; the backends shrink (lose MoonModule/control/lifecycle scaffolding). Plus the one-selectable-card UX.
+**Net effect — a subtraction refactor + a feature:** 4 classes → 1 module + 1 interface + 3 stripped backends; one control set, one lifecycle, one registry entry, one UI card; the backends shrink (lose MoonModule/control/lifecycle scaffolding). Plus the one-selectable-card UX.
 
 **Scope boundary — `RmtLedDriver` stays separate (evaluated, deliberate).** RmtLed is `: public DriverBase`, NOT a `ParallelLedDriver<>` subclass. It is a different *shape*: N independent per-pin RMT TX channels + a symbol encoder, versus the parallel family's single lockstep DMA bus + bit-transpose. The genuine overlap (pin/count parsing) is already factored into the shared `PinList.h` helper — the correct dedup. Folding RmtLed behind the `LedPeripheral` interface (built around a single DMA bus: `busBuffer`/`busTransmit(i,bytes)`/`busCapacity`/ring/double-buffer) would be a *leaky* abstraction carrying ops half its implementers can't honor — an expansion, not a reduction. Two coherent concepts stay two modules.
 

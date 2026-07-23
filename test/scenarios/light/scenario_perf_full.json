@@ -9,8 +9,7 @@
     "PreviewDriver",
     "NetworkSendDriver",
     "RmtLedDriver",
-    "MultiPinLedDriver",
-    "ParlioLedDriver",
+    "ParallelLedDriver",
     "MultiplyModifier",
     "SpiralEffect",
     "NoiseEffect"
@@ -836,16 +835,19 @@
     },
     {
       "name": "add-i80-driver",
-      "description": "+MultiPinLedDriver capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. MultiPinLedDriver also registers on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
+      "description": "+ParallelLedDriver (peripheral=i80) capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. The i80 peripheral also runs on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
       "op": "add_module",
       "id": "MultiPin",
-      "type": "MultiPinLedDriver",
+      "type": "ParallelLedDriver",
       "parent_id": "Drivers",
       "props": {
         "pins": "1,2,3,4,5,6,7,8",
         "ledsPerPin": "64,0,0,0,0,0,0,0"
       },
-      "optional": true
+      "optional": true,
+      "controls": {
+        "peripheral": "i80"
+      }
     },
     {
       "name": "measure-i80",
@@ -936,16 +938,19 @@
     },
     {
       "name": "add-parlio-driver",
-      "description": "+ParlioLedDriver capped to 64 LEDs on lane 0. Optional — P4 only. Diff = the Parlio per-frame cost.",
+      "description": "+ParallelLedDriver (peripheral=Parlio) capped to 64 LEDs on lane 0. Optional — P4 only. Diff = the Parlio per-frame cost.",
       "op": "add_module",
       "id": "Parlio",
-      "type": "ParlioLedDriver",
+      "type": "ParallelLedDriver",
       "parent_id": "Drivers",
       "props": {
         "pins": "20",
         "ledsPerPin": "64"
       },
-      "optional": true
+      "optional": true,
+      "controls": {
+        "peripheral": "Parlio"
+      }
     },
     {
       "name": "measure-parlio",

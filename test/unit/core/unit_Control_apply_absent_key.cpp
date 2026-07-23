@@ -19,6 +19,7 @@
 #include "doctest.h"
 #include "core/Control.h"
 #include "core/JsonUtil.h"
+#include "core/JsonSink.h"   // PaletteOptionsFn's JsonSink parameter (the palette-crash regression)
 
 #include <cstdint>
 #include <cstring>
@@ -168,4 +169,48 @@ TEST_CASE("a Text control with no validator accepts anything that fits") {
     CHECK(mm::applyControlValue(controls[0], "{\"label\":\"hi\"}",
                                 "label", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
     CHECK(std::strcmp(label, "hi") == 0);
+}
+
+// A Palette control's aux holds a PaletteOptionsFn (a FUNCTION POINTER), not an options array. The
+// Select label-match path must therefore NOT run for Palette: reinterpreting a function pointer as a
+// char* const* and walking it dereferences code bytes — undefined behavior, a near-certain crash on
+// ESP32. The regression: a string value on a palette must fall to numeric-index apply (parseInt → 0),
+// exactly the harmless behavior before the label-match feature existed. (Robust to any input.)
+static void paletteOptions(mm::JsonSink& sink) {
+    sink.append("[\"Rainbow\",\"Ocean\",\"Forest\"]");   // a real fn body; never read via the aux cast
+}
+TEST_CASE("applyControlValue: a string palette value does not crash and applies numerically") {
+    mm::ControlList controls;
+    uint8_t palette = 1;
+    controls.addPalette("palette", palette, paletteOptions, 3);
+
+    // A STRING value (as a hand-edited config or a mistaken client could send). Before the fix this
+    // walked the function pointer as an options array. After: string → parseInt → 0, clamped in range.
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":\"Rainbow\"}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(palette == 0);   // numeric fallback, no function-pointer deref
+
+    // A numeric value still applies straight through.
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":2}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(palette == 2);
+}
+
+// The complement: a Select's aux IS the options array, so a string LABEL value matches an option by
+// name (the board-portable catalog path — a peripheral label is stable while its filtered index is
+// not). This keeps the label-match feature working where it is safe.
+TEST_CASE("applyControlValue: a Select accepts an option label as a string value") {
+    mm::ControlList controls;
+    uint8_t sel = 0;
+    static const char* const opts[] = {"i80", "MoonI80", "Parlio"};
+    controls.addSelect("peripheral", sel, opts, 3);
+
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":\"Parlio\"}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 2);   // matched the "Parlio" label → index 2
+
+    // A numeric index still works alongside the label path.
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":1}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 1);
 }

@@ -69,9 +69,12 @@ def set_log_level(ips, index):
     never raised, so it can't fail the caller's real work (a KPI capture, a monitor session)."""
     body = json.dumps({"module": "System", "control": "logLevel", "value": index}).encode("utf-8")
     for ip in ips:
-        req = urllib.request.Request(f"http://{ip}/api/control", data=body,
-                                     headers={"Content-Type": "application/json"}, method="POST")
         try:
+            # Request() is inside the try too: a malformed IP makes its construction raise, and that
+            # must skip only this device — not abort the loop and strand the rest (which, under
+            # raised_log_level, would also skip the restore of every device after it).
+            req = urllib.request.Request(f"http://{ip}/api/control", data=body,
+                                         headers={"Content-Type": "application/json"}, method="POST")
             urllib.request.urlopen(req, timeout=3).read()
         except Exception:
             pass

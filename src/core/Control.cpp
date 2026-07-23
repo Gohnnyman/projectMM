@@ -315,10 +315,38 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);
             return ApplyResult::Ok;
         }
-        case ControlType::Select:
-        case ControlType::Palette: {
-            int v = mm::json::parseInt(json, key);
+        case ControlType::Select: {
             const int hi = c.max > 0 ? c.max - 1 : 0;
+            // A Select value may be given as the option LABEL (a string) instead of the index. This is
+            // what makes a catalog config board-portable: the index into a board-FILTERED option list
+            // varies per chip (an S3 offers fewer peripherals than a P4), but the label is stable. Match
+            // the string against the options and use that row; fall back to the numeric index otherwise.
+            // Select-only: a Select's aux IS the options array (const char* const*); Palette's aux is a
+            // PaletteOptionsFn (a function pointer), so it must not reach this reinterpret_cast.
+            char label[24] = {};
+            mm::json::parseString(json, key, label, sizeof(label));
+            if (label[0]) {
+                auto* options = reinterpret_cast<const char* const*>(c.aux);
+                if (options)
+                    for (int i = 0; i <= hi; i++)
+                        if (options[i] && std::strcmp(options[i], label) == 0)
+                            return clampInto(static_cast<uint8_t*>(c.ptr), i, 0, hi);
+                // A label that names no current option (e.g. a peripheral this board can't run) is not an
+                // error in Lenient policy — the driver keeps its default; Strict rejects it.
+                if (policy == ApplyPolicy::Strict) return ApplyResult::OutOfRange;
+                return ApplyResult::Ok;
+            }
+            int v = mm::json::parseInt(json, key);
+            if (policy == ApplyPolicy::Strict && (v < 0 || v > hi)) {
+                return ApplyResult::OutOfRange;
+            }
+            return clampInto(static_cast<uint8_t*>(c.ptr), v, 0, hi);
+        }
+        case ControlType::Palette: {
+            // Palette carries a PaletteOptionsFn in aux (not an options array), so it stays numeric-index
+            // only — no label match. A string value parses to 0 via parseInt, the harmless prior behavior.
+            const int hi = c.max > 0 ? c.max - 1 : 0;
+            int v = mm::json::parseInt(json, key);
             if (policy == ApplyPolicy::Strict && (v < 0 || v > hi)) {
                 return ApplyResult::OutOfRange;
             }

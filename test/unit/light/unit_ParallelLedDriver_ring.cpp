@@ -44,60 +44,55 @@ using mm::nrOfLightsType;
 constexpr uint8_t kMockRingBufs = 4;
 constexpr uint32_t kMockRingRows = 16;
 
-class MockRingDriver : public mm::ParallelLedDriver<MockRingDriver> {
-public:
-    static constexpr uint8_t lanesAvailable() { return 8; }   // 8 data lines (an 8-bit bus)
-    static constexpr bool kPowerOfTwoBus = true;
-    static constexpr bool kLoopbackFullWidth = false;
-    static constexpr bool kSupportsPinExpander = true;
-    static constexpr const char* kInitFailMsg = "mock init failed";
+class MockRingDriver;   // forward decl — the peripheral's ring hooks call back into the owner's encode
 
-    void addBusControls() {}
-    // A ring-capable backend adds its ring cluster here (the base's default addRingControls is a no-op for
+// The ring-capable backend: a memory-only LedPeripheral (same shape as unit_ParallelLedDriver_doublebuffer's
+// MockPeripheral) PLUS the ring hooks (busInitRing/busTransmitRing/busIsRing/wantsRing), which is what
+// MoonI80Peripheral is on real hardware. Holds the ring buffer pool and geometry; the actual per-slice
+// encode is the OWNER's (ParallelLedDriver::encodeRows), reached through owner_ exactly as
+// MoonI80Peripheral::ringEncodeTrampoline does.
+class MockRingPeripheral : public mm::LedPeripheral {
+public:
+    uint8_t lanesAvailable() const override { return 8; }   // 8 data lines (an 8-bit bus)
+    bool powerOfTwoBus() const override { return true; }
+    bool loopbackFullWidth() const override { return false; }
+    bool supportsPinExpander() const override { return true; }
+    const char* initFailMsg() const override { return "mock init failed"; }
+    mm::LedHwBlock hwBlock() const override { return mm::LedHwBlock::None; }   // mock drives no real block
+
+    void addBusControls(mm::ControlList&) override {}
+    // A ring-capable backend adds its ring cluster here (the default addRingControls is a no-op for
     // whole-frame-only backends). Mirror the real driver: the source-snapshot knob under the path, gated
     // on wantsRing() — this mock's controllable wantRing_ drives the visibility the hide test checks.
-    void addRingControls() {
-        controls_.addBool("ringSnapshot", ringSnapshot);
-        controls_.setHidden(controls_.count() - 1, !wantsRing());
+    void addRingControls(mm::ControlList& controls) override {
+        controls.addBool("ringSnapshot", owner_->ringSnapshotRef());
+        controls.setHidden(controls.count() - 1, !wantsRing());
     }
-    bool busControlTriggersBuild(const char*) const { return false; }
-    void recordBusPins() {}
-    bool extraBusPinsCurrent() const { return true; }
-    const char* validateBusPins(const uint16_t*, uint8_t) const { return nullptr; }
-    const char* validateBusFatal() const { return nullptr; }
-    uint16_t clockPinForBus() const { return 99; }
+    bool busControlTriggersBuild(const char*) const override { return false; }
+    void recordBusPins() override {}
+    bool extraBusPinsCurrent() const override { return true; }
+    const char* validateBusPins(const uint16_t*, uint8_t) const override { return nullptr; }
+    const char* validateBusFatal() const override { return nullptr; }
+    uint16_t clockPinForBus() const override { return 99; }
 
     // --- whole-frame bus (used to produce the reference frame the ring output is compared against) ---
-    bool busInit(size_t frameBytes, bool) { cap_ = frameBytes; buf_.assign(frameBytes, 0); return true; }
-    uint8_t* busBuffer(uint8_t i) { return (i == 0 && !buf_.empty()) ? buf_.data() : nullptr; }
-    size_t busCapacity() const { return cap_; }
-    bool busTransmit(uint8_t, size_t) { return true; }
-    bool busWait(uint8_t, uint32_t) { return true; }
-    uint32_t busLastTransmitUs() const { return 0; }
-    void busDeinit() { cap_ = 0; buf_.clear(); ringActive_ = false; }
-    mm::platform::RmtLoopbackResult busLoopback(const uint8_t*, size_t, size_t, uint8_t) { return {}; }
+    bool busInit(size_t frameBytes, bool) override { cap_ = frameBytes; buf_.assign(frameBytes, 0); return true; }
+    uint8_t* busBuffer(uint8_t i) override { return (i == 0 && !buf_.empty()) ? buf_.data() : nullptr; }
+    size_t busCapacity() const override { return cap_; }
+    bool busTransmit(uint8_t, size_t) override { return true; }
+    bool busWait(uint8_t, uint32_t) override { return true; }
+    uint32_t busLastTransmitUs() const override { return 0; }
+    void busDeinit() override { cap_ = 0; buf_.clear(); ringActive_ = false; }
+    mm::platform::RmtLoopbackResult busLoopback(const uint8_t*, size_t, size_t, uint8_t) override { return {}; }
 
-    // The whole-frame reference: prefill constants + encode the entire frame in one call (what the ring
-    // must reproduce, slice by slice).
-    template <class Slot>
-    void encodeWholeForTest(uint8_t outCh, uint8_t* dst) {
-        this->template encodeRows<Slot>(outCh, dst, 0, 0, /*closeFrame=*/true);
-    }
-    template <class Slot>
-    void prefillShiftFrameForTest(uint8_t outCh, uint8_t* dst) {
-        this->template prefillShiftFrame<Slot>(outCh, dst);
-    }
-    // Which bus bit the '595's latch rides (the ragged darkness test masks it out of its bit check).
-    uint8_t latchBitForTest() const { return latchBit_; }
-
-    // --- ring hooks (the seam the platform drives). The mock stores the trampoline + geometry and hands
-    //     out plain-memory buffers; driveRingFrame() below replays the platform's prime+refill order. ---
-    bool wantsRing() const { return wantRing_; }
+    // --- ring hooks (the seam the platform drives). The mock stores the geometry and hands out
+    //     plain-memory buffers; driveRingFrame() below replays the platform's prime+refill order. ---
+    bool wantsRing() const override { return wantRing_; }
     void setWantRing(bool w) { wantRing_ = w; }
     // Buffers are ROWS-ONLY, exactly as the platform allocates them: the WS2812 reset comes from stopping
     // the peripheral, never from a pad inside a circulating buffer. Sizing these rows+pad here would let a
     // pad-writing bug pass the tests and overrun on hardware.
-    bool busInitRing(size_t rowBytes, uint32_t totalRows) {
+    bool busInitRing(size_t rowBytes, uint32_t totalRows) override {
         ringRowBytes_ = rowBytes;
         ringTotalRows_ = totalRows;
         ringActive_ = true;
@@ -108,8 +103,8 @@ public:
         for (auto& f : needsPrefill_) f = true;
         return true;
     }
-    bool busIsRing() const { return ringActive_; }
-    bool busTransmitRing() { return true; }   // the wire itself is the platform's; the encode is what we test
+    bool busIsRing() const override { return ringActive_; }
+    bool busTransmitRing() override { return true; }   // the wire itself is the platform's; the encode is what we test
 
     // Replay one frame through the ring exactly as the platform does: prime the first min(N, needed)
     // buffers, then refill in ring order until the slice that reaches totalRows. Returns the frame
@@ -151,8 +146,7 @@ public:
             // and re-flag the buffer after a tail memset (its constants are gone for the NEXT use).
             const bool needsPrefill = needsPrefill_[slot];
             needsPrefill_[slot] = false;
-            MockRingDriver::ringEncodeTrampolineHost(this, ring_[slot].data(), row, count, last,
-                                                     needsPrefill);
+            ringEncodeTrampolineHost(ring_[slot].data(), row, count, last, needsPrefill);
             if (shortSlice) needsPrefill_[slot] = true;
             // Reassemble the row region in DMA order.
             assembled.insert(assembled.end(), ring_[slot].begin(),
@@ -204,29 +198,20 @@ public:
         return (ringTotalRows_ + kMockRingRows - 1) / kMockRingRows;
     }
 
-    // The trampoline the real driver registers is MoonLedDriver::ringEncodeTrampoline; the mock
-    // reproduces its body (recover `this`, branch on bus width, call encodeRows) so the host drives the
-    // identical encode the seam does on device. `closeFrame` is ALWAYS false to the encoder: the platform
-    // (encodeRingSlice) never appends a latch pad to a rows-only ring buffer — the WS2812 reset comes from
-    // stopping the peripheral, not from a pad inside a circulating buffer. `needsPrefill` mirrors the real
-    // trampoline's prefill-skip: constants are laid only when the platform says the buffer's are gone (or
-    // the lanes are ragged), and the byte-compare tests prove a data-only refill of a recycled buffer is
-    // identical to a full one.
-    static void ringEncodeTrampolineHost(void* user, uint8_t* dst, uint32_t firstRow,
-                                         uint32_t count, bool /*last*/, bool needsPrefill) {
-        auto* self = static_cast<MockRingDriver*>(user);
-        const uint8_t outCh = self->correction_.outChannels;
-        const auto first = static_cast<nrOfLightsType>(firstRow);
-        const auto cnt = static_cast<nrOfLightsType>(count);
-        const bool prefill = self->pinExpanderMode() && (needsPrefill || !self->uniformLaneCounts());
-        if (self->slotBytes() == 1) {
-            if (prefill) self->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
-            self->template encodeRows<uint8_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
-        } else {
-            if (prefill) self->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
-            self->template encodeRows<uint16_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
-        }
-    }
+    // The trampoline the real driver registers is MoonI80Peripheral::ringEncodeTrampoline; the mock
+    // reproduces its body (recover the OWNER — this backend's attach()'d ParallelLedDriver — branch on
+    // bus width, call encodeRows) so the host drives the identical encode the seam does on device.
+    // `closeFrame` is ALWAYS false to the encoder: the platform (encodeRingSlice) never appends a latch
+    // pad to a rows-only ring buffer — the WS2812 reset comes from stopping the peripheral, not from a
+    // pad inside a circulating buffer. `needsPrefill` mirrors the real trampoline's prefill-skip:
+    // constants are laid only when the platform says the buffer's are gone (or the lanes are ragged),
+    // and the byte-compare tests prove a data-only refill of a recycled buffer is identical to a full one.
+    //
+    // Needs the owner's PROTECTED encodeRows/prefillShiftRows, which only a ParallelLedDriver subclass
+    // can reach — MockRingDriver (below) exposes them via a couple of one-line forwarders, mirroring how
+    // MoonI80Peripheral's real trampoline calls back through `owner_`.
+    void ringEncodeTrampolineHost(uint8_t* dst, uint32_t firstRow, uint32_t count, bool /*last*/,
+                                  bool needsPrefill);
 
     size_t rowBytesForTest() const { return ringRowBytes_; }
 
@@ -276,7 +261,7 @@ public:
             const bool last = (firstRow + count >= ringTotalRows_);
             const bool needsPrefill = poolNeedsPrefill[slot];
             poolNeedsPrefill[slot] = false;
-            ringEncodeTrampolineHost(this, pool[slot].data(), firstRow, count, last, needsPrefill);
+            ringEncodeTrampolineHost(pool[slot].data(), firstRow, count, last, needsPrefill);
             if (shortSlice) poolNeedsPrefill[slot] = true;   // the tail memset erased those rows' constants
         };
         uint32_t refilledRow = 0;
@@ -326,6 +311,57 @@ public:
         return out;
     }
 
+private:
+    std::vector<uint8_t> buf_;
+    size_t cap_ = 0;
+    std::vector<uint8_t> ring_[kMockRingBufs];
+    bool needsPrefill_[kMockRingBufs] = {};   // the platform's bufNeedsPrefill lifecycle, mirrored
+    size_t ringRowBytes_ = 0;
+    uint32_t ringTotalRows_ = 0;
+    bool ringActive_ = false;
+    bool wantRing_ = false;
+    int32_t lastSlot_ = -1;
+};
+
+// A tiny ParallelLedDriver subclass that exposes the protected lane/encode/snapshot internals the ring
+// tests need (encodeRows, prefillShiftRows/Frame, latchBit_'s bit position, the ensureSnapshotCap /
+// snapshotSourceForRing / copyRange snapshot machinery) without widening the production class's public
+// surface — same pattern as unit_ParallelLedDriver_pinexpander.cpp's Expose-style mocks. Everything else
+// the tests use (laneCount, maxLaneLights, frameBytes, pins, ledsPerPin, pinExpander, latchPin,
+// defineControls, setSourceBuffer, correctionForTest, applyState, severity, outputsPerPin,
+// setWindow, tick) is already public on ParallelLedDriver itself.
+class MockRingDriver : public mm::ParallelLedDriver {
+public:
+    // The whole-frame reference: prefill constants + encode the entire frame in one call (what the ring
+    // must reproduce, slice by slice).
+    template <class Slot>
+    void encodeWholeForTest(uint8_t outCh, uint8_t* dst) {
+        this->template encodeRows<Slot>(outCh, dst, 0, 0, /*closeFrame=*/true);
+    }
+    template <class Slot>
+    void prefillShiftFrameForTest(uint8_t outCh, uint8_t* dst) {
+        this->template prefillShiftFrame<Slot>(outCh, dst);
+    }
+    // Which bus bit the '595's latch rides (the ragged darkness test masks it out of its bit check).
+    uint8_t latchBitForTest() const { return this->latchBit(); }
+
+    // The trampoline body itself (recover outCh/prefill-gate from this driver, branch on bus width, call
+    // encodeRows) — MockRingPeripheral::ringEncodeTrampolineHost forwards here, mirroring how
+    // MoonI80Peripheral's real trampoline recovers `owner_` and calls straight into it.
+    void encodeSliceForTest(uint8_t* dst, uint32_t firstRow, uint32_t count, bool needsPrefill) {
+        const uint8_t outCh = this->correction().outChannels;
+        const auto first = static_cast<nrOfLightsType>(firstRow);
+        const auto cnt = static_cast<nrOfLightsType>(count);
+        const bool prefill = this->pinExpanderMode() && (needsPrefill || !this->uniformLaneCounts());
+        if (this->slotBytes() == 1) {
+            if (prefill) this->template prefillShiftRows<uint8_t>(outCh, dst, first, cnt);
+            this->template encodeRows<uint8_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
+        } else {
+            if (prefill) this->template prefillShiftRows<uint16_t>(outCh, dst, first, cnt);
+            this->template encodeRows<uint16_t>(outCh, dst, first, cnt, /*closeFrame=*/false);
+        }
+    }
+
     // Freeze the current source into the driver-owned snapshot and route the ring encode at it — the same
     // call tickRing makes before kicking a frame. After this, encodeRows reads the snapshot, so mutating
     // the live source (a resize / repaint on the render thread) can't tear or UAF the in-flight frame.
@@ -350,18 +386,14 @@ public:
     static mm::nrOfLightsType snapHalfForTest(mm::nrOfLightsType n, size_t chStride) {
         return snapLineAlignedHalf(n, chStride);
     }
-
-private:
-    std::vector<uint8_t> buf_;
-    size_t cap_ = 0;
-    std::vector<uint8_t> ring_[kMockRingBufs];
-    bool needsPrefill_[kMockRingBufs] = {};   // the platform's bufNeedsPrefill lifecycle, mirrored
-    size_t ringRowBytes_ = 0;
-    uint32_t ringTotalRows_ = 0;
-    bool ringActive_ = false;
-    bool wantRing_ = false;
-    int32_t lastSlot_ = -1;
 };
+
+// Out-of-line: needs MockRingDriver's full definition (encodeSliceForTest), so it's defined after the
+// class rather than inline in MockRingPeripheral.
+inline void MockRingPeripheral::ringEncodeTrampolineHost(uint8_t* dst, uint32_t firstRow, uint32_t count,
+                                                         bool /*last*/, bool needsPrefill) {
+    static_cast<MockRingDriver*>(owner_)->encodeSliceForTest(dst, firstRow, count, needsPrefill);
+}
 
 // Bring the mock up on `lights` lights, shift mode (8 pins × 8 = 64 strands... capped; use fewer pins),
 // with a correction so outChannels is known. Mirrors the shiftregister test's setup.
@@ -370,8 +402,9 @@ private:
 // "" leaves every strand equal at `lights`. Pass an explicit list for a RAGGED frame, where strands have
 // different lengths (an end user's mix of strips and panels), which is what makes the active mask change
 // mid-frame rather than being one constant.
-void wireShift(MockRingDriver& d, mm::Buffer& src, mm::Correction& corr, nrOfLightsType lights,
-               const char* pins, const char* ledsPerPin = "") {
+void wireShift(MockRingDriver& d, MockRingPeripheral& peripheral, mm::Buffer& src, mm::Correction& corr,
+              nrOfLightsType lights, const char* pins, const char* ledsPerPin = "") {
+    d.setPeripheralForTest(&peripheral);
     std::strcpy(d.pins, pins);
     std::strcpy(d.ledsPerPin, ledsPerPin);
     d.pinExpander = true;
@@ -395,10 +428,11 @@ void wireShift(MockRingDriver& d, mm::Buffer& src, mm::Correction& corr, nrOfLig
 //    writes to dst+0 for any firstRow, so if the tiling is right the reassembled buffer == the frame.
 TEST_CASE("MoonI80 ring: sliced encode tiles into a byte-identical whole frame") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
     // 200 lights/strand > 16 rows/buffer × 4 buffers = 64, so this needs real refills (not fits-in-ring).
-    wireShift(d, src, corr, 200, "1,2");   // 2 pins × 8 = 16 strands, 200 lights each
+    wireShift(d, peripheral, src, corr, 200, "1,2");   // 2 pins × 8 = 16 strands, 200 lights each
     // Paint the source so every row differs (a tiling bug that repeats a slice would then be visible).
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {
@@ -413,16 +447,16 @@ TEST_CASE("MoonI80 ring: sliced encode tiles into a byte-identical whole frame")
 
     // Reference: one whole-frame encode (2 pins → 8-bit bus → uint8 slots). encodeRows in shift mode
     // writes only data words, so prefill the whole buffer's constants first — same as reinit does.
-    d.busInit(d.frameBytes(), false);
-    d.prefillShiftFrameForTest<uint8_t>(outCh, d.busBuffer(0));
-    d.encodeWholeForTest<uint8_t>(outCh, d.busBuffer(0));
-    std::vector<uint8_t> whole(d.busBuffer(0), d.busBuffer(0) + rowRegion);
-    d.busDeinit();
+    peripheral.busInit(d.frameBytes(), false);
+    d.prefillShiftFrameForTest<uint8_t>(outCh, peripheral.busBuffer(0));
+    d.encodeWholeForTest<uint8_t>(outCh, peripheral.busBuffer(0));
+    std::vector<uint8_t> whole(peripheral.busBuffer(0), peripheral.busBuffer(0) + rowRegion);
+    peripheral.busDeinit();
 
     // Ring: drive the frame slice by slice, reassemble the row region.
-    d.setWantRing(true);
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
-    std::vector<uint8_t> assembled = d.driveRingFrame();
+    peripheral.setWantRing(true);
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    std::vector<uint8_t> assembled = peripheral.driveRingFrame();
 
     REQUIRE(assembled.size() == whole.size());
     CHECK(std::memcmp(assembled.data(), whole.data(), whole.size()) == 0);
@@ -433,16 +467,17 @@ TEST_CASE("MoonI80 ring: sliced encode tiles into a byte-identical whole frame")
 //    buffer), so a slice that wrote a latch word past its rows would overrun the allocation on hardware.
 TEST_CASE("MoonI80 ring: no slice writes past its rows (buffers are rows-only)") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2");
+    wireShift(d, peripheral, src, corr, 200, "1,2");
     const uint8_t outCh = corr.outChannels;
 
-    d.setWantRing(true);
+    peripheral.setWantRing(true);
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
-    d.driveRingFrame();
-    CHECK(d.noSliceWritesPad());
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    peripheral.driveRingFrame();
+    CHECK(peripheral.noSliceWritesPad());
 }
 
 // 3. RECYCLED == FRESH — a second frame through the SAME (recycled, not zeroed) ring buffers produces
@@ -450,9 +485,10 @@ TEST_CASE("MoonI80 ring: no slice writes past its rows (buffers are rows-only)")
 //    single-frame test cannot see — the failure mode unique to a recycled ring.
 TEST_CASE("MoonI80 ring: a recycled buffer produces the same bytes as a fresh one") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2");
+    wireShift(d, peripheral, src, corr, 200, "1,2");
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {
         s[i * 3 + 0] = static_cast<uint8_t>(i * 5 + 3);
@@ -461,12 +497,12 @@ TEST_CASE("MoonI80 ring: a recycled buffer produces the same bytes as a fresh on
     }
     const uint8_t outCh = corr.outChannels;
 
-    d.setWantRing(true);
+    peripheral.setWantRing(true);
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
 
-    std::vector<uint8_t> first = d.driveRingFrame();
-    std::vector<uint8_t> second = d.driveRingFrame();   // same buffers, recycled — not re-init'd
+    std::vector<uint8_t> first = peripheral.driveRingFrame();
+    std::vector<uint8_t> second = peripheral.driveRingFrame();   // same buffers, recycled — not re-init'd
     REQUIRE(first.size() == second.size());
     CHECK(std::memcmp(first.data(), second.data(), first.size()) == 0);
 }
@@ -477,9 +513,10 @@ TEST_CASE("MoonI80 ring: a recycled buffer produces the same bytes as a fresh on
 //    8 buffers (reuse) AND lastRows=8 (short) — exactly the case 128/192/256 (all ×16) never hit.
 TEST_CASE("MoonI80 ring: a short last slice in a reused buffer has a clean pad (no stale ghost rows)") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2");   // 200 lights/strand: 13 slices, last slice = 8 rows
+    wireShift(d, peripheral, src, corr, 200, "1,2");   // 200 lights/strand: 13 slices, last slice = 8 rows
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {   // dense non-zero source so a stale row WOULD show
         s[i * 3 + 0] = static_cast<uint8_t>(i * 9 + 1);
@@ -487,14 +524,14 @@ TEST_CASE("MoonI80 ring: a short last slice in a reused buffer has a clean pad (
         s[i * 3 + 2] = static_cast<uint8_t>(i * 19 + 2);
     }
     const uint8_t outCh = corr.outChannels;
-    d.setWantRing(true);
+    peripheral.setWantRing(true);
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
 
     // Drive TWICE so the last-slice buffer is genuinely recycled (held an earlier frame's full slice).
-    d.driveRingFrame();
-    d.driveRingFrame();
-    CHECK(d.lastSliceStalePadBytes() == 0);   // tail past the short slice's rows is zero — no ghost rows
+    peripheral.driveRingFrame();
+    peripheral.driveRingFrame();
+    CHECK(peripheral.lastSliceStalePadBytes() == 0);   // tail past the short slice's rows is zero — no ghost rows
 }
 
 // 5. SOURCE SNAPSHOT — the ring encodes off the render thread across the ~6 ms wire, so it must read a
@@ -505,9 +542,10 @@ TEST_CASE("MoonI80 ring: a short last slice in a reused buffer has a clean pad (
 //    mid-wire from tearing or reading freed memory.)
 TEST_CASE("MoonI80 ring: the encode reads a per-frame snapshot, not the live source") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2");
+    wireShift(d, peripheral, src, corr, 200, "1,2");
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {
         s[i * 3 + 0] = static_cast<uint8_t>(i * 5 + 3);
@@ -515,16 +553,16 @@ TEST_CASE("MoonI80 ring: the encode reads a per-frame snapshot, not the live sou
         s[i * 3 + 2] = static_cast<uint8_t>(i * 17 + 7);
     }
     const uint8_t outCh = corr.outChannels;
-    d.setWantRing(true);
+    peripheral.setWantRing(true);
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
 
     // Freeze the source, then SCRIBBLE all over the live buffer as the render thread would between kick
     // and wire-completion. The snapshot must shield the encode from it.
     REQUIRE(d.snapshotForTest());
-    std::vector<uint8_t> fromSnapshot = d.driveRingFrame();
+    std::vector<uint8_t> fromSnapshot = peripheral.driveRingFrame();
     std::memset(src.data(), 0xA5, static_cast<size_t>(src.count()) * src.channelsPerLight());
-    std::vector<uint8_t> afterMutation = d.driveRingFrame();   // still on the same snapshot
+    std::vector<uint8_t> afterMutation = peripheral.driveRingFrame();   // still on the same snapshot
 
     REQUIRE(fromSnapshot.size() == afterMutation.size());
     CHECK(std::memcmp(fromSnapshot.data(), afterMutation.data(), fromSnapshot.size()) == 0);
@@ -533,7 +571,7 @@ TEST_CASE("MoonI80 ring: the encode reads a per-frame snapshot, not the live sou
     // scribbled buffer and confirm the encode follows it (a uniform 0xA5 source → uniform encoded bytes,
     // clearly different from the structured pattern above).
     REQUIRE(d.snapshotForTest());
-    std::vector<uint8_t> fromMutated = d.driveRingFrame();
+    std::vector<uint8_t> fromMutated = peripheral.driveRingFrame();
     REQUIRE(fromMutated.size() == fromSnapshot.size());
     CHECK(std::memcmp(fromMutated.data(), fromSnapshot.data(), fromMutated.size()) != 0);
 }
@@ -546,9 +584,10 @@ TEST_CASE("MoonI80 ring: the encode reads a per-frame snapshot, not the live sou
 TEST_CASE("MoonI80 ring: the windowed snapshot bias reads this driver's slice, not from light 0") {
     // Reference: a driver whose window starts at 0 over a buffer sized for exactly its strands.
     MockRingDriver ref;
+    MockRingPeripheral peripheralRef;
     mm::Buffer refSrc;
     mm::Correction corr;
-    wireShift(ref, refSrc, corr, 64, "1,2");   // 16 strands × 64 lights = 1024-light window
+    wireShift(ref, peripheralRef, refSrc, corr, 64, "1,2");   // 16 strands × 64 lights = 1024-light window
     const nrOfLightsType winLights = refSrc.count();   // the whole buffer IS the window here
     auto paint = [](uint8_t* p, nrOfLightsType n, nrOfLightsType base) {
         for (nrOfLightsType i = 0; i < n; i++) {
@@ -558,27 +597,28 @@ TEST_CASE("MoonI80 ring: the windowed snapshot bias reads this driver's slice, n
         }
     };
     paint(refSrc.data(), winLights, /*base=*/64);   // same pixel VALUES the windowed driver will see
-    ref.setWantRing(true);
+    peripheralRef.setWantRing(true);
     const size_t rowBytes = static_cast<size_t>(corr.outChannels) * 24 * 1 * ref.outputsPerPin();
-    REQUIRE(ref.busInitRing(rowBytes, static_cast<uint32_t>(ref.maxLaneLights())));
+    REQUIRE(peripheralRef.busInitRing(rowBytes, static_cast<uint32_t>(ref.maxLaneLights())));
     REQUIRE(ref.snapshotForTest());
-    std::vector<uint8_t> refFrame = ref.driveRingFrame();
+    std::vector<uint8_t> refFrame = peripheralRef.driveRingFrame();
 
     // Windowed: a bigger buffer, the driver's window offset to start=64, painted so window pixel k equals
     // reference pixel k. The bias must make the snapshot read [64, 64+winLights), i.e. the SAME values.
     MockRingDriver win;
+    MockRingPeripheral peripheralWin;
     mm::Buffer winSrc;
     mm::Correction corr2;
-    wireShift(win, winSrc, corr2, 64, "1,2");   // same geometry...
+    wireShift(win, peripheralWin, winSrc, corr2, 64, "1,2");   // same geometry...
     // ...but re-allocate the source with a 64-light lead-in the window skips, and re-apply the window.
     REQUIRE(winSrc.allocate(winLights + 64, 3) == true);
     paint(winSrc.data(), winLights + 64, /*base=*/0);  // pixel 64.. == refSrc pixel 0.. (base 64)
     win.setWindow(64, winLights);
     win.applyState();
-    win.setWantRing(true);
-    REQUIRE(win.busInitRing(rowBytes, static_cast<uint32_t>(win.maxLaneLights())));
+    peripheralWin.setWantRing(true);
+    REQUIRE(peripheralWin.busInitRing(rowBytes, static_cast<uint32_t>(win.maxLaneLights())));
     REQUIRE(win.snapshotForTest());
-    std::vector<uint8_t> winFrame = win.driveRingFrame();
+    std::vector<uint8_t> winFrame = peripheralWin.driveRingFrame();
 
     REQUIRE(refFrame.size() == winFrame.size());
     CHECK(std::memcmp(refFrame.data(), winFrame.data(), refFrame.size()) == 0);
@@ -596,20 +636,21 @@ TEST_CASE("MoonI80 ring: the windowed snapshot bias reads this driver's slice, n
 //     is the no-reuse stopgap's guarantee; it is what renders clean at ≤240 lights/strand (kRingBufs=16).
 TEST_CASE("MoonI80 ring: no-reuse frame clocks a clean LOW tail and stops deterministically") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 176, "1,2");   // 176 lights = 11 slices; model 16 buffers → NO reuse
+    wireShift(d, peripheral, src, corr, 176, "1,2");   // 176 lights = 11 slices; model 16 buffers → NO reuse
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {   // dense non-zero so a dirty tail WOULD show
         s[i * 3 + 0] = static_cast<uint8_t>(i * 7 + 1);
         s[i * 3 + 1] = static_cast<uint8_t>(i * 13 + 5);
         s[i * 3 + 2] = static_cast<uint8_t>(i * 29 + 2);
     }
-    d.setWantRing(true);
+    peripheral.setWantRing(true);
     const size_t rowBytes = static_cast<size_t>(corr.outChannels) * 24 * 1 * d.outputsPerPin();
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
 
-    auto f = d.driveRingFrameWithTermination(/*bufs=*/16, /*kTailBufs=*/1);
+    auto f = peripheral.driveRingFrameWithTermination(/*bufs=*/16, /*kTailBufs=*/1);
     const uint32_t nSlices = (176 + 15) / 16;   // 11
     CHECK(f.drainsToStop == nSlices + 1);        // stops one buffer LATE (the tail), not early, not looping forever
     CHECK(f.tailIsLow);                          // the buffer(s) past the last real slice clock all-LOW
@@ -631,27 +672,28 @@ TEST_CASE("MoonI80 ring: no-reuse frame clocks a clean LOW tail and stops determ
 //     stop timing at the correct sizing is caught here; the equal-case stall is covered in the backlog.
 TEST_CASE("MoonI80 ring: the no-reuse stopgap clocks a clean tail and stops on the drain counter") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 176, "1,2");   // 11 slices
+    wireShift(d, peripheral, src, corr, 176, "1,2");   // 11 slices
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {
         s[i * 3 + 0] = static_cast<uint8_t>(i * 7 + 1);
         s[i * 3 + 1] = static_cast<uint8_t>(i * 13 + 5);
         s[i * 3 + 2] = static_cast<uint8_t>(i * 29 + 2);
     }
-    d.setWantRing(true);
+    peripheral.setWantRing(true);
     const size_t rowBytes = static_cast<size_t>(corr.outChannels) * 24 * 1 * d.outputsPerPin();
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
     const uint32_t nSlices = (176 + 15) / 16;   // 11
 
     // bufs = nSlices + 1 (the correct stopgap sizing, kRingBufs > nSlices): clean LOW tail, stop on the
     // drain counter one buffer past the last real slice. This is the ≤240-lights/strand no-reuse guarantee.
-    auto ok = d.driveRingFrameWithTermination(/*bufs=*/static_cast<uint8_t>(nSlices + 1), /*kTailBufs=*/1);
+    auto ok = peripheral.driveRingFrameWithTermination(/*bufs=*/static_cast<uint8_t>(nSlices + 1), /*kTailBufs=*/1);
     CHECK(ok.tailIsLow);
     CHECK(ok.drainsToStop == nSlices + 1);
     // A deeper pool (kRingBufs=16 for 11 slices, the shipped stopgap) is equally clean and stops the same.
-    auto deep = d.driveRingFrameWithTermination(/*bufs=*/16, /*kTailBufs=*/1);
+    auto deep = peripheral.driveRingFrameWithTermination(/*bufs=*/16, /*kTailBufs=*/1);
     CHECK(deep.tailIsLow);
     CHECK(deep.drainsToStop == nSlices + 1);
 }
@@ -673,12 +715,13 @@ TEST_CASE("MoonI80 ring: the no-reuse stopgap clocks a clean tail and stops on t
 //    slice) nor the driver-level ring tests (which are never ragged) reach on their own.
 TEST_CASE("MoonI80 ring: a ragged frame tiles byte-identically (a strand ending mid-slice)") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
     // 16 strands (2 pins × 8). Strand 0 runs the full 200; strands 3 and 9 end at 100 and 57 — both
     // INSIDE a 16-row slice (100 = slice 6 row 4; 57 = slice 3 row 9), and 57 is not a multiple of
     // anything convenient, which is the point.
-    wireShift(d, src, corr, 200, "1,2",
+    wireShift(d, peripheral, src, corr, 200, "1,2",
               "200,200,200,100,200,200,200,200,200,57,200,200,200,200,200,200");
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {
@@ -693,15 +736,15 @@ TEST_CASE("MoonI80 ring: a ragged frame tiles byte-identically (a strand ending 
     // The frame is still as long as the LONGEST strand — the short ones just go dark early.
     REQUIRE(d.maxLaneLights() == 200);
 
-    d.busInit(d.frameBytes(), false);
-    d.prefillShiftFrameForTest<uint8_t>(outCh, d.busBuffer(0));
-    d.encodeWholeForTest<uint8_t>(outCh, d.busBuffer(0));
-    std::vector<uint8_t> whole(d.busBuffer(0), d.busBuffer(0) + rowRegion);
-    d.busDeinit();
+    peripheral.busInit(d.frameBytes(), false);
+    d.prefillShiftFrameForTest<uint8_t>(outCh, peripheral.busBuffer(0));
+    d.encodeWholeForTest<uint8_t>(outCh, peripheral.busBuffer(0));
+    std::vector<uint8_t> whole(peripheral.busBuffer(0), peripheral.busBuffer(0) + rowRegion);
+    peripheral.busDeinit();
 
-    d.setWantRing(true);
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
-    std::vector<uint8_t> assembled = d.driveRingFrame();
+    peripheral.setWantRing(true);
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    std::vector<uint8_t> assembled = peripheral.driveRingFrame();
 
     REQUIRE(assembled.size() == whole.size());
     CHECK(std::memcmp(assembled.data(), whole.data(), whole.size()) == 0);
@@ -715,9 +758,10 @@ TEST_CASE("MoonI80 ring: a ragged frame tiles byte-identically (a strand ending 
 //      cross the recycle boundary repeatedly.
 TEST_CASE("MoonI80 ring v2: coalesced EOFs (batched refill) are byte-identical to one-per-EOF") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2", "");   // 16 uniform strands, 200 rows: 13 slices over the mock pool
+    wireShift(d, peripheral, src, corr, 200, "1,2", "");   // 16 uniform strands, 200 rows: 13 slices over the mock pool
     uint8_t* s = src.data();
     for (nrOfLightsType i = 0; i < src.count(); i++) {
         s[i * 3 + 0] = static_cast<uint8_t>(i * 5 + 3);
@@ -727,11 +771,11 @@ TEST_CASE("MoonI80 ring v2: coalesced EOFs (batched refill) are byte-identical t
     const uint8_t outCh = corr.outChannels;
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
 
-    d.setWantRing(true);
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
-    std::vector<uint8_t> onePerEof = d.driveRingFrame();          // the reference grouping
-    std::vector<uint8_t> coalesced2 = d.driveRingFrameCoalesced(2);   // every firing carries 2 drains
-    std::vector<uint8_t> coalesced5 = d.driveRingFrameCoalesced(5);   // deep coalescing (a long stall)
+    peripheral.setWantRing(true);
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    std::vector<uint8_t> onePerEof = peripheral.driveRingFrame();          // the reference grouping
+    std::vector<uint8_t> coalesced2 = peripheral.driveRingFrameCoalesced(2);   // every firing carries 2 drains
+    std::vector<uint8_t> coalesced5 = peripheral.driveRingFrameCoalesced(5);   // deep coalescing (a long stall)
 
     REQUIRE(coalesced2.size() == onePerEof.size());
     REQUIRE(coalesced5.size() == onePerEof.size());
@@ -746,10 +790,11 @@ TEST_CASE("MoonI80 ring v2: coalesced EOFs (batched refill) are byte-identical t
 //     frames — which now skip the prefill — stay byte-identical to the whole-frame encode.
 TEST_CASE("MoonI80 ring: an EMPTY lane does not break uniformity (prefill-skip stays valid)") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
     // 15 strands at the full 200, the 16th empty — the 3840-lights-on-16-strands wall shape.
-    wireShift(d, src, corr, 200, "1,2",
+    wireShift(d, peripheral, src, corr, 200, "1,2",
               "200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,0");
     CHECK(d.uniformLaneCounts());   // the gate itself: empty lane ignored
     uint8_t* s = src.data();
@@ -762,15 +807,15 @@ TEST_CASE("MoonI80 ring: an EMPTY lane does not break uniformity (prefill-skip s
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
     const size_t rowRegion = static_cast<size_t>(d.maxLaneLights()) * rowBytes;
 
-    d.busInit(d.frameBytes(), false);
-    d.prefillShiftFrameForTest<uint8_t>(outCh, d.busBuffer(0));
-    d.encodeWholeForTest<uint8_t>(outCh, d.busBuffer(0));
-    std::vector<uint8_t> whole(d.busBuffer(0), d.busBuffer(0) + rowRegion);
-    d.busDeinit();
+    peripheral.busInit(d.frameBytes(), false);
+    d.prefillShiftFrameForTest<uint8_t>(outCh, peripheral.busBuffer(0));
+    d.encodeWholeForTest<uint8_t>(outCh, peripheral.busBuffer(0));
+    std::vector<uint8_t> whole(peripheral.busBuffer(0), peripheral.busBuffer(0) + rowRegion);
+    peripheral.busDeinit();
 
-    d.setWantRing(true);
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
-    std::vector<uint8_t> assembled = d.driveRingFrame();
+    peripheral.setWantRing(true);
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    std::vector<uint8_t> assembled = peripheral.driveRingFrame();
 
     REQUIRE(assembled.size() == whole.size());
     CHECK(std::memcmp(assembled.data(), whole.data(), whole.size()) == 0);
@@ -790,18 +835,19 @@ TEST_CASE("MoonI80 ring: an EMPTY lane does not break uniformity (prefill-skip s
 //     buffers are reused, not zeroed), which is where a "lay it once at init" shortcut breaks on frame 2.
 TEST_CASE("MoonI80 ring: an exhausted RAGGED strand clocks zeros, on a fresh AND a recycled buffer") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
     // Strand 0 alone runs the full 200; every other strand on both '595s ends at 8 — so from row 8 the
     // mask is a single bit, and 15 of 16 strands must be silent for the remaining 192 rows.
-    wireShift(d, src, corr, 200, "1,2", "200,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8");
+    wireShift(d, peripheral, src, corr, 200, "1,2", "200,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8");
     std::memset(src.data(), 0xFF, static_cast<size_t>(src.count()) * 3);   // a leak shows as full white
     const uint8_t outCh = corr.outChannels;
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
 
     REQUIRE(d.maxLaneLights() == 200);
-    d.setWantRing(true);
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    peripheral.setWantRing(true);
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
 
     // Strand 0 is pin 0's shift position 0; the '595 shifts MSB-first, so that strand rides bit 0 of the
     // bus word at cycle outputsPerPin-1. Every OTHER bus bit must be 0 for rows >= 8: bit p is pin p's
@@ -820,9 +866,9 @@ TEST_CASE("MoonI80 ring: an exhausted RAGGED strand clocks zeros, on a fresh AND
         INFO("exhausted strands leaked on " << which << ": " << leaked << " bytes");
         CHECK(leaked == 0);
     };
-    std::vector<uint8_t> first = d.driveRingFrame();
+    std::vector<uint8_t> first = peripheral.driveRingFrame();
     checkDark(first, "the first frame");
-    std::vector<uint8_t> second = d.driveRingFrame();   // same buffers, recycled
+    std::vector<uint8_t> second = peripheral.driveRingFrame();   // same buffers, recycled
     checkDark(second, "a recycled buffer");
     // And the two laps agree byte for byte — a recycled buffer is not a fresh one only by accident.
     REQUIRE(first.size() == second.size());
@@ -846,22 +892,23 @@ TEST_CASE("MoonI80 ring: an exhausted RAGGED strand clocks zeros, on a fresh AND
 //     UNCONDITIONALLY. The mock's busDeinit clears ringActive_, so a surviving ring is visible here.
 TEST_CASE("MoonI80 ring: a failed ring build tears the bus down (no leaked ring)") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2");
+    wireShift(d, peripheral, src, corr, 200, "1,2");
 
     const uint8_t outCh = corr.outChannels;
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
 
     // A ring that built successfully — the exact state the failure path must not leave behind.
-    d.setWantRing(true);
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
-    REQUIRE(d.busIsRing());
+    peripheral.setWantRing(true);
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    REQUIRE(peripheral.busIsRing());
 
     // The fall-through's teardown, as reinit() performs it. It must not be gated on `inited_` — which is
     // false here, exactly as it is in production on this path.
-    d.busDeinit();
-    CHECK_FALSE(d.busIsRing());   // the ring is gone, not merely unreferenced
+    peripheral.busDeinit();
+    CHECK_FALSE(peripheral.busIsRing());   // the ring is gone, not merely unreferenced
 }
 
 TEST_CASE("MoonI80 ring: the PARALLEL snapshot's range-split is byte-identical to the whole-range serial") {
@@ -870,9 +917,10 @@ TEST_CASE("MoonI80 ring: the PARALLEL snapshot's range-split is byte-identical t
     // ranges are disjoint and stateless: copyRange(0,half)+copyRange(half,N) == copyRange(0,N). The
     // snapshot is now a raw memcpy at SOURCE channel stride (correction fuses into encodeRows downstream).
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2");   // 16 strands × 200, a real window
+    wireShift(d, peripheral, src, corr, 200, "1,2");   // 16 strands × 200, a real window
     // Distinctive per-light source so a mis-split (gap/overlap/wrong stride) can't accidentally match.
     uint8_t* s = src.data();
     for (mm::nrOfLightsType i = 0; i < src.count(); i++) {
@@ -883,8 +931,8 @@ TEST_CASE("MoonI80 ring: the PARALLEL snapshot's range-split is byte-identical t
     const uint8_t outCh = corr.outChannels;
     const uint8_t srcCh = static_cast<uint8_t>(src.channelsPerLight());
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
-    d.setWantRing(true);
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    peripheral.setWantRing(true);
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
     // snapshotForTest sizes snapshotBuf_ (ensureSnapshotCap) and runs one full serial snapshot — after it,
     // the snapshot state (snapCopy*) is set and the buffer exists, so the manual re-runs below are safe.
     REQUIRE(d.snapshotForTest());
@@ -918,9 +966,10 @@ TEST_CASE("MoonI80 ring: the PARALLEL snapshot's range-split is byte-identical t
 // its tail reading stale bytes. This pins the full window survives.
 TEST_CASE("MoonI80 ring: snapshot keeps the whole window when outCh > srcCh (RGBW correction on RGB source)") {
     MockRingDriver d;
+    MockRingPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wireShift(d, src, corr, 200, "1,2");            // 16 strands × 200, RGB source (srcCh=3)
+    wireShift(d, peripheral, src, corr, 200, "1,2");            // 16 strands × 200, RGB source (srcCh=3)
     // Swap in an RGBW correction (outCh=4) so outCh > the source's 3 channels — the failing condition.
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::RGBW);
     d.correctionForTest() = corr;
@@ -928,11 +977,11 @@ TEST_CASE("MoonI80 ring: snapshot keeps the whole window when outCh > srcCh (RGB
     REQUIRE(corr.outChannels == 4);
     REQUIRE(src.channelsPerLight() == 3);
 
-    d.setWantRing(true);
+    peripheral.setWantRing(true);
     const uint8_t outCh = corr.outChannels;
     const uint8_t srcCh = static_cast<uint8_t>(src.channelsPerLight());
     const size_t rowBytes = static_cast<size_t>(outCh) * 24 * 1 * d.outputsPerPin();
-    REQUIRE(d.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
+    REQUIRE(peripheral.busInitRing(rowBytes, static_cast<uint32_t>(d.maxLaneLights())));
 
     // Paint the source window's LAST light a distinct value; the snapshot must copy it. With the buggy
     // outCh clamp the window shrinks to winLen*3/4, so the last quarter (including this light) is never
@@ -969,10 +1018,14 @@ TEST_CASE("MoonI80 ring: ringSnapshot control is hidden unless the ring is activ
         return false;
     };
     MockRingDriver ringing;
-    ringing.setWantRing(true);
+    MockRingPeripheral peripheralRinging;
+    ringing.setPeripheralForTest(&peripheralRinging);
+    peripheralRinging.setWantRing(true);
     CHECK_FALSE(ringSnapshotHidden(ringing));   // ring active → visible
 
     MockRingDriver whole;
-    whole.setWantRing(false);
+    MockRingPeripheral peripheralWhole;
+    whole.setPeripheralForTest(&peripheralWhole);
+    peripheralWhole.setWantRing(false);
     CHECK(ringSnapshotHidden(whole));           // no ring → hidden
 }
