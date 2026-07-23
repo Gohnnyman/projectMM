@@ -268,6 +268,14 @@ public:
     /// schema change without depending on the WS layer. Null until wired (unit tests run without it).
     using SchemaChangedFn = void (*)();
     static void setSchemaChangedHook(SchemaChangedFn fn) { schemaChangedHook_ = fn; }
+
+    /// Install the quiesce-render hook (the light domain points it at the encode worker: stop core 1
+    /// before a structural tree mutation). A static function pointer, same decoupling as the hooks above:
+    /// core signals "a mutation is about to free/realloc tree nodes" without naming Drivers (a light
+    /// module core can't include). Null until wired (unit tests without a render worker run fine). See
+    /// quiesce() for WHY the per-parent quiesce() alone is not enough.
+    using QuiesceRenderFn = void (*)();
+    static void setQuiesceRenderHook(QuiesceRenderFn fn) { quiesceRenderHook_ = fn; }
     /// Fire the schema-changed hook directly — for a change that rebuildControls() doesn't cover but that
     /// the client must still full-resync for. The one case: toggling a module's `enabled` (which rides the
     /// FULL state, never the value patch), so without this the client's cached state never learns the new
@@ -482,10 +490,25 @@ public:
     /// Idempotent and safe to call when no worker is running.
     virtual void quiesce() {}
 
+    /// The full pre-mutation quiesce, called by the four structural mutators below (addChild /
+    /// removeChild / replaceChildAt / moveChildTo). Two workers
+    /// can be reading the tree, so BOTH must be stopped before a node is freed or the child array is
+    /// realloc'd: (1) `this->quiesce()` — a worker THIS module owns and that iterates ITS OWN children
+    /// (Drivers, when its parent is mutated); and (2) the render worker via the quiesce-render hook — the
+    /// core-1 encode worker ticks the drivers, and a driver walks the WHOLE tree (a layout, a layer),
+    /// so mutating ANY node — not just the worker-owner's own child array — is a use-after-free for it.
+    /// The per-parent quiesce() alone missed this: replacing a *layout* quiesces Layouts (no worker)
+    /// while the render worker is mid-walk of that layout (the LoadProhibited crash this fixes). The
+    /// hook reaches the render worker wherever it lives; both are idempotent and no-ops when idle.
+    void quiesceForMutation() {
+        quiesce();
+        if (quiesceRenderHook_) quiesceRenderHook_();
+    }
+
     /// Generic children — grows on demand, only allocates during setup.
     bool addChild(MoonModule* child) {
         if (!child) return false;
-        quiesce();   // a worker may be iterating children_; the realloc below would pull it out from under it
+        quiesceForMutation();   // a worker may be iterating children_; the realloc below would pull it out from under it
         if (childCount_ == childCapacity_) {
             uint8_t newCap = childCapacity_ == 0 ? 4 : childCapacity_ * 2;
             auto** newArr = new MoonModule*[newCap];
@@ -500,7 +523,7 @@ public:
     }
 
     bool removeChild(MoonModule* child) {
-        quiesce();   // the caller release()s + deleteTree()s `child` next; a worker must not be inside its tick()
+        quiesceForMutation();   // the caller release()s + deleteTree()s `child` next; a worker must not be inside its tick()
         for (uint8_t i = 0; i < childCount_; i++) {
             if (children_[i] == child) {
                 child->setParent(nullptr);
@@ -517,7 +540,7 @@ public:
     /// Used by FilesystemModule at load time to swap a child whose type differs from
     /// the persisted JSON; the caller tears down + Scheduler::deleteTree's the old child.
     MoonModule* replaceChildAt(uint8_t i, MoonModule* fresh) {
-        quiesce();   // same hazard as removeChild: the caller tears down + deletes the child we swap out
+        quiesceForMutation();   // same hazard as removeChild: the caller tears down + deletes the child we swap out
         if (i >= childCount_ || !fresh) return nullptr;
         MoonModule* old = children_[i];
         if (old) old->setParent(nullptr);
@@ -532,6 +555,10 @@ public:
     /// the caller's follow-up Scheduler::prepareTree() rebuilds any order-dependent LUT.
     bool moveChildTo(MoonModule* child, uint8_t newIndex) {
         if (newIndex >= childCount_) return false;
+        // The fourth structural mutator: permuting children_ under an index-based worker loop can tick a
+        // child twice or skip one (no free, so not a use-after-free — but the same data-race class the
+        // add/remove/replace guards close). Quiesce like the others before touching the array.
+        quiesceForMutation();
         for (uint8_t i = 0; i < childCount_; i++) {
             if (children_[i] != child) continue;
             if (i == newIndex) return false;  // no-op
@@ -681,6 +708,7 @@ private:
     // Schema-changed hook: one function pointer for the whole process (like the persistence
     // noteDirty hook), poked by rebuildControls() so the WS layer resyncs on any schema change.
     static inline SchemaChangedFn schemaChangedHook_ = nullptr;
+    static inline QuiesceRenderFn quiesceRenderHook_ = nullptr;
 };
 
 } // namespace mm

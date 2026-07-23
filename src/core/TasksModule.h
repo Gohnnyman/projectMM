@@ -9,6 +9,7 @@
 #include "core/JsonSink.h"    // writeListRow emits its row as JSON into the sink
 #include "platform/platform.h" // taskSnapshot / TaskInfo — the RTOS task view (behind the boundary)
 
+#include <algorithm>  // std::sort — stable row order so the list doesn't jump each refresh
 #include <cstdint>
 #include <cstdio>
 #include <cstring>   // strcmp — match a task row to the render task
@@ -79,6 +80,27 @@ private:
 
         void refresh() {
             count_ = static_cast<uint8_t>(platform::taskSnapshot(rows_, kMaxTasks));
+            // uxTaskGetSystemState walks the RTOS ready/blocked lists, so a task's position in the
+            // snapshot shifts as its state changes — the SAME task lands on a different row each refresh,
+            // and the once-a-second list re-render makes the rows jump so you can't read them. Sort so
+            // every task holds a fixed row (only the live cpu/stack values update in place), AND float
+            // projectMM's OWN tasks to the top (the render task "main" and the "mm"-prefixed workers like
+            // mmEncode / mmSnap — the ones the user is here to watch), sinking the RTOS system tasks
+            // (IDLE, Tmr, ipc, esp_timer, …) below. Alphabetical within each group.
+            std::sort(rows_, rows_ + count_, [](const platform::TaskInfo& a, const platform::TaskInfo& b) {
+                const bool oursA = isProjectMMTask(a.name), oursB = isProjectMMTask(b.name);
+                if (oursA != oursB) return oursA;                 // our tasks first
+                return std::strcmp(a.name, b.name) < 0;           // then alphabetical, stable
+            });
+        }
+
+        // A projectMM-created task: the render task (whatever platform::renderTaskName() reports — the
+        // same seam writeListRowDetail uses to nest the modules, NOT a hardcoded "main") or a worker we
+        // spawn (our convention names them with an "mm" prefix — mmEncode, mmSnap). Everything else is an
+        // RTOS/system task.
+        static bool isProjectMMTask(const char* name) {
+            const char* render = platform::renderTaskName();
+            return (render[0] && std::strcmp(name, render) == 0) || std::strncmp(name, "mm", 2) == 0;
         }
         uint8_t listRowCount() const override { return count_; }
         void writeListRow(JsonSink& sink, uint8_t row) const override {

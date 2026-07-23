@@ -134,6 +134,12 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/supporting.md#layer");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/supporting.md#drivers");
     mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule", "light/supporting.md#lightpresets");
+
+    // Wire the core quiesce-render hook to the light domain's encode worker: before core mutates the tree
+    // (add/remove/replace a child), stop core 1 so it can't dereference a node being freed. Core can't
+    // name Drivers (a light module), so it calls through this function-pointer seam (see MoonModule
+    // quiesceForMutation). Wired once here, where main.cpp legitimately depends on both sides.
+    mm::MoonModule::setQuiesceRenderHook([] { if (auto* d = mm::Drivers::active()) d->quiesceRenderSplit(); });
     // Concrete modules. registerType<T> captures the type's dimensions() via
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.

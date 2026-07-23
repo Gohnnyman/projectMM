@@ -146,7 +146,8 @@ void FilesystemModule::loadSubtree(MoonModule* m) {
     platform::free(buf);
 }
 
-void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
+// Overlay every persistable control's saved value onto the module's current control list, in list order.
+void FilesystemModule::overlayControls(MoonModule* m, const char* json, const char* prefix) {
     char key[MAX_KEY];
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
@@ -155,6 +156,26 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
         std::snprintf(key, sizeof(key), "%s%s", prefix, c.name);
         applyValue(c, json, key);
     }
+}
+
+void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
+    char key[MAX_KEY];
+    // Overlay the saved values. A module whose CONTROL SET depends on one of its own control VALUES
+    // (the canonical case: ParallelLedDriver's `peripheral` Select, which swaps the bus backend and
+    // with it the backend-owned controls — clockPin, dcPin, the ring cluster) needs a second pass:
+    // the first overlay writes `peripheral`, but the backend-owned controls are still bound to the
+    // DEFAULT backend's members, so their saved values land on a backend about to be discarded. So
+    // overlay, then rebuildControls() (which re-runs defineControls → swaps the live backend to match
+    // the just-applied `peripheral`, re-binding the control list to the RIGHT backend's members), then
+    // overlay again onto the now-correct controls. rebuildControls' schema-hash gate no-ops the refire
+    // when nothing changed (the common case: a module with no value-dependent schema), and the second
+    // overlay is idempotent value writes — so this is safe and cheap for every module. Without it, a
+    // reboot silently reverts every backend-owned control to its default (found: the giant wall's
+    // clockPin and ring geometry reset on an INT_WDT restart).
+    overlayControls(m, json, prefix);
+    m->rebuildControls();
+    overlayControls(m, json, prefix);
+
     std::snprintf(key, sizeof(key), "%senabled", prefix);
     // Note: we can't distinguish "key absent" from "key=false" with the flat parser.
     // The convention: every saved file includes "enabled", so if the file exists and

@@ -153,7 +153,14 @@ public:
     /// distinct control lines — the bus won't init), so it can't be a warn-and-run like a data-lane
     /// collision (which only corrupts that one lane). null = no fatal condition.
     const char* validateBusFatal() const override {
-        if (clockPin >= 0 && clockPin == dcPin)
+        // An UNSET clockPin/dcPin (-1) is fatal on i80: the bus mandates a valid WR and DC GPIO, but
+        // clockPinForBus()/busInit cast the int8_t to uint16_t, so -1 becomes 65535 and slips past
+        // IDF's own `wr_gpio_num >= 0 && dc_gpio_num >= 0` guard (see the clockPin doc above). Reject it
+        // here, before that cast, so an unconfigured board idles with a clear status instead of an
+        // init on a garbage GPIO number.
+        if (clockPin < 0) return "clockPin (WR) is unset — the i80 bus needs a valid WR GPIO";
+        if (dcPin < 0) return "dcPin is unset — the i80 bus needs a valid DC GPIO";
+        if (clockPin == dcPin)
             return "clockPin (WR) and dcPin are the same GPIO — they must differ";
         // The '595 latch is a BUS LANE, so it needs its own GPIO: sharing it with WR would make the
         // pixel clock double as the latch (the '595 would present a byte on every shift cycle), and

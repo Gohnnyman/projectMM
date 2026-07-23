@@ -102,6 +102,22 @@ struct Rig {
     }
 };
 
+// File-static the quiesce-render hook reads (the hook is a non-capturing function pointer). Set to a
+// rig's drivers for the layout-mutation test below; null the rest of the time.
+mm::Drivers* g_hookDrivers = nullptr;
+
+// RAII: install the quiesce-render hook pointing at `d`, and ALWAYS clear both the hook and the file
+// static on scope exit — even if a REQUIRE throws past the test body. Without this a failed assertion
+// would leave the process-global hook installed with g_hookDrivers dangling at a destroyed rig, so the
+// next test's addChild would call quiesceRenderSplit() on freed memory (a cascade crash).
+struct HookGuard {
+    explicit HookGuard(mm::Drivers* d) {
+        g_hookDrivers = d;
+        mm::MoonModule::setQuiesceRenderHook([] { if (g_hookDrivers) g_hookDrivers->quiesceRenderSplit(); });
+    }
+    ~HookGuard() { mm::MoonModule::setQuiesceRenderHook(nullptr); g_hookDrivers = nullptr; }
+};
+
 }  // namespace
 
 TEST_CASE("render-split: multicore on → every driver ticks on the worker, never on a torn frame") {
@@ -216,6 +232,94 @@ TEST_CASE("render-split: deleting a driver WHILE core 1 is inside its tick() is 
     r.drivers.prepare();                      // last driver gone → disengage
     CHECK_FALSE(r.drivers.renderSplitActive());
     r.drivers.release();
+}
+
+// The SIBLING-SUBTREE case: mutating a node OUTSIDE the Drivers subtree — here a LAYOUT — while the
+// encode worker runs. The worker ticks the drivers, and a driver walks the whole tree
+// (PreviewDriver::sendFrame → Layouts::forEachCoord), so freeing a layout mid-walk is a use-after-free
+// EVEN THOUGH the mutated node's parent (Layouts) owns no worker. `this->quiesce()` alone misses it —
+// Layouts::quiesce() is the no-op default. The fix routes MoonModule::quiesceForMutation() through the
+// quiesce-render HOOK, which reaches the render worker wherever it lives. This is the exact crash seen
+// replacing a layout on a running split device (LoadProhibited); the test pins it via the hook.
+TEST_CASE("render-split: mutating a LAYOUT while core 1 runs is safe via the quiesce-render hook") {
+    Rig r(64);
+    // A driver whose tick() reads the shared source buffer — enough to keep the worker busy on core 1.
+    auto* slow = new SlowDriver();
+    r.drivers.addChild(slow);
+    r.drivers.setup();
+    r.drivers.prepare();
+    REQUIRE(r.drivers.renderSplitActive());
+
+    // Wire the quiesce-render hook the way main.cpp does (routed through a file static since the hook is
+    // a non-capturing function pointer). The RAII guard clears it on every exit path, including a thrown
+    // REQUIRE — so a failure here can't dangle the hook into a later test.
+    HookGuard hook(&r.drivers);
+
+    r.drivers.tick();                         // notify core 1 → worker enters slow->tick()
+    REQUIRE(slow->waitEntered());
+    CHECK(slow->isInTick());                  // worker mid-tick, holding the tree
+
+    std::atomic<bool> releaseFired{false};
+    std::thread releaser([&] {
+        std::this_thread::sleep_for(30ms);
+        releaseFired.store(true);
+        slow->letGo();
+    });
+
+    // Mutate a node OUTSIDE the Drivers subtree: remove the grid from Layouts. quiesceForMutation()
+    // must reach the render worker through the hook and block until it is out — WITHOUT the hook this
+    // returns immediately and a later free of `grid` would be a use-after-free (ASan) while the worker
+    // is still walking it.
+    r.layouts.removeChild(&r.grid);
+
+    CHECK(releaseFired.load());               // it waited for the encode (fails without the hook)
+    CHECK_FALSE(slow->isInTick());            // the worker is provably out
+
+    releaser.join();
+
+    r.drivers.release();
+    delete slow;
+    // The HookGuard clears the hook + g_hookDrivers on scope exit (including a thrown REQUIRE above).
+}
+
+// The FOURTH mutator: reordering children (the drag-reorder UI → moveChildTo) permutes children_ under
+// the worker's index-based tick loop. No free, so not a use-after-free — but a slot shift mid-loop can
+// tick a child twice or skip one (the data-race class the batch closes). moveChildTo must quiesce like
+// the other three. Same harness: park the worker inside a driver tick, reorder Drivers' children, and
+// prove moveChildTo waited for the worker (fails without the quiesce).
+TEST_CASE("render-split: reordering children (moveChildTo) while core 1 runs waits for the worker") {
+    Rig r(64);
+    auto* slow = new SlowDriver();
+    auto* second = new SlowDriver();          // a second driver so there IS a reorder to do
+    r.drivers.addChild(slow);
+    r.drivers.addChild(second);
+    r.drivers.setup();
+    r.drivers.prepare();
+    REQUIRE(r.drivers.renderSplitActive());
+
+    HookGuard hook(&r.drivers);
+
+    r.drivers.tick();                         // worker enters the first driver's tick()
+    REQUIRE(slow->waitEntered());
+    CHECK(slow->isInTick());
+
+    std::atomic<bool> releaseFired{false};
+    std::thread releaser([&] {
+        std::this_thread::sleep_for(30ms);
+        releaseFired.store(true);
+        slow->letGo();
+        second->letGo();                      // release both in case the worker moved on to the second
+    });
+
+    r.drivers.moveChildTo(second, 0);         // reorder while the worker is mid-tick
+
+    CHECK(releaseFired.load());               // moveChildTo waited for the encode (fails without quiesce)
+    CHECK_FALSE(slow->isInTick());
+
+    releaser.join();
+    r.drivers.release();
+    delete slow;
+    delete second;
 }
 
 TEST_CASE("render-split: toggling multicore live engages and disengages the worker") {

@@ -15,7 +15,7 @@ Added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements i
 <img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="Shared driver controls: localBrightness, lightPreset, whiteMode, start, count">
 
 - `localBrightness` — this driver's dim (0–255), multiplied with the global brightness into one LUT; both sliders reach the output.
-- `lightPreset` — the [light preset](supporting.md) this driver applies per light (channel order / RGBW synthesis), referenced by its stable id (not its name), so renaming or reordering presets never breaks a driver's reference and it survives a reboot.
+- `lightPreset` — the [light preset](supporting.md) this driver applies per light (channel order / RGBW synthesis). Renaming or reordering presets never breaks a driver's reference, and it survives a reboot.
 - `whiteMode` — how the white channel is derived for an RGBW strip, applied only when the referenced preset carries a W channel.
 - `start` — first light of the shared buffer this driver reads (default `0`).
 - `count` — how many lights from `start` this driver drives. **Blank / default drives all lights**; set a number to output only that slice — the way multiple drivers each own a section of one buffer (an onboard status LED at `0`, the main strip from `1`).
@@ -49,7 +49,7 @@ The card reads top-down as **invariant controls → `peripheral` divider → per
 - `pins` — data GPIO list, e.g. `18,17,16`, or inclusive ranges like `20-23` (= `20,21,22,23`) mixed freely (`20-22,35,38-40`). One strand each — or, with the `MoonI80` pin expander, one *group of 8*. Empty idles until set; changing it re-inits live.
 - `ledsPerPin` — lights per **strand**, following the broadcasting idiom (cf. NumPy / CSS shorthand): **empty** = even split of the window; **one number** = that many on *every* strand (`64` → 64 each); **a list** `3,4,5` = one per strand by position (a short list even-splits the remainder). Shorter strands go dark early while the longest finishes. Through an expander an entry is one strand, not one pin, so two strands on one '595 can differ.
 - `doubleBuffer`, `pinExpander` — output shape, also invariant across peripherals.
-- `peripheral` (the **divider**) — the DMA peripheral driving the bus (`i80` / `Parlio` / `MoonI80`), filtered to what the chip supports. Everything **above** it is invariant (*which LEDs and how many*); everything **below** is what the chosen peripheral needs. Switching it re-surfaces that peripheral's own controls and re-inits live. Always shown — with a single option it reads as a labelled indicator of what's driving the LEDs.
+- `peripheral` (the **divider**) — the DMA peripheral driving the bus (`i80` / `Parlio` / `MoonI80`), filtered to what the chip supports. Everything **above** it is invariant (*which LEDs and how many*); everything **below** is what the chosen peripheral needs. Switching it re-surfaces that peripheral's own controls and re-inits live. Always shown — with a single option it reads as a labeled indicator of what's driving the LEDs.
 - *peripheral-specific* (below the divider) — `i80`: the WR/DC bus pins (`clockPin`/`dcPin`). `MoonI80`: `shiftOverclock` and the `ring*` geometry cluster. `Parlio`: none.
 - **Expert-only** (🔧, shown when `System.expertMode` is on): `loopbackTest` — a TX→RX loopback self-test (jumper the first pin to `loopbackRxPin`), verdict in the status field, with `loopbackTxPin`/`loopbackRxPin` its wiring.
 
@@ -128,16 +128,18 @@ Detail: [technical](moxygen/PreviewDriver.md)
 
 **Which driver?**
 
+RMT is its own driver; the rest are `peripheral` choices on the one **Parallel LED** driver.
+
 | Want | Use | Why |
 |---|---|---|
-| A few strands, any ESP32 | **RMT** | The default. Simple, no bus width to think about, one channel per strand. |
-| Many strands (up to 16) | **MultiPin** | The scale path where RMT runs out of channels. One DMA transfer drives every strand at once. |
-| Up to 16 strands on a **P4** | **Parlio** | The P4's own parallel peripheral — it generates its pixel clock, so there is no clock pin to spend. |
-| **More lights than fit one DMA buffer**, or **more strands than you have GPIOs** | **Moon** | The same LCD_CAM output as MultiPin, on our own DMA: it *streams* the frame, and it drives a 74HCT595 **pin expander** — 6 pins → 48 strands. |
+| A few strands, any ESP32 | **RMT** driver | The default. Simple, no bus width to think about, one channel per strand. |
+| Many strands (up to 16) | Parallel LED, peripheral **`i80`** | The scale path where RMT runs out of channels. One DMA transfer drives every strand at once. |
+| Up to 16 strands on a **P4** | Parallel LED, peripheral **`Parlio`** | The P4's own parallel peripheral — it generates its pixel clock, so there is no clock pin to spend. |
+| **More lights than fit one DMA buffer**, or **more strands than you have GPIOs** | Parallel LED, peripheral **`MoonI80`** | The same LCD_CAM output as `i80`, on our own DMA: it *streams* the frame, and it drives a 74HCT595 **pin expander** — 6 pins → 48 strands. |
 
-**Moon and MultiPin drive the same pins the same way; only the DMA underneath differs.** Start with MultiPin — it is the proven path. Choose Moon when you hit one of its two limits. Both are registered module types, so you can swap them in the UI on one board with no reflash.
+**`MoonI80` and `i80` drive the same pins the same way; only the DMA underneath differs.** Start with `i80` — it is the proven path. Choose `MoonI80` when you hit one of its two limits. Both are `peripheral` choices on the one Parallel LED driver, so you switch between them with the `peripheral` control on one board with no reflash.
 
-**RMT vs the three parallel peripherals.** All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism, chip, and — for the two i80-bus peripherals (**i80** and **MoonI80**) — in who programs the DMA. RMT is its own driver; the parallel peripherals are the `peripheral` choices on the one **Parallel LED** driver above.
+**RMT vs the three parallel peripherals.** All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism, chip, and — for the two i80-bus peripherals (**i80** and **MoonI80**) — in who programs the DMA.
 
 **Lane, pin, strand.** A **lane** is one bus data line; a **strand** is one chain of LEDs. The i80 **bus** is 8 or 16 lanes wide (a hardware fact — `lcd_ll_set_data_wire_width` takes nothing else), but you configure only the **pins** that drive something, at any count from 1: the driver rounds the bus up around them and parks the spare lanes on a pin the peripheral already drives, where nothing reads them.
 

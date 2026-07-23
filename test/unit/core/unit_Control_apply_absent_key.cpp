@@ -235,6 +235,25 @@ TEST_CASE("applyControlValue: an empty Select rejects/no-ops instead of acceptin
                                 mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }
 
+// The Palette twin of the empty-Select guard: an empty palette (addPalette(..., 0)) has no valid index,
+// so a value must not write index 0 — and critically must not let `hi = c.max - 1` underflow to -1 and
+// clamp the stored value up to 255. Lenient leaves the sentinel untouched; Strict returns OutOfRange.
+TEST_CASE("applyControlValue: an empty Palette rejects/no-ops and never underflows to 255") {
+    mm::ControlList controls;
+    uint8_t pal = 7;                       // sentinel: a spurious index-0 OR a 255 underflow would clobber it
+    controls.addPalette("palette", pal, paletteOptions, 0);   // zero options
+
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":0}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(pal == 7);   // untouched — neither index 0 nor a 255 underflow
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":3}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(pal == 7);   // a representative palette value is also a no-op on an empty list
+    CHECK(pal != 255); // explicit: the c.max-1 underflow the guard prevents
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":0}", "palette",
+                                mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
+}
+
 // A label longer than any real option (here, longer than the parse buffer) must NOT match a real option
 // by prefix — it is "no such option", so Lenient keeps the default and Strict rejects. Guards against a
 // truncated value spuriously equalling a shorter option that shares its leading characters.

@@ -473,3 +473,78 @@ TEST_CASE("FilesystemModule Int16 controls round-trip preserves the saved value"
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
+
+// Regression: a module whose CONTROL SET depends on one of its own control VALUES must restore its
+// value-dependent controls across a reboot. The canonical case is ParallelLedDriver's `peripheral`
+// Select, which swaps the bus backend and with it the backend-owned controls (clockPin, ring cluster):
+// on reload the saved `clockPin` landed on the DEFAULT backend's member, then the swap to the saved
+// peripheral discarded it, silently reverting clockPin to its default (found on the giant wall — an
+// INT_WDT restart reset clockPin and the ring geometry). applyNode's overlay → rebuildControls →
+// overlay-again fixes it. This mock reproduces the structure minimally: `mode` picks which of two
+// backing variables `param` binds to, so a naive single-overlay writes param to the wrong one.
+namespace {
+struct ModeDependentMock : public mm::MoonModule {
+    uint8_t mode = 0;         // the "peripheral" analogue: selects the control set
+    uint8_t paramA = 10;      // bound when mode==0 (the "default backend" member, default 10)
+    uint8_t paramB = 10;      // bound when mode==1 (the "swapped backend" member, default 10)
+    static constexpr const char* kModes[2] = {"A", "B"};
+    void defineControls() override {
+        controls_.addSelect("mode", mode, kModes, 2);
+        // `param` binds to a DIFFERENT variable depending on mode — exactly like clockPin binding to
+        // whichever peripheral backend is live. A rebuild after `mode` changes re-binds it.
+        controls_.addUint8("param", mode == 0 ? paramA : paramB, 0, 255);
+    }
+};
+}  // namespace
+
+TEST_CASE("FilesystemModule restores a value-dependent control across reload (the peripheral/clockPin bug)") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_persist_modedep_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(tmpRoot);
+    mm::ModuleFactory::registerType<ModeDependentMock>("ModeDependentMock");
+
+    // --- Save: set mode=1 (the non-default control set) AND param=3 on the mode-1 variable ---
+    {
+        mm::Scheduler scheduler;
+        auto* fs = new mm::FilesystemModule();
+        fs->setTypeName("FilesystemModule");
+        fs->setScheduler(&scheduler);
+        auto* m = new ModeDependentMock();
+        m->setTypeName("ModeDependentMock");
+        scheduler.addModule(fs);
+        scheduler.addModule(m);
+        scheduler.setup();
+
+        m->mode = 1;
+        m->rebuildControls();      // mode change re-binds `param` to paramB (as the UI swap would)
+        m->paramB = 3;             // the value the user sets (the "clockPin=3" analogue)
+        m->markDirty();
+        mm::FilesystemModule::noteDirty();
+        fs->flush();
+        scheduler.release();
+    }
+
+    // --- Load: fresh module (mode defaults to 0, param bound to paramA=10). The reload must end with
+    //     mode=1 AND paramB=3 — NOT paramB=10 (the bug: param landed on paramA, then the mode-1 rebuild
+    //     showed paramB at its default). ---
+    {
+        mm::Scheduler scheduler;
+        auto* fs = new mm::FilesystemModule();
+        fs->setTypeName("FilesystemModule");
+        fs->setScheduler(&scheduler);
+        auto* m = new ModeDependentMock();
+        m->setTypeName("ModeDependentMock");
+        scheduler.addModule(fs);
+        scheduler.addModule(m);
+        scheduler.setup();
+
+        CHECK(m->mode == 1);       // the value-dependent selector restored
+        CHECK(m->paramB == 3);     // and the control it selects restored to the SAVED value, not default 10
+        scheduler.release();
+    }
+
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}

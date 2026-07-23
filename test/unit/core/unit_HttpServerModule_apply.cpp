@@ -119,6 +119,38 @@ TEST_CASE("apply-core: applyAddModule adds a child, idempotent on the id") {
     s.deleteTree(root);
 }
 
+// applyAddModule reports the created module's FINAL name (post-disambiguation) via outName, so the
+// HTTP handler can return it and the UI can select + focus the new module (the "+" focus fix).
+TEST_CASE("apply-core: applyAddModule reports the created name, disambiguated") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box();
+    root->setName("Root");
+    s.addModule(root);
+    mm::HttpServerModule http;
+    http.setScheduler(&s);
+    using OpResult = mm::HttpServerModule::OpResult;
+
+    // An explicit id comes back verbatim.
+    char name[32] = {};
+    REQUIRE(http.applyAddModule("Knob", "First", "Root", name, sizeof(name)) == OpResult::Ok);
+    CHECK(std::strcmp(name, "First") == 0);
+
+    // No explicit id → the type name is the base; a second same-type add disambiguates, and the
+    // REPORTED name is the disambiguated one (what the UI must select, not the colliding base).
+    char n1[32] = {}, n2[32] = {};
+    REQUIRE(http.applyAddModule("Knob", "", "Root", n1, sizeof(n1)) == OpResult::Ok);
+    REQUIRE(http.applyAddModule("Knob", "", "Root", n2, sizeof(n2)) == OpResult::Ok);
+    CHECK(std::strcmp(n1, n2) != 0);                         // the two got distinct names
+    CHECK(childNamed(root, n1) != nullptr);                  // each reported name resolves to a real child
+    CHECK(childNamed(root, n2) != nullptr);
+
+    // outName is optional — the APPLY_OP transport passes nullptr and must still succeed.
+    CHECK(http.applyAddModule("Knob", "NoReport", "Root") == OpResult::Ok);
+
+    s.deleteTree(root);
+}
+
 TEST_CASE("apply-core: applySetControl writes a value, rejects out-of-range / unknown") {
     registerTestTypes();
     mm::Scheduler s;

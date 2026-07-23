@@ -4,7 +4,7 @@ The core machinery the UI modules lean on — not directly user-facing, so no co
 
 ### Control
 
-A named, typed value a MoonModule exposes to the UI — the binding between a class variable and its web-UI widget, DMX channel, and persisted value. Every module's `controls_` is a list of these.
+A named, typed value a MoonModule exposes to the UI — the binding between a class variable and its web-UI widget, DMX channel, and persisted value. Every module holds a list of these.
 
 Detail: [technical](moxygen/Control.md)
 
@@ -20,7 +20,7 @@ Detail: [technical](moxygen/Scheduler.md)
 
 ### MoonModule
 
-The base class every module derives from — the shared lifecycle (`setup` / `tick` / `release`), the `controls_` list, child propagation, and the self-reporting footprint (`classSize` / `dynamicBytes` / `tickTimeUs`). Learn the pattern once, apply it everywhere.
+The base class every module derives from — the shared lifecycle (`setup` / `tick` / `release`), the controls list, child propagation, and the self-reporting footprint (`classSize` / `dynamicBytes` / `tickTimeUs`). Learn the pattern once, apply it everywhere.
 
 Detail: [technical](moxygen/MoonModule.md)
 

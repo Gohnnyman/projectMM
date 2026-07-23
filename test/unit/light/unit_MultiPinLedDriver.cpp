@@ -303,6 +303,36 @@ TEST_CASE("MultiPinLedDriver warns (does not idle) when a data pin is on clockPi
         CHECK(d.severity() == mm::MoonModule::Severity::Error);   // idles, not warn-and-run
         CHECK(d.laneCount() == 0);                                // driver did NOT build the bus
     }
+    {   // An UNSET clockPin (-1) is FATAL on i80: the int8_t -1 casts to uint16_t 65535 and slips past
+        // IDF's own wr/dc >= 0 guard, so validateBusFatal must reject it here or the bus inits on a
+        // garbage GPIO. Idles with a clear status, doesn't build.
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
+        d.setPeripheralForTest(&peripheral);
+        d.defineControls();
+        mm::test::setControlValue<int8_t>(d, "clockPin", -1);   // unset
+        mm::test::setControlValue<int8_t>(d, "dcPin", 21);
+        std::strcpy(d.pins, "1,2,3,4,5,6,7,8");
+        wire(d, peripheral, src, corr, 64);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strstr(d.status(), "clockPin") != nullptr);
+        CHECK(d.severity() == mm::MoonModule::Severity::Error);
+        CHECK(d.laneCount() == 0);
+    }
+    {   // Same for an unset dcPin (-1).
+        mm::I80Peripheral peripheral;
+        mm::ParallelLedDriver d;
+        d.setPeripheralForTest(&peripheral);
+        d.defineControls();
+        mm::test::setControlValue<int8_t>(d, "clockPin", 20);
+        mm::test::setControlValue<int8_t>(d, "dcPin", -1);      // unset
+        std::strcpy(d.pins, "1,2,3,4,5,6,7,8");
+        wire(d, peripheral, src, corr, 64);
+        REQUIRE(d.status() != nullptr);
+        CHECK(std::strstr(d.status(), "dcPin") != nullptr);
+        CHECK(d.severity() == mm::MoonModule::Severity::Error);
+        CHECK(d.laneCount() == 0);
+    }
 }
 
 // A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.

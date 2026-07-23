@@ -1547,7 +1547,8 @@ void HttpServerModule::writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, b
 // Apply-core: add one module under a named parent. Transport-free; returns an
 // OpResult. Idempotent on the id (an existing name returns Ok, "already there").
 HttpServerModule::OpResult HttpServerModule::applyAddModule(
-        const char* typeName, const char* id, const char* parentId) {
+        const char* typeName, const char* id, const char* parentId,
+        char* outName, size_t outNameLen) {
     if (!typeName || typeName[0] == 0) return OpResult::BadRequest;
 
     // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
@@ -1578,6 +1579,9 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     // runs after persistence load; single source of truth.
     if (scheduler_) scheduler_->ensureUniqueName(mod);
 
+    // Report the FINAL name (post-disambiguation) so a caller can select/focus the new module.
+    if (outName && outNameLen > 0) std::snprintf(outName, outNameLen, "%s", mod->name());
+
     // Lifecycle in Scheduler::setup() order: defineControls() (bind buffers) →
     // setup() (may read them) → applyState() (build if effectively-enabled, else release).
     mod->defineControls();
@@ -1600,10 +1604,24 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
     mm::json::parseString(body, "id", id, sizeof(id));
     mm::json::parseString(body, "parent_id", parentId, sizeof(parentId));
 
-    switch (applyAddModule(typeName, id, parentId)) {
-        case OpResult::Ok:
-            sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    // The created module's final name (post-disambiguation) rides back in the response so the UI can
+    // select + focus the new module. A client-supplied `id` can contain any character (parseString
+    // decodes \" and \\), so the name is NOT quote-safe — escape it through JsonSink::writeJsonString
+    // (which emits its own quotes) rather than a raw %s, the same precedent as the module-status
+    // serialize above. A raw %s with a name containing a `"` would produce invalid JSON.
+    char createdName[32] = {};
+    switch (applyAddModule(typeName, id, parentId, createdName, sizeof(createdName))) {
+        case OpResult::Ok: {
+            // Sized for the worst case: a 15-char name (name_[16]) fully \uXXXX-escaped (6x) + the
+            // ~20-char wrapper + NUL. JsonSink truncates safely if ever exceeded, never overflows.
+            char resp[128];
+            JsonSink sink(resp, sizeof(resp));
+            sink.append("{\"ok\":true,\"name\":");
+            sink.writeJsonString(createdName);
+            sink.append("}");
+            sendResponse(conn, 200, "application/json", resp);
             return;
+        }
         case OpResult::AlreadyExists:
             sendResponse(conn, 200, "application/json", "{\"ok\":true,\"note\":\"already exists\"}");
             return;

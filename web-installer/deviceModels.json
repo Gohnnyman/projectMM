@@ -1271,13 +1271,12 @@
         "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
-          "peripheral": "i80",
+          "peripheral": "MoonI80",
           "pins": "9,10,12,8,18,17",
           "pinExpander": true,
           "latchPin": 46,
           "clockPin": 3,
-          "ledsPerPin": "96",
-          "dcPin": 13,
+          "ledsPerPin": "256",
           "doubleBuffer": false
         }
       },

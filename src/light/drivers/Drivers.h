@@ -109,6 +109,20 @@ public:
     /// is the only place that can't be skipped.
     ~Drivers() override { stopEncodeTask(); }
 
+    /// Stop the core-1 encode worker so a STRUCTURAL TREE MUTATION (a module replace / delete / add) can
+    /// free tree nodes without the worker dereferencing them mid-tick. The worker ticks the driver
+    /// children, and a driver walks the whole Layouts/Layer tree (PreviewDriver::sendFrame →
+    /// Layouts::forEachCoord), so freeing ANY layout/layer/driver node while core 1 runs is a
+    /// use-after-free — a LoadProhibited crash seen replacing a layout on a running split device. The
+    /// mutation path (HttpServerModule) calls this before the free; the trailing prepareTree() re-engages
+    /// the split. Idempotent + safe when the split is off (stopEncodeTask guards on the task handle).
+    void quiesceRenderSplit() {
+        stopEncodeTask();
+        renderSplitActive_ = false;
+    }
+    /// Reach the live Drivers (the one that owns the encode worker) to quiesce it around a mutation.
+    static Drivers* active() { return ActiveInstance<Drivers>::active(); }
+
     /// Global brightness (0–255). Scales every channel through a 256-entry LUT
     /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
     /// `onControlChanged` tier — no pipeline realloc, so the slider is fluent. Gamma /
