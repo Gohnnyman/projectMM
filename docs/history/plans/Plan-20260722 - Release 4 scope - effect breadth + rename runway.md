@@ -14,7 +14,7 @@ This is a roadmap/scope plan, not a single-feature `/plan`. Each item below gets
 
 This is the biggest lever and the explicit *"execution vehicle for the effect-breadth parity gate."* ~21 of the predecessor's 60+ effects are ported. Stage 1's prerequisites are the highest-value core work available, because every future effect leans on them:
 
-- **Shared palette** — hard prerequisite; many effects colour via `ColorFromPalette`. Generalise the pattern `PlasmaPaletteEffect` hard-codes today.
+- **Shared palette** — hard prerequisite; many effects color via `ColorFromPalette`. Generalise the pattern `PlasmaPaletteEffect` hard-codes today.
 - **The shared primitive library** — FastLED-named, our own implementation, hot-path-tuned integer-only: `beatsin8`, `inoise8`, `qadd8`, `nscale8`, `random8`/`random16`, `ColorFromPalette`, and the dimension-agnostic draw set. Extends the existing `color.h` (`scale8`, `sin8`).
 - **Tag/emoji legend** — settle before batch-migrating so every module is consistent from batch one.
 - **Per-library doc model** — `effects_<library>.md` compact table rows (per [ADR 0015](../../adr/0015-library-is-a-tag-not-a-folder.md)); changes the `check_specs.py` contract.
@@ -30,11 +30,15 @@ Then the next migration batch on top. This is the R4 headline: it unblocks the r
 
 The [P4-shield RS-485/DMX hardware is now well documented](../../reference/mhc-wled-esp32-p4-shield.md) (the builder's schematics landed 2026-07-16). The **RS-485 / DMX-512 wired-output driver** + its **`platform::` UART-RS485 seam** ([backlog-light](../../backlog/backlog-light.md#rs-485-dmx-512-wired-output-future-the-physical-dmx-driver)) is demand-driven and self-contained. It is a meaty new capability — a flagship candidate if R4 wants a headline new-hardware feature alongside the effects work, but it is larger than the two quick wins and should be its own `/plan`.
 
-## Explicitly NOT in R4
+## High-light-count driver work (in R4 — hardware-verified)
 
-- **P4 streaming ring / classic-shift-ring on raw I2S / P4-Parlio streaming** ([backlog-light "WANTED"](../../backlog/backlog-light.md#drivers)) — high value but hardware-verification-heavy; needs the expander wall. Better as its own focused effort than bundled into a release.
-- **MoonI80 prime-only ring stall backstop** ([backlog-core](../../backlog/backlog-core.md#mooni80-prime-only-ring-no-stall-backstop-sibling-path-gap)) — needs the expander wall to verify; do not land blind.
+The streaming-ring / lane-driver work is **in R4**. It is hardware-verification-heavy — each item needs the expander wall (and the relevant board) to prove, so these land with bench sign-off, not blind:
+
+- **Classic-ESP32 shift-register ring on raw I2S** ([backlog-light "WANTED"](../../backlog/backlog-light.md#drivers)) — the high-light-count classic driver.
+- **P4 Parlio streaming ring** ([backlog-light "WANTED"](../../backlog/backlog-light.md#drivers)) — lift the P4 Parlio ceiling past ~21K to light-count-independent.
+- **Shared lane-driver scaffolding** — extract when the 3rd parallel backend lands (deferred until then, but that 3rd backend is one of the two above).
+- **MoonI80 prime-only ring stall backstop** ([backlog-core](../../backlog/backlog-core.md#mooni80-prime-only-ring-no-stall-backstop-sibling-path-gap)) + the whole-frame late-EOF serialization hardening — the sibling-path recovery gaps; verify on the expander wall.
 
 ## Success shape
 
-R4 ships when: the migration Stage-1 primitives + the next effect batch have landed (moving the rename's breadth gate forward), the `ActiveInstance` primitive and the CodeRabbit #29 boundary fixes are in, and — if taken up — the RS-485/DMX driver reaches a verified first output. The rename itself is a *separate* cutover (its own plan); R4 is the runway that makes the name not a downgrade, not the switch.
+R4 ships when: the migration Stage-1 primitives + the next effect batch have landed (moving the rename's breadth gate forward), the `ActiveInstance` primitive and the CodeRabbit #29 boundary fixes are in, the RS-485/DMX driver reaches a verified first output, and the high-light-count driver work above is bench-verified. The rename itself is a *separate* cutover (its own plan); R4 is the runway that makes the name not a downgrade, not the switch.

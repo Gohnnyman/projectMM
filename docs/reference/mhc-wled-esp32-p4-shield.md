@@ -2,9 +2,11 @@
 
 Terminal pinout and onboard features for the **MHC-WLED ESP32-P4 shield** (myhome-control), the P4-NANO carrier used on the bench (catalog `deviceModel: "MHC-WLED ESP32-P4 shield"`, `esp32p4-eth` firmware). Read from the board silkscreen + the builder's schematics so projectMM work reads this instead of the marketing render. The shield sits on a **Waveshare ESP32-P4-NANO**; GPIO numbers are the P4's.
 
+> **Board revision:** the terminal map and RS-485 wiring below are transcribed from a **V1** board (the builder's labelled V1 photos + schematics). The overview render is a **V2** render. Whether V2 keeps the identical GPIO↔terminal wiring is **not confirmed here** — treat the map as V1-specific and verify against your own board's silkscreen if you have a different revision.
+
 **Sources**
 - Overview render (board V2): [`docs/assets/deviceModels/mhc-wled-esp32-p4-shield.jpg`](../assets/deviceModels/mhc-wled-esp32-p4-shield.jpg)
-- Silkscreen (photographed) + the builder's schematics and terminal maps (myhome-control / Wladi, 2026-07-16); the transcriptions below come from those. The schematics supersede the marketing render where they differ.
+- Silkscreen (photographed) + the builder's V1 schematics and terminal maps (myhome-control / Wladi, 2026-07-16); the transcriptions below come from those. The schematics supersede the marketing render where they differ.
 
 ## Pinout
 

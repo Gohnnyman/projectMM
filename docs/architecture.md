@@ -1,6 +1,6 @@
 # Architecture
 
-This document is the agreed-up-front **architecture contract**: what projectMM is designed to be. Most of it describes the system as it is today. A design described here is committed (this is how it *will* work, and code should be written toward it), not optional or undecided.
+This document is the agreed-up-front **architecture contract**: what projectMM is designed to be. Most of it describes the system as it is today. A design described here is committed (this is the intended behavior, and code is written toward it), not optional or undecided.
 
 Coding conventions live in [coding-standards.md](coding-standards.md); how to build and run lives in [building.md](building.md); what is tested lives in [testing.md](testing.md).
 

@@ -47,7 +47,12 @@ public:
     // value lives here so it travels with the Layer through add/delete/reorder —
     // no separate, sync-prone blend list on Drivers. The bottom (first-composited)
     // layer's blendMode is moot: it fills the cleared buffer regardless.
-    uint8_t blendMode = 0;     // index into kBlendModeOptions; 0 = alpha (over)
+    // Default additive (index 1): a newly-added layer ADDS light onto the layers below and never
+    // blacks them out, which matches the common case (a sparse effect — sparks, a comet, text —
+    // stacked over a background). Alpha (over, index 0) is opt-in for full-frame layers that MEAN to
+    // cover what's below, where its black pixels are intended, not a surprise. Index order is fixed by
+    // kBlendModeOptions (alpha=0, additive=1) so a persisted preset's stored index keeps its meaning.
+    uint8_t blendMode = 1;     // index into kBlendModeOptions; 1 = additive
     uint8_t opacity = 255;     // 0 = invisible, 255 = full
 
     void defineControls() override {

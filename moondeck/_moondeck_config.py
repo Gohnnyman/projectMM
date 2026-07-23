@@ -7,6 +7,7 @@ moondeck/ to sys.path, without threading extra `--with` deps. Mirrors the shared
 
 import json
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +33,36 @@ def active_device_ips():
         return []
 
 
+def _get_log_level(ip):
+    """Read one device's current System.logLevel index from /api/state, or None if unreachable
+    or unparseable. Used to snapshot a device before a temporary change so it can be restored."""
+    try:
+        with urllib.request.urlopen(f"http://{ip}/api/state", timeout=3) as r:
+            state = json.loads(r.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "SystemModule":
+                for c in node.get("controls", []):
+                    if c.get("name") == "logLevel":
+                        v = c.get("value")
+                        return v if isinstance(v, int) else None
+            for v in node.values():
+                found = walk(v)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for v in node:
+                found = walk(v)
+                if found is not None:
+                    return found
+        return None
+
+    return walk(state)
+
+
 def set_log_level(ips, index):
     """POST System.logLevel=<index> to each device IP. The value is a numeric JSON index
     (a quoted value parses to 0). Best-effort per device: a stale/absent entry is skipped,
@@ -44,3 +75,19 @@ def set_log_level(ips, index):
             urllib.request.urlopen(req, timeout=3).read()
         except Exception:
             pass
+
+
+@contextmanager
+def raised_log_level(ips, index=LOG_INFO):
+    """Temporarily raise each device to `index` (default Info, so the serial tick line prints) and
+    restore each device's ORIGINAL level on exit — not a hardcoded Warn, so a device the user had set
+    to Debug/Error keeps its choice. A device whose level can't be read is still raised, and restored
+    to Warn (the resting default) as the honest fallback. Best-effort throughout; never raises."""
+    saved = {ip: _get_log_level(ip) for ip in ips}
+    set_log_level(ips, index)
+    try:
+        yield
+    finally:
+        for ip in ips:
+            prev = saved.get(ip)
+            set_log_level([ip], prev if prev is not None else LOG_WARN)
