@@ -1326,15 +1326,14 @@
         "id": "ParallelLed",
         "parent_id": "Drivers",
         "controls": {
-          "peripheral": "i80",
+          "peripheral": "MoonI80",
           "pins": "9,10",
           "pinExpander": true,
           "latchPin": 46,
           "clockPin": 3,
-          "ledsPerPin": "96",
-          "dcPin": 21,
-          "doubleBuffer": false,
-          "loopbackTest": true,
+          "ledsPerPin": "256",
+          "doubleBuffer": true,
+          "loopbackTest": false,
           "loopbackStrand": 8,
           "loopbackRxPin": 16
         }

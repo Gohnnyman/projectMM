@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>   // std::string — the overlong-label regression builds its JSON
 
 // hasKey distinguishes an absent key from one whose value is 0 — the capability the
 // fix relies on. parseInt alone can't (returns 0 for both).
@@ -213,4 +214,42 @@ TEST_CASE("applyControlValue: a Select accepts an option label as a string value
     CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":1}", "peripheral",
                                 mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
     CHECK(sel == 1);
+}
+
+// An empty option list (max == 0) has no valid index — applying a value must not manufacture index 0.
+// Strict rejects; Lenient (Clamp) leaves the bound value untouched. Guards a board-filtered Select that
+// filtered down to zero options (e.g. a peripheral list on a chip that supports none).
+TEST_CASE("applyControlValue: an empty Select rejects/no-ops instead of accepting index 0") {
+    mm::ControlList controls;
+    uint8_t sel = 7;                       // a sentinel that a spurious index-0 write would clobber
+    static const char* const noOpts[] = {nullptr};
+    controls.addSelect("peripheral", sel, noOpts, 0);   // zero options
+
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":0}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 7);   // untouched — no index 0 manufactured
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":\"i80\"}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 7);   // a label on an empty list is also a no-op
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":0}", "peripheral",
+                                mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
+}
+
+// A label longer than any real option (here, longer than the parse buffer) must NOT match a real option
+// by prefix — it is "no such option", so Lenient keeps the default and Strict rejects. Guards against a
+// truncated value spuriously equalling a shorter option that shares its leading characters.
+TEST_CASE("applyControlValue: an overlong Select label does not prefix-match a real option") {
+    mm::ControlList controls;
+    uint8_t sel = 0;
+    static const char* const opts[] = {"i80", "MoonI80", "Parlio"};
+    controls.addSelect("peripheral", sel, opts, 3);
+
+    // 80 'M' chars — far past any option and past the parse buffer; must not match "MoonI80" by prefix.
+    std::string longVal(80, 'M');
+    std::string json = "{\"peripheral\":\"" + longVal + "\"}";
+    CHECK(mm::applyControlValue(controls[0], json.c_str(), "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 0);   // default kept, no spurious match
+    CHECK(mm::applyControlValue(controls[0], json.c_str(), "peripheral",
+                                mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }

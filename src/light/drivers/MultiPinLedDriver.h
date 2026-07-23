@@ -92,7 +92,7 @@ public:
 
     /// The number of i80 lanes this chip provides (0 = no i80 bus on this chip); the orchestrator's
     /// inert-on-wrong-chip guards key off it. Reads whichever backend the silicon has —
-    /// `lcdLanes` (LCD_CAM, S3/P4) or `i2sLanes` (I2S-i80, classic ESP32) — which are mutually
+    /// `lcdLanes` (LCD_CAM, S3/P4/S31) or `i2sLanes` (I2S-i80, classic ESP32) — which are mutually
     /// exclusive per chip (at most one is non-zero), so the sum picks the right one.
     uint8_t lanesAvailable() const override { return platform::lcdLanes + platform::i2sLanes; }
     bool powerOfTwoBus() const override { return true; }   // the BUS rounds to 8/16; the pin count is free
@@ -106,7 +106,7 @@ public:
     /// downgrades the optional second (doubleBuffer) buffer on its own when only one fits. The classic
     /// path is bounded by construction, so it never returns 0 (which means "no bound"): when the block
     /// is at or under the reserve, it reports a small positive floor so the fit gate still rejects.
-    /// On the LCD_CAM chips (S3/P4) the DMA reaches PSRAM → 0 = no bound (the interface default). COLD PATH.
+    /// On the LCD_CAM chips (S3/P4/S31) the DMA reaches PSRAM → 0 = no bound (the interface default). COLD PATH.
     size_t dmaBudgetBytes() const override {
         if constexpr (platform::i2sLanes > 0) {
             const size_t block = platform::maxInternalAllocBlock();
@@ -114,7 +114,7 @@ public:
             constexpr size_t kMinBudget = 1;         // never 0 on the bounded path (0 == "no bound")
             return block > kReserve ? block - kReserve : kMinBudget;
         } else {
-            return 0;   // LCD_CAM (S3/P4): PSRAM DMA, no whole-frame ceiling
+            return 0;   // LCD_CAM (S3/P4/S31): PSRAM DMA, no whole-frame ceiling
         }
     }
 
@@ -123,7 +123,7 @@ public:
     // width (16-bit for a 16-lane driver) to match. (Parlio can do a 1-lane unit, so its backend
     // sets false.)
     bool loopbackFullWidth() const override { return true; }
-    /// The classic ESP32's esp_lcd-i80 backend IS the I2S peripheral; on the S3/P4 it is LcdCam (shared
+    /// The classic ESP32's esp_lcd-i80 backend IS the I2S peripheral; on the LCD_CAM chips (S3/P4/S31) it is LcdCam (shared
     /// with MoonI80, which is why the two conflict). Keys on the same i2sLanes flag lanesAvailable does.
     LedHwBlock hwBlock() const override {
         if constexpr (platform::i2sLanes > 0) return LedHwBlock::I2s;
@@ -200,7 +200,7 @@ public:
     /// ×8 frame fits), it has no single-transfer cap, and its WR pixel-clock pin IS the shift clock a
     /// '595 needs. The classic ESP32 shares this backend but not that silicon path — its i80 is the I2S
     /// peripheral, whose DMA cannot read PSRAM at all, so a 154 KB frame has nowhere to live. Keying
-    /// the flag on `lcdLanes` (non-zero only on the LCD_CAM chips, S3/P4) makes the refusal a
+    /// the flag on `lcdLanes` (non-zero only on the LCD_CAM chips, S3/P4/S31) makes the refusal a
     /// compile-time property of the silicon rather than a runtime surprise, and the orchestrator then
     /// reports it as a config error instead of letting the bus die at init with "check pins / memory".
     bool supportsPinExpander() const override { return platform::lcdLanes > 0; }
@@ -237,7 +237,7 @@ public:
                                             size_t dataBytes, uint8_t rowBits) override {
         // The private bus is built from the orchestrator's bus pin list (which appends the latch in
         // shift mode — the latch is a bus lane) and at the shift-mode pclk, so the test transmits
-        // exactly what the render loop does. In direct mode both reduce to today's behaviour.
+        // exactly what the render loop does. In direct mode both reduce to today's behavior.
         return platform::i80Ws2812Loopback(owner_->busPinList(), owner_->busPinCount(),
                                            static_cast<uint16_t>(clockPin),
                                            static_cast<uint16_t>(dcPin),

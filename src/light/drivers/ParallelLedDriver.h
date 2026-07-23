@@ -334,7 +334,7 @@ public:
         // holds the NEW index (applyControlValue wrote it before rebuildControls), so
         // ensurePeripheralMatchesSelection() makes the live object agree BEFORE addBusControls/addRingControls
         // surface the chosen backend's controls. Always shown, even with a single option: with one backend
-        // it reads as a labelled indicator of what's driving the LEDs (e.g. "i80" on the classic).
+        // it reads as a labeled indicator of what's driving the LEDs (e.g. "i80" on the classic).
         buildPeripheralOptions();
         ensurePeripheralMatchesSelection();
         controls_.addSelect("peripheral", peripheralSel_, peripheralOptions_, peripheralOptionCount_);

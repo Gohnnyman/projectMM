@@ -266,7 +266,7 @@ public:
     /// the pattern on lane 0 — the test frame must therefore be encoded at the operational bus width.
     bool loopbackFullWidth() const override { return true; }
     /// MoonI80 programs LCD_CAM directly (its own GDMA below esp_lcd), so it claims the LcdCam block —
-    /// the same block the esp_lcd-i80 backend uses on the S3/P4, hence the two can't run together.
+    /// the same block the esp_lcd-i80 backend uses on the LCD_CAM chips (S3/P4/S31), hence the two can't run together.
     LedHwBlock hwBlock() const override { return LedHwBlock::LcdCam; }
     /// Status text when the bus will not come up, so the cause is on screen rather than in a serial log.
     /// The two real causes are named: a pin the peripheral cannot route, or no DMA-reachable memory for

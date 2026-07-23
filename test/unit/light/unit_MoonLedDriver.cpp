@@ -30,7 +30,7 @@
 namespace {
 
 // On the host `platform::lcdLanes` is 0, so the real MoonI80Peripheral reports supportsPinExpander()
-// == false — which the orchestrator now honours by SILENTLY dropping pinExpander back to direct mode
+// == false — which the orchestrator now honors by SILENTLY dropping pinExpander back to direct mode
 // (a peripheral that can't host the '595 has its expander toggle hidden, so an unfixable error would be
 // wrong — see parseConfig). That degradation is correct on hardware but hides the SHIFT-MODE validation
 // (WR collision, latch-on-WR, clockPin required) these cases exist to pin. So the shift-mode cases use

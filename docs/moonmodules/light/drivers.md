@@ -12,10 +12,10 @@ Several drivers can share one buffer, each driving its own slice. Every driver s
 
 Added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements it: a per-driver **output correction** (how this driver's slice looks) and a **source window** (which slice of the shared buffer it reads). Every driver card leads with this block; its own controls follow.
 
-<img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="Shared driver controls: localBrightness, preset, whiteMode, start, count">
+<img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="Shared driver controls: localBrightness, lightPreset, whiteMode, start, count">
 
 - `localBrightness` — this driver's dim (0–255), multiplied with the global brightness into one LUT; both sliders reach the output.
-- `preset` — the [light preset](supporting.md) this driver applies per light (channel order / RGBW synthesis), referenced by its stable id (not its name), so renaming or reordering presets never breaks a driver's reference and it survives a reboot.
+- `lightPreset` — the [light preset](supporting.md) this driver applies per light (channel order / RGBW synthesis), referenced by its stable id (not its name), so renaming or reordering presets never breaks a driver's reference and it survives a reboot.
 - `whiteMode` — how the white channel is derived for an RGBW strip, applied only when the referenced preset carries a W channel.
 - `start` — first light of the shared buffer this driver reads (default `0`).
 - `count` — how many lights from `start` this driver drives. **Blank / default drives all lights**; set a number to output only that slice — the way multiple drivers each own a section of one buffer (an onboard status LED at `0`, the main strip from `1`).

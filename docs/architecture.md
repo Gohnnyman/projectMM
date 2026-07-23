@@ -469,7 +469,7 @@ The shared output buffer is necessary when blend+map writes to arbitrary physica
 
 Each driver (a MoonModule) speaks one protocol:
 
-- **LED drivers**: WS2812 via RMT (multi-pin), plus one DMA-driven parallel driver ([ParallelLedDriver](moonmodules/light/moxygen/ParallelLedDriver.md)) whose `peripheral` control picks the bus backend the chip supports — the S3/P4 LCD_CAM i80 bus, our own-GDMA MoonI80 (LCD_CAM, adds the streaming ring + 74HCT595 expander), or the P4's Parlio. All are DMA-driven and behind the platform boundary; the driver rounds an i80 bus up around whatever pin count is configured (any count from 1) and parks unused lanes on a pin already driven.
+- **LED drivers**: WS2812 via RMT (multi-pin), plus one DMA-driven parallel driver ([ParallelLedDriver](moonmodules/light/moxygen/ParallelLedDriver.md)) whose `peripheral` control picks the bus backend the chip supports — the `i80` bus (LCD_CAM on the S3/P4/S31, and the classic ESP32's I2S peripheral in i80 mode, which is the classic's only >8-lane parallel route — IDF's `esp_lcd` picks the backend per chip), our own-GDMA MoonI80 (LCD_CAM, adds the streaming ring + 74HCT595 expander), or the P4's Parlio. All are DMA-driven and behind the platform boundary; the driver rounds an i80 bus up around whatever pin count is configured (any count from 1) and parks unused lanes on a pin already driven.
 - **DMX / ArtNet**: sends DMX over UDP. Supports addressable LEDs and conventional DMX fixtures (pars, moving heads, dimmers).
 - **Preview**: streams light data to the web UI via WebSocket.
 - **Desktop output**: SDL2 or terminal for visual preview. Desktop also serves as a high-speed processing node, driving lights via ArtNet/DDP over the network.

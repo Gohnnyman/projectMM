@@ -199,7 +199,7 @@ USB cable needed once it's on your network.
 
 ![The Firmware module](assets/gettingstarted/02-06-UI-Firmware.png)
 
-> **Updating from an older build?** Skim the [migration notes](MIGRATING.md) first. Most updates need nothing — the device keeps your settings — but a breaking change is listed there with the one action it costs you (usually re-setting or re-adding a control).
+**Updating from an older build?** Skim the [migration notes](MIGRATING.md) first. Most updates need nothing — the device keeps your settings — but a breaking change is listed there with the one action it costs you (usually re-setting or re-adding a control).
 
 > [FirmwareUpdateModule](moonmodules/core/system.md#firmware-update)
 
