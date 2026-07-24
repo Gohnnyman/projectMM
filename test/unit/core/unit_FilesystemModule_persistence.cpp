@@ -632,6 +632,59 @@ TEST_CASE("FilesystemModule restores a user module recorded after reordered code
     mm::platform::fsSetRoot(".");
 }
 
+// Regression: an UNKNOWN entry BEFORE a boot-wired child must not spawn a DUPLICATE of the wired child.
+// The stale-slot branch restores a mismatched wired child from a later matching JSON entry — but that
+// later entry is ALSO walked by the main loop, and if pos has moved past the wired child, the loop would
+// factory-create a second instance of the wired type (two Rainbows). The reconciler must consume the
+// wired child's saved entry once, not twice.
+TEST_CASE("FilesystemModule: an unknown entry before a wired child does not duplicate the wired child") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_wired_dup_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+
+    // Saved file: an UNKNOWN type at entry 0 (GoneEffect never registers), then RainbowEffect at entry 1.
+    // The live tree has ONE boot-wired RainbowEffect.
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
+        f << "{\"channelsPerLight\":3,\"enabled\":true,"
+             "\"0.type\":\"GoneEffect\",\"0.enabled\":true,"
+             "\"1.type\":\"RainbowEffect\",\"1.speed\":91,\"1.enabled\":true}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    auto* rainbow = new mm::RainbowEffect(); rainbow->setTypeName("RainbowEffect"); rainbow->markWiredByCode();
+    layer->addChild(rainbow);       // the ONE boot-wired Rainbow at live index 0
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // EXACTLY ONE Rainbow — the unknown GoneEffect drops, and the RainbowEffect JSON entry restores the
+    // wired child's controls without spawning a second instance.
+    uint8_t rainbows = 0;
+    for (uint8_t k = 0; k < layer->childCount(); k++)
+        if (std::strcmp(layer->child(k)->typeName(), "RainbowEffect") == 0) rainbows++;
+    CHECK(rainbows == 1);
+    CHECK(layer->childCount() == 1);
+    // And the wired child's saved control was applied (not left at default).
+    REQUIRE(layer->childCount() >= 1);
+    CHECK(static_cast<mm::RainbowEffect*>(layer->child(0))->speed == 91);
+
+    scheduler.release();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
 // User-module reorder must round-trip: the drag-reorder UI (moveChildTo) permutes children, saves the
 // new order, and on reboot the reconciler must restore THAT order (user-module order is meaningful —
 // render/composite order). This is the invariant the reconciliation fix must not break: user modules are

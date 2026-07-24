@@ -238,6 +238,8 @@ The tick cost is native-code speed — a `setRGB` is a bounds-guard + three byte
 
 The rows below name the peripherals by their pre-consolidation driver-class names (`MultiPinLedDriver` = the `i80` peripheral, `MoonLedDriver` = `MoonI80`, `ParlioLedDriver` = `Parlio`). They are dated bench records kept as measurements; the three are now one `ParallelLedDriver` whose `peripheral` control selects the backend (see [ADR-0016](adr/0016-one-parallel-led-driver-runtime-peripheral-strategy.md)). The timings are unchanged by the consolidation (one vtable dispatch per frame, never per light).
 
+**Async double-buffer is peripheral-specific.** The `doubleBuffer` win recorded in the Parlio row below (the ~7.5 ms wire hidden behind background DMA) applies to `i80` and `Parlio` — they route through a real transaction queue (esp_lcd / the Parlio driver) that absorbs the second in-flight transfer. `MoonI80` runs **single-buffer only** (`supportsDoubleBuffer()` false, and the control is hidden on it): its own-GDMA whole-frame two-buffer handshake races and wedges the bus, and its speed comes from the streaming ring, not from double-buffering a whole frame. On MoonI80 the whole-frame path is therefore encode → transmit → wait, serial per frame (the ring is the scale path).
+
 Each parallel LED driver run on real hardware at a 128×128 = 16384-light grid, 8 lanes (2026-07-12). The **GPIOs used are recorded** because they double as the seed for each board's usable-pin map (the per-model `deviceModels.json` pin defaults are built from proven-working sets, not datasheet guesses). Every listed pin drove WS2812 output on that board without conflict.
 
 | Peripheral | Board | Pins used (8 lanes) | Result | Ceiling / bound |

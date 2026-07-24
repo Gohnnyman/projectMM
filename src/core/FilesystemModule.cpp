@@ -177,6 +177,17 @@ void FilesystemModule::applyWiredChildFromJson(MoonModule* wired, const char* js
     }
 }
 
+// True when a live child of `parent` is a code-wired singleton of `typeName`. The reconcile loop uses it
+// to avoid factory-creating a duplicate of a wired type-singleton whose saved entry sits at an index other
+// than its boot position (already restored in place by applyWiredChildFromJson).
+bool FilesystemModule::hasWiredChildOfType(const MoonModule* parent, const char* typeName) {
+    for (uint8_t i = 0; i < parent->childCount(); i++) {
+        MoonModule* c = parent->child(i);
+        if (c && c->isWiredByCode() && std::strcmp(c->typeName(), typeName) == 0) return true;
+    }
+    return false;
+}
+
 void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
     char key[MAX_KEY];
     // Overlay the saved values. A module whose CONTROL SET depends on one of its own control VALUES
@@ -241,6 +252,12 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
                 pos++;
                 continue;
             }
+            // A code-wired child is a type-singleton (one per type per container). If a live wired child
+            // already has this entry's type, this entry IS that singleton's saved slot — it was restored by
+            // the applyWiredChildFromJson type-search above when the wired child sat at an earlier position
+            // (its saved index differs from its boot index). Creating here would spawn a DUPLICATE, so drop
+            // the entry without advancing `pos`: the singleton already stands in the live tree.
+            if (hasWiredChildOfType(m, typeName)) continue;
             MoonModule* created = ModuleFactory::create(typeName);
             if (!created) {
                 // Unknown/renamed type (ADR-0013 migration): the module drops. Skip this JSON entry and

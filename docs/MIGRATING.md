@@ -40,7 +40,7 @@ The correction Select every driver exposes (channel order / RGBW synthesis) is r
 |---|---|
 | control `preset` | `lightPreset` |
 
-**Action: nothing.** The saved *value* survives: a driver persists its preset choice under a separate durable key (the preset name), which is unchanged, so the driver comes up pointing at the same light preset. Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
+**Action: nothing.** The saved value survives the rename (see the `lightPreset` [persistence contract](moonmodules/light/drivers.md#led-driver-details) for how a driver's preset reference is stored and re-resolved). Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
 
 ### `AudioService`: the `sync` control becomes `mode` + `send audio`, and `simulate` is renumbered (2026-07-22)
 

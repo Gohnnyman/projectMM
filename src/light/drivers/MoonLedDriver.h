@@ -434,14 +434,16 @@ public:
     /// the orchestrator (in shift mode the list appends the latch — it is a bus lane), and
     /// `busClockMultiplier()` tells the platform how many bus words one WS2812 slot is shifted out
     /// over, so it can scale the pixel clock and the slot keeps its wire duration.
-    bool busInit(size_t frameBytes, bool wantSecondBuffer) override {
+    bool busInit(size_t frameBytes, bool /*wantSecondBuffer*/) override {
         platform::moonI80SetShiftClockDiv(shiftOverclock ? 3 : 4);   // ON = 26.67 MHz, OFF = 20 MHz
-        // wantSecondBuffer is already forced false for this backend by the orchestrator (see
-        // supportsDoubleBuffer + the busInit call site) — MoonI80 runs single-buffer, its speed comes
-        // from the streaming ring, not from double-buffering a whole frame.
+        // Force single-buffer HERE regardless of the request: this backend's own-GDMA whole-frame
+        // two-buffer completion handshake races and wedges the bus (the double-buffer freeze). The
+        // orchestrator already gates the request via supportsDoubleBuffer()==false, but the backend
+        // enforces its own contract too, so a future caller that forgets the gate can't reach the broken
+        // path. MoonI80's speed comes from the streaming ring, not from double-buffering a whole frame.
         return platform::moonI80Ws2812Init(bus_, owner_->busPinList(), owner_->busPinCount(),
                                            static_cast<uint16_t>(clockPin), frameBytes,
-                                           wantSecondBuffer, owner_->busClockMultiplier());
+                                           /*wantSecondBuffer=*/false, owner_->busClockMultiplier());
     }
     void busDeinit() override { stopSnapHelper(); platform::moonI80Ws2812Deinit(bus_); }
     uint8_t* busBuffer(uint8_t i) override { return platform::moonI80Ws2812Buffer(bus_, i); }

@@ -40,8 +40,9 @@ namespace mm {
 /// `lanesAvailable()` (which makes it inert on the wrong chip), `powerOfTwoBus()` (the i80 bus rounds to
 /// 8 or 16; Parlio's width IS its pin count), and any extra bus pins it owns. Each backend header
 /// (I80Peripheral, MoonI80Peripheral, ParlioPeripheral) self-registers its factory + label with the
-/// peripheral registry, gated by its chip's CONFIG_SOC_*, so a board links only its usable backends and
-/// the `peripheral` control offers that subset. A fresh driver wires the first usable backend so it is
+/// peripheral registry at static-init; which backends link is `#if`-gated per chip's CONFIG_SOC_* at the
+/// backend `#include`s in main.cpp, so a board links only its usable backends and the `peripheral`
+/// control offers that subset. A fresh driver wires the first usable backend so it is
 /// functional out of the box; the control (or a catalog `peripheral` value) switches it live.
 ///
 /// @moreinfo
@@ -76,10 +77,12 @@ public:
 
     // --- Peripheral backend registry ---
     // The set of peripheral backends compiled into THIS build. Each backend header self-registers its
-    // factory + label at static-init time (see MM_REGISTER_LED_PERIPHERAL below), gated by its chip's
-    // CONFIG_SOC_* — so a classic ESP32 only links the esp_lcd-i80 backend, an S3 links i80 + MoonI80,
-    // a P4 links all three. The `peripheral` Select then offers the linked-and-supported subset at
-    // runtime. Mirrors ModuleFactory's static-registration shape, one level down for the bus backend.
+    // factory + label at static-init, via an `inline const bool kXxxPeripheralRegistered =
+    // registerPeripheral(...)` at the bottom of the backend header (e.g. MoonLedDriver.h, ParlioLedDriver.h).
+    // WHICH backends link is decided in main.cpp: the `#include` of each backend header is `#if`-gated on
+    // the chip's CONFIG_SOC_* — so a classic ESP32 only links the esp_lcd-i80 backend, an S3 links i80 +
+    // MoonI80, a P4 links all three. The `peripheral` Select then offers the linked-and-supported subset
+    // at runtime. Mirrors ModuleFactory's static-registration shape, one level down for the bus backend.
     using PeripheralFactory = LedPeripheral* (*)();
     struct PeripheralEntry { const char* label; PeripheralFactory make; };
     static constexpr uint8_t kMaxPeripherals = 4;

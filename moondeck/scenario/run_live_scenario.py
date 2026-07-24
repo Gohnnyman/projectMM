@@ -226,11 +226,11 @@ def _snapshot_tree(state: dict) -> list:
     scenario's clear_children / replace actually removes."""
     snap = []
 
-    def controls_of(m):
+    def controls_of(m: dict) -> dict:
         return {c["name"]: c.get("value") for c in m.get("controls", [])
                 if c.get("name") and not c.get("readonly")}
 
-    def walk(modules, parent_name, inside_container):
+    def walk(modules: list, parent_name, *, inside_container: bool) -> None:
         for m in modules:
             name = m.get("name")
             typ = m.get("type")
@@ -242,16 +242,19 @@ def _snapshot_tree(state: dict) -> list:
                 snap.append({"type": typ, "id": name,
                              "parent_id": parent_name, "controls": controls_of(m)})
             walk(m.get("children", []), name,
-                 inside_container or name in _SNAPSHOT_CONTAINERS)
+                 inside_container=inside_container or name in _SNAPSHOT_CONTAINERS)
 
-    walk(state.get("modules", []), None, False)
+    walk(state.get("modules", []), None, inside_container=False)
     return snap
 
 
-def _restore_tree(client, snapshot: list, current_state: dict):
+def _restore_tree(client, snapshot: list, current_state: dict) -> None:
     """Re-create any snapshotted module that a scenario removed, restoring the board to
     the tree it had before the run. Adds parents before children (snapshot order) and
-    re-applies control values. A module still present is left untouched."""
+    re-applies control values. A module still present is left untouched. A restore that
+    fails is reported (which module/control + the error), not silently swallowed — a
+    board left partially restored is a signal worth seeing, but one failure must not stop
+    the rest, so we log and continue."""
     present = _collect_module_names(current_state)
     restored = 0
     for entry in snapshot:
@@ -260,15 +263,17 @@ def _restore_tree(client, snapshot: list, current_state: dict):
         try:
             client.post("/api/modules", {"type": entry["type"], "id": entry["id"],
                                          "parent_id": entry["parent_id"]})
-            for cname, val in entry["controls"].items():
-                try:
-                    client.post("/api/control", {"module": entry["id"],
-                                                 "control": cname, "value": val})
-                except Exception:
-                    pass
-            restored += 1
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  WARN — restore: could not re-create {entry['id']} "
+                  f"({entry['type']} under {entry['parent_id']}): {e}")
+            continue
+        for cname, val in entry["controls"].items():
+            try:
+                client.post("/api/control", {"module": entry["id"],
+                                             "control": cname, "value": val})
+            except Exception as e:
+                print(f"  WARN — restore: could not set {entry['id']}.{cname}={val!r}: {e}")
+        restored += 1
     if restored:
         print(f"  restored {restored} module(s) the scenario had cleared")
 
@@ -321,6 +326,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     # its set_control/replace ids won't exist on the device yet; they're created
     # mid-run. A still-unreachable id is a real typo / wrong-wiring bug.
     target = "unknown"
+    live_state = None   # bound before the try so the snapshot below can't NameError if /api/state fails
     try:
         live_state = client.get("/api/state")
         target = _detect_target(live_state)
@@ -360,10 +366,11 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     # board's real config, and the created_modules cleanup only removes what the scenario
     # ADDED, not what it CLEARED. Restoring the snapshot leaves the bench board as found.
     tree_snapshot = []
-    try:
-        tree_snapshot = _snapshot_tree(live_state)
-    except Exception as e:
-        print(f"  WARN — couldn't snapshot tree for restore: {e}")
+    if live_state is not None:   # skip restore if the pre-flight /api/state fetch failed (nothing to snapshot)
+        try:
+            tree_snapshot = _snapshot_tree(live_state)
+        except Exception as e:
+            print(f"  WARN — couldn't snapshot tree for restore: {e}")
 
     # Reset block: scenarios that mutate shared controls (Mirror toggles, grid
     # size, Preview detail, …) declare a `reset` array of set_control steps that

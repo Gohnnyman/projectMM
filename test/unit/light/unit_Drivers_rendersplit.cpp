@@ -144,10 +144,11 @@ TEST_CASE("render-split: a single-layer multicore config stays engaged across ma
     drivers.prepare();
     REQUIRE(drivers.renderSplitActive());   // splitWanted forces the buffer even for one no-LUT layer
 
-    // Tick 30 frames WITHOUT touching config. The split must not disengage on its own.
+    // Tick 30 frames WITHOUT touching config. The split must not disengage on its own. renderSplitActive()
+    // is a state flag set/cleared synchronously in prepare()/tick(), not by worker timing, so it can be
+    // asserted right after each tick() — no sleep needed (a sleep would only add flake, not synchronization).
     for (int i = 0; i < 30; i++) {
         drivers.tick();
-        std::this_thread::sleep_for(1ms);
         CHECK(drivers.renderSplitActive());   // any false here reproduces the bench flap
     }
 

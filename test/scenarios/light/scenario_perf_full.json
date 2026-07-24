@@ -908,24 +908,6 @@
             "2026-07-08",
             "2026-07-08"
           ]
-        },
-        "esp32": {
-          "tick_us": [
-            193,
-            311
-          ],
-          "free_heap": [
-            119224,
-            121220
-          ],
-          "max_alloc_block": [
-            94208,
-            110592
-          ],
-          "at": [
-            "2026-07-22",
-            "2026-07-24"
-          ]
         }
       },
       "description": "The i80 per-frame cost. Only meaningful where add-i80-driver's pins are valid (S3; desktop is inert but exercises the code path) — the classic/P4 blocks were removed: they recorded a driver that had failed to init, so the tiny tick was the bail-out path, not an encode."
@@ -974,42 +956,6 @@
           "at": [
             "2026-06-17",
             "2026-07-01"
-          ]
-        },
-        "esp32s3-n16r8": {
-          "tick_us": [
-            106,
-            192
-          ],
-          "free_heap": [
-            8529847,
-            8552603
-          ],
-          "max_alloc_block": [
-            86016,
-            114688
-          ],
-          "at": [
-            "2026-06-17",
-            "2026-07-24"
-          ]
-        },
-        "esp32": {
-          "tick_us": [
-            101,
-            313
-          ],
-          "free_heap": [
-            120112,
-            150316
-          ],
-          "max_alloc_block": [
-            94208,
-            110592
-          ],
-          "at": [
-            "2026-06-17",
-            "2026-07-24"
           ]
         },
         "esp32p4-eth": {
