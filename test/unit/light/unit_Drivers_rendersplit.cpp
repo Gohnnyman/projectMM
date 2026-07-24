@@ -120,6 +120,40 @@ struct HookGuard {
 
 }  // namespace
 
+// DIAGNOSTIC (bench flap): a SINGLE enabled layer + one driver + multicore. On the bench renderWait
+// alternated on/off second-to-second. needOutput is false here (one layer, no LUT), so the split is
+// held only by splitWanted forcing outputBuffer_. Tick many frames and assert the split stays STABLY
+// engaged — never flaps off — with no config change between ticks.
+TEST_CASE("render-split: a single-layer multicore config stays engaged across many ticks (no flap)") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    mm::Layers layers;
+    mm::Layer layer;
+    mm::Drivers drivers;
+    grid.width = 64; grid.height = 1; grid.depth = 1;
+    layouts.addChild(&grid);
+    layer.setChannelsPerLight(3);
+    layers.addChild(&layer);          // ONE layer (the bench config), not two
+    layers.setLayouts(&layouts);
+    drivers.setLayers(&layers);
+    layers.applyState();
+
+    MockDriver d;
+    drivers.addChild(&d);
+    drivers.setup();
+    drivers.prepare();
+    REQUIRE(drivers.renderSplitActive());   // splitWanted forces the buffer even for one no-LUT layer
+
+    // Tick 30 frames WITHOUT touching config. The split must not disengage on its own.
+    for (int i = 0; i < 30; i++) {
+        drivers.tick();
+        std::this_thread::sleep_for(1ms);
+        CHECK(drivers.renderSplitActive());   // any false here reproduces the bench flap
+    }
+
+    drivers.release();
+}
+
 TEST_CASE("render-split: multicore on → every driver ticks on the worker, never on a torn frame") {
     Rig r(64);
     MockDriver a, b;                          // two drivers: BOTH move to core 1, no per-driver opt-out

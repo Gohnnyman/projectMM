@@ -317,16 +317,18 @@ public:
     uint8_t outputsPerPin() const { return pinExpanderMode() ? kPinExpanderOutputs : uint8_t(1); }
 
     /// Bind the driver's controls: the peripheral-INVARIANT block first (window, `pins`, `ledsPerPin`,
-    /// doubleBuffer, frameTime, pinExpander — they describe *which LEDs and how many*, the same on any
-    /// backend), THEN the `peripheral` selector as a divider, THEN the peripheral-SPECIFIC controls the
-    /// chosen backend surfaces (i80's clockPin/dcPin, MoonI80's ring cluster). The loopback cluster is
-    /// last (expert). This ordering makes the card read top-down: everything above `peripheral` is
-    /// invariant; everything below is what that peripheral needs.
+    /// `frameTime` — they describe *which LEDs and how many*, the same on any backend), THEN the
+    /// `peripheral` selector as a divider, THEN the peripheral-SPECIFIC controls the chosen backend
+    /// surfaces (`doubleBuffer` where supported, i80's clockPin/dcPin, the `pinExpander` toggle, MoonI80's
+    /// ring cluster). The loopback cluster is last (expert). This ordering makes the card read top-down:
+    /// everything above `peripheral` is invariant; everything below is what that peripheral supports.
     void defineDriverControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
-        controls_.addBool("doubleBuffer", doubleBuffer);   // double-buffer on/off (latency opt-out)
+        // `doubleBuffer` is peripheral-DEPENDENT (a peripheral that can't run the async path hides it —
+        // MoonI80), so it lives BELOW the peripheral divider with the other peripheral-specific controls,
+        // not up here in the invariant block. Added after the swap; see below.
         // ringSnapshot is added in the derived driver's addRingControls() (below the useRing path selector,
         // with the rest of the ring cluster) — it is a ring-only knob, so it belongs with the ring
         // controls, not up here with the path-neutral ones.
@@ -344,6 +346,14 @@ public:
         buildPeripheralOptions();
         ensurePeripheralMatchesSelection();
         controls_.addSelect("peripheral", peripheralSel_, peripheralOptions_, peripheralOptionCount_);
+        // doubleBuffer — the first peripheral-specific control, directly under the divider. Peripheral-
+        // dependent: a peripheral that can't run the async path hides it (MoonI80 — single-buffer only,
+        // its own-GDMA two-buffer handshake races; see supportsDoubleBuffer / its busInit). Added AFTER
+        // ensurePeripheralMatchesSelection so a peripheral CHANGE evaluates the visibility against the NEW
+        // backend. The saved value stays bound, so it survives a round-trip through a single-buffer-only
+        // peripheral and re-engages when a peripheral that supports it is selected again.
+        controls_.addBool("doubleBuffer", doubleBuffer);
+        controls_.setHidden(controls_.count() - 1, !(peripheral_ && peripheral_->supportsDoubleBuffer()));
         // The bus pins sit UNDER the peripheral selector because they ARE peripheral-specific: for a driver
         // that owns its own GPIO routing they are '595 pins: MoonI80 routes WR only when a shift register
         // needs it as SRCLK, and hides the control otherwise. (I80 goes through esp_lcd, which mandates a
@@ -1765,7 +1775,12 @@ protected:
         freeSnapshot();
 
         const bool haveSecond = peripheral_->busBuffer(1) != nullptr;
-        const bool wantSecond = doubleBuffer;
+        // Want the second (async) buffer only when the toggle is ON AND the peripheral can run the async
+        // path. MoonI80 reports supportsDoubleBuffer()==false — its own-GDMA two-buffer handshake races
+        // and wedges the bus — so it always runs single-buffer regardless of the saved toggle (the value
+        // is preserved and re-engages on a peripheral that supports it). This is the single "want second?"
+        // decision; the reinit-skip check and the busInit request below both read it.
+        const bool wantSecond = doubleBuffer && peripheral_->supportsDoubleBuffer();
         if (inited_ && !peripheral_->busIsRing() && peripheral_->busCapacity() == frameBytes_
             && busPinsCurrent() && busLaneCount_ == laneCount_ && haveSecond == wantSecond) {
             // Clear stale latch-pad bytes in BOTH buffers (buffer 1 is null in single-buffer mode).
@@ -1794,9 +1809,9 @@ protected:
             }
             return;
         }
-        // Pass doubleBuffer so busInit allocates the second buffer only when the double-buffer is
-        // wanted — OFF (default) costs exactly one DMA buffer, no async overhead, no second alloc.
-        inited_ = peripheral_->busInit(frameBytes_, doubleBuffer);
+        // Allocate the second buffer only when wanted (see wantSecond above — gated on the toggle AND the
+        // peripheral supporting async). OFF costs exactly one DMA buffer, no async overhead.
+        inited_ = peripheral_->busInit(frameBytes_, wantSecond);
         dmaBuf_ = inited_ ? peripheral_->busBuffer(0) : nullptr;
         if (inited_) {
             for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];

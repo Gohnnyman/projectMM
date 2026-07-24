@@ -151,6 +151,7 @@ private:
     void loadAll(Scheduler* s);
     void loadSubtree(MoonModule* m);
     void applyNode(MoonModule* m, const char* json, const char* prefix);
+    void applyWiredChildFromJson(MoonModule* wired, const char* json, const char* prefix);
     void overlayControls(MoonModule* m, const char* json, const char* prefix);
     void applyValue(const ControlDescriptor& c, const char* json, const char* key);
     bool saveSubtree(MoonModule* m);

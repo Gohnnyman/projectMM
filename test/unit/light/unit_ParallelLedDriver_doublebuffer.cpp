@@ -41,6 +41,7 @@ class MockPeripheral : public mm::LedPeripheral {
 public:
     // --- test knobs / observation ---
     bool twoBuffers = true;               // false → single-buffer mode (busBuffer(1) == null)
+    bool canDoubleBuffer = true;          // false → this peripheral reports supportsDoubleBuffer()==false
     std::vector<Call> calls;              // transmit/wait order, in call sequence
 
     // --- LedPeripheral hooks (mock, host-only) ---
@@ -51,6 +52,7 @@ public:
     // lets the shift-register lane/frame arithmetic be pinned on the host (unit_ParallelSlots covers
     // the encoded bits; here it's the driver plumbing).
     bool supportsPinExpander() const override { return true; }
+    bool supportsDoubleBuffer() const override { return canDoubleBuffer; }   // MoonI80 reports false
     const char* initFailMsg() const override { return "mock init failed"; }
     mm::LedHwBlock hwBlock() const override { return mm::LedHwBlock::None; }   // mock drives no real block
 
@@ -214,6 +216,35 @@ TEST_CASE("ParallelLedDriver doubleBuffer toggles allocation and path") {
     d.doubleBuffer = false;
     d.applyState();
     CHECK(peripheral.busBuffer(1) == nullptr);
+}
+
+// Regression (MoonI80 double-buffer freeze): a peripheral that reports supportsDoubleBuffer()==false
+// must run SINGLE-buffer even when the doubleBuffer control is ON — its own-GDMA two-buffer completion
+// handshake races and wedges the bus (the ~200 ms-per-frame freeze). The orchestrator gates the
+// second-buffer request on supportsDoubleBuffer(), so the peripheral never gets a second buffer and the
+// tick stays on the proven synchronous path. The saved doubleBuffer value is preserved (it just doesn't
+// engage here), so switching to a peripheral that DOES support it restores the async behavior.
+TEST_CASE("ParallelLedDriver: a peripheral that can't double-buffer stays single-buffer with doubleBuffer ON") {
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
+    mm::Buffer src;
+    mm::Correction corr;
+    peripheral.canDoubleBuffer = false;   // the MoonI80 case: supportsDoubleBuffer() == false
+    wire(d, peripheral, src, corr, 64, /*async=*/true);   // doubleBuffer ON, but the peripheral refuses async
+
+    // The second buffer is NEVER requested (busInit got wantSecond=false), so it isn't allocated...
+    CHECK(peripheral.busBuffer(1) == nullptr);
+    // ...and the saved control value is untouched (survives a round-trip through this peripheral).
+    CHECK(d.doubleBuffer == true);
+
+    // The tick runs the SYNCHRONOUS single-buffer path: transmit 0 then wait 0, every frame, on buffer 0.
+    d.tick();
+    d.tick();
+    for (const auto& c : peripheral.calls) CHECK(c.buffer == 0);   // buffer 1 never touched
+    REQUIRE(peripheral.calls.size() == 4);
+    CHECK(peripheral.calls[0].kind == Call::Transmit); CHECK(peripheral.calls[1].kind == Call::Wait);
+    CHECK(peripheral.calls[2].kind == Call::Transmit); CHECK(peripheral.calls[3].kind == Call::Wait);
+    CHECK(d.activeForTest() == 0);   // never flips — single-buffer stays on 0
 }
 
 // A board that WANTS async but can't fit the second buffer (memory-tight) degrades to single-buffer

@@ -41,7 +41,7 @@ public:
     bool extraBusPinsCurrent() const override { return true; }
     const char* validateBusPins(const uint16_t*, uint8_t) const override { return nullptr; }
     const char* validateBusFatal() const override { return nullptr; }
-    uint16_t clockPinForBus() const override { return 99; }   // a recognisable "parked here" sentinel
+    uint16_t clockPinForBus() const override { return 99; }   // a recognizable "parked here" sentinel
 
     bool busInit(size_t frameBytes, bool) override {
         cap_ = frameBytes;
@@ -50,12 +50,14 @@ public:
     }
     uint8_t* busBuffer(uint8_t i) override { return (i == 0 && !buf_.empty()) ? buf_.data() : nullptr; }
     size_t busCapacity() const override { return cap_; }
-    // busTransmit reports success — as the real one does. This is the crux of the 2026-07-14 bug:
-    // esp_lcd's tx_color returns ESP_OK because the ENQUEUE succeeded, while the GDMA mount fails
-    // later inside the ISR. So "transmit returned true" does NOT mean the frame reached the wire.
+    // busTransmit models the real enqueue/completion split: it reports success for the ENQUEUE (like
+    // esp_lcd's tx_color returning ESP_OK the moment the transfer is queued), which does NOT mean the
+    // frame reached the wire — completion is a separate signal via busWait below. So a true here is
+    // "queued", not "done".
     bool busTransmit(uint8_t, size_t) override { transmits_++; return true; }
-    // `waitTimesOut` simulates a transfer whose done-callback never fires — precisely what a failed
-    // GDMA mount produces. The driver must degrade, not wedge, and must not reuse the buffer.
+    // busWait is the completion half: `waitTimesOut` models a transfer whose done-signal never fires
+    // (a stuck/failed DMA). The driver must degrade, not wedge, and must not reuse the buffer while a
+    // transfer may still be reading it.
     bool busWait(uint8_t, uint32_t) override { return !waitTimesOut; }
     bool waitTimesOut = false;
     uint32_t busLastTransmitUs() const override { return 0; }
@@ -106,6 +108,10 @@ void wire(MockShiftDriver& d, MockPeripheral& peripheral, mm::Buffer& src, mm::C
     std::strcpy(d.ledsPerPin, ledsPerPin);
     d.pinExpander = shiftOn;
     d.latchPin = latch;
+    // These tests exercise the SINGLE-buffer expander/ring path. MockPeripheral::busInit ignores the
+    // double-buffer request (busBuffer(1) is always null), so run the driver in single-buffer mode
+    // EXPLICITLY rather than relying on a silent fallback — the coverage is honest about which path runs.
+    d.doubleBuffer = false;
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     d.defineControls();
@@ -401,10 +407,22 @@ TEST_CASE("shift register: a timed-out transfer never gets its buffer re-encoded
     d.tick();                       // starts a transfer that will never complete
     const size_t transmitsAfterFirst = peripheral.transmitCount();
 
-    d.tick();                       // must NOT transmit again over the live buffer
+    // Snapshot the buffer the stuck transfer is (conceptually) still reading. The immutability contract
+    // is not just "no new transmit" but "no re-encode": the bytes must be byte-for-byte unchanged while
+    // the transfer is in flight, or half of one frame + half of the next reach the wire (the bench's
+    // "scattered random pixels"). Read through busBuffer(0) — the same memory the encoder writes.
+    const uint8_t* live = peripheral.busBuffer(0);
+    REQUIRE(live != nullptr);
+    const std::vector<uint8_t> snapshot(live, live + peripheral.busCapacity());
+
+    d.tick();                       // must NOT transmit again NOR re-encode over the live buffer
     d.tick();
 
     CHECK(peripheral.transmitCount() == transmitsAfterFirst);   // no new transfer while the old one is stuck
+    // And the buffer contents are untouched — the stronger invariant the timeout exists to protect.
+    const uint8_t* after = peripheral.busBuffer(0);
+    REQUIRE(after != nullptr);
+    CHECK(std::vector<uint8_t>(after, after + peripheral.busCapacity()) == snapshot);
 }
 
 // **The robustness rule: a broken bus must not cost the user the DEVICE.** Every dead transfer is a

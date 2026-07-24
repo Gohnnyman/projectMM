@@ -27,6 +27,14 @@
 
 namespace {
 
+// The quiesce-render hook's fire count, and whether it had fired BEFORE the last attached backend was
+// freed. The swap-ordering test installs a hook that bumps g_hookFires; SwapMock's destructor snapshots
+// (into g_hookFiredBeforeLastDtor) whether the hook had already fired by the time an ATTACHED backend is
+// destroyed — the proof that the worker was quiesced before the backend it reads was freed, not merely
+// that the hook fired at some point during the swap.
+int g_hookFires = 0;
+bool g_hookFiredBeforeLastDtor = false;
+
 // A minimal owned backend (created by the registry, deleted by the driver). Reports a real hwBlock so
 // the two labels model two distinct peripherals, and counts its own construction/destruction so the
 // test can assert no leak and no double-free across a swap.
@@ -44,8 +52,13 @@ struct SwapMock : mm::LedPeripheral {
     explicit SwapMock(mm::LedHwBlock b) : block(b) { live++; }
     // owner_ (protected, set by attach()) is non-null only for a backend the driver actually selected;
     // a buildPeripheralOptions() probe is make()/delete'd without attach(), so it destructs with a null
-    // owner_. Counting attached destructions isolates real backend churn from probe churn.
-    ~SwapMock() override { live--; if (owner_) attachedDtors++; }
+    // owner_. Counting attached destructions isolates real backend churn from probe churn. For an ATTACHED
+    // backend being freed, also snapshot whether the quiesce hook had already fired — the ordering proof
+    // the swap-ordering test reads (the worker must be stopped BEFORE the backend it dereferences is freed).
+    ~SwapMock() override {
+        live--;
+        if (owner_) { attachedDtors++; g_hookFiredBeforeLastDtor = (g_hookFires > 0); }
+    }
 
     uint8_t lanesAvailable() const override { return 8; }
     bool powerOfTwoBus() const override { return true; }
@@ -193,20 +206,17 @@ TEST_CASE("ParallelLedDriver: a peripheral swap does not double-free or dangle t
 // Regression (pre-merge Reviewer BLOCKER): a LIVE peripheral swap frees the old backend, and the core-1
 // encode worker dereferences that backend (busBuffer/busTransmit) — so swapPeripheral MUST stop the
 // worker (fire the quiesce-render hook) BEFORE deleting the backend, or it is a use-after-free, the same
-// class the structural-mutation quiesce fixes. This pins the ordering: the hook fires while the outgoing
-// backend is still alive (a SwapMock records, in its destructor, whether the hook had already fired).
-namespace {
-int g_hookFires = 0;
-bool g_hookFiredBeforeLastDtor = false;
-}  // namespace
-
+// class the structural-mutation quiesce fixes. This pins the ORDERING, not merely that the hook fired:
+// SwapMock's destructor snapshots (into g_hookFiredBeforeLastDtor) whether the quiesce hook had already
+// fired at the moment the outgoing attached backend is freed. A swap that deleted the backend BEFORE
+// quiescing would leave that flag false even though g_hookFires ends up > 0.
 TEST_CASE("ParallelLedDriver: a live peripheral swap quiesces the render worker before freeing the backend") {
     RegistryScope registry;
     g_hookFires = 0;
     g_hookFiredBeforeLastDtor = false;
 
-    // The hook records each fire. A HookSwapMock's destructor snapshots whether the hook had fired at
-    // least once by the time it is destroyed — proving the quiesce happened before the free.
+    // The hook records each fire; SwapMock's destructor records whether it had fired before an attached
+    // backend was freed — the ordering proof.
     mm::MoonModule::setQuiesceRenderHook([] { g_hookFires++; });
 
     {
@@ -230,11 +240,19 @@ TEST_CASE("ParallelLedDriver: a live peripheral swap quiesces the render worker 
         for (int k = 0; k < optCount; k++) if (opts[k] && std::strcmp(opts[k], "swapB") == 0) bIdx = k;
         REQUIRE(bIdx >= 0);
 
-        const int firesBefore = g_hookFires;
-        changePeripheralTo(d, static_cast<uint8_t>(bIdx));   // the live swap: frees the old backend
-        // The swap must have fired the quiesce hook (swapPeripheral runs it before the delete). It runs
-        // in both rebuildControls' ensurePeripheralMatchesSelection and would-be paths, so at least once.
-        CHECK(g_hookFires > firesBefore);
+        // Reset the fire count to ZERO immediately before the swap so the dtor's "had the hook fired?"
+        // snapshot reflects ONLY this swap — not an earlier fire from applyState/rebuild. Otherwise any
+        // prior fire would make g_hookFiredBeforeLastDtor true even if THIS swap freed A before quiescing.
+        g_hookFires = 0;
+        g_hookFiredBeforeLastDtor = false;
+        changePeripheralTo(d, static_cast<uint8_t>(bIdx));   // the live swap: frees the old backend (A)
+        // The swap fired the quiesce hook at all...
+        CHECK(g_hookFires > 0);
+        // ...AND it fired BEFORE the outgoing backend was freed. This is the ordering the finding pins:
+        // the SwapMock dtor recorded whether the hook had fired (this swap) when the attached backend (A)
+        // was destroyed. A swap that deleted the backend first would leave this false despite the hook
+        // firing later in the same swap.
+        CHECK(g_hookFiredBeforeLastDtor);
     }
 
     mm::MoonModule::setQuiesceRenderHook(nullptr);

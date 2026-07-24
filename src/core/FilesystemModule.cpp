@@ -158,6 +158,25 @@ void FilesystemModule::overlayControls(MoonModule* m, const char* json, const ch
     }
 }
 
+// Restore a code-wired child's saved state when its boot index differs from the index the file recorded
+// it at (a reorder of code-wired siblings). Scan the saved child entries ("<prefix><j>.type") for the
+// one whose type matches `wired`, and apply that entry's subtree to it. If the file has no entry for this
+// wired child (it predates the child), there is nothing to restore and the child keeps its defaults.
+void FilesystemModule::applyWiredChildFromJson(MoonModule* wired, const char* json, const char* prefix) {
+    for (uint8_t j = 0; ; j++) {
+        char typeKey[MAX_KEY];
+        std::snprintf(typeKey, sizeof(typeKey), "%s%u.type", prefix, static_cast<unsigned>(j));
+        char typeName[32] = {};
+        mm::json::parseString(json, typeKey, typeName, sizeof(typeName));
+        if (typeName[0] == 0) return;   // walked past the last saved child — no match, keep defaults
+        if (std::strcmp(typeName, wired->typeName()) != 0) continue;
+        char childPrefix[MAX_KEY];
+        std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(j));
+        applyNode(wired, json, childPrefix);
+        return;
+    }
+}
+
 void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
     char key[MAX_KEY];
     // Overlay the saved values. A module whose CONTROL SET depends on one of its own control VALUES
@@ -211,10 +230,17 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
         MoonModule* live = m->child(pos);
         if (!live || std::strcmp(live->typeName(), typeName) != 0) {
             // A code-wired child that mismatches the saved type here is a STALE SLOT (the file predates
-            // this code-wired child, or names a different type where it now sits). Never replace/destroy
-            // the wired instance: keep it, advance past it, and drop this stale JSON entry — the trim
-            // loop preserves the code-wired child and the next save rewrites the shape.
-            if (live && live->isWiredByCode()) { pos++; continue; }
+            // this code-wired child, or names a different type where it now sits — e.g. boot wired the
+            // code-wired siblings in a different order than the file recorded them). Never replace/destroy
+            // the wired instance: keep it and advance past it. But first restore ITS saved values — find
+            // the JSON entry that names THIS wired child's type and overlay that entry's controls, so a
+            // code-wired child's persisted state survives even when its saved index differs from its boot
+            // index (a reorder). Without this the wired child keeps its defaults on every reboot.
+            if (live && live->isWiredByCode()) {
+                applyWiredChildFromJson(live, json, prefix);
+                pos++;
+                continue;
+            }
             MoonModule* created = ModuleFactory::create(typeName);
             if (!created) {
                 // Unknown/renamed type (ADR-0013 migration): the module drops. Skip this JSON entry and

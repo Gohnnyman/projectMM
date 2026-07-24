@@ -276,6 +276,10 @@ public:
     /// LCD_CAM-only, so the answer is simply "wherever this backend runs at all".
     bool supportsPinExpander() const override { return platform::lcdLanes > 0; }
 
+    /// No async double-buffer on this backend — the own-GDMA two-buffer completion handshake races and
+    /// wedges the bus (see busInit). Single-buffer only; the ring is where MoonI80's speed lives.
+    bool supportsDoubleBuffer() const override { return false; }
+
     /// The orchestrator pads spare bus lanes with this GPIO. Unrouted lanes cost nothing here, so the value is
     /// only ever *used* in shift mode — where WR is a real pad and the padding is genuinely inert.
     uint16_t clockPinForBus() const override { return static_cast<uint16_t>(clockPin); }
@@ -432,6 +436,9 @@ public:
     /// over, so it can scale the pixel clock and the slot keeps its wire duration.
     bool busInit(size_t frameBytes, bool wantSecondBuffer) override {
         platform::moonI80SetShiftClockDiv(shiftOverclock ? 3 : 4);   // ON = 26.67 MHz, OFF = 20 MHz
+        // wantSecondBuffer is already forced false for this backend by the orchestrator (see
+        // supportsDoubleBuffer + the busInit call site) — MoonI80 runs single-buffer, its speed comes
+        // from the streaming ring, not from double-buffering a whole frame.
         return platform::moonI80Ws2812Init(bus_, owner_->busPinList(), owner_->busPinCount(),
                                            static_cast<uint16_t>(clockPin), frameBytes,
                                            wantSecondBuffer, owner_->busClockMultiplier());

@@ -572,12 +572,14 @@ TEST_CASE("FilesystemModule restores a user module recorded after reordered code
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
 
     // Saved file: child order Noise(0), Rainbow(1), Multiply(2) — the two effects are the code-wired
-    // singletons, the modifier is the user-added module recorded AFTER them.
+    // singletons, the modifier is the user-added module recorded AFTER them. The Rainbow carries a
+    // DISTINCTIVE saved `speed` (137, not its default 20) so the test can prove a reordered code-wired
+    // child's own persisted controls are restored, not just its presence.
     {
         std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
         f << "{\"channelsPerLight\":3,\"enabled\":true,"
              "\"0.type\":\"NoiseEffect\",\"0.enabled\":true,"
-             "\"1.type\":\"RainbowEffect\",\"1.enabled\":true,"
+             "\"1.type\":\"RainbowEffect\",\"1.speed\":137,\"1.enabled\":true,"
              "\"2.type\":\"MultiplyModifier\",\"2.enabled\":true}";
     }
 
@@ -610,14 +612,20 @@ TEST_CASE("FilesystemModule restores a user module recorded after reordered code
     CHECK(layer->child(2)->isWiredByCode() == false);
     // Both code-wired effects survive (in either order — cosmetic).
     bool haveNoise = false, haveRainbow = false;
+    mm::RainbowEffect* liveRainbow = nullptr;
     for (uint8_t k = 0; k < 2; k++) {
         const char* t = layer->child(k)->typeName();
         CHECK(layer->child(k)->isWiredByCode() == true);
         if (std::strcmp(t, "NoiseEffect") == 0) haveNoise = true;
-        if (std::strcmp(t, "RainbowEffect") == 0) haveRainbow = true;
+        if (std::strcmp(t, "RainbowEffect") == 0) { haveRainbow = true; liveRainbow = static_cast<mm::RainbowEffect*>(layer->child(k)); }
     }
     CHECK(haveNoise);
     CHECK(haveRainbow);
+    // The reordered code-wired Rainbow's OWN persisted control is restored — not just its presence. Its
+    // saved index (1) differs from its boot index (0), so this is the reorder case the fix covers: the
+    // reconciler finds the JSON entry naming RainbowEffect and overlays its `speed` (137, not default 20).
+    REQUIRE(liveRainbow != nullptr);
+    CHECK(liveRainbow->speed == 137);
 
     scheduler.release();
     std::filesystem::remove_all(tmpRoot);

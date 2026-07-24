@@ -50,6 +50,12 @@ public:
     virtual uint8_t lanesAvailable() const = 0;
     /// Can this peripheral host the 74HCT595 pin expander? (Needs a DMA that reaches PSRAM.)
     virtual bool supportsPinExpander() const = 0;
+    /// Can this peripheral run the async double-buffer (a second whole-frame buffer, encode overlaps
+    /// wire)? Default yes — i80/Parlio route through a real transaction queue (esp_lcd / the Parlio
+    /// driver), so a second in-flight transfer is handled for us. MoonI80 owns its GDMA with no queue,
+    /// and its hand-rolled two-buffer completion handshake races; it overrides this false and runs
+    /// single-buffer (its speed comes from the ring, not from double-buffering a whole frame).
+    virtual bool supportsDoubleBuffer() const { return true; }
     /// Does the bus width round up to a power of two (8/16), or is it the exact pin count?
     virtual bool powerOfTwoBus() const = 0;
     /// The status message when bus init fails on this peripheral.

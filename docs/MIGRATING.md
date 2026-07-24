@@ -30,7 +30,7 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 | `MoonLedDriver` | `ParallelLedDriver` + `peripheral` = `MoonI80` (own-GDMA below esp_lcd, LCD_CAM) |
 | `ParlioLedDriver` | `ParallelLedDriver` + `peripheral` = `Parlio` (P4) |
 
-**Action: re-add the driver.** A persisted module whose type is one of the three old names no longer resolves (the type isn't registered), so the robust loader drops it on boot — the driver, and its pins/settings, vanish from the tree. Add a **Parallel LED** driver again, choose the `peripheral` your board uses (the same backend the old type named — see the table), and re-enter its pins / lengths / clock pin. The web installer's board catalog already names the new type, so a fresh install or a catalog re-inject wires it correctly; only a device carrying an OLD persisted tree needs the manual re-add.
+**Action: re-add the driver.** A persisted module whose type is one of the three old names no longer resolves (the type isn't registered), so the robust loader drops it on boot — the driver, and its pins/settings, vanish from the tree. Add a **Parallel LED** driver again, choose the `peripheral` your board uses (the same backend the old type named — see the table), and re-enter its `pins` / `ledsPerPin` plus whatever the chosen peripheral needs: `i80` has `clockPin`/`dcPin`, `MoonI80` has `clockPin` + the ring/expander controls, `Parlio` has no clock or DC pins at all. The web installer's board catalog already names the new type, so a fresh install or a catalog re-inject wires it correctly; only a device carrying an OLD persisted tree needs the manual re-add.
 
 ### The per-driver `preset` control is renamed to `lightPreset` (2026-07-23)
 
@@ -86,7 +86,7 @@ The LED driver module types and several controls were renamed so the UI reads in
 
 A device whose persisted config names the old module type loads a module type that no longer exists — the unknown type is ignored, so **the driver is absent from the tree on boot**. Re-add a **Parallel LED** driver (the single type the two later merged into — see the 2026-07-23 entry above for the `peripheral` value that matches the old `I80LedDriver` / `MoonI80LedDriver`) and re-enter its controls. Within a re-added driver, the two renamed *settable* controls (`pinExpander`, `doubleBuffer`) read as absent → they take their defaults (`pinExpander` off, `doubleBuffer` on); set them again if your board needs otherwise. `frameTime` and `renderWait` are read-only KPIs — nothing to restore.
 
-`RmtLedDriver` and `ParlioLedDriver` are unchanged. The `pins` / `ledsPerPin` / `clockPin` / `latchPin` / `loopback*` controls are unchanged.
+This rename left `RmtLedDriver` untouched, and `ParlioLedDriver` untouched *at the time*; the later 2026-07-23 entry above then merges `ParlioLedDriver` into `ParallelLedDriver` along with the other two. The `pins` / `ledsPerPin` / `clockPin` / `latchPin` / `loopback*` controls are unchanged by this rename.
 
 ---
 
