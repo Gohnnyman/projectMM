@@ -315,10 +315,50 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);
             return ApplyResult::Ok;
         }
-        case ControlType::Select:
-        case ControlType::Palette: {
+        case ControlType::Select: {
+            // An empty option list (c.max == 0) has no valid index at all — don't accept a value or
+            // manufacture index 0 for it. Strict rejects; Lenient leaves the control untouched.
+            if (c.max == 0) return policy == ApplyPolicy::Strict ? ApplyResult::OutOfRange : ApplyResult::Ok;
+            const int hi = c.max - 1;
+            // A Select value may be given as the option LABEL (a string) instead of the index. This is
+            // what makes a catalog config board-portable: the index into a board-FILTERED option list
+            // varies per chip (an S3 offers fewer peripherals than a P4), but the label is stable. Match
+            // the string against the options and use that row; fall back to the numeric index otherwise.
+            // Select-only: a Select's aux IS the options array (const char* const*); Palette's aux is a
+            // PaletteOptionsFn (a function pointer), so it must not reach this reinterpret_cast.
+            // parseString silently truncates a value longer than the buffer, and a truncated label could
+            // spuriously equal a real option that happens to share its prefix. Guard by sizing the buffer
+            // past any real option label AND rejecting a value that fills it: a label that reaches the cap
+            // is longer than any option (or was truncated to it), so it cannot legitimately match — treat
+            // it as "no such option" rather than risk a prefix match.
+            char label[64] = {};
+            mm::json::parseString(json, key, label, sizeof(label));
+            const bool overlong = std::strlen(label) >= sizeof(label) - 1;
+            if (label[0]) {
+                auto* options = reinterpret_cast<const char* const*>(c.aux);
+                if (options && !overlong)
+                    for (int i = 0; i <= hi; i++)
+                        if (options[i] && std::strcmp(options[i], label) == 0)
+                            return clampInto(static_cast<uint8_t*>(c.ptr), i, 0, hi);
+                // A label that names no current option (a peripheral this board can't run, or one too long
+                // to be any real option) is not an error in Lenient policy — the driver keeps its default;
+                // Strict rejects it.
+                if (policy == ApplyPolicy::Strict) return ApplyResult::OutOfRange;
+                return ApplyResult::Ok;
+            }
             int v = mm::json::parseInt(json, key);
-            const int hi = c.max > 0 ? c.max - 1 : 0;
+            if (policy == ApplyPolicy::Strict && (v < 0 || v > hi)) {
+                return ApplyResult::OutOfRange;
+            }
+            return clampInto(static_cast<uint8_t*>(c.ptr), v, 0, hi);
+        }
+        case ControlType::Palette: {
+            // Palette carries a PaletteOptionsFn in aux (not an options array), so it stays numeric-index
+            // only — no label match. A string value parses to 0 via parseInt, the harmless prior behavior.
+            // An empty palette list (c.max == 0) has no valid index — reject/no-op like the Select above.
+            if (c.max == 0) return policy == ApplyPolicy::Strict ? ApplyResult::OutOfRange : ApplyResult::Ok;
+            const int hi = c.max - 1;
+            int v = mm::json::parseInt(json, key);
             if (policy == ApplyPolicy::Strict && (v < 0 || v > hi)) {
                 return ApplyResult::OutOfRange;
             }

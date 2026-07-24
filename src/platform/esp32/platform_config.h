@@ -88,7 +88,7 @@ constexpr uint8_t rmtTxChannels = 0;
 // unrelated I2S-LCD peripheral, so gating on it wired this driver onto the
 // classic chip and hung its boot trying to init an esp_lcd i80 bus the chip
 // doesn't have. SOC_LCDCAM_I80_LCD_SUPPORTED is defined only on chips with the
-// real LCD_CAM (S3/P4), which is what esp_lcd's i80 driver actually needs.
+// real LCD_CAM (S3/P4/S31), which is what esp_lcd's i80 driver actually needs.
 // The LCD_CAM i80 bus does 16 data lines. The driver derives the actual bus width
 // (8 or 16 — power-of-two only) from the configured pin count; this is the MAX it
 // may reach. LCD requires exactly 8 or 16 real pins (i80 rejects an NC data line).
@@ -116,8 +116,8 @@ constexpr uint8_t parlioLanes = 0;
 // width, WR/DC) with the I2S peripheral on the classic ESP32 (esp_lcd_panel_io_i2s.c),
 // using WHOLE-FRAME chained DMA — so MultiPinLedDriver reuses the MultiPinLedDriver code path and
 // the i80Ws2812* seam, not a bespoke ISR ring. Gate CLASSIC-ONLY: SOC_LCD_I80_SUPPORTED
-// is set on the classic chip (I2S backend) AND the S3/P4 (LCD_CAM backend), so exclude
-// the LCD_CAM chips — otherwise both this and lcdLanes would be non-zero on the S3/P4 and
+// is set on the classic chip (I2S backend) AND the LCD_CAM chips (S3/P4/S31, LCD_CAM backend), so
+// exclude the LCD_CAM chips — otherwise both this and lcdLanes would be non-zero on those chips and
 // the chip would register both drivers. The `defined(A) && !defined(B)` shape mirrors
 // hasEthW5500 below. The i80 bus does 16 data lines; the driver derives 8 or 16 from the
 // pin count and requires exactly that many real pins (i80 rejects an NC data line).

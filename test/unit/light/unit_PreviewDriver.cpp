@@ -436,6 +436,64 @@ TEST_CASE("PreviewDriver gates the next frame on the buffered send draining (ada
     mm::platform::setTestNowMs(0);
 }
 
+// ADAPTIVE RESOLUTION RECOVERY: the downsample coarsens ADDITIVELY (downscale_++ on slow frames, a
+// gentle anti-stall) but refines MULTIPLICATIVELY (halve toward 1 on a run of clean frames). So a grid
+// that briefly coarsened on a slow link snaps back to full resolution in ~log2 refine events, not one
+// step per unit — the fix for a small grid taking ~10 s to reach full detail. This pins the halving so
+// the recovery can't silently regress to the old linear crawl.
+TEST_CASE("PreviewDriver refines resolution multiplicatively (fast recovery to full res)") {
+    mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;   // 256 lights, trivially full-res-able
+    PreviewRig rig(&g);
+
+    uint32_t t = 1000;
+    auto tickSlow = [&] { rig.cap.bufferedDrains = 5; t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
+    auto tickFast = [&] { rig.cap.bufferedDrains = 0; t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
+
+    // Drive it coarse: a run of slow frames coarsens downscale_ well above 1 (additive +1 per event).
+    for (int i = 0; i < 40; i++) tickSlow();
+    const mm::nrOfLightsType coarsened = rig.preview->downscaleForTest();
+    REQUIRE(coarsened > 1);      // it did downsample under the slow link
+
+    // Now the link is prompt. Count how many refine EVENTS (clean-streak completions) it takes to reach
+    // full res. Multiplicative halving needs ~log2(coarsened) events, far fewer than (coarsened-1) linear
+    // steps. kUpscaleAfterFast clean frames per event; bound the loop generously and assert it converged.
+    int refineEvents = 0;
+    mm::nrOfLightsType prev = coarsened;
+    for (int i = 0; i < 200 && rig.preview->downscaleForTest() > 1; i++) {
+        tickFast();
+        const mm::nrOfLightsType now = rig.preview->downscaleForTest();
+        if (now < prev) { refineEvents++; CHECK(now <= (prev + 1) / 2); prev = now; }   // each event at least halves
+    }
+    CHECK(rig.preview->downscaleForTest() == 1);          // reached full resolution
+    // log2(64 max) = 6 events ceiling; a real coarsened value needs far fewer. Linear would be up to 63.
+    CHECK(refineEvents <= 6);
+
+    mm::platform::setTestNowMs(0);
+}
+
+// RE-ANCHOR ON REBUILD: a link-struggle coarsening must NOT carry across a geometry change and hold a
+// now-fitting grid coarse. A rebuild resets downscale_ to 1, so the memory/display cap alone sets the
+// stride for the new grid — a grid that fits renders at full res immediately, no inherited ramp. (This
+// is the "add a small grid → stuck at 4 blobs for ~10 s because a prior config had coarsened" fix.)
+TEST_CASE("PreviewDriver re-anchors resolution on a geometry rebuild (no inherited coarsening)") {
+    mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
+    PreviewRig rig(&g);
+
+    uint32_t t = 1000;
+    auto tickSlow = [&] { rig.cap.bufferedDrains = 5; t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
+
+    // Coarsen it under a slow link.
+    for (int i = 0; i < 40; i++) tickSlow();
+    REQUIRE(rig.preview->downscaleForTest() > 1);   // it coarsened
+
+    // A rebuild (a resize, or just re-preparing the same fitting grid) must re-anchor to full res: the
+    // 16×16 (256 lights) is well under the cap, so with downscale_ reset it renders at stride 1.
+    rig.preview->applyState();                       // prepare() re-anchors downscale_
+    CHECK(rig.preview->downscaleForTest() == 1);     // did NOT inherit the stale coarsening
+
+    mm::platform::setTestNowMs(0);
+}
+
 // USE-AFTER-FREE GUARD: a geometry rebuild (resize) frees+reallocs the producer buffer, so any
 // in-flight buffered send (which holds a pointer into it) MUST be cancelled in prepare before
 // the buffer goes away — else drainPreviewSend would read freed memory.

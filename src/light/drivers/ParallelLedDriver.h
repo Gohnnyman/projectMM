@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/drivers/DriverBase.h"        // DriverBase, Correction
+#include "light/drivers/LedPeripheral.h"     // runtime peripheral strategy (Parlio / i80 / MoonI80)
 #include "light/drivers/ParallelSlots.h"        // encodeWs2812ParallelSlots (shared encoder)
 #include "light/drivers/LedDriverConfig.h"
 #include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared)
@@ -10,10 +11,10 @@
 
 namespace mm {
 
-template <class Derived>
-/// Base for the parallel WS2812B LED-output drivers — the S3's LCD_CAM i80 bus (MultiPinLedDriver) and
-/// the P4's Parlio peripheral (ParlioLedDriver). Both drive up to 16 strands that clock out
-/// SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of the source buffer (see kMaxLanes).
+/// The one registered parallel WS2812B LED-output driver. It drives up to 16 strands that clock out
+/// SIMULTANEOUSLY, one GPIO lane each, fed consecutive slices of the source buffer (see kMaxLanes), over
+/// whichever bus peripheral the `peripheral` control selects at runtime (the S3's LCD_CAM i80 bus, its
+/// own-GDMA MoonI80 shift-ring, or the P4's Parlio peripheral — see the LedPeripheral strategy below).
 /// (Vocabulary — strand / lane / slot / row — under @xref{terminology|More info → Terminology}.)
 ///
 /// **How it works: encode the whole frame, then hand it to the DMA and walk away.** Every WS2812 bit of
@@ -32,14 +33,17 @@ template <class Derived>
 /// by `ledsPerPin` with the remainder split evenly — the same rule (and the same parser) as
 /// RmtLedDriver, so a strand count means the same thing on every LED driver.
 ///
-/// **CRTP, not virtual calls.** The base calls into the derived through
-/// `static_cast<Derived*>(this)->busX()`, so the shared body costs no vtable and no runtime indirection
-/// on the hot path, and the module tree stays the project's one deliberate class hierarchy (the only
-/// virtual boundary is MoonModule -> DriverBase). A derived driver supplies only the peripheral-specific
-/// pieces: the `bus*` platform wrappers, `lanesAvailable()` (which makes it inert on the wrong chip),
-/// `kPowerOfTwoBus` (the i80 bus rounds to 8 or 16; Parlio's width IS its pin count), the slot rate
-/// `kClockHz`, and any extra bus pins it owns. The two drivers were ~250 of ~370 lines byte-for-byte
-/// identical before this base existed.
+/// **A runtime `LedPeripheral` strategy, not compile-time CRTP.** The base calls into `peripheral_`
+/// (a `LedPeripheral*`, see LedPeripheral.h) through one virtual-dispatch boundary per FRAME or per
+/// reinit — never per light, so the per-light encode (the actual hot path) stays a direct call and pays
+/// no vtable cost. A peripheral supplies only the variant-specific pieces: the `bus*` platform wrappers,
+/// `lanesAvailable()` (which makes it inert on the wrong chip), `powerOfTwoBus()` (the i80 bus rounds to
+/// 8 or 16; Parlio's width IS its pin count), and any extra bus pins it owns. Each backend header
+/// (I80Peripheral, MoonI80Peripheral, ParlioPeripheral) self-registers its factory + label with the
+/// peripheral registry at static-init; which backends link is `#if`-gated per chip's CONFIG_SOC_* at the
+/// backend `#include`s in main.cpp, so a board links only its usable backends and the `peripheral`
+/// control offers that subset. A fresh driver wires the first usable backend so it is
+/// functional out of the box; the control (or a catalog `peripheral` value) switches it live.
 ///
 /// @moreinfo
 ///
@@ -58,9 +62,61 @@ template <class Derived>
 /// and an i80 bus word have the same meaning.
 class ParallelLedDriver : public DriverBase {
 public:
-    /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver (and its MultiPinLedDriver
-    /// subclass) references the "GRB" preset by default. The user can pick any preset.
-    ParallelLedDriver() { this->setDefaultPresetName("GRB"); }
+    /// Test-only: swap in a peripheral backend for a test mock. Deinits + drops any existing peripheral
+    /// first (a rebuild-from-scratch, same as a real reinit would need). The caller retains ownership —
+    /// this borrows the pointer, exactly like a registered driver's own owned backend does not need a
+    /// test to manage its lifetime.
+    void setPeripheralForTest(LedPeripheral* p) {
+        if (peripheral_ && peripheralOwned_) { peripheral_->busDeinit(); delete peripheral_; }
+        else if (peripheral_) peripheral_->busDeinit();
+        peripheral_ = p;
+        peripheralOwned_ = false;   // the test owns a stack/heap mock; the orchestrator must not delete it
+        peripheralActiveReg_ = 0xFF;
+        if (p) p->attach(this);
+    }
+
+    // --- Peripheral backend registry ---
+    // The set of peripheral backends compiled into THIS build. Each backend header self-registers its
+    // factory + label at static-init, via an `inline const bool kXxxPeripheralRegistered =
+    // registerPeripheral(...)` at the bottom of the backend header (e.g. MoonLedDriver.h, ParlioLedDriver.h).
+    // WHICH backends link is decided in main.cpp: the `#include` of each backend header is `#if`-gated on
+    // the chip's CONFIG_SOC_* — so a classic ESP32 only links the esp_lcd-i80 backend, an S3 links i80 +
+    // MoonI80, a P4 links all three. The `peripheral` Select then offers the linked-and-supported subset
+    // at runtime. Mirrors ModuleFactory's static-registration shape, one level down for the bus backend.
+    using PeripheralFactory = LedPeripheral* (*)();
+    struct PeripheralEntry { const char* label; PeripheralFactory make; };
+    static constexpr uint8_t kMaxPeripherals = 4;
+    static inline PeripheralEntry peripheralRegistry_[kMaxPeripherals] = {};
+    static inline uint8_t peripheralRegistryCount_ = 0;
+    /// Register a backend factory under a UI label. Called once per linked backend at static-init.
+    /// Duplicate labels and overflow past kMaxPeripherals are ignored (the backstop is far above the
+    /// three real backends).
+    static bool registerPeripheral(const char* label, PeripheralFactory make) {
+        if (!label || !make || peripheralRegistryCount_ >= kMaxPeripherals) return false;
+        for (uint8_t i = 0; i < peripheralRegistryCount_; i++)
+            if (std::strcmp(peripheralRegistry_[i].label, label) == 0) return false;
+        peripheralRegistry_[peripheralRegistryCount_++] = {label, make};
+        return true;
+    }
+
+    /// WS2812/SK6812 strips are GRB-wired, so a fresh parallel LED driver references the "GRB" preset by
+    /// default (the user can pick any). A fresh driver also wires the first peripheral this chip supports
+    /// so it is functional out of the box; the `peripheral` control (or a catalog `peripheral` value)
+    /// switches it. On desktop no backend is linked, so peripheral_ stays null and the driver idles —
+    /// tests inject a mock via setPeripheralForTest.
+    ParallelLedDriver() {
+        this->setDefaultPresetName("GRB");
+        selectDefaultPeripheral(nullptr);
+    }
+
+    /// Free the owned backend. A registered driver's backend (created via the registry) is owned and
+    /// deleted here; a test-borrowed mock (setPeripheralForTest) is not — the ownership flag decides,
+    /// so the delete lives ONCE in the base rather than per thin subclass. The owner released()/removed
+    /// this driver before destruction (the DriverBase vptr-race contract), so the bus is already down.
+    ~ParallelLedDriver() override {
+        if (peripheral_ && peripheralOwned_) delete peripheral_;
+        peripheral_ = nullptr;
+    }
 
     /// Max parallel lanes = the peripheral's full 16 data lines. The bus width the driver
     /// actually builds is DERIVED from the configured pin count: ≤8 pins → an 8-bit bus (uint8
@@ -252,20 +308,30 @@ public:
 
     /// Is the shift-register expander engaged? (Reads the control; the alias keeps the intent
     /// readable at the call sites that ask "am I encoding through a register?")
-    bool pinExpanderMode() const { return pinExpander; }
+    // The EFFECTIVE expander mode: the user's saved `pinExpander` AND a peripheral that can host the
+    // '595. Gating here (not by mutating `pinExpander`) means a peripheral that can't host it degrades to
+    // direct mode at runtime while the saved value survives — so switching back to a supporting
+    // peripheral restores shift mode. Every consumer (lane math, latch, ring, encode) reads this.
+    bool pinExpanderMode() const { return pinExpander && peripheral_ && peripheral_->supportsPinExpander(); }
     /// Strands driven per physical data pin: 1 direct, or the '595's width through the expander.
-    /// The multiplier every size/clock/slot computation below is expressed in.
-    uint8_t outputsPerPin() const { return pinExpander ? kPinExpanderOutputs : uint8_t(1); }
+    /// The multiplier every size/clock/slot computation below is expressed in. Reads the EFFECTIVE mode
+    /// (pinExpanderMode), so on a peripheral that can't host the '595 the lane math is direct even though
+    /// the saved `pinExpander` value is kept — matching every other consumer.
+    uint8_t outputsPerPin() const { return pinExpanderMode() ? kPinExpanderOutputs : uint8_t(1); }
 
-    /// Bind the driver's controls: the window (start/count), the `pins` and
-    /// `ledsPerPin` text lists, any derived-supplied bus controls (i80 adds
-    /// clockPin/dcPin, Parlio none), and the loopback self-test controls (TX/RX pin
-    /// overrides always bound but shown only in test mode).
+    /// Bind the driver's controls: the peripheral-INVARIANT block first (window, `pins`, `ledsPerPin`,
+    /// `frameTime` — they describe *which LEDs and how many*, the same on any backend), THEN the
+    /// `peripheral` selector as a divider, THEN the peripheral-SPECIFIC controls the chosen backend
+    /// surfaces (`doubleBuffer` where supported, i80's clockPin/dcPin, the `pinExpander` toggle, MoonI80's
+    /// ring cluster). The loopback cluster is last (expert). This ordering makes the card read top-down:
+    /// everything above `peripheral` is invariant; everything below is what that peripheral supports.
     void defineDriverControls() override {
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
-        controls_.addBool("doubleBuffer", doubleBuffer);   // double-buffer on/off (latency opt-out)
+        // `doubleBuffer` is peripheral-DEPENDENT (a peripheral that can't run the async path hides it —
+        // MoonI80), so it lives BELOW the peripheral divider with the other peripheral-specific controls,
+        // not up here in the invariant block. Added after the swap; see below.
         // ringSnapshot is added in the derived driver's addRingControls() (below the useRing path selector,
         // with the rest of the ring cluster) — it is a ring-only knob, so it belongs with the ring
         // controls, not up here with the path-neutral ones.
@@ -273,21 +339,44 @@ public:
         // floor (independent of render load), so it shows how much headroom remains as the pipeline
         // improves — and it reflects an overclocked slot rate directly. Refreshed in tick1s().
         controls_.addReadOnly("frameTime", frameTimeStr_, sizeof(frameTimeStr_));
-        // A checkbox: the expander is fitted or it isn't. The '595's width (8) is the chip's, not a
-        // setting, so there is nothing to type — and a boolean can't be half-configured.
+        // The peripheral selector — the divider between the invariant block above and the
+        // peripheral-specific controls below. buildPeripheralOptions syncs peripheralSel_ to the live
+        // backend (or clamps it); when a peripheral CHANGE triggered this rebuild, peripheralSel_ already
+        // holds the NEW index (applyControlValue wrote it before rebuildControls), so
+        // ensurePeripheralMatchesSelection() makes the live object agree BEFORE addBusControls/addRingControls
+        // surface the chosen backend's controls. Always shown, even with a single option: with one backend
+        // it reads as a labeled indicator of what's driving the LEDs (e.g. "i80" on the classic).
+        buildPeripheralOptions();
+        ensurePeripheralMatchesSelection();
+        controls_.addSelect("peripheral", peripheralSel_, peripheralOptions_, peripheralOptionCount_);
+        // doubleBuffer — the first peripheral-specific control, directly under the divider. Peripheral-
+        // dependent: a peripheral that can't run the async path hides it (MoonI80 — single-buffer only,
+        // its own-GDMA two-buffer handshake races; see supportsDoubleBuffer / its busInit). Added AFTER
+        // ensurePeripheralMatchesSelection so a peripheral CHANGE evaluates the visibility against the NEW
+        // backend. The saved value stays bound, so it survives a round-trip through a single-buffer-only
+        // peripheral and re-engages when a peripheral that supports it is selected again.
+        controls_.addBool("doubleBuffer", doubleBuffer);
+        controls_.setHidden(controls_.count() - 1, !(peripheral_ && peripheral_->supportsDoubleBuffer()));
+        // The bus pins sit UNDER the peripheral selector because they ARE peripheral-specific: for a driver
+        // that owns its own GPIO routing they are '595 pins: MoonI80 routes WR only when a shift register
+        // needs it as SRCLK, and hides the control otherwise. (I80 goes through esp_lcd, which mandates a
+        // valid WR *and* DC GPIO whatever the mode, so it shows both unconditionally — same hook, different answer.)
+        if (peripheral_) peripheral_->addBusControls(controls_);
+        // The 74HCT595 pin expander toggle + its latch pin. It comes BEFORE the ring cluster (below)
+        // because that cluster DEPENDS on it — the ring/shift controls are shown only when the expander
+        // is on, so the switch that controls them must sit above them (the dependent-below-controlling
+        // rule). Peripheral-specific — shown only when the SELECTED peripheral can host the '595 (i80 /
+        // MoonI80 on LCD_CAM; not Parlio, whose single-shot transfer can't carry the ×8 fan-out frame —
+        // a hardware limit, see supportsPinExpander). The '595's width (8) is the chip's, not a setting,
+        // so the toggle is a plain checkbox; latchPin is bound always (a saved value survives a
+        // round-trip through direct mode) but shown only when the expander is on.
         controls_.addBool("pinExpander", pinExpander);
-        // The bus pins sit UNDER the expander toggle because for a driver that owns its own GPIO
-        // routing they are '595 pins: MoonI80 routes WR only when a shift register needs it as SRCLK,
-        // and hides the control otherwise. (I80 goes through esp_lcd, which mandates a valid WR *and*
-        // DC GPIO whatever the mode, so it shows both unconditionally — same hook, different answer.)
-        derived()->addBusControls();
-        // Always bound, shown only when the expander is on — the conditional-control shape
-        // (bound regardless so a saved latchPin survives a round-trip through direct mode).
+        controls_.setHidden(controls_.count() - 1, !(peripheral_ && peripheral_->supportsPinExpander()));
         controls_.addPin("latchPin", latchPin);
         controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
-        // A ring-capable backend's geometry, AFTER latchPin so the bus pins stay one unbroken group
-        // (clockPin and latchPin are a wiring pair). Default no-op; only MoonI80 rings.
-        derived()->addRingControls();
+        // The ring cluster (MoonI80 only; default no-op) — shift-mode geometry, all gated on the
+        // expander being on, so it sits UNDER the pinExpander switch that governs it.
+        if (peripheral_) peripheral_->addRingControls(controls_);
         // The on-device loopback self-test + its wiring — a dev/bring-up instrument (jumper a lane to the
         // rx pin), not a casual-user setting, so the whole cluster is expert-only.
         controls_.addBool("loopbackTest", loopbackTest);
@@ -325,7 +414,7 @@ public:
             || std::strcmp(name, "doubleBuffer") == 0
             || std::strcmp(name, "pinExpander") == 0 || std::strcmp(name, "latchPin") == 0
             || isWindowControl(name)
-            || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80
+            || (peripheral_ && peripheral_->busControlTriggersBuild(name));   // clockPin/dcPin on i80
     }
 
     /// React to a control change off the render loop. loopbackTest is a persistent
@@ -333,6 +422,21 @@ public:
     /// lane-config refresh first, since onControlChanged precedes the prepare sweep);
     /// turning it OFF clears the verdict and re-derives the real driver status.
     void onControlChanged(const char* name) override {
+        // Peripheral swap: bring the newly-selected backend's bus up. Scheduler::setControl already ran
+        // rebuildControls() BEFORE this, and defineDriverControls calls ensurePeripheralMatchesSelection()
+        // off peripheralSel_ (the just-written index) — so the live backend was ALREADY swapped during the
+        // rebuild and the control list is bound to it. We must NOT swap again here: a second swapPeripheral
+        // would free that backend and build a third, leaving every backend-owned control (clockPin, ring
+        // cluster, ...) dangling into freed memory. ensurePeripheralMatchesSelection() is a no-op now
+        // (peripheralActiveReg_ already equals the wanted reg); we only re-parse against the new backend's
+        // descriptors (powerOfTwoBus differs Parlio vs i80) and reinit to bring the bus up.
+        if (std::strcmp(name, "peripheral") == 0) {
+            ensurePeripheralMatchesSelection();
+            parseConfig();
+            reinit();
+            DriverBase::onControlChanged(name);
+            return;
+        }
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
         // Every control that reshapes the lane config the self-test transmits through. pinExpander
         // and latchPin belong here for the same reason `pins` does: they change laneList_,
@@ -446,7 +550,7 @@ public:
     /// lifted the P4 whole-board rate 48→76 fps; OFF is the sound-reactive 0-latency opt-out and pays
     /// for exactly one buffer — see the doubleBuffer control + docs/history/lessons.md.)
     void tick() override {
-        if constexpr (Derived::lanesAvailable() == 0) return;  // inert off this chip
+        if (!peripheral_ || peripheral_->lanesAvailable() == 0) return;  // no backend / inert off this chip
         // Loopback mode owns the peripheral EXCLUSIVELY. While it is on, the render loop must not
         // transmit — the loopback tears the bus down, drives its own private frame, and rebuilds it.
         if (loopbackTest) return;
@@ -462,15 +566,15 @@ public:
         // small internal buffers refilled by the platform, so it does NOT hold the whole frame and the
         // busCapacity() guard below (which the other two need) does not apply. The whole-frame paths keep
         // their guard and their proven behavior byte-for-byte.
-        if (derived()->busIsRing()) { tickRing(outCh); return; }
-        if (frameBytes_ > derived()->busCapacity()) return;
+        if (peripheral_->busIsRing()) { tickRing(outCh); return; }
+        if (frameBytes_ > peripheral_->busCapacity()) return;
 
         // Two explicitly-separate whole-frame paths so the OFF path is PROVABLY the pre-Step-1.5 behavior
         // (no regression) and pays nothing for the double-buffer it isn't using. The mode is fixed by
         // whether the second buffer was allocated (busInit(async) — ON allocs it, OFF doesn't), so a
         // stale flag can't route a single-buffer bus down the async path.
-        if (derived()->busBuffer(1)) tickAsync(outCh);   // double-buffer (doubleBuffer ON)
-        else                         tickSync(outCh);    // synchronous (doubleBuffer OFF / no 2nd buf)
+        if (peripheral_->busBuffer(1)) tickAsync(outCh);   // double-buffer (doubleBuffer ON)
+        else                           tickSync(outCh);    // synchronous (doubleBuffer OFF / no 2nd buf)
     }
 
     // Synchronous single-buffer path — the ORIGINAL tick, verbatim: encode buffer 0, transmit, wait
@@ -483,7 +587,7 @@ public:
         // A previous frame's wait may have timed out, leaving the DMA still reading buffer 0 — re-wait
         // rather than encoding over a live transfer. (Normally a no-op: the wait below completes.)
         if (!busWaitIfBusy(0)) return;
-        uint8_t* buf = derived()->busBuffer(0);
+        uint8_t* buf = peripheral_->busBuffer(0);
         if (!buf) return;
         // Branch on the BUS WIDTH (slotBytes), not the strand count — with a '595 expander the
         // strands ride the shift cycles, so 48 strands on 6 pins is still an 8-bit bus.
@@ -493,7 +597,7 @@ public:
         // LOW >=300 µs. Wait only when the transfer started — a failed transmit gives no done-callback,
         // so an unconditional wait would block the full timeout. A timed-out wait leaves the buffer
         // marked in-flight so the next tick re-waits instead of corrupting the live transfer.
-        if (derived()->busTransmit(0, frameBytes_)) {
+        if (peripheral_->busTransmit(0, frameBytes_)) {
             inFlight_[0] = true;
             busWaitIfBusy(0);   // synchronous: wait it out here; clears the flag on completion
         }
@@ -515,14 +619,14 @@ public:
         //    instead of emitting garbage, and it self-heals the moment the transfer completes.
         if (!busWaitIfBusy(active_)) return;
         // 2. Fused per-ROW encode into buffer `active_`, one branch on the bus width (see encodeRows).
-        uint8_t* buf = derived()->busBuffer(active_);
+        uint8_t* buf = peripheral_->busBuffer(active_);
         if (!buf) return;
         // Branch on the BUS WIDTH (slotBytes), not the strand count — with a '595 expander the
         // strands ride the shift cycles, so 48 strands on 6 pins is still an 8-bit bus.
         if (slotBytes() == 1) encodeRows<uint8_t>(outCh, buf);
         else                  encodeRows<uint16_t>(outCh, buf);
         // 3. Kick this buffer's DMA and return WITHOUT waiting; flip to the other buffer for next tick.
-        if (derived()->busTransmit(active_, frameBytes_)) {
+        if (peripheral_->busTransmit(active_, frameBytes_)) {
             inFlight_[active_] = true;
             active_ ^= 1;
         }
@@ -565,7 +669,7 @@ public:
         if (ringSnapshot) { if (!snapshotSourceForRing()) return; }
         else              encodeSrc_ = nullptr;   // OFF: encodeRows reads the live sourceBuffer_
         const uint32_t tkW2 = platform::cycleCount();
-        if (derived()->busTransmitRing()) {
+        if (peripheral_->busTransmitRing()) {
             inFlight_[0] = true;   // kicked; DO NOT wait here — the next tick waits, freeing the core now
         }
         const uint32_t tkW3 = platform::cycleCount();
@@ -586,16 +690,13 @@ public:
     /// the render loop can never beat it, so it's the target the multicore work drives the system tick
     /// toward, and it tracks an overclocked slot rate directly. "—" until the first transfer completes.
     void tick1s() override {
-        const uint32_t us = derived()->busLastTransmitUs();
+        if (!peripheral_) return;
+        const uint32_t us = peripheral_->busLastTransmitUs();
         if (us == 0) std::snprintf(frameTimeStr_, sizeof(frameTimeStr_), "—");
         else std::snprintf(frameTimeStr_, sizeof(frameTimeStr_), "%u µs (%u fps max)",
                            static_cast<unsigned>(us), static_cast<unsigned>(1000000u / us));
-        derived()->refreshBusKpi();   // per-backend extra read-only KPIs (MoonI80's ring diagnostic); base no-op
+        peripheral_->refreshBusKpi();   // per-backend extra read-only KPIs (MoonI80's ring diagnostic); base no-op
     }
-
-    /// CRTP hook: refresh any backend-specific read-only KPI once a second (off the hot path). Base is a
-    /// no-op; MoonLedDriver overrides it to publish its ring diagnostic counters (see ringDbg).
-    void refreshBusKpi() {}
 
     // Wait for buffer `i`'s in-flight transfer to finish. Returns TRUE when the buffer is free to
     // reuse — either nothing was outstanding (first tick, or a transmit that failed to start, so an
@@ -608,7 +709,7 @@ public:
     /// so callers arm it unconditionally instead of tracking state themselves.
     bool busWaitIfBusy(uint8_t i) {
         if (!inFlight_[i]) return true;
-        if (!derived()->busWait(i, waitBudgetMs())) {
+        if (!peripheral_ || !peripheral_->busWait(i, waitBudgetMs())) {
             // The transfer did not complete within many times its own wire time, so it is not going
             // to. Count it: a bus that keeps doing this is broken, and the ONLY thing that matters
             // then is that the driver stops spending the render thread on it (see deadFrames_).
@@ -720,11 +821,11 @@ public:
     /// already carries data or is a zero the buffer's memset provides). Called from reinit(), the cold
     /// path, whenever the buffers are (re)established or re-zeroed.
     void prefillShiftConstantsIfNeeded() {
-        if (!pinExpanderMode() || !inited_) return;
+        if (!peripheral_ || !pinExpanderMode() || !inited_) return;
         const uint8_t outCh = correction_.outChannels;
         if (outCh == 0 || maxLaneLights_ == 0) return;
         for (uint8_t i = 0; i < 2; i++) {
-            uint8_t* buf = derived()->busBuffer(i);
+            uint8_t* buf = peripheral_->busBuffer(i);
             if (!buf) continue;   // buffer 1 is null in single-buffer mode
             if (slotBytes() == 1) prefillShiftFrame<uint8_t>(outCh, buf);
             else                  prefillShiftFrame<uint16_t>(outCh, buf);
@@ -931,6 +1032,11 @@ public:
     /// Test-only accessors — pin the lane slicing and frame-size arithmetic on the
     /// host (unit_{I80,Parlio}LedDriver.cpp); the hardware half is proven on device.
     uint8_t laneCount() const { return laneCount_; }
+    /// Which DMA buffer this tick encodes into (0/1) — the deferred-wait double-buffer's alternation
+    /// state. Test-only.
+    uint8_t activeForTest() const { return active_; }
+    /// Is buffer `i`'s DMA transfer outstanding (awaiting its wait)? Test-only.
+    bool inFlightForTest(uint8_t i) const { return inFlight_[i]; }
     /// Lights on lane `i` (0 if out of range). Test-only.
     nrOfLightsType laneLightCount(uint8_t i) const { return i < laneCount_ ? laneCounts_[i] : 0; }
     /// All POPULATED strands the same length? Gates the ring's prefill-skip: what the skip actually
@@ -966,9 +1072,172 @@ public:
     /// Total DMA frame size in bytes (rows + latch pad). Test-only.
     size_t frameBytes() const { return frameBytes_; }
 
+    // --- Peripheral-facing accessors: a backend reaches the orchestrator's parsed lane list, latch
+    // bit, correction, and loopback pin through these (the back-pointer's read side — see owner_ in
+    // LedPeripheral.h). Replaces what CRTP inheritance gave a derived class for free.
+    /// Bus-bit index of the latch line (shift mode only) — a backend's addRingControls/encode seam
+    /// reads this through the owner pointer (e.g. masking the latch bit out of a bit-verify).
+    uint8_t latchBit() const { return latchBit_; }
+    /// The parsed physical data GPIOs (bus-width bound) — a backend's encode trampoline reads lane
+    /// state through the owner pointer instead of inheriting the array directly.
+    const uint16_t* laneList() const { return laneList_; }
+    /// The live output Correction (channel count, role wiring) — a backend's encode/prefill helpers
+    /// read `outChannels` through this instead of inheriting `correction_` directly.
+    const Correction& correction() const { return correction_; }
+    /// Mutable reference to the ring-snapshot A/B knob, for a backend's addRingControls to bind
+    /// (`controls.addBool("ringSnapshot", owner_->ringSnapshotRef())`) — addBool binds by reference,
+    /// so the control needs the member's address, not a copy.
+    bool& ringSnapshotRef() { return ringSnapshot; }
+    /// The ring snapshot buffer (null when unallocated / off the ring path) — a backend's KPI refresh
+    /// (MoonLedDriver::refreshBusKpi) reads this to report the buffer's memory residency (PSRAM vs
+    /// internal) through the owner pointer.
+    const uint8_t* snapshotBuf() const { return snapshotBuf_; }
+    /// The wired source buffer (null before setSourceBuffer) — same KPI-residency use as snapshotBuf().
+    const Buffer* sourceBuffer() const { return sourceBuffer_; }
+
 protected:
-    Derived* derived() { return static_cast<Derived*>(this); }
-    const Derived* derived() const { return static_cast<const Derived*>(this); }
+    // Fill peripheralOptions_/peripheralIndex_ from the registry, keeping only backends this chip can
+    // run (lanesAvailable() > 0), and reconcile peripheralSel_ so it still points at the SAME backend
+    // after the filter (or clamps into range). Built each defineDriverControls, so the Select always
+    // offers exactly what the board supports. A backend is created briefly to read its lanesAvailable()
+    // (a cheap object — no bus is brought up until busInit), then discarded.
+    void buildPeripheralOptions() {
+        // Remember which backend is selected now (by label) so we can re-find it after filtering.
+        const char* current = (peripheralSel_ < peripheralOptionCount_) ? peripheralOptions_[peripheralSel_]
+                                                                        : nullptr;
+        peripheralOptionCount_ = 0;
+        for (uint8_t i = 0; i < peripheralRegistryCount_ && peripheralOptionCount_ < kMaxPeripherals; i++) {
+            LedPeripheral* probe = peripheralRegistry_[i].make();
+            const bool usable = probe && probe->lanesAvailable() > 0;
+            delete probe;
+            if (!usable) continue;
+            peripheralOptions_[peripheralOptionCount_] = peripheralRegistry_[i].label;
+            peripheralIndex_[peripheralOptionCount_] = i;
+            peripheralOptionCount_++;
+        }
+        if (peripheralOptionCount_ == 0) {   // no usable backend on this chip (desktop) — a single inert row
+            peripheralOptions_[0] = "(none)";
+            peripheralIndex_[0] = 0;
+            peripheralOptionCount_ = 1;
+        }
+        // Re-point the Select at the same backend it named before (labels are stable), else clamp.
+        uint8_t sel = 0;
+        if (current)
+            for (uint8_t k = 0; k < peripheralOptionCount_; k++)
+                if (std::strcmp(peripheralOptions_[k], current) == 0) { sel = k; break; }
+        peripheralSel_ = sel;
+    }
+
+    // Tear down the current backend and build the one at filtered option slot `k`. Frees the old
+    // backend's bus + heap (only the selected peripheral costs memory — the product-owner requirement).
+    // Guarded so a bad index or an empty registry leaves peripheral_ null (tick() then idles).
+    void swapPeripheral(uint8_t k) {
+        // Stop the core-1 encode worker before freeing the backend. deinit() drains the BUS DMA, but the
+        // encode worker (owned by Drivers) ticks this driver and dereferences peripheral_ for
+        // busBuffer/busTransmit/busWait — so a live `peripheral` swap (POST /api/control) that reaches
+        // here while the render split is active would `delete peripheral_` out from under the worker
+        // mid-tick: a use-after-free, the same class the structural-mutation quiesce fixes. The swap is
+        // not a child-array mutation, so it does not pass through MoonModule::quiesceForMutation; reach
+        // the same render-worker hook directly. The trailing reinit()/tick re-engages the split.
+        MoonModule::notifyQuiesceRender();
+        deinit();                                   // stop any in-flight transfer on the old bus first
+        if (peripheral_) {
+            peripheral_->busDeinit();
+            if (peripheralOwned_) delete peripheral_;   // never delete a test-borrowed mock
+            peripheral_ = nullptr;
+        }
+        peripheralActiveReg_ = 0xFF;
+        peripheralOwned_ = false;
+        if (k >= peripheralOptionCount_) return;
+        const uint8_t reg = peripheralIndex_[k];
+        if (reg >= peripheralRegistryCount_) return;
+        peripheral_ = peripheralRegistry_[reg].make();
+        if (peripheral_) { peripheral_->attach(this); peripheralActiveReg_ = reg; peripheralOwned_ = true; }
+    }
+
+    // Seed the default peripheral for a registered driver (called from its constructor with the backend's
+    // registry label). Builds the filtered options, points peripheralSel_ at `label` if this chip
+    // supports it (else the first usable backend — a board that names an unavailable default still gets a
+    // working driver), and swaps the live backend to match. From here the base's selector owns the rest.
+    void selectDefaultPeripheral(const char* label) {
+        buildPeripheralOptions();
+        peripheralSel_ = 0;   // fallback: the first usable backend (a board naming an absent default
+                              // still gets a working driver, and `label == nullptr` means "first").
+        if (label)
+            for (uint8_t k = 0; k < peripheralOptionCount_; k++)
+                if (std::strcmp(peripheralOptions_[k], label) == 0) { peripheralSel_ = k; break; }
+        swapPeripheral(peripheralSel_);
+    }
+
+    // Make the live backend match peripheralSel_. When a `peripheral` control change triggered a
+    // control rebuild, peripheralSel_ already holds the new index but peripheral_ is still the old
+    // backend — this swaps it so the schema below surfaces the right controls. A no-op when they
+    // already agree (the common rebuild-for-another-reason case), so it's cheap on every rebuild.
+    void ensurePeripheralMatchesSelection() {
+        // A test-borrowed mock (setPeripheralForTest → !peripheralOwned_) is deliberate — never swap it
+        // out from under the test for a registry backend.
+        if (peripheral_ && !peripheralOwned_) return;
+        const uint8_t wantReg = (peripheralSel_ < peripheralOptionCount_) ? peripheralIndex_[peripheralSel_]
+                                                                          : 0xFF;
+        if (peripheral_ && peripheralActiveReg_ == wantReg) return;   // already correct
+        swapPeripheral(peripheralSel_);
+    }
+
+    // The peripheral-block claim guard: is a SIBLING driver under the same Drivers container already
+    // driving the hardware block this driver's peripheral wants? The chip has one of each block (one
+    // LcdCam, one Parlio, one I2S), so two live drivers on the same block corrupt each other. Returns
+    // true when the block is already claimed. RTTI-free (ESP32 builds -fno-rtti): siblings are compared
+    // through the virtual `hwBlock()` on every module — a non-parallel driver (RMT, NetworkSend) and any
+    // other module return None, so no cast is needed. Walks the parent's children; skips self + disabled.
+    bool siblingClaimsBlock() const {
+        if (!peripheral_) return false;
+        const LedHwBlock mine = peripheral_->hwBlock();
+        if (mine == LedHwBlock::None) return false;
+        const MoonModule* p = parent();
+        if (!p) return false;
+        for (uint8_t i = 0; i < p->childCount(); i++) {
+            const MoonModule* sib = p->child(i);
+            if (sib == this || !sib || !sib->enabled()) continue;
+            // Every child of Drivers is a DriverBase (role Driver), so this static_cast is safe once
+            // role() confirms it — no RTTI. A non-parallel driver returns None from hwBlock().
+            if (sib->role() != ModuleRole::Driver) continue;
+            if (static_cast<const DriverBase*>(sib)->hwBlock() == mine) return true;
+        }
+        return false;
+    }
+
+public:
+    /// The hardware peripheral block this driver is DRIVING, for the sibling claim guard (overrides
+    /// DriverBase). Gated on inited_: a driver reports its block only while it actually holds the bus,
+    /// not merely from having a backend selected. Without this a driver that was itself refused (or has
+    /// no pins yet) would still "claim" the block, so the next prepare sweep — re-running a working
+    /// sibling's reinit() for an unrelated reason (a grid resize, a pin edit) — would see the phantom
+    /// claim and dark the live wall too. The claim must mean "the bus is up", which is exactly inited_.
+    /// siblingClaimsBlock() derives its OWN block from peripheral_ directly, so gating here only affects
+    /// how OTHER drivers see this one — precisely the intent.
+    LedHwBlock hwBlock() const override {
+        return (inited_ && peripheral_) ? peripheral_->hwBlock() : LedHwBlock::None;
+    }
+
+protected:
+
+
+    /// The runtime backend. Null only before a registered driver's constructor wires its default
+    /// backend (or after a test detaches one) — every method that dereferences it guards first.
+    LedPeripheral* peripheral_ = nullptr;
+
+    // The `peripheral` Select's state. peripheralSel_ indexes into the BOARD-FILTERED option list
+    // (only backends with lanesAvailable() > 0 on this chip), whose labels are held in peripheralOptions_
+    // — a stable member array because addSelect borrows the pointer (same pattern as presetOptions_).
+    // peripheralIndex_[k] maps filtered slot k back to its registry index, so a Select change can create
+    // the right backend. All three are (re)built by buildPeripheralOptions().
+    uint8_t peripheralSel_ = 0;
+    const char* peripheralOptions_[kMaxPeripherals] = {};
+    uint8_t peripheralIndex_[kMaxPeripherals] = {};
+    uint8_t peripheralOptionCount_ = 0;
+    uint8_t peripheralActiveReg_ = 0xFF;   // registry index the LIVE peripheral_ came from (0xFF = none)
+    bool peripheralOwned_ = false;         // does the orchestrator own peripheral_ (delete it) — false
+                                           // for a test-borrowed mock (setPeripheralForTest)
 
     Buffer* sourceBuffer_ = nullptr;
 
@@ -1178,50 +1447,13 @@ protected:
                                          // can keep the same frameBytes_ yet needs
                                          // a rebuild, so the fast path checks it too
 
-    static constexpr uint8_t maxLanesForTarget() {
-        return (Derived::lanesAvailable() > 0 && Derived::lanesAvailable() < kMaxLanes)
-                   ? Derived::lanesAvailable()
-                   : kMaxLanes;
+    /// The pin-list parser's cap: the peripheral's own lane count when it's narrower than kMaxLanes
+    /// (Parlio may report fewer), else the full kMaxLanes. Falls back to kMaxLanes with no peripheral
+    /// attached yet (parseConfig then has nothing to parse anyway).
+    uint8_t maxLanesForTarget() const {
+        const uint8_t avail = peripheral_ ? peripheral_->lanesAvailable() : 0;
+        return (avail > 0 && avail < kMaxLanes) ? avail : kMaxLanes;
     }
-
-    /// CRTP hook (default: no extra bus pins to validate). A derived driver whose
-    /// peripheral commits its own GPIOs beyond the data lanes (the i80 bus's WR/DC)
-    /// HIDES this to flag a data lane that overlaps them. Returns a WARNING string
-    /// (the driver keeps running — see MultiPinLedDriver::validateBusPins for why it's a
-    /// warning, not a blocker) or null when the data pins are clean. Parlio has no
-    /// such pins, so it uses this default.
-    const char* validateBusPins(const uint16_t* /*lanes*/, uint8_t /*n*/) const { return nullptr; }
-
-    /// FATAL bus-pin check → the ERROR path (idles the driver), for a bus-pin misconfig the peripheral
-    /// can't init at all (MultiPinLedDriver's clockPin==dcPin). Distinct from validateBusPins' per-lane
-    /// warnings. Default null; a peripheral with bus control pins overrides it. Parlio has none.
-    const char* validateBusFatal() const { return nullptr; }
-
-    /// CRTP ring hooks (default: this peripheral has no streaming ring, so it never rings). Only MoonI80
-    /// — which owns its DMA — overrides these to stream a frame too big for internal RAM (see its
-    /// busInitRing / the tickRing path). The esp_lcd I80 (the memory-capped reference) and Parlio use
-    /// these defaults: busIsRing() is always false, so tick() never selects tickRing and the ring transmit
-    /// is never called. reinit() consults wantsRing() to decide whether to attempt a ring build at all.
-    bool wantsRing() const { return false; }                        // should reinit try the ring for this config?
-    void addRingControls() {}                                       // a ring-capable backend's geometry controls
-    bool busInitRing(size_t /*rowBytes*/, uint32_t /*totalRows*/) { return false; }
-    bool busIsRing() const { return false; }
-    bool busTransmitRing() { return false; }
-    /// The ring's regime as a one-word status suffix ("primed" / "lapping"), or null when not ringing —
-    /// so the driving-status line shows which side of the streaming boundary a config sits on.
-    const char* busRingMode() const { return nullptr; }
-    /// Core-0 helper hook (default: no helper). Only the ring driver overrides it, spawning a core-0
-    /// worker that primes half the ring pool while core 1 primes the other half (busTransmitRing's
-    /// fork-join). ready() is true only when the render/encode split is engaged AND the helper task is up.
-    /// (The snapshot copy is always serial — forking it saturated core 0; see snapshotSourceForRing.)
-    bool snapHelperReady() const { return false; }
-
-    /// CRTP hook: the GPIO a SPARE bus lane is parked on when the pin list is narrower than the bus
-    /// width (shift mode — the board decides the data-pin count, the peripheral decides the width).
-    /// The i80 driver hides this to return its WR pin, which the peripheral already drives; a
-    /// peripheral that accepts NC lanes (Parlio) never calls it. Default: lane 0's pin, so a spare
-    /// lane is at worst a harmless duplicate of a pin the bus already owns.
-    uint16_t clockPinForBus() const { return laneList_[0]; }
 
     // Frame bytes: longest lane × channels × 24 slots, plus a zeroed latch pad of
     // >=300 µs at the slot rate (800 slots) with clock-tolerance slack (64), each
@@ -1258,11 +1490,14 @@ protected:
         return (bytes + 63) & ~static_cast<size_t>(63);
     }
 
-    // Bytes per bus slot: 1 for the 8-bit bus, 2 for the 16-bit bus. Keys on the PHYSICAL
-    // pin count, not laneCount_ — with a '595 expander the lanes ride the shift cycles, not
-    // extra bus bits, so 48 lanes on 6 pins is still an 8-bit bus. (In direct mode the two
-    // counts are equal, so this is the original behaviour.)
-    uint8_t slotBytes() const { return busWidthPins() > 8 ? 2 : 1; }
+    // Whether a whole-frame DMA buffer of `frameBytes` fits the internal-DMA budget of a driver whose
+    // DMA can't reach PSRAM (the classic i80's I2S peripheral) and holds the whole frame (no ring).
+    // A driver that IS so bounded calls this in reinit() (before busInit); if false it idles with a clear
+    // status instead of choking the bus init on an allocation the peripheral can never satisfy. `budgetBytes`
+    // 0 means "no bound" (PSRAM-capable / ring drivers) → always fits.
+    static bool frameFitsDmaBudget(size_t frameBytes, size_t budgetBytes) {
+        return budgetBytes == 0 || frameBytes <= budgetBytes;
+    }
 
     // The i80 bus width is a POWER OF TWO (8 or 16) — a peripheral fact, independent of how many
     // strands the board drives. In direct mode the pin list already fills it exactly. In shift mode
@@ -1290,12 +1525,18 @@ protected:
     // the peripheral a short array while busPinCount() claims the full width — a read past the end.
     // Kept in the base (one owner of the latch + the padding), so both derived busInit()s just pass
     // these two calls.
+public:
+    /// Public: a backend (a separate LedPeripheral, reached through the owner_ back-pointer) builds its
+    /// bus from this + busPinCount()/busClockMultiplier(), same as busPinList()/busPinCount()/slotBytes()
+    /// below — the bus-geometry accessors a backend needs are public, everything else in this block stays
+    /// protected (this driver's own cold-path config machinery).
     const uint16_t* busPinList() {
         const uint8_t width = busWidthPins();
+        const uint16_t clockPin = peripheral_ ? peripheral_->clockPinForBus() : laneList_[0];
         for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
             if (i < physPins_)                        busPinBuf_[i] = laneList_[i];   // data
             else if (pinExpanderMode() && i == latchBit_)   busPinBuf_[i] = static_cast<uint16_t>(latchPin);
-            else                                      busPinBuf_[i] = derived()->clockPinForBus();
+            else                                      busPinBuf_[i] = clockPin;
         }
         return busPinBuf_;
     }
@@ -1304,6 +1545,13 @@ protected:
     // that much faster to hold the same 375 ns slot on the wire. The platform picks the exact rate
     // its clock tree can divide to (see platform_esp32_i80.cpp); this is the multiplier.
     uint8_t busClockMultiplier() const { return outputsPerPin(); }
+    // Bytes per bus slot: 1 for the 8-bit bus, 2 for the 16-bit bus. Keys on the PHYSICAL
+    // pin count, not laneCount_ — with a '595 expander the lanes ride the shift cycles, not
+    // extra bus bits, so 48 lanes on 6 pins is still an 8-bit bus. (In direct mode the two
+    // counts are equal, so this is the original behaviour.) A backend's encode trampoline
+    // (MoonLedDriver::ringEncodeTrampoline) branches on this through the owner_ pointer.
+    uint8_t slotBytes() const { return busWidthPins() > 8 ? 2 : 1; }
+protected:
 
     // (Re)size the per-row correction scratch to kMaxLanes × outCh bytes. Grows-only, off the hot
     // path (called from parseConfig). Sizing to outCh — not a fixed 4 — is what lets encodeRows lay
@@ -1329,12 +1577,17 @@ protected:
         const char* err = parsePinList(pins, laneList_, maxLanesForTarget(), n);
         // (Nothing to validate about the fan-out itself: pinExpander is a bool, so the only two
         // wirings that physically exist are the only two it can express.)
-        // The shift-register expander needs a backend that can DMA the 8× frame from PSRAM:
-        // the LCD_CAM i80 path (S3 / P4). Refuse it elsewhere rather than emit a waveform the hardware
-        // can't sustain — classic-ESP32 i80 is internal-DMA-only (it walls ~76 KB; its route in is the
-        // PSRAM refill ring), and Parlio caps a single transfer at 65,535 B.
-        if (!err && pinExpanderMode() && !Derived::kSupportsPinExpander)
-            err = "the 74HCT595 expander needs the LCD_CAM i80 bus (ESP32-S3 / -P4)";
+        // The shift-register expander needs a backend that can DMA the 8× frame from PSRAM: the LCD_CAM
+        // i80 path (S3 / P4). On a peripheral that can't (classic-ESP32 i80 = internal-DMA-only I2S, or
+        // Parlio's 65,535 B single-transfer cap), SILENTLY drop back to direct mode rather than erroring:
+        // the `pinExpander` control is HIDDEN on such a peripheral (see supportsPinExpander), so a user
+        // who lands here — via a saved config or a peripheral switch — has no toggle to turn it off. An
+        // unfixable error status is the wrong answer; degrade to the working direct path (robust-to-any-input).
+        // The degrade is gated in pinExpanderMode() (the EFFECTIVE mode), NOT by mutating the stored
+        // `pinExpander` — so A/B'ing a MoonI80 '595 wall through Parlio and back keeps the saved value, and
+        // it comes up in shift mode again rather than silently reverting to direct (the same "don't mutate
+        // a persisted value to express a runtime condition" lesson as the backend-control persistence fix).
+        //
         // The latch is a real GPIO and a real bus bit; without it the '595s never present a byte.
         if (!err && pinExpanderMode() && latchPin < 0) err = "the 74HCT595 expander needs a latchPin";
         // **The BUS width is a peripheral fact; the PIN COUNT is a board fact. They are not the same
@@ -1347,7 +1600,7 @@ protected:
         //
         // In shift mode the LATCH also occupies a bus bit, so it costs one of the width's lanes —
         // hence kMaxLanes - 1 data pins there against kMaxLanes here.
-        if constexpr (Derived::kPowerOfTwoBus) {
+        if (peripheral_ && peripheral_->powerOfTwoBus()) {
             const uint8_t maxData = static_cast<uint8_t>(kMaxLanes - (pinExpanderMode() ? 1 : 0));
             if (!err && (n == 0 || n > maxData))
                 err = pinExpanderMode() ? "shift mode needs 1..15 data pins (one per populated 74HCT595)"
@@ -1366,15 +1619,15 @@ protected:
         // Fatal bus-pin misconfig (MultiPinLedDriver's clockPin==dcPin — the i80 bus can't init) → the
         // error path below, which idles the driver. Checked before the per-lane WARNINGS: a broken
         // bus is worse than a garbled lane, so it wins the status.
-        if (!err) err = derived()->validateBusFatal();
+        if (!err && peripheral_) err = peripheral_->validateBusFatal();
         // Peripheral-specific data-pin check (i80's WR/DC on a data lane routes two
         // output signals to one pin, so that lane emits the clock/DC waveform, not
         // pixel data). This is a WARNING, not a blocker: on a board that wires all
         // 8/16 lanes but drives fewer strands, an unused data pin is a legitimate
         // WR/DC candidate — only the lanes that actually drive a strand would show
         // garbage, and the user opted into that. Parlio has no WR/DC and returns null.
-        // Kept a CRTP hook so the base stays peripheral-neutral.
-        const char* warn = err ? nullptr : derived()->validateBusPins(laneList_, n);
+        // Kept a peripheral hook so the base stays backend-neutral.
+        const char* warn = (err || !peripheral_) ? nullptr : peripheral_->validateBusPins(laneList_, n);
         // STRAND lanes: each physical pin fans out to outputsPerPin() strands through its '595.
         // This is the count ledsPerPin distributes over and the encoder indexes — from here on
         // "lane" means a strand, and physPins_ holds the GPIO count.
@@ -1382,12 +1635,12 @@ protected:
         if (!err && lanes > kMaxStrands) err = "too many strands (pins × 8 through the expander)";
         if (!err) {
             // Distribute over this driver's window slice, not the whole buffer.
-            // assignCounts clamps each lane to kMaxWs2812LedsPerPin (drives that many
-            // rather than choking a whole grid onto one WS2812 line). Its own warning
-            // (a clamped lane) wins over the WR/DC one only if it sets warn non-null.
             const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
             windowSlice(bufN, winStart_, winLen_);
             const char* clampWarn = nullptr;
+            // assignCounts clamps each lane to kMaxWs2812LedsPerPin (drives that many
+            // rather than choking a whole grid onto one WS2812 line). Its own warning
+            // (a clamped lane) wins over the WR/DC one only if it sets warn non-null.
             err = assignCounts(ledsPerPin, lanes, winLen_, laneCounts_, kMaxWs2812LedsPerPin,
                                &clampWarn);
             if (clampWarn) warn = clampWarn;
@@ -1433,7 +1686,17 @@ protected:
     // row bytes. ---
 
     void reinit() {
-        if constexpr (Derived::lanesAvailable() == 0) return;
+        if (!peripheral_ || peripheral_->lanesAvailable() == 0) return;
+        // Peripheral-block claim guard: the chip has ONE of each block (one LcdCam, one Parlio, one
+        // I2S), so a second live driver on the same block would corrupt the first's DMA. If a sibling
+        // already holds this peripheral's block, idle with a clear status instead of fighting over the
+        // hardware — the same fail-clean spirit as the DMA-budget gate. (Two DIFFERENT peripherals —
+        // RMT + Parlio + i80 on a P4 — coexist fine; only same-block collides.)
+        if (siblingClaimsBlock()) {
+            deinit();
+            setConfigErr("peripheral already in use by another driver — pick a different one");
+            return;
+        }
         // A rebuild is the user fixing the setting that broke the bus: give the new bus a clean slate
         // so a driver that gave up starts transmitting again (the live-reconfiguration rule — no reboot).
         deadFrames_ = 0;
@@ -1460,7 +1723,7 @@ protected:
         // path, which then idles with a status if the frame won't fit either (the always-available
         // degrade). The ring owns its own buffers + refill task, so a plain deinit()+rebuild is correct;
         // ring-reuse is a later optimization (a config change already forces a rebuild).
-        if (derived()->wantsRing()) {
+        if (peripheral_->wantsRing()) {
             deinit();
             const uint8_t outCh = correction_.outChannels;
             // Rows only — a ring buffer carries no latch pad (the reset comes from stopping the
@@ -1473,20 +1736,20 @@ protected:
             // reads the live source, so the buffer isn't needed — free it (ringSnapshot triggers a rebuild,
             // so this branch re-runs on the toggle) and skip the alloc, keeping the memory readout honest.
             if (!ringSnapshot) freeSnapshot();
-            if (derived()->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_))
+            if (peripheral_->busInitRing(rowBytes, static_cast<uint32_t>(maxLaneLights_))
                 && (!ringSnapshot || ensureSnapshotCap())) {
                 inited_ = true;
-                dmaBuf_ = derived()->busBuffer(0);   // ring[0] — a real pointer, the "inited" sentinel
+                dmaBuf_ = peripheral_->busBuffer(0);   // ring[0] — a real pointer, the "inited" sentinel
                 for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
                 busLaneCount_ = laneCount_;
-                derived()->recordBusPins();
-                if (status() == Derived::kInitFailMsg) clearStatus();
+                peripheral_->recordBusPins();
+                if (status() == peripheral_->initFailMsg()) clearStatus();
                 // Re-issue the driving status WITH the ring's regime word — the regime (primed vs
                 // lapping) is a platform fact that exists only now, after the ring build; parseConfig
                 // set the plain form before it could know. Same numbers, same severity rules.
                 // Only when the plain form is what's showing — a clamp warning (or any more urgent
                 // status) must keep winning, same rule as parseConfig's `!warn` guard.
-                if (const char* mode = derived()->busRingMode();
+                if (const char* mode = peripheral_->busRingMode();
                     mode && status() && std::strncmp(status(), "driving ", 8) == 0) {
                     nrOfLightsType driven = 0;
                     for (uint8_t i = 0; i < laneCount_; i++) driven += laneCounts_[i];
@@ -1504,7 +1767,7 @@ protected:
             // deinit() would walk straight past, and the whole-frame busInit below would overwrite the
             // handle of. That leaks the scarcest memory on the chip on exactly the OOM path most likely
             // to hit it, and repeats on every prepare rebuild. busDeinit is idempotent and null-safe.
-            derived()->busDeinit();
+            peripheral_->busDeinit();
             deinit();
         }
 
@@ -1514,42 +1777,66 @@ protected:
         // buffer the current path never touches. (deinit/drain above stopped any refill that read it.)
         freeSnapshot();
 
-        const bool haveSecond = derived()->busBuffer(1) != nullptr;
-        const bool wantSecond = doubleBuffer;
-        if (inited_ && !derived()->busIsRing() && derived()->busCapacity() == frameBytes_
+        const bool haveSecond = peripheral_->busBuffer(1) != nullptr;
+        // Want the second (async) buffer only when the toggle is ON AND the peripheral can run the async
+        // path. MoonI80 reports supportsDoubleBuffer()==false — its own-GDMA two-buffer handshake races
+        // and wedges the bus — so it always runs single-buffer regardless of the saved toggle (the value
+        // is preserved and re-engages on a peripheral that supports it). This is the single "want second?"
+        // decision; the reinit-skip check and the busInit request below both read it.
+        const bool wantSecond = doubleBuffer && peripheral_->supportsDoubleBuffer();
+        if (inited_ && !peripheral_->busIsRing() && peripheral_->busCapacity() == frameBytes_
             && busPinsCurrent() && busLaneCount_ == laneCount_ && haveSecond == wantSecond) {
             // Clear stale latch-pad bytes in BOTH buffers (buffer 1 is null in single-buffer mode).
-            std::memset(dmaBuf_, 0, derived()->busCapacity());
-            if (uint8_t* b1 = derived()->busBuffer(1)) std::memset(b1, 0, derived()->busCapacity());
+            std::memset(dmaBuf_, 0, peripheral_->busCapacity());
+            if (uint8_t* b1 = peripheral_->busBuffer(1)) std::memset(b1, 0, peripheral_->busCapacity());
             prefillShiftConstantsIfNeeded();   // the zeroing above wiped them
             return;
         }
         deinit();
-        // Pass doubleBuffer so busInit allocates the second buffer only when the double-buffer is
-        // wanted — OFF (default) costs exactly one DMA buffer, no async overhead, no second alloc.
-        inited_ = derived()->busInit(frameBytes_, doubleBuffer);
-        dmaBuf_ = inited_ ? derived()->busBuffer(0) : nullptr;
+        // Pre-check the frame against the driver's DMA budget BEFORE attempting the bus init. A
+        // whole-frame driver whose DMA can't reach PSRAM (the classic ESP32 i80 = the I2S peripheral,
+        // internal-RAM-only) simply cannot allocate a frame larger than its internal DMA block — and on
+        // that chip the failing esp_lcd path can BUSY-WAIT to a watchdog reset rather than return an
+        // error. So refuse cleanly with a clear, actionable status instead of choking the init. Budget 0
+        // (PSRAM-capable chips, or the streaming ring) means "no bound" → always passes. Cold path.
+        if (const size_t budget = peripheral_->dmaBudgetBytes();
+            !frameFitsDmaBudget(frameBytes_, budget)) {
+            // deinit() above already cleared the bus and inited_ — just report and bail.
+            if (char* b = failBufEnsure()) {
+                std::snprintf(b, kFailBufLen, "frame %uKB over i80 DMA %uKB: fewer lights/pin",
+                              static_cast<unsigned>(frameBytes_ / 1024),
+                              static_cast<unsigned>(budget / 1024));
+                setStatus(b, Severity::Error);
+            } else {
+                setStatus(peripheral_->initFailMsg(), Severity::Error);
+            }
+            return;
+        }
+        // Allocate the second buffer only when wanted (see wantSecond above — gated on the toggle AND the
+        // peripheral supporting async). OFF costs exactly one DMA buffer, no async overhead.
+        inited_ = peripheral_->busInit(frameBytes_, wantSecond);
+        dmaBuf_ = inited_ ? peripheral_->busBuffer(0) : nullptr;
         if (inited_) {
             for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
             busLaneCount_ = laneCount_;
-            derived()->recordBusPins();   // i80 also stores WR/DC; Parlio no-op
+            peripheral_->recordBusPins();   // i80 also stores WR/DC; Parlio no-op
             prefillShiftConstantsIfNeeded();
         }
         if (!inited_) {
             clearFailBuf();
-            setStatus(Derived::kInitFailMsg, Severity::Error);
-        } else if (status() == Derived::kInitFailMsg) {
+            setStatus(peripheral_->initFailMsg(), Severity::Error);
+        } else if (status() == peripheral_->initFailMsg()) {
             clearStatus();
         }
     }
 
     void deinit() {
-        if constexpr (Derived::lanesAvailable() == 0) return;
+        if (!peripheral_ || peripheral_->lanesAvailable() == 0) return;
         // Free is a use-after-free if a transfer is still reading the buffer — drain first.
         // (reinit already drains before calling here; release()/onCorrectionChanged reach
         // deinit directly, so the guard belongs here too. Idempotent no-op when idle.)
         drainInFlight();
-        if (inited_) derived()->busDeinit();
+        if (inited_) peripheral_->busDeinit();
         inited_ = false;
         dmaBuf_ = nullptr;
         active_ = 0;              // next init starts on buffer 0
@@ -1569,7 +1856,7 @@ protected:
     bool busPinsCurrent() const {
         for (uint8_t i = 0; i < laneCount_; i++)
             if (busPins_[i] != laneList_[i]) return false;
-        return derived()->extraBusPinsCurrent();   // i80 also checks WR/DC
+        return peripheral_ && peripheral_->extraBusPinsCurrent();   // i80 also checks WR/DC
     }
 
     // --- loopback self-test (control-driven; same status shapes as RMT). Builds
@@ -1607,15 +1894,15 @@ protected:
         patternHoldStrand_ = static_cast<int16_t>(strand);
         platform::delayMs(40);   // a handful of 100 fps frames so the held pattern is on the wire before capture
         const uint8_t pat[3] = {kPatternRGB_[0], kPatternRGB_[1], kPatternRGB_[2]};
-        const auto r = derived()->busLoopbackRide(pat, outCh < 3 ? outCh : uint8_t{3}, dataBytes,
-                                                  static_cast<uint8_t>(outCh * 8));
+        const auto r = busLoopbackRide(pat, outCh < 3 ? outCh : uint8_t{3}, dataBytes,
+                                       static_cast<uint8_t>(outCh * 8));
         patternHoldStrand_ = -1;   // release the hold — the strand returns to the live effect next frame
         // Report with the shared verdict formatter (same status strings as the private-bus path).
         reportLoopbackResult(r, outCh);
     }
 
     void runLoopbackSelfTest() {
-        if constexpr (Derived::lanesAvailable() == 0) {
+        if (!peripheral_ || peripheral_->lanesAvailable() == 0) {
             clearFailBuf();
             setStatus("loopback: not supported on this platform", Severity::Warning);
             return;
@@ -1654,7 +1941,7 @@ protected:
         // the FULL-WIDTH private bus (it can't do a 1-lane bus), so a 16-lane driver's frame must
         // be 16-bit slots to match — and this then genuinely exercises the 16-bit transpose+DMA on
         // real silicon. Parlio builds a 1-lane private unit, so its loopback stays 8-bit regardless.
-        const uint8_t sb = Derived::kLoopbackFullWidth ? slotBytes() : 1;
+        const uint8_t sb = peripheral_->loopbackFullWidth() ? slotBytes() : 1;
         // The expander multiplies the SLOT COUNT (a '595 is serial-in: each WS2812 slot is shifted
         // out over 8 bus words), exactly as frameBytesFor does for the operational frame. Omitting it
         // here would build a frame 8× too small and transmit a truncated waveform.
@@ -1729,8 +2016,8 @@ protected:
         // anything).
         const uint16_t realLane0 = laneList_[0];
         if (loopbackTxPin >= 0 && !pinExpanderMode()) laneList_[0] = static_cast<uint16_t>(loopbackTxPin);
-        const auto r = derived()->busLoopback(frame, testFrameBytes, dataBytes,
-                                              static_cast<uint8_t>(outCh * 8));
+        const auto r = peripheral_->busLoopback(frame, testFrameBytes, dataBytes,
+                                                static_cast<uint8_t>(outCh * 8));
         laneList_[0] = realLane0;
         platform::free(frame);
         // Loopback result first, then reinit: if rebuilding the real bus fails

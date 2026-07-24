@@ -146,7 +146,8 @@ void FilesystemModule::loadSubtree(MoonModule* m) {
     platform::free(buf);
 }
 
-void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
+// Overlay every persistable control's saved value onto the module's current control list, in list order.
+void FilesystemModule::overlayControls(MoonModule* m, const char* json, const char* prefix) {
     char key[MAX_KEY];
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
@@ -155,6 +156,56 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
         std::snprintf(key, sizeof(key), "%s%s", prefix, c.name);
         applyValue(c, json, key);
     }
+}
+
+// Restore a code-wired child's saved state when its boot index differs from the index the file recorded
+// it at (a reorder of code-wired siblings). Scan the saved child entries ("<prefix><j>.type") for the
+// one whose type matches `wired`, and apply that entry's subtree to it. If the file has no entry for this
+// wired child (it predates the child), there is nothing to restore and the child keeps its defaults.
+void FilesystemModule::applyWiredChildFromJson(MoonModule* wired, const char* json, const char* prefix) {
+    for (uint8_t j = 0; ; j++) {
+        char typeKey[MAX_KEY];
+        std::snprintf(typeKey, sizeof(typeKey), "%s%u.type", prefix, static_cast<unsigned>(j));
+        char typeName[32] = {};
+        mm::json::parseString(json, typeKey, typeName, sizeof(typeName));
+        if (typeName[0] == 0) return;   // walked past the last saved child — no match, keep defaults
+        if (std::strcmp(typeName, wired->typeName()) != 0) continue;
+        char childPrefix[MAX_KEY];
+        std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(j));
+        applyNode(wired, json, childPrefix);
+        return;
+    }
+}
+
+// True when a live child of `parent` is a code-wired singleton of `typeName`. The reconcile loop uses it
+// to avoid factory-creating a duplicate of a wired type-singleton whose saved entry sits at an index other
+// than its boot position (already restored in place by applyWiredChildFromJson).
+bool FilesystemModule::hasWiredChildOfType(const MoonModule* parent, const char* typeName) {
+    for (uint8_t i = 0; i < parent->childCount(); i++) {
+        MoonModule* c = parent->child(i);
+        if (c && c->isWiredByCode() && std::strcmp(c->typeName(), typeName) == 0) return true;
+    }
+    return false;
+}
+
+void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
+    char key[MAX_KEY];
+    // Overlay the saved values. A module whose CONTROL SET depends on one of its own control VALUES
+    // (the canonical case: ParallelLedDriver's `peripheral` Select, which swaps the bus backend and
+    // with it the backend-owned controls — clockPin, dcPin, the ring cluster) needs a second pass:
+    // the first overlay writes `peripheral`, but the backend-owned controls are still bound to the
+    // DEFAULT backend's members, so their saved values land on a backend about to be discarded. So
+    // overlay, then rebuildControls() (which re-runs defineControls → swaps the live backend to match
+    // the just-applied `peripheral`, re-binding the control list to the RIGHT backend's members), then
+    // overlay again onto the now-correct controls. rebuildControls' schema-hash gate no-ops the refire
+    // when nothing changed (the common case: a module with no value-dependent schema), and the second
+    // overlay is idempotent value writes — so this is safe and cheap for every module. Without it, any
+    // reload that rebuilds the control set (a reboot, an INT_WDT restart) silently reverts every
+    // backend-owned control (clockPin, the ring geometry) to its default.
+    overlayControls(m, json, prefix);
+    m->rebuildControls();
+    overlayControls(m, json, prefix);
+
     std::snprintf(key, sizeof(key), "%senabled", prefix);
     // Note: we can't distinguish "key absent" from "key=false" with the flat parser.
     // The convention: every saved file includes "enabled", so if the file exists and
@@ -163,16 +214,23 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     // they get enabled=false (matches the default-after-bad-edit behavior).
     m->setEnabled(mm::json::parseBool(json, key));
 
-    // Reconcile children with the JSON's tree shape. For each position, look up
-    // "<prefix><idx>.type"; if it differs from the live child (or no live child
-    // exists), factory-create the JSON type and place it at that position. The
-    // newly-created child gets defineControls() here so the recursive applyNode
-    // below can overlay its persisted values. Phases 3+4 (setup, prepare)
-    // cascade into the new child automatically.
-    // Walk JSON child positions in order; stop when "<idx>.type" is absent. No fixed cap —
-    // the JSON itself terminates the loop. childCount_ is a uint8_t so the practical ceiling
-    // is 255 children per parent, far above any realistic tree.
-    uint8_t jsonChildCount = 0;
+    // Reconcile children with the JSON's tree shape. Walk each saved child entry ("<prefix><idx>.type")
+    // and place the corresponding live child. The JSON index `i` and the live position `pos` are
+    // DECOUPLED: `i` always advances; `pos` advances only when a child is actually placed there. This
+    // decoupling is what makes a single bad entry non-fatal — a JSON entry that produces no live child
+    // (an unknown/renamed type, or a stale slot over a code-wired child) is skipped WITHOUT dropping the
+    // user modules the file records after it. User modules are created fresh here in file order via
+    // addChild, so their user-chosen order (a UI reorder) round-trips; code-wired children pre-exist and
+    // are skipped in place (see the isWiredByCode() branch below).
+    //
+    // The decoupling is what keeps a single bad entry from taking the rest of the tree down with it — the
+    // failure mode a naive "break on any mismatch/unknown" reconcile has, where one unresolvable entry
+    // drops every module the file records after it. The two entries that must skip-not-break:
+    //   - a stale slot over a code-wired child (the file predates the wired child, or names a different
+    //     type where it now sits): keep the wired instance, advance past it;
+    //   - a renamed/removed module type (the documented ADR-0013 migration, e.g. a pre-consolidation
+    //     MoonLedDriver/MultiPinLedDriver entry): that entry drops, the rest stay.
+    uint8_t pos = 0;
     for (uint8_t i = 0; ; i++) {
         char typeKey[MAX_KEY];
         std::snprintf(typeKey, sizeof(typeKey), "%s%u.type", prefix, static_cast<unsigned>(i));
@@ -180,38 +238,48 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
         mm::json::parseString(json, typeKey, typeName, sizeof(typeName));
         if (typeName[0] == 0) break;
 
-        MoonModule* live = m->child(i);
+        MoonModule* live = m->child(pos);
         if (!live || std::strcmp(live->typeName(), typeName) != 0) {
-            // Position-replace can also destroy a code-wired child if the file
-            // describes a different type at this slot. Bail out of further
-            // reconciliation rather than killing it — the trim loop below then
-            // preserves the code-wired tail, and the next save will rewrite the
-            // file with the current (correct) tree shape. The rest of the JSON
-            // past this position is dropped on this boot; that's better than
-            // losing a code-wired child.
-            if (live && live->isWiredByCode()) break;
+            // A code-wired child that mismatches the saved type here is a STALE SLOT (the file predates
+            // this code-wired child, or names a different type where it now sits — e.g. boot wired the
+            // code-wired siblings in a different order than the file recorded them). Never replace/destroy
+            // the wired instance: keep it and advance past it. But first restore ITS saved values — find
+            // the JSON entry that names THIS wired child's type and overlay that entry's controls, so a
+            // code-wired child's persisted state survives even when its saved index differs from its boot
+            // index (a reorder). Without this the wired child keeps its defaults on every reboot.
+            if (live && live->isWiredByCode()) {
+                applyWiredChildFromJson(live, json, prefix);
+                pos++;
+                continue;
+            }
+            // A code-wired child is a type-singleton (one per type per container). If a live wired child
+            // already has this entry's type, this entry IS that singleton's saved slot — it was restored by
+            // the applyWiredChildFromJson type-search above when the wired child sat at an earlier position
+            // (its saved index differs from its boot index). Creating here would spawn a DUPLICATE, so drop
+            // the entry without advancing `pos`: the singleton already stands in the live tree.
+            if (hasWiredChildOfType(m, typeName)) continue;
             MoonModule* created = ModuleFactory::create(typeName);
             if (!created) {
-                // Factory failed (type not registered). Stop here so subsequent JSON
-                // children don't get applied to misaligned live slots; jsonChildCount
-                // stays at the last successfully reconciled position, and the trim loop
-                // below removes any live children past that point.
-                break;
+                // Unknown/renamed type (ADR-0013 migration): the module drops. Skip this JSON entry and
+                // keep reconciling the rest — do NOT advance `pos`, so the file's later user modules still
+                // map to the correct live position.
+                continue;
             }
             created->defineControls();
             if (live) {
-                MoonModule* old = m->replaceChildAt(i, created);
+                MoonModule* old = m->replaceChildAt(pos, created);
                 if (old) { old->release(); Scheduler::deleteTree(old); }
             } else {
                 m->addChild(created);
             }
         }
 
-        jsonChildCount = i + 1;
         char childPrefix[MAX_KEY];
         std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
-        applyNode(m->child(i), json, childPrefix);
+        applyNode(m->child(pos), json, childPrefix);
+        pos++;
     }
+    uint8_t jsonChildCount = pos;   // live children reconciled; the trim loop keeps these, prunes the rest
     // Trim live children beyond what the JSON describes, EXCEPT children that
     // were wired by code at boot (main.cpp annotates those via markWiredByCode).
     // A code-wired child is preserved across persistence loads even when the

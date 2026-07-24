@@ -208,6 +208,76 @@ def _child_names_of(state: dict, container_name: str) -> list:
     return find(state.get("modules", [])) or []
 
 
+# Containers whose USER-ADDED children a scenario may clear/rebuild — the tree the
+# snapshot/restore protects. A scenario that clear_children's one of these destroys
+# the board's real config; restoring the snapshot afterward leaves the board as found.
+_SNAPSHOT_CONTAINERS = {"Layouts", "Layers", "Drivers", "Services", "Layer"}
+
+
+def _snapshot_tree(state: dict) -> list:
+    """Capture the user-added modules a scenario might clear or replace, in tree order
+    (parents before children), so they can be re-created after the scenario runs.
+
+    Each entry is {type, id, parent_id, controls} — everything /api/state exposes to
+    reconstruct a module via POST /api/modules + /api/control. Boot-wired singletons
+    (the containers themselves, Preview, LightPresets) are NOT captured: the device
+    re-creates them itself and re-adding is a no-op or an error. We snapshot the
+    CHILDREN of the snapshot containers (and their descendants) — the modules a
+    scenario's clear_children / replace actually removes."""
+    snap = []
+
+    def controls_of(m: dict) -> dict:
+        return {c["name"]: c.get("value") for c in m.get("controls", [])
+                if c.get("name") and not c.get("readonly")}
+
+    def walk(modules: list, parent_name, *, inside_container: bool) -> None:
+        for m in modules:
+            name = m.get("name")
+            typ = m.get("type")
+            # Capture a module that sits INSIDE a snapshot container and is user-editable
+            # (a driver/effect/modifier/layout/service the scenario could clear). Skip the
+            # boot-wired ones the device owns (userEditable false is not in /api/state, so
+            # gate on the known singletons by name instead).
+            if inside_container and name and typ and name not in ("Preview", "LightPresets"):
+                snap.append({"type": typ, "id": name,
+                             "parent_id": parent_name, "controls": controls_of(m)})
+            walk(m.get("children", []), name,
+                 inside_container=inside_container or name in _SNAPSHOT_CONTAINERS)
+
+    walk(state.get("modules", []), None, inside_container=False)
+    return snap
+
+
+def _restore_tree(client, snapshot: list, current_state: dict) -> None:
+    """Re-create any snapshotted module that a scenario removed, restoring the board to
+    the tree it had before the run. Adds parents before children (snapshot order) and
+    re-applies control values. A module still present is left untouched. A restore that
+    fails is reported (which module/control + the error), not silently swallowed — a
+    board left partially restored is a signal worth seeing, but one failure must not stop
+    the rest, so we log and continue."""
+    present = _collect_module_names(current_state)
+    restored = 0
+    for entry in snapshot:
+        if entry["id"] in present:
+            continue
+        try:
+            client.post("/api/modules", {"type": entry["type"], "id": entry["id"],
+                                         "parent_id": entry["parent_id"]})
+        except Exception as e:
+            print(f"  WARN — restore: could not re-create {entry['id']} "
+                  f"({entry['type']} under {entry['parent_id']}): {e}")
+            continue
+        for cname, val in entry["controls"].items():
+            try:
+                client.post("/api/control", {"module": entry["id"],
+                                             "control": cname, "value": val})
+            except Exception as e:
+                print(f"  WARN — restore: could not set {entry['id']}.{cname}={val!r}: {e}")
+        restored += 1
+    if restored:
+        print(f"  restored {restored} module(s) the scenario had cleared")
+
+
 def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                  update_contract: bool = False,
                  update_reason: str | None = None) -> dict:
@@ -256,6 +326,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     # its set_control/replace ids won't exist on the device yet; they're created
     # mid-run. A still-unreachable id is a real typo / wrong-wiring bug.
     target = "unknown"
+    live_state = None   # bound before the try so the snapshot below can't NameError if /api/state fails
     try:
         live_state = client.get("/api/state")
         target = _detect_target(live_state)
@@ -289,6 +360,17 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         print(f"\n  WARN — couldn't pre-flight live module names: {e}")
     print(f"  Target: {target}")
     results["target"] = target
+
+    # Snapshot the board's user-added tree so we can restore it after the scenario:
+    # a scenario that clear_children's a container (to get a known canvas) destroys the
+    # board's real config, and the created_modules cleanup only removes what the scenario
+    # ADDED, not what it CLEARED. Restoring the snapshot leaves the bench board as found.
+    tree_snapshot = []
+    if live_state is not None:   # skip restore if the pre-flight /api/state fetch failed (nothing to snapshot)
+        try:
+            tree_snapshot = _snapshot_tree(live_state)
+        except Exception as e:
+            print(f"  WARN — couldn't snapshot tree for restore: {e}")
 
     # Reset block: scenarios that mutate shared controls (Mirror toggles, grid
     # size, Preview detail, …) declare a `reset` array of set_control steps that
@@ -392,6 +474,15 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         # a grid a prior run's cleanup removed) is a no-op, not a fail.
                         step_result["status"] = "ok"
                         print(f"  SET   {step.get('id','?')}.{step.get('key','?')} — skipped (optional, not present)")
+                    elif step.get("optional") and ce.code == 400:
+                        # An `optional` set_control the device REJECTS with 400 (e.g.
+                        # "value out of range") is a not-available-here skip, not a
+                        # failure — e.g. selecting a `peripheral` value this chip doesn't
+                        # offer (Parlio on an S3, MoonI80 on a classic): the Select's max
+                        # is the board-filtered option count, so the value is out of range
+                        # and returns 400. A REQUIRED set_control that 400s still fails.
+                        step_result["status"] = "skipped"
+                        print(f"  SET   {step.get('id','?')}.{step.get('key','?')} = {step.get('value','?')} — skipped (optional, value not offered on this target)")
                     elif ce.code == 404:
                         # Transient: a set_control issued right after a structural
                         # change (replace/add) can race the device's prepareTree and
@@ -729,6 +820,16 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             print(f"  -     {module_id} (cleanup)")
         except Exception:
             pass
+
+    # Restore: re-create any pre-existing module the scenario removed (a clear_children
+    # of a real container, or a replace). Combined with the created-module cleanup above,
+    # the board ends the run in the tree it started with — no residue, no lost config.
+    if tree_snapshot:
+        try:
+            after_state = client.get("/api/state")
+            _restore_tree(client, tree_snapshot, after_state)
+        except Exception as e:
+            print(f"  WARN — couldn't restore snapshot: {e}")
 
     # Write the scenario JSON back if anything changed:
     #   - observed.<target> was updated by any measure step (every run); OR

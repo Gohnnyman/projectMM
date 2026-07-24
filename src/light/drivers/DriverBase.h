@@ -20,6 +20,7 @@
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/drivers/Correction.h"
+#include "light/drivers/LedPeripheral.h"         // LedHwBlock — the peripheral-block claim guard's vocabulary
 #include "light/drivers/LightPresetsModule.h"   // the shared preset library a driver references by id
 #include "platform/platform.h"
 
@@ -49,6 +50,12 @@ public:
     /// worker) first. TSan enforces this.
     ModuleRole role() const override { return ModuleRole::Driver; }
     virtual void setSourceBuffer(Buffer* buf) = 0;
+
+    /// The hardware peripheral block this driver drives, for the parallel-driver claim guard (two live
+    /// drivers on one block corrupt each other). Only ParallelLedDriver overrides it; every other driver
+    /// (RMT, NetworkSend, Hue, Preview) drives no shared parallel block and keeps None. Virtual, not
+    /// RTTI — ESP32 builds compile -fno-rtti, so the guard reads siblings through this, never a cast.
+    virtual LedHwBlock hwBlock() const { return LedHwBlock::None; }
 
     /// Template method: every driver card leads with the per-driver output correction
     /// (localBrightness / lightPreset / whiteMode / Custom offsets), added once here in the base
@@ -143,9 +150,9 @@ public:
     /// controls chains to this so it doesn't re-implement the correction branch (the
     /// Complexity-lives-in-core rule: the correction rule lives here, once, for every driver).
     void onControlChanged(const char* name) override {
-        // A preset Select change: map the chosen INDEX to a stable preset id (what we store +
+        // A lightPreset Select change: map the chosen INDEX to a stable preset id (what we store +
         // persist), so the reference survives a later reorder/delete of other presets.
-        if (std::strcmp(name, "preset") == 0) {
+        if (std::strcmp(name, "lightPreset") == 0) {
             if (auto* lib = LightPresetsModule::active()) {
                 presetId_ = lib->idAt(presetSel_);
                 std::snprintf(presetRef_, sizeof(presetRef_), "%s", lib->nameAt(presetSel_));  // persist the name
@@ -259,7 +266,7 @@ protected:
     void defineCorrectionControls() {
         controls_.addUint8("localBrightness", localBrightness_, 0, 255);
         buildPresetOptions();                        // fill presetOptions_ from the library, sync id/sel/ref
-        controls_.addSelect("preset", presetSel_, presetOptions_, presetOptionCount_);
+        controls_.addSelect("lightPreset", presetSel_, presetOptions_, presetOptionCount_);
         controls_.addSelect("whiteMode", whiteMode_, kWhiteModeOptions, kWhiteModeCount);
         // whiteMode only applies when the REFERENCED preset carries a channel apply() synthesises
         // from RGB (White / WarmWhite / Yellow / UV) — there's nothing to synthesise on a plain
@@ -267,8 +274,8 @@ protected:
         // tracks the live reference.
         auto* lib = LightPresetsModule::active();
         controls_.setHidden(controls_.count() - 1, !(lib && lib->presetHasSynthChannel(presetId_)));
-        // The durable reference (the preset NAME) persists but isn't shown — the preset Select above
-        // is the user-facing control; presetRef_ just carries the reference across a reboot.
+        // The durable reference (the preset NAME) persists but isn't shown — the lightPreset Select
+        // above is the user-facing control; presetRef_ just carries the reference across a reboot.
         controls_.addText("presetRef", presetRef_, sizeof(presetRef_));
         controls_.setHidden(controls_.count() - 1, true);
     }
@@ -281,7 +288,7 @@ protected:
     /// True if `name` is one of the correction controls — a driver folds this into its
     /// affectsPrepare() and its correction rebuilds in onControlChanged (both handled by DriverBase).
     static bool isCorrectionControl(const char* name) {
-        return std::strcmp(name, "preset") == 0 || std::strcmp(name, "localBrightness") == 0
+        return std::strcmp(name, "lightPreset") == 0 || std::strcmp(name, "localBrightness") == 0
             || std::strcmp(name, "whiteMode") == 0;
     }
 

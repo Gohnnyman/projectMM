@@ -10,7 +10,7 @@
     "Drivers",
     "NetworkSendDriver"
   ],
-  "description": "Multi-layer composition end-to-end: Layouts→Grid, TWO Layers under one Layers container (bottom Spiral, top Rainbow), Drivers→NetworkSendDriver. Proves the Drivers composite loop builds, allocates its output buffer, blends both enabled layers and feeds the result to the driver without crashing, and gates the bounded FPS so the N-pass composite cost is tracked. The exact alpha/additive blend math and the disable-drops-to-single-layer path are pinned by the unit tests (unit_BlendMap, unit_Layers_container); construct-mode set_control can't apply controls (built post-scheduler), so this scenario uses each Layer's default blend (alpha, full opacity) and asserts wired liveness + tick, not per-byte blend output.",
+  "description": "Multi-layer composition end-to-end: Layouts→Grid, TWO Layers under one Layers container (bottom Spiral, top Rainbow), Drivers→NetworkSendDriver. Proves the Drivers composite loop builds, allocates its output buffer, blends both enabled layers and feeds the result to the driver without crashing, and gates the bounded FPS so the N-pass composite cost is tracked. The exact alpha/additive blend math and the disable-drops-to-single-layer path are pinned by the unit tests (unit_BlendMap, unit_Layers_container); construct-mode set_control can't apply controls (built post-scheduler), so this scenario uses each Layer's default blend (additive, full opacity) and asserts wired liveness + tick, not per-byte blend output.",
   "steps": [
     {
       "name": "add-layout-group",

@@ -111,6 +111,7 @@ public:
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
         controls_.addBool("loopbackTest", loopbackTest);
+        controls_.setAdvanced(controls_.count() - 1);   // expert-mode: a bench self-test, not a normal-use control
         // loopbackTxPin / loopbackRxPin are always bound (so persistence can load
         // them any time) but only shown while the test mode is on — same always-
         // add-then-setHidden shape NetworkModule uses for its static-IP fields. The
@@ -199,6 +200,17 @@ public:
         parseConfig();
         resizeSymbols();
         reinit();
+        // Re-assert the resting "driving N of M lights" status after the full build. parseConfig sets it
+        // too, but only when a buffer is already wired (txLightCount_ > 0); on the boot path setup()'s
+        // parseConfig runs before the source buffer exists, so it's skipped and the status stays blank
+        // (or shows a stale loopback verdict) until the user touches a control. Re-deriving here — once
+        // pins + buffer + counts are all settled — makes it the default resting state, the way MoonLed's
+        // shows. Gated on inited_: reinit() reports a per-pin "RMT init failed" at Severity::Error without
+        // touching configErr_/configWarn_, so the `!warn` rule alone would overwrite that error with a
+        // false "driving N lights" while tick() bails and the strand stays dark. Only assert the resting
+        // status when the channels actually came up.
+        if (inited_ && !configErr_ && !configWarn_ && txLightCount_ > 0)
+            setDrivingInfo(txLightCount_, winLen_, correction_.outChannels);
     }
 
     /// Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild —
@@ -403,12 +415,19 @@ private:
     // hot path. Grows only — keeps a big-enough existing allocation.
     void resizeSymbols() {
         if (!sourceBuffer_) return;
-        // Size for this driver's window slice, not the whole source buffer — an
-        // onboard-LED slice of 1 reserves 1 light's worth of symbols, not the full
-        // grid's. Derive the window length directly (windowSlice is independent of
-        // the pin parse, so the buffer sizes correctly even before pins are set).
-        nrOfLightsType winStart, n;
-        windowSlice(sourceBuffer_->count(), winStart, n);
+        // Size for the lights this driver actually CLOCKS OUT, not the whole window. The window (start,
+        // count) can be far larger than the pins encode: `ledsPerPin` (or fewer pins than the window has
+        // lights) caps the transmitted total at `txLightCount_` (Σ pinCounts_), and tick() only ever
+        // encodes that many (n = min(txLightCount_, winLen_) there). Sizing to the window instead made an
+        // 8×8 strip on one pin (ledsPerPin 64) inside a 70×82 grid (count=all, window 5740) try to alloc
+        // ~550 KB of symbols for lights it never encodes — the alloc failed on a small-heap classic ESP32,
+        // symbols_ stayed null, and tick() bailed → the strip went dark even though only 64 lights were
+        // wanted. Bound to txLightCount_ so the buffer matches the real output. Fall back to the window
+        // when no pins are parsed yet (txLightCount_ == 0), so the buffer is ready before pins are set.
+        nrOfLightsType winStart, win;
+        windowSlice(sourceBuffer_->count(), winStart, win);
+        nrOfLightsType n = txLightCount_ > 0 ? txLightCount_ : win;
+        if (n > win) n = win;               // never exceed the window's own light count
         const uint8_t ch = correction_.outChannels;
         if (n == 0 || ch == 0) return;
         // Per-light correction scratch: grow to `ch` bytes when the channel count grows (off the hot

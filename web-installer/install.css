@@ -39,6 +39,56 @@
       text-decoration: none;
     }
     .help-link:hover { border-color: var(--accent); }
+
+    /* App-store / smart-home badges under Step 3. Official badges display at a fixed
+       height (Apple/Google guidelines size by height, not width); the HA link is a
+       small icon+text chip since HA's wordmark logo is dark-on-transparent. */
+    .app-badges {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0 4px;
+    }
+    .store-badge {
+      height: 40px;
+      width: auto;
+      display: block;
+      transition: opacity .12s;
+    }
+    .app-badges a:hover .store-badge { opacity: 0.85; }
+    .ha-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 40px;
+      padding: 0 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--fg);
+      font-size: 14px;
+      text-decoration: none;
+      transition: border-color .12s;
+    }
+    .ha-badge:hover { border-color: var(--accent); }
+    .ha-icon { height: 24px; width: 24px; display: block; }
+    /* The browser option has no single URL (the address is per-device — <name>.local or
+       its DHCP IP, spelled out below), so it's a non-clickable label chip, same shape as
+       .ha-badge for a consistent row. A globe is the vendor-neutral "open in a browser" glyph. */
+    .browser-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 40px;
+      padding: 0 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--fg);
+      font-size: 14px;
+    }
+    .browser-icon { height: 22px; width: 22px; display: block; color: var(--accent); }
     .version-chip {
       display: inline-block;
       margin-left: 8px;

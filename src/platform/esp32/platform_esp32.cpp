@@ -364,6 +364,12 @@ const char* resetReason() {
     }
 }
 
+void setLogLevel(LogLevel level) {
+    // LogLevel's values are chosen to equal esp_log_level_t (None=0 … Verbose=5), so the
+    // mapping is a plain cast — the "*" tag sets the level for every component at once.
+    esp_log_level_set("*", static_cast<esp_log_level_t>(level));
+}
+
 size_t firmwareSize() {
     // Get actual running image size from the image header
     const esp_partition_t* part = esp_ota_get_running_partition();

@@ -426,12 +426,43 @@ async function addModule(type, parentName) {
     if (!type) return;
     const body = {type: type};
     if (parentName) body.parent_id = parentName;
-    await fetch("/api/modules", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(body)
-    });
-    refetchState();
+    let name = null;
+    try {
+        const r = await fetch("/api/modules", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body)
+        });
+        name = (await r.json()).name;   // the created module's final name (post-disambiguation)
+    } catch {}
+    // Select the new module's tab BEFORE the re-render so renderCards shows it active (the tab strip
+    // reads selectedTabs[parent]); then scroll it into view and focus its first control so a keyboard
+    // user lands on it. Without this the view stays on the previously-active tab and the new module
+    // is added out of sight.
+    if (name && parentName) {
+        selectedTabs[parentName] = name;
+        localStorage.setItem(LS_TABS, JSON.stringify(selectedTabs));   // persist like the tab-click path
+    }
+    await refetchState();
+    if (name) focusModule(name);
+}
+
+// Bring a module's card into view and focus its first control (added via the "+" flow).
+function focusModule(name) {
+    const card = document.querySelector(`.card[data-module="${cssEscape(name)}"]`);
+    if (!card) return;
+    // A child card can wrap its controls in a collapsed <details> (.card-controls-collapse) — open it
+    // FIRST so the card is at its expanded height, THEN scroll: scrolling a still-collapsed card lands
+    // on its pre-expansion geometry and the focused control ends up mispositioned.
+    const collapse = card.querySelector("details.card-controls-collapse");
+    if (collapse) collapse.open = true;
+    card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // Focus the first real control input, NOT the tab strip / header buttons — and NOT the status row,
+    // which is a `.control-row` with only spans (a freshly added driver leads with a status, so picking
+    // the first `.control-row` would find no input and focus nothing). Query for the input directly
+    // inside any control row so the status row is skipped.
+    const first = card.querySelector(".control-row input, .control-row select, .control-row textarea, .control-row button");
+    if (first) first.focus({ preventScroll: true });
 }
 
 async function deleteModule(name) {

@@ -90,14 +90,17 @@
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
 #include "light/drivers/RmtLedDriver.h"
 #endif
+// The parallel-WS2812 driver + its peripheral backends. Each backend header self-registers its factory
+// into ParallelLedDriver's peripheral registry (gated by the chip's CONFIG_SOC_*), so including the ones
+// this silicon supports is what populates the `peripheral` control's options.
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
-#include "light/drivers/MultiPinLedDriver.h"
+#include "light/drivers/MultiPinLedDriver.h"      // esp_lcd i80 backend (I80Peripheral)
 #endif
 #if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-#include "light/drivers/MoonLedDriver.h"
+#include "light/drivers/MoonLedDriver.h"          // MoonI80 own-GDMA backend (MoonI80Peripheral)
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED)
-#include "light/drivers/ParlioLedDriver.h"
+#include "light/drivers/ParlioLedDriver.h"        // Parlio backend (ParlioPeripheral)
 #endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
@@ -131,6 +134,12 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/supporting.md#layer");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/supporting.md#drivers");
     mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule", "light/supporting.md#lightpresets");
+
+    // Wire the core quiesce-render hook to the light domain's encode worker: before core mutates the tree
+    // (add/remove/replace a child), stop core 1 so it can't dereference a node being freed. Core can't
+    // name Drivers (a light module), so it calls through this function-pointer seam (see MoonModule
+    // quiesceForMutation). Wired once here, where main.cpp legitimately depends on both sides.
+    mm::MoonModule::setQuiesceRenderHook([] { if (auto* d = mm::Drivers::active()) d->quiesceRenderSplit(); });
     // Concrete modules. registerType<T> captures the type's dimensions() via
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
@@ -214,19 +223,13 @@ static void registerModuleTypes() {
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers.md#rmtled");
 #endif
-    // MultiPinLedDriver — 8/16 parallel strands over IDF's esp_lcd i80 bus (LCD_CAM on S3/P4, I2S-i80
-    // on classic ESP32); IDF picks the backend by chip, so ONE driver serves all i80-capable silicon.
-#if defined(CONFIG_SOC_LCD_I80_SUPPORTED)
-    mm::ModuleFactory::registerType<mm::MultiPinLedDriver>("MultiPinLedDriver", "light/drivers.md#multipinled");
-#endif
-#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
-    // The same LCD_CAM output on our own DMA code instead of esp_lcd (ADR-0014). Registered ALONGSIDE
-    // MultiPinLedDriver, not instead of it: that one is the reference implementation and the default,
-    // this is the challenger, and having both registered makes the A/B a swap in the UI.
-    mm::ModuleFactory::registerType<mm::MoonLedDriver>("MoonLedDriver", "light/drivers.md#moonled");
-#endif
-#if defined(CONFIG_SOC_PARLIO_SUPPORTED)
-    mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers.md#parlioled");
+    // ParallelLedDriver — ONE driver for the parallel-WS2812 output, whatever the DMA peripheral. The
+    // three backends (esp_lcd i80, MoonI80 own-GDMA, Parlio) each self-register into the driver's
+    // peripheral registry when their header is included above (gated by the same CONFIG_SOC_* below), so
+    // the `peripheral` control offers exactly the ones this chip links. Registered once, on any chip that
+    // links at least one parallel backend.
+#if defined(CONFIG_SOC_LCD_I80_SUPPORTED) || defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED)
+    mm::ModuleFactory::registerType<mm::ParallelLedDriver>("ParallelLedDriver", "light/drivers.md#parallelled");
 #endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/system.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/system.md#system");
@@ -547,6 +550,17 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         if (now - lastLog >= 1000) {
             lastLog = now;
             if (scheduler.tickTimeUs() == 0) continue; // no measurement yet
+
+            // The KPI tick line is a plain stdout printf, not an ESP_LOG, so the platform log level
+            // doesn't suppress it — we gate it here on the same level. At Info or above it prints; at
+            // Warn/Error/None it's silenced so a device resting quietly makes no periodic serial write
+            // (a status LED that blinks on UART TX stops flickering). The first 60 s of uptime always
+            // prints regardless: the web installer reads MM_IP off this line just after flash, and the
+            // window latches the same way the MM_IP token below does (a plain `< 60000` re-opens every
+            // ~49.7 days at the millis() wrap). Real ESP_LOGW/ESP_LOGE warnings and errors are a
+            // separate stream that setLogLevel governs independently, so they still surface at Warn.
+            const bool inBootWindow = !mmIpWindowClosed && (now - bootMillis < 60000);
+            if (systemModule->logLevel() < mm::platform::LogLevel::Info && !inBootWindow) continue;
 
             heap = mm::platform::freeHeap();
             std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),

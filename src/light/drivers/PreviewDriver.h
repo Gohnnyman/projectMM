@@ -59,6 +59,10 @@ public:
     /// affectsPrepare path). Lets a test drive the buffer alloc/free without a control write.
     void setResumableFramesForTest(bool on) { resumableFrames = on; }
 
+    /// The current adaptive downsample factor (1 = full resolution). Test-only — lets a test pin the
+    /// coarsen (additive) / refine (multiplicative) recovery cadence.
+    nrOfLightsType downscaleForTest() const { return downscale_; }
+
     /// Preview shows the raw logical buffer, no correction.
     bool hasCorrectionControls() const override { return false; }
 
@@ -93,6 +97,17 @@ public:
         if (broadcaster_) broadcaster_->cancelBufferedSend();
         if (resumableFrames) ensureStage();   // allocate the staging buffer only when the A/B wants it
         else freePreviewBuffers();            // OFF: release the ~24 KB (readout drops to match)
+        // Re-anchor the LINK-adaptive downsample on a geometry change: a rebuild is a fresh layout, so a
+        // previous grid's link-struggle coarsening must not carry over and hold a now-small grid coarse
+        // (the "add a 16×16 → 4 blobs for ~10 s" bug — it inherited a big config's downscale_). The
+        // memory/display cap in buildAndSendCoordTable still sets the honest floor for THIS grid instantly
+        // (a 90×90 lands at its 1/3 with no ramp), and downscale_ only re-coarsens if this grid's own
+        // frames actually stall. Reset here (the true rebuild seam), NOT in buildAndSendCoordTable, which
+        // the adaptive loop itself calls — resetting there would undo the adaptation mid-flight.
+        downscale_ = 1;
+        slowStreak_ = 0;
+        cleanStreak_ = 0;
+        framesWaiting_ = 0;   // the old grid's drain count must not make the new grid's first frame read slow
         buildAndSendCoordTable();
         refreshStatus();   // surface any resumable-path degradation (alloc miss) in the tab
     }
@@ -174,7 +189,7 @@ public:
         // frames eventually send (the slow-but-complete case a pure all-sent signal misses — a
         // full-res 128² frame that delivers at ~2 fps). On a sustained run of slow frames, coarsen
         // the lattice (downscale_++) so frames shrink and the rate climbs; a sustained run of
-        // prompt, fully-sent frames refines back toward full res (downscale_--). The streaks only
+        // prompt, fully-sent frames refines back toward full res (downscale_ >>= 1, halving). The streaks only
         // advance on slots where a frame completed (sentThisSlot), so a long drain counts as ONE
         // slow frame, not many — making kDownscaleAfterSlow a count of slow frames, not ticks.
         // Hysteresis stops oscillation; the factor rides the wire stride field to the status line.
@@ -191,7 +206,12 @@ public:
             slowStreak_ = 0;
             if (downscale_ > 1 && ++cleanStreak_ >= kUpscaleAfterFast) {
                 cleanStreak_ = 0;
-                downscale_--;
+                // AIMD-inverse recovery: coarsen ADDITIVELY (+1, gentle — above) but refine
+                // MULTIPLICATIVELY (halve toward 1). A run of prompt frames means the link has plenty
+                // of headroom, so a coarse stride collapses to full res in ~log2 refine events, not one
+                // per unit — the difference between a small grid settling in ~1 s vs. ~10 s. The next
+                // step still measures before refining again, so overshoot re-coarsens by the +1 path.
+                downscale_ >>= 1;   // guarded by downscale_ > 1 above, so this stays >= 1
                 buildAndSendCoordTable();
             }
         }
@@ -587,7 +607,7 @@ private:
     // The streamed send is all-or-nothing per client, so a frame (color or coord table) that
     // doesn't reach every client means the link can't keep up at this resolution: coarsen
     // (downscale_++) after a short run of such frames so the rebuilt lattice sends fewer points.
-    // A sustained run of fully-sent frames refines back toward full resolution (downscale_--).
+    // A sustained run of fully-sent frames refines back toward full resolution (downscale_ >>= 1, halving).
     // downscale_ is an extra floor on the per-axis lattice stride, composing with the cap
     // downsample; it rides the wire stride field to the browser's "preview 1/N · link limited"
     // status. (≥1; 1 = full resolution.) Hysteresis via the streak thresholds stops oscillation.
@@ -596,7 +616,9 @@ private:
     uint8_t cleanStreak_ = 0;      // consecutive prompt, fully-sent frames
     uint8_t framesWaiting_ = 0;    // fps slots skipped because the previous frame is still draining
     static constexpr uint8_t kDownscaleAfterSlow = 2;    // coarsen after this many slow frames (fast react)
-    static constexpr uint8_t kUpscaleAfterFast   = 20;   // refine after this many clean frames
+    static constexpr uint8_t kUpscaleAfterFast   = 6;    // refine after this many clean frames — then HALVE
+                                                         // downscale_ (multiplicative recovery), so a coarse
+                                                         // stride reaches full res in ~log2 steps, not linearly
     // A frame still draining after this many fps slots means the link can't sustain even one frame
     // at this resolution at the slowest useful rate → resolution must drop (not just the rate). Set
     // above 1 so a normal multi-tick drain on a healthy link isn't mistaken for struggle.

@@ -1,0 +1,704 @@
+{
+  "name": "scenario_peripheral_switch",
+  "module": "ParallelLedDriver",
+  "mode": "mutate",
+  "also": [
+    "MultiPinLedDriver",
+    "MoonLedDriver",
+    "ParlioLedDriver",
+    "Layouts",
+    "GridLayout",
+    "Layers",
+    "Layer",
+    "NoiseEffect",
+    "Drivers",
+    "PreviewDriver"
+  ],
+  "description": "Switch a live ParallelLedDriver between its DMA peripherals (i80 / MoonI80 / Parlio) and verify the device keeps running clean across every swap, and that the peripheral-dependent controls (doubleBuffer, pinExpander) behave per backend. Builds one Layout(Grid 16x16) + one Layer + one NoiseEffect + one ParallelLedDriver on lane-0 (64 LEDs), then set_control cycles `peripheral` and toggles `doubleBuffer`/`pinExpander`, measuring after each. The peripheral steps are `optional` so a board that lacks a given peripheral (a classic ESP32 offers only i80/I2S; a P4 adds Parlio; an S3 offers i80+MoonI80) skips them without failing. Guards the runtime-peripheral-strategy consolidation (ADR-0016): a swap that crashes, wedges, or leaves the driver in a bad state shows up here. Specifically pins the MoonI80 double-buffer fix: with doubleBuffer ON, MoonI80 must run single-buffer and NOT freeze (its own-GDMA whole-frame two-buffer handshake races); the measure after switching to MoonI80 with doubleBuffer ON is the regression guard (a freeze shows as a ~200 ms tick).",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "shrink-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "shrink-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "clear-layers",
+      "description": "Start clean: drop whatever effects/modifiers the device had.",
+      "op": "clear_children",
+      "id": "Layers"
+    },
+    {
+      "name": "clear-drivers",
+      "description": "Drop existing drivers (the pre-wired Preview survives on a device).",
+      "op": "clear_children",
+      "id": "Drivers"
+    },
+    {
+      "name": "rebuild-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "rebuild-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "add-parallel-driver",
+      "description": "One ParallelLedDriver on lane 0, 64 LEDs (i80 rounds the bus up to 8 pins and parks the spare lanes; the 8-pin set is the S3's clean range). The peripheral is set per switch step below.",
+      "op": "add_module",
+      "id": "ParallelLed",
+      "type": "ParallelLedDriver",
+      "parent_id": "Drivers",
+      "props": {
+        "pins": "1,2,3,4,5,6,7,8",
+        "ledsPerPin": "64,0,0,0,0,0,0,0"
+      }
+    },
+    {
+      "name": "switch-i80",
+      "description": "Select the i80 peripheral (esp_lcd: LCD_CAM on S3/P4/S31, I2S on classic).",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "peripheral",
+      "value": "i80",
+      "optional": true
+    },
+    {
+      "name": "measure-i80-single",
+      "description": "i80 single-buffer baseline. Only meaningful where the pins are valid (S3/desktop path); a classic/P4 records its own i80 backend.",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s3-n16r8": {
+          "tick_us": [
+            42,
+            8191
+          ],
+          "free_heap": [
+            8490863,
+            8539759
+          ],
+          "max_alloc_block": [
+            81920,
+            106496
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            6
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            208,
+            208
+          ],
+          "free_heap": [
+            33961671,
+            33961671
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            389,
+            389
+          ],
+          "free_heap": [
+            120332,
+            120332
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "i80-doublebuffer-on",
+      "description": "i80 supports the async double-buffer (esp_lcd has a real transaction queue) — turn it on.",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "doubleBuffer",
+      "value": true,
+      "optional": true
+    },
+    {
+      "name": "measure-i80-double",
+      "description": "i80 with double-buffer: the encode overlaps the wire, so the tick should be at or below the single-buffer baseline. No freeze.",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s3-n16r8": {
+          "tick_us": [
+            46,
+            8925
+          ],
+          "free_heap": [
+            8413619,
+            8539115
+          ],
+          "max_alloc_block": [
+            81920,
+            106496
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            6
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            215,
+            215
+          ],
+          "free_heap": [
+            33961679,
+            33961679
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            316,
+            316
+          ],
+          "free_heap": [
+            120120,
+            120120
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "switch-moonI80-dbstill-on",
+      "description": "Switch to MoonI80 with doubleBuffer STILL ON. This is the regression guard: MoonI80 must ignore the async request and run single-buffer (its whole-frame own-GDMA two-buffer handshake races and wedges). The measure below must be a normal tick, NOT ~200 ms.",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "peripheral",
+      "value": "MoonI80",
+      "optional": true
+    },
+    {
+      "name": "measure-moonI80-nofreeze",
+      "description": "MoonI80 whole-frame, doubleBuffer requested but forced single. A ~200 ms tick here is the double-buffer freeze regressing; a normal tick is the fix holding.",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s3-n16r8": {
+          "tick_us": [
+            42,
+            8960
+          ],
+          "free_heap": [
+            8497787,
+            8538287
+          ],
+          "max_alloc_block": [
+            81920,
+            114688
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            6
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            216,
+            216
+          ],
+          "free_heap": [
+            33969675,
+            33969675
+          ],
+          "max_alloc_block": [
+            360448,
+            360448
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            316,
+            316
+          ],
+          "free_heap": [
+            122032,
+            122032
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "moonI80-doublebuffer-off",
+      "description": "Explicitly turn doubleBuffer off on MoonI80 (a no-op behaviorally — it was already forced single — but exercises the control write on the hidden control).",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "doubleBuffer",
+      "value": false,
+      "optional": true
+    },
+    {
+      "name": "measure-moonI80-single",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s3-n16r8": {
+          "tick_us": [
+            44,
+            8708
+          ],
+          "free_heap": [
+            8490871,
+            8538079
+          ],
+          "max_alloc_block": [
+            81920,
+            106496
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            6
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            209,
+            209
+          ],
+          "free_heap": [
+            33961491,
+            33961491
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            343,
+            343
+          ],
+          "free_heap": [
+            122052,
+            122052
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "moonI80-expander-on",
+      "description": "Turn on the 74HCT595 pin expander: MoonI80 switches to the streaming RING path (wantsRing()). At 64 LOGICAL lights the ring still initializes; this exercises the ring engage on a live switch without needing a 48x256 rig.",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "pinExpander",
+      "value": true,
+      "optional": true
+    },
+    {
+      "name": "measure-moonI80-ring",
+      "description": "MoonI80 ring path live. A crash/wedge on the expander engage shows here.",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s3-n16r8": {
+          "tick_us": [
+            44,
+            9233
+          ],
+          "free_heap": [
+            8489355,
+            8538291
+          ],
+          "max_alloc_block": [
+            81920,
+            106496
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            6
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            217,
+            217
+          ],
+          "free_heap": [
+            33961487,
+            33961487
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            326,
+            326
+          ],
+          "free_heap": [
+            121824,
+            121824
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "moonI80-expander-off",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "pinExpander",
+      "value": false,
+      "optional": true
+    },
+    {
+      "name": "switch-parlio",
+      "description": "Select Parlio (P4 only). On a board that doesn't offer it (S3/classic) the Select value is out of range → the device returns 400 and this optional step is SKIPPED, leaving the peripheral where it was. No standalone measure follows it (that would record the wrong peripheral on a skip); the round-trip measure below covers the post-switch state. On a P4 the switch succeeds and the round-trip back to i80 exercises the Parlio→i80 swap.",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "peripheral",
+      "value": "Parlio",
+      "optional": true
+    },
+    {
+      "name": "switch-back-i80",
+      "description": "Round-trip back to i80 — the driver must return to a clean, running state after the whole cycle.",
+      "op": "set_control",
+      "id": "ParallelLed",
+      "key": "peripheral",
+      "value": "i80",
+      "optional": true
+    },
+    {
+      "name": "measure-back-i80",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s3-n16r8": {
+          "tick_us": [
+            42,
+            10004
+          ],
+          "free_heap": [
+            8477667,
+            8538251
+          ],
+          "max_alloc_block": [
+            81920,
+            114688
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            6
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            206,
+            206
+          ],
+          "free_heap": [
+            33970039,
+            33970039
+          ],
+          "max_alloc_block": [
+            360448,
+            360448
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            320,
+            320
+          ],
+          "free_heap": [
+            121604,
+            121604
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "cleanup-driver",
+      "op": "remove_module",
+      "id": "ParallelLed",
+      "optional": true
+    },
+    {
+      "name": "cleanup-fx",
+      "op": "remove_module",
+      "id": "FX",
+      "optional": true
+    },
+    {
+      "name": "cleanup-layer",
+      "op": "remove_module",
+      "id": "Layer",
+      "optional": true
+    }
+  ]
+}

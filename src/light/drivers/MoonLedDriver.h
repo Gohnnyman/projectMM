@@ -1,25 +1,25 @@
 #pragma once
 
-#include "light/drivers/ParallelLedDriver.h"   // shared CRTP body
+#include "light/drivers/ParallelLedDriver.h"   // shared driver body + LedPeripheral
 #include "platform/platform.h"
 
 #include <atomic>   // the parallel-snapshot helper join flags
 
 namespace mm {
 
-/// Output driver: parallel WS2812B on the **LCD_CAM** peripheral (ESP32-S3 / -P4), driven by **our own
-/// DMA code** instead of ESP-IDF's `esp_lcd`. Same peripheral, pins and wire contract as
-/// [MultiPinLedDriver](MultiPinLedDriver.md); the difference is underneath, and it buys two things
-/// `esp_lcd` cannot give — a frame **streamed** rather than held whole, and a **74HCT595 pin expander**
-/// (one GPIO driving 8 strands).
+/// A `LedPeripheral` backend: parallel WS2812B on the **LCD_CAM** peripheral (ESP32-S3 / -P4 / -S31), driven by
+/// **our own DMA code** instead of ESP-IDF's `esp_lcd`. Same peripheral, pins and wire contract as the
+/// `i80` backend (`I80Peripheral`); the difference is underneath, and it buys two things `esp_lcd` cannot
+/// give — a frame **streamed** rather than held whole, and a **74HCT595 pin expander** (one GPIO driving
+/// 8 strands).
 ///
 /// **Streamed, not held:** the DMA refills a small pool of internal buffers behind the read head, so RAM
-/// stops scaling with strand length (`useRing` picks this path; `ringRows`/`ringBufs` size it). **Both
-/// paths ship:** `MultiPinLedDriver` is the memory-capped **reference**, this is the streaming
-/// **challenger**, and `useRing` A/Bs them on the same board with no reflash. LCD_CAM only — the classic
-/// ESP32's i80 is the I2S peripheral, a different backend. Everything above the DMA (slicing, the fused
-/// 3-slot encode, the async double-buffer, loopback, the `frameTime` KPI, the dead-frame guard) is
-/// inherited from ParallelLedDriver, so this class is nearly all one-liners.
+/// stops scaling with strand length (`useRing` picks this path; `ringRows`/`ringBufs` size it). The `i80`
+/// backend is the memory-capped **reference**, this is the streaming **challenger**, and switching the
+/// `peripheral` control A/Bs them on the same board with no reflash. LCD_CAM only — the classic ESP32's
+/// i80 is the I2S peripheral, a separate backend. Everything above the DMA (slicing, the fused 3-slot
+/// encode, the async double-buffer, loopback, the `frameTime` KPI, the dead-frame guard) lives in
+/// ParallelLedDriver, so this backend is nearly all one-liners.
 ///
 /// The deep dives are under *More info*, below the attribute/method lists:
 /// @xref{why-our-own-dma-driver-below-the-read-head|why our own DMA driver},
@@ -136,14 +136,15 @@ namespace mm {
 /// `putdefaultones()` prefill has our own counterpart; the transpose is our own SWAR). He runs the S3
 /// shift clock at ~19.2 MHz; we default to the same reliability point (20 MHz, a 28.8 µs/light budget)
 /// with the `shiftOverclock` switch (26.67 MHz, 21.6 µs/light) for short-wired rigs (see the control).
-class MoonLedDriver : public ParallelLedDriver<MoonLedDriver> {
+class MoonI80Peripheral : public LedPeripheral {
 public:
     // Data pins + loopback pin default to UNSET, for the same reason as the sibling: they are
     // user-soldered, so a hard-coded default would be a guess that could drive a pin the user
-    // committed elsewhere. The base declares pins="" / loopbackRxPin=-1, so nothing is needed here.
+    // committed elsewhere. The orchestrator declares pins="" / loopbackRxPin=-1, so nothing is
+    // needed here.
 
     /// WR — the pixel clock — and it is needed **only by a 74HCT595 expander**, which is why it is the
-    /// one bus control this driver keeps.
+    /// one bus control this backend keeps.
     ///
     /// WR toggles once per bus word in hardware, which is exactly what a '595's SRCLK needs: the pixel
     /// clock IS the shift clock. That is why the expander costs zero DMA bytes for its clock, and why
@@ -250,107 +251,122 @@ public:
     /// `sizeof` bounds the `snprintf`.
     char ringDbgStr_[176] = "—";
 
-    // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
+    // --- LedPeripheral descriptors ---
 
-    /// LCD_CAM lanes on this chip (0 = none, and then the base's guards make the driver inert).
+    /// LCD_CAM lanes on this chip (0 = none, and then the orchestrator's guards make the driver inert).
     /// Unlike the sibling this does NOT add `i2sLanes`: the classic ESP32's i80 is the I2S peripheral,
     /// which this backend does not implement.
-    static constexpr uint8_t lanesAvailable() { return platform::lcdLanes; }
+    uint8_t lanesAvailable() const override { return platform::lcdLanes; }
     /// The i80 bus width is 8 or 16 — a hardware fact (`lcd_ll_set_data_wire_width` takes nothing else).
-    /// The PIN count stays free: configure only the pins that drive something and the base rounds the bus
-    /// up around them, parking the spare lanes on WR (which the peripheral already drives, and nothing
-    /// reads). Parlio sets this false — its bus width IS its pin count.
-    static constexpr bool kPowerOfTwoBus = true;
+    /// The PIN count stays free: configure only the pins that drive something and the orchestrator rounds
+    /// the bus up around them, parking the spare lanes on WR (which the peripheral already drives, and
+    /// nothing reads). Parlio's backend sets this false — its bus width IS its pin count.
+    bool powerOfTwoBus() const override { return true; }
     /// The loopback cannot build a 1-lane private bus, so it rebuilds the full-width bus and carries
     /// the pattern on lane 0 — the test frame must therefore be encoded at the operational bus width.
-    static constexpr bool kLoopbackFullWidth = true;
+    bool loopbackFullWidth() const override { return true; }
+    /// MoonI80 programs LCD_CAM directly (its own GDMA below esp_lcd), so it claims the LcdCam block —
+    /// the same block the esp_lcd-i80 backend uses on the LCD_CAM chips (S3/P4/S31), hence the two can't run together.
+    LedHwBlock hwBlock() const override { return LedHwBlock::LcdCam; }
     /// Status text when the bus will not come up, so the cause is on screen rather than in a serial log.
     /// The two real causes are named: a pin the peripheral cannot route, or no DMA-reachable memory for
     /// the frame (or the ring's pool).
-    static constexpr const char* kInitFailMsg = "MoonI80 bus init failed — check pins / memory";
-    /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this driver is
-    /// LCD_CAM-only, so the answer is simply "wherever this driver runs at all".
-    static constexpr bool kSupportsPinExpander = platform::lcdLanes > 0;
+    const char* initFailMsg() const override { return "MoonI80 bus init failed — check pins / memory"; }
+    /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this backend is
+    /// LCD_CAM-only, so the answer is simply "wherever this backend runs at all".
+    bool supportsPinExpander() const override { return platform::lcdLanes > 0; }
 
-    /// The base pads spare bus lanes with this GPIO. Unrouted lanes cost nothing here, so the value is
+    /// No async double-buffer on this backend — the own-GDMA two-buffer completion handshake races and
+    /// wedges the bus (see busInit). Single-buffer only; the ring is where MoonI80's speed lives.
+    bool supportsDoubleBuffer() const override { return false; }
+
+    /// The orchestrator pads spare bus lanes with this GPIO. Unrouted lanes cost nothing here, so the value is
     /// only ever *used* in shift mode — where WR is a real pad and the padding is genuinely inert.
-    uint16_t clockPinForBus() const { return static_cast<uint16_t>(clockPin); }
+    uint16_t clockPinForBus() const override { return static_cast<uint16_t>(clockPin); }
 
     /// WR is a '595 pin here, so the control follows the expander toggle: bound always (a saved value
     /// survives a round-trip through direct mode) but shown only when a shift register can read it.
-    void addBusControls() {
-        controls_.addPin("clockPin", clockPin);
-        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
+    void addBusControls(ControlList& controls) override {
+        controls.addPin("clockPin", clockPin);
+        controls.setHidden(controls.count() - 1, !owner_->pinExpanderMode());
     }
 
     /// The output path + the ring's geometry and instrument. A separate hook from addBusControls() so the
-    /// base can place these AFTER latchPin — clockPin and latchPin are one '595 wiring pair and belong
-    /// together in the UI, not split by a mode selector.
-    void addRingControls() {
-        // The shift-clock speed switch, below the clockPin/latchPin wiring pair (the base places this
-        // hook right after latchPin): OFF = 20 MHz (safe default), ON = 26.67 MHz (overclock). The fix
-        // for per-strand '595 corruption is OFF; see the member doc. Shift-mode only.
-        controls_.addBool("shiftOverclock", shiftOverclock);
-        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
-        controls_.setAdvanced(controls_.count() - 1);   // a '595 clock tuning knob — expert only
+    /// orchestrator can place these AFTER latchPin — clockPin and latchPin are one '595 wiring pair and
+    /// belong together in the UI, not split by a mode selector.
+    void addRingControls(ControlList& controls) override {
+        // The shift-clock speed switch, below the clockPin/latchPin wiring pair (the orchestrator places
+        // this hook right after latchPin): OFF = 20 MHz (safe default), ON = 26.67 MHz (overclock). The
+        // fix for per-strand '595 corruption is OFF; see the member doc. Shift-mode only.
+        controls.addBool("shiftOverclock", shiftOverclock);
+        controls.setHidden(controls.count() - 1, !owner_->pinExpanderMode());
+        controls.setAdvanced(controls.count() - 1);   // a '595 clock tuning knob — expert only
         // Path selector (pin-expander mode only): the ring, or the whole frame. A distinct axis from
         // ringSnapshot — this picks the PATH, ringSnapshot tunes how the RING reads its source; they
         // compose. Whole-frame is the A/B reference: it is how the whole-frame-PSRAM-at-the-expander-clock
         // question stays testable on the same board and content.
-        controls_.addBool("useRing", useRing);
-        controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
+        controls.addBool("useRing", useRing);
+        controls.setHidden(controls.count() - 1, !owner_->pinExpanderMode());
         // The source-snapshot A/B knob, directly under useRing (the path it belongs to): the ring reads
         // its source through an immutable snapshot (ON, the safe default) or the live buffer (OFF, a bench
         // lever). Meaningful only when the ring is the chosen path, so hidden on wantsRing() like the
-        // geometry below. `ringSnapshot` lives on the base (ParallelLedDriver); the control binds it here.
-        controls_.addBool("ringSnapshot", ringSnapshot);
-        controls_.setHidden(controls_.count() - 1, !wantsRing());
+        // geometry below. `ringSnapshot` lives on the orchestrator (ParallelLedDriver); the control binds
+        // it here through the mutable reference accessor.
+        controls.addBool("ringSnapshot", owner_->ringSnapshotRef());
+        controls.setHidden(controls.count() - 1, !wantsRing());
         // The geometry + the instrument, shown only when the RING is the chosen path — all meaningless on
         // the whole-frame one. (Gating on wantsRing() is safe: it reads plain members, pinExpanderMode +
         // useRing, not frameBytes_, so it resolves even before the source buffer is wired at boot.)
-        controls_.addBool("ringAuto", ringAuto);
-        controls_.setHidden(controls_.count() - 1, !wantsRing());
+        controls.addBool("ringAuto", ringAuto);
+        controls.setHidden(controls.count() - 1, !wantsRing());
         // ringRows/ringBufs/ringPadUs are DEV TUNING — ringAuto derives them for the end user (kept
         // visible above); the manual knobs are expert-only. (Once ringAuto is verified to always pick the
         // right geometry, ringAuto itself could go advanced too — for now it stays visible as the recourse.)
-        controls_.addUint8("ringRows", ringRows, 1, 64);
-        controls_.setHidden(controls_.count() - 1, !wantsRing());
-        controls_.setAdvanced(controls_.count() - 1);
-        controls_.addUint8("ringBufs", ringBufs, platform::kRingBufsMin, platform::kRingBufsMax);
-        controls_.setHidden(controls_.count() - 1, !wantsRing());
-        controls_.setAdvanced(controls_.count() - 1);
-        controls_.addUint8("ringPadUs", ringPadUs, 0, platform::kRingPadMaxUs);
-        controls_.setHidden(controls_.count() - 1, !wantsRing());
-        controls_.setAdvanced(controls_.count() - 1);
+        controls.addUint8("ringRows", ringRows, 1, 64);
+        controls.setHidden(controls.count() - 1, !wantsRing());
+        controls.setAdvanced(controls.count() - 1);
+        controls.addUint8("ringBufs", ringBufs, platform::kRingBufsMin, platform::kRingBufsMax);
+        controls.setHidden(controls.count() - 1, !wantsRing());
+        controls.setAdvanced(controls.count() - 1);
+        controls.addUint8("ringPadUs", ringPadUs, 0, platform::kRingPadMaxUs);
+        controls.setHidden(controls.count() - 1, !wantsRing());
+        controls.setAdvanced(controls.count() - 1);
         // Ring internals, so the streaming can be diagnosed by polling /api/state (reliable) rather than
         // scraping serial. The raw instrument — expert only; the full field-by-field legend lives on the
         // ringDbgStr_ member below (rendered into the technical page).
-        controls_.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
-        controls_.setHidden(controls_.count() - 1, !wantsRing());
-        controls_.setAdvanced(controls_.count() - 1);
+        controls.addReadOnly("ringDbg", ringDbgStr_, sizeof(ringDbgStr_));
+        controls.setHidden(controls.count() - 1, !wantsRing());
+        controls.setAdvanced(controls.count() - 1);
     }
 
-    /// Refresh the ringDbg diagnostic string once a second (base tick1s chains here via refreshBusKpi).
-    /// Nothing to report on the whole-frame path — the control is hidden there, so leave it untouched
-    /// rather than writing a "no ring" status that only repeats what useRing says.
-    void refreshBusKpi() {
+    /// Refresh the ringDbg diagnostic string once a second (the orchestrator's tick1s chains here via
+    /// refreshBusKpi). Nothing to report on the whole-frame path — the control is hidden there, so leave
+    /// it untouched rather than writing a "no ring" status that only repeats what useRing says.
+    void refreshBusKpi() override {
         const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
         if (!s.isRing) return;
         // Read-and-clear the segment sums each 1 s window — a free-running uint32 sum wraps every
         // ~20 s at the ring's accumulation rate, which silently garbles the averages (measured: se "64").
-        const uint32_t segGather = dbgSegGatherCy, segEmit = dbgSegEmitCy, segRows = dbgSegRows;
-        dbgSegGatherCy = 0; dbgSegEmitCy = 0; dbgSegRows = 0;
+        const uint32_t segGather = ParallelLedDriver::dbgSegGatherCy;
+        const uint32_t segEmit = ParallelLedDriver::dbgSegEmitCy;
+        const uint32_t segRows = ParallelLedDriver::dbgSegRows;
+        ParallelLedDriver::dbgSegGatherCy = 0;
+        ParallelLedDriver::dbgSegEmitCy = 0;
+        ParallelLedDriver::dbgSegRows = 0;
         // The extended fields (ld/tx/ipb/ci/tn) are the LAPPING-phase instruments — the same readouts that
         // isolated the prime-only bugs (ld = drain progress, tx = real wire time vs the physical frame
         // minimum, ipb/ci/tn = node accounting + the terminator). Their scope lives in the backlog's ring
         // entry.
-        // sn/lv: memory residency of the two encode sources — snapshotBuf_ (sn) and the live source (lv);
-        // P = PSRAM, I = internal, '-' = absent. The ISR reads one of these per byte, and a PSRAM 'sn'
-        // under a lapping ring is the measured 4-8x encode cost + the cache-contention corruption exposure.
-        const char snapWhere = this->snapshotBuf_
-            ? (platform::ptrIsPsram(this->snapshotBuf_) ? 'P' : 'I') : '-';
-        const char liveWhere = (this->sourceBuffer_ && this->sourceBuffer_->data())
-            ? (platform::ptrIsPsram(this->sourceBuffer_->data()) ? 'P' : 'I') : '-';
+        // sn/lv: memory residency of the two encode sources — the snapshot buffer (sn) and the live source
+        // (lv); P = PSRAM, I = internal, '-' = absent. The ISR reads one of these per byte, and a PSRAM
+        // 'sn' under a lapping ring is the measured 4-8x encode cost + the cache-contention corruption
+        // exposure.
+        const uint8_t* snap = owner_->snapshotBuf();
+        const Buffer* src = owner_->sourceBuffer();
+        const char snapWhere = snap
+            ? (platform::ptrIsPsram(snap) ? 'P' : 'I') : '-';
+        const char liveWhere = (src && src->data())
+            ? (platform::ptrIsPsram(src->data()) ? 'P' : 'I') : '-';
         std::snprintf(ringDbgStr_, sizeof(ringDbgStr_), "sn%c lv%c sl%u/bf%u co%u cr%u ab%u dn%u ld%u lt%u tx%u ipb%u ci%u tn%d de%u enc%u ea%u sg%u se%u tw%u ts%u tp%u gap%u",
                       snapWhere, liveWhere,
                       static_cast<unsigned>(s.nSlices), static_cast<unsigned>(s.ringBufs),
@@ -364,9 +380,9 @@ public:
                       static_cast<unsigned>(s.maxEncodeUs), static_cast<unsigned>(s.avgEncodeUs),
                       static_cast<unsigned>(segRows ? segGather / segRows : 0),   // avg gather cycles/row (last window)
                       static_cast<unsigned>(segRows ? segEmit / segRows : 0),     // avg emit cycles/row (last window)
-                      static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickWaitUs),   // wire-wait µs
-                      static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickSnapUs),   // snapshot µs
-                      static_cast<unsigned>(ParallelLedDriver<MoonLedDriver>::dbgTickPrimeUs),  // prime µs
+                      static_cast<unsigned>(ParallelLedDriver::dbgTickWaitUs),   // wire-wait µs
+                      static_cast<unsigned>(ParallelLedDriver::dbgTickSnapUs),   // snapshot µs
+                      static_cast<unsigned>(ParallelLedDriver::dbgTickPrimeUs),  // prime µs
                       static_cast<unsigned>(s.maxIsrGapUs));
                       // co = lifetime cache-off ISR defers (flash/WiFi write; ~10/s at idle is normal). cr =
                       // worst consecutive-defer run ≈ buffers drained un-refilled in one window. ab = frames
@@ -378,10 +394,10 @@ public:
                       // enc = worst ISR refill-encode µs (producer); gap = worst EOF-to-EOF µs (deadline).
                       // enc >= gap == the refill can't keep pace (PACE); enc << gap but still fails == CURSOR/logic.
     }
-    /// Which of this driver's controls need the BUS rebuilt (not just a re-encode) when they change:
+    /// Which of this backend's controls need the BUS rebuilt (not just a re-encode) when they change:
     /// the WR pin, the output path, and the ring's geometry — buffers are sized and the DMA chain mounted
     /// at build time, so each of these is a rebuild.
-    bool busControlTriggersBuild(const char* name) const {
+    bool busControlTriggersBuild(const char* name) const override {
         return std::strcmp(name, "clockPin") == 0
             || std::strcmp(name, "useRing") == 0      // path switch: rebuild the bus on the new path
             || std::strcmp(name, "ringAuto") == 0     // re-derive (or stop deriving) the geometry
@@ -395,34 +411,58 @@ public:
     /// WR only reaches a pad in shift mode, so it can only COLLIDE in shift mode. In direct mode the
     /// signal never leaves the peripheral, so `clockPin` naming a strand's GPIO is harmless — and
     /// rejecting it would forbid a perfectly good config for the sake of a signal nobody reads.
-    const char* validateBusFatal() const {
-        if (pinExpanderMode()) {
+    const char* validateBusFatal() const override {
+        if (owner_->pinExpanderMode()) {
             // The '595 needs WR on a real GPIO (it is the SRCLK). Unset (-1) would route the
             // peripheral's WR signal to GPIO 65535 — reject it before busInit reaches the pad.
             if (clockPin < 0) return "the 74HCT595 expander needs a clockPin (its shift clock)";
-            if (latchPin >= 0 && latchPin == clockPin)
+            if (owner_->latchPin >= 0 && owner_->latchPin == clockPin)
                 return "latchPin is on clockPin (WR) — the latch needs its own GPIO";
         }
         return nullptr;
     }
     /// A data lane sharing WR's GPIO is silent corruption — the matrix routes both signals to the one
     /// pad and that strand emits the shift clock instead of pixel data. Only possible in shift mode.
-    const char* validateBusPins(const uint16_t* lanes, uint8_t n) const {
-        if (!pinExpanderMode()) return nullptr;
+    const char* validateBusPins(const uint16_t* lanes, uint8_t n) const override {
+        if (!owner_->pinExpanderMode()) return nullptr;
         for (uint8_t i = 0; i < n; i++)
             if (lanes[i] == static_cast<uint16_t>(clockPin)) return "a data pin is on clockPin (WR)";
         return nullptr;
     }
 
     /// Create the bus + its DMA buffer(s) for `frameBytes`. `busPinList()`/`busPinCount()` come from
-    /// the base (in shift mode the list appends the latch — it is a bus lane), and
+    /// the orchestrator (in shift mode the list appends the latch — it is a bus lane), and
     /// `busClockMultiplier()` tells the platform how many bus words one WS2812 slot is shifted out
     /// over, so it can scale the pixel clock and the slot keeps its wire duration.
-    bool busInit(size_t frameBytes, bool wantSecondBuffer) {
+    bool busInit(size_t frameBytes, bool /*wantSecondBuffer*/) override {
         platform::moonI80SetShiftClockDiv(shiftOverclock ? 3 : 4);   // ON = 26.67 MHz, OFF = 20 MHz
-        return platform::moonI80Ws2812Init(bus_, this->busPinList(), this->busPinCount(),
+        // Force single-buffer HERE regardless of the request: this backend's own-GDMA whole-frame
+        // two-buffer completion handshake races and wedges the bus (the double-buffer freeze). The
+        // orchestrator already gates the request via supportsDoubleBuffer()==false, but the backend
+        // enforces its own contract too, so a future caller that forgets the gate can't reach the broken
+        // path. MoonI80's speed comes from the streaming ring, not from double-buffering a whole frame.
+        return platform::moonI80Ws2812Init(bus_, owner_->busPinList(), owner_->busPinCount(),
                                            static_cast<uint16_t>(clockPin), frameBytes,
-                                           wantSecondBuffer, this->busClockMultiplier());
+                                           /*wantSecondBuffer=*/false, owner_->busClockMultiplier());
+    }
+    void busDeinit() override { stopSnapHelper(); platform::moonI80Ws2812Deinit(bus_); }
+    uint8_t* busBuffer(uint8_t i) override { return platform::moonI80Ws2812Buffer(bus_, i); }
+    size_t busCapacity() const override { return platform::moonI80Ws2812BufferCapacity(bus_); }
+    bool busTransmit(uint8_t i, size_t bytes) override { return platform::moonI80Ws2812Transmit(bus_, i, bytes); }
+    bool busWait(uint8_t i, uint32_t ms) override { return platform::moonI80Ws2812Wait(bus_, i, ms); }
+    uint32_t busLastTransmitUs() const override { return platform::moonI80Ws2812LastTransmitUs(bus_); }
+
+    /// Drive `frame` on a private bus and capture the wire back on `loopbackRxPin` (jumpered), so the
+    /// self-test bit-verifies what the peripheral ACTUALLY emitted — the one instrument that does not
+    /// take the driver's word for it.
+    platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
+                                            size_t dataBytes, uint8_t rowBits) override {
+        return platform::moonI80Ws2812Loopback(owner_->busPinList(), owner_->busPinCount(),
+                                               static_cast<uint16_t>(clockPin),
+                                               static_cast<uint16_t>(owner_->loopbackRxPin),
+                                               frame, frameBytes, dataBytes, rowBits,
+                                               owner_->busClockMultiplier(),
+                                               ringRows, ringBufs, useRing);
     }
 
     /// Should reinit build a RING for this config instead of the whole-frame path? Only in pin-expander
@@ -434,17 +474,18 @@ public:
     /// itself as a decision, and its silent fallback made the ACTIVE path invisible — the driver reported
     /// "driving N lights" while quietly running whole-frame from PSRAM, which does not clock at the
     /// expander's 26.67 MHz. The switch says what runs.
-    bool wantsRing() const {
-        if (!pinExpanderMode()) return false;   // direct mode never rings (drives PSRAM fine)
+    bool wantsRing() const override {
+        if (!owner_->pinExpanderMode()) return false;   // direct mode never rings (drives PSRAM fine)
         return useRing;
     }
 
     /// Bring the bus up as a streaming RING (the phase-2 path): the platform loops a few small internal
     /// buffers and calls back per drained buffer to refill it, so a frame too big for internal RAM never
-    /// materialises (see platform.h). `rowBytes`/`padBytes` come from the base's frame arithmetic; the
-    /// trampoline below is the encode seam. Returns false if even the small ring won't fit — the base
-    /// then falls back to busInit (whole-frame), which idles with a status if IT can't fit either.
-    bool busInitRing(size_t rowBytes, uint32_t totalRows) {
+    /// materialises (see platform.h). `rowBytes`/`padBytes` come from the orchestrator's frame arithmetic;
+    /// the trampoline below is the encode seam. Returns false if even the small ring won't fit — the
+    /// orchestrator then falls back to busInit (whole-frame), which idles with a status if IT can't fit
+    /// either.
+    bool busInitRing(size_t rowBytes, uint32_t totalRows) override {
         // AUTO geometry (see ringAuto): derive the winning combination for THIS config and write it into
         // the visible controls — rows = one-node max (fewest slices), bufs = as deep as fits. The RAM
         // budget takes free internal MINUS a reserve (WiFi/HTTP need their share; same spirit as the
@@ -468,10 +509,10 @@ public:
             ringBufs = static_cast<uint8_t>(bufs >= platform::kRingBufsMin ? bufs : platform::kRingBufsMin);
         }
         platform::moonI80SetShiftClockDiv(shiftOverclock ? 3 : 4);   // ON = 26.67 MHz, OFF = 20 MHz
-        const bool ok = platform::moonI80Ws2812InitRing(bus_, this->busPinList(), this->busPinCount(),
+        const bool ok = platform::moonI80Ws2812InitRing(bus_, owner_->busPinList(), owner_->busPinCount(),
                                                static_cast<uint16_t>(clockPin), rowBytes, totalRows,
-                                               ringRows, ringBufs, ringPadUs, this->busClockMultiplier(),
-                                               &MoonLedDriver::ringEncodeTrampoline, this);
+                                               ringRows, ringBufs, ringPadUs, owner_->busClockMultiplier(),
+                                               &MoonI80Peripheral::ringEncodeTrampoline, this);
         // Ring up → bring the parallel-snapshot helper up too (idempotent; parks in waitNotify). Torn down
         // in busDeinit with the bus. Spawned here (cold reinit path) so kick()/join() only ever notify.
         if (ok) ensureSnapHelper();
@@ -482,7 +523,7 @@ public:
     // ring buffers are independent (each derives its rows from its index), so the helper primes the bottom
     // half of the pool on core 0 while this core primes the top half, the join fences both, then the arm
     // starts the DMA. Serial fallback: the platform's prime-all-then-arm combo.
-    bool busTransmitRing() {
+    bool busTransmitRing() override {
         if (snapHelperReady() && ringBufs >= 2) {
             // `done` is written-gated (leads the wire drain); the prime itself takes the wire barrier —
             // each prime call waits out the previous frame's deterministic wire end before writing (see
@@ -499,17 +540,17 @@ public:
     }
     /// The ring's regime for the driving-status suffix: "primed" (whole frame encoded before arming —
     /// no deadline, pixel-perfect) vs "lapping" (the ISR refills behind the DMA — the deadline regime).
-    const char* busRingMode() const {
+    const char* busRingMode() const override {
         const platform::MoonI80RingStats s = platform::moonI80Ws2812RingStats(bus_);
         if (!s.isRing) return nullptr;
         return s.nSlices <= s.ringBufs ? "primed" : "lapping";
     }
-    /// Did the bus actually come up as a ring? The base routes tick() on this, so it reports what the
-    /// platform BUILT, not what was asked for — a ring that would not fit falls back to whole-frame.
-    bool busIsRing() const          { return platform::moonI80Ws2812IsRing(bus_); }
+    /// Did the bus actually come up as a ring? The orchestrator routes tick() on this, so it reports what
+    /// the platform BUILT, not what was asked for — a ring that would not fit falls back to whole-frame.
+    bool busIsRing() const override { return platform::moonI80Ws2812IsRing(bus_); }
 
-    /// The platform's `MoonI80EncodeFn` seam: a plain function pointer (there is no CRTP hook for it), so
-    /// this static trampoline recovers `this` from `user` and encodes one slice into the ring buffer the
+    /// The platform's `MoonI80EncodeFn` seam: a plain function pointer (there is no virtual hook for it),
+    /// so this static trampoline recovers `this` from `user` and encodes one slice into the ring buffer the
     /// platform hands it. `dst` is the buffer; `firstRow`/`rowCount` name the slice; `closeFrame` gates
     /// the trailing latch pad (only the last slice emits it).
     ///
@@ -522,14 +563,15 @@ public:
     /// mode writes every slot word in encodeRows, so it needs no prefill.
     static void MM_RAMFUNC ringEncodeTrampoline(void* user, uint8_t* dst, uint32_t firstRow, uint32_t rowCount,
                                                 bool closeFrame, bool needsPrefill) {
-        auto* self = static_cast<MoonLedDriver*>(user);
-        const uint8_t outCh = self->correction_.outChannels;
+        auto* self = static_cast<MoonI80Peripheral*>(user);
+        ParallelLedDriver* owner = self->owner_;
+        const uint8_t outCh = owner->correction().outChannels;
         const auto first = static_cast<nrOfLightsType>(firstRow);
         const auto count = static_cast<nrOfLightsType>(rowCount);
         if (rowCount == 0) {
             // The FRAME-CLOSE call (see MoonI80EncodeFn): write only the latch-only word, which presents
             // the register's final slot on the strand. Direct mode has no close word — zeros are LOW.
-            if (closeFrame) self->encodeFrameClose(dst);
+            if (closeFrame) owner->encodeFrameClose(dst);
             return;
         }
         // Prefill only when the buffer's constants are actually gone (`needsPrefill` — the platform's
@@ -538,54 +580,23 @@ public:
         // ~1/3 of the ISR encode cost — the difference between the refill fitting its drain deadline or not.
         // RAGGED strands still prefill every time: the active mask varies per ROW, so a buffer holding a
         // different slice needs that slice's row masks re-laid regardless of recycling.
-        const bool prefill = self->pinExpanderMode() && (needsPrefill || !self->uniformLaneCounts());
-        if (self->slotBytes() == 1) {
-            if (prefill) self->prefillShiftRows<uint8_t>(outCh, dst, first, count);
-            self->encodeRows<uint8_t>(outCh, dst, first, count, closeFrame);
+        const bool prefill = owner->pinExpanderMode() && (needsPrefill || !owner->uniformLaneCounts());
+        if (owner->slotBytes() == 1) {
+            if (prefill) owner->prefillShiftRows<uint8_t>(outCh, dst, first, count);
+            owner->encodeRows<uint8_t>(outCh, dst, first, count, closeFrame);
         } else {
-            if (prefill) self->prefillShiftRows<uint16_t>(outCh, dst, first, count);
-            self->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
+            if (prefill) owner->prefillShiftRows<uint16_t>(outCh, dst, first, count);
+            owner->encodeRows<uint16_t>(outCh, dst, first, count, closeFrame);
         }
-    }
-    /// The whole-frame path's DMA buffer `i` (0, or 1 with doubleBuffer on) — where the base encodes a
-    /// frame. Null on a ring handle, which has no whole-frame buffer to hand out.
-    uint8_t*  busBuffer(uint8_t i)              { return platform::moonI80Ws2812Buffer(bus_, i); }
-    /// Bytes that buffer holds — the base's guard against encoding past the end after a live resize.
-    size_t    busCapacity() const               { return platform::moonI80Ws2812BufferCapacity(bus_); }
-    /// Clock buffer `i` out: one gapless DMA transfer of `bytes`, returning as soon as it is armed.
-    bool      busTransmit(uint8_t i, size_t bytes) { return platform::moonI80Ws2812Transmit(bus_, i, bytes); }
-    /// Block until buffer `i` has finished clocking (or `ms` elapses) — how the async double-buffer
-    /// defers its wait to the NEXT frame instead of stalling this one.
-    bool      busWait(uint8_t i, uint32_t ms)   { return platform::moonI80Ws2812Wait(bus_, i, ms); }
-    /// Measured wire time of the last frame, in µs — the `frameTime` KPI's source, and the output floor
-    /// the encode is compared against.
-    uint32_t  busLastTransmitUs() const         { return platform::moonI80Ws2812LastTransmitUs(bus_); }
-    /// Tear the bus down: stop the DMA before freeing anything it could still read. Safe on a
-    /// half-built bus, so a failed init and a live one release through the same path. The snapshot helper
-    /// task goes down FIRST — it reads snapshotBuf_, which the base frees on release, so no wake may land
-    /// after; stopPinnedTask joins, so once it returns the helper is provably gone.
-    void      busDeinit()                       { stopSnapHelper(); platform::moonI80Ws2812Deinit(bus_); }
-
-    /// Drive `frame` on a private bus and capture the wire back on `loopbackRxPin` (jumpered), so the
-    /// self-test bit-verifies what the peripheral ACTUALLY emitted — the one instrument that does not
-    /// take the driver's word for it.
-    platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
-                                            size_t dataBytes, uint8_t rowBits) {
-        return platform::moonI80Ws2812Loopback(this->busPinList(), this->busPinCount(),
-                                               static_cast<uint16_t>(clockPin),
-                                               static_cast<uint16_t>(loopbackRxPin),
-                                               frame, frameBytes, dataBytes, rowBits,
-                                               this->busClockMultiplier(),
-                                               ringRows, ringBufs, useRing);
     }
 
     /// WR is part of the bus identity, so a change to it rebuilds the bus — not just a data-pin edit.
-    void recordBusPins() { lastClockPin_ = clockPin; }
-    /// Do this driver's extra bus pins still match the live bus? WR is bus identity here, so the base
-    /// rebuilds when this goes false rather than routing a stale clock.
-    bool extraBusPinsCurrent() const { return lastClockPin_ == clockPin; }
+    void recordBusPins() override { lastClockPin_ = clockPin; }
+    /// Do this backend's extra bus pins still match the live bus? WR is bus identity here, so the
+    /// orchestrator rebuilds when this goes false rather than routing a stale clock.
+    bool extraBusPinsCurrent() const override { return lastClockPin_ == clockPin; }
 
-    // --- Fork-join helper (CRTP override of the base's default no-op hook) ---
+    // --- Fork-join helper (the ring's core-0 prime-half worker) ---
     // The pool PRIME (~14 ms at 48×256) is embarrassingly parallel — each ring buffer derives its rows from
     // its own index — so under the render/encode split (ring tick on core 1) one core-0 helper task primes
     // the bottom half of the pool while core 1 primes the top, per frame. The task is spawned once at ring
@@ -600,7 +611,7 @@ public:
     /// — i.e. the render/encode split is active and core 0 is the idle one to hand the bottom half. On
     /// core 0 (single-core, or the split disengaged), there is no idle second core, so stay serial and
     /// avoid spawning contention onto the very core doing the render.
-    bool snapHelperReady() const {
+    bool snapHelperReady() const override {
         return snapHelper_.impl != nullptr && !snapHelperBroken_ && platform::currentCore() == 1;
     }
 
@@ -659,7 +670,7 @@ public:
         // very first kick doesn't wait on a park signal the helper only emits after it starts running.
         snapHelperParked_.store(true, std::memory_order_release);
         snapHelperDone_.store(true, std::memory_order_release);
-        platform::spawnPinnedTask(snapHelper_, "mmSnap", &MoonLedDriver::snapHelperTramp, this,
+        platform::spawnPinnedTask(snapHelper_, "mmSnap", &MoonI80Peripheral::snapHelperTramp, this,
                                   4096, 5, /*core=*/0);
     }
     void stopSnapHelper() {
@@ -669,7 +680,7 @@ public:
     }
 
     static void snapHelperTramp(void* user) {
-        auto* self = static_cast<MoonLedDriver*>(user);
+        auto* self = static_cast<MoonI80Peripheral*>(user);
         while (!self->snapHelperStop_.load(std::memory_order_acquire)) {
             // Announce PARKED before blocking, so helperKick knows the previous job is fully done and the
             // helper is no longer reading helperJob_/the bounds — only then does it publish the next job.
@@ -699,5 +710,11 @@ private:
     platform::MoonI80Ws2812Handle bus_;
     int8_t lastClockPin_ = -1;
 };
+
+// Register the MoonI80 (own-GDMA below esp_lcd) backend into the peripheral registry once, at
+// static-init. Gated by this header's CONFIG_SOC include in main.cpp (LCD_CAM chips only). No separate
+// driver class — the one ParallelLedDriver drives it, chosen via the `peripheral` control.
+inline const bool kMoonI80PeripheralRegistered =
+    ParallelLedDriver::registerPeripheral("MoonI80", []() -> LedPeripheral* { return new MoonI80Peripheral(); });
 
 } // namespace mm

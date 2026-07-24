@@ -48,12 +48,22 @@
       }
     },
     {
+      "name": "fix-layers",
+      "description": "Layers: the top-level container the Layer hangs under — the standard tree the live device boots with. A pinned single Layer (parent_id-less, props.layouts) is the older shape the host runner tolerates but the device's live reachability check does not.",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
       "name": "fix-layer",
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
+      "parent_id": "Layers",
       "props": {
-        "layouts": "Layouts",
         "channelsPerLight": 3
       }
     },
@@ -70,7 +80,7 @@
       "id": "Drivers",
       "type": "Drivers",
       "props": {
-        "layer": "Layer"
+        "layers": "Layers"
       }
     },
     {
@@ -132,19 +142,37 @@
         "esp32": {
           "tick_us": [
             30,
-            32
+            912
           ],
           "free_heap": [
-            132244,
-            133524
+            97484,
+            134324
           ],
           "max_alloc_block": [
-            110592,
+            49152,
             110592
           ],
           "at": [
             "2026-07-22",
-            "2026-07-22"
+            "2026-07-24"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            34,
+            96487
+          ],
+          "free_heap": [
+            7579339,
+            8541659
+          ],
+          "max_alloc_block": [
+            86016,
+            90112
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
           ]
         }
       }
@@ -206,20 +234,38 @@
         },
         "esp32": {
           "tick_us": [
-            35,
-            37
+            30,
+            967
           ],
           "free_heap": [
-            127468,
-            127716
+            91320,
+            127772
           ],
           "max_alloc_block": [
-            110592,
+            73728,
             110592
           ],
           "at": [
             "2026-07-22",
-            "2026-07-22"
+            "2026-07-24"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            38,
+            87069
+          ],
+          "free_heap": [
+            7646227,
+            8535767
+          ],
+          "max_alloc_block": [
+            86016,
+            90112
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
           ]
         }
       }
@@ -297,20 +343,38 @@
         },
         "esp32": {
           "tick_us": [
-            32,
-            45
+            26,
+            1091
           ],
           "free_heap": [
-            130620,
-            130904
+            94188,
+            136324
           ],
           "max_alloc_block": [
-            110592,
+            90112,
             110592
           ],
           "at": [
             "2026-07-22",
-            "2026-07-22"
+            "2026-07-24"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            47,
+            96332
+          ],
+          "free_heap": [
+            7579367,
+            8528955
+          ],
+          "max_alloc_block": [
+            77824,
+            86016
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
           ]
         }
       }
@@ -372,20 +436,38 @@
         },
         "esp32": {
           "tick_us": [
-            33,
-            36
+            26,
+            1460
           ],
           "free_heap": [
-            115928,
-            128660
+            93556,
+            135688
           ],
           "max_alloc_block": [
-            110592,
+            90112,
             110592
           ],
           "at": [
             "2026-07-22",
-            "2026-07-22"
+            "2026-07-24"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            46,
+            101101
+          ],
+          "free_heap": [
+            7556343,
+            8528959
+          ],
+          "max_alloc_block": [
+            61440,
+            86016
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
           ]
         }
       }
@@ -446,19 +528,37 @@
         "esp32": {
           "tick_us": [
             33,
-            34
+            1463
           ],
           "free_heap": [
-            133756,
-            134328
+            99096,
+            135048
           ],
           "max_alloc_block": [
-            110592,
+            94208,
             110592
           ],
           "at": [
             "2026-07-22",
-            "2026-07-22"
+            "2026-07-24"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            37,
+            103475
+          ],
+          "free_heap": [
+            7659423,
+            8541875
+          ],
+          "max_alloc_block": [
+            86016,
+            90112
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
           ]
         }
       }
@@ -519,19 +619,37 @@
         "esp32": {
           "tick_us": [
             31,
-            32
+            974
           ],
           "free_heap": [
-            133604,
-            133632
+            98596,
+            134416
           ],
           "max_alloc_block": [
-            110592,
+            94208,
             110592
           ],
           "at": [
             "2026-07-22",
-            "2026-07-22"
+            "2026-07-24"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            34,
+            95335
+          ],
+          "free_heap": [
+            7661059,
+            8541451
+          ],
+          "max_alloc_block": [
+            86016,
+            90112
+          ],
+          "at": [
+            "2026-07-24",
+            "2026-07-24"
           ]
         }
       }

@@ -1,6 +1,6 @@
 # Architecture
 
-This document is the agreed-up-front **architecture contract**: what projectMM is designed to be. Most of it describes the system as it is today; a few load-bearing design decisions are settled but not yet implemented. Those are marked **🚧: designed, not implemented yet (high priority for release 2)**. The 🚧 marker means the design is committed (this is how it *will* work, and code should be written toward it), not that it's optional or undecided. Anything without the marker is live today.
+This document is the agreed-up-front **architecture contract**: what projectMM is designed to be. Most of it describes the system as it is today. A design described here is committed (this is the intended behavior, and code is written toward it), not optional or undecided.
 
 Coding conventions live in [coding-standards.md](coding-standards.md); how to build and run lives in [building.md](building.md); what is tested lives in [testing.md](testing.md).
 
@@ -164,7 +164,7 @@ When one module produces data another module reads on the hot path, the pattern 
 - The producer exposes the struct via a `const`-returning getter (or a `setX(const Foo*)` setter on the consumer).
 - The **consumer holds a `const Foo*`** received once at wiring time in `main.cpp`, and reads it on the hot path each frame.
 
-No registry, no subscription, no event bus. The consumer reads the latest value when it needs it; if the producer wrote nothing this tick, the consumer sees the previous value (acceptable for the kinds of data this exchanges: small state structs, periodic captures). This pull pattern is lock-free **for a small POD struct overwritten in place**: a reader on another core might catch a half-updated struct, but the result is one slightly-inconsistent read of a few fields that self-corrects next tick, visually harmless for the gyro/sensor data this carries, and cheaper than a lock. That tolerance does **not** extend to a large frame buffer the consumer copies out wholesale (an LED DMA buffer, an ArtNet packet): there a half-written read is a visible glitch, so that hand-off uses the 🚧 two-core double-buffer swap from [§ Parallelism](#parallelism), not this lock-free pull.
+No registry, no subscription, no event bus. The consumer reads the latest value when it needs it; if the producer wrote nothing this tick, the consumer sees the previous value (acceptable for the kinds of data this exchanges: small state structs, periodic captures). This pull pattern is lock-free **for a small POD struct overwritten in place**: a reader on another core might catch a half-updated struct, but the result is one slightly-inconsistent read of a few fields that self-corrects next tick, visually harmless for the gyro/sensor data this carries, and cheaper than a lock. That tolerance does **not** extend to a large frame buffer the consumer copies out wholesale (an LED DMA buffer, an ArtNet packet): there a half-written read is a visible glitch, so that hand-off uses the two-core double-buffer swap from [§ Parallelism](#parallelism), not this lock-free pull.
 
 **Push through a domain-neutral sink.** When the producer should hand bytes to a generic core service rather than expose a struct, the core defines a narrow interface and the producer pushes to it. The producer owns the data and its wire format; the core sink (the interface's implementer) knows only "take these bytes and do my generic job"; it has zero knowledge of what the bytes mean or which domain produced them. `BinaryBroadcaster` (`HttpServerModule` implements it: "broadcast these bytes to all WebSocket clients") is the example; the producer side lives in the light domain (see [§ The pipeline](#the-pipeline)).
 
@@ -274,7 +274,7 @@ Services are **user-add/deletable children of the `Services` container** — the
 Two domain-neutral services let several controllers act as one installation. They're core because nothing about them is light-specific; any domain spanning multiple devices uses the same two.
 
 - **Discovery**: devices find each other via mDNS. `NetworkModule` advertises each device today; this is live.
-- **🚧 Clock sync**: one leader broadcasts its elapsed time (millis); followers compute their offset, targeting sub-millisecond accuracy. A shared monotonic clock is the foundation any cross-device coordination builds on. The committed design; not yet wired.
+- **Clock sync**: one leader broadcasts its elapsed time (millis); followers compute their offset, targeting sub-millisecond accuracy. A shared monotonic clock is the foundation any cross-device coordination builds on. The committed design; not yet wired.
 
 What the synced clock is *for* is a domain question; the light domain's use of it (synced animation across a wall) is in [§ Multi-device sync](#multi-device-sync).
 
@@ -373,7 +373,7 @@ Each layer references the shared Layouts. The layer builds its mapping by walkin
 
 Effects produce light colours. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
 
-Effects use elapsed time for animation, not frame count. Animation speed becomes frame-rate independent: an effect looks the same at 30 fps and 60 fps. This is also what makes the 🚧 cross-device clock sync work: a shared elapsed-time base means synced visuals across controllers (see [§ Multi-device sync](#multi-device-sync)).
+Effects use elapsed time for animation, not frame count. Animation speed becomes frame-rate independent: an effect looks the same at 30 fps and 60 fps. This is also what makes the cross-device clock sync work: a shared elapsed-time base means synced visuals across controllers (see [§ Multi-device sync](#multi-device-sync)).
 
 Effects know nothing about hardware, protocols, physical LED layout, or mapping. They only see the logical grid the layer provides.
 
@@ -469,7 +469,7 @@ The shared output buffer is necessary when blend+map writes to arbitrary physica
 
 Each driver (a MoonModule) speaks one protocol:
 
-- **LED drivers**: WS2812 via RMT (multi-pin), plus two parallel-output paths on the newer chips. The S3's LCD_CAM i80 bus ([MultiPinLedDriver](moonmodules/light/moxygen/MultiPinLedDriver.md)) drives exactly 8 data GPIOs — the i80 bus claims every data line of its width, so a partial set is rejected. The P4's Parlio peripheral ([ParlioLedDriver](moonmodules/light/moxygen/ParlioLedDriver.md)) drives 1–8 lanes — it takes the data GPIOs directly, so any count up to 8 is valid. Both are DMA-driven. Platform-specific; all behind the platform boundary.
+- **LED drivers**: WS2812 via RMT (multi-pin), plus one DMA-driven parallel driver ([ParallelLedDriver](moonmodules/light/drivers.md#parallelled)) whose `peripheral` control picks the bus backend the chip supports — the `i80` bus (LCD_CAM on the S3/P4/S31, and the classic ESP32's I2S peripheral in i80 mode, which is the classic's only >8-lane parallel route — IDF's `esp_lcd` picks the backend per chip), our own-GDMA MoonI80 (LCD_CAM, adds the streaming ring + 74HCT595 expander), or the P4's Parlio. All are DMA-driven and behind the platform boundary; the driver rounds an i80 bus up around whatever pin count is configured (any count from 1) and parks unused lanes on a pin already driven.
 - **DMX / ArtNet**: sends DMX over UDP. Supports addressable LEDs and conventional DMX fixtures (pars, moving heads, dimmers).
 - **Preview**: streams light data to the web UI via WebSocket.
 - **Desktop output**: SDL2 or terminal for visual preview. Desktop also serves as a high-speed processing node, driving lights via ArtNet/DDP over the network.
@@ -497,7 +497,7 @@ The result is a memory ladder that tracks configuration exactly: module-absent �
 ### Buffer types
 
 - **Layer buffers**: one per active layer, holds the logical light data for one effect chain. Allocated in PSRAM when available. On memory-constrained devices, consumers may read from the layer buffer directly (no mapping, no blending, no physical buffer needed).
-- **Physical buffer**: when present, holds the blended+mapped output. It is a *blend* buffer, needed only for compositing (>1 layer, or any alpha/additive blend); it is not what provides producer/consumer parallelism. Under the 🚧 [two-core handover](#parallelism), parallelism comes from the consumer's own working copy, the encoded DMA buffer for a clockless LED driver, or the kernel socket buffer for ArtNet, which decouples the producer (filling the next Layer frame) from the consumer (transmitting the previous one).
+- **Physical buffer**: when present, holds the blended+mapped output. It is a *blend* buffer, needed only for compositing (>1 layer, or any alpha/additive blend); it is not what provides producer/consumer parallelism. Under the [two-core handover](#parallelism), parallelism comes from the consumer's own working copy, the encoded DMA buffer for a clockless LED driver, or the kernel socket buffer for ArtNet, which decouples the producer (filling the next Layer frame) from the consumer (transmitting the previous one).
 - **Mapping LUT**: flat lookup table for logical→physical. Read-only during rendering. PSRAM is fine: sequential reads are cache-friendly.
 
 All buffers are raw `uint8_t*` arrays sized `channelsPerLight * nrOfLights`. There is no pre-allocated per-channel array and no fixed channel layout: `channelsPerLight` is a runtime value (a `uint8_t`, so 1–255), so RGB (3), RGBW (4), and multi-channel DMX fixtures all use the same code path; the buffer simply gets wider. Channel layout is configured via offsets (see MoonLight's [LightsHeader](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h) pattern).
@@ -548,8 +548,8 @@ The architecture does not assume PSRAM is present. Buffer counts and sizes are d
 
 How lighting uses the core [multi-device runtime](#multi-device-runtime) (discovery + clock sync) to drive an installation spanning multiple controllers:
 
-- **🚧 Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so feeding them the leader's synced clock instead of each device's local one makes a wall of controllers animate in lockstep, regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
-- **🚧 Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards (the ArtNet *driver* already sends to fixtures today; device-to-device distribution as a sync topology is the part not yet wired). No bespoke protocol.
+- **Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so feeding them the leader's synced clock instead of each device's local one makes a wall of controllers animate in lockstep, regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
+- **Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards (the ArtNet *driver* already sends to fixtures today; device-to-device distribution as a sync topology is the part not yet wired). No bespoke protocol.
 
 # Web UI
 

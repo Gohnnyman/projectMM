@@ -19,9 +19,11 @@
 #include "doctest.h"
 #include "core/Control.h"
 #include "core/JsonUtil.h"
+#include "core/JsonSink.h"   // PaletteOptionsFn's JsonSink parameter (the palette-crash regression)
 
 #include <cstdint>
 #include <cstring>
+#include <string>   // std::string — the overlong-label regression builds its JSON
 
 // hasKey distinguishes an absent key from one whose value is 0 — the capability the
 // fix relies on. parseInt alone can't (returns 0 for both).
@@ -168,4 +170,138 @@ TEST_CASE("a Text control with no validator accepts anything that fits") {
     CHECK(mm::applyControlValue(controls[0], "{\"label\":\"hi\"}",
                                 "label", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
     CHECK(std::strcmp(label, "hi") == 0);
+}
+
+// A Palette control's aux holds a PaletteOptionsFn (a FUNCTION POINTER), not an options array. The
+// Select label-match path must therefore NOT run for Palette: reinterpreting a function pointer as a
+// char* const* and walking it dereferences code bytes — undefined behavior, a near-certain crash on
+// ESP32. The regression: a string value on a palette must fall to numeric-index apply (parseInt → 0),
+// exactly the harmless behavior before the label-match feature existed. (Robust to any input.)
+static void paletteOptions(mm::JsonSink& sink) {
+    sink.append("[\"Rainbow\",\"Ocean\",\"Forest\"]");   // a real fn body; never read via the aux cast
+}
+TEST_CASE("applyControlValue: a string palette value does not crash and applies numerically") {
+    mm::ControlList controls;
+    uint8_t palette = 1;
+    controls.addPalette("palette", palette, paletteOptions, 3);
+
+    // A STRING value (as a hand-edited config or a mistaken client could send). Before the fix this
+    // walked the function pointer as an options array. After: string → parseInt → 0, clamped in range.
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":\"Rainbow\"}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(palette == 0);   // numeric fallback, no function-pointer deref
+
+    // A numeric value still applies straight through.
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":2}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(palette == 2);
+}
+
+// The complement: a Select's aux IS the options array, so a string LABEL value matches an option by
+// name (the board-portable catalog path — a peripheral label is stable while its filtered index is
+// not). This keeps the label-match feature working where it is safe.
+TEST_CASE("applyControlValue: a Select accepts an option label as a string value") {
+    mm::ControlList controls;
+    uint8_t sel = 0;
+    static const char* const opts[] = {"i80", "MoonI80", "Parlio"};
+    controls.addSelect("peripheral", sel, opts, 3);
+
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":\"Parlio\"}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 2);   // matched the "Parlio" label → index 2
+
+    // A numeric index still works alongside the label path.
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":1}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 1);
+}
+
+// An empty option list (max == 0) has no valid index — applying a value must not manufacture index 0.
+// Strict rejects; Lenient (Clamp) leaves the bound value untouched. Guards a board-filtered Select that
+// filtered down to zero options (e.g. a peripheral list on a chip that supports none).
+TEST_CASE("applyControlValue: an empty Select rejects/no-ops instead of accepting index 0") {
+    mm::ControlList controls;
+    uint8_t sel = 7;                       // a sentinel that a spurious index-0 write would clobber
+    static const char* const noOpts[] = {nullptr};
+    controls.addSelect("peripheral", sel, noOpts, 0);   // zero options
+
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":0}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 7);   // untouched — no index 0 manufactured
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":\"i80\"}", "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 7);   // a label on an empty list is also a no-op
+    CHECK(mm::applyControlValue(controls[0], "{\"peripheral\":0}", "peripheral",
+                                mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
+}
+
+// The Palette twin of the empty-Select guard: an empty palette (addPalette(..., 0)) has no valid index,
+// so a value must not write index 0 — and critically must not let `hi = c.max - 1` underflow to -1 and
+// clamp the stored value up to 255. Lenient leaves the sentinel untouched; Strict returns OutOfRange.
+TEST_CASE("applyControlValue: an empty Palette rejects/no-ops and never underflows to 255") {
+    mm::ControlList controls;
+    uint8_t pal = 7;                       // sentinel: a spurious index-0 OR a 255 underflow would clobber it
+    controls.addPalette("palette", pal, paletteOptions, 0);   // zero options
+
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":0}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(pal == 7);   // untouched — neither index 0 nor a 255 underflow
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":3}", "palette",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(pal == 7);   // a representative palette value is also a no-op on an empty list
+    CHECK(pal != 255); // explicit: the c.max-1 underflow the guard prevents
+    CHECK(mm::applyControlValue(controls[0], "{\"palette\":0}", "palette",
+                                mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
+}
+
+// A label longer than any real option (here, longer than the parse buffer) must NOT match a real option
+// by prefix — it is "no such option", so Lenient keeps the default and Strict rejects. Guards against a
+// truncated value spuriously equalling a shorter option that shares its leading characters.
+TEST_CASE("applyControlValue: an overlong Select label does not prefix-match a real option") {
+    mm::ControlList controls;
+    uint8_t sel = 0;
+    static const char* const opts[] = {"i80", "MoonI80", "Parlio"};
+    controls.addSelect("peripheral", sel, opts, 3);
+
+    // 80 'M' chars — far past any option and past the parse buffer; must not match "MoonI80" by prefix.
+    std::string longVal(80, 'M');
+    std::string json = "{\"peripheral\":\"" + longVal + "\"}";
+    CHECK(mm::applyControlValue(controls[0], json.c_str(), "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 0);   // default kept, no spurious match
+    CHECK(mm::applyControlValue(controls[0], json.c_str(), "peripheral",
+                                mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
+}
+
+// The exact boundary of the overlong guard. The Select label parses into a 64-byte buffer and a value
+// that FILLS it (length >= 63, i.e. buffer_size - 1) is treated as overlong — it may have been truncated
+// to the cap, so it cannot legitimately equal any option and the match is skipped. A value one shorter
+// (62) is NOT overlong and matches normally. This pins the threshold so a future buffer-size change
+// can't silently shift where a legitimate long label starts being rejected. Real option labels sit far
+// below this (the longest peripheral/mode label is ~35 chars), so the boundary only ever fences off
+// junk — but the test makes that contract explicit rather than incidental.
+TEST_CASE("applyControlValue: the Select overlong-label boundary is exactly the parse buffer") {
+    mm::ControlList controls;
+    uint8_t sel = 0;
+    // Two options at the boundary lengths: one 62 chars (just under the cap), one 63 (at the cap).
+    static const std::string at62(62, 'a');
+    static const std::string at63(63, 'b');
+    static const char* const opts[] = {"i80", at62.c_str(), at63.c_str()};
+    controls.addSelect("peripheral", sel, opts, 3);
+
+    // 62 chars: not overlong → matches option index 1.
+    const std::string j62 = "{\"peripheral\":\"" + at62 + "\"}";
+    CHECK(mm::applyControlValue(controls[0], j62.c_str(), "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 1);
+
+    // 63 chars: fills the buffer → treated as overlong, the match is skipped even though an option of
+    // that exact text EXISTS. Lenient keeps the current value; Strict rejects.
+    sel = 0;
+    const std::string j63 = "{\"peripheral\":\"" + at63 + "\"}";
+    CHECK(mm::applyControlValue(controls[0], j63.c_str(), "peripheral",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel == 0);   // NOT matched to index 2 — the cap fences it off
+    CHECK(mm::applyControlValue(controls[0], j63.c_str(), "peripheral",
+                                mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }

@@ -14,9 +14,10 @@
 // Host test of the deferred-wait DOUBLE-BUFFER logic in ParallelLedDriver::tick()
 // (Step 1.5). The real LCD/Parlio peripherals are inert on the host (desktop stubs
 // return null), so the alternation/wait/drain invariants can't be exercised through
-// them. Instead a MockDriver supplies the CRTP bus* hooks against two in-memory
-// buffers and RECORDS the call sequence, so the base loop's behavior is pinned on
-// the host exactly where the hardware would run it:
+// them. Instead a MockPeripheral (a runtime LedPeripheral backend) supplies the bus*
+// hooks against two in-memory buffers and RECORDS the call sequence, so the
+// orchestrator's loop behavior is pinned on the host exactly where the hardware
+// would run it:
 //   - double-buffer mode alternates encode target 0,1,0,1,… and waits on a buffer
 //     only right before it's REUSED (never after every transmit);
 //   - single-buffer mode (mock offers no buffer 1) stays on buffer 0 and waits every
@@ -28,43 +29,37 @@ namespace {
 
 using mm::nrOfLightsType;
 
-// A record of one bus call, so a test can assert the exact ordering the base emits.
+// A record of one bus call, so a test can assert the exact ordering the orchestrator emits.
 struct Call {
     enum Kind { Transmit, Wait } kind;
     uint8_t buffer;
 };
 
-// CRTP peripheral mock: two heap buffers, a settable "double-buffer available" flag,
-// and a call log. Everything the base's tick()/reinit()/deinit() reach is here.
-class MockParallelDriver : public mm::ParallelLedDriver<MockParallelDriver> {
+// LedPeripheral mock: two heap buffers, a settable "double-buffer available" flag,
+// and a call log. Everything the orchestrator's tick()/reinit()/deinit() reach is here.
+class MockPeripheral : public mm::LedPeripheral {
 public:
     // --- test knobs / observation ---
     bool twoBuffers = true;               // false → single-buffer mode (busBuffer(1) == null)
+    bool canDoubleBuffer = true;          // false → this peripheral reports supportsDoubleBuffer()==false
     std::vector<Call> calls;              // transmit/wait order, in call sequence
-    uint8_t activeForTest() const { return active_; }
-    bool inFlightForTest(uint8_t i) const { return inFlight_[i]; }
 
-    // --- CRTP hooks (mock, host-only) ---
-    static constexpr uint8_t lanesAvailable() { return 8; }   // pretend this chip has lanes
-    static constexpr bool kPowerOfTwoBus = false;
-    static constexpr bool kLoopbackFullWidth = false;
+    // --- LedPeripheral hooks (mock, host-only) ---
+    uint8_t lanesAvailable() const override { return 8; }   // pretend this chip has lanes
+    bool powerOfTwoBus() const override { return false; }
+    bool loopbackFullWidth() const override { return false; }
     // The mock bus is memory, not a peripheral, so it can host the 74HCT595 expander — which is what
     // lets the shift-register lane/frame arithmetic be pinned on the host (unit_ParallelSlots covers
     // the encoded bits; here it's the driver plumbing).
-    static constexpr bool kSupportsPinExpander = true;
-    static constexpr const char* kInitFailMsg = "mock init failed";
+    bool supportsPinExpander() const override { return true; }
+    bool supportsDoubleBuffer() const override { return canDoubleBuffer; }   // MoonI80 reports false
+    const char* initFailMsg() const override { return "mock init failed"; }
+    mm::LedHwBlock hwBlock() const override { return mm::LedHwBlock::None; }   // mock drives no real block
 
-    void addBusControls() {}
-    bool busControlTriggersBuild(const char*) const { return false; }
-    void recordBusPins() {}
-    bool extraBusPinsCurrent() const { return true; }
-    const char* validateBusPins(const uint16_t*, uint8_t) const { return nullptr; }
-    const char* validateBusFatal() const { return nullptr; }
-
-    // busInit gets `wantSecond` from the base (= doubleBuffer). The mock allocates the second
+    // busInit gets `wantSecond` from the orchestrator (= doubleBuffer). The mock allocates the second
     // buffer only when BOTH the flag wants it AND the test's twoBuffers knob allows it (so a test
     // can simulate a memory-tight board that refuses the second buffer even with async on).
-    bool busInit(size_t frameBytes, bool wantSecond) {
+    bool busInit(size_t frameBytes, bool wantSecond) override {
         cap_ = frameBytes;
         buf_[0].assign(frameBytes, 0);
         if (wantSecond && twoBuffers) buf_[1].assign(frameBytes, 0);
@@ -72,26 +67,26 @@ public:
         inited_ = true;
         return true;
     }
-    uint8_t* busBuffer(uint8_t i) {
+    uint8_t* busBuffer(uint8_t i) override {
         if (i >= 2 || buf_[i].empty()) return nullptr;
         return buf_[i].data();
     }
-    size_t busCapacity() const { return cap_; }
-    bool busTransmit(uint8_t i, size_t /*bytes*/) {
+    size_t busCapacity() const override { return cap_; }
+    bool busTransmit(uint8_t i, size_t /*bytes*/) override {
         calls.push_back({Call::Transmit, i});
         return true;   // the mock transfer always "starts"
     }
     // Returns whether the transfer completed. `waitTimesOut` makes every wait report a TIMEOUT, so a
     // test can prove the driver refuses to re-encode into a buffer the DMA may still be reading.
-    bool busWait(uint8_t i, uint32_t) {
+    bool busWait(uint8_t i, uint32_t) override {
         calls.push_back({Call::Wait, i});
         return !waitTimesOut;
     }
     bool waitTimesOut = false;
-    uint32_t busLastTransmitUs() const { return lastTransmitUs; }   // mock wire-time KPI
+    uint32_t busLastTransmitUs() const override { return lastTransmitUs; }   // mock wire-time KPI
     uint32_t lastTransmitUs = 0;   // a test can set this to check the frameTime string formatting
-    void busDeinit() { cap_ = 0; buf_[0].clear(); buf_[1].clear(); inited_ = false; }
-    mm::platform::RmtLoopbackResult busLoopback(const uint8_t*, size_t, size_t, uint8_t) {
+    void busDeinit() override { cap_ = 0; buf_[0].clear(); buf_[1].clear(); inited_ = false; }
+    mm::platform::RmtLoopbackResult busLoopback(const uint8_t*, size_t, size_t, uint8_t) override {
         return {};
     }
 
@@ -102,12 +97,13 @@ private:
 };
 
 // Wire a mock driver onto a `lights`-light source buffer + a GRB correction, and drive it ready.
-// `async` sets doubleBuffer (whether the base requests a second buffer); `canSecond` is the mock's
-// board-fits-a-second-buffer knob (lets a test simulate a memory-tight board that refuses it even
-// with async on). Mirrors the other parallel-driver test helpers.
-void wire(MockParallelDriver& d, mm::Buffer& src, mm::Correction& corr,
+// `async` sets doubleBuffer (whether the orchestrator requests a second buffer); `canSecond` is the
+// mock's board-fits-a-second-buffer knob (lets a test simulate a memory-tight board that refuses it
+// even with async on). Mirrors the other parallel-driver test helpers.
+void wire(mm::ParallelLedDriver& d, MockPeripheral& peripheral, mm::Buffer& src, mm::Correction& corr,
           nrOfLightsType lights, bool async, bool canSecond = true) {
-    d.twoBuffers = canSecond;
+    peripheral.twoBuffers = canSecond;
+    d.setPeripheralForTest(&peripheral);
     d.doubleBuffer = async;
     std::strcpy(d.pins, "1,2,3,4");
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
@@ -125,10 +121,11 @@ void wire(MockParallelDriver& d, mm::Buffer& src, mm::Correction& corr,
 // the first two ticks transmit without a preceding wait (both buffers start idle),
 // and from tick 3 on each tick waits on the buffer it's about to reuse.
 TEST_CASE("ParallelLedDriver double-buffer alternates and defers the wait") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/true);
+    wire(d, peripheral, src, corr, 64, /*async=*/true);
 
     // Tick 1: buffer 0 idle → no wait, transmit 0, flip to 1.
     d.tick();
@@ -145,24 +142,25 @@ TEST_CASE("ParallelLedDriver double-buffer alternates and defers the wait") {
     d.tick();
     CHECK(d.activeForTest() == 0);
 
-    // The exact call order the base emitted.
-    REQUIRE(d.calls.size() == 6);
-    CHECK(d.calls[0].kind == Call::Transmit); CHECK(d.calls[0].buffer == 0);
-    CHECK(d.calls[1].kind == Call::Transmit); CHECK(d.calls[1].buffer == 1);
-    CHECK(d.calls[2].kind == Call::Wait);     CHECK(d.calls[2].buffer == 0);
-    CHECK(d.calls[3].kind == Call::Transmit); CHECK(d.calls[3].buffer == 0);
-    CHECK(d.calls[4].kind == Call::Wait);     CHECK(d.calls[4].buffer == 1);
-    CHECK(d.calls[5].kind == Call::Transmit); CHECK(d.calls[5].buffer == 1);
+    // The exact call order the orchestrator emitted.
+    REQUIRE(peripheral.calls.size() == 6);
+    CHECK(peripheral.calls[0].kind == Call::Transmit); CHECK(peripheral.calls[0].buffer == 0);
+    CHECK(peripheral.calls[1].kind == Call::Transmit); CHECK(peripheral.calls[1].buffer == 1);
+    CHECK(peripheral.calls[2].kind == Call::Wait);     CHECK(peripheral.calls[2].buffer == 0);
+    CHECK(peripheral.calls[3].kind == Call::Transmit); CHECK(peripheral.calls[3].buffer == 0);
+    CHECK(peripheral.calls[4].kind == Call::Wait);     CHECK(peripheral.calls[4].buffer == 1);
+    CHECK(peripheral.calls[5].kind == Call::Transmit); CHECK(peripheral.calls[5].buffer == 1);
 }
 
 // Single-buffer mode (no second buffer): the driver stays on buffer 0 and waits on
 // it EVERY frame before re-encoding — the old synchronous wait-after-transmit path,
 // so a memory-tight board keeps its old fps rather than failing to init.
 TEST_CASE("ParallelLedDriver single-buffer mode waits every frame on buffer 0") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/false);   // default: no second buffer, synchronous path
+    wire(d, peripheral, src, corr, 64, /*async=*/false);   // default: no second buffer, synchronous path
 
     d.tick();   // tickSync: transmit 0, wait 0
     CHECK(d.activeForTest() == 0);
@@ -171,15 +169,15 @@ TEST_CASE("ParallelLedDriver single-buffer mode waits every frame on buffer 0") 
     d.tick();   // transmit 0, wait 0
 
     // tickSync waits RIGHT AFTER each transmit (the original synchronous order): T0,W0 ×3.
-    REQUIRE(d.calls.size() == 6);
-    CHECK(d.calls[0].kind == Call::Transmit); CHECK(d.calls[0].buffer == 0);
-    CHECK(d.calls[1].kind == Call::Wait);     CHECK(d.calls[1].buffer == 0);
-    CHECK(d.calls[2].kind == Call::Transmit); CHECK(d.calls[2].buffer == 0);
-    CHECK(d.calls[3].kind == Call::Wait);     CHECK(d.calls[3].buffer == 0);
-    CHECK(d.calls[4].kind == Call::Transmit); CHECK(d.calls[4].buffer == 0);
-    CHECK(d.calls[5].kind == Call::Wait);     CHECK(d.calls[5].buffer == 0);
+    REQUIRE(peripheral.calls.size() == 6);
+    CHECK(peripheral.calls[0].kind == Call::Transmit); CHECK(peripheral.calls[0].buffer == 0);
+    CHECK(peripheral.calls[1].kind == Call::Wait);     CHECK(peripheral.calls[1].buffer == 0);
+    CHECK(peripheral.calls[2].kind == Call::Transmit); CHECK(peripheral.calls[2].buffer == 0);
+    CHECK(peripheral.calls[3].kind == Call::Wait);     CHECK(peripheral.calls[3].buffer == 0);
+    CHECK(peripheral.calls[4].kind == Call::Transmit); CHECK(peripheral.calls[4].buffer == 0);
+    CHECK(peripheral.calls[5].kind == Call::Wait);     CHECK(peripheral.calls[5].buffer == 0);
     // Buffer 1 is never allocated or touched.
-    for (const auto& c : d.calls) CHECK(c.buffer == 0);
+    for (const auto& c : peripheral.calls) CHECK(c.buffer == 0);
 }
 
 // doubleBuffer is the on/off knob AND drives allocation: OFF (default) allocates ONE buffer and
@@ -188,63 +186,95 @@ TEST_CASE("ParallelLedDriver single-buffer mode waits every frame on buffer 0") 
 // it off never holds the second buffer. This mirrors the live toggle (the A/B knob), which routes
 // through applyState()/prepare() the same way.
 TEST_CASE("ParallelLedDriver doubleBuffer toggles allocation and path") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/false);
+    wire(d, peripheral, src, corr, 64, /*async=*/false);
 
     // OFF: single buffer only — buffer 1 was never allocated, and tick runs synchronous.
-    CHECK(d.busBuffer(1) == nullptr);
+    CHECK(peripheral.busBuffer(1) == nullptr);
     d.tick();
-    REQUIRE(d.calls.size() == 2);   // T0, W0 — synchronous
-    CHECK(d.calls[0].kind == Call::Transmit);
-    CHECK(d.calls[1].kind == Call::Wait);
+    REQUIRE(peripheral.calls.size() == 2);   // T0, W0 — synchronous
+    CHECK(peripheral.calls[0].kind == Call::Transmit);
+    CHECK(peripheral.calls[1].kind == Call::Wait);
 
     // Flip ON and re-prepare (what a live control change does): the second buffer is now allocated.
     d.doubleBuffer = true;
     d.applyState();
-    CHECK(d.busBuffer(1) != nullptr);
-    d.calls.clear();
+    CHECK(peripheral.busBuffer(1) != nullptr);
+    peripheral.calls.clear();
     d.tick();   // async: transmit 0, no wait, flip to 1
     d.tick();   // async: transmit 1, no wait, flip to 0
     CHECK(d.activeForTest() == 0);
     // Two transmits, no interleaved wait (both buffers idle at start) — the deferred-wait pattern.
-    REQUIRE(d.calls.size() == 2);
-    CHECK(d.calls[0].kind == Call::Transmit); CHECK(d.calls[0].buffer == 0);
-    CHECK(d.calls[1].kind == Call::Transmit); CHECK(d.calls[1].buffer == 1);
+    REQUIRE(peripheral.calls.size() == 2);
+    CHECK(peripheral.calls[0].kind == Call::Transmit); CHECK(peripheral.calls[0].buffer == 0);
+    CHECK(peripheral.calls[1].kind == Call::Transmit); CHECK(peripheral.calls[1].buffer == 1);
 
     // Flip back OFF and re-prepare: the second buffer is freed, back to synchronous.
     d.doubleBuffer = false;
     d.applyState();
-    CHECK(d.busBuffer(1) == nullptr);
+    CHECK(peripheral.busBuffer(1) == nullptr);
+}
+
+// Regression (MoonI80 double-buffer freeze): a peripheral that reports supportsDoubleBuffer()==false
+// must run SINGLE-buffer even when the doubleBuffer control is ON — its own-GDMA two-buffer completion
+// handshake races and wedges the bus (the ~200 ms-per-frame freeze). The orchestrator gates the
+// second-buffer request on supportsDoubleBuffer(), so the peripheral never gets a second buffer and the
+// tick stays on the proven synchronous path. The saved doubleBuffer value is preserved (it just doesn't
+// engage here), so switching to a peripheral that DOES support it restores the async behavior.
+TEST_CASE("ParallelLedDriver: a peripheral that can't double-buffer stays single-buffer with doubleBuffer ON") {
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
+    mm::Buffer src;
+    mm::Correction corr;
+    peripheral.canDoubleBuffer = false;   // the MoonI80 case: supportsDoubleBuffer() == false
+    wire(d, peripheral, src, corr, 64, /*async=*/true);   // doubleBuffer ON, but the peripheral refuses async
+
+    // The second buffer is NEVER requested (busInit got wantSecond=false), so it isn't allocated...
+    CHECK(peripheral.busBuffer(1) == nullptr);
+    // ...and the saved control value is untouched (survives a round-trip through this peripheral).
+    CHECK(d.doubleBuffer == true);
+
+    // The tick runs the SYNCHRONOUS single-buffer path: transmit 0 then wait 0, every frame, on buffer 0.
+    d.tick();
+    d.tick();
+    for (const auto& c : peripheral.calls) CHECK(c.buffer == 0);   // buffer 1 never touched
+    REQUIRE(peripheral.calls.size() == 4);
+    CHECK(peripheral.calls[0].kind == Call::Transmit); CHECK(peripheral.calls[1].kind == Call::Wait);
+    CHECK(peripheral.calls[2].kind == Call::Transmit); CHECK(peripheral.calls[3].kind == Call::Wait);
+    CHECK(d.activeForTest() == 0);   // never flips — single-buffer stays on 0
 }
 
 // A board that WANTS async but can't fit the second buffer (memory-tight) degrades to single-buffer
 // synchronous — never fails to init. doubleBuffer is on, but the mock refuses the second buffer.
 TEST_CASE("ParallelLedDriver async degrades to synchronous when second buffer won't fit") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/true, /*canSecond=*/false);
-    CHECK(d.busBuffer(1) == nullptr);   // requested but didn't fit
+    wire(d, peripheral, src, corr, 64, /*async=*/true, /*canSecond=*/false);
+    CHECK(peripheral.busBuffer(1) == nullptr);   // requested but didn't fit
     d.tick();
-    REQUIRE(d.calls.size() == 2);       // synchronous path (T0, W0)
-    CHECK(d.calls[0].kind == Call::Transmit);
-    CHECK(d.calls[1].kind == Call::Wait);
+    REQUIRE(peripheral.calls.size() == 2);       // synchronous path (T0, W0)
+    CHECK(peripheral.calls[0].kind == Call::Transmit);
+    CHECK(peripheral.calls[1].kind == Call::Wait);
 }
 
 // The frameTime KPI: tick1s() pulls the platform's measured wire time via busLastTransmitUs(). The
 // string formatting + the actual DMA timing are verified on hardware (the metric's whole point is a
 // real wire measurement); here we just pin that tick1s reads the seam without crashing pre-first-frame.
 TEST_CASE("ParallelLedDriver frameTime tick1s is safe before the first transfer") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/true);
+    wire(d, peripheral, src, corr, 64, /*async=*/true);
     d.tick1s();                 // lastTransmitUs == 0 → placeholder path, must not divide by zero
-    d.lastTransmitUs = 7680;    // the 256-light WS2812 floor
+    peripheral.lastTransmitUs = 7680;    // the 256-light WS2812 floor
     d.tick1s();                 // real path (1e6/7680 = 130 fps) — must not crash
-    CHECK(d.busLastTransmitUs() == 7680);
+    CHECK(peripheral.busLastTransmitUs() == 7680);
 }
 
 // Robustness + no-caps (regression for a live bootloop): a correction can carry ANY channel count
@@ -254,7 +284,9 @@ TEST_CASE("ParallelLedDriver frameTime tick1s is safe before the first transfer"
 // driver must DRIVE it (size the frame + encode), not idle and not crash.
 TEST_CASE("ParallelLedDriver drives an N-channel (>4) correction without overflow") {
     using R = mm::ChannelRole;
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
+    d.setPeripheralForTest(&peripheral);
     mm::Buffer src;
     mm::Correction corr;
     d.doubleBuffer = true;
@@ -273,16 +305,16 @@ TEST_CASE("ParallelLedDriver drives an N-channel (>4) correction without overflo
     // frameBytes scales with 8). The encode runs and transmits; the ASan/valgrind-clean run (and the
     // hardware regression on the SE16) is the overflow proof — a 4-byte stride would have corrupted
     // memory here.
-    CHECK(d.severity() != MockParallelDriver::Severity::Error);
+    CHECK(d.severity() != mm::ParallelLedDriver::Severity::Error);
     CHECK(d.frameBytes() > 0);
     // The status reports the total channel count for a multi-channel fixture (lights × channels) —
     // the DMX-universe footprint the user sizes against, not just the light count.
     CHECK(std::string(d.status()).find("(") != std::string::npos);   // "... (N channels)"
     CHECK(std::string(d.status()).find("channels") != std::string::npos);
-    d.calls.clear();
+    peripheral.calls.clear();
     d.tick();
-    REQUIRE(d.calls.size() >= 1);
-    CHECK(d.calls[0].kind == Call::Transmit);   // it actually drove the fixture
+    REQUIRE(peripheral.calls.size() >= 1);
+    CHECK(peripheral.calls[0].kind == Call::Transmit);   // it actually drove the fixture
 }
 
 // A reinit (grid resize / pin edit) must drain BOTH buffers' in-flight transfers
@@ -290,16 +322,17 @@ TEST_CASE("ParallelLedDriver drives an N-channel (>4) correction without overflo
 // use-after-free. After two ticks both buffers are in flight; the resize's reinit
 // waits on both before rebuilding. (async on → two buffers.)
 TEST_CASE("ParallelLedDriver reinit drains both in-flight buffers") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/true);
+    wire(d, peripheral, src, corr, 64, /*async=*/true);
 
     d.tick();   // transmit 0 (in flight)
     d.tick();   // transmit 1 (in flight)
     CHECK(d.inFlightForTest(0) == true);
     CHECK(d.inFlightForTest(1) == true);
-    const size_t before = d.calls.size();
+    const size_t before = peripheral.calls.size();
 
     // Force a rebuild by growing the grid, which changes frameBytes → reinit().
     REQUIRE(src.allocate(256, 3) == true);
@@ -308,9 +341,9 @@ TEST_CASE("ParallelLedDriver reinit drains both in-flight buffers") {
 
     // Both buffers were waited on during the drain (order-independent — assert both present).
     bool waited0 = false, waited1 = false;
-    for (size_t i = before; i < d.calls.size(); i++) {
-        if (d.calls[i].kind == Call::Wait && d.calls[i].buffer == 0) waited0 = true;
-        if (d.calls[i].kind == Call::Wait && d.calls[i].buffer == 1) waited1 = true;
+    for (size_t i = before; i < peripheral.calls.size(); i++) {
+        if (peripheral.calls[i].kind == Call::Wait && peripheral.calls[i].buffer == 0) waited0 = true;
+        if (peripheral.calls[i].kind == Call::Wait && peripheral.calls[i].buffer == 1) waited1 = true;
     }
     CHECK(waited0);
     CHECK(waited1);
@@ -326,32 +359,33 @@ TEST_CASE("ParallelLedDriver reinit drains both in-flight buffers") {
 // inFlight_ either way; 🐇 CodeRabbit caught it.) The contract now: on timeout the buffer STAYS
 // in-flight, the frame is skipped, and the driver re-waits next tick — self-healing, never corrupting.
 TEST_CASE("ParallelLedDriver: a timed-out wait never re-encodes into the live buffer") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/true);
+    wire(d, peripheral, src, corr, 64, /*async=*/true);
 
     d.tick();   // encode+transmit buffer 0 → in flight
     d.tick();   // encode+transmit buffer 1 → in flight; next tick must reuse buffer 0
     REQUIRE(d.inFlightForTest(0) == true);
 
-    d.waitTimesOut = true;          // buffer 0's transfer is wedged (the DMA never completes)
-    const size_t before = d.calls.size();
+    peripheral.waitTimesOut = true;          // buffer 0's transfer is wedged (the DMA never completes)
+    const size_t before = peripheral.calls.size();
     d.tick();                       // must NOT encode/transmit into buffer 0
 
     // It waited on 0 and then gave up — no Encode, no Transmit followed.
     bool transmitted = false;
-    for (size_t i = before; i < d.calls.size(); i++)
-        if (d.calls[i].kind == Call::Transmit) transmitted = true;
+    for (size_t i = before; i < peripheral.calls.size(); i++)
+        if (peripheral.calls[i].kind == Call::Transmit) transmitted = true;
     CHECK_FALSE(transmitted);            // the live buffer was NOT reused
     CHECK(d.inFlightForTest(0) == true); // still marked in flight, so the next tick re-waits
 
     // The DMA completes: the very next tick proceeds normally — it self-heals, no reinit needed.
-    d.waitTimesOut = false;
+    peripheral.waitTimesOut = false;
     d.tick();
     bool transmittedNow = false;
-    for (size_t i = before; i < d.calls.size(); i++)
-        if (d.calls[i].kind == Call::Transmit) transmittedNow = true;
+    for (size_t i = before; i < peripheral.calls.size(); i++)
+        if (peripheral.calls[i].kind == Call::Transmit) transmittedNow = true;
     CHECK(transmittedNow);
 }
 
@@ -362,29 +396,30 @@ TEST_CASE("ParallelLedDriver: a timed-out wait never re-encodes into the live bu
 // control. So once given up, the driver periodically lets one frame through; if the bus is alive again,
 // output resumes on its own. This pins that retry-recovery.
 TEST_CASE("ParallelLedDriver: give-up self-recovers on a periodic retry, no reinit needed") {
-    MockParallelDriver d;
+    mm::ParallelLedDriver d;
+    MockPeripheral peripheral;
     mm::Buffer src;
     mm::Correction corr;
-    wire(d, src, corr, 64, /*async=*/true);
+    wire(d, peripheral, src, corr, 64, /*async=*/true);
 
     // Wedge the bus and tick until it gives up: every wait times out, so each frame is a dead strike.
-    d.waitTimesOut = true;
+    peripheral.waitTimesOut = true;
     for (int i = 0; i < 40; i++) d.tick();   // well past kDeadFramesBeforeGiveUp
     CHECK(d.severity() == mm::DriverBase::Severity::Error);   // reported "output stalled"
 
     // While given up, a tick must NOT transmit every frame (that would keep spending the render thread).
-    size_t mark = d.calls.size();
+    size_t mark = peripheral.calls.size();
     d.tick();
     bool transmittedWhileGivenUp = false;
-    for (size_t i = mark; i < d.calls.size(); i++)
-        if (d.calls[i].kind == Call::Transmit) transmittedWhileGivenUp = true;
+    for (size_t i = mark; i < peripheral.calls.size(); i++)
+        if (peripheral.calls[i].kind == Call::Transmit) transmittedWhileGivenUp = true;
     CHECK_FALSE(transmittedWhileGivenUp);   // this tick was inside the quiet window, not a retry
 
     // The bus comes back to life. Within one retry window the driver lets a frame through, it completes,
     // and output resumes — no config change, no reinit. Recovery means the driver actually LEFT the
     // give-up state (its Error status cleared), not merely that one retry Transmit happened: a retry that
     // transmits but whose wait still fails would keep the driver given-up, and that must NOT count.
-    d.waitTimesOut = false;
+    peripheral.waitTimesOut = false;
     bool recovered = false;
     for (int i = 0; i < 200 && !recovered; i++) {   // several retry windows' worth of margin
         d.tick();
@@ -393,10 +428,10 @@ TEST_CASE("ParallelLedDriver: give-up self-recovers on a periodic retry, no rein
     CHECK(recovered);   // the give-up Error state cleared — the driver is transmitting normally again
 
     // And it keeps transmitting on the following ticks (steady-state, not a one-off retry blip).
-    const size_t after = d.calls.size();
+    const size_t after = peripheral.calls.size();
     d.tick();
     bool stillTransmitting = false;
-    for (size_t j = after; j < d.calls.size(); j++)
-        if (d.calls[j].kind == Call::Transmit) stillTransmitting = true;
+    for (size_t j = after; j < peripheral.calls.size(); j++)
+        if (peripheral.calls[j].kind == Call::Transmit) stillTransmitting = true;
     CHECK(stillTransmitting);
 }

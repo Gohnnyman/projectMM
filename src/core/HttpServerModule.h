@@ -197,7 +197,11 @@ public:
         ReadOnly,        ///< tried to write a display-only control
     };
     /// body is a small JSON object: `{"type","id","parent_id"}` / `{"module","control","value"}`.
-    OpResult applyAddModule(const char* typeName, const char* id, const char* parentId);
+    // outName (optional): on OpResult::Ok, receives the created module's FINAL name (after
+    // ensureUniqueName disambiguates a collision) so a client can select/focus it. Pass its
+    // buffer size in outNameLen. Null → not reported (the APPLY_OP transport doesn't need it).
+    OpResult applyAddModule(const char* typeName, const char* id, const char* parentId,
+                            char* outName = nullptr, size_t outNameLen = 0);
     OpResult applySetControl(const char* moduleName, const char* controlName, const char* valueJson);
     /// Enumerate-then-DELETE every child of `parentName` (the catalog inject's
     /// replaceChildren). Returns NotFound if the parent doesn't exist, else Ok.

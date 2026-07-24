@@ -473,3 +473,307 @@ TEST_CASE("FilesystemModule Int16 controls round-trip preserves the saved value"
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
+
+// Regression: a module whose CONTROL SET depends on one of its own control VALUES must restore its
+// value-dependent controls across a reboot. The canonical case is ParallelLedDriver's `peripheral`
+// Select, which swaps the bus backend and with it the backend-owned controls (clockPin, ring cluster).
+// Without the fix, a single overlay writes the saved `clockPin` onto the DEFAULT backend's member, and
+// the later swap to the saved peripheral discards it — clockPin (and the ring geometry) silently revert
+// to their defaults on any reload that rebuilds the control set (a device reboot, or an INT_WDT
+// restart). applyNode's overlay → rebuildControls → overlay-again fixes it: the second overlay lands on
+// the now-correct backend member. This mock reproduces the structure minimally: `mode` picks which of
+// two backing variables `param` binds to, so a naive single-overlay writes param to the wrong one.
+namespace {
+struct ModeDependentMock : public mm::MoonModule {
+    uint8_t mode = 0;         // the "peripheral" analogue: selects the control set
+    uint8_t paramA = 10;      // bound when mode==0 (the "default backend" member, default 10)
+    uint8_t paramB = 10;      // bound when mode==1 (the "swapped backend" member, default 10)
+    static constexpr const char* kModes[2] = {"A", "B"};
+    void defineControls() override {
+        controls_.addSelect("mode", mode, kModes, 2);
+        // `param` binds to a DIFFERENT variable depending on mode — exactly like clockPin binding to
+        // whichever peripheral backend is live. A rebuild after `mode` changes re-binds it.
+        controls_.addUint8("param", mode == 0 ? paramA : paramB, 0, 255);
+    }
+};
+}  // namespace
+
+TEST_CASE("FilesystemModule restores a value-dependent control across reload (the peripheral/clockPin bug)") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_persist_modedep_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(tmpRoot);
+    mm::ModuleFactory::registerType<ModeDependentMock>("ModeDependentMock");
+
+    // --- Save: set mode=1 (the non-default control set) AND param=3 on the mode-1 variable ---
+    {
+        mm::Scheduler scheduler;
+        auto* fs = new mm::FilesystemModule();
+        fs->setTypeName("FilesystemModule");
+        fs->setScheduler(&scheduler);
+        auto* m = new ModeDependentMock();
+        m->setTypeName("ModeDependentMock");
+        scheduler.addModule(fs);
+        scheduler.addModule(m);
+        scheduler.setup();
+
+        m->mode = 1;
+        m->rebuildControls();      // mode change re-binds `param` to paramB (as the UI swap would)
+        m->paramB = 3;             // the value the user sets (the "clockPin=3" analogue)
+        m->markDirty();
+        mm::FilesystemModule::noteDirty();
+        fs->flush();
+        scheduler.release();
+    }
+
+    // --- Load: fresh module (mode defaults to 0, param bound to paramA=10). The reload must end with
+    //     mode=1 AND paramB=3 — NOT paramB=10 (the bug: param landed on paramA, then the mode-1 rebuild
+    //     showed paramB at its default). ---
+    {
+        mm::Scheduler scheduler;
+        auto* fs = new mm::FilesystemModule();
+        fs->setTypeName("FilesystemModule");
+        fs->setScheduler(&scheduler);
+        auto* m = new ModeDependentMock();
+        m->setTypeName("ModeDependentMock");
+        scheduler.addModule(fs);
+        scheduler.addModule(m);
+        scheduler.setup();
+
+        CHECK(m->mode == 1);       // the value-dependent selector restored
+        CHECK(m->paramB == 3);     // and the control it selects restored to the SAVED value, not default 10
+        scheduler.release();
+    }
+
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// Regression: a user-added module recorded AFTER two code-wired siblings must survive a load even when
+// the code-wired siblings' boot order differs from the saved order. This is shiffy's "spontaneously lost
+// ParallelLedDriver" bug: the Drivers container boot-wires LightPresets then Preview, but the file was
+// saved as Preview(0), LightPresets(1), ParallelLed(2). The old positional reconciler hit index 0
+// (JSON: Preview, live: LightPresets, code-wired) and BROKE, dropping the ParallelLedDriver at index 2
+// on every reboot. The align pass reorders the code-wired children to the saved indices first, so the
+// user module is reached and restored. Modeled with two code-wired effects (singletons per container,
+// like Preview/LightPresets) swapped vs. the file, plus a user effect after them.
+TEST_CASE("FilesystemModule restores a user module recorded after reordered code-wired siblings") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_wired_reorder_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+    mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+    mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
+
+    // Saved file: child order Noise(0), Rainbow(1), Multiply(2) — the two effects are the code-wired
+    // singletons, the modifier is the user-added module recorded AFTER them. The Rainbow carries a
+    // DISTINCTIVE saved `speed` (137, not its default 20) so the test can prove a reordered code-wired
+    // child's own persisted controls are restored, not just its presence.
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
+        f << "{\"channelsPerLight\":3,\"enabled\":true,"
+             "\"0.type\":\"NoiseEffect\",\"0.enabled\":true,"
+             "\"1.type\":\"RainbowEffect\",\"1.speed\":137,\"1.enabled\":true,"
+             "\"2.type\":\"MultiplyModifier\",\"2.enabled\":true}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+
+    // Live boot tree: the two code-wired effects in the OPPOSITE order from the file — Rainbow(0),
+    // Noise(1) — and NO user modifier yet (it is what the file must restore).
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    auto* rainbow = new mm::RainbowEffect(); rainbow->setTypeName("RainbowEffect"); rainbow->markWiredByCode();
+    auto* noise   = new mm::NoiseEffect();   noise->setTypeName("NoiseEffect");     noise->markWiredByCode();
+    layer->addChild(rainbow);     // live index 0 (file says index 1)
+    layer->addChild(noise);       // live index 1 (file says index 0)
+
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // After load: the user MultiplyModifier must be restored (the BUG dropped it), the two code-wired
+    // effects preserved. The user module lands AFTER the code-wired pair (it is appended in file order
+    // once the code-wired positions are consumed). The code-wired pair's relative order is cosmetic (both
+    // are boot singletons, not render-order-sensitive) and self-corrects on the next save, so this asserts
+    // presence + the user module's position, not the code-wired pair's exact order.
+    REQUIRE(layer->childCount() == 3);
+    // The user module is at the tail, restored (this is the regression: it used to vanish).
+    CHECK(std::strcmp(layer->child(2)->typeName(), "MultiplyModifier") == 0);
+    CHECK(layer->child(2)->isWiredByCode() == false);
+    // Both code-wired effects survive (in either order — cosmetic).
+    bool haveNoise = false, haveRainbow = false;
+    mm::RainbowEffect* liveRainbow = nullptr;
+    for (uint8_t k = 0; k < 2; k++) {
+        const char* t = layer->child(k)->typeName();
+        CHECK(layer->child(k)->isWiredByCode() == true);
+        if (std::strcmp(t, "NoiseEffect") == 0) haveNoise = true;
+        if (std::strcmp(t, "RainbowEffect") == 0) { haveRainbow = true; liveRainbow = static_cast<mm::RainbowEffect*>(layer->child(k)); }
+    }
+    CHECK(haveNoise);
+    CHECK(haveRainbow);
+    // The reordered code-wired Rainbow's OWN persisted control is restored — not just its presence. Its
+    // saved index (1) differs from its boot index (0), so this is the reorder case the fix covers: the
+    // reconciler finds the JSON entry naming RainbowEffect and overlays its `speed` (137, not default 20).
+    REQUIRE(liveRainbow != nullptr);
+    CHECK(liveRainbow->speed == 137);
+
+    scheduler.release();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// Regression: an UNKNOWN entry BEFORE a boot-wired child must not spawn a DUPLICATE of the wired child.
+// The stale-slot branch restores a mismatched wired child from a later matching JSON entry — but that
+// later entry is ALSO walked by the main loop, and if pos has moved past the wired child, the loop would
+// factory-create a second instance of the wired type (two Rainbows). The reconciler must consume the
+// wired child's saved entry once, not twice.
+TEST_CASE("FilesystemModule: an unknown entry before a wired child does not duplicate the wired child") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_wired_dup_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+
+    // Saved file: an UNKNOWN type at entry 0 (GoneEffect never registers), then RainbowEffect at entry 1.
+    // The live tree has ONE boot-wired RainbowEffect.
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
+        f << "{\"channelsPerLight\":3,\"enabled\":true,"
+             "\"0.type\":\"GoneEffect\",\"0.enabled\":true,"
+             "\"1.type\":\"RainbowEffect\",\"1.speed\":91,\"1.enabled\":true}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    auto* rainbow = new mm::RainbowEffect(); rainbow->setTypeName("RainbowEffect"); rainbow->markWiredByCode();
+    layer->addChild(rainbow);       // the ONE boot-wired Rainbow at live index 0
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // EXACTLY ONE Rainbow — the unknown GoneEffect drops, and the RainbowEffect JSON entry restores the
+    // wired child's controls without spawning a second instance.
+    uint8_t rainbows = 0;
+    for (uint8_t k = 0; k < layer->childCount(); k++)
+        if (std::strcmp(layer->child(k)->typeName(), "RainbowEffect") == 0) rainbows++;
+    CHECK(rainbows == 1);
+    CHECK(layer->childCount() == 1);
+    // And the wired child's saved control was applied (not left at default).
+    REQUIRE(layer->childCount() >= 1);
+    CHECK(static_cast<mm::RainbowEffect*>(layer->child(0))->speed == 91);
+
+    scheduler.release();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// User-module reorder must round-trip: the drag-reorder UI (moveChildTo) permutes children, saves the
+// new order, and on reboot the reconciler must restore THAT order (user-module order is meaningful —
+// render/composite order). This is the invariant the reconciliation fix must not break: user modules are
+// created fresh in file order, so a saved [B, A] loads as [B, A]. Two user effects, no code-wired
+// children, saved in a non-boot order.
+TEST_CASE("FilesystemModule restores a user-module reorder in the saved order") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_user_reorder_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+    mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+
+    // Saved file: the user reordered to Noise(0), Rainbow(1) — neither is code-wired.
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
+        f << "{\"channelsPerLight\":3,\"enabled\":true,"
+             "\"0.type\":\"NoiseEffect\",\"0.enabled\":true,"
+             "\"1.type\":\"RainbowEffect\",\"1.enabled\":true}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+    // Live boot tree: an empty Layer (user effects are not boot-wired — the reconciler creates them).
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // The saved order is restored exactly.
+    REQUIRE(layer->childCount() == 2);
+    CHECK(std::strcmp(layer->child(0)->typeName(), "NoiseEffect") == 0);
+    CHECK(std::strcmp(layer->child(1)->typeName(), "RainbowEffect") == 0);
+
+    scheduler.release();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// The EXACT shiffy scenario: an UNKNOWN/renamed type mid-list (a pre-consolidation MoonLedDriver that no
+// longer registers) followed by a real USER module. The renamed entry must drop WITHOUT taking the user
+// module after it — the old `break` dropped the tail, so the user's real driver vanished on every reboot.
+// This is the dominant cause on shiffy (distinct from the code-wired-reorder case above), pinned here.
+TEST_CASE("FilesystemModule skips an unknown type mid-list and keeps the user module after it") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_unknown_midlist_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+    mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
+    // Deliberately do NOT register "GoneEffect" — it stands in for a renamed/removed type (MoonLedDriver).
+
+    // Saved file: Rainbow(0), GoneEffect(1, unregistered), Multiply(2, a real user module AFTER the dead one).
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
+        f << "{\"channelsPerLight\":3,\"enabled\":true,"
+             "\"0.type\":\"RainbowEffect\",\"0.enabled\":true,"
+             "\"1.type\":\"GoneEffect\",\"1.enabled\":true,"
+             "\"2.type\":\"MultiplyModifier\",\"2.enabled\":true}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+    auto* layer = new mm::Layer();     // empty; the reconciler creates the (known) children
+    layer->setTypeName("Layer");
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // The unknown GoneEffect is dropped; Rainbow AND the user's Multiply (recorded AFTER the dead entry)
+    // both survive — the whole point of the fix. Before it, the `break` on GoneEffect dropped Multiply too.
+    REQUIRE(layer->childCount() == 2);
+    CHECK(std::strcmp(layer->child(0)->typeName(), "RainbowEffect") == 0);
+    CHECK(std::strcmp(layer->child(1)->typeName(), "MultiplyModifier") == 0);
+
+    scheduler.release();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}

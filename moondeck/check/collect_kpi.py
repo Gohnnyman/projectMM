@@ -20,6 +20,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 ESP32_DIR = ROOT / "esp32"
 
+# Shared moondeck.json + logLevel-toggle helpers (one level up, reachable from check/ and run/).
+sys.path.insert(0, str(ROOT / "moondeck"))
+from _moondeck_config import active_device_ips, raised_log_level, LOG_INFO  # noqa: E402
+
 # Per-host desktop build dir (matches build_desktop.py / package_desktop.py).
 # We pick the directory belonging to the OS this script runs on so KPI
 # numbers reflect the binary the developer actually has on disk.
@@ -287,22 +291,27 @@ def _live_capture(log, seconds=15):
         import serial
     except ImportError:
         return False
+    # Raise the device(s) to Info so the KPI tick line prints during the capture (they rest at Warn,
+    # which silences it), and restore each device's ORIGINAL level on exit — covering the serial-open
+    # failure and the normal-cleanup paths alike. A freshly booted device already logs at Info for its
+    # first 60 s, so this is a no-op there but harmless.
     print(f"  ESP32 KPI: capturing {seconds}s from {port}...")
-    try:
-        ser = serial.Serial(port, 115200, timeout=1)
-    except Exception as e:
-        print(f"  ESP32 KPI: cannot open {port}: {e}")
-        return False
-    end = time.time() + seconds
-    try:
-        with open(log, "w") as f:
-            while time.time() < end:
-                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
-                if line:
-                    f.write(line + "\n")
-                    f.flush()
-    finally:
-        ser.close()
+    with raised_log_level(active_device_ips(), LOG_INFO):
+        try:
+            ser = serial.Serial(port, 115200, timeout=1)
+        except Exception as e:
+            print(f"  ESP32 KPI: cannot open {port}: {e}")
+            return False
+        end = time.time() + seconds
+        try:
+            with open(log, "w") as f:
+                while time.time() < end:
+                    line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                    if line:
+                        f.write(line + "\n")
+                        f.flush()
+        finally:
+            ser.close()
     return True
 
 def collect_code():

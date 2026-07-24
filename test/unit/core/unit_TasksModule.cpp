@@ -95,19 +95,70 @@ TEST_CASE("TasksModule: the tasks list renders the injected RTOS tasks with thei
     REQUIRE(src != nullptr);
     REQUIRE(src->listRowCount() == 2);
 
+    // Rows hold a STABLE order across refreshes (the RTOS snapshot order is unstable — it shifts as
+    // tasks change state — which made the once-a-second list jump). projectMM's own tasks float to the
+    // top (the render task "main" and "mm"-prefixed workers), RTOS system tasks sink below, alphabetical
+    // within each group. So "main" (ours) is row 0 and "IDLE1" (system) is row 1.
     JsonSink r0; src->writeListRow(r0, 0);
     std::string row0(r0.data());
-    CHECK(row0.find("\"name\":\"main\"") != std::string::npos);
+    CHECK(row0.find("\"name\":\"main\"") != std::string::npos);    // our render task, floated to the top
     CHECK(row0.find("\"state\":\"running\"") != std::string::npos);
     CHECK(row0.find("\"core\":0") != std::string::npos);
     CHECK(row0.find("\"prio\":1") != std::string::npos);
     CHECK(row0.find("\"stack\":2340") != std::string::npos);
-    CHECK(row0.find("\"cpu\":47.9") != std::string::npos);   // real measurement → shown
+    CHECK(row0.find("\"cpu\":47.9") != std::string::npos);         // real measurement → shown
 
     JsonSink r1; src->writeListRow(r1, 1);
     std::string row1(r1.data());
-    CHECK(row1.find("\"name\":\"IDLE1\"") != std::string::npos);
-    CHECK(row1.find("\"cpu\":") == std::string::npos);       // kTaskCpuUnmeasured → field omitted
+    CHECK(row1.find("\"name\":\"IDLE1\"") != std::string::npos);   // system task, sunk below ours
+    CHECK(row1.find("\"cpu\":") == std::string::npos);             // kTaskCpuUnmeasured → field omitted
+}
+
+// The row order: projectMM's OWN tasks (render "main" + "mm"-prefixed workers) float to the top so the
+// user sees them first, RTOS system tasks sink below, alphabetical within each group — regardless of the
+// (unstable) order the RTOS snapshot returns them in. Feed a deliberately-jumbled snapshot and pin the
+// exact resulting order.
+TEST_CASE("TasksModule: projectMM tasks sort to the top, system tasks below, alphabetical within") {
+    // Input order is scrambled (system, ours, system, ours, ...) — exactly the kind of shuffle the RTOS
+    // snapshot produces frame to frame.
+    const platform::TaskInfo snap[] = {
+        {"Tmr Svc", platform::TaskState::Blocked, -1, 1, 900, platform::kTaskCpuUnmeasured},
+        {"mmSnap",  platform::TaskState::Blocked,  1, 5, 700, platform::kTaskCpuUnmeasured},
+        {"IDLE0",   platform::TaskState::Ready,    0, 0, 500, platform::kTaskCpuUnmeasured},
+        {"main",    platform::TaskState::Running,  0, 1, 2340, platform::kTaskCpuUnmeasured},
+        {"esp_timer", platform::TaskState::Blocked, -1, 22, 800, platform::kTaskCpuUnmeasured},
+        {"mmEncode", platform::TaskState::Ready,   1, 5, 600, platform::kTaskCpuUnmeasured},
+    };
+    platform::setTestTaskSnapshot(snap, 6, "main");
+
+    Scheduler scheduler;
+    TasksModule tasks;
+    scheduler.addModule(&tasks);
+    scheduler.setup();
+    tasks.tick1s();
+
+    const ListSource* src = tasksSource(tasks);
+    REQUIRE(src != nullptr);
+    REQUIRE(src->listRowCount() == 6);
+
+    // Extract each row's task name in order.
+    auto rowName = [&](uint8_t i) {
+        JsonSink s; src->writeListRow(s, i);
+        std::string row(s.data());
+        size_t p = row.find("\"name\":\"");
+        if (p == std::string::npos) return std::string();
+        p += 8;
+        return row.substr(p, row.find('"', p) - p);
+    };
+
+    // Ours first (main, then mm* alphabetical: mmEncode < mmSnap), then system alphabetical
+    // (IDLE0 < Tmr Svc < esp_timer — uppercase sorts before lowercase).
+    CHECK(rowName(0) == "main");
+    CHECK(rowName(1) == "mmEncode");
+    CHECK(rowName(2) == "mmSnap");
+    CHECK(rowName(3) == "IDLE0");
+    CHECK(rowName(4) == "Tmr Svc");
+    CHECK(rowName(5) == "esp_timer");
 }
 
 TEST_CASE("TasksModule: the render task's detail nests the modules + the ∑/tick cross-check") {
@@ -132,6 +183,7 @@ TEST_CASE("TasksModule: the render task's detail nests the modules + the ∑/tic
     const ListSource* src = tasksSource(tasks);
     REQUIRE(src != nullptr);
 
+    // projectMM's tasks float to the top: the render task "main" (ours) is row 0, "IDLE1" (system) is row 1.
     // Row 0 ("main") = the render task → its detail nests the modules + the cross-check line.
     JsonSink d0; src->writeListRowDetail(d0, 0);
     std::string det0(d0.data());

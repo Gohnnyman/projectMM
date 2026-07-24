@@ -257,6 +257,16 @@ const char* hostIp();
 // "BROWNOUT", "DEEPSLEEP", or "UNKNOWN". On desktop always returns "OK". UI uses
 // this to flag a "crashed" prior boot (PANIC / INT_WDT / TASK_WDT / BROWNOUT).
 const char* resetReason();
+
+// Serial log verbosity, low to high. Mirrors the standard syslog/ESP-IDF ordering so the
+// numeric value maps straight onto esp_log_level_set (None=0 … Verbose=5). The periodic KPI
+// tick line (a plain stdout printf, not an ESP_LOG) is emitted only at Info or above, so a
+// resting device at Warn stays quiet on the wire — no once-a-second serial write — while real
+// ESP_LOGW/ESP_LOGE warnings and errors still print. setLogLevel applies it to the ESP-IDF
+// logger; the KPI-line gate is read from the same value in the main loop. Desktop is a no-op.
+enum class LogLevel : uint8_t { None = 0, Error, Warn, Info, Debug, Verbose };
+void setLogLevel(LogLevel level);
+
 size_t firmwareSize();        // firmware image bytes
 size_t firmwarePartition();   // app partition size (firmware capacity)
 size_t flashChipSize();       // total flash chip capacity

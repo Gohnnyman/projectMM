@@ -46,6 +46,49 @@ TEST_CASE("RmtLedDriver sizes the symbol buffer in prepare") {
     CHECK(d.symbolCapacity() >= static_cast<size_t>(64) * 3 * 8);
 }
 
+// The resting status is "driving N of M lights" after a build, shown by DEFAULT (the way MoonLed does) —
+// not only after the user touches a control. prepare() re-asserts it after the full build (pins + buffer
+// + counts settled), so a driver that built cleanly always advertises its consumption. This also
+// overwrites any stale transient (e.g. a prior loopback verdict), which must NOT linger as the resting
+// status once the driver is driving lights.
+TEST_CASE("RmtLedDriver shows 'driving N of M' as the resting status after a build") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.pins, "16");
+    std::strcpy(d.ledsPerPin, "64");
+    wire(d, src, corr, 256);   // defineControls + setSourceBuffer + applyState (the build)
+
+    REQUIRE(d.status() != nullptr);
+    CHECK(std::strstr(d.status(), "driving 64 of 256") != nullptr);
+    CHECK(d.severity() != mm::MoonModule::Severity::Error);
+
+    // A rebuild (the prepareTree sweep — a resize, an enable) re-asserts it, so the resting status is
+    // stable across rebuilds and never silently blanks.
+    d.applyState();
+    REQUIRE(d.status() != nullptr);
+    CHECK(std::strstr(d.status(), "driving 64 of 256") != nullptr);
+}
+
+// The symbol buffer sizes to what the pins CLOCK OUT (txLightCount_), NOT the window. A small strip on
+// one pin (ledsPerPin 64) inside a huge grid (window = all 5740 lights) must reserve symbols for 64, not
+// 5740 — else it tries to alloc ~550 KB it never encodes, the alloc fails on a small-heap board, and the
+// strip goes dark even though only 64 lights were wanted (the bug this pins; ParallelLedDriver already
+// sizes its frame to the driven count, RmtLed did not). ledsPerPin caps the pin; tick() only encodes 64.
+TEST_CASE("RmtLedDriver sizes symbols to the driven lights, not the whole window") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.pins, "16");
+    std::strcpy(d.ledsPerPin, "64");    // one pin, 64 lights — the physical 8×8 strip
+    wire(d, src, corr, 5740);           // but a 70×82 grid in the buffer (count defaults to all)
+
+    REQUIRE(d.symbolBuffer() != nullptr);                          // allocated (64 lights fits easily)
+    CHECK(d.symbolCapacity() >= static_cast<size_t>(64) * 3 * 8);  // holds the 64 it encodes
+    // The window is 5740, but the buffer must NOT be sized for it (that was the ~550 KB over-alloc).
+    CHECK(d.symbolCapacity() < static_cast<size_t>(5740) * 3 * 8);
+}
+
 TEST_CASE("RmtLedDriver keeps the symbol buffer across a rebuild (reinit must not free it)") {
     // The regression: prepare() does resizeSymbols() THEN reinit(), and a
     // bad reinit()->deinit() freed symbols_ right after it was allocated, so the
