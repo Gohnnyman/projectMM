@@ -281,6 +281,13 @@ public:
     /// FULL state, never the value patch), so without this the client's cached state never learns the new
     /// enabled and reverts the toggle a second later. Safe when unwired (null hook → no-op).
     static void notifySchemaChanged() { if (schemaChangedHook_) schemaChangedHook_(); }
+
+    /// Fire the quiesce-render hook directly — for a NON-child-array mutation that still frees or reuses
+    /// memory a render worker may be reading, so it can't go through quiesceForMutation (which is the
+    /// add/remove/replace/move path). The one case: ParallelLedDriver's live `peripheral` swap deletes
+    /// the bus backend the core-1 encode worker dereferences. Same seam as notifySchemaChanged; no-op
+    /// when unwired.
+    static void notifyQuiesceRender() { if (quiesceRenderHook_) quiesceRenderHook_(); }
     void clearControlsRecursive() {
         controls_.clear();
         for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
@@ -523,16 +530,17 @@ public:
     }
 
     bool removeChild(MoonModule* child) {
+        // Locate the child FIRST — a not-found removeChild is a no-op and must not quiesce the render
+        // worker (which would needlessly disengage the split until the next prepare). Only quiesce once
+        // we know we are about to actually mutate the array + the caller frees the child.
+        uint8_t idx = 0;
+        for (; idx < childCount_; idx++) if (children_[idx] == child) break;
+        if (idx >= childCount_) return false;
         quiesceForMutation();   // the caller release()s + deleteTree()s `child` next; a worker must not be inside its tick()
-        for (uint8_t i = 0; i < childCount_; i++) {
-            if (children_[i] == child) {
-                child->setParent(nullptr);
-                for (uint8_t j = i; j + 1 < childCount_; j++) children_[j] = children_[j + 1];
-                childCount_--;
-                return true;
-            }
-        }
-        return false;
+        child->setParent(nullptr);
+        for (uint8_t j = idx; j + 1 < childCount_; j++) children_[j] = children_[j + 1];
+        childCount_--;
+        return true;
     }
 
     /// Replace child at position i with fresh. Caller owns lifecycle of the removed
@@ -555,24 +563,25 @@ public:
     /// the caller's follow-up Scheduler::prepareTree() rebuilds any order-dependent LUT.
     bool moveChildTo(MoonModule* child, uint8_t newIndex) {
         if (newIndex >= childCount_) return false;
+        // Resolve the child and reject the no-op (not found, or already at newIndex) BEFORE quiescing —
+        // a move that changes nothing must not disengage the render split. Only an actual permutation
+        // needs the guard below.
+        uint8_t idx = 0;
+        for (; idx < childCount_; idx++) if (children_[idx] == child) break;
+        if (idx >= childCount_ || idx == newIndex) return false;
         // The fourth structural mutator: permuting children_ under an index-based worker loop can tick a
         // child twice or skip one (no free, so not a use-after-free — but the same data-race class the
         // add/remove/replace guards close). Quiesce like the others before touching the array.
         quiesceForMutation();
-        for (uint8_t i = 0; i < childCount_; i++) {
-            if (children_[i] != child) continue;
-            if (i == newIndex) return false;  // no-op
-            if (newIndex > i) {
-                // Shift left to fill the gap
-                for (uint8_t j = i; j < newIndex; j++) children_[j] = children_[j + 1];
-            } else {
-                // Shift right to make room
-                for (uint8_t j = i; j > newIndex; j--) children_[j] = children_[j - 1];
-            }
-            children_[newIndex] = child;
-            return true;
+        if (newIndex > idx) {
+            // Shift left to fill the gap
+            for (uint8_t j = idx; j < newIndex; j++) children_[j] = children_[j + 1];
+        } else {
+            // Shift right to make room
+            for (uint8_t j = idx; j > newIndex; j--) children_[j] = children_[j - 1];
         }
-        return false;
+        children_[newIndex] = child;
+        return true;
     }
 
     uint8_t childCount() const { return childCount_; }

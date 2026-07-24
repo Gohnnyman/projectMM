@@ -209,6 +209,55 @@ TEST_CASE("LightPresets: a custom preset round-trips through persistence with it
     CHECK(c.offWhite == 3);   // W at channel 3 survived
 }
 
+// Regression: a preset name containing a JSON metacharacter (a double-quote or a backslash) must
+// round-trip through persistence. writeListRow escapes the name via writeJsonString; a raw %s would
+// emit malformed JSON that fails to parse on the next boot, SILENTLY WIPING every custom preset — a
+// legal keystroke ("MH \"BeeEyes\"") wiping the whole library. The persisted form must be valid JSON
+// for any name the editor accepts.
+TEST_CASE("LightPresets: a preset name with a quote or backslash survives persistence") {
+    LightPresetsModule src;
+    src.setup();
+    uint32_t id = 0;
+    src.addListRow(id);
+    // A name carrying both a double-quote and a backslash — exactly what breaks a raw %s emit. The
+    // field-edit path decodes JSON escapes, so this lands the literal 5 chars  A"B\C  in the name.
+    src.setListRowField(id, "name", "{\"value\":\"A\\\"B\\\\C\"}");
+    src.setListRowField(id, "channels", "{\"value\":3}");
+    const std::string rows = presetsJson(src);
+    REQUIRE(!rows.empty());
+
+    LightPresetsModule dst;
+    const std::string wrapped = "{\"presets\":" + rows + "}";
+    CHECK(dst.restoreList(wrapped.c_str(), "presets"));   // MUST parse — the whole point
+    CHECK(dst.listRowCount() == kBuiltinCount + 1);       // the custom preset survived, not wiped
+    // And the driver can still resolve it (the row is intact, not a half-parsed remnant).
+    Correction c;
+    CHECK(dst.deriveCorrection(id, 255, c));
+}
+
+// Regression: a persisted role byte out of the valid ChannelRole range (a hand-edited / corrupt file)
+// must clamp to a safe default on restore, matching the validation setListRowField applies on the live
+// edit path. An unclamped cast would store e.g. 250, which the UI's role Select mis-renders and the
+// derived Correction silently drops — the "corrupted-but-looks-fine" outcome the robustness contract
+// forbids. (The load path is ApplyPolicy::Clamp: a stale/bad value snaps to a valid one, never survives.)
+TEST_CASE("LightPresets: an out-of-range persisted role clamps to a default on restore") {
+    // A hand-authored persisted array with role bytes past kChannelRoleCount (250) and a negative (-1).
+    // R (role 1) sits at channel 2 — a non-default offset, so a passing offRed==2 proves the value came
+    // from the restored roles, not Correction's built-in default (offRed=1).
+    const std::string wrapped =
+        "{\"presets\":[{\"id\":900,\"name\":\"corrupt\",\"channels\":3,\"roles\":[250,-1,1]}]}";
+    LightPresetsModule dst;
+    CHECK(dst.restoreList(wrapped.c_str(), "presets"));
+    CHECK(dst.listRowCount() == 1);   // this hand-authored file carries only the one corrupt preset
+
+    // The valid role (1 = R) at channel 2 survives; the two bad ones (250, -1) become 0 (None), not
+    // 250/255. If they hadn't clamped, no channel would carry R and offRed would fall back to default.
+    Correction c;
+    REQUIRE(dst.deriveCorrection(900, 255, c));
+    CHECK(c.outChannels == 3);
+    CHECK(c.offRed == 2);      // R restored at channel 2 — proves the in-range role survived the clamp
+}
+
 // Driver reference (Inc 2): a driver's `preset` Select is populated from the library and picking a
 // preset changes the driver's resolved Correction. This would have caught the "(none)" bug where the
 // library seat was claimed too late (in prepare, phase 4) for the driver's defineControls (phase 1)

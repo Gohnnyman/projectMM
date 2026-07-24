@@ -151,8 +151,13 @@ public:
     void writeListRow(JsonSink& sink, uint8_t row) const override {
         const Preset& p = presets_[row];
         const uint8_t* roles = roleAt(p);
-        sink.appendf("{\"id\":%lu,\"name\":\"%s\",\"channels\":%u,\"roles\":[",
-                     static_cast<unsigned long>(p.id), p.name, static_cast<unsigned>(p.channelCount));
+        // name via writeJsonString (escapes `"` / `\` / control bytes), NOT raw %s: this row IS the
+        // persisted form, so a name with a quote emitted raw would produce malformed JSON that fails to
+        // parse on the next boot — silently wiping every custom preset. (DevicesModule::writeListRow
+        // writes its name the same way for the same reason.)
+        sink.appendf("{\"id\":%lu,\"name\":", static_cast<unsigned long>(p.id));
+        sink.writeJsonString(p.name);
+        sink.appendf(",\"channels\":%u,\"roles\":[", static_cast<unsigned>(p.channelCount));
         for (uint8_t c = 0; c < p.channelCount; c++)
             sink.appendf("%s%u", c ? "," : "", static_cast<unsigned>(roles[c]));
         sink.append("]");
@@ -180,7 +185,9 @@ public:
         const Preset& p = presets_[row];
         const uint8_t* roles = roleAt(p);
         sink.append("{\"fields\":[");
-        sink.appendf("{\"name\":\"name\",\"type\":\"text\",\"value\":\"%s\"},", p.name);
+        sink.append("{\"name\":\"name\",\"type\":\"text\",\"value\":");
+        sink.writeJsonString(p.name);   // escape the value, same reason as writeListRow
+        sink.append("},");
         sink.appendf("{\"name\":\"channels\",\"type\":\"uint8\",\"value\":%u,\"min\":1,\"max\":255}",
                      static_cast<unsigned>(p.channelCount));
         for (uint8_t c = 0; c < p.channelCount; c++) {
@@ -299,6 +306,13 @@ public:
             count_++;
         }
         rebuildPool();
+        // The role pool is heap-backed; on an out-of-memory boot (fragmented / exhausted heap on ESP32)
+        // rolePool_.resize() leaves data() null. Writing roles through a null base would be a hard fault,
+        // so degrade to an empty list instead — the device runs, setup()'s count_==0 gate re-seeds the
+        // built-ins, and the customs are simply not restored this boot. (Desktop malloc effectively never
+        // fails at these sizes, so this only trips on a memory-tight device — exactly where a crash is
+        // least acceptable.)
+        if (!rolePool_.data() && count_ > 0) { count_ = 0; return true; }
         // Second pass: fill each preset's roles now that the pool is sized.
         for (int r = 0, idx = 0; r < n && idx < count_; r++, idx++) {
             const mm::json::JsonNode* row = mm::json::element(doc, arr, r);
@@ -306,8 +320,13 @@ public:
             uint8_t* dst = roleAtMut(presets_[idx]);
             const int rn = (roles && roles->type == mm::json::JsonType::Array)
                                ? mm::json::arraySize(doc, roles) : 0;
-            for (uint8_t c = 0; c < presets_[idx].channelCount; c++)
-                dst[c] = (c < rn) ? static_cast<uint8_t>(mm::json::readInt(mm::json::element(doc, roles, c), 0)) : 0;
+            // Clamp each persisted role to the valid ChannelRole range, matching setListRowField's
+            // validation — a hand-edited / corrupt file can carry an out-of-range byte, and an unclamped
+            // cast would store a value the UI mis-renders and the Correction silently drops.
+            for (uint8_t c = 0; c < presets_[idx].channelCount; c++) {
+                const long rv = (c < rn) ? mm::json::readInt(mm::json::element(doc, roles, c), 0) : 0;
+                dst[c] = (rv < 0 || rv >= kChannelRoleCount) ? 0 : static_cast<uint8_t>(rv);
+            }
         }
         return true;
     }

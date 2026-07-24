@@ -256,8 +256,14 @@ public:
     /// to release() otherwise.
     void prepare() override {
         micSeat_.claim();       // first live instance wins the frame seat (claim-if-empty), any mode
-        if (mode == 0) reinit();   // Local only: (re)acquire the I²S mic
-        else deinit();             // Receive / Simulate: no peripheral — free the I²S channel + its pins
+        if (mode == 0) {
+            reinit();           // Local only: (re)acquire the I²S mic (sets its own mic status)
+        } else {
+            deinit();           // Receive / Simulate: no peripheral — free the I²S channel + its pins
+            clearStatus();      // the mic status is a Local-mode diagnostic; clear it so a stale
+                                // "mic: set sckPin…" doesn't linger on the status row (Receive/Simulate
+                                // report through the separate sync-status row instead)
+        }
         syncReinit();
     }
     /// One-time wiring only; the mic acquire + election live in prepare(), the sole gate.

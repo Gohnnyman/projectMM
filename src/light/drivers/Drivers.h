@@ -113,7 +113,7 @@ public:
     /// free tree nodes without the worker dereferencing them mid-tick. The worker ticks the driver
     /// children, and a driver walks the whole Layouts/Layer tree (PreviewDriver::sendFrame →
     /// Layouts::forEachCoord), so freeing ANY layout/layer/driver node while core 1 runs is a
-    /// use-after-free — a LoadProhibited crash seen replacing a layout on a running split device. The
+    /// use-after-free — a LoadProhibited fault (e.g. replacing a layout on a running split device). The
     /// mutation path (HttpServerModule) calls this before the free; the trailing prepareTree() re-engages
     /// the split. Idempotent + safe when the split is off (stopEncodeTask guards on the task handle).
     void quiesceRenderSplit() {

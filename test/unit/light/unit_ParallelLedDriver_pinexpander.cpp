@@ -579,16 +579,17 @@ TEST_CASE("shift register: the loopback frame has room for its closing latch wor
 
 // A peripheral that CANNOT host the '595 (Parlio's transfer cap, or the classic i80 = I2S). Its
 // pinExpander control is hidden, so a user can't turn a stray `pinExpander=true` back off — the driver
-// must therefore auto-clear it and run direct, not wedge in an unfixable error status.
+// must therefore degrade to direct mode, not wedge in an unfixable error status.
 struct NoExpanderPeripheral : MockPeripheral {
     bool supportsPinExpander() const override { return false; }
 };
 
-// The robustness case behind the 2026-07-23 consolidation bug: switching to (or loading a saved config
-// on) a peripheral that can't host the expander must SILENTLY drop pinExpander to direct mode — because
-// the pinExpander toggle is hidden there, an error status would be unfixable from the UI. Pins: the
-// driver clears pinExpander, drives direct, and reports no error.
-TEST_CASE("pinExpander auto-clears on a peripheral that can't host it (no unfixable error)") {
+// Switching to (or loading a saved config on) a peripheral that can't host the expander must degrade to
+// direct mode — because the pinExpander toggle is hidden there, an error status would be unfixable from
+// the UI. The degrade is in the EFFECTIVE mode (pinExpanderMode()), NOT a mutation of the stored value:
+// the saved `pinExpander=true` is preserved so A/B'ing back to a supporting peripheral restores shift
+// mode. Pins: the driver KEEPS pinExpander, drives DIRECT (effective mode off), and reports no error.
+TEST_CASE("pinExpander degrades to direct on a peripheral that can't host it, keeping the saved value") {
     NoExpanderPeripheral peripheral;   // declared before the driver — borrowed, must outlive it
     MockShiftDriver d;
     mm::Buffer src;
@@ -596,7 +597,8 @@ TEST_CASE("pinExpander auto-clears on a peripheral that can't host it (no unfixa
     // Ask for the expander (as a stale saved config or a post-switch state would): 3 data pins, latch set.
     wire(d, peripheral, src, corr, 3 * 8, "1,2,3", /*shiftOn=*/true, /*latch=*/7);
 
-    CHECK_FALSE(d.pinExpander);                                 // silently dropped to direct
+    CHECK(d.pinExpander);                                       // saved value PRESERVED (not mutated)
+    CHECK_FALSE(d.pinExpanderMode());                           // but the EFFECTIVE mode is direct
     CHECK(d.severity() != mm::MoonModule::Severity::Error);     // NOT a dead-end error
     CHECK(d.laneCount() == 3);                                  // 3 pins → 3 direct lanes (not ×8)
 }

@@ -7,7 +7,7 @@
 
 namespace mm {
 
-/// A `LedPeripheral` backend: parallel WS2812B on the **LCD_CAM** peripheral (ESP32-S3 / -P4), driven by
+/// A `LedPeripheral` backend: parallel WS2812B on the **LCD_CAM** peripheral (ESP32-S3 / -P4 / -S31), driven by
 /// **our own DMA code** instead of ESP-IDF's `esp_lcd`. Same peripheral, pins and wire contract as the
 /// `i80` backend (`I80Peripheral`); the difference is underneath, and it buys two things `esp_lcd` cannot
 /// give — a frame **streamed** rather than held whole, and a **74HCT595 pin expander** (one GPIO driving

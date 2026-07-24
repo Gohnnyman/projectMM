@@ -11,7 +11,7 @@ namespace mm {
 /// channels; this gives 8-16 lanes for the wall time of one. The magic is that ESP-IDF exposes ONE
 /// public i80 API (`esp_i80_new_i80_bus` / `esp_i80_panel_io_tx_color`) and routes it to whichever
 /// peripheral the silicon has — so this single backend serves every chip:
-///  - **ESP32-S3 / -P4:** backed by the dedicated **LCD_CAM** peripheral.
+///  - **ESP32-S3 / -P4 / -S31:** backed by the dedicated **LCD_CAM** peripheral.
 ///  - **classic ESP32:** backed by the **I2S peripheral in i80/LCD mode** (the classic has no LCD_CAM;
 ///    I2S-i80 is its only >8-lane route). IDF's own CMake picks the backend by chip; the two are
 ///    mutually exclusive per silicon, so `lanesAvailable()` reads whichever lane-count constant is

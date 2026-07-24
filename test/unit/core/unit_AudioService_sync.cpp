@@ -41,6 +41,32 @@ struct FrozenClock {
 };
 }  // namespace
 
+// Regression: the mic status ("mic: set sckPin / wsPin / sdPin", and the other mic diagnostics) is a
+// LOCAL-mode read-out. Switching to Receive network / Simulate must clear it so a stale mic message
+// doesn't linger on the status row — those modes report through the separate "sync status" row and have
+// no mic to diagnose. Before the fix, prepare()'s non-Local branch deinit()'d the peripheral but left
+// the status string set from the prior Local build (or from boot with pins unset).
+TEST_CASE("AudioService: switching out of Local mode clears the mic status") {
+    AudioService a;
+    a.mode = 0;                      // Local audio, pins unset (the default) → mic status set on build
+    a.applyState();
+    // On a host build hasI2sMic is false, so reinit() sets "mic: no I2S on this platform"; on a device
+    // with unset pins it's "mic: set sckPin / wsPin / sdPin". Either way Local mode leaves a mic status.
+    CHECK(a.status() != nullptr);
+    CHECK(std::strstr(a.status(), "mic") != nullptr);
+
+    a.mode = 1;                      // receive network
+    a.applyState();                  // prepare() non-Local branch must clear the stale mic status
+    CHECK((a.status() == nullptr || a.status()[0] == 0));   // no lingering mic message on the status row
+
+    // And back to Simulate — same rule (no mic there either).
+    a.mode = AudioService::kSimMode;
+    a.applyState();
+    CHECK((a.status() == nullptr || a.status()[0] == 0));
+
+    a.release();
+}
+
 TEST_CASE("AudioService Local+send: lazy-opens once and reports sending") {
     FrozenClock clk(1);
     AudioService a;

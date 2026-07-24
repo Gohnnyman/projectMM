@@ -32,6 +32,16 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 **Action: re-add the driver.** A persisted module whose type is one of the three old names no longer resolves (the type isn't registered), so the robust loader drops it on boot — the driver, and its pins/settings, vanish from the tree. Add a **Parallel LED** driver again, choose the `peripheral` your board uses (the same backend the old type named — see the table), and re-enter its pins / lengths / clock pin. The web installer's board catalog already names the new type, so a fresh install or a catalog re-inject wires it correctly; only a device carrying an OLD persisted tree needs the manual re-add.
 
+### The per-driver `preset` control is renamed to `lightPreset` (2026-07-23)
+
+The correction Select every driver exposes (channel order / RGBW synthesis) is renamed `preset` → `lightPreset`, so the UI label reads unambiguously next to a driver's other controls.
+
+| Old | New |
+|---|---|
+| control `preset` | `lightPreset` |
+
+**Action: nothing.** The saved *value* survives: a driver persists its preset choice under a separate durable key (the preset name), which is unchanged, so the driver comes up pointing at the same light preset. Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
+
 ### `AudioService`: the `sync` control becomes `mode` + `send audio`, and `simulate` is renumbered (2026-07-22)
 
 The audio module's identity is now a single `mode` control (Local audio / Receive network / Simulate), each showing only its own detail controls, replacing the separate `sync` (off / send / receive) toggle. Broadcasting the locally-analyzed frame moved to a `send audio` switch, meaningful only in Local mode. `simulate` was also renumbered, from a five-option list to two.

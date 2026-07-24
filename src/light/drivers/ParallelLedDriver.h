@@ -305,10 +305,16 @@ public:
 
     /// Is the shift-register expander engaged? (Reads the control; the alias keeps the intent
     /// readable at the call sites that ask "am I encoding through a register?")
-    bool pinExpanderMode() const { return pinExpander; }
+    // The EFFECTIVE expander mode: the user's saved `pinExpander` AND a peripheral that can host the
+    // '595. Gating here (not by mutating `pinExpander`) means a peripheral that can't host it degrades to
+    // direct mode at runtime while the saved value survives — so switching back to a supporting
+    // peripheral restores shift mode. Every consumer (lane math, latch, ring, encode) reads this.
+    bool pinExpanderMode() const { return pinExpander && peripheral_ && peripheral_->supportsPinExpander(); }
     /// Strands driven per physical data pin: 1 direct, or the '595's width through the expander.
-    /// The multiplier every size/clock/slot computation below is expressed in.
-    uint8_t outputsPerPin() const { return pinExpander ? kPinExpanderOutputs : uint8_t(1); }
+    /// The multiplier every size/clock/slot computation below is expressed in. Reads the EFFECTIVE mode
+    /// (pinExpanderMode), so on a peripheral that can't host the '595 the lane math is direct even though
+    /// the saved `pinExpander` value is kept — matching every other consumer.
+    uint8_t outputsPerPin() const { return pinExpanderMode() ? kPinExpanderOutputs : uint8_t(1); }
 
     /// Bind the driver's controls: the peripheral-INVARIANT block first (window, `pins`, `ledsPerPin`,
     /// doubleBuffer, frameTime, pinExpander — they describe *which LEDs and how many*, the same on any
@@ -1113,6 +1119,14 @@ protected:
     // backend's bus + heap (only the selected peripheral costs memory — the product-owner requirement).
     // Guarded so a bad index or an empty registry leaves peripheral_ null (tick() then idles).
     void swapPeripheral(uint8_t k) {
+        // Stop the core-1 encode worker before freeing the backend. deinit() drains the BUS DMA, but the
+        // encode worker (owned by Drivers) ticks this driver and dereferences peripheral_ for
+        // busBuffer/busTransmit/busWait — so a live `peripheral` swap (POST /api/control) that reaches
+        // here while the render split is active would `delete peripheral_` out from under the worker
+        // mid-tick: a use-after-free, the same class the structural-mutation quiesce fixes. The swap is
+        // not a child-array mutation, so it does not pass through MoonModule::quiesceForMutation; reach
+        // the same render-worker hook directly. The trailing reinit()/tick re-engages the split.
+        MoonModule::notifyQuiesceRender();
         deinit();                                   // stop any in-flight transfer on the old bus first
         if (peripheral_) {
             peripheral_->busDeinit();
@@ -1556,7 +1570,11 @@ protected:
         // the `pinExpander` control is HIDDEN on such a peripheral (see supportsPinExpander), so a user
         // who lands here — via a saved config or a peripheral switch — has no toggle to turn it off. An
         // unfixable error status is the wrong answer; degrade to the working direct path (robust-to-any-input).
-        if (pinExpander && !(peripheral_ && peripheral_->supportsPinExpander())) pinExpander = false;
+        // The degrade is gated in pinExpanderMode() (the EFFECTIVE mode), NOT by mutating the stored
+        // `pinExpander` — so A/B'ing a MoonI80 '595 wall through Parlio and back keeps the saved value, and
+        // it comes up in shift mode again rather than silently reverting to direct (the same "don't mutate
+        // a persisted value to express a runtime condition" lesson as the backend-control persistence fix).
+        //
         // The latch is a real GPIO and a real bus bit; without it the '595s never present a byte.
         if (!err && pinExpanderMode() && latchPin < 0) err = "the 74HCT595 expander needs a latchPin";
         // **The BUS width is a peripheral fact; the PIN COUNT is a board fact. They are not the same

@@ -189,3 +189,53 @@ TEST_CASE("ParallelLedDriver: a peripheral swap does not double-free or dangle t
     // Driver destroyed → its owned backend freed → back to the starting live count (no leak).
     CHECK(SwapMock::live == liveBefore);
 }
+
+// Regression (pre-merge Reviewer BLOCKER): a LIVE peripheral swap frees the old backend, and the core-1
+// encode worker dereferences that backend (busBuffer/busTransmit) — so swapPeripheral MUST stop the
+// worker (fire the quiesce-render hook) BEFORE deleting the backend, or it is a use-after-free, the same
+// class the structural-mutation quiesce fixes. This pins the ordering: the hook fires while the outgoing
+// backend is still alive (a SwapMock records, in its destructor, whether the hook had already fired).
+namespace {
+int g_hookFires = 0;
+bool g_hookFiredBeforeLastDtor = false;
+}  // namespace
+
+TEST_CASE("ParallelLedDriver: a live peripheral swap quiesces the render worker before freeing the backend") {
+    RegistryScope registry;
+    g_hookFires = 0;
+    g_hookFiredBeforeLastDtor = false;
+
+    // The hook records each fire. A HookSwapMock's destructor snapshots whether the hook had fired at
+    // least once by the time it is destroyed — proving the quiesce happened before the free.
+    mm::MoonModule::setQuiesceRenderHook([] { g_hookFires++; });
+
+    {
+        mm::ParallelLedDriver d;
+        mm::Buffer src;
+        mm::Correction corr;
+        std::strcpy(d.pins, "1,2");
+        REQUIRE(src.allocate(64, 3) == true);
+        mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
+        d.defineControls();
+        d.setSourceBuffer(&src);
+        d.correctionForTest() = corr;
+        d.applyState();
+
+        const auto& cs = d.controls();
+        int selIdx = mm::test::controlIndex(d, "peripheral");
+        REQUIRE(selIdx >= 0);
+        const char* const* opts = reinterpret_cast<const char* const*>(cs[static_cast<uint8_t>(selIdx)].aux);
+        const int optCount = cs[static_cast<uint8_t>(selIdx)].max;
+        int bIdx = -1;
+        for (int k = 0; k < optCount; k++) if (opts[k] && std::strcmp(opts[k], "swapB") == 0) bIdx = k;
+        REQUIRE(bIdx >= 0);
+
+        const int firesBefore = g_hookFires;
+        changePeripheralTo(d, static_cast<uint8_t>(bIdx));   // the live swap: frees the old backend
+        // The swap must have fired the quiesce hook (swapPeripheral runs it before the delete). It runs
+        // in both rebuildControls' ensurePeripheralMatchesSelection and would-be paths, so at least once.
+        CHECK(g_hookFires > firesBefore);
+    }
+
+    mm::MoonModule::setQuiesceRenderHook(nullptr);
+}

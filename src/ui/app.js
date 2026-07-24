@@ -451,11 +451,12 @@ async function addModule(type, parentName) {
 function focusModule(name) {
     const card = document.querySelector(`.card[data-module="${cssEscape(name)}"]`);
     if (!card) return;
-    card.scrollIntoView({ block: "nearest", behavior: "smooth" });
     // A child card can wrap its controls in a collapsed <details> (.card-controls-collapse) — open it
-    // so the focused control is visible, not hidden behind the "controls" disclosure.
+    // FIRST so the card is at its expanded height, THEN scroll: scrolling a still-collapsed card lands
+    // on its pre-expansion geometry and the focused control ends up mispositioned.
     const collapse = card.querySelector("details.card-controls-collapse");
     if (collapse) collapse.open = true;
+    card.scrollIntoView({ block: "nearest", behavior: "smooth" });
     // Focus the first real control input, NOT the tab strip / header buttons — and NOT the status row,
     // which is a `.control-row` with only spans (a freshly added driver leads with a status, so picking
     // the first `.control-row` would find no input and focus nothing). Query for the input directly

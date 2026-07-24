@@ -25,3 +25,4 @@ Agents do not read this directory automatically, only when a decision's rational
 | [0013](0013-no-migration-code-robust-persistence-plus-documented-breaks.md) | No migration code — robust persistence + documented breaks | Accepted |
 | [0014](0014-own-i80-dma-driver-below-esp-lcd.md) | Our own i80 DMA driver, one level below esp_lcd | Accepted |
 | [0015](0015-library-is-a-tag-not-a-folder.md) | The source tree splits by domain/type; library origin is a tag, not a folder | Accepted |
+| [0016](0016-one-parallel-led-driver-runtime-peripheral-strategy.md) | One parallel LED driver with a runtime peripheral strategy, not three CRTP subclasses | Accepted |
