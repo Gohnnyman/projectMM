@@ -105,6 +105,14 @@
       "script": "check/collect_kpi.py"
     },
     {
+      "id": "repo_health",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Repo Health",
+      "help": "repo_health",
+      "script": "check/repo_health.py"
+    },
+    {
       "id": "history_report",
       "tab": "desktop",
       "group": "check",

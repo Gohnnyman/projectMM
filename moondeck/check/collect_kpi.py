@@ -24,6 +24,11 @@ ESP32_DIR = ROOT / "esp32"
 sys.path.insert(0, str(ROOT / "moondeck"))
 from _moondeck_config import active_device_ips, raised_log_level, LOG_INFO  # noqa: E402
 
+# Same directory; imported by path so this needs no PYTHONPATH tweak (the pattern the
+# other cross-script imports here use).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import repo_health  # noqa: E402
+
 # Per-host desktop build dir (matches build_desktop.py / package_desktop.py).
 # We pick the directory belonging to the OS this script runs on so KPI
 # numbers reflect the binary the developer actually has on disk.
@@ -488,6 +493,20 @@ def main():
     # Event 1 gate 7 — KPI collection).
     # Only --commit mode aborts on a breach; a plain interactive report just
     # warns, so viewing KPIs on an unlucky slow sample does not exit non-zero.
+    # The repo-health snapshot rides along with the KPI run: it needs the tick/FPS this
+    # collector just measured, and running at the same moment keeps the two views of
+    # "how is the project doing" consistent. Written only in --commit mode, so an
+    # interactive report never rewrites a committed file behind the reader's back.
+    if args.commit:
+        print()
+        perf = {}
+        if desktop.get("tick_us"):
+            perf["desktop"] = {"tick_us": desktop["tick_us"][0],
+                               "fps": desktop.get("fps", [None])[0]}
+        if esp32.get("tick_us"):
+            perf["esp32"] = {"tick_us": esp32["tick_us"], "fps": esp32.get("fps")}
+        repo_health.write(perf)
+
     esp32_tick = esp32.get("tick_us")
     lights = desktop.get("lights")
     if esp32_tick is not None and lights:

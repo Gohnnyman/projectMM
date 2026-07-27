@@ -36,9 +36,13 @@ def build_gates(firmware, full_esp32=False):
         # reading opens the serial port for 15 s and needs a bench board attached, which
         # makes the gate's cost unpredictable. Run collect_kpi.py without the flag when
         # composing the commit message, where the fresh reading is the point.
+        # Triggers on everything the repo-health snapshot measures, not just `src/`: a
+        # moondeck/ or docs-only commit still moves lines of code, comment density and the
+        # docs inventory, and a snapshot that skipped those commits would drift out of
+        # step with the tree it claims to describe.
         Gate("KPI collection",
              UV + ["moondeck/check/collect_kpi.py", "--commit", "--no-live-capture"],
-             lambda f: touches(f, "src/")),
+             lambda f: touches(f, "src/", "test/", "moondeck/", "docs/", "CLAUDE.md")),
 
         Gate("device-model catalog",
              UV + ["moondeck/check/check_devices.py"],

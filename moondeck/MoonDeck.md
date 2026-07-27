@@ -177,6 +177,21 @@ Captures a live tick from a connected ESP32 (and the desktop scenario ticks) plu
 
 The ESP32 half reads `esp32/monitor.log`, and refreshes it by opening the serial port for 15 s when that log is older than 5 minutes — accurate, but ~80 s and only possible with a bench board attached. `--no-live-capture` skips that refresh and uses whatever log exists (a few seconds, no board needed); the ESP32 tick line is then absent rather than stale when no recent log is around. The gate lists pass the flag so their cost stays predictable; omit it when composing a commit message, where the fresh reading is the point.
 
+In `--commit` mode it also writes the repo-health snapshot (below), reusing the tick/FPS it just measured.
+
+### repo_health
+
+Measure the repo's current state into `repo-health.json` — flash per firmware variant, tick/FPS per target, lines of code by area, comment density, test counts, docs inventory.
+
+```bash
+uv run moondeck/check/repo_health.py           # measure + print the delta, write nothing
+uv run moondeck/check/repo_health.py --write   # rewrite repo-health.json
+```
+
+**One small file, current state only — the trend is its git history** (`git log -p repo-health.json`), so the file never grows. The KPI gate rewrites it on every `--commit` run and prints the delta first, so growth is visible while you work and again in the commit's diff. A **soft ratchet**: nothing here fails a build. The numbers count things; they cannot tell a valuable comment from a restating one, so the judgment stays human.
+
+Two properties worth knowing. Measurements read **tracked files only** (`git ls-files`), so a stray build artifact or scratch file can't move a number. And anything this run could not measure — a firmware variant that wasn't built, a tick with no board attached — **carries its previous value forward** rather than disappearing, so a docs-only commit doesn't blank the flash sizes and make the next diff unreadable.
+
 ### scenario_pipeline
 
 Run scenario tests. Replays JSON scenario files in-process.
