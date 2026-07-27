@@ -122,7 +122,7 @@ This is a throwaway reference document — not committed. Used to decide what to
 The v1 `index.html` was fully reverse-engineered. The notes below capture mechanisms worth not rediscovering and, where v3 chose differently, why. The **forward-looking** UI gap analysis (what to still adopt) lives in the [backlog](../backlog/README.md) (UI chapter of backlog-core.md).
 
 **Engine-side data fields v1 exposed that v3 doesn't (yet):**
-- `setup_ok` (bool) + `health` (string) per module — drove a setup-dot colour and tooltip. v3 would add `bool setupOk()` + `const char* health()` to MoonModule when a real failure mode exists.
+- `setup_ok` (bool) + `health` (string) per module — drove a setup-dot color and tooltip. v3 would add `bool setupOk()` + `const char* health()` to MoonModule when a real failure mode exists.
 - `parent_id` per module — v1 shipped a *flat* array and the UI rebuilt the tree by walking `parent_id` (`buildTree()`). v3's `/api/state` returns a nested tree, so this is unnecessary.
 - `core` per module (FreeRTOS affinity 0/1) with inheritance (`propagateCore` — children take the parent's core). Irrelevant until core pinning is a real v3 engine feature.
 - Distinct `id` (stable, machine-friendly) vs `name` (human-friendly, editable). v3 uses `name` for both; split only when disambiguating two instances of one type, or when external configs reference ids.
@@ -131,7 +131,7 @@ The v1 `index.html` was fully reverse-engineered. The notes below capture mechan
 **Rendering quirks worth keeping (or rejecting):**
 - v1 used `innerHTML` heavily with an `esc()` helper to neutralise HTML in user strings. v3 prefers `textContent` for all dynamic strings — no escaping, no XSS surface; reserve `innerHTML` for static templates in the JS source.
 - Log stick-to-bottom: tracks `logAtBottom` via `scrollTop + clientHeight >= scrollHeight - 5`; auto-scrolls newest only if the user hasn't scrolled up. Adopt with the log panel.
-- Log severity colouring: `appendLogLine` lowercases and substring-matches `error`/`fail` → red, `warn` → yellow. No structured levels — cheap and matches how embedded logs read. Adopt with the log panel.
+- Log severity coloring: `appendLogLine` lowercases and substring-matches `error`/`fail` → red, `warn` → yellow. No structured levels — cheap and matches how embedded logs read. Adopt with the log panel.
 - v1 auto-generated module ids: `type.toLowerCase().replace(/[^a-z0-9]/g,'') + '_' + (Date.now()%100000)`. v3 uses the typeName as the name at factory-create; a similar generator is needed if v3 ever splits id-from-name.
 - v1's `POST /api/modules/reorder {parent_id, ids:[…]}` reordered a whole sibling group at once; v3's `POST /api/modules/<n>/move {to:N}` moves one at a time. v3's form is simpler (up/down + drag call the same endpoint).
 

@@ -12,9 +12,9 @@
 // order-dependent neighbours.
 namespace { struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } }; }
 
-// The six sticker colours drawCube() paints from (Red, DarkOrange, Blue, Green, Yellow, White) —
-// the only colours a lit voxel may carry.
-static bool isRubiksFaceColour(uint8_t r, uint8_t g, uint8_t b) {
+// The six sticker colors drawCube() paints from (Red, DarkOrange, Blue, Green, Yellow, White) —
+// the only colors a lit voxel may carry.
+static bool isRubiksFaceColor(uint8_t r, uint8_t g, uint8_t b) {
     static const mm::RGB kMap[6] = {
         {255, 0, 0}, {255, 140, 0}, {0, 0, 255}, {0, 128, 0}, {255, 255, 0}, {255, 255, 255}};
     for (const mm::RGB& c : kMap)
@@ -55,9 +55,9 @@ TEST_CASE("RubiksCubeEffect paints the cube on the first frame") {
     CHECK(anyLit);
 }
 
-// Every lit voxel carries exactly one of the six Rubik's face colours — the projection only ever
+// Every lit voxel carries exactly one of the six Rubik's face colors — the projection only ever
 // writes COLOR_MAP entries, never a blended or arbitrary RGB.
-TEST_CASE("RubiksCubeEffect only paints the six face colours") {
+TEST_CASE("RubiksCubeEffect only paints the six face colors") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1);
 
@@ -82,7 +82,7 @@ TEST_CASE("RubiksCubeEffect only paints the six face colours") {
     for (size_t i = 0; i + 2 < buf.bytes(); i += 3) {
         uint8_t r = buf.data()[i], g = buf.data()[i + 1], b = buf.data()[i + 2];
         if (r == 0 && g == 0 && b == 0) continue;  // interior/background voxel — drawCube leaves it black
-        CHECK(isRubiksFaceColour(r, g, b));
+        CHECK(isRubiksFaceColor(r, g, b));
     }
 }
 

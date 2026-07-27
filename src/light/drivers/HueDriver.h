@@ -11,15 +11,15 @@ namespace mm {
 
 /// Output driver: sends the buffer to Philips Hue bulbs as pixels — a driver, not a listed device.
 /// The bulbs are pixels of an effect: make a small grid (e.g. 4×1×1), run any effect, and this
-/// driver reads its window of the shared buffer and pushes each light's colour to the bridge. Same
+/// driver reads its window of the shared buffer and pushes each light's color to the bridge. Same
 /// shape as NetworkSendDriver (read a window, send it out), but over the Hue v1 HTTP API not UDP.
 ///
 /// It's HTTP, not a wire protocol (`GET /api/<key>/lights`, `PUT .../lights/<id>/state`), so the
 /// rate is bounded by connection churn — each PUT opens a fresh TCP connection (the bridge speaks
 /// `Connection: close`), and tick() does at most one PUT every `kPutIntervalMs` (see there) — giving
-/// smooth ambient colour, not real-time. The shared output Correction applies as on the LED/network
-/// drivers, so the brightness slider and colour-order preset reach the Hue lights too (brightness
-/// 0 → light off). Only colour-capable, reachable lights are driven (see `parseLights`); the `room`
+/// smooth ambient color, not real-time. The shared output Correction applies as on the LED/network
+/// drivers, so the brightness slider and color-order preset reach the Hue lights too (brightness
+/// 0 → light off). Only color-capable, reachable lights are driven (see `parseLights`); the `room`
 /// and `light` dropdowns aim the effect at a subset (see `rebuildDriven`).
 ///
 /// **Wire contract (Hue v1 API, plain HTTP, no TLS — bench-confirmed on a BSB002 bridge, API 1.77):**
@@ -66,7 +66,7 @@ public:
         controls_.addSelect("light", light_, lightOptions_, lightOptionCount_);
         addWindowControls();                                    // start / count — its slice of the buffer
         // The generic "status" line (setStatus) carries the pairing state + driven-of-total light
-        // count — see refreshStatus(); no separate hueStatus / colourLights controls.
+        // count — see refreshStatus(); no separate hueStatus / colorLights controls.
         refreshStatus();
     }
 
@@ -147,14 +147,14 @@ public:
         return true;
     }
 
-    // Test seam: parse a real /lights JSON body through fetchLights' colour-light extractor.
+    // Test seam: parse a real /lights JSON body through fetchLights' color-light extractor.
     void parseLightsForTest(const char* json) { parseLights(json); rebuildDriven(); }
-    uint8_t lightCountForTest() const { return lightCount_; }    // kept colour+reachable lights
+    uint8_t lightCountForTest() const { return lightCount_; }    // kept color+reachable lights
     uint16_t hueIdForTest(uint8_t i) const { return i < kMaxLights ? hueId_[i] : 0; }
     int8_t colorCountForTest() const { return colorCount_; }
 
     // Test seam: parse a real /groups JSON body through fetchGroups' Room extractor. Call
-    // parseLightsForTest FIRST — room membership resolves against the known colour lights (hueId_),
+    // parseLightsForTest FIRST — room membership resolves against the known color lights (hueId_),
     // exactly as production order guarantees (fetchGroups runs only after fetchLights).
     void parseGroupsForTest(const char* json) { parseGroups(json); rebuildDriven(); }
     uint8_t roomCountForTest() const { return roomCount_; }      // kept Rooms (type=="Room")
@@ -180,17 +180,17 @@ private:
     static constexpr uint8_t kMaxLights = 32;        // a LAN's worth of Hue bulbs; bounded, no heap
     static constexpr uint8_t kMaxRooms  = 16;        // bounded room count; option index 0 is "All"
     static constexpr uint8_t kNameLen   = 24;        // per-light / per-room friendly-name buffer
-    // kMaxLights == 32 == the width of a uint32_t, so a Room's colour-light membership fits one
-    // bitmask (bit i ⇔ colour light hueId_[i]) — resolved at parse time, since fetchGroups runs
+    // kMaxLights == 32 == the width of a uint32_t, so a Room's color-light membership fits one
+    // bitmask (bit i ⇔ color light hueId_[i]) — resolved at parse time, since fetchGroups runs
     // after fetchLights (the sawGroups_ gate), so hueId_ is already populated. A bitmask is the
     // textbook small-set membership (a bit test replaces a per-id scan), and 16×4 B = 64 B beats a
     // 16×32 id-list's 1 KB inline. static_assert pins the width assumption.
-    static_assert(kMaxLights == 32, "Room membership bitmask (roomMask_) assumes 32 colour lights");
+    static_assert(kMaxLights == 32, "Room membership bitmask (roomMask_) assumes 32 color lights");
     // One PUT at most every kPutIntervalMs (a millis() gate in tick()). Each PUT opens a fresh
     // TCP connection (the bridge speaks Connection: close), so the rate is bounded by connection
     // CHURN, not just Hue's command budget: at ~7/s the TIME_WAIT sockets pile into the hundreds
     // and the bridge starts refusing connections (PUTs fail, lights freeze). 500 ms → ~2 PUTs/s
-    // keeps TIME_WAIT small and is plenty for smooth ambient colour (each light glides over its
+    // keeps TIME_WAIT small and is plenty for smooth ambient color (each light glides over its
     // ~2 s refresh via the matched transitiontime). Real-time would need keep-alive or the
     // Entertainment API — out of scope; this is the standard API's comfortable rate.
     static constexpr uint32_t kPutIntervalMs = 500;
@@ -211,10 +211,10 @@ private:
     uint16_t hueId_[kMaxLights] = {};
     uint8_t  lastRgb_[kMaxLights][3] = {};
     bool     sent_[kMaxLights] = {};                 // have we pushed this light at least once
-    // hueId_ holds ONLY colour-capable lights (the bridge's "Extended color light"s) — a
+    // hueId_ holds ONLY color-capable lights (the bridge's "Extended color light"s) — a
     // dimmable-only white or an on/off plug is skipped, so every window pixel maps to a bulb
-    // that can show the effect's full colour. lightCount_ is that filtered count.
-    uint8_t  lightCount_ = 0;                         // number of colour-capable lights
+    // that can show the effect's full color. lightCount_ is that filtered count.
+    uint8_t  lightCount_ = 0;                         // number of color-capable lights
     int8_t   colorCount_ = 0;                        // same, as the read-only control / bridge field
     bool     sawLights_ = false;                      // fetchLights ran → the list is trustworthy
     // Friendly names for the dropdowns. Heap, NOT inline: a fixed [kMaxLights][kNameLen] array
@@ -240,15 +240,15 @@ private:
         platform::free(roomNames_);  roomNames_  = nullptr;
     }
 
-    // --- Rooms (GET /api/<key>/groups, type=="Room"): name + a colour-light membership bitmask.
-    uint32_t roomMask_[kMaxRooms] = {};               // bit i set ⇔ this Room references colour light hueId_[i]
+    // --- Rooms (GET /api/<key>/groups, type=="Room"): name + a color-light membership bitmask.
+    uint32_t roomMask_[kMaxRooms] = {};               // bit i set ⇔ this Room references color light hueId_[i]
     uint8_t  roomCount_ = 0;                           // number of Rooms kept
     bool     sawGroups_ = false;                      // fetchGroups ran → the room list is trustworthy
 
     // --- Filter selection (Select indices, persisted as uint8) and the derived driven subset.
     uint8_t  room_ = 0;                               // 0 = "All", else roomName_[room_-1]
     uint8_t  light_ = 0;                              // 0 = "All", else the n-th light of the current option list
-    uint8_t  drivenIdx_[kMaxLights] = {};             // colour-light array-indices actually driven (after filter)
+    uint8_t  drivenIdx_[kMaxLights] = {};             // color-light array-indices actually driven (after filter)
     uint8_t  drivenLightCount_ = 0;                   // size of drivenIdx_ — what pushOneChangedLight walks
 
     // --- Stable option pointer arrays for the two Selects. addSelect borrows the pointer; these
@@ -275,7 +275,7 @@ private:
     bool haveBridge() const { return bridgeIp[0] || bridgeIp[1] || bridgeIp[2] || bridgeIp[3]; }
 
     // Does the JSON span [begin, end) contain `key` (e.g. "\"hue\"") — used to read a light's
-    // capabilities off its state block (a colour light has "hue"; the bridge omits it otherwise).
+    // capabilities off its state block (a color light has "hue"; the bridge omits it otherwise).
     static bool containsKey(const char* begin, const char* end, const char* key) {
         const size_t kl = std::strlen(key);
         for (const char* s = begin; s + kl <= end; s++)
@@ -309,8 +309,8 @@ private:
     }
 
     // The single status line, folding what were three separate controls (status / hueStatus /
-    // colourLights). Shows the pairing state and the light count as driven-of-total: "paired,
-    // 3-4 lights" = the room/light filter narrowed 4 colour lights to 3 driven. When nothing is
+    // colorLights). Shows the pairing state and the light count as driven-of-total: "paired,
+    // 3-4 lights" = the room/light filter narrowed 4 color lights to 3 driven. When nothing is
     // filtered (driven == total) it collapses to the plain count, "paired, 4 lights".
     void refreshStatus() {
         if (!appKey[0]) std::snprintf(statusBuf_, sizeof(statusBuf_), "unpaired");
@@ -434,12 +434,12 @@ private:
         dev->upsertHueBridge(bridgeIp, name, static_cast<uint8_t>(colorCount_));
     }
 
-    // Extract the COLOUR-capable, REACHABLE light ids from a /lights JSON body:
-    // {"1":{…},"5":{…},…}. A colour light's object carries a "hue" field in its state; a
+    // Extract the COLOR-capable, REACHABLE light ids from a /lights JSON body:
+    // {"1":{…},"5":{…},…}. A color light's object carries a "hue" field in its state; a
     // dimmable-only white or an on/off plug does not. A light that's powered off / out of mesh
-    // reports "reachable":false. We keep only lights that are BOTH colour-capable and reachable
+    // reports "reachable":false. We keep only lights that are BOTH color-capable and reachable
     // — those are the ones an effect can actually animate right now — so the window maps every
-    // pixel to a live colour bulb. The bridge response (~8 KB / hundreds of fields) exceeds the
+    // pixel to a live color bulb. The bridge response (~8 KB / hundreds of fields) exceeds the
     // recursive JSON reader's node arena, so this is a lightweight forward scan: spot each
     // top-level id key, then keep it iff its object span (up to the next id key) has both.
     void parseLights(const char* resp) {
@@ -477,7 +477,7 @@ private:
         commit(resp + std::strlen(resp));                   // the last light runs to the end
         sawLights_ = true;
         colorCount_ = static_cast<int8_t>(lightCount_ > 127 ? 127 : lightCount_);
-        rebuildDriven();   // the colour-light set changed → re-derive the filtered driven subset
+        rebuildDriven();   // the color-light set changed → re-derive the filtered driven subset
     }
 
     // --- Learn the bridge's Rooms (GET /api/<key>/groups). Same dynamic grow-and-retry read as
@@ -540,9 +540,9 @@ private:
         sawGroups_ = true;
     }
 
-    // Resolve a Room's "lights":["3","5",…] array (within [begin, end)) to a colour-light
-    // membership bitmask: for each listed bridge id, set bit i if it equals a kept colour light
-    // hueId_[i]. Ids the Room lists that aren't colour-capable (a white bulb, a plug) simply don't
+    // Resolve a Room's "lights":["3","5",…] array (within [begin, end)) to a color-light
+    // membership bitmask: for each listed bridge id, set bit i if it equals a kept color light
+    // hueId_[i]. Ids the Room lists that aren't color-capable (a white bulb, a plug) simply don't
     // match and are dropped. Scans from the "lights" key to the array's ']' so a later array
     // (e.g. a Zone's "lights" in a wider scan) can't bleed in.
     uint32_t roomMaskFor(const char* begin, const char* end) const {
@@ -553,7 +553,7 @@ private:
         for (const char* q = s; q < end && *q != ']'; ) {
             if (*q == '"') {
                 const int id = std::atoi(q + 1);
-                for (uint8_t i = 0; i < lightCount_; i++)        // map the id to its colour-light bit
+                for (uint8_t i = 0; i < lightCount_; i++)        // map the id to its color-light bit
                     if (hueId_[i] == id) { mask |= (1u << i); break; }
                 const char* c = std::strchr(q + 1, '"');         // skip to the value's closing quote
                 if (!c || c >= end) break;
@@ -563,8 +563,8 @@ private:
         return mask;
     }
 
-    // The colour-light array-indices (into hueId_ / lightName_) that the CURRENT room selection
-    // exposes: room_==0 ("All") → every colour light, in order; else only the colour lights whose
+    // The color-light array-indices (into hueId_ / lightName_) that the CURRENT room selection
+    // exposes: room_==0 ("All") → every color light, in order; else only the color lights whose
     // id appears in that Room's member list. Writes up to kMaxLights indices into `out`, returns
     // the count. The single source of truth both the light-dropdown options and the driven set
     // derive from, so the dropdown and the driven subset can never disagree.
@@ -573,14 +573,14 @@ private:
     // With a bare uint8_t* the callee cannot see the caller's size at all, and GCC must assume the
     // worst — it warned that these writes could run past the end (-Wstringop-overflow). lightCount_
     // is itself capped at kMaxLights when the lights are parsed, so n never exceeds the array.
-    uint8_t roomColourLights(uint8_t (&out)[kMaxLights]) const {
+    uint8_t roomColorLights(uint8_t (&out)[kMaxLights]) const {
         uint8_t n = 0;
-        if (room_ == 0 || room_ > roomCount_) {              // "All" (or a stale index) → every colour light
+        if (room_ == 0 || room_ > roomCount_) {              // "All" (or a stale index) → every color light
             for (uint8_t i = 0; i < lightCount_ && n < kMaxLights; i++) out[n++] = i;
             return n;
         }
         const uint32_t mask = roomMask_[room_ - 1];
-        for (uint8_t i = 0; i < lightCount_ && n < kMaxLights; i++)   // keep colour lights in this Room's bitmask
+        for (uint8_t i = 0; i < lightCount_ && n < kMaxLights; i++)   // keep color lights in this Room's bitmask
             if (mask & (1u << i)) out[n++] = i;
         return n;
     }
@@ -593,26 +593,26 @@ private:
         roomOptionCount_ = n;
     }
 
-    // Rebuild the light dropdown options: {"All", <names of the current room's colour lights>},
+    // Rebuild the light dropdown options: {"All", <names of the current room's color lights>},
     // pointing into lightName_. The option count tracks the current room, so the light index
     // selects within that narrowed list (index 0 = "All", index k = the k-th listed light).
     void buildLightOptions() {
         lightOptions_[0] = "All";
         uint8_t idx[kMaxLights];
-        const uint8_t m = roomColourLights(idx);
+        const uint8_t m = roomColorLights(idx);
         uint8_t n = 1;
         for (uint8_t i = 0; i < m && n <= kMaxLights; i++) lightOptions_[n++] = lightNameAt(idx[i]);
         lightOptionCount_ = n;
     }
 
     // Derive drivenIdx_ from the current room+light filter — the subset pushOneChangedLight walks.
-    //   room=All & light=All → every colour light (the original behaviour, unchanged).
-    //   room=X               → that room's colour lights.
+    //   room=All & light=All → every color light (the original behaviour, unchanged).
+    //   room=X               → that room's color lights.
     //   light=Y              → just that one light (the Y-th of the current room's list).
     void rebuildDriven() {
         drivenLightCount_ = 0;
         uint8_t idx[kMaxLights];
-        const uint8_t m = roomColourLights(idx);
+        const uint8_t m = roomColorLights(idx);
         if (light_ == 0 || light_ > m) {                     // "All" within the (possibly room-narrowed) set
             for (uint8_t i = 0; i < m; i++) drivenIdx_[drivenLightCount_++] = idx[i];
         } else {                                             // a single light: the (light_-1)-th listed one
@@ -632,18 +632,18 @@ private:
         const uint8_t cpl = sourceBuffer_->channelsPerLight();
         if (cpl < 3) return;
         const uint8_t* base = sourceBuffer_->data();
-        // Walk the FILTERED driven set (drivenIdx_), not every colour light: room=All & light=All
-        // makes it the full colour-light set (unchanged behaviour), a room/light pick narrows it.
+        // Walk the FILTERED driven set (drivenIdx_), not every color light: room=All & light=All
+        // makes it the full color-light set (unchanged behaviour), a room/light pick narrows it.
         const uint8_t n = drivenLightCount_ < winLen ? drivenLightCount_ : static_cast<uint8_t>(winLen);
         if (n == 0) return;
         drivenCount_ = n;   // the round-robin size — drives the Hue fade time (transitionDeciseconds)
 
         for (uint8_t step = 0; step < n; step++) {
             const uint8_t i = (pushCursor_ + step) % n;        // position within the driven window
-            const uint8_t li = drivenIdx_[i];                  // the colour-light array index it maps to
+            const uint8_t li = drivenIdx_[i];                  // the color-light array index it maps to
             const uint8_t* px = base + static_cast<size_t>(winStart + i) * cpl;
             // Apply the shared Correction (brightness LUT + channel order) so the global
-            // brightness slider and a swapped colour order reach Hue too — same as the physical
+            // brightness slider and a swapped color order reach Hue too — same as the physical
             // drivers. apply() writes outChannels bytes; we read the first three (RGB) for HSV.
             uint8_t rgb[4] = { px[0], px[1], px[2], 0 };
             correction_.apply(px, rgb);
@@ -667,16 +667,16 @@ private:
     }
 
     // The changed-only diff + the Hue state body. Returns true (and fills `out`) when light
-    // `idx`'s RGB differs from the last push (or was never sent). Every driven light is colour-
-    // capable (parseLights keeps only those), so the body carries the full colour: on/off, plus
-    // bri (value) + hue + sat from a textbook RGB→HSV — so a colour effect actually animates.
+    // `idx`'s RGB differs from the last push (or was never sent). Every driven light is color-
+    // capable (parseLights keeps only those), so the body carries the full color: on/off, plus
+    // bri (value) + hue + sat from a textbook RGB→HSV — so a color effect actually animates.
     // "transitiontime" is the bridge's built-in fade — the smoothing knob. Set to roughly the
     // per-light update interval (a light updates every kPutIntervalMs × lightCount), so the bulb
-    // glides from its current colour to the next instead of snapping. The bridge's default is
+    // glides from its current color to the next instead of snapping. The bridge's default is
     // 400 ms (too long for our cadence — it smears and looks frozen); we compute a value matched
     // to the actual rate so transitions are smooth but keep up. transitiontime is in deciseconds
     // (×100 ms). The Hue standard API tops out ~10 cmd/s — true real-time needs the Entertainment
-    // API; this is smooth ambient colour, the standard API's sweet spot.
+    // API; this is smooth ambient color, the standard API's sweet spot.
     bool diffAndFormat(uint8_t idx, uint8_t r, uint8_t g, uint8_t b, char* out, size_t cap) {
         if (idx >= kMaxLights) return false;
         if (sent_[idx] && lastRgb_[idx][0] == r && lastRgb_[idx][1] == g && lastRgb_[idx][2] == b)

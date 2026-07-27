@@ -74,6 +74,9 @@ async function init() {
         state.provisionDeviceModel = state.provisionBoard;
         delete state.provisionBoard;
     }
+    // Restore the "online only" device filter from the persisted state (absent = show all).
+    const onlineOnlyInit = document.getElementById("online-only");
+    if (onlineOnlyInit) onlineOnlyInit.checked = !!state.onlineOnly;
 
     const scenResp = await fetch("/api/scenarios");
     const scenData = await scenResp.json();
@@ -722,7 +725,20 @@ async function refreshPorts() {
     }
 }
 
-document.getElementById("refresh-ports").addEventListener("click", refreshPorts);
+// Refreshing the port list usually changes nothing visible — the same ports come back — so
+// without feedback the click looks like it did nothing and invites a second press. Spin the
+// ↻ glyph for one turn: the affordance the icon already implies, and it confirms the action
+// ran without adding a message to read. The spin is on the click handler rather than inside
+// refreshPorts() because the other callers (after a flash, after a scan) are not user
+// clicks and should not animate.
+document.getElementById("refresh-ports").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.classList.add("spinning");
+    // Hold the spin for at least one full turn even when the fetch resolves sooner, so a
+    // fast refresh still reads as a deliberate action rather than a flicker.
+    await Promise.all([refreshPorts(), new Promise(r => setTimeout(r, 500))]);
+    btn.classList.remove("spinning");
+});
 
 // Identify: probe EVERY ESP-capable port with esptool to read chip + MAC. This
 // is a dev bench where boards move between ports constantly, so it always does a
@@ -877,8 +893,25 @@ function stopWatch(reason) {
 // Live tab
 // ---------------------------------------------------------------------------
 
+// "Online only" — a view filter over the same device list, persisted with the rest of the
+// state so the choice survives a reload. It hides nothing permanently: the records stay in
+// moondeck.json and reappear the moment the box is unticked (or the device answers again).
+const onlineOnlyBox = document.getElementById("online-only");
+if (onlineOnlyBox) {
+    onlineOnlyBox.addEventListener("change", () => {
+        state.onlineOnly = onlineOnlyBox.checked;
+        saveState();
+        renderDevices();
+    });
+}
+
+// Scan — the Live tab's single action. A subnet scan both finds new devices and settles
+// online/offline for every device already registered, so it is a superset of the old
+// separate "refresh known devices" step (which is why that button is gone: pressing both
+// was the only way to get one complete picture). The /api/refresh endpoint stays for
+// scripts and for a device on a subnet this machine isn't scanning.
 document.getElementById("discover-btn").addEventListener("click", async () => {
-    appendLog("\n--- Discovering devices ---\n");
+    appendLog("\n--- Scanning for devices ---\n");
     switchPane("log");
     const resp = await fetch("/api/discover", { method: "POST" });
     // Server attributes found devices to the matching network (or creates a
@@ -898,30 +931,13 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
     renderNetworkBar();
     renderDevices();
     refreshPorts();
+    // A scan can re-attribute last_port (it consumes the flash breadcrumb and can strip a
+    // stale link), so the "last flashed: X" hint under the port dropdown is restated too.
+    updatePortDeviceHint(getActiveNetwork()?.port || "");
     const active = getActiveNetwork();
     const count = (active && active.devices) ? active.devices.length : 0;
     const onCount = active ? active.devices.filter(d => d.online).length : 0;
     appendLog(`Active network "${state.active_network}": ${onCount}/${count} online\n`);
-});
-
-document.getElementById("refresh-devices-btn")?.addEventListener("click", async () => {
-    const active = getActiveNetwork();
-    if (!active || !active.devices || active.devices.length === 0) return;
-    appendLog(`\n--- Refreshing network "${active.name}" ---\n`);
-    const resp = await fetch("/api/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ network: active.name }),
-    });
-    state = await resp.json();
-    renderNetworkBar();
-    renderDevices();
-    // /api/refresh can re-attribute last_port (it consumes the flash breadcrumb + can strip a
-    // stale link), so refresh the "last flashed: X" hint under the port dropdown too.
-    updatePortDeviceHint(getActiveNetwork()?.port || "");
-    const after = getActiveNetwork();
-    const onCount = after ? after.devices.filter(d => d.online).length : 0;
-    appendLog(`${onCount}/${after ? after.devices.length : 0} online\n`);
 });
 
 // Network bar — rebuilds the dropdown options from state.networks and
@@ -1033,12 +1049,25 @@ function setupNetworkBar() {
 function renderDevices() {
     const el = document.getElementById("device-list");
     const active = getActiveNetwork();
-    const devices = (active && active.devices) || [];
-    if (devices.length === 0) {
+    const allDevices = (active && active.devices) || [];
+    if (allDevices.length === 0) {
         el.textContent = "No devices discovered yet.";
         return;
     }
+    // "Online only" hides what didn't answer the last probe. `online !== false` is the same
+    // test the status dot uses: a device discovered but never probed has no `online` field,
+    // and treating that as offline would hide a board that may well be up.
+    const devices = state.onlineOnly
+        ? allDevices.filter(d => d.online !== false)
+        : allDevices;
+    const hidden = allDevices.length - devices.length;
     el.innerHTML = "";
+    if (devices.length === 0) {
+        // Say why the list is empty. Without this, filtering everything out looks identical
+        // to "discovery found nothing" — and the fix (untick the box) isn't discoverable.
+        el.textContent = `No online devices (${hidden} offline hidden).`;
+        return;
+    }
     for (const device of devices) {
         // A plain <div>, NOT a <label>: a <label> wrapper toggles its checkbox on a click
         // ANYWHERE inside it (native behaviour), so clicking the IP/name to open the device
@@ -1087,6 +1116,22 @@ function renderDevices() {
         ipLink.title = "Open this device's UI in the view pane";
         ipLink.addEventListener("click", () => showInView("http://" + device.ip));
         infoText.appendChild(ipLink);
+
+        // ↗ — the same device UI in a real browser tab, next to (not instead of) the view
+        // pane. The pane keeps MoonDeck's context; a tab gives the device its own window,
+        // devtools, and a bookmarkable URL. An <a target="_blank"> rather than a button
+        // calling window.open, so the browser's own affordances work: middle-click,
+        // cmd-click, "Open in new window", copy-link-address. rel="noopener" because a
+        // target="_blank" link otherwise hands the opened page a window.opener handle
+        // back into MoonDeck.
+        const ipNewTab = document.createElement("a");
+        ipNewTab.className = "device-ip-newtab";
+        ipNewTab.href = "http://" + device.ip;
+        ipNewTab.target = "_blank";
+        ipNewTab.rel = "noopener noreferrer";
+        ipNewTab.textContent = "↗";
+        ipNewTab.title = "Open this device's UI in a new browser tab";
+        infoText.appendChild(ipNewTab);
         if (device.firmware) {
             infoText.appendChild(document.createTextNode(` · fw:${device.firmware}`));
         }
@@ -1284,6 +1329,15 @@ function renderDevices() {
         label.appendChild(row2);
         label.appendChild(row3);
         el.appendChild(label);
+    }
+
+    // Account for what the filter removed, so a short list is never mistaken for the
+    // whole registry — the count is the reminder that more devices exist.
+    if (hidden > 0) {
+        const note = document.createElement("div");
+        note.className = "device-filter-note";
+        note.textContent = `${hidden} offline device${hidden === 1 ? "" : "s"} hidden`;
+        el.appendChild(note);
     }
 }
 

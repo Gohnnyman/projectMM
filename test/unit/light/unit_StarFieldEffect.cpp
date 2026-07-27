@@ -86,7 +86,7 @@ TEST_CASE("StarFieldEffect at speed 0 leaves the buffer black") {
 
 }
 
-// The palette variant lights on-panel stars in colour (not forced grey) — usePalette drives hue.
+// The palette variant lights on-panel stars in color (not forced grey) — usePalette drives hue.
 TEST_CASE("StarFieldEffect with usePalette lights stars from the palette") {
     ClockGuard guard;
     mm::Layouts layouts;
@@ -106,7 +106,7 @@ TEST_CASE("StarFieldEffect with usePalette lights stars from the palette") {
     layer.addChild(&stars);
     layer.applyState();
 
-    // Rainbow palette (0), generated at full saturation/value so entries are colourful, not grey —
+    // Rainbow palette (0), generated at full saturation/value so entries are colorful, not grey —
     // Palettes::active() is a process-wide static any prior test can mutate, so pin it here.
     mm::Palettes::setActive(0);
 
@@ -116,16 +116,16 @@ TEST_CASE("StarFieldEffect with usePalette lights stars from the palette") {
     auto* data = layer.buffer().data();
     const size_t count = layer.buffer().count();
     bool anyLit = false;
-    bool anyColoured = false;
+    bool anyColored = false;
     for (size_t i = 0; i < count; i++) {
         const uint8_t r = data[i * 3], g = data[i * 3 + 1], b = data[i * 3 + 2];
         if (r || g || b) {
             anyLit = true;
-            if (!(r == g && g == b)) { anyColoured = true; break; }  // a non-grey pixel = palette colour
+            if (!(r == g && g == b)) { anyColored = true; break; }  // a non-grey pixel = palette color
         }
     }
     CHECK(anyLit);
-    CHECK(anyColoured);
+    CHECK(anyColored);
 
 }
 

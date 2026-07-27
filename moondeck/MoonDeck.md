@@ -103,6 +103,46 @@ uv run moondeck/check/check_platform_boundary.py
 
 Scans all source files outside `src/platform/` for forbidden includes and platform `#ifdef`s.
 
+### check_hotpath
+
+Flag allocation or blocking written directly in a render-path method.
+
+```bash
+uv run moondeck/check/check_hotpath.py          # report findings
+uv run moondeck/check/check_hotpath.py --list   # list the methods it scans
+```
+
+Reads the body of every `tick()` / `tick20ms()` / `tick1s()` under `src/` and reports the banned constructs it can see: `new` / `malloc` / `push_back` / `std::string` / `make_unique` / `make_shared` (allocation) and `delay` / `sleep` / `mutex.lock()` (blocking). A **lint, not a proof** — it cannot see what a callee allocates, so a clean run means "nothing visible in the render path's own source". A justified exception is marked `// hot-path-ok: <reason>` at the line, so the reason lives at the site.
+
+### check_esp32_built
+
+Check that a firmware binary exists and is newer than every source that feeds it.
+
+```bash
+uv run moondeck/check/check_esp32_built.py --firmware esp32s3-n16r8
+```
+
+The cheap stand-in for a full `idf.py build` in the commit and merge gates. Freshness is measured against the **sources**, not the clock: a wall-clock rule ("built in the last hour") passes a binary that predates an edit made twenty minutes ago, which is the stale-artifact trap that sends debugging at the wrong image. On failure it names the newer file and prints the rebuild command. `--max-age-hours N` adds an optional age rule on top; the default (0) disables it.
+
+### event_precommit / event_premerge / event_prerelease
+
+Run the gate list for one lifecycle event ([CLAUDE.md § The Process](../CLAUDE.md#the-process)).
+
+```bash
+uv run moondeck/event/precommit.py                    # commit event
+uv run moondeck/event/precommit.py --build-esp32      # …compiling the firmware for real
+uv run moondeck/event/precommit.py --firmware esp32   # pick the ESP32 variant
+uv run moondeck/event/premerge.py                     # merge event (branch diff vs main)
+uv run moondeck/event/prerelease.py                   # release event (diff vs previous tag)
+```
+
+Each gate carries an objective trigger read from the changed-file set, so a docs-only change runs the spec check and skips the rest, while a `src/` change runs the full list. Every gate reports **PASS** (ran, succeeded), **FAIL** (ran, failed), **SKIP** (trigger did not match) or **MANUAL** (a human decision — hardware, review, release criteria — listed, never auto-failed). Gates do not stop at the first failure: one pass gives the whole picture, and the run ends with a `DONE` line so a long run's finish is unambiguous. The scripts are **product-owner initiated** and never commit, merge, or tag.
+
+**The commit list is built to stay under ~10 seconds**, because a gate list nobody runs protects nothing. Two steps that would otherwise dominate it are deliberately cheap:
+
+- **ESP32 is a freshness check, not a compile** — [check_esp32_built](#check_esp32_built) instead of a cold `idf.py build`. `--build-esp32` compiles for real; `prerelease.py` always does, since that is the event where the binary ships; CI builds every variant on every PR regardless.
+- **KPI skips the live serial capture** — the gate passes `--no-live-capture` (see [collect_kpi](#collect_kpi)), so it needs no bench board and costs seconds.
+
 ### check_devices
 
 Validate the installer device-model catalog (`web-installer/deviceModels.json`).
@@ -128,10 +168,14 @@ Regenerates the firmware list from `build_esp32.py`'s `FIRMWARES` dict and fails
 Collect the per-target KPI line (tick/FPS, memory, sizes) for the commit message.
 
 ```bash
-uv run moondeck/check/collect_kpi.py
+uv run moondeck/check/collect_kpi.py                          # full interactive report
+uv run moondeck/check/collect_kpi.py --commit                 # the commit-message form
+uv run moondeck/check/collect_kpi.py --commit --no-live-capture   # skip the serial read
 ```
 
-Captures a live tick from a connected ESP32 (and the desktop scenario ticks) plus source/test line counts, emitting the `tick:Xus(FPS:Y)` one-liner the commit gate records.
+Captures a live tick from a connected ESP32 (and the desktop scenario ticks) plus source/test line counts, emitting the `tick:Xus(FPS:Y)` one-liner the commit message records.
+
+The ESP32 half reads `esp32/monitor.log`, and refreshes it by opening the serial port for 15 s when that log is older than 5 minutes — accurate, but ~80 s and only possible with a bench board attached. `--no-live-capture` skips that refresh and uses whatever log exists (a few seconds, no board needed); the ESP32 tick line is then absent rather than stale when no recent log is around. The gate lists pass the flag so their cost stays predictable; omit it when composing a commit message, where the fresh reading is the point.
 
 ### scenario_pipeline
 
@@ -241,7 +285,7 @@ For a full description of each scenario, see the [scenario inventory](/api/docs/
 
 ### run_network_live
 
-End-to-end lights-over-UDP matrix test across every online board in moondeck.json's active network — the live proof for [NetworkReceiveEffect](../docs/moonmodules/light/effects.md#networkreceive) and [NetworkSendDriver](../docs/moonmodules/light/drivers.md#networksend). Each round one device is the sender and every other device listens: the desktop seeds the sender **three times — once per protocol (ArtNet, E1.31, DDP), each with its own colour** — asserting the sender's `/ws` preview stream shows each one, then points the sender's own NetworkSendDriver at each listener with the protocol control cycled round-robin and asserts the listener's preview shows the sender's corrected colour (brightness + channel order replicated host-side). With one device online only the desktop→device sweep runs.
+End-to-end lights-over-UDP matrix test across every online board in moondeck.json's active network — the live proof for [NetworkReceiveEffect](../docs/moonmodules/light/effects.md#networkreceive) and [NetworkSendDriver](../docs/moonmodules/light/drivers.md#networksend). Each round one device is the sender and every other device listens: the desktop seeds the sender **three times — once per protocol (ArtNet, E1.31, DDP), each with its own color** — asserting the sender's `/ws` preview stream shows each one, then points the sender's own NetworkSendDriver at each listener with the protocol control cycled round-robin and asserts the listener's preview shows the sender's corrected color (brightness + channel order replicated host-side). With one device online only the desktop→device sweep runs.
 
 ```bash
 uv run moondeck/scenario/run_network_live.py                      # full matrix over all online devices
@@ -253,7 +297,7 @@ Everything it mutates (grid size → 16×16 for the run, NetworkSend `ip`/`proto
 
 ### run_network_roundtrip
 
-Minimal **desktop→device→desktop latency probe** across **all three protocols**: per device, the desktop sends one solid-colour frame over ArtNet, then E1.31, then DDP, each time timing how long until that colour appears in the device's `/ws` preview stream (desktop → NetworkReceiveEffect → PreviewDriver → desktop). The receiver autodetects each protocol on its own port, so there's no device reconfig between them. Reports min / median / max over N repeats per protocol and a per-device median-per-protocol comparison line — the spread is the signal for the latency / hiccup symptom, the protocol comparison shows which transport is fastest on a given board, and running across boards makes the per-chip difference visible (a classic ESP32 measures slower than an S3). Runs against **every device checked in the Live tab** (the same `selected` set the matrix test uses); unreachable checked devices are warned and skipped. The measured time includes the PreviewDriver's own fps quantisation (≈42 ms at the 24 fps default), so it's "state visible within" latency, not wire latency; raise the device's Preview fps to tighten it. Deliberately minimal — per-frame sequence matching, the device→device chain, and jitter/drop histograms are left as later extensions.
+Minimal **desktop→device→desktop latency probe** across **all three protocols**: per device, the desktop sends one solid-color frame over ArtNet, then E1.31, then DDP, each time timing how long until that color appears in the device's `/ws` preview stream (desktop → NetworkReceiveEffect → PreviewDriver → desktop). The receiver autodetects each protocol on its own port, so there's no device reconfig between them. Reports min / median / max over N repeats per protocol and a per-device median-per-protocol comparison line — the spread is the signal for the latency / hiccup symptom, the protocol comparison shows which transport is fastest on a given board, and running across boards makes the per-chip difference visible (a classic ESP32 measures slower than an S3). Runs against **every device checked in the Live tab** (the same `selected` set the matrix test uses); unreachable checked devices are warned and skipped. The measured time includes the PreviewDriver's own fps quantisation (≈42 ms at the 24 fps default), so it's "state visible within" latency, not wire latency; raise the device's Preview fps to tighten it. Deliberately minimal — per-frame sequence matching, the device→device chain, and jitter/drop histograms are left as later extensions.
 
 ```bash
 uv run moondeck/scenario/run_network_roundtrip.py                  # every checked device, 10 probes each
@@ -264,7 +308,7 @@ Captures and restores each device's grid and removes the temporary NetworkReceiv
 
 ### preview_health
 
-Browser-faithful **3D-preview stream health probe** — measures the device's `/ws` preview the way a real browser tab experiences it, so the numbers match what a person watching the [PreviewDriver](../docs/moonmodules/light/drivers.md#preview) preview sees. A plain one-shot WebSocket reader gives up the moment the device closes the socket, so it reports stalls a browser never shows (the browser reconnects) and misses the brief blips a browser does show; this probe replicates the real client in [app.js](../src/ui/app.js)'s `connectWs` — reads the binary frames, sends a `"ping"` text frame every 25 s, and **auto-reconnects on close with 500 ms→5 s backoff** — so a momentary device-side close registers as a short blip, not a frozen preview. Pure WebSocket client: **no device-side changes**, it observes the unmodified stream the device already broadcasts. Reports, per device: colour frames + sustained fps, reconnects (each a visible blip), `maxgap` (the longest stretch with no colour frame — the real "did it freeze?" number), and a `SMOOTH` / `CHOPPY` / `DEAD` verdict. Diagnostic, not a gate — it always exits `0`; read the verdict. Runs against **every device checked in the Live tab** (or an explicit `--host`); with no host it sweeps every online device on the active network.
+Browser-faithful **3D-preview stream health probe** — measures the device's `/ws` preview the way a real browser tab experiences it, so the numbers match what a person watching the [PreviewDriver](../docs/moonmodules/light/drivers.md#preview) preview sees. A plain one-shot WebSocket reader gives up the moment the device closes the socket, so it reports stalls a browser never shows (the browser reconnects) and misses the brief blips a browser does show; this probe replicates the real client in [app.js](../src/ui/app.js)'s `connectWs` — reads the binary frames, sends a `"ping"` text frame every 25 s, and **auto-reconnects on close with 500 ms→5 s backoff** — so a momentary device-side close registers as a short blip, not a frozen preview. Pure WebSocket client: **no device-side changes**, it observes the unmodified stream the device already broadcasts. Reports, per device: color frames + sustained fps, reconnects (each a visible blip), `maxgap` (the longest stretch with no color frame — the real "did it freeze?" number), and a `SMOOTH` / `CHOPPY` / `DEAD` verdict. Diagnostic, not a gate — it always exits `0`; read the verdict. Runs against **every device checked in the Live tab** (or an explicit `--host`); with no host it sweeps every online device on the active network.
 
 ```bash
 uv run moondeck/diag/preview_health.py                              # every online device, 30s each

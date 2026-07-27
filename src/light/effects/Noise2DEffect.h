@@ -8,7 +8,7 @@ namespace mm {
 // X/Y coordinates are the grid position scaled by `scale` (larger scale = finer, more detailed
 // noise; smaller = broad, smooth blobs) and whose Z coordinate is time, so the whole field flows /
 // morphs over the frames. The 0..255 noise value indexes the active palette directly, giving the
-// classic organic, plasma-like colour wash.
+// classic organic, plasma-like color wash.
 //
 // Source math (MoonLight's Noise2D): for every (x,y),
 //   pixelHue8 = inoise8(x*scale, y*scale, millis()/(16-speed));

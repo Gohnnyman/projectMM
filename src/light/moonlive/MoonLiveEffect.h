@@ -89,7 +89,7 @@ public:
 
 private:
     moonlive::MoonLive engine_;
-    // Default script — random pixels: each tick lights one random light in a random RGB colour.
+    // Default script — random pixels: each tick lights one random light in a random RGB color.
     // A live, always-visible starting example (and a good demo-reel slot). The index random16(256)
     // covers a typical grid; setRGB bounds-guards it (an index past the light count is skipped, and
     // 0×0 is safe), so most ticks land on a real light and the demo stays visibly lit.

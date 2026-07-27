@@ -265,7 +265,12 @@ select {
 }
 
 /* Live tab */
-.live-controls { margin-bottom: 12px; }
+/* Scan + its "Online only" filter on one row: the action and what it displays belong
+   together. Baseline-aligned so the checkbox label sits level with the button text. */
+.live-controls {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 12px;
+}
 
 #device-list {
     font-size: 12px;
@@ -341,6 +346,27 @@ select {
    on hover marks it as the link, distinct from the inert fw text beside it. */
 .device-ip-link { cursor: pointer; }
 .device-ip-link:hover { color: #8ab4f8; text-decoration: underline; }
+
+/* ↗ beside the IP — the same device UI in a real browser tab. Muted by default so it
+   reads as a secondary affordance next to the IP, not a second primary action. */
+.device-ip-newtab {
+    color: #7a8a9a; text-decoration: none; cursor: pointer;
+    margin-left: 4px; font-size: 11px;
+}
+.device-ip-newtab:hover { color: #8ab4f8; }
+
+/* "Online only" — sits on the Scan row (see .live-controls), so it carries no margin of
+   its own; the row owns the spacing. */
+.device-filter {
+    display: flex; align-items: center; gap: 6px;
+    color: #7a8a9a; font-size: 11px;
+    cursor: pointer; user-select: none;
+}
+.device-filter:hover { color: #9aaaba; }
+.device-filter-note {
+    color: #5a6a7a; font-size: 10px; font-style: italic;
+    margin-top: 6px; padding-left: 2px;
+}
 
 /* last_port chip — click to set this device's known flash port as the network port. */
 .device-port-chip {
@@ -502,6 +528,19 @@ button#identify-ports:hover, button#watch-ports:hover {
     color: #e94560;
 }
 button#refresh-ports { padding: 3px 6px; font-size: 12px; }
+/* One turn of the ↻ glyph confirms a manual port refresh ran: the list usually comes back
+   identical, so without this the click reads as a no-op and invites a second press.
+   The animation targets the GLYPH, not the button — rotating the button would spin its
+   border into a diamond. inline-block because transforms don't apply to an inline box. */
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+button#refresh-ports .refresh-glyph { display: inline-block; }
+button#refresh-ports.spinning .refresh-glyph { animation: refresh-spin 0.5s linear; }
+/* Someone who asked the OS for less motion still needs the confirmation — a brief
+   highlight on the button instead of the rotation. */
+@media (prefers-reduced-motion: reduce) {
+    button#refresh-ports.spinning .refresh-glyph { animation: none; }
+    button#refresh-ports.spinning { border-color: #2e9e63; color: #6ee7a0; }
+}
 /* Watcher is live: green while polling so its on-state reads at a glance. */
 button#watch-ports.watching {
     background: #1b5e3a;

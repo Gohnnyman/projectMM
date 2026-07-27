@@ -10,11 +10,11 @@ namespace mm {
 // toward full (then reverses) or toward zero (then respawns at a fresh random cell). A small per-
 // frame chance (random8() < 10) flips a star's direction early, scattering the twinkle so it never
 // pulses in sync. Stars are white (b,b,b) unless usePalette, in which case each carries its own
-// palette index. The colour drawn each frame is taken from the brightness BEFORE this frame's step
+// palette index. The color drawn each frame is taken from the brightness BEFORE this frame's step
 // (MoonLight computes `color` once from the current brightness, then steps, then setRGB(color)).
 //
 // Prior art: MoonLight's StarSky (E_MoonModules / MoonModules) — the star-pool model (fill-ratio
-// sizing, fade-up/fade-down/respawn, the random early-reverse, the optional palette colour) is
+// sizing, fade-up/fade-down/respawn, the random early-reverse, the optional palette color) is
 // reproduced here, written fresh on projectMM's EffectBase + shared primitives (Random8,
 // colorFromPalette, draw::). The per-star arrays live on the heap (ScratchBuffers), never as inline
 // members, so sizeof(StarSkyEffect) stays tiny.
@@ -29,7 +29,7 @@ public:
     // Defaults match MoonLight's StarSky exactly.
     uint8_t speed           = 1;     // fade step per frame (0..42)
     uint8_t star_fill_ratio = 42;    // stars per 10000 lights (the pool-size lever)
-    bool    usePalette      = false; // false → white stars; true → per-star palette colour
+    bool    usePalette      = false; // false → white stars; true → per-star palette color
 
     void defineControls() override {
         controls_.addUint8("speed", speed, 0, 42);
@@ -84,8 +84,8 @@ public:
             const lengthType z = static_cast<lengthType>(index / (static_cast<size_t>(w) * h));
             const Coord3D p{x, y, z};
 
-            // Colour is computed ONCE from the CURRENT (pre-step) brightness, then the brightness is
-            // stepped, then the pre-step colour is drawn — matching MoonLight's
+            // Color is computed ONCE from the CURRENT (pre-step) brightness, then the brightness is
+            // stepped, then the pre-step color is drawn — matching MoonLight's
             //   color = usePalette ? ColorFromPalette(pal, colors[i], brightness[i]) : CRGB(b,b,b);
             //   brightness[i] += speed; setRGB(pos, color);
             const uint8_t b = brightness_[i];
@@ -140,7 +140,7 @@ private:
         }
     }
 
-    // Seed every star: random cell, random fade direction, random mid brightness, random colour.
+    // Seed every star: random cell, random fade direction, random mid brightness, random color.
     void initStars(nrOfLightsType count) {
         for (size_t i = 0; i < nbStars_; i++) {
             indexes_[i]    = randomIndex(count);

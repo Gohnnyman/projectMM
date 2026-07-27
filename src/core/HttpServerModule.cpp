@@ -15,7 +15,7 @@
 #include "core/FilesystemModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/SystemModule.h"      // deviceName() for the WLED /json/info shim
-#include "light/Palette.h"          // Palettes::nearestForHue — maps HA's RGB colour picker onto our
+#include "light/Palette.h"          // Palettes::nearestForHue — maps HA's RGB color picker onto our
                                     // hue→palette convention (same core→light bridge MqttModule uses
                                     // for hsv/set; see the note in MqttModule.cpp:7-14).
 #include "light/drivers/Drivers.h"  // Drivers::latestSummary() — the real light count/channels for
@@ -258,7 +258,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         // useful independent cross-check that our mDNS advertise resolves.
         else if (std::strcmp(path, "/json/info") == 0) serveWledInfo(conn);
         // WLED state + the combined state+info (`/json/si`) the app reads for its device
-        // card: on/off, brightness, and the segment's primary colour (which the app uses
+        // card: on/off, brightness, and the segment's primary color (which the app uses
         // as the card tint). serveWledState reads live brightness from the Drivers module.
         else if (std::strcmp(path, "/json/state") == 0) serveWledState(conn);
         else if (std::strcmp(path, "/json/si") == 0) serveWledStateInfo(conn);
@@ -1273,8 +1273,8 @@ void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const
 }
 
 // The WLED state object, written into an open sink. `on` + `bri` mirror Drivers on/brightness.
-// `seg[0].col[0]` reports the ACTIVE PALETTE's identity colour, not the live first-LED — so
-// every WLED consumer (the WLED native app's device card, HA's WLED integration colour picker,
+// `seg[0].col[0]` reports the ACTIVE PALETTE's identity color, not the live first-LED — so
+// every WLED consumer (the WLED native app's device card, HA's WLED integration color picker,
 // Homebridge's HSV via the MQTT pair, the /ws push) sees the same stable palette-representative
 // value and matches the palette-picker → RGB round-trip. Live first-LED was tried first and
 // dropped: it dimmed the picker under low master brightness (near-black) and jittered with the
@@ -1299,8 +1299,8 @@ void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     // seg[0].pal = the active palette index, so HA's WLED integration highlights the current entry
     // in its palette dropdown (light.py reads state.segments[<seg>].palette). It shares the Drivers
     // `palette` control with col[0] above (representativeRgb of the SAME index), so the HA palette
-    // dropdown and colour picker stay two views of one value: selecting a palette repaints the picker
-    // on HA's next poll, and picking a colour snaps to the nearest palette (applyWledState).
+    // dropdown and color picker stay two views of one value: selecting a palette repaints the picker
+    // on HA's next poll, and picking a color snaps to the nearest palette (applyWledState).
     const uint8_t pal = driversPalette(scheduler_);
     sink.appendf("{\"on\":%s,\"bri\":%u,\"transition\":7,\"ps\":-1,\"pl\":-1,"
                  "\"nl\":{},\"udpn\":{},\"lor\":0,\"mainseg\":0,"
@@ -1398,12 +1398,12 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
                  "\"brand\":\"WLED\",\"product\":\"MoonModules\",\"release\":\"MoonModules\","
                  // lc + seglc = LightCapability.RGB_COLOR (1) so HA WLED's segment light picks
                  // ColorMode.RGB (via LIGHT_CAPABILITIES_COLOR_MODE_MAPPING in ha-core/wled/const.py),
-                 // which grants a brightness slider AND colour picker. LightCapability.NONE (0)
+                 // which grants a brightness slider AND color picker. LightCapability.NONE (0)
                  // maps to ColorMode.ONOFF, which is why the entity was on/off-only initially.
                  // BOTH are capability CODES, not counts: HA reads seglc[segment_id] as that segment's
                  // capability bitmask (1 = RGB), then LIGHT_CAPABILITIES_COLOR_MODE_MAPPING[seglc[0]]
-                 // gives the colour mode. Putting the LED count here (e.g. seglc:[24]) has no mapping,
-                 // so WLEDSegmentLight ends up with NO supported colour modes and HA refuses to add the
+                 // gives the color mode. Putting the LED count here (e.g. seglc:[24]) has no mapping,
+                 // so WLEDSegmentLight ends up with NO supported color modes and HA refuses to add the
                  // light entity ("does not set supported color modes") — it stays `restored`/unavailable
                  // while the sensors still work. seglc is therefore the constant 1, matching lc; the LED
                  // count lives only in `count`. fps = the real render rate (scheduler_->fps()).
@@ -1442,7 +1442,7 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
     // effects stays one real entry ("Solid"): this shim drives a single Layer, so a longer effect list
     // would be a lie. palettes is the REAL built-in list (Palette.h paletteNames / kBuiltins) so HA's
     // palette dropdown offers every palette the device has, indexed to match seg[0].pal and the Drivers
-    // `palette` control — the same one-narrow-reach into light/ that the representative colour uses.
+    // `palette` control — the same one-narrow-reach into light/ that the representative color uses.
     sink.appendf(",\"effects\":[\"Solid\"],\"palettes\":[");
     mm::paletteNames(sink);
     sink.appendf("]}");
@@ -1489,7 +1489,7 @@ void HttpServerModule::applyWledState(const char* body) {
     // WLED palette: seg[0].pal is the palette index. HA's WLED integration writes here when a user
     // picks from the palette dropdown (the entries served by paletteNames in /json). It maps straight
     // to the Drivers `palette` control — the direct-index counterpart to the col[] nearest-match below;
-    // both feed the same control, so the dropdown and the colour picker stay one value. Parsed from the
+    // both feed the same control, so the dropdown and the color picker stay one value. Parsed from the
     // segment object so a top-level stray "pal" can't hijack it.
     const char* segStart = std::strstr(body, "\"seg\":");
     const char* palStart = segStart ? std::strstr(segStart, "\"pal\":") : nullptr;
@@ -1501,8 +1501,8 @@ void HttpServerModule::applyWledState(const char* body) {
         std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", pal);
         applySetControl("Drivers", "palette", valueJson);
     }
-    // WLED colour: seg[0].col[0] is [r,g,b]. HA's WLED integration writes here when a user picks a
-    // colour in the RGB picker. Palettes::nearestForRgb is the canonical RGB→palette entry (see the
+    // WLED color: seg[0].col[0] is [r,g,b]. HA's WLED integration writes here when a user picks a
+    // color in the RGB picker. Palettes::nearestForRgb is the canonical RGB→palette entry (see the
     // comment at its declaration): it applies the same RGB→(hue,sat) conversion representativeHueSat
     // uses on the palette side, then runs the 2D-distance sweep. Value channel is ignored — HA's own
     // brightness slider handles bri via the `bri` field above.
@@ -2262,11 +2262,11 @@ void HttpServerModule::pushStateToWebSockets() {
     }
 
     // Also push a WLED-shaped {state, info} frame. The native WLED app connects to this
-    // same /ws and reads live state (colour, brightness, on/off) from a DeviceStateInfo
+    // same /ws and reads live state (color, brightness, on/off) from a DeviceStateInfo
     // message — it has no /json/si GET. Our own UI ignores this frame (its JS keys on
     // `modules`); the WLED app ignores our module frame (its Moshi keys on `state`/`info`).
     // Two small frames, each consumer parses its own — no client needs to know about the
-    // other. This is what makes the device's card show the live colour + a working slider.
+    // other. This is what makes the device's card show the live color + a working slider.
     pushWledStateToWebSockets();
 }
 
@@ -2370,7 +2370,7 @@ bool HttpServerModule::sendWsTextFrame(platform::TcpConnection& conn, const char
 // can't all go right now. Bounded TOTAL would-block spins (not reset on progress) hard-bound how
 // long this synchronous send can occupy the caller's loop; a span that doesn't complete in budget
 // closes the client (the browser reconnects). Used by the begin/push/end stream (the coord table
-// and downsampled colour frame); the full-res colour frame uses the resumable sendBufferedFrame.
+// and downsampled color frame); the full-res color frame uses the resumable sendBufferedFrame.
 bool HttpServerModule::sendAllOrClose(platform::TcpConnection& ws, const uint8_t* data, size_t len) {
     size_t sent = 0;
     int stalls = 0;
@@ -2387,7 +2387,7 @@ bool HttpServerModule::sendAllOrClose(platform::TcpConnection& ws, const uint8_t
 }
 
 // Streamed frame: header now, payload pushed in slices, no frame-sized staging buffer — so a
-// large frame (PreviewDriver's coordinate table or colour frame) goes out on a memory-tight
+// large frame (PreviewDriver's coordinate table or color frame) goes out on a memory-tight
 // board where a contiguous block won't fit. The producer (forEachCoord) pushes forward-only;
 // each slice fans to every client before the next push. A client that can't keep up is closed
 // (its WS message ends incomplete → it reconnects), so this never blocks the tick indefinitely.

@@ -8,12 +8,12 @@ namespace mm {
 // whole column scrolls one pixel away from the source end and a single new pixel is painted at that
 // end, its HUE derived from the music's major peak frequency (mapped through a tunable
 // lowBin..highBin frequency window) and its BRIGHTNESS from the overall loudness. The result is a
-// scrolling "waterfall" where pitch becomes colour and loudness becomes intensity — speak or play a
-// rising tone and a coloured streak climbs the strip. Silence (or a sub-bass-only signal) paints
+// scrolling "waterfall" where pitch becomes color and loudness becomes intensity — speak or play a
+// rising tone and a colored streak climbs the strip. Silence (or a sub-bass-only signal) paints
 // black, so quiet rooms scroll dark.
 //
 // The column itself IS the shift register: each loop reads pixel y-1 into pixel y (from the far end
-// back toward the source) and writes the freshly-computed colour at y=0, so no separate history
+// back toward the source) and writes the freshly-computed color at y=0, so no separate history
 // buffer is needed — the look is entirely in the Buffer's own scroll. As a D1 effect it writes only
 // the x=0 column running along Y (the project's "1D runs along Y" contract, docs/architecture.md);
 // Layer::extrude fans that single column across x (and z on a cube) on wider layers, so the same
@@ -35,7 +35,7 @@ namespace mm {
 // /2560 divisor so a full-scale level·fx·sensitivity lands near 255 — the same response curve on our
 // integer level. These two scale conversions are the only deviations from the verbatim WLED math;
 // every constant (80 Hz, 0.25, 42·highBin, 3·lowBin) is otherwise preserved.
-/// Audio-reactive effect: scrolls the dominant frequency as a colour column.
+/// Audio-reactive effect: scrolls the dominant frequency as a color column.
 class FreqMatrixEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙📊"; }  // 1D · audio
@@ -96,7 +96,7 @@ public:
         if (pixVal > 255) pixVal = 255;
         const uint8_t bri = static_cast<uint8_t>(pixVal);
 
-        // --- Colour of the new pixel. Black unless there is a real tone above 80 Hz and the (smoothed)
+        // --- Color of the new pixel. Black unless there is a real tone above 80 Hz and the (smoothed)
         // volume is above a quarter scale (WLED: peakHz > 80 && volumeSmth > 0.25). 0.25 on WLED's
         // 0..1 volume is reproduced as level > 64 on our 0..255 smoothed level (fidelity-scale note).
         RGB newColor{0, 0, 0};
@@ -118,7 +118,7 @@ public:
         }
 
         // --- Shift the column one pixel away from the source end (WLED: for i = SEGLEN-1 .. 1,
-        // setPixelColor(i, getPixelColor(i-1))), then paint the new colour at y=0. The effect writes
+        // setPixelColor(i, getPixelColor(i-1))), then paint the new color at y=0. The effect writes
         // only x=0; Layer::extrude duplicates this column across x (and z) on wider layers.
         for (int y = len - 1; y > 0; y--) {
             const RGB c = draw::get(buf, dims, {0, static_cast<lengthType>(y - 1), 0});

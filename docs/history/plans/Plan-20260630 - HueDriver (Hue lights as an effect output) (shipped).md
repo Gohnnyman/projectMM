@@ -2,7 +2,7 @@
 
 ## Context
 
-The product owner has Hue lights and a bridge ("Hue Ewoud", BSB002, API 1.77, at 192.168.1.143). The reframe that drives this plan, from the product owner: **Hue is an *output*, not a device to list.** projectMM already drives "an array of lights" through the effect → layout → buffer → driver pipeline; Hue maps onto that directly — a handful of bulbs are a small **grid** (e.g. 5×1×1), an **effect** runs on them, and a **`HueDriver`** (a sibling of `RmtLedDriver` / `NetworkSendDriver` in the Drivers container) reads its window of the output buffer and pushes each pixel's colour to the corresponding bulb. The bulbs are *pixels of an effect*, not rows in DevicesModule.
+The product owner has Hue lights and a bridge ("Hue Ewoud", BSB002, API 1.77, at 192.168.1.143). The reframe that drives this plan, from the product owner: **Hue is an *output*, not a device to list.** projectMM already drives "an array of lights" through the effect → layout → buffer → driver pipeline; Hue maps onto that directly — a handful of bulbs are a small **grid** (e.g. 5×1×1), an **effect** runs on them, and a **`HueDriver`** (a sibling of `RmtLedDriver` / `NetworkSendDriver` in the Drivers container) reads its window of the output buffer and pushes each pixel's color to the corresponding bulb. The bulbs are *pixels of an effect*, not rows in DevicesModule.
 
 This is *Common patterns first* + *Concrete first, abstract later*: a new driver is the recognised unit of "a new output target," and the architecture already has the seam. No new core concept — one new `DriverBase` subclass + a small outbound-HTTP helper.
 
@@ -15,8 +15,8 @@ This is *Common patterns first* + *Concrete first, abstract later*: a new driver
 ## Decisions locked (product owner)
 
 - **Hue is an output driver** (`HueDriver : DriverBase`), sibling of `NetworkSendDriver`. Not a DevicesModule entry. (Listing the bridge in DevicesModule + auto-filling the driver's IP from discovery is a **follow-up**, per *concrete first* — build the working output, add the discovery nicety after.)
-- **Scope: on/off + brightness** from the effect's per-pixel value (luminance → `bri`). Colour (`xy`/`hue`/`sat`) is a clean later extension on the same PUT.
-- **Update model: throttled, changed-lights-only.** Hue's bridge rate-limits to ~10 commands/s/light; a real-time stream would need the Entertainment API (DTLS) — out of scope. The driver samples its window on a **slow tick** (target ≤ ~10 Hz total across its lights) and PUTs **only the lights whose colour changed** since the last push. This is the standard way apps drive Hue from animations.
+- **Scope: on/off + brightness** from the effect's per-pixel value (luminance → `bri`). Color (`xy`/`hue`/`sat`) is a clean later extension on the same PUT.
+- **Update model: throttled, changed-lights-only.** Hue's bridge rate-limits to ~10 commands/s/light; a real-time stream would need the Entertainment API (DTLS) — out of scope. The driver samples its window on a **slow tick** (target ≤ ~10 Hz total across its lights) and PUTs **only the lights whose color changed** since the last push. This is the standard way apps drive Hue from animations.
 - **Plain-HTTP Hue v1 API** (no TLS). The bridge IP + app key are **controls on the HueDriver** (self-contained config, like NetworkSendDriver owns its target IP/universe); a **Pair button** runs the link-button POST to fill the app key. Persisted with the module.
 
 ## Design
@@ -60,7 +60,7 @@ Header-only light module, mirroring `NetworkSendDriver`'s shape:
 ## Files
 
 - **New:** `src/light/drivers/HueDriver.h` (the driver), `docs/moonmodules/light/drivers/HueDriver.md` (spec — controls, the Hue v1 wire contract, pairing flow, the rate-limit rationale, prior art).
-- **Edit:** `src/platform/platform.h` (+ `src/platform/esp32/` + `src/platform/desktop/` impls) for `httpRequest`; the driver registration in `src/main.cpp`; `test/CMakeLists.txt` + a `test/unit/light/unit_HueDriver.cpp` (request formatting + changed-only diff + window mapping); `docs/backlog/backlog-light.md` (mark the Hue-driver item building / add the follow-ups: colour, DevicesModule bridge discovery, Entertainment-API streaming).
+- **Edit:** `src/platform/platform.h` (+ `src/platform/esp32/` + `src/platform/desktop/` impls) for `httpRequest`; the driver registration in `src/main.cpp`; `test/CMakeLists.txt` + a `test/unit/light/unit_HueDriver.cpp` (request formatting + changed-only diff + window mapping); `docs/backlog/backlog-light.md` (mark the Hue-driver item building / add the follow-ups: color, DevicesModule bridge discovery, Entertainment-API streaming).
 
 ## Riskiest parts
 
@@ -77,7 +77,7 @@ Header-only light module, mirroring `NetworkSendDriver`'s shape:
 
 ## Out of scope (clean follow-ups)
 
-- **Colour** (`xy` / `hue`/`sat` from the pixel RGB) — same PUT, one more field; the obvious next slice.
+- **Color** (`xy` / `hue`/`sat` from the pixel RGB) — same PUT, one more field; the obvious next slice.
 - **DevicesModule lists the Hue bridge** + auto-fills the driver's `bridgeIp` from discovery (the product owner's "list it in devices" idea, done as the second step — discovery feeds the output).
 - **Hue Entertainment API** (DTLS streaming, ~25–50 Hz) for true real-time effect sync — a major separate feature (TLS-PSK on ESP32, entertainment-area setup, v2 API).
 - **DMX lights** as another such output driver (the product owner noted this is coming — Hue maps the "array of foreign lights" pattern that DMX will reuse).

@@ -660,12 +660,25 @@ void ethGetIPv4(uint8_t out[4]) {
     }
 }
 
-bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
+// Test seam: the host has no STA radio, so wifiStaInit() reports "no STA" — unless a test fakes
+// one to drive NetworkModule's WaitingSta path. Cross-thread atomic, the setTestNowMs contract.
+static std::atomic<bool> testWifiStaAvailable{false};
+void setTestWifiStaAvailable(bool available) { testWifiStaAvailable.store(available, std::memory_order_relaxed); }
+bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) {
+    return testWifiStaAvailable.load(std::memory_order_relaxed);
+}
 bool wifiStaConnected() { return false; }
 void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 // Addressing is OS-managed on desktop; the static/DHCP setters are inert (no netif to reconfigure).
-void netSetStaticIPv4(NetIface /*iface*/, const uint8_t[4], const uint8_t[4],
-                      const uint8_t[4], const uint8_t[4]) {}
+// The per-interface apply counter is the observable a host test pins the static-addressing path on.
+static std::atomic<uint32_t> testStaticApplies[2] = {};   // indexed by NetIface
+void netSetStaticIPv4(NetIface iface, const uint8_t[4], const uint8_t[4],
+                      const uint8_t[4], const uint8_t[4]) {
+    testStaticApplies[static_cast<uint8_t>(iface)].fetch_add(1, std::memory_order_relaxed);
+}
+uint32_t testNetStaticApplyCount(NetIface iface) {
+    return testStaticApplies[static_cast<uint8_t>(iface)].load(std::memory_order_relaxed);
+}
 void netSetDhcp(NetIface /*iface*/) {}
 void setHostname(const char* /*name*/) {}   // no DHCP client on desktop
 void wifiStaStop() {}

@@ -93,7 +93,7 @@ TEST_CASE("LavaLampEffect writes non-zero RGB") {
     CHECK(ctx.hasNonZero());
 }
 
-// Across 10 frames at bpm=60, at least one frame shows two distinct colours somewhere in the buffer (blobs move and the field varies).
+// Across 10 frames at bpm=60, at least one frame shows two distinct colors somewhere in the buffer (blobs move and the field varies).
 TEST_CASE("LavaLampEffect spatial variation") {
     // LavaLamp's blobs cluster at some t values and produce a near-uniform
     // saturated frame at the default slow bpm (=8). Sample several frames
@@ -153,7 +153,7 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     CHECK(ctx.hasNonZero());
 }
 
-// Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
+// Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colors (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
 TEST_CASE("RipplesEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RipplesEffect effect;

@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-// MoonLive Stage 1a: the load-bearing slice — emit a fixed-colour fill as native code,
+// MoonLive Stage 1a: the load-bearing slice — emit a fixed-color fill as native code,
 // place it in executable memory, and call it over a buffer. These tests run the WHOLE path
 // in-process on the desktop host backend (the host ISA's emit + platform::allocExec/
 // writeExec + a real call), so they prove emit → exec → call → buffer-write works off
@@ -41,7 +41,7 @@ TEST_CASE("MoonLive emitFill/emitAnimatedFill reject a null output buffer (no cr
 // would fail on the REQUIRE. Guarded on the emit-header capability macro so they compile
 // out where the backend is unimplemented — the same "runs dark" degradation on-device.
 #if MM_MOONLIVE_HAS_HOST_JIT
-TEST_CASE("MoonLive compiles and fills a buffer with the chosen colour") {
+TEST_CASE("MoonLive compiles and fills a buffer with the chosen color") {
     moonlive::MoonLive engine;
     REQUIRE(engine.compile(/*r*/ 10, /*g*/ 20, /*b*/ 200));
     REQUIRE(engine.ok());
@@ -79,14 +79,14 @@ TEST_CASE("MoonLive run is a no-op on sub-RGB buffers (cpl 1 and 2)") {
     engine.run(nullptr, 8, 3, 0);
 }
 
-TEST_CASE("MoonLive recompile swaps the colour; free returns to !ok") {
+TEST_CASE("MoonLive recompile swaps the color; free returns to !ok") {
     moonlive::MoonLive engine;
     REQUIRE(engine.compile(1, 1, 1));
     std::vector<uint8_t> buf(3, 0);
     engine.run(buf.data(), 1, 3, 0);
     CHECK(buf[0] == 1);
 
-    REQUIRE(engine.compile(9, 8, 7));       // recompile a new colour
+    REQUIRE(engine.compile(9, 8, 7));       // recompile a new color
     engine.run(buf.data(), 1, 3, 0);
     CHECK(buf[0] == 9); CHECK(buf[1] == 8); CHECK(buf[2] == 7);
 
@@ -96,7 +96,7 @@ TEST_CASE("MoonLive recompile swaps the colour; free returns to !ok") {
     engine.run(buf.data(), 1, 3, 0);
 }
 
-TEST_CASE("MoonLive animated fill derives colour from the per-frame t") {
+TEST_CASE("MoonLive animated fill derives color from the per-frame t") {
     moonlive::MoonLive engine;
     REQUIRE(engine.compileAnimated());
     REQUIRE(engine.ok());

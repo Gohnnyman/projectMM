@@ -58,7 +58,7 @@ chip, and what the device can do (LEDs, WiFi, a button, a microphone…); click
 
 ![A device card with its details](assets/gettingstarted/01-05-device-details.png)
 
-The little coloured pills are the device's capabilities, and the colour tells you
+The little colored pills are the device's capabilities, and the color tells you
 how ready each one is:
 
 - 🟢 **Green** — set up and working the moment you install. This capability is
@@ -143,7 +143,7 @@ Three regions, left to right:
   option and the lights react instantly.
 
 Every module header carries a **⏻ power button** — it turns that module on or off.
-Bright (accent-coloured) means on; dimmed means off. A switched-off module simply
+Bright (accent-colored) means on; dimmed means off. A switched-off module simply
 stops running — it stays in place with all its settings, so flicking it back on
 picks up right where it left off. It's the quick way to mute an effect or an output
 for a moment without deleting anything.
@@ -167,7 +167,7 @@ phone, standing next to your lights:
 ![The 3D preview, lights numbered](assets/gettingstarted/02-04-UI-Preview.png)
 
 Drag to rotate, scroll to zoom. Each dot is one light at its real position, lit
-with the colour it's showing this instant. Turn on the numbers to see each light's
+with the color it's showing this instant. Turn on the numbers to see each light's
 index — handy when you're wiring or mapping a layout. The preview is a *view* of
 the device; it never slows the lights down, and it gracefully eases off (fewer
 updates, then fewer points) on a slow connection rather than stalling.
@@ -257,7 +257,7 @@ and the MQTT broker if you don't have them, is in the
 ### Building a light show: layouts → layers → drivers
 
 The bottom three modules are where the fun is. They form a simple pipeline: a
-**layout** says where your lights are, **layers** decide what colours play on
+**layout** says where your lights are, **layers** decide what colors play on
 them, and **drivers** send the result out to the real world. Add modules with the
 dashed **+ add module** button under each one.
 
@@ -271,14 +271,14 @@ on **serpentine** if your strip zig-zags back and forth.
 
 **Layers** — what plays on the lights. Add an **effect** (a moving pattern), stack
 several to blend them, and reshape them with **modifiers** (mirror, rotate, and
-more). Each effect has its own controls — speed, colour mode, and so on — that you
+more). Each effect has its own controls — speed, color mode, and so on — that you
 tweak live.
 
 ![The Layers module](assets/gettingstarted/02-09-UI-Layers.png)
 
 > [Layers](moonmodules/light/supporting.md) · [Layer](moonmodules/light/supporting.md)
 
-**Drivers** — where the colours go. Set overall **brightness** and colour order,
+**Drivers** — where the colors go. Set overall **brightness** and color order,
 then add an output: real LED strips on a pin, or send the frame over the network
 (ArtNet, E1.31/sACN, DDP) to other devices or lighting software.
 

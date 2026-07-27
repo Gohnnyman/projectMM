@@ -14,7 +14,7 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
 ## Controls
 
-- `source` — the script text (default: random pixels — `setRGB(random16(256), random16(256), random16(256), random16(256));`, one random light in a random colour each tick). Editing it recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot).
+- `source` — the script text (default: random pixels — `setRGB(random16(256), random16(256), random16(256), random16(256));`, one random light in a random color each tick). Editing it recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot).
 - **Scripted controls** — a script declares a tunable variable with a range annotation, and the engine surfaces it as a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
@@ -54,7 +54,7 @@ MoonLive's native-codegen approach — compile a small C-like language straight 
 
 The grammar + bounds guard are verified live on the S3/Olimex (Xtensa) by editing the `source` control — the device compiles the expression on-chip and renders it.
 
-[scenario_MoonLiveEffect_livescript](../../../test/scenarios/light/scenario_MoonLiveEffect_livescript.json) exercises the effect **as a wired MoonModule** — what the unit tests can't reach: add it, live-edit the `source` to recolour (recompile), push a broken script (`MoonLive::compile` fails, frees the previous code, `MoonLiveEffect` reports the parse error in the status and renders dark — no crash), recover, resize the grid to 1×1 and back while rendering (the every-grid-size hard rule), then remove and re-add (exec memory re-acquired clean). It runs in-process on the desktop backend each commit, and the same JSON runs live over REST against the device backends. The Xtensa/RISC-V backends are validated by the live S3/P4 runs (a `MoonLiveEffect` on a Layer lights the grid from its `source`), which the desktop tests can't reach.
+[scenario_MoonLiveEffect_livescript](../../../test/scenarios/light/scenario_MoonLiveEffect_livescript.json) exercises the effect **as a wired MoonModule** — what the unit tests can't reach: add it, live-edit the `source` to recolor (recompile), push a broken script (`MoonLive::compile` fails, frees the previous code, `MoonLiveEffect` reports the parse error in the status and renders dark — no crash), recover, resize the grid to 1×1 and back while rendering (the every-grid-size hard rule), then remove and re-add (exec memory re-acquired clean). It runs in-process on the desktop backend each commit, and the same JSON runs live over REST against the device backends. The Xtensa/RISC-V backends are validated by the live S3/P4 runs (a `MoonLiveEffect` on a Layer lights the grid from its `source`), which the desktop tests can't reach.
 
 ## Source
 

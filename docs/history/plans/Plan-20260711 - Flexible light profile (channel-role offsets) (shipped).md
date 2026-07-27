@@ -36,7 +36,7 @@ static constexpr uint8_t kAbsent = 255;   // role not present on this fixture
 struct Correction {
     uint8_t  briLut[256];
     uint8_t  channelsPerLight = 3;         // fixture width (3 strip … up to 32 moving head)
-    // RGB(W) roles — the SOURCE→OUTPUT offset for each colour role. kAbsent = not emitted.
+    // RGB(W) roles — the SOURCE→OUTPUT offset for each color role. kAbsent = not emitted.
     uint8_t  offRed = 1, offGreen = 0, offBlue = 2;   // GRB default (matches today's default 2)
     uint8_t  offWhite = kAbsent;
     bool     deriveWhite = false;

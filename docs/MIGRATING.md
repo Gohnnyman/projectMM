@@ -106,7 +106,7 @@ The browser localStorage key for the UI's last-selected module.
 
 **Action: nothing.** Lost: the remembered selection resets to the first module.
 
-### Device-list `colour` → `color` (US-spelling rename)
+### Device-list `color` → `color` (US-spelling rename)
 
 The DevicesModule persisted-list key for a Hue bridge's color-capable light count (`DevicesModule::restoreList()`). A device list persisted under the old key reads the count as absent → 0.
 

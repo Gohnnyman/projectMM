@@ -972,6 +972,43 @@ def _port_serial(path: str) -> str:
     return m.group(1) if m else ""
 
 
+def _heal_last_ports(network: dict | None) -> None:
+    """Correct `last_port` breadcrumbs that the currently-present ports disprove.
+
+    `last_port` is a flash-time breadcrumb, and macOS renumbers `/dev/cu.usbserial-*`
+    paths as adapters come and go — so a record can end up naming a port that no longer
+    exists while the board sits on a different one. The Live tab then shows a port the
+    ESP32 tab knows is wrong, which is exactly the kind of quietly-stale state that sends
+    a flash at the wrong board.
+
+    Two repairs, both driven by `usbSerial` (the ADAPTER's own serial, embedded in the port
+    name and immune to path drift), never by the path:
+
+      1. the adapter is present on a different path → move `last_port` to that path;
+      2. the adapter is absent and the recorded path is gone → drop `last_port`, so the UI
+         shows no port rather than a fictional one.
+
+    A record with no `usbSerial` is left alone: without the drift-immune key there is
+    nothing to prove the breadcrumb wrong, and guessing would be worse than stale.
+    """
+    if not network:
+        return
+    present = {p: _port_serial(p) for p in list_serial_ports()}
+    by_serial = {s: p for p, s in present.items() if s}
+
+    for dev in network.get("devices", []):
+        serial = dev.get("usbSerial")
+        if not serial:
+            continue
+        actual = by_serial.get(serial)
+        recorded = dev.get("last_port")
+        if actual:
+            if recorded != actual:
+                dev["last_port"] = actual
+        elif recorded and recorded not in present:
+            dev.pop("last_port", None)
+
+
 def _resolve_port(path: str, usb: dict, devices: list) -> dict:
     """Build the {path, chip, board, ip} identity for one port. `usb` is that
     port's USB descriptor ({vid,pid,product,serial}) or {} if unknown; `devices`
@@ -1266,8 +1303,11 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/api/ports":
             # Enrich each port with chip family + specific board (levels 2/3),
-            # resolved against the active network's registered devices.
-            state = load_state()
+            # resolved against the active network's registered devices, and heal any
+            # `last_port` this listing proves wrong (see _heal_last_ports).
+            state = mutate_state(lambda s: _heal_last_ports(
+                next((n for n in s.get("networks", [])
+                      if n.get("name") == s.get("active_network")), None)))
             active = next((n for n in state.get("networks", [])
                            if n.get("name") == state.get("active_network")), None)
             devices = (active or {}).get("devices", [])

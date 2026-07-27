@@ -1,7 +1,7 @@
 // @module HueDriver
 
-// Pins HueDriver's host-testable core: the changed-only diff, the RGB→HSV colour body it PUTs,
-// and the parse that keeps only colour-capable, reachable lights. Live bridge I/O (httpRequest,
+// Pins HueDriver's host-testable core: the changed-only diff, the RGB→HSV color body it PUTs,
+// and the parse that keeps only color-capable, reachable lights. Live bridge I/O (httpRequest,
 // pairing) needs a real bridge — that's the bench; here the seams run with no socket.
 
 #include "doctest.h"
@@ -11,7 +11,7 @@
 #include <cstring>
 #include <string>
 
-TEST_CASE("HueDriver: a coloured pixel becomes an on/bri/hue/sat state body") {
+TEST_CASE("HueDriver: a colored pixel becomes an on/bri/hue/sat state body") {
     mm::HueDriver hue;
     char body[80] = {};
     CHECK(hue.wouldPushForTest(0, 255, 0, 0, body, sizeof(body)));   // pure red
@@ -26,7 +26,7 @@ TEST_CASE("HueDriver: a black pixel becomes on:false") {
     char body[80] = {};
     CHECK(hue.wouldPushForTest(1, 0, 0, 0, body, sizeof(body)));
     CHECK(std::strstr(body, "\"on\":false") != nullptr);
-    CHECK(std::strstr(body, "\"hue\"") == nullptr);   // off → no colour fields
+    CHECK(std::strstr(body, "\"hue\"") == nullptr);   // off → no color fields
 }
 
 TEST_CASE("HueDriver: RGB→HSV maps the primaries to the right Hue wheel positions") {
@@ -42,7 +42,7 @@ TEST_CASE("HueDriver: RGB→HSV maps the primaries to the right Hue wheel positi
     CHECK(s == 0);
 }
 
-TEST_CASE("HueDriver: unchanged colour is not resent, a changed one is") {
+TEST_CASE("HueDriver: unchanged color is not resent, a changed one is") {
     mm::HueDriver hue;
     char body[80] = {};
     CHECK(hue.wouldPushForTest(2, 10, 20, 30, body, sizeof(body)));        // first → yes
@@ -50,10 +50,10 @@ TEST_CASE("HueDriver: unchanged colour is not resent, a changed one is") {
     CHECK(hue.wouldPushForTest(2, 10, 20, 31, body, sizeof(body)));        // changed → yes
 }
 
-TEST_CASE("HueDriver: parseLights keeps only colour-capable, reachable lights") {
+TEST_CASE("HueDriver: parseLights keeps only color-capable, reachable lights") {
     mm::HueDriver hue;
-    // id 5 colour + reachable (keep); id 7 dimmable-only white (drop); id 10 on/off plug (drop);
-    // id 8 colour but UNREACHABLE (drop). The shapes the real bridge returns.
+    // id 5 color + reachable (keep); id 7 dimmable-only white (drop); id 10 on/off plug (drop);
+    // id 8 color but UNREACHABLE (drop). The shapes the real bridge returns.
     const char* json =
         "{\"5\":{\"state\":{\"on\":false,\"bri\":77,\"hue\":8595,\"sat\":121,\"reachable\":true},\"name\":\"Bureau lamp\"},"
         "\"7\":{\"state\":{\"on\":true,\"bri\":40,\"reachable\":true},\"name\":\"Gang lamp\"},"
@@ -65,12 +65,12 @@ TEST_CASE("HueDriver: parseLights keeps only colour-capable, reachable lights") 
     CHECK(hue.colorCountForTest() == 1);
 }
 
-// Room + light selection filters which colour lights the driver actually drives. Both dropdowns
-// default to "All" (index 0): then every colour light is driven (unchanged behaviour). Selecting a
-// room narrows the driven set to that room's colour lights; selecting a light drives just that one.
+// Room + light selection filters which color lights the driver actually drives. Both dropdowns
+// default to "All" (index 0): then every color light is driven (unchanged behaviour). Selecting a
+// room narrows the driven set to that room's color lights; selecting a light drives just that one.
 TEST_CASE("HueDriver: room/light selection filters the driven set") {
     mm::HueDriver hue;
-    // Four colour+reachable lights, ids 1..4.
+    // Four color+reachable lights, ids 1..4.
     const char* lights =
         "{\"1\":{\"state\":{\"hue\":1,\"reachable\":true},\"name\":\"Lamp A\"},"
         "\"2\":{\"state\":{\"hue\":2,\"reachable\":true},\"name\":\"Lamp B\"},"
@@ -107,7 +107,7 @@ TEST_CASE("HueDriver: room/light selection filters the driven set") {
     CHECK(hue.drivenCountForTest() == 4);
 }
 
-// The single status line (folding what were the separate hueStatus / colourLights controls) shows
+// The single status line (folding what were the separate hueStatus / colorLights controls) shows
 // the light count as driven-of-total: "N-M lights" while filtered, the plain "M lights" when not.
 TEST_CASE("HueDriver: status reports the driven-of-total light count") {
     mm::HueDriver hue;

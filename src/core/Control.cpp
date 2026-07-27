@@ -104,7 +104,7 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             return;
         case ControlType::Select:
         case ControlType::Palette:
-            // The selected index — the option strings / swatch colours go in the
+            // The selected index — the option strings / swatch colors go in the
             // metadata block (writeControlMetadata) where the UI also wants them.
             sink.appendf("%u", *static_cast<uint8_t*>(c.ptr));
             return;

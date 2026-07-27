@@ -4,8 +4,8 @@
 
 namespace mm {
 
-// A 3D colour sine field: R, G, B each follow a sine along one axis (x, y, z) with a
-// 120° phase offset between channels, so the box glows through shifting colours that
+// A 3D color sine field: R, G, B each follow a sine along one axis (x, y, z) with a
+// 120° phase offset between channels, so the box glows through shifting colors that
 // scroll over time. True 3D — every axis drives a channel; on a 2D grid the z term is
 // constant (Layer::extrude handles a lower-dim layer), so it reads as a 2D R/G wash.
 //

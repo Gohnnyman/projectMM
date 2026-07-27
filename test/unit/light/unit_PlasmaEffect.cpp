@@ -36,7 +36,7 @@ TEST_CASE("PlasmaEffect writes non-zero RGB data to buffer") {
     CHECK(hasNonZero);
 }
 
-// Opposite corners of a 16×16 grid differ in colour (the plasma is not flat-filling).
+// Opposite corners of a 16×16 grid differ in color (the plasma is not flat-filling).
 TEST_CASE("PlasmaEffect produces spatial variation") {
     mm::Layouts layouts;
     mm::GridLayout grid;

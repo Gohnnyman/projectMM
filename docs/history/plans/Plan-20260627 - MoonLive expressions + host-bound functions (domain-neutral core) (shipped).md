@@ -4,8 +4,8 @@
 
 ## The three remarks, one root cause
 
-1. **`setRGB(random16(256), random16(256), 30, 0)` doesn't work** — the parser only allows `random16` in the *index* slot; colour slots are literal-only. Bespoke per-slot rules instead of "every argument is an expression."
-2. **`random16(255)` caps at 255** — the index/colour validators conflate ranges; `random16` returns uint16 (0..65535).
+1. **`setRGB(random16(256), random16(256), 30, 0)` doesn't work** — the parser only allows `random16` in the *index* slot; color slots are literal-only. Bespoke per-slot rules instead of "every argument is an expression."
+2. **`random16(255)` caps at 255** — the index/color validators conflate ranges; `random16` returns uint16 (0..65535).
 3. **The core is light-specific** — `setRGB`/`fill`/the `Store` IR op / `buf[i*cpl]` are baked into `src/core/moonlive/`, violating *Domain-neutral core*. The engine should know *language* + *ISA*, never *LEDs*.
 
 Root cause: the compiler was built around the *statement shape* (`setRGB(idx, r, g, b)`) rather than around **expressions + a generic call mechanism**. The fix is the architecture ESPLiveScript/ARTI-FX use and the MoonLive doc §3.4 specifies: the core knows expressions + `call(builtin, args…)`; the **host registers the functions**.
@@ -68,7 +68,7 @@ expr     := number                     // 0..65535 (uint16) — range checked at
 ```
 
 - Every argument slot parses an `expr`, so `setRGB(random16(256), random16(256), 30, 0)` works (#1).
-- A number literal is a uint16 (0..65535); `random16(N)` accepts N up to 65535 (#2). A value used as a colour is masked to a byte at the store (the inline writer does `& 0xFF`), so out-of-byte colours wrap rather than erroring — consistent, no bespoke per-slot range rule.
+- A number literal is a uint16 (0..65535); `random16(N)` accepts N up to 65535 (#2). A value used as a color is masked to a byte at the store (the inline writer does `& 0xFF`), so out-of-byte colors wrap rather than erroring — consistent, no bespoke per-slot range rule.
 - Each `expr` lowers to a vreg (a `Const`, or a `Call` result). `setRGB`/`fill` then consume those vregs via their InlineOp. The bounds guard wraps the inline write as before.
 
 ## Steps (desktop-first, each green)
@@ -83,7 +83,7 @@ expr     := number                     // 0..65535 (uint16) — range checked at
 ## Validation
 
 - Desktop: `setRGB(random16(256), random16(256), 30, 0)` writes a random pixel with a random red+green; `random16(65535)` accepted; behavioral golden (fill output unchanged) holds. All unit tests green.
-- **Domain-neutral check** (the #3 fix, mechanised): a test/grep asserts `src/core/moonlive/` contains no LED vocabulary ("setRGB", "fill", "RGB" in the colour sense, "cpl"/"buffer" semantics) — only `Call`, `InlineOp`, arithmetic, the neutral opcode enum.
+- **Domain-neutral check** (the #3 fix, mechanised): a test/grep asserts `src/core/moonlive/` contains no LED vocabulary ("setRGB", "fill", "RGB" in the color sense, "cpl"/"buffer" semantics) — only `Call`, `InlineOp`, arithmetic, the neutral opcode enum.
 - Xtensa: the failing cases from the remarks work live on the Olimex; no crash.
 - P4/RISC-V still builds (stub).
 

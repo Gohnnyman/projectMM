@@ -104,9 +104,9 @@ TEST_CASE("GEQEffect fills columns from the floor upward") {
     audio.release();
 }
 
-// colorBars colours each bar by its column index, so two well-separated lit columns take different hues
-// rather than sharing the row-height gradient — the toggle changes what colour a bar is.
-TEST_CASE("GEQEffect colorBars colours bars per column") {
+// colorBars colors each bar by its column index, so two well-separated lit columns take different hues
+// rather than sharing the row-height gradient — the toggle changes what color a bar is.
+TEST_CASE("GEQEffect colorBars colors bars per column") {
     mm::AudioService audio;
     audio.defineControls();
     audio.simulate = 3;   // music (always): keeps every band non-zero so many columns rise together
@@ -133,7 +133,7 @@ TEST_CASE("GEQEffect colorBars colours bars per column") {
     layer.applyState();
     mm::Palettes::setActive(0);   // Rainbow: index maps to a spread of hues, order-independent
 
-    // Advance until both an early and a late column have a lit floor, then compare their colours.
+    // Advance until both an early and a late column have a lit floor, then compare their colors.
     const int xa = 0, xb = W - 1;
     auto color = [&](int x) {
         auto* d = layer.buffer().data();
@@ -149,7 +149,7 @@ TEST_CASE("GEQEffect colorBars colours bars per column") {
         auto ca = color(xa), cb = color(xb);
         if (lit(ca) && lit(cb)) {
             // Column 0 (hue 0) and column 15 (hue 255) are opposite ends of the palette: their bar
-            // colours differ, confirming the colour is driven by column, not by shared row height.
+            // colors differ, confirming the color is driven by column, not by shared row height.
             CHECK((ca[0] != cb[0] || ca[1] != cb[1] || ca[2] != cb[2]));
             compared = true;
         }

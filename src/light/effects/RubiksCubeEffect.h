@@ -8,14 +8,14 @@ namespace mm {
 // cube visibly un-mixes turn by turn, and re-scrambles once solved. The cube is a full 6-face model
 // (up to 8×8 stickers per face) with the real face/row/column rotations; each frame it is drawn onto
 // the LED volume by classifying every in-bounds voxel as belonging to whichever of the six outer
-// faces it sits nearest, and colouring it from that face's sticker. Turns play at `turnsPerSecond`;
+// faces it sits nearest, and coloring it from that face's sticker. Turns play at `turnsPerSecond`;
 // `cubeSize` is the order of the cube (2..8 are real cubes, 1 is a degenerate single block); with
 // `randomTurning` the cube tumbles through endless random moves instead of solving a stored scramble.
 //
 // Prior art: MoonLight's RubiksCube effect (E_MoonModules / MoonModules). The cube model
 // (init/rotateFace/rotateRow/rotateColumn/rotateFaceLayer and the six face rotations), the packed
 // move list + scramble/playback, and drawCube's nearest-face projection with the
-// {Red, DarkOrange, Blue, Green, Yellow, White} colour map are reproduced exactly here, written
+// {Red, DarkOrange, Blue, Green, Yellow, White} color map are reproduced exactly here, written
 // fresh on EffectBase + the shared draw primitive. projectMM has no per-cell mapping mask, so every
 // in-bounds voxel is treated as mapped (the source's isMapped()-skip and the mapping-driven
 // sizeX++/sizeY++/sizeZ++ adjustments are dropped; the projection uses sizeX = max(size.x-1, 1)).
@@ -30,7 +30,7 @@ public:
     uint8_t turnsPerSecond = 2;       // 0..20
     uint8_t cubeSize       = 3;       // 1..8 (cube order)
     bool    randomTurning  = false;
-    bool    usePalette     = false;   // off = the classic 6 Rubik's face colours; on = 6 samples
+    bool    usePalette     = false;   // off = the classic 6 Rubik's face colors; on = 6 samples
                                       // of the system-wide palette (advised: a primary-ish palette)
 
     void defineControls() override {
@@ -40,9 +40,9 @@ public:
         controls_.addBool("usePalette", usePalette);
     }
 
-    // The 6 face colours drawCube paints with. Classic Rubik's set (red, dark-orange, blue, green,
+    // The 6 face colors drawCube paints with. Classic Rubik's set (red, dark-orange, blue, green,
     // yellow, white) by default; with usePalette, 6 evenly-spaced samples of the system-wide active
-    // palette (0, 51, 102, … 255) so the cube recolours to whatever palette is chosen — advised: a
+    // palette (0, 51, 102, … 255) so the cube recolors to whatever palette is chosen — advised: a
     // primary-ish palette so the 6 faces stay distinct.
     std::array<RGB, 6> faceColors() const {
         if (!usePalette)
@@ -214,9 +214,9 @@ private:
             if (width >= SIZE) rotateFace(top, !clockwise);
         }
 
-        // Project the cube onto the LED volume: every in-bounds voxel is coloured by the outer face
+        // Project the cube onto the LED volume: every in-bounds voxel is colored by the outer face
         // it sits nearest. (MoonLight's drawCube, with the isMapped()-skip and sizeX++/etc dropped.)
-        // The 6 face colours are supplied by the caller (classic Rubik's set, or palette samples).
+        // The 6 face colors are supplied by the caller (classic Rubik's set, or palette samples).
         void drawCube(Buffer& buf, Coord3D dims, lengthType sx, lengthType sy, lengthType sz,
                       const std::array<RGB, 6>& COLOR_MAP) const {
             // This effect owns its background: drawCube writes only the SURFACE voxels (the loop has

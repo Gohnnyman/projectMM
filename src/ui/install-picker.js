@@ -375,7 +375,7 @@ function render(state) {
     }
 
     // One option per release, newest-first. RC tags carry a "(beta)" suffix
-    // and a different colour so a casual user can't mistake them for a
+    // and a different color so a casual user can't mistake them for a
     // production release. The compatibility filter at the firmware step
     // handles the "is this binary for my chip?" question, so the release
     // dropdown doesn't pre-filter on it — a user can still see every release

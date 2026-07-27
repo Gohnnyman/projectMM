@@ -6,7 +6,7 @@ namespace mm {
 
 // Atmospheric lava-lamp: three slow blobs whose summed field is mapped
 // through a black → red → orange → yellow → white palette.
-// Distinct from MetaballsEffect (which is fast, HSV-coloured).
+// Distinct from MetaballsEffect (which is fast, HSV-colored).
 // Author: projectMM original (metaball lava lamp)
 /// Lava-lamp effect: slow rising/merging palette blobs.
 /// @card LavaLampEffect.gif
@@ -70,7 +70,7 @@ public:
                 uint8_t idx = scaled > 255 ? 255 : static_cast<uint8_t>(scaled);
                 // The metaball field value (0 = between blobs, 255 = blob core) is the palette index,
                 // so the lamp takes the active palette. Lava gives the classic molten look (its low
-                // end is black, so the space between blobs stays dark); any palette recolours the blobs.
+                // end is black, so the space between blobs stays dark); any palette recolors the blobs.
                 const RGB c = colorFromPalette(*Palettes::active(), idx);
                 if (cpl >= 1) row[0] = c.r;
                 if (cpl >= 2) row[1] = c.g;

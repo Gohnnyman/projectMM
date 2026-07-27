@@ -206,7 +206,12 @@ TEST_CASE("render-split: multicore off → drivers tick inline on the render cor
 // selects the default peripheral from a null backend, so it never notifies — the live worker is untouched.
 // This pins that a detached ParallelLedDriver swapping its peripheral leaves a live split untouched.
 TEST_CASE("render-split: a detached ParallelLedDriver's peripheral swap does not disturb the live split") {
-    mm::MoonModule::setQuiesceRenderHook([] { if (auto* d = mm::Drivers::active()) d->quiesceRenderSplit(); });
+    // RAII: a doctest REQUIRE failure throws, so a bare set-then-reset would leak the global hook
+    // into later tests; the guard resets it on every exit path.
+    struct HookGuard {
+        HookGuard()  { mm::MoonModule::setQuiesceRenderHook([] { if (auto* d = mm::Drivers::active()) d->quiesceRenderSplit(); }); }
+        ~HookGuard() { mm::MoonModule::setQuiesceRenderHook(nullptr); }
+    } hookGuard;
 
     Rig r(64);
     MockDriver d;
@@ -227,7 +232,6 @@ TEST_CASE("render-split: a detached ParallelLedDriver's peripheral swap does not
     CHECK(r.drivers.renderSplitActive());     // fails on the v3.0.0 bug (probe fired the hook → live teardown)
 
     r.drivers.release();
-    mm::MoonModule::setQuiesceRenderHook(nullptr);
 }
 
 TEST_CASE("render-split: no driver → the split does not engage (nothing to move)") {

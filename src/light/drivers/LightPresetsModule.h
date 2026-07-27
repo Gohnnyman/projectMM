@@ -21,7 +21,7 @@ namespace mm {
 ///
 /// A "light preset" is a channel-role layout: role `r` at channel `i` says channel `i` of a light
 /// carries role `r` (Red/Green/Blue/White/WarmWhite/Yellow/UV, and the fixture roles Pan/Tilt/…).
-/// A curated set of real fixtures is SEEDED as read-only (`locked`) rows on first boot: the colour
+/// A curated set of real fixtures is SEEDED as read-only (`locked`) rows on first boot: the color
 /// orders (RGB, GRB, BGR, RGBW, GRBW, WRGB), the multi-channel LED/par fixtures (Curtain GRB6,
 /// Lightbar RGBWYP, RGBCCT, IRGB), and moving heads (MH BeeEyes 15, MH BeTopper 32, MH 19x15W-24).
 /// A user adds custom named wirings alongside them. A
@@ -426,7 +426,7 @@ private:
 
     // The curated built-in wirings, each a dense role array of exactly its fixture's width. Data,
     // not code: a preset of any width seeds directly (the old LightPreset-enum path capped at 4
-    // channels via a roles[4] — a wide moving head couldn't be expressed). The colour orders are the
+    // channels via a roles[4] — a wide moving head couldn't be expressed). The color orders are the
     // real ones (WS2812 GRB, ws2814 WRGB, sk6812 GRBW, …); RBG/GBR/BRG are deliberately omitted — no
     // real fixture ships them, so they'd be permutation noise in the built-in list (a user adds a
     // custom preset if ever needed). The moving-head maps are migrated from MoonLight's DriverNode

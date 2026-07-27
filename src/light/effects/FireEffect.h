@@ -7,7 +7,7 @@ namespace mm {
 // Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits — https://github.com/toggledbits/MatrixFireFast
 /// Fire2012-style heat field: sparks at the base rise and cool through the active
 /// palette (heat = palette index, cold at the low end, hottest at the high end);
-/// spark count scales with width. The flame colour comes from the active palette —
+/// spark count scales with width. The flame color comes from the active palette —
 /// the Lava palette (black->red->orange->yellow->white) gives the classic look; any
 /// palette works (Ocean/Forest turn the flame blue/green).
 /// @card FireEffect.png
@@ -89,8 +89,8 @@ public:
         //    palette (black→red→orange→yellow→white) gives the classic fire look; any palette works
         //    (an Ocean/Forest palette makes a blue/green "fire").
         //    A completely cold cell (heat 0) always stays black — the "sky" above the flame — rather
-        //    than taking the palette's index-0 colour (Lava's is black, but Ocean's is blue, which
-        //    would tint the whole background). Only a warm cell is coloured.
+        //    than taking the palette's index-0 color (Lava's is black, but Ocean's is blue, which
+        //    would tint the whole background). Only a warm cell is colored.
         const Palette& pal = *Palettes::active();
         for (nrOfLightsType i = 0; i < heat_.count(); i++) {
             RGB c = heat_[i] == 0 ? RGB{0, 0, 0} : colorFromPalette(pal, heat_[i]);

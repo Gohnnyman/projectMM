@@ -438,6 +438,13 @@ public:
 
             case State::WaitingSta:
                 if constexpr (platform::hasWiFi) {
+                    // Static mode: pin the IP during bring-up, the WaitingEth mirror — a DHCP-less
+                    // network never fires a lease event, so waiting for "connected" before applying
+                    // static would strand the STA into the AP fallback. netSetStaticIPv4 marks the
+                    // STA connected once it is associated (platform-gated), so the check below
+                    // promotes on the same or next tick. DHCP mode: no-op.
+                    if (addressing_ == kAddressingStatic && !platform::wifiStaConnected())
+                        applyStaticIfConfigured(platform::NetIface::Sta);
                     if (platform::wifiStaConnected()) {
                         onConnected("WiFi STA");
                     } else if (elapsed > kStaGraceMs) {

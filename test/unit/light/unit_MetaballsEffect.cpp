@@ -34,7 +34,7 @@ TEST_CASE("MetaballsEffect writes non-zero RGB data to buffer") {
     CHECK(hasNonZero);
 }
 
-// Pixels at opposite corners of a 32×32 grid differ in colour (the effect is not flat-filling the buffer).
+// Pixels at opposite corners of a 32×32 grid differ in color (the effect is not flat-filling the buffer).
 TEST_CASE("MetaballsEffect produces spatial variation") {
     mm::Layouts layouts;
     mm::GridLayout grid;

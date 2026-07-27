@@ -16,7 +16,7 @@ namespace mm {
 // degenerates to a single y-row, which is honest for a flat layout.
 //
 // Float trig in the loop matches the existing wave effects (Plasma, LavaLamp);
-// the hot-path integer-math preference is for per-light colour work, not the
+// the hot-path integer-math preference is for per-light color work, not the
 // handful of transcendental ops a wave front needs.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Water-ripple effect: distance-from-centre drives a wave phase.

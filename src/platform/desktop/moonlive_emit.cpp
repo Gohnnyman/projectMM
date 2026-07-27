@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-// MoonLive desktop backend (§3.2) — emits the fixed-colour fill as host machine code (arm64
+// MoonLive desktop backend (§3.2) — emits the fixed-color fill as host machine code (arm64
 // or x86-64, chosen at compile time). The desktop backend lets a unit test EXECUTE generated
 // code in-process — proving allocExec → writeExec → call works off-hardware — and exercises
 // the engine/binding API the same way the device backends do. Hand-encoding the loop here is
@@ -44,7 +44,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
     if (!out || cap < sizeof(kArm64)) return 0;
     uint32_t code[sizeof(kArm64) / 4];
     std::memcpy(code, kArm64, sizeof(kArm64));
-    // Patch the colour immediates: mov wN,#imm encodes imm at bits [20:5]; the base word
+    // Patch the color immediates: mov wN,#imm encodes imm at bits [20:5]; the base word
     // has imm=0 so OR-ing (imm<<5) sets it cleanly.
     code[4] = 0x52800004u | (static_cast<uint32_t>(r) << 5);
     code[5] = 0x52800005u | (static_cast<uint32_t>(g) << 5);
@@ -54,7 +54,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // arm64 animated fill (assembled from anim_arm64.s): red = (t>>3)&0xFF, green=0, blue=64.
-// t arrives in w3; nothing to patch — the colour is computed from the runtime arg.
+// t arrives in w3; nothing to patch — the color is computed from the runtime arg.
 static const uint32_t kArm64Anim[] = {
     0x34000241,  // cbz   w1, .done
     0x53037c64,  // lsr   w4, w3, #3      red = t>>3
@@ -116,7 +116,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // x86-64 animated fill (assembled from anim_x64.s): red = (t>>3)&0xFF, green=0, blue=64.
-// t arrives in ecx; nothing to patch — the colour is computed from the runtime arg.
+// t arrives in ecx; nothing to patch — the color is computed from the runtime arg.
 static const uint8_t kX64Anim[] = {
     0x85, 0xf6,                         // test  esi, esi
     0x74, 0x2d,                         // je    .done (+0x2d)

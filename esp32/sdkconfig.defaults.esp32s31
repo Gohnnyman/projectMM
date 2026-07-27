@@ -18,6 +18,14 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/ota_16mb.csv"
 # Flash size override (the CoreBoard ships 16 MB).
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
+# CPU at the S31's rated maximum, 320 MHz. The shared sdkconfig.defaults sets 240 (the
+# rated max for the chips that came before), so this target has to override it or it
+# silently runs a third slower than the silicon allows — the render loop and the ring
+# ISR's encode deadline are compute-bound, so that is a third of the headroom gone.
+# Same reasoning as the base file's 240 over IDF's 160 default; the P4 needs no entry
+# because it ignores the symbol (its own 360 MHz default applies).
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_320=y
+
 # PSRAM — the S31 has a DMA-capable PSRAM with a dedicated LDO (SOC_SPIRAM_SUPPORTED,
 # SOC_PSRAM_HAS_DEDICATED_LDO). Enabled for the large buffers later rounds allocate;
 # not relied on at boot.

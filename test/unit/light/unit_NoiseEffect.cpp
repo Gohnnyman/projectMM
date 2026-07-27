@@ -44,7 +44,7 @@ TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
     CHECK(hasNonZero);
 }
 
-// Opposite corners of a 16×16 grid carry different colours (noise is not flat).
+// Opposite corners of a 16×16 grid carry different colors (noise is not flat).
 TEST_CASE("NoiseEffect produces spatial variation") {
     mm::Layouts layouts;
     mm::GridLayout grid;

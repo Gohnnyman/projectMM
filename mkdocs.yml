@@ -142,6 +142,10 @@ nav:
       - Unit tests: tests/unit-tests.md
       - Scenario tests: tests/scenario-tests.md
   - Developer reference:
+      # The repo's rulebook (CLAUDE.md at the root, embedded — see the page's comment).
+      # First in this section because it is the "how we work here" a new contributor
+      # reads before the technical references below it.
+      - Principles & process: principles-and-process.md
       - Architecture: architecture.md
       - Coding standards: coding-standards.md
       - Building: building.md

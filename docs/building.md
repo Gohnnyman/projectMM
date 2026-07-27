@@ -13,6 +13,8 @@ The scripts have two front ends with the same code and arguments:
 
 Use whichever fits. Neither path is "more official" than the other; the scripts are the source of truth and the front ends are interfaces. New work adds a script first; both interfaces follow.
 
+**Why our own scripts, not PlatformIO:** the ESP32 build is ESP-IDF-native — projectMM tracks IDF pre-releases against a pinned commit for chips like the P4 and S31, a level of version control PlatformIO's packaged platforms don't offer, and the hot-path drivers (LCD_CAM, Parlio, GDMA) use the vendor APIs first-class rather than through an Arduino-core abstraction. The tooling surface is also far wider than compile-upload-monitor: desktop builds, unit and scenario runs, spec and boundary checks, KPI collection, the web installer, provisioning, multi-board bench orchestration. A wrapper toolchain would cover one of those tasks and still need all the scripts around it; one script per task, two front ends, keeps humans, agents, and CI on the identical path.
+
 MoonDeck has three tabs:
 
 - **Desktop** — build, run, test. Fast iteration.
@@ -257,7 +259,7 @@ The platform abstraction layer replaces what libraries typically provide. Today 
 
 | Library | Why not | What replaces it |
 |---|---|---|
-| [FastLED](https://github.com/FastLED/FastLED) | Arduino-dependent. LED protocol drivers (RMT, SPI) are available natively in ESP-IDF; FastLED's colour math is small enough to reimplement. | Own colour math in core. Own LED drivers per platform in `src/platform/`. |
+| [FastLED](https://github.com/FastLED/FastLED) | Arduino-dependent. LED protocol drivers (RMT, SPI) are available natively in ESP-IDF; FastLED's color math is small enough to reimplement. | Own color math in core. Own LED drivers per platform in `src/platform/`. |
 | [ESPAsyncWebServer](https://github.com/ESP32Async/ESPAsyncWebServer) | Arduino-dependent. Past memory-leak issues. Ties us to Arduino. | Own HTTP server via ESP-IDF's `esp_http_server` (ESP32) or BSD sockets (desktop). Reconsider if Arduino-as-component is added. |
 | [ArduinoJson](https://github.com/bblanchon/ArduinoJson) | Works on ESP-IDF, but heavy: dynamic allocation, large footprint. | Own fixed-size control storage. JSON only for API serialisation, not internal state. |
 
@@ -284,4 +286,4 @@ Both are defined in the root `CMakeLists.txt` (desktop) and `esp32/main/CMakeLis
 
 The system serves the web UI from its embedded HTTP server. Open `http://<device-ip>/` in a browser; on desktop that's typically `http://localhost:8080/`. From the UI you can change effects and modifiers, configure controls, see the 3D preview. The settings persist across reboot.
 
-To run the test suite or any of the checks (platform boundary, specs, KPI), see the MoonDeck reference linked above. The release-readiness gates that wrap these into a checklist live in [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events).
+To run the test suite or any of the checks (platform boundary, specs, KPI), see the MoonDeck reference linked above. The release-readiness gates that wrap these into a checklist live in [CLAUDE.md § The Process](../CLAUDE.md#the-process).

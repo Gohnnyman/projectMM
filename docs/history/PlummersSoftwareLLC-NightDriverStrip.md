@@ -42,7 +42,7 @@ Auditability: ~40 first-parent merges/commits on `main` with author-date in 2026
 
 **New**
 
-- **RGBWW / SK6812 white-channel support** — W/WW helpers, a WarmGlow test effect, configurable SK6812 white extraction; colour-temperature naming cleanup.
+- **RGBWW / SK6812 white-channel support** — W/WW helpers, a WarmGlow test effect, configurable SK6812 white extraction; color-temperature naming cleanup.
 - **New Setup Wizard / guided-installer WebUI** — and a push to make the UI a "non-special consumer": everything the official UI needs now comes from the firmware over the wire (spec/schema), not baked into `app.js`.
 - M5 Stick S3 support (IR + WS2812B); optimised WS2812B draw path; `ACTIVITY_PIN` support; allow zero effects in the table.
 

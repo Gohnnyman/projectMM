@@ -52,7 +52,7 @@ _Auditability: commits on `main` author-dated 2026-06-01..2026-06-30 = 0 (0 merg
 **New**
 
 - **IDF 5.5 support** — version checks, dynamic DMA-buffer allocation (PSRAM-preferred), `NUM_STRIPS` as a global, `IRAM_ATTR` removed from forwards to compile warning-free.
-- `updateDriver` / `deleteDriver` gained length/size and per-strip offset parameters; `initled` with custom colour arrangement; `isVirtualDriver` flag; `setDelay()`.
+- `updateDriver` / `deleteDriver` gained length/size and per-strip offset parameters; `initled` with custom color arrangement; `isVirtualDriver` flag; `setDelay()`.
 - Split a `Driver.cpp` out of the header; added clang-format and removed the `COLOR_ORDER_` compiler directives.
 
 **Fixed**

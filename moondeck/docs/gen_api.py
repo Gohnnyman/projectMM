@@ -334,7 +334,7 @@ _SIG_ATTR_NAME_RE = re.compile(r'(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*(?:=
 def _highlight_signature_names(md: str) -> str:
     """Wrap the declared member NAME in each generated signature so the theme can
     highlight it while the type/args stay muted (CSS: `.mm-sig-name`). moxygen emits
-    a flat `<code>` string with no internal markup, so 'colour only the name' can't
+    a flat `<code>` string with no internal markup, so 'color only the name' can't
     be done in CSS alone — we split the code span here into
     `<code>…<span class="mm-sig-name">name</span>…</code>` (raw HTML the markdown
     passes through). The signature reads as one code chip; only the identifier pops."""

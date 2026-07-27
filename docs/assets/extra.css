@@ -38,7 +38,7 @@
 .md-typeset .mm-catalog-wrap table td { word-wrap: break-word; overflow-wrap: anywhere; vertical-align: top; }
 
 /* Name column: title distinct from description (was one run-on line). The name is
-   bold and slightly larger; the description sits below in a muted colour with a
+   bold and slightly larger; the description sits below in a muted color with a
    small gap, reading as title + subtitle. */
 .md-typeset .mm-catalog-wrap .mm-name {
   font-weight: 700;
@@ -63,7 +63,7 @@
 .md-typeset .mm-catalog-wrap .mm-param:last-child { margin-bottom: 0; }
 
 /* The param NAME (a `code` chip in the source) is the anchor the eye scans for —
-   make it stand out: accent colour, bold, no chip background so it reads as a
+   make it stand out: accent color, bold, no chip background so it reads as a
    highlighted term rather than a muted grey box blending into the prose. */
 .md-typeset .mm-catalog-wrap .mm-param code {
   color: var(--md-typeset-a-color);   /* the theme accent (purple) */
@@ -81,18 +81,18 @@
 }
 
 /* Links column: grey the plain attribution prose (author, project, year). The
-   actual links (Tests, source .h, MoonLight) keep their accent colour — Material's
+   actual links (Tests, source .h, MoonLight) keep their accent color — Material's
    `a` rule is more specific than this, so only the surrounding text greys. */
 .md-typeset .mm-catalog-wrap .mm-links {
   color: var(--md-default-fg-color--light);
 }
 
 /* ---------------------------------------------------------------------------
-   Coloured headings (whole site). The slate theme renders every heading in the
+   Colored headings (whole site). The slate theme renders every heading in the
    same near-white, so an h1/h2/h3 doesn't stand out from body text — the page
-   reads as one grey wall. Give headings the theme's primary/accent colour so
+   reads as one grey wall. Give headings the theme's primary/accent color so
    the document structure is scannable at a glance (the standard Material-site
-   look: coloured headings over neutral body). h4+ stay default — colouring
+   look: colored headings over neutral body). h4+ stay default — coloring
    every level would just re-flatten the hierarchy. */
 .md-typeset h1,
 .md-typeset h2 {

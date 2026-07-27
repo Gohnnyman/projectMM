@@ -155,3 +155,30 @@ TEST_CASE("Desktop static-addressing seam is a safe no-op") {
     // Desktop reports no eth/sta connection regardless — the setters didn't fake one.
     CHECK_FALSE(mm::platform::ethConnected());
 }
+
+// Static addressing on WiFi STA is applied during BRING-UP (WaitingSta), not only after a lease
+// event: a DHCP-less network never fires one, so waiting for "connected" before pinning the static
+// IP would strand a static STA into the AP fallback (the WaitingEth static poll's mirror). The test
+// seam fakes an STA radio so the host can drive the cascade into WaitingSta; the platform apply
+// counter pins that tick1s invoked netSetStaticIPv4(Sta).
+TEST_CASE("Static mode pins the static IP during STA bring-up (WaitingSta)") {
+    mm::platform::setTestWifiStaAvailable(true);
+    {
+        mm::NetworkModule net;
+        net.setWifiCredentials("bench-ssid", "bench-pass");
+        net.setup();   // desktop ethInit() fails → cascades to STA; the seam lands it in WaitingSta
+        // Switch to Static with a real address via the normal control-apply path (the octets bind
+        // by reference, so the module reads them directly).
+        for (uint8_t i = 0; i < net.controls().count(); i++) {
+            auto& c = net.controls()[i];
+            if (std::strcmp(c.name, "addressing") == 0)
+                mm::applyControlValue(c, "{\"addressing\":1}", "addressing", mm::ApplyPolicy::Clamp);
+            else if (std::strcmp(c.name, "ip") == 0)
+                mm::applyControlValue(c, "{\"ip\":\"192.168.1.250\"}", "ip", mm::ApplyPolicy::Clamp);
+        }
+        uint32_t before = mm::platform::testNetStaticApplyCount(mm::platform::NetIface::Sta);
+        net.tick1s();   // WaitingSta: Static + not connected → applyStaticIfConfigured(Sta)
+        CHECK(mm::platform::testNetStaticApplyCount(mm::platform::NetIface::Sta) > before);
+    }
+    mm::platform::setTestWifiStaAvailable(false);   // reset — cases stay independent
+}

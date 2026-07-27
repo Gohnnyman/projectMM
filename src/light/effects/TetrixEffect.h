@@ -16,7 +16,7 @@ namespace mm {
 // Prior art: MoonLight's Tetrix (E_MoonModules / MoonModules), descended from the WLED "Tetrix"
 // effect (Aircoookie / blazoncek). The per-column physics (mapped fall speed = grid-height·FRAMETIME
 // / map(speed,1,255,40000,250), the `pos`/`stack`/`brick` integers, the millis()+2000 start/blank
-// delays, and the step-machine values 0/1/2/>2) and the colour rules are reproduced from the
+// delays, and the step-machine values 0/1/2/>2) and the color rules are reproduced from the
 // MoonLight spec, written fresh on EffectBase + the shared draw primitives. One drop per X column;
 // safe at any grid size.
 // Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
@@ -29,7 +29,7 @@ public:
     // Controls — MoonLight's exact defaults. `speedControl` is the UI "speed" (0 = random per brick).
     uint8_t speedControl = 0;     // 0..255; 0 → each brick gets a random fall speed
     uint8_t widthControl = 0;     // 0..255; 0 → random brick height, else derived from this
-    bool    oneColor     = false; // all bricks in a column share one slowly-advancing colour
+    bool    oneColor     = false; // all bricks in a column share one slowly-advancing color
 
     void defineControls() override {
         controls_.addUint8("speed", speedControl, 0, 255);
@@ -111,7 +111,7 @@ public:
                 if (d.pos > static_cast<float>(d.stack)) {
                     d.pos -= d.speed;
                     if (d.pos < static_cast<float>(d.stack)) d.pos = static_cast<float>(d.stack);
-                    // Render the brick: rows [pos, pos+brick) lit in the column colour, above it black.
+                    // Render the brick: rows [pos, pos+brick) lit in the column color, above it black.
                     for (lengthType i = static_cast<lengthType>(d.pos); i < h; i++) {
                         const RGB c = (i < static_cast<lengthType>(d.pos) + static_cast<lengthType>(d.brick))
                                           ? colorFromPalette(*Palettes::active(), d.col)

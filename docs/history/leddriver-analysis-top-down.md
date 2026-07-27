@@ -145,7 +145,7 @@ Contributing factors, ranked:
 - Set `pm_config.min_freq_mhz` ≥ 80.
 - Prefer DMA-fed peripherals (RMT-with-DMA, I2S, LCD_CAM, PARLIO) so the CPU is out of the timing loop.
 
-Diagnostic signature for WiFi-induced corruption (vs power or signal-integrity faults): first frames after boot look perfect; symptoms appear only after WiFi associates; pixels are shifted/stuck *from a position outward* (one bit slipped, everything downstream inherits it); colour flashes correlate with traffic bursts. Compare against power-fault signature: brownout, whole-strip dim, first-pixel corruption.
+Diagnostic signature for WiFi-induced corruption (vs power or signal-integrity faults): first frames after boot look perfect; symptoms appear only after WiFi associates; pixels are shifted/stuck *from a position outward* (one bit slipped, everything downstream inherits it); color flashes correlate with traffic bursts. Compare against power-fault signature: brownout, whole-strip dim, first-pixel corruption.
 
 For projectMM, this means: **the LED driver task lives on core 1** (the quiet core, away from the WiFi stack and its interrupts) and **the effects / network path lives on core 0** (it can tolerate latency spikes — a late effect frame is invisible, a late driver bit is a corrupted pixel). This is the inverse of the WLED render-on-core-1 pattern, applied to a different observation about which task has the harder deadline; see § 7.2 for the full rationale and the projectMM-specific per-module core-affinity story.
 

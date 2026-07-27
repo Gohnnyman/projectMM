@@ -24,7 +24,7 @@ TEST_CASE("PraxisEffect fills every pixel from the palette") {
 
     layer.applyState();
     // Rainbow palette (0) is generated at full saturation/value, so every wheel index
-    // maps to a lit colour — makes "every pixel lit" order-independent of prior tests.
+    // maps to a lit color — makes "every pixel lit" order-independent of prior tests.
     mm::Palettes::setActive(0);
     layer.tick();
 
@@ -42,9 +42,9 @@ TEST_CASE("PraxisEffect fills every pixel from the palette") {
     CHECK(everyPixelLit);
 }
 
-// The hue is a function of (x, y): pixels far apart in the grid carry different colours,
+// The hue is a function of (x, y): pixels far apart in the grid carry different colors,
 // so the field is spatial, not a uniform fill.
-TEST_CASE("PraxisEffect varies colour across the grid") {
+TEST_CASE("PraxisEffect varies color across the grid") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;

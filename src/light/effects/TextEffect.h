@@ -9,7 +9,7 @@ namespace mm {
 // Text: renders a multi-line string on the grid in a selectable bitmap font. By DEFAULT the text is
 // STATIC — laid out from the top-left, each `\n` dropping one font-height, clipped where it runs off
 // the grid. Turn on `scroll` to march the whole block leftwards as a marquee (wrapping), at `speed`.
-// The colour comes from the active palette (one index, so it follows the global palette control).
+// The color comes from the active palette (one index, so it follows the global palette control).
 //
 // Multi-line entry uses the shared TextArea control (the same widget MoonLive's `source` uses — a
 // real <textarea>), so a user types several lines and each renders on its own row. The bitmap glyph
@@ -31,7 +31,7 @@ public:
     bool    scroll = false;               // false = static top-left; true = horizontal marquee
     uint8_t font   = 1;                   // index into fonts::kAll (0 = 4x6, 1 = 6x8)
     uint8_t speed  = 30;                  // marquee speed (pixels/sec-ish); only used when scrolling
-    uint8_t hue    = 128;                 // palette index for the text colour (mid-palette; 0 is black in some palettes)
+    uint8_t hue    = 128;                 // palette index for the text color (mid-palette; 0 is black in some palettes)
 
     void defineControls() override {
         controls_.addTextArea("text", text_, sizeof(text_));

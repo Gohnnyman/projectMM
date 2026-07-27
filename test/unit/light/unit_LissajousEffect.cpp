@@ -22,7 +22,7 @@ TEST_CASE("LissajousEffect traces a lit curve on the grid") {
     layer.addChild(&lissajous);
 
     layer.applyState();
-    // Pin a colourful palette (Rainbow=0) so painted pixels are non-black regardless of prior tests
+    // Pin a colorful palette (Rainbow=0) so painted pixels are non-black regardless of prior tests
     // mutating the process-wide active palette.
     mm::Palettes::setActive(0);
     layer.tick();

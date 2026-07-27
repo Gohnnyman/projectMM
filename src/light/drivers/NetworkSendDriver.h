@@ -62,7 +62,7 @@ namespace mm {
 /// **Synchronous send:** the whole frame goes out inline in tick() (~35 ms Ethernet / ~90 ms WiFi at
 /// 128×128 ArtNet; DDP less). A decoupling send task is a PSRAM-gated backlog item. Added per board
 /// via the catalog like the LED drivers; applies the same shared Correction, so network and wired
-/// outputs show identical colours.
+/// outputs show identical colors.
 /// @card NetworkSendDriver.png
 class NetworkSendDriver : public DriverBase {
 public:

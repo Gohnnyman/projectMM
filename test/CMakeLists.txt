@@ -67,6 +67,7 @@ add_executable(mm_tests
     unit/light/unit_TextEffect.cpp
     unit/light/unit_Coord3D.cpp
     unit/light/unit_effects_render.cpp
+    unit/light/unit_Effects_gridsweep.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
@@ -119,8 +120,21 @@ add_executable(mm_tests
     unit/light/unit_RmtLedDriver_pins.cpp
 )
 
-target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# The grid-size sweep drives every effect, including ones added after this file was
+# written, so its effect list is DERIVED from src/light/effects/ rather than typed here
+# (a hand-kept list would silently miss the next effect — the exact gap the sweep closes).
+# Always out-of-date on purpose, same rule as build_info.h: adding an effect file must
+# regenerate. The generator rewrites only on change, so an unchanged effect set is a no-op.
+add_custom_target(effect_sweep_gen ALL
+    COMMAND ${UV_EXECUTABLE} run python ${CMAKE_SOURCE_DIR}/moondeck/build/generate_effect_sweep.py ${CMAKE_CURRENT_BINARY_DIR}/generated/effect_sweep.h
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated/effect_sweep.h
+    COMMENT "Generating effect_sweep.h (every effect, for the grid-size sweep)"
+    VERBATIM
+)
+
+target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(mm_tests PRIVATE mm_core mm_platform)
+add_dependencies(mm_tests effect_sweep_gen)
 
 add_test(NAME unit_tests COMMAND mm_tests)
 

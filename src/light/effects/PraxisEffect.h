@@ -4,10 +4,10 @@
 
 namespace mm {
 
-// Praxis: a flowing, palette-coloured field whose hue at each pixel is driven by two
+// Praxis: a flowing, palette-colored field whose hue at each pixel is driven by two
 // independently-oscillating "mutators". A slow macro mutator and a faster micro mutator
 // (each a beatsin16 sweeping a tight high range) combine with the pixel's (x, y) position
-// and a steadily-advancing hue base, so the colour pattern continually stretches, shears,
+// and a steadily-advancing hue base, so the color pattern continually stretches, shears,
 // and rolls across the grid. The micro mutator divides the spatial term (so it sets the
 // pattern's spatial "frequency"), while the macro mutator multiplies the y·x cross term
 // (so it warps the field), and huebase = elapsed/40 scrolls the whole thing through the

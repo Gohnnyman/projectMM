@@ -5,8 +5,8 @@
 #include "light/effects/SolidEffect.h"
 #include "light/layouts/GridLayout.h"
 
-// Mode 0 (RGB(W)) fills the whole buffer with one uniform colour: every light equals red/green/blue.
-TEST_CASE("SolidEffect mode 0 fills the buffer with one uniform colour") {
+// Mode 0 (RGB(W)) fills the whole buffer with one uniform color: every light equals red/green/blue.
+TEST_CASE("SolidEffect mode 0 fills the buffer with one uniform color") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 4;
@@ -23,7 +23,7 @@ TEST_CASE("SolidEffect mode 0 fills the buffer with one uniform colour") {
     solid.red = 100;
     solid.green = 50;
     solid.blue = 25;
-    solid.brightness = 255;  // brightness 255 leaves the colour unscaled
+    solid.brightness = 255;  // brightness 255 leaves the color unscaled
     layer.addChild(&solid);
 
     layer.applyState();
@@ -31,7 +31,7 @@ TEST_CASE("SolidEffect mode 0 fills the buffer with one uniform colour") {
 
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 16);
-    // Every light carries exactly the configured RGB — the whole grid is one flat colour.
+    // Every light carries exactly the configured RGB — the whole grid is one flat color.
     for (size_t i = 0; i < buf.count(); i++) {
         CHECK(buf.data()[i * 3 + 0] == 100);
         CHECK(buf.data()[i * 3 + 1] == 50);
@@ -39,8 +39,8 @@ TEST_CASE("SolidEffect mode 0 fills the buffer with one uniform colour") {
     }
 }
 
-// Brightness scales the flat colour down per channel (channel * brightness / 255).
-TEST_CASE("SolidEffect mode 0 scales the flat colour by brightness") {
+// Brightness scales the flat color down per channel (channel * brightness / 255).
+TEST_CASE("SolidEffect mode 0 scales the flat color by brightness") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 2;
@@ -106,8 +106,8 @@ TEST_CASE("SolidEffect mode 0 writes the white channel on an RGBW layer") {
     }
 }
 
-// The effect runs at a degenerate 0×0×0 grid and at every colour mode without crashing.
-TEST_CASE("SolidEffect survives a 0x0x0 grid across all colour modes") {
+// The effect runs at a degenerate 0×0×0 grid and at every color mode without crashing.
+TEST_CASE("SolidEffect survives a 0x0x0 grid across all color modes") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 0;

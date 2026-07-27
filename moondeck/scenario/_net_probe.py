@@ -5,7 +5,7 @@ run_network_roundtrip.py).
 Kept in its own module (like _preview_ws.py) so the shared bits — protocol
 ports, the three packet builders, and the MoonDeck device set — have one clear
 home instead of living inside one of the two consumers. Nothing here is
-specific to either test; the matrix-only colour-correction and Board
+specific to either test; the matrix-only color-correction and Board
 orchestration stay in run_network_live.py.
 
 The packet builders mirror the firmware encoders byte for byte — cross-language

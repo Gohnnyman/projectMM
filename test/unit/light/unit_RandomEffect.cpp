@@ -43,7 +43,7 @@ TEST_CASE("RandomEffect lights exactly one light per frame") {
 }
 
 // Over many frames with light fade the sparkle field fills — more than one light ends up lit.
-TEST_CASE("RandomEffect scatters colour across many lights over many frames") {
+TEST_CASE("RandomEffect scatters color across many lights over many frames") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;

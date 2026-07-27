@@ -40,7 +40,7 @@ The preview is a *live view* — one viewer at a time is the real use case, and 
 ### 3. PreviewDriver: raise the cap empirically, widen count to u32, keep downsample fallback
 
 - Replace fixed `MAX_PREVIEW_POINTS = 1800` with a **RAM-derived cap** (`platform::hasPsram`/`freeInternalHeap()`/`maxAllocBlock()` with a margin for stack/HTTP/WiFi), **tuned by measurement**. The spatial-lattice downsample **stays** and engages beyond the cap.
-- **Widen the frame `count` field `u16 → u32`** (both 0x02 colour and 0x03 coord headers) on device and browser.
+- **Widen the frame `count` field `u16 → u32`** (both 0x02 color and 0x03 coord headers) on device and browser.
 - **Does NOT touch the `rgb_`/`coords_` build buffers** — only how the built frame is *sent* and the count width. Zero-copy producer-buffer reuse + channelsPerLight/offset wire model are a separate deferred step.
 
 ## Files

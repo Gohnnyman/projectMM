@@ -31,7 +31,7 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     std::vector<uint8_t> lastCoord, lastFrame;
     std::vector<uint8_t> cur_;     // payload accumulated across pushBinaryFrame between begin/end
     uint32_t generation = 0;       // bump to simulate a new client connecting
-    bool acceptNext = true;        // false → endBinaryFrame reports a colour frame not fully sent
+    bool acceptNext = true;        // false → endBinaryFrame reports a color frame not fully sent
     bool dropCoord = false;        // true → endBinaryFrame reports a coord table not fully sent
 
     void beginBinaryFrame(size_t /*totalLen*/) override { cur_.clear(); }
@@ -46,7 +46,7 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
             coordMsgs++; lastCoord = cur_; return true;
         }
         if (type == 0x02) {
-            if (!acceptNext) return false;     // simulate the colour frame not reaching the client
+            if (!acceptNext) return false;     // simulate the color frame not reaching the client
             frameMsgs++; lastFrame = cur_; return true;
         }
         return true;
@@ -57,7 +57,7 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     bool tryAcquireSend() override { return true; }
     void releaseSend() override {}
 
-    // Resumable buffered send — the colour-frame path (coord table uses begin/push/end). The mock
+    // Resumable buffered send — the color-frame path (coord table uses begin/push/end). The mock
     // captures it as a 0x02 frame (header ++ body). `bufferedDrains` models a slow link: the send
     // stays "in flight" for that many bufferedSendIdle() polls before going idle (0 = instant).
     // bufferedFrames counts accepted sends; bufferedDropped counts newest-wins backpressure drops.
@@ -176,7 +176,7 @@ TEST_CASE("PreviewDriver small grid sends all lights exactly") {
 // A large layout is SPATIALLY downsampled (a regular per-axis lattice, not every-Nth-flat-
 // index) so the payload fits the send-buffer cap without the diagonal moiré that linear
 // stride produced on a grid whose width didn't divide the stride. The wire "stride" field
-// carries the per-axis lattice/downscale factor (colour k still maps 1:1 to coord k).
+// carries the per-axis lattice/downscale factor (color k still maps 1:1 to coord k).
 TEST_CASE("PreviewDriver downsamples a large layout on a regular spatial lattice") {
     // 200×200 = 40000 lights, over the 4096 display cap → the lattice downsample engages. The
     // extent (199) is ≤255/axis, so positions are sent at EXACT integer grid coordinates (no
@@ -234,7 +234,7 @@ TEST_CASE("PreviewDriver fps default") {
     CHECK(driver.fps == 24);
 }
 
-// Regression: a coordinate table dropped under backpressure must be RETRIED, and colour
+// Regression: a coordinate table dropped under backpressure must be RETRIED, and color
 // frames withheld until it lands — otherwise the device sends 0x02 frames the browser skips
 // (count mismatch) and the preview freezes for the whole session. Drives tick() (where the
 // coord-pending logic lives) with a broadcaster that drops every 0x03, then lets it through.
@@ -250,7 +250,7 @@ TEST_CASE("PreviewDriver retries a dropped coordinate table, withholds frames un
     uint32_t t = 1000;
     auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
 
-    // Pump tick() several times. The rebuilt 0x03 never lands, so NO colour frame may go out —
+    // Pump tick() several times. The rebuilt 0x03 never lands, so NO color frame may go out —
     // a 0x02 now would carry a count the browser can't map (the freeze the guard prevents).
     for (int i = 0; i < 5; i++) tick();
     CHECK(rig.cap.frameMsgs == 0);            // frames withheld while the table is pending
@@ -258,7 +258,7 @@ TEST_CASE("PreviewDriver retries a dropped coordinate table, withholds frames un
     // Link recovers: the table now lands, and frames resume — matching the same count.
     rig.cap.dropCoord = false;
     tick();                                    // retries the pending table (it lands)
-    tick();                                    // now a colour frame may go out
+    tick();                                    // now a color frame may go out
     CHECK(rig.cap.coordMsgs > 0);              // the table finally reached the client
     CHECK(rig.cap.frameMsgs > 0);              // frames resumed
     CHECK(rig.cap.coordCount() == rig.cap.frameCount());   // and they agree (no freeze)
@@ -324,7 +324,7 @@ TEST_CASE("PreviewDriver sends coordinates only on change / new client, never on
     CHECK(afterFirst >= 1);
 
     // Advance a FULL 3 seconds with no new client and no rebuild: tick() keeps sending
-    // colour frames but must NOT re-send the coordinate table. This is the regression
+    // color frames but must NOT re-send the coordinate table. This is the regression
     // guard — the removed ~1 Hz timer would have re-sent ~3 times here.
     for (int t = 1; t <= 3; t++) {
         mm::platform::setTestNowMs(100000 + t * 1000);
@@ -387,12 +387,12 @@ TEST_CASE("PreviewDriver reports its resumable-path buffers in dynamicBytes" * d
     MESSAGE("skipped — see docs/backlog/backlog-light.md (resumableFrames default OFF)");
 }
 
-// Dense-grid CLOSED-FORM downsample, exact colour placement: a 200×1 strip pinned over a small cap
-// strides in x only, so the kept lights are columns 0,s,2s,… The colour pass must read each from its
+// Dense-grid CLOSED-FORM downsample, exact color placement: a 200×1 strip pinned over a small cap
+// strides in x only, so the kept lights are columns 0,s,2s,… The color pass must read each from its
 // dense buffer index (closed-form x for a 1-row grid) and pack them in the SAME order as the coord
-// table — no forEachCoord. Painting a known colour at a kept column and finding it at the matching
+// table — no forEachCoord. Painting a known color at a kept column and finding it at the matching
 // frame position pins the index math + the lattice order.
-TEST_CASE("PreviewDriver dense downsample packs colours by closed-form index, in lattice order") {
+TEST_CASE("PreviewDriver dense downsample packs colors by closed-form index, in lattice order") {
     const int width = 5000;                            // > the 4096 display cap → forces a stride
     mm::GridLayout g; g.width = width; g.height = 1; g.depth = 1;
     PreviewRig rig(&g);

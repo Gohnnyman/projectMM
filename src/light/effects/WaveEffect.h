@@ -8,8 +8,8 @@ namespace mm {
 // the lit points trace a sawtooth / triangle / sine / square / composite-sine / noise curve that
 // scrolls sideways over time, leaving a fading trail behind it. The classic "oscilloscope wave"
 // look. Prior art: MoonLight's Wave effect (Ewoud Wijma) — behaviour reproduced (the six waveform
-// types, the per-column phase travel, the time-varying colour, the frame fade), written fresh on
-// projectMM's EffectBase + integer primitives (sin8 LUT, scale8); the colour is a global-palette lookup.
+// types, the per-column phase travel, the time-varying color, the frame fade), written fresh on
+// projectMM's EffectBase + integer primitives (sin8 LUT, scale8); the color is a global-palette lookup.
 //
 // Axis convention: the waveform sets a y (its shape lives on HEIGHT); width is the travel axis.
 // So a 1-tall grid shows no wave — to drive a 1D output (a strip, a row of Hue lights) lay it out
@@ -79,7 +79,7 @@ public:
         phase_ += static_cast<uint64_t>(now - lastElapsed_) * bpm;
         lastElapsed_ = now;
         const uint8_t t = static_cast<uint8_t>((phase_ * 256) / 60000);    // uint8 angle (256 = full turn)
-        // Colour cycles slowly over time: now/50 indexes the active palette via waveColor.
+        // Color cycles slowly over time: now/50 indexes the active palette via waveColor.
         const uint8_t colorIndex = static_cast<uint8_t>(now / 50);
 
         // 3. Plot the wave point per column, joining discontinuous shapes to the previous column.
@@ -122,8 +122,8 @@ private:
     uint32_t lastElapsed_ = 0;
     bool     started_ = false;   // first-tick guard: seed lastElapsed_ before the first delta
 
-    // The colour for the wave this frame — one place: a lookup into the global active palette,
-    // so the wave recolours when the palette changes.
+    // The color for the wave this frame — one place: a lookup into the global active palette,
+    // so the wave recolors when the palette changes.
     static RGB waveColor(uint8_t index) { return colorFromPalette(*Palettes::active(), index); }
 
     // Map a phase (uint8 angle) to a y in [0, h) for the selected waveform. Integer-only.

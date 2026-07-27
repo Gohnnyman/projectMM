@@ -28,7 +28,7 @@ public:
     MoonLive(const MoonLive&) = delete;
     MoonLive& operator=(const MoonLive&) = delete;
 
-    // Compile a fixed-colour program direct from the emitter: emit the routine, copy it into
+    // Compile a fixed-color program direct from the emitter: emit the routine, copy it into
     // an exec block, ready it to call. Returns ok(). A failure (no exec memory, emit too big)
     // leaves the engine !ok() with an error() — the caller degrades, never crashes.
     bool compile(uint8_t r, uint8_t g, uint8_t b);
@@ -39,14 +39,14 @@ public:
     // !ok() with error() pointing at the diagnostic — the script editor's failure path.
     bool compile(const char* source, const BuiltinTable& table);
 
-    // Compile the animated routine (colour derived from the per-frame `t`).
+    // Compile the animated routine (color derived from the per-frame `t`).
     bool compileAnimated();
 
     bool ok() const { return fn_ != nullptr || anim_ != nullptr || ctrl_ != nullptr; }
     const char* error() const { return error_; }
 
     // The hot path: run the compiled routine over the host's buffer. `t` is the host's
-    // elapsed() ms; a static routine ignores it, an animated one derives its colour from
+    // elapsed() ms; a static routine ignores it, an animated one derives its color from
     // it. No-op if !ok() (a failed compile renders nothing). The emitted routines write
     // channels +0/+1/+2 per light, so a buffer that can't hold RGB — null, zero lights, or
     // fewer than 3 channels per light — is left untouched rather than overrun (robust to any

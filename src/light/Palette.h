@@ -8,7 +8,7 @@
 
 namespace mm {
 
-// A colour palette: the active palette is 16 evenly-spaced RGB entries (the CRGBPalette16 model),
+// A color palette: the active palette is 16 evenly-spaced RGB entries (the CRGBPalette16 model),
 // and colorFromPalette() reads a 0-255 wheel index by interpolating between the two bracketing
 // entries. The gradient definitions (a {pos,R,G,B,…} stop list) live in flash and expand into the
 // 16 entries on selection, off the hot path; the per-light lookup is then a single scale8 blend.
@@ -35,7 +35,7 @@ struct Palette {
     }
 
 private:
-    // The colour at `pos` (0..255) on the gradient: find the bracketing stops and lerp.
+    // The color at `pos` (0..255) on the gradient: find the bracketing stops and lerp.
     static RGB sampleGradient(const uint8_t* stops, size_t nStops, uint8_t pos) {
         // Before the first stop (a gradient whose first stop sits above 0): clamp to it, so the
         // `pos - p0` below can't underflow.
@@ -82,11 +82,11 @@ inline RGB colorFromPalette(const Palette& p, uint8_t index, uint8_t brightness 
     return c;
 }
 
-// Cross-fade two colours: `amt`/255 of the way from `a` to `b` (amt 0 = a, 255 = b). The textbook
+// Cross-fade two colors: `amt`/255 of the way from `a` to `b` (amt 0 = a, 255 = b). The textbook
 // RGB lerp, the staple for compositing/transitions. Prior art: FastLED's blend (colorutils).
 inline RGB blend(RGB a, RGB b, uint8_t amt) { return Palette::lerpRGB(a, b, amt); }
 
-// Dim a colour toward black by `amt`/255 (amt 0 = unchanged, 255 = black) — the per-frame fade
+// Dim a color toward black by `amt`/255 (amt 0 = unchanged, 255 = black) — the per-frame fade
 // that gives effects a decaying trail. Prior art: FastLED's fadeToBlackBy.
 inline void fadeToBlackBy(RGB& c, uint8_t amt) {
     const uint8_t keep = static_cast<uint8_t>(255 - amt);
@@ -234,11 +234,11 @@ public:
         return p;
     }
 
-    // --- Representative colour of a palette (for the HomeKit color-wheel → palette mapping) ---
+    // --- Representative color of a palette (for the HomeKit color-wheel → palette mapping) ---
     //
-    // HomeKit (via MQTT/Homebridge) has no "palette" concept but a native colour wheel, so we map a
-    // wheel colour to the nearest palette. Each palette's representative (hue, sat) is COMPUTED from
-    // its expanded entries — the textbook "dominant colour": average the 16 RGB entries, convert to
+    // HomeKit (via MQTT/Homebridge) has no "palette" concept but a native color wheel, so we map a
+    // wheel color to the nearest palette. Each palette's representative (hue, sat) is COMPUTED from
+    // its expanded entries — the textbook "dominant color": average the 16 RGB entries, convert to
     // HSV. No hand-maintained table (it auto-covers every built-in + any future one). A rainbow/
     // multi-hue palette averages toward grey → low saturation, which correctly matches the wheel's
     // desaturated centre rather than any single hue. Off the hot path (called on an MQTT set / get).
@@ -250,9 +250,9 @@ public:
         return hue;
     }
 
-    // Representative RGB colour of built-in `index` — the palette's identity colour, useful anywhere
+    // Representative RGB color of built-in `index` — the palette's identity color, useful anywhere
     // an external surface (HA WLED /json seg[0].col, an MQTT hsv/get with an RGB-shaped payload,
-    // a future HomeKit RGB accessory) needs one RGB triple to name "the colour of this palette".
+    // a future HomeKit RGB accessory) needs one RGB triple to name "the color of this palette".
     // Full V=255 in HSV, so the reported hue survives external dimming applied on top (HA's slider
     // multiplies segment.bri × state.bri, so baking in brightness here would double-dim).
     // Rainbow / grey palettes (sat=0) intentionally resolve to white (255,255,255) — the honest
@@ -267,8 +267,8 @@ public:
                         static_cast<uint8_t>(sat), 255);
     }
 
-    // RGB → nearest palette, the one call every RGB-input consumer (HA's WLED colour picker via
-    // /json/state, an ESP-NOW / REST colour message, a future BLE-mesh command …) should reach for
+    // RGB → nearest palette, the one call every RGB-input consumer (HA's WLED color picker via
+    // /json/state, an ESP-NOW / REST color message, a future BLE-mesh command …) should reach for
     // instead of open-coding the RGB→HSV conversion. Converts to (hue, sat) with the same maths
     // representativeHueSat uses on the palette side — so the input and the palette centroids are
     // measured on the same axes — then delegates to nearestForHue for the 2D distance sweep.
@@ -332,13 +332,13 @@ private:
         hue = static_cast<uint16_t>(h % 360);
     }
 
-    // Default to a full rainbow (index 0): always colourful, so an effect renders visible output
+    // Default to a full rainbow (index 0): always colorful, so an effect renders visible output
     // before any palette is selected. setActive() (Drivers setup) overrides from the saved index.
     static inline Palette active_ = fromBuiltin(0);
 };
 
 // Emit the palette dropdown's options for a ControlType::Palette control (the PaletteOptionsFn):
-// one {"name":…,"colors":"rrggbb rrggbb …"} object per built-in, the colours being the 16 entries
+// one {"name":…,"colors":"rrggbb rrggbb …"} object per built-in, the colors being the 16 entries
 // as space-separated hex so the UI renders each option as a gradient swatch.
 inline void paletteOptions(JsonSink& sink) {
     for (uint8_t i = 0; i < palettes::kCount; i++) {
@@ -353,7 +353,7 @@ inline void paletteOptions(JsonSink& sink) {
 // Emit the built-in palette names as a bare JSON string array (`"Default","Rainbow",…`), the
 // element list WLED's /json `palettes` array carries — HA's WLED integration renders one dropdown
 // entry per name, indexed by position (so seg[0].pal picks into this list). Same source of truth as
-// paletteOptions (kBuiltins), just names without the colour swatches the native UI needs.
+// paletteOptions (kBuiltins), just names without the color swatches the native UI needs.
 inline void paletteNames(JsonSink& sink) {
     for (uint8_t i = 0; i < palettes::kCount; i++)
         sink.appendf("%s\"%s\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);

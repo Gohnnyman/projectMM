@@ -1,10 +1,10 @@
 # Home automation
 
-Bring a projectMM device into your smart home — controlled alongside your lights, scenes, and automations — using the [MQTT module](../moonmodules/core/system.md#mqtt) (or, for some hubs, the built-in WLED compatibility). The device exposes on/off, brightness, and colour; a home-automation platform adopts it and drives those from its own app, voice assistant, and automations.
+Bring a projectMM device into your smart home — controlled alongside your lights, scenes, and automations — using the [MQTT module](../moonmodules/core/system.md#mqtt) (or, for some hubs, the built-in WLED compatibility). The device exposes on/off, brightness, and color; a home-automation platform adopts it and drives those from its own app, voice assistant, and automations.
 
 Integration goes **both directions**, and this page covers both:
 
-- **Your smart home controlling the device** — a hub (Home Assistant, Homebridge, …) adopts the projectMM device and drives its on/off, brightness, and colour from its own app, voice assistant, and automations.
+- **Your smart home controlling the device** — a hub (Home Assistant, Homebridge, …) adopts the projectMM device and drives its on/off, brightness, and color from its own app, voice assistant, and automations.
 - **The device controlling smart-home lights** — projectMM drives **Philips Hue** bulbs as effect pixels, so your existing smart bulbs become part of a show.
 
 The device-side recipes below assume the hub and (where relevant) an MQTT broker are already running. If any of that infrastructure isn't there yet, jump to [Set up the infrastructure](#set-up-the-infrastructure) at the end for HA-with-Mosquitto and standalone-Homebridge walkthroughs, then come back.
@@ -29,7 +29,7 @@ The control surface these integrations drive — the MQTT controls, topics, and 
 
 <img src="../assets/core/ha-integration.png" width="600" alt="projectMM devices as 💫-marked lights in a Home Assistant dashboard">
 
-HA discovers a projectMM device automatically over the WLED path — no broker, nothing to configure — and lists it as a light with colour, palette, and brightness. The 💫 in each name marks it as projectMM among any plain WLED devices. An optional step brings that entity into Apple Home via HA's own HomeKit Bridge — no Homebridge needed. Turn the `haDiscovery` control on only for the MQTT path (broker-only or cross-subnet setups); see [Let HA auto-create the entity](#2-let-ha-auto-create-the-entity) below.
+HA discovers a projectMM device automatically over the WLED path — no broker, nothing to configure — and lists it as a light with color, palette, and brightness. The 💫 in each name marks it as projectMM among any plain WLED devices. An optional step brings that entity into Apple Home via HA's own HomeKit Bridge — no Homebridge needed. Turn the `haDiscovery` control on only for the MQTT path (broker-only or cross-subnet setups); see [Let HA auto-create the entity](#2-let-ha-auto-create-the-entity) below.
 
 The chain:
 
@@ -53,10 +53,10 @@ The default WLED path needs none of this — skip to step 2. Do step 1 **only if
 
 Nothing to configure — HA discovers the device automatically over the WLED path. Two paths exist; the WLED one is the default and the richer of the two, so a device appears in HA **once** out of the box:
 
-- **WLED integration** (the default, no MQTT at all): HA's built-in WLED integration discovers the device over zeroconf and reads the WLED-compatible `/json` API projectMM already serves — **colour, palette, brightness, and diagnostic sensors**, no broker. This is the recommended path.
-- **MQTT auto-discovery** (opt-in, uses the Mosquitto add-on): turn `haDiscovery` on for a broker-only or cross-subnet setup where zeroconf can't reach HA. The device then also announces itself on the retained `homeassistant/light/…/config` topic, and HA **auto-creates a light entity** named after the device with **on/off + brightness** (the discovery config declares `brightness` only, so this entity has no colour control); it greys out when the device drops offline. Colour/palette control stays on the separate `hsv/set` topic — not the auto-created entity.
+- **WLED integration** (the default, no MQTT at all): HA's built-in WLED integration discovers the device over zeroconf and reads the WLED-compatible `/json` API projectMM already serves — **color, palette, brightness, and diagnostic sensors**, no broker. This is the recommended path.
+- **MQTT auto-discovery** (opt-in, uses the Mosquitto add-on): turn `haDiscovery` on for a broker-only or cross-subnet setup where zeroconf can't reach HA. The device then also announces itself on the retained `homeassistant/light/…/config` topic, and HA **auto-creates a light entity** named after the device with **on/off + brightness** (the discovery config declares `brightness` only, so this entity has no color control); it greys out when the device drops offline. Color/palette control stays on the separate `hsv/set` topic — not the auto-created entity.
 
-**Why is MQTT discovery off by default?** Because the WLED path alone already gives HA a richer light — colour, palette, sensors — with zero infrastructure, and running both lists the device **twice** (one WLED entity, one MQTT entity). So WLED is the default and MQTT discovery is opt-in, reserved for what WLED's zeroconf can't do: reach across VLANs/guest nets or a broker-only network, sit next to other MQTT devices (Tasmota, ESPHome, Zigbee2MQTT) under one convention, or push state with retained-across-offline latency. On a flat LAN with only projectMM devices, WLED alone is the whole story; a segmented network or an existing MQTT estate is where turning `haDiscovery` on earns its slot. The full rationale is [ADR-0012](../adr/0012-ha-discovery-wled-default-mqtt-opt-in.md).
+**Why is MQTT discovery off by default?** Because the WLED path alone already gives HA a richer light — color, palette, sensors — with zero infrastructure, and running both lists the device **twice** (one WLED entity, one MQTT entity). So WLED is the default and MQTT discovery is opt-in, reserved for what WLED's zeroconf can't do: reach across VLANs/guest nets or a broker-only network, sit next to other MQTT devices (Tasmota, ESPHome, Zigbee2MQTT) under one convention, or push state with retained-across-offline latency. On a flat LAN with only projectMM devices, WLED alone is the whole story; a segmented network or an existing MQTT estate is where turning `haDiscovery` on earns its slot. The full rationale is [ADR-0012](../adr/0012-ha-discovery-wled-default-mqtt-opt-in.md).
 
 The MQTT control surface (topics, HSV → palette mapping, retained state) is in [Core › System › MQTT](../moonmodules/core/system.md#mqtt); nothing here restates it.
 
@@ -96,13 +96,13 @@ Restart Homebridge.
 
 ### 3. Pair it in Apple Home
 
-Once the broker, device, and Homebridge are all talking (the `mosquitto_sub` window shows the device, and Homebridge lists the accessory), add it to HomeKit: in the **Home** app, **Add Accessory → More options →** the Homebridge bridge, using the PIN Homebridge prints on start (or shown in the Config UI). The device shows up as a light — on/off, brightness, and the colour wheel that steps through palettes.
+Once the broker, device, and Homebridge are all talking (the `mosquitto_sub` window shows the device, and Homebridge lists the accessory), add it to HomeKit: in the **Home** app, **Add Accessory → More options →** the Homebridge bridge, using the PIN Homebridge prints on start (or shown in the Config UI). The device shows up as a light — on/off, brightness, and the color wheel that steps through palettes.
 
 ## Drive Hue lights
 
-The other direction: instead of a hub controlling the device, the **device controls your Philips Hue bulbs**, treating each colour bulb as a pixel of an effect. Your existing smart lights join the show — an effect's colours glide across them alongside (or instead of) an LED strip. This is a projectMM **output driver**, not a hub integration, so there's no broker and no Homebridge — the device talks straight to the Hue bridge over its LAN HTTP API.
+The other direction: instead of a hub controlling the device, the **device controls your Philips Hue bulbs**, treating each color bulb as a pixel of an effect. Your existing smart lights join the show — an effect's colors glide across them alongside (or instead of) an LED strip. This is a projectMM **output driver**, not a hub integration, so there's no broker and no Homebridge — the device talks straight to the Hue bridge over its LAN HTTP API.
 
-Because Hue is a rate-limited HTTP hub (~10 commands/s), this is **smooth ambient colour**, not fast strobing — the driver paces itself to the bridge and lets it fade between colours. Full behaviour, controls, and the wire contract are in the driver reference: [Drivers › Hue](../moonmodules/light/drivers.md#hue).
+Because Hue is a rate-limited HTTP hub (~10 commands/s), this is **smooth ambient color**, not fast strobing — the driver paces itself to the bridge and lets it fade between colors. Full behaviour, controls, and the wire contract are in the driver reference: [Drivers › Hue](../moonmodules/light/drivers.md#hue).
 
 **Recommended layout:** set up a **one-dimensional grid — width 1, height = the number of Hue lights** you want to control. Each pixel of that column maps to one bulb (the driver assigns window pixels to bulbs in order), so a 1×N grid gives you exactly N discrete lights with no wasted pixels, and 1D effects (rainbow, chase, …) read naturally across the bulbs. Sizing the grid to your bulb count keeps the effect and the driver in step.
 
@@ -110,10 +110,10 @@ To set it up:
 
 1. **Add a Hue driver.** In the device's web UI pipeline (**Layers → a Layer → its Drivers**), add a **Hue** driver. Enter your bridge's IP in `bridgeIp` (find it in the Hue app, or at [discovery.meethue.com](https://discovery.meethue.com)).
 2. **Pair with the bridge.** Press the physical **link button** on the Hue bridge, then click the driver's **`pair`** button within ~30 seconds. The device claims an app key (stored on the driver as `appKey`) — a one-time step; the status line reports `paired, N lights`.
-3. **Pick what it drives.** The driver lists the bridge's colour-capable, reachable bulbs and its rooms; use the `room` / `light` controls to aim the effect at all bulbs, one room, or a single light. Each selected bulb becomes one pixel of the driver's window.
-4. **Run an effect.** Any effect on the layer now drives the bulbs — the global brightness slider and colour-order correction apply to them just like a physical strip (brightness 0 turns a bulb off).
+3. **Pick what it drives.** The driver lists the bridge's color-capable, reachable bulbs and its rooms; use the `room` / `light` controls to aim the effect at all bulbs, one room, or a single light. Each selected bulb becomes one pixel of the driver's window.
+4. **Run an effect.** Any effect on the layer now drives the bulbs — the global brightness slider and color-order correction apply to them just like a physical strip (brightness 0 turns a bulb off).
 
-*Note:* a bulb is only driven if it's an "Extended color light" and currently reachable — a white-only bulb, a plug, or a powered-off light is skipped. For true real-time (fast) Hue, the [Hue Entertainment API](https://developers.meethue.com/develop/hue-entertainment/) (DTLS streaming) is a separate future path; today's driver targets the standard API's ambient-colour sweet spot.
+*Note:* a bulb is only driven if it's an "Extended color light" and currently reachable — a white-only bulb, a plug, or a powered-off light is skipped. For true real-time (fast) Hue, the [Hue Entertainment API](https://developers.meethue.com/develop/hue-entertainment/) (DTLS streaming) is a separate future path; today's driver targets the standard API's ambient-color sweet spot.
 
 ## Other platforms
 
@@ -263,4 +263,4 @@ Now jump back to [Adopt in Homebridge](#adopt-in-homebridge).
 
   A **404 on `/json`** means an old firmware that predates the WLED-compatibility shim → reflash. A **404 on `/presets.json`** with `/json` working means the presets route is missing → HA's coordinator retry-storms trying to fetch presets and the entity ends up stuck on "unavailable" even though the light responds; also a firmware reflash. A `/json` response that parses but is missing `info.fs`, `state.nl`, `state.udpn`, or `state.lor` fails python-wled's dataclass parse and HA reports HTTP-500 on `light.turn_on` — again a firmware version older than the current WLED shim.
 - **Homebridge shows "No Response"** — the accessory's topics don't match the device's MAC suffix, or the `url` points at the wrong broker. Confirm the suffix with `mosquitto_sub -t 'projectMM/#'` and that the same broker appears in both the device's `broker` control and the accessory `url`.
-- **HomeKit colour wheel doesn't match a specific colour** — expected: HomeKit sends a full-precision hue, and the device snaps it to the *nearest* built-in palette (there's no arbitrary-colour mode). Same behaviour whether the bridge is HA's HomeKit Bridge or standalone Homebridge. See the palette note in the [MQTT reference](../moonmodules/core/system.md#mqtt).
+- **HomeKit color wheel doesn't match a specific color** — expected: HomeKit sends a full-precision hue, and the device snaps it to the *nearest* built-in palette (there's no arbitrary-color mode). Same behaviour whether the bridge is HA's HomeKit Bridge or standalone Homebridge. See the palette note in the [MQTT reference](../moonmodules/core/system.md#mqtt).

@@ -11,7 +11,7 @@ namespace mm {
 //
 // Per frame the whole buffer fades a little (fadeOut → motion trail), then for each column x its band
 // is read, optionally smoothed against its neighbours (smoothBars), mapped to a bar height, and the
-// column is filled from the floor up. The bar colour is either per-column (colorBars) or per-row (the
+// column is filled from the floor up. The bar color is either per-column (colorBars) or per-row (the
 // gradient runs up the bar). A per-column peak tracker remembers the tallest the bar reached; when the
 // live bar is shorter, the remembered peak is drawn as a single dot and decays downward at a rate set
 // by `ripple` (0 = the peak dot is disabled; otherwise it falls one row every `ripple` frames).
@@ -36,7 +36,7 @@ public:
                                 // fade so bars snap rather than smear.
     uint8_t ripple     = 4;     // peak-dot fall rate: the dot drops one row every `ripple` frames
                                 // (0 = no peak dot). WLED's "ripple" slider gates the falling peak.
-    bool    colorBars  = false; // colour each bar by its column (true) instead of by row height (false)
+    bool    colorBars  = false; // color each bar by its column (true) instead of by row height (false)
     bool    smoothBars = false; // blend each band with its neighbours for a smoother profile
 
     void defineControls() override {
@@ -135,7 +135,7 @@ public:
             if (ripple > 0 && peaks_[x] > 0 && peaks_[x] > barHeight) {
                 const int y = rows - peaks_[x];      // peaks_[x] rows up from the floor
                 if (y >= 0 && y < rows) {
-                    // Peak colour: top of the palette (index 255) so the dot reads as the crest.
+                    // Peak color: top of the palette (index 255) so the dot reads as the crest.
                     const RGB peakCol = colorFromPalette(*Palettes::active(), 255);
                     draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, peakCol);
                 }
@@ -146,7 +146,7 @@ public:
 private:
     static constexpr int NUM_GEQ_CHANNELS = 16;
 
-    // Standard integer map (WLED/MoonLight's ::map), used for the band/colour/height remaps. Guards a
+    // Standard integer map (WLED/MoonLight's ::map), used for the band/color/height remaps. Guards a
     // zero input span so a degenerate grid (cols/rows <= 1) can't divide by zero.
     static int imap(int v, int inLo, int inHi, int outLo, int outHi) {
         const int den = inHi - inLo;

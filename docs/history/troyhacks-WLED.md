@@ -51,7 +51,7 @@ _Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 com
 
 - **PixelForge** image/GIF tooling gained image rotation; WLED-MM-specific adjustments.
 - **RMTHI** (high-speed RMT LED output) now works on ESP32-S2 and S3; new 16 MB ESP32-with-Ethernet build target.
-- Random colours via the JSON API (`"col":["r","r","r"]`); Animartrix optional gamma correction + math-optimization speedups.
+- Random colors via the JSON API (`"col":["r","r","r"]`); Animartrix optional gamma correction + math-optimization speedups.
 - Nightly-build automation: automatic version stamping, cleaner release notes, "Nightly mdev Build" titling.
 
 **Fixed**
@@ -71,7 +71,7 @@ _Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 com
 **New**
 
 - **WLEDPixelForge** — a new image and scrolling-text interface (`pxmagic`), with 1D GIF support, blur option, and version-14.x adaptations.
-- Effect math sped up (up to ~3× faster); inlined hot-path colour/segment functions; more segment/effect data allowed on PSRAM boards.
+- Effect math sped up (up to ~3× faster); inlined hot-path color/segment functions; more segment/effect data allowed on PSRAM boards.
 - DDP-over-websockets / DDP-over-WS stability; E1.31 kill switch; `dnrgbw` realtime mode.
 
 **Fixed / hardened**
@@ -103,7 +103,7 @@ _Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 com
 
 *~32 commits on `mdev`, 2025-10-01 … 2025-10-31.*
 
-- **DDP-over-websockets** added; HUB75 skips colour-temperature correction for performance.
+- **DDP-over-websockets** added; HUB75 skips color-temperature correction for performance.
 - `setPixelColor` / `getPixelColor` hot-path optimizations (cached-bus path, `colorKtoRGB` fix, IRAM placement); particle-FX framebuffer memory-calc fix.
 - Bugfixes: preset-corruption prevention, IR-JSON buffer-overrun, low-brightness gradient smoothness.
 

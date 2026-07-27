@@ -9,15 +9,15 @@ namespace mm {
 // over a slow motion-trail fade. The box origin (X/Y/Z position) and size (width/height/depth)
 // are plain controls, so the user dials in exactly which cells light up — a static fixture /
 // alignment / region paint. When `alternateWhite` is on, the box is rendered as a chequerboard
-// of white and the RGB colour: a per-cell toggle flips along the box's dominant axis (it flips
+// of white and the RGB color: a per-cell toggle flips along the box's dominant axis (it flips
 // every cell when the box is wider than tall, and once per row when it is taller than wide), so
-// the white/colour pattern follows the box's longer side. On RGBW grids the 4th (white) channel
-// carries `white` on the white tiles and is cleared to 0 on the coloured tiles, so a coloured
+// the white/color pattern follows the box's longer side. On RGBW grids the 4th (white) channel
+// carries `white` on the white tiles and is cleared to 0 on the colored tiles, so a colored
 // cell never picks up the white LED and no stale W lingers from a prior frame.
 //
 // Prior art: MoonLight's FixedRectangle (E_MoonModules / MoonModules). The defaults, the
 // origin+extent clamping, the alternate-toggle rule (flip per-cell when height<width, flip
-// per-row when height>width), and the white-vs-colour chequerboard are reproduced exactly,
+// per-row when height>width), and the white-vs-color chequerboard are reproduced exactly,
 // written fresh on EffectBase + the shared draw primitives.
 // Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Test effect: draws a fixed rectangle at set coordinates.
@@ -26,7 +26,7 @@ public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
     Dim dimensions() const override { return Dim::D3; }
 
-    // Colour of the box (MoonLight defaults). White is the 4th-channel value, used only on RGBW.
+    // Color of the box (MoonLight defaults). White is the 4th-channel value, used only on RGBW.
     uint8_t red   = 182;
     uint8_t green = 15;
     uint8_t blue  = 98;
@@ -71,7 +71,7 @@ public:
         // Motion trail: dim the whole buffer each frame (source: layer->fadeToBlackBy(10)).
         layer()->fadeToBlackBy(10);
 
-        // The white/colour chequerboard toggle. MoonLight keeps it as a member but resets it to
+        // The white/color chequerboard toggle. MoonLight keeps it as a member but resets it to
         // false at the top of each draw, so it is effectively per-frame state — a plain local here.
         bool alternate = false;
 
@@ -85,21 +85,21 @@ public:
         for (int z = rectZ; z < zEnd; z++) {
             for (int y = rectY; y < yEnd; y++) {
                 for (int x = rectX; x < xEnd; x++) {
-                    // One chequerboard decision drives both the RGB colour and the W channel:
-                    // a white tile paints white RGB + W=white; a coloured tile paints rgb + W=0.
+                    // One chequerboard decision drives both the RGB color and the W channel:
+                    // a white tile paints white RGB + W=white; a colored tile paints rgb + W=0.
                     const bool isWhiteTile = alternateWhite && alternate;
                     const Coord3D p{static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)};
-                    // Always write RGB: a white tile paints {255,255,255} even when the colour is all
-                    // zero, and a coloured tile writes rgb (clearing any stale pixel from a prior frame).
+                    // Always write RGB: a white tile paints {255,255,255} even when the color is all
+                    // zero, and a colored tile writes rgb (clearing any stale pixel from a prior frame).
                     draw::pixel(buf, dims, p, isWhiteTile ? RGB{255, 255, 255} : rgb);
                     // White channel (4th) only on RGBW grids. Follow the chequerboard branch: the
-                    // white tile carries `white`, a coloured tile clears W so it never tints the
-                    // colour and no stale W persists in the RGBW buffer. draw::pixel writes RGB only.
+                    // white tile carries `white`, a colored tile clears W so it never tints the
+                    // color and no stale W persists in the RGBW buffer. draw::pixel writes RGB only.
                     if (cpl >= 4) {
                         const size_t off = draw::offsetOf(buf, dims, p);
                         if (off + 3 < buf.bytes()) buf.data()[off + 3] = isWhiteTile ? white : 0;
                     }
-                    // Box wider than tall: flip the white/colour toggle every cell along X.
+                    // Box wider than tall: flip the white/color toggle every cell along X.
                     if (rectH < rectW) alternate = !alternate;
                 }
                 // Box taller than wide: flip once per row instead.

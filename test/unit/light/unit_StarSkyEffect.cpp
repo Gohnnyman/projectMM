@@ -61,7 +61,7 @@ TEST_CASE("StarSkyEffect white stars paint greyscale pixels") {
         uint8_t r = data[p * 3], g = data[p * 3 + 1], b = data[p * 3 + 2];
         if (r || g || b) {
             litPixels++;
-            // A white star's colour is RGB{b,b,b}: the three channels must be equal.
+            // A white star's color is RGB{b,b,b}: the three channels must be equal.
             CHECK(r == g);
             CHECK(g == b);
         }

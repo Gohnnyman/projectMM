@@ -32,16 +32,21 @@
 // below MUST match the import URLs (a check script could pin this later).
 //
 // esptool-js is pinned 0.5.7 — the version ESP Web Tools (the flasher ESPHome
-// and WLED embed) ships. 0.6.0 (the newest) has a DETERMINISTIC compressed-flash
-// bug: a P4 web-flash aborts at the SAME block both times — "Failed to write
-// compressed data to flash after seq 38, status 201" — where 0.4.7, 0.5.7, and
-// the CLI (esptool.py) all flash the same P4 cleanly. Failing at a fixed seq (not
-// a random one) rules out a transient USB hiccup; it's a real 0.6.0 regression in
-// the deflate write path (cf. upstream esptool-js#245, per-block retry). 0.5.x
+// and WLED embed) ships. 0.6.0 (the newest, tagged 2026-03-26) has a DETERMINISTIC
+// compressed-flash bug: a P4 web-flash aborts at a FIXED block — "Failed to write
+// compressed data to flash after seq NN failed with status 201,0" — where 0.4.7,
+// 0.5.7, and the CLI (esptool.py) all flash the same P4 cleanly. Failing at a fixed
+// seq (not a random one) rules out a transient USB hiccup; it's a real 0.6.0
+// regression in the deflate write path (cf. upstream esptool-js#233/#245). 0.5.x
 // also moved hardReset off ESPLoader into a reset-strategy class — handled by
 // hardResetChip() below (transport DTR/RTS), version-agnostic, so 0.6.x would
 // reboot fine IF its flash worked. Re-test the flash + reset path on any bump;
-// 0.6.x is only viable once that deflate regression is fixed. Pinned 2026-06-28.
+// 0.6.x is only viable once that deflate regression is fixed.
+//   Re-verified on the bench 2026-07-27: 0.6.0 is still the newest tag (no 0.6.1+),
+//   and a real P4 web-flash STILL aborts — "seq 50 failed with status 201,0". So the
+//   regression persists in 0.6.0-as-tagged; keep 0.5.7. (0.6.0 also brings no ESP32-S31
+//   support — misdetection is tracked upstream in esptool-js#248 — so the bump has no
+//   upside for us either.) Pinned 2026-06-28, re-verified 2026-07-27.
 export const ESPTOOL_JS_VERSION = "0.5.7";
 export const IMPROV_SDK_VERSION = "2.5.0";
 import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.5.7/bundle.js?module";

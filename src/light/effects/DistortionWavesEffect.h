@@ -4,7 +4,7 @@
 
 namespace mm {
 
-// Two interfering sine waves whose sum drives the hue — a flowing, moiré-like colour
+// Two interfering sine waves whose sum drives the hue — a flowing, moiré-like color
 // field. The horizontal and vertical waves run at independent frequencies and slightly
 // different time rates, so they beat against each other. 2D (Layer::extrude lifts it to
 // 3D). Ported from WLED's "Distortion Waves".

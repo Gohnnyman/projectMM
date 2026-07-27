@@ -69,7 +69,7 @@ Repo: the current workspace root (the projectMM checkout you're running in) — 
 - First line MUST be: \`// @module ${cls}\`  (this is what the doc generator + MoonDeck read — the whole point is that this module becomes a documented, tested module). Add \`// @also X, Y\` only if the test genuinely also exercises another module.
 - Each TEST_CASE gets a single \`//\` comment line ABOVE it describing the behaviour it pins (the generator turns that into the doc description). Write real, present-tense descriptions.
 - Assert REAL BEHAVIOUR, not just "renders non-zero". Examples of the bar:
-  - SolidEffect → the whole buffer is ONE uniform colour (every light equals the configured colour).
+  - SolidEffect → the whole buffer is ONE uniform color (every light equals the configured color).
   - FixedRectangleEffect → only lights inside the configured rect are lit; outside is black; defaults (0,0,0)+(15,15,15) light the origin corner.
   - MirrorModifier → a coord and its mirror map to the same logical position; modifyLogicalSize halves the mirrored axis (study the .h for which axis/percentage).
   - TransposeModifier → swaps axes (x↔y etc. per the .h); modifyLogicalSize swaps the corresponding size fields.

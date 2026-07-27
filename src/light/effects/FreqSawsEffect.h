@@ -137,7 +137,7 @@ public:
         }
 
         // Column loop: map each x onto its band and draw that band's cached Y. Per-column concerns
-        // (invert mirroring, palette colour) stay here; the band physics already ran above.
+        // (invert mirroring, palette color) stay here; the band physics already ran above.
         for (int x = 0; x < sizeX; x++) {
             // Map this column onto one of the 16 GEQ bands (band = map(x, 0, sizeX, 0, 16)).
             int band = imap(x, 0, sizeX, 0, NUM_GEQ_CHANNELS);
@@ -158,7 +158,7 @@ public:
 private:
     static constexpr int NUM_GEQ_CHANNELS = 16;
 
-    // Standard integer map (MoonLight's ::map), used for the band/colour/position remaps. Guards a
+    // Standard integer map (MoonLight's ::map), used for the band/color/position remaps. Guards a
     // zero input span so a degenerate grid (sizeX/sizeY <= 1) can't divide by zero.
     static int imap(int v, int inLo, int inHi, int outLo, int outHi) {
         const int den = inHi - inLo;

@@ -1,10 +1,10 @@
 # LED signal integrity — flicker on LEDs that should be off
 
-Random wrong colours on LEDs the effect leaves black — most often a few stray pixels flickering — is, on a 3.3 V ESP32 driving WS2812 **directly**, almost always a **data-line signal-integrity** problem, not a firmware bug. WS2812 wants a logic-high near 0.7 × VDD (≈ 3.5 V on a 5 V strip), but the ESP32 drives only 3.3 V, so individual bits sit at the margin and noise tips them.
+Random wrong colors on LEDs the effect leaves black — most often a few stray pixels flickering — is, on a 3.3 V ESP32 driving WS2812 **directly**, almost always a **data-line signal-integrity** problem, not a firmware bug. WS2812 wants a logic-high near 0.7 × VDD (≈ 3.5 V on a 5 V strip), but the ESP32 drives only 3.3 V, so individual bits sit at the margin and noise tips them.
 
 Confirm the firmware is innocent **before** reaching for the soldering iron. These checks are the bench diagnosis path (recorded in [lessons.md](../history/lessons.md)):
 
-1. **Is the data clean?** The preview/source buffer is the logical RGB the effect produced — if it shows no stray colour, the effect is innocent (the corruption is downstream of the buffer).
+1. **Is the data clean?** The preview/source buffer is the logical RGB the effect produced — if it shows no stray color, the effect is innocent (the corruption is downstream of the buffer).
 2. **Is the firmware/peripheral clean?** Run the [`loopbackFrame` self-test](../moonmodules/light/drivers.md#led-drivers) through a short jumper on the data pin. A `PASS` means the RMT encode + transmit emit bit-perfect WS2812 — the GPIO is fine.
 3. **Is it WiFi RF?** Lower `Network.txPowerSetting` from 20 dBm down toward 2 and watch. If the flicker shrinks with TX power, it's radio coupling into the data wire (mitigate with the level shifter below). If it's **unchanged across the whole sweep, it is not the radio** — it's the physical data path.
 

@@ -338,7 +338,7 @@ public:
     /// Read this module's first output light as RGB into out[3], returning true if it has
     /// one. Domain-neutral seam (core declares it, the output-owning module overrides):
     /// the WLED-compatibility shim uses it to tint the app's device card with the live
-    /// first-LED colour. Default: no output → false.
+    /// first-LED color. Default: no output → false.
     virtual bool firstOutputRgb(uint8_t /*out*/[3]) const { return false; }
 
     const char* name() const { return name_; }
@@ -439,7 +439,7 @@ public:
             // an option index), and Palette (a palette-picker stored as a builtins-array index). The
             // Palette omission here silently failed driversPalette()/similar callers to dflt=0,
             // which then made HttpServerModule's WLED shim report seg[0].col as Rainbow's
-            // representative colour (white) regardless of the actually-picked palette — the "the HA
+            // representative color (white) regardless of the actually-picked palette — the "the HA
             // wheel snaps back to the centre and the card renders white" bug pinned on the bench.
             if (c.ptr && std::strcmp(c.name, name) == 0 &&
                 (c.type == ControlType::Uint8 || c.type == ControlType::Select ||

@@ -26,7 +26,7 @@ namespace mm::moonlive {
 
 // --- Xtensa (LX6/LX7: classic ESP32, ESP32-S3) ---------------------------------------
 // Little-endian, mixed 24-bit and 16-bit (narrow) instructions; windowed ABI prologue/
-// epilogue `entry`/`retw` so a plain C function pointer calls it. Colour bytes are the
+// epilogue `entry`/`retw` so a plain C function pointer calls it. Color bytes are the
 // immediate byte of three wide `movi`s (forced wide so all patch identically), at kR/kG/kB.
 
 // Disassembly (offsets in the template below):
@@ -62,7 +62,7 @@ static const uint8_t kXtensaFill[] = {
     0x37, 0x98, 0xed,        // bne a8, a3, .loop
     0x1d, 0xf0,              // retw.n
 };
-static constexpr size_t kR = 0x0b, kG = 0x0e, kB = 0x11;   // colour-immediate byte offsets
+static constexpr size_t kR = 0x0b, kG = 0x0e, kB = 0x11;   // color-immediate byte offsets
 
 size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
     if (!out || cap < sizeof(kXtensaFill)) return 0;
@@ -75,7 +75,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
 
 // Xtensa animated fill (assembled from anim_xt.s, verified by objdump). The 4th windowed-ABI
 // arg `t` arrives in a5; red = (t>>3)&0xFF is computed at runtime, green=0, blue=64. Nothing
-// to patch — the colour is derived from `t`, so the SAME code animates as the host feeds a
+// to patch — the color is derived from `t`, so the SAME code animates as the host feeds a
 // changing elapsed() each tick.
 //   00: entry a1,32           06: srli a6,a5,3 (red=t>>3)   0e: movi.n a7,0 (green)
 //   03: beqz.n a3,.done        08: movi a7,0xff             10: movi.n a8,64 (blue)
@@ -104,7 +104,7 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
 // --- RISC-V (RV32IMC: ESP32-P4) ------------------------------------------------------
 // Little-endian, fixed 4-byte instructions (assembled with .option norvc so there are no
 // 2-byte compressed forms — uniform words, simple patching). Standard RV calling convention:
-// a0=buf, a1=nLights, a2=cpl, a3=t; `ret` (jalr x0, ra, 0) returns. The colour `li`s sit at
+// a0=buf, a1=nLights, a2=cpl, a3=t; `ret` (jalr x0, ra, 0) returns. The color `li`s sit at
 // fixed WORD indices; a li's 12-bit immediate is bits [31:20], so patch is base | (imm<<20)
 // with a zero-immediate base. Verbatim from riscv32-esp-elf-as (objcopy of .text).
 
@@ -119,7 +119,7 @@ static const uint8_t kRiscvFill[] = {
     0x23, 0x01, 0xdf, 0x01,  0x13, 0x03, 0x13, 0x00,  0xb3, 0x82, 0xc2, 0x00,
     0xe3, 0x14, 0xb3, 0xfe,  0x67, 0x80, 0x00, 0x00,
 };
-// li t2/t3/t4, 0 (zero-immediate bases) at word indices 3/4/5; patch | (colour<<20).
+// li t2/t3/t4, 0 (zero-immediate bases) at word indices 3/4/5; patch | (color<<20).
 static constexpr uint32_t kRvLiBaseR = 0x00000393u;  // li t2,0
 static constexpr uint32_t kRvLiBaseG = 0x00000e13u;  // li t3,0
 static constexpr uint32_t kRvLiBaseB = 0x00000e93u;  // li t4,0

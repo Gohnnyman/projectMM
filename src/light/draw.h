@@ -110,7 +110,7 @@ inline RGB get(const Buffer& buf, Coord3D dims, Coord3D p) {
     return {d[off + 0], d[off + 1], d[off + 2]};
 }
 
-// Blend a colour into a pixel by amt/255 (amt 0 = leave as-is, 255 = replace). The in-place
+// Blend a color into a pixel by amt/255 (amt 0 = leave as-is, 255 = replace). The in-place
 // read-modify-write that GoL's dead-cell fade-to-background and age-toward-red use
 // (MoonLight's blendColor). Clipped like pixel().
 inline void blendPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c, uint8_t amt) {
@@ -122,7 +122,7 @@ inline void blendPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c, uint8_t amt)
     d[off + 0] = out.r; d[off + 1] = out.g; d[off + 2] = out.b;
 }
 
-// Add a colour into a pixel, saturating (a bright pixel can't wrap to dark) — WLED's addRGB / additive
+// Add a color into a pixel, saturating (a bright pixel can't wrap to dark) — WLED's addRGB / additive
 // setPixelColor. Used to re-stamp a light on top of a blur so its centre stays bright. Clipped like pixel().
 inline void addPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c) {
     const size_t off = offsetOf(buf, dims, p);
@@ -208,10 +208,10 @@ inline void blur(Buffer& buf, Coord3D dims, uint8_t amt) {
     if (z > 1) blurAxis(d, cpl, z, w * h * cpl, w * h, cpl, amt);
 }
 
-// Fill the whole buffer with one colour (MoonLight's fill_solid).
+// Fill the whole buffer with one color (MoonLight's fill_solid).
 inline void fill(Buffer& buf, RGB c) {
     const uint8_t cpl = buf.channelsPerLight();
-    if (cpl == 0) return;   // a 0-channel buffer has no colour to write; guards off += 0 spinning
+    if (cpl == 0) return;   // a 0-channel buffer has no color to write; guards off += 0 spinning
     uint8_t* d = buf.data();
     const size_t n = buf.bytes();
     for (size_t off = 0; off + cpl <= n; off += cpl) {

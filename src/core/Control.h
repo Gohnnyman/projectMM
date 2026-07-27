@@ -89,7 +89,7 @@ inline void sanitizeHostname(char* buf) {
 /// The type of a control — selects its storage, its UI widget, and its DMX mapping.
 /// Each `controls_.addX(name, var, …)` binds one of these to a class variable by
 /// reference. Uint8 (a slider, 0–255) is the preferred default; the non-obvious
-/// members are noted per value below. There is no RGB colour-picker type — effects
+/// members are noted per value below. There is no RGB color-picker type — effects
 /// use a palette index (a Uint8) instead; `float` and `Coord3D` exist but are used
 /// minimally, prefer Uint8.
 enum class ControlType : uint8_t {
@@ -133,8 +133,8 @@ enum class ControlType : uint8_t {
                 ///< No backing storage (ptr unused) and non-persistable — distinct
                 ///< from Bool, which is an on/off STATE that renders as a toggle and a
                 ///< toggle is the wrong affordance for "do this now" (e.g. rescan).
-    Palette     ///< a colour-palette dropdown (ptr → uint8_t index). Like Select, but
-                ///< each option carries its gradient *colours* (16 hex stops) so the UI
+    Palette     ///< a color-palette dropdown (ptr → uint8_t index). Like Select, but
+                ///< each option carries its gradient *colors* (16 hex stops) so the UI
                 ///< renders a gradient swatch per option, not just a name. The light
                 ///< domain supplies the names + swatches via the Palette type; the wire
                 ///< shape (options:[{name,colors}]) is serialized in writeControlMetadata.
@@ -144,7 +144,7 @@ enum class ControlType : uint8_t {
 class JsonSink;
 
 // A ControlType::Palette control's options come from the light domain (it owns the palette set
-// and the swatch colours). The descriptor's `aux` holds a pointer to this function; core calls it
+// and the swatch colors). The descriptor's `aux` holds a pointer to this function; core calls it
 // to emit the `"options":[{"name":…,"colors":…}, …]` array — core stays palette-agnostic.
 using PaletteOptionsFn = void (*)(JsonSink& sink);
 
@@ -252,7 +252,7 @@ struct ControlDescriptor {
                             // so tooling and the API reach it regardless. Set via setAdvanced(). (The
                             // client composes the two: expertMode is one global toggle in SystemModule,
                             // read UI-side, so no module needs to reach into System's state.)
-    bool numberField = false;  // Render a numeric control (Uint8/Uint16/Int16) as a plain NUMBER INPUT,
+    bool numberField = false;  // Renders a numeric control (Uint8/Uint16/Int16) as a plain NUMBER INPUT,
                             // never a drag-slider — for a value where each integer is a discrete address
                             // (a PHY MDIO address, an I2C address, a channel number), not a magnitude you
                             // sweep. A pure UI rendering hint like hidden/advanced; the value, range, and
@@ -393,8 +393,8 @@ public:
                                ControlType::ReadOnlyInt, 0, 0};
     }
 
-    // A colour-palette dropdown: like a Select (ptr → uint8_t index, max = optionCount), but the
-    // options carry swatch colours. `optionsFn` (light-domain) emits the {name,colors} objects.
+    // A color-palette dropdown: like a Select (ptr → uint8_t index, max = optionCount), but the
+    // options carry swatch colors. `optionsFn` (light-domain) emits the {name,colors} objects.
     void addPalette(const char* name, uint8_t& var, PaletteOptionsFn optionsFn, uint8_t optionCount) {
         grow();
         controls_[count_++] = {&var, name, reinterpret_cast<uintptr_t>(optionsFn), ControlType::Palette, 0, optionCount};

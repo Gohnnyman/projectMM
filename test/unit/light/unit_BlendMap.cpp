@@ -28,7 +28,7 @@ TEST_CASE("blendMap identity (no LUT) copies buffer") {
     }
 }
 
-// One logical light routed to multiple physical positions copies the colour to each (mirror-style mappings work).
+// One logical light routed to multiple physical positions copies the color to each (mirror-style mappings work).
 TEST_CASE("blendMap 1:N mapping duplicates pixels") {
     // 2 logical lights, 4 physical lights
     // Logical 0 → physical {0, 3}

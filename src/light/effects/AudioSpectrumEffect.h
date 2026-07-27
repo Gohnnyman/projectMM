@@ -17,14 +17,14 @@ namespace mm {
 // bands zero → dark, so it is safe on any target and any grid size (including
 // 0×0). On a 1D strip (height 1) the bars collapse to per-column brightness.
 // Author: projectMM original, on the WLED-SR GEQ / spectrum-analyser concept (Andrew Tuline) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
-/// Audio-reactive effect: colours the layer from the 16-band FFT spectrum.
+/// Audio-reactive effect: colors the layer from the 16-band FFT spectrum.
 class AudioSpectrumEffect : public EffectBase {
 public:
     const char* tags() const override { return "📊"; }
     Dim dimensions() const override { return Dim::D2; }   // writes the z=0 slice; extrude fills z
 
     // 0 = height gradient (green base → red top, the VU look); 1 = per-band hue
-    // (each column its own colour across the spectrum, the rainbow analyser look).
+    // (each column its own color across the spectrum, the rainbow analyser look).
     // Default per-band: the rainbow analyser reads as a spectrum at a glance, which is
     // what a "spectrum" effect is expected to look like.
     uint8_t colorMode = 1;
@@ -91,8 +91,8 @@ public:
                 ? 1
                 : static_cast<lengthType>(static_cast<uint32_t>(mag) * specH / 255u);
 
-            // Per-band hue: spread the 16 bands across the full colour wheel so
-            // each column is a distinct colour (bass red → treble violet).
+            // Per-band hue: spread the 16 bands across the full color wheel so
+            // each column is a distinct color (bass red → treble violet).
             const uint8_t bandHue = static_cast<uint8_t>(band * 16);
 
             // Spectrum bars sit ABOVE the level row: their bottom is row h-2 when a

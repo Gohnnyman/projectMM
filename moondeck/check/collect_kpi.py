@@ -267,8 +267,19 @@ def _extract_esp32_tick(log, kpi):
         return "tick_us" in kpi
     return False
 
+# Whether a stale monitor.log may be refreshed by opening the serial port. On by default —
+# a live reading is the honest one for a commit message. The gate lists turn it off
+# (--no-live-capture): a capture costs ~80s and needs a bench board plugged in, which makes
+# the gate's cost unpredictable, and a gate people avoid running protects nothing.
+_LIVE_CAPTURE_ENABLED = True
+
+
 def _live_capture(log, seconds=15):
     """Capture ESP32 serial output to monitor.log for ~seconds. Returns True on success."""
+    if not _LIVE_CAPTURE_ENABLED:
+        print("  ESP32 KPI: live capture disabled (--no-live-capture); "
+              "using monitor.log if present")
+        return False
     import json
     cfg = ROOT / "moondeck" / "moondeck.json"
     if not cfg.exists():
@@ -434,7 +445,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--commit", action="store_true",
                         help="Output in commit message format (one-liner + details)")
+    parser.add_argument("--no-live-capture", action="store_true",
+                        help="Never open the serial port for a fresh ESP32 tick reading; "
+                             "use esp32/monitor.log only, however old it is. Turns an "
+                             "~80s step into a few seconds, at the cost of the ESP32 "
+                             "tick/FPS numbers when no recent log exists. For the gate "
+                             "lists, where predictable cost matters more than a live "
+                             "reading; omit it when composing a commit message.")
     args = parser.parse_args()
+    if args.no_live_capture:
+        global _LIVE_CAPTURE_ENABLED
+        _LIVE_CAPTURE_ENABLED = False
 
     desktop = collect_desktop()
     esp32 = collect_esp32()

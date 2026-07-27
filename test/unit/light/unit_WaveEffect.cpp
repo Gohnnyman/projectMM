@@ -1,7 +1,7 @@
 // @module WaveEffect
 
 // Pins WaveEffect's pure waveform map (phase → y) for each of the six shapes — the behaviour
-// that defines the effect. The animation/trail/colour need a Layer + buffer (covered by the
+// that defines the effect. The animation/trail/color need a Layer + buffer (covered by the
 // scenario run); here we drive waveYForTest directly, no grid.
 
 #include "doctest.h"

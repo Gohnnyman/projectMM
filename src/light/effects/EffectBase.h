@@ -1,7 +1,7 @@
 #pragma once
 
 // Include this one file to write an effect: it brings EffectBase, the render context accessors, and the
-// common drawing / palette / maths / noise / colour / scratch / audio helpers, so a new effect is a single
+// common drawing / palette / maths / noise / color / scratch / audio helpers, so a new effect is a single
 // include:
 //
 //   #pragma once

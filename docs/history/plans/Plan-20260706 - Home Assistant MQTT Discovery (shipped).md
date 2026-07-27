@@ -14,7 +14,7 @@ gap, not a capability gap**. The device is *controllable* from HA today; it just
 correctly-wired light entity. **JSON schema** (PO decision), matching the modern auto-discovery peer
 group (Tasmota / ESPHome / Zigbee2MQTT) — *Common patterns first* — and chosen for **extensibility**:
 a JSON light carries all state in one atomic message and has native `effect`/`effect_list`, so future
-controls (presets, effects, palette-as-colour) add a key, not a new topic + custom HA config. The
+controls (presets, effects, palette-as-color) add a key, not a new topic + custom HA config. The
 existing `projectMM/<mac6>/…` mqttthing topics stay byte-identical (the user's working setup is
 untouched); Discovery lands *alongside* them.
 
@@ -118,7 +118,7 @@ ungraceful drop — no polling/timers on our side. Zero hot-path / memory cost.
 
 JSON schema grows by adding a key to the config + the state/command JSON — no new topic, no new HA
 entity type. Concretely: **presets/effects** → `effect_list:[…]` in the config + `{"effect":"Fire"}`
-on the wire (HA renders a dropdown natively); **colour** (when palette→colour matures) →
+on the wire (HA renders a dropdown natively); **color** (when palette→color matures) →
 `{"color":{"h":…,"s":…}}`. The default schema has no `effect` support at all — this is the deciding
 reason for JSON.
 

@@ -7,7 +7,7 @@
 #include "doctest.h"
 #include "light/Palette.h"
 
-TEST_CASE("Palette: gradient endpoints land on the first/last stop colours") {
+TEST_CASE("Palette: gradient endpoints land on the first/last stop colors") {
     // A simple red→green→blue gradient.
     const uint8_t stops[] = {0,255,0,0, 128,0,255,0, 255,0,0,255};
     mm::Palette p;
@@ -32,7 +32,7 @@ TEST_CASE("Palette: a mid-gradient sample interpolates between stops") {
 }
 
 TEST_CASE("Palette: colorFromPalette index 0 reads entry 0; brightness scales") {
-    const uint8_t stops[] = {0,200,100,50, 255,200,100,50};   // flat colour
+    const uint8_t stops[] = {0,200,100,50, 255,200,100,50};   // flat color
     mm::Palette p;
     p.fromGradient(stops, sizeof(stops));
     mm::RGB full = mm::colorFromPalette(p, 0, 255);
@@ -49,7 +49,7 @@ TEST_CASE("Palette: the index wraps at 255→0 (no out-of-range read)") {
     p.fromGradient(stops, sizeof(stops));
     // index 255 blends entry[15] toward entry[0] (the wrap) — must not read past the array.
     mm::RGB c = mm::colorFromPalette(p, 255);
-    CHECK((c.r <= 255));   // a valid colour, no crash/garbage
+    CHECK((c.r <= 255));   // a valid color, no crash/garbage
     // Sweeping every index never faults.
     for (int i = 0; i <= 255; i++) (void)mm::colorFromPalette(p, static_cast<uint8_t>(i));
 }
@@ -77,10 +77,10 @@ TEST_CASE("Palettes::active swaps the global palette on setActive") {
     mm::Palettes::setActive(0);
 }
 
-// The HomeKit-colour-wheel → palette mapping (MQTT/Homebridge). Each palette's representative
+// The HomeKit-color-wheel → palette mapping (MQTT/Homebridge). Each palette's representative
 // (hue, sat) is computed from its expanded entries; nearestForHue picks the closest. A vivid hue
 // snaps to that hue's palette family; a low-saturation target snaps to the desaturated Rainbow.
-TEST_CASE("Palettes::nearestForHue maps a colour to the closest palette") {
+TEST_CASE("Palettes::nearestForHue maps a color to the closest palette") {
     // A vivid red hue lands on a red/orange-family palette (Party≈13° / Lava≈24° are the reds),
     // never on the all-hue Rainbow (index 0, which has ~0 saturation).
     const uint8_t redIdx = mm::Palettes::nearestForHue(5, 255);

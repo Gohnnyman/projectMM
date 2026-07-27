@@ -25,13 +25,13 @@ The first executable slice of the [migration plan](Plan-20260630%20-%20MoonLight
 
 ## Riskiest parts
 
-1. **The expansion + lookup must be correct *and* cheap** — pin both with tests (endpoints exact, a mid-gradient colour interpolates, the wheel wraps at 255→0, brightness folds correctly). It runs per-light, so eyeball the KPI tick after wiring PlasmaPalette.
+1. **The expansion + lookup must be correct *and* cheap** — pin both with tests (endpoints exact, a mid-gradient color interpolates, the wheel wraps at 255→0, brightness folds correctly). It runs per-light, so eyeball the KPI tick after wiring PlasmaPalette.
 2. **`colorFromPalette` dispatchable without a per-pixel cost** — Stage 1 has only the gradient case, so it's a direct call now; the *interface shape* (so MoonLivePalette slots in later) must not impose a per-pixel branch today. Keep it a plain function over the 16-entry `Palette`; the static/dynamic dispatch is a later per-frame concern, not built now.
 3. **PlasmaPalette visual change** — it goes from a fixed palette to the active one; confirm it still looks good on the default palette and that the effect's index math still maps sensibly.
 
 ## Verification
 
-Desktop build (-Werror); `ctest` incl. `unit_Palette` (expand/lookup/wrap/brightness) + the existing PlasmaPalette test still green; scenarios; spec-check (new `Palette.md`); ESP32 build; KPI (watch the per-light cost — PlasmaPalette is the canary). Bench: on desktop, switch the `palette` control and confirm PlasmaPalette (and the preview) recolours live.
+Desktop build (-Werror); `ctest` incl. `unit_Palette` (expand/lookup/wrap/brightness) + the existing PlasmaPalette test still green; scenarios; spec-check (new `Palette.md`); ESP32 build; KPI (watch the per-light cost — PlasmaPalette is the canary). Bench: on desktop, switch the `palette` control and confirm PlasmaPalette (and the preview) recolors live.
 
 ## Out of scope (later Stage-1 slices / later stages)
 

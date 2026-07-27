@@ -355,6 +355,12 @@ void netSetStaticIPv4(NetIface iface, const uint8_t ip[4], const uint8_t gw[4],
 // Return a client interface to DHCP: restart its DHCP client so it re-leases live (no reboot).
 // The counterpart to netSetStaticIPv4 for a Static→DHCP toggle. Desktop: no-op.
 void netSetDhcp(NetIface iface);
+// Test seams (desktop-only impls, same contract as setTestBindFails — reset in release so cases
+// stay independent): make wifiStaInit() succeed so a host test can drive the STA cascade
+// (WaitingSta) that the radio-less desktop otherwise never enters, and count netSetStaticIPv4()
+// applies per interface so the test can pin that the static-addressing path reached the platform.
+void setTestWifiStaAvailable(bool available);
+uint32_t testNetStaticApplyCount(NetIface iface);
 
 bool wifiApInit(const char* apName, const char* ip);
 bool wifiApConnected();

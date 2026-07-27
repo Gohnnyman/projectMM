@@ -276,14 +276,14 @@ Metadata carried by the driver as bound MoonModule controls, **not** through `pu
 - `pinMap[]` — which GPIO each strip lives on (or, for virtual driver: which shift-register output).
 - `stripLengths[]` — per-strip light counts, sums to `bufferBytes / channelsPerLight`.
 - `protocol` — WS2812 / WS2815 / SK6812 / APA102 / SK9822 / HD107S / etc.
-- `colourOrder` — GRB / RGB / GRBW / etc.
+- `colorOrder` — GRB / RGB / GRBW / etc.
 - `gamma` (1.0-3.0).
 - `globalBrightness` (0-255 uint8).
 - *Backend-specific*: each backend may expose its own controls (RMT clock divider, LCD overclock factor, FlexIO timer divider). These live on the backend, not the base.
 
 Per-frame: just the span + an implicit "size matches the bound metadata".
 
-> **Superseded — `colourOrder` / `gamma` / `globalBrightness` shipped differently.** These three are now the **shared output correction** (`src/light/drivers/Correction.h`): the `Drivers` container owns one `Correction` (brightness LUT + a `lightPreset` covering channel order *and* RGBW) and hands each child a `const Correction*`, rather than each driver binding its own `colourOrder`/`gamma`/`brightness`. One source of truth across all physical drivers; ArtNet already uses it. The future LED driver consumes the same `Correction` — see [leddriver-analysis-top-down.md § 4.6](leddriver-analysis-top-down.md) and [architecture.md § Drivers](../architecture.md#drivers). Gamma is not implemented yet (the LUT is brightness-only; gamma folds in later as a per-channel R/G/B split).
+> **Superseded — `colorOrder` / `gamma` / `globalBrightness` shipped differently.** These three are now the **shared output correction** (`src/light/drivers/Correction.h`): the `Drivers` container owns one `Correction` (brightness LUT + a `lightPreset` covering channel order *and* RGBW) and hands each child a `const Correction*`, rather than each driver binding its own `colorOrder`/`gamma`/`brightness`. One source of truth across all physical drivers; ArtNet already uses it. The future LED driver consumes the same `Correction` — see [leddriver-analysis-top-down.md § 4.6](leddriver-analysis-top-down.md) and [architecture.md § Drivers](../architecture.md#drivers). Gamma is not implemented yet (the LUT is brightness-only; gamma folds in later as a per-channel R/G/B split).
 
 ### Identity-mapping fast path preserved
 
@@ -413,7 +413,7 @@ What IDF does **not** provide:
 - **No LED-strip driver in core IDF.** No `esp_ws2812.h`, no built-in WS281x bit encoder, no APA102 helper. The `led_strip` community component (`espressif/idf-extra-components`, Apache-2.0) gives a basic single-strip handle on top of RMT or SPI MOSI, but it's a managed-component dependency we'd pull in, not built into IDF.
 - **No transposition helpers.** If you want to drive 16 parallel WS281x strips through I2S-LCD or LCD-CAM, you write the bit-interleaving yourself. That's the work hpwit's lib does.
 - **No multi-protocol abstraction.** "Drive WS2812 here, APA102 there, DMX over there" is your problem; IDF gives you the peripherals, not the protocol mapping.
-- **No colour-order / gamma / brightness layer.** Up to us.
+- **No color-order / gamma / brightness layer.** Up to us.
 - **No hot-reconfigure pattern.** Each peripheral driver's API is "create_unit → enable → transmit → delete"; toggling pin maps at runtime means delete + recreate, and the discipline of doing that without dropping a frame is on us.
 
 **What that means for Scenario B effort estimate:**
@@ -493,7 +493,7 @@ enum class LedProtocol : uint8_t {
     Custom,  // backend-specific timing in its own controls
 };
 
-enum class ColourOrder : uint8_t {
+enum class ColorOrder : uint8_t {
     RGB, RBG, GRB, GBR, BRG, BGR,
     RGBW, GRBW, // …
 };
@@ -504,7 +504,7 @@ struct StripSpec {
     uint16_t lightCount;     // logical lights on this strip
     uint8_t  pin;            // GPIO or shift-register output index
     LedProtocol protocol;
-    ColourOrder order;
+    ColorOrder order;
 };
 
 // LedDriver — abstract base for hardware-specific LED-strip output.
@@ -553,7 +553,7 @@ public:
 Notes on the shape:
 
 - `std::span<const uint8_t>` for `pixels` — caller-owned, zero-copy, lifetime tied to the call. ESP-IDF allows `std::span` (C++20 is the project baseline).
-- No `colour_order` / `gamma` / `brightness` argument to `push()` — those are controls on the driver and applied during push by the implementation. Keeps the boundary narrow.
+- No `color_order` / `gamma` / `brightness` argument to `push()` — those are controls on the driver and applied during push by the implementation. Keeps the boundary narrow.
 - `StripSpec.pin` is a uint8 because the virtual driver indexes shift-register outputs (0..63), not real GPIOs. Real-GPIO backends just use it as a GPIO number.
 - `onTopologyChange()` returns bool so the UI can surface "this combination isn't possible on this chip" instead of silently truncating.
 - No CRTP, no templates — straightforward virtual dispatch, one call per frame. Runtime driver switch is `delete oldDriver; oldDriver = makeDriverByName(...)` — trivially supported.
@@ -610,7 +610,7 @@ Specific to the LED-driver architecture; ranked by potential blast radius.
 4. **LCD overclock non-portability.** hpwit overclocks the S3 LCD clock to ~1.125 MHz for WS2812 timing headroom. This is undocumented behaviour; Espressif could change it without warning. The non-overclocked path works; "overclock for headroom" is performance-only and falls back cleanly if removed.
 5. **Hot-reconfigure during DMA in-flight.** What happens if the user changes `pinMap` via the UI while the *current* frame's DMA is mid-transmission? The architecture must define this: most likely "topology changes are taken into account on the next frame's `push()`; the in-flight frame completes on the old topology". `onTopologyChange()` blocks until DMA-quiescent before re-allocating peripheral resources.
 6. **WiFi-coexistence empirically variable.** Different routers, different switches, different cable conditions all interact with the WiFi stack's CPU-burst patterns. Our two tracks (DMA-driven + core pinning) cover the known modes; there's an unknown unknown around very-large installs (50K+) that no public library has fully solved.
-7. **Identity-mapping path subtlety.** The fast path requires the Layer's buffer layout to *exactly* match the wire layout (no gamma, no brightness, no colour-order swap on the way out). If the driver wants to apply gamma/brightness in `push()`, the identity path is gone — we re-introduce the copy. The control-binding shape should make this trade-off explicit per backend. **Resolved for clockless LEDs:** a WS2812-class driver must encode RGB into a pulse pattern anyway, so it already allocates a separate DMA buffer — the `Correction` (brightness/reorder/white) fuses into that encode pass at no extra buffer cost. The true zero-copy-to-wire identity path only ever applied to byte-identical protocols (ArtNet/DMX, APA102-SPI), where there's no encode and correction is the only reason to copy. So "identity → no copy" is a property of the *protocol*, not the mapping.
+7. **Identity-mapping path subtlety.** The fast path requires the Layer's buffer layout to *exactly* match the wire layout (no gamma, no brightness, no color-order swap on the way out). If the driver wants to apply gamma/brightness in `push()`, the identity path is gone — we re-introduce the copy. The control-binding shape should make this trade-off explicit per backend. **Resolved for clockless LEDs:** a WS2812-class driver must encode RGB into a pulse pattern anyway, so it already allocates a separate DMA buffer — the `Correction` (brightness/reorder/white) fuses into that encode pass at no extra buffer cost. The true zero-copy-to-wire identity path only ever applied to byte-identical protocols (ArtNet/DMX, APA102-SPI), where there's no encode and correction is the only reason to copy. So "identity → no copy" is a property of the *protocol*, not the mapping.
 8. **Build vs borrow lock-in.** Whichever scenario Stage 2 picks, switching later is expensive (months, not weeks). The hybrid escape hatch (Scenario A for some backends, Scenario B for others) reduces this but doesn't eliminate it.
 
 ## Stage-2 candidates (revised)
