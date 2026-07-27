@@ -21,7 +21,23 @@ name: CodeQL
 # scorecard and delete this file.
 
 on:
-  # Manual runs during the POC: the point is to look at output, not to gate merges yet.
+  # Push-triggered on the POC branch, deliberately.
+  #
+  # `workflow_dispatch` alone would NOT work here: GitHub only offers the "Run workflow"
+  # button for workflows that exist on the DEFAULT branch, and this one lives on
+  # next-iteration until the POC is judged. A push trigger is the only way to get a first
+  # result without merging an unevaluated workflow into main.
+  #
+  # This is still not a gate: it does not run on pull_request, so it cannot block a merge.
+  # It runs, we read the findings, and we decide.
+  push:
+    branches:
+      - next-iteration
+    paths:
+      # Only when C/C++ or the workflow itself changes — a docs commit has nothing new to
+      # analyse and would just burn a runner.
+      - 'src/**'
+      - '.github/workflows/codeql.yml'
   workflow_dispatch:
   schedule:
     # Monday 04:00 UTC. Weekly is enough for a codebase this size, and keeps the signal
