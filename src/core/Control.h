@@ -252,6 +252,14 @@ struct ControlDescriptor {
                             // so tooling and the API reach it regardless. Set via setAdvanced(). (The
                             // client composes the two: expertMode is one global toggle in SystemModule,
                             // read UI-side, so no module needs to reach into System's state.)
+    bool numberField = false;  // Render a numeric control (Uint8/Uint16/Int16) as a plain NUMBER INPUT,
+                            // never a drag-slider — for a value where each integer is a discrete address
+                            // (a PHY MDIO address, an I2C address, a channel number), not a magnitude you
+                            // sweep. A pure UI rendering hint like hidden/advanced; the value, range, and
+                            // persistence are unchanged. Set via setNumberField(). (The Pin type already
+                            // renders number-only for the same reason — a GPIO is an identity, not a
+                            // magnitude; this extends that to non-Pin numerics without the Pin type's
+                            // pin-ownership-map claim.)
     // Optional per-control input validator (Text/Password only; nullptr = accept anything
     // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
     // write and returns ApplyResult::Malformed on reject, so the check covers EVERY write
@@ -353,7 +361,7 @@ public:
     void addText(const char* name, char* var, uint16_t bufSize = 16,
                  bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, false, validate};
     }
 
     // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
@@ -361,7 +369,7 @@ public:
     void addTextArea(const char* name, char* var, uint16_t bufSize = 16,
                      bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, false, validate};
     }
 
     // Like addText but the value is a secret: the API serializes it
@@ -455,6 +463,13 @@ public:
     // it only when System.expertMode is on; it still persists and still accepts HTTP writes.
     void setAdvanced(uint8_t i, bool advanced = true) {
         if (i < count_) controls_[i].advanced = advanced;
+    }
+
+    // Ask the UI to render a numeric control as a plain number input, never a slider — for a value where
+    // each integer is a discrete identity (a PHY/I2C address, a channel), not a magnitude to sweep.
+    // Typical use: addInt16()/addUint8() then setNumberField(count() - 1). See the descriptor's field.
+    void setNumberField(uint8_t i, bool numberField = true) {
+        if (i < count_) controls_[i].numberField = numberField;
     }
 
 private:

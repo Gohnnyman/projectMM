@@ -663,6 +663,10 @@ void ethGetIPv4(uint8_t out[4]) {
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
 bool wifiStaConnected() { return false; }
 void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
+// Addressing is OS-managed on desktop; the static/DHCP setters are inert (no netif to reconfigure).
+void netSetStaticIPv4(NetIface /*iface*/, const uint8_t[4], const uint8_t[4],
+                      const uint8_t[4], const uint8_t[4]) {}
+void netSetDhcp(NetIface /*iface*/) {}
 void setHostname(const char* /*name*/) {}   // no DHCP client on desktop
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }

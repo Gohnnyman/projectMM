@@ -1366,6 +1366,33 @@ function createControl(moduleName, moduleType, ctrl) {
     const key = moduleName + ":" + ctrl.name;
     const def = defaultFor(moduleType, ctrl.name);
 
+    // numberField: a numeric control that opted out of the slider (server sets it for a value where each
+    // integer is a discrete identity, not a magnitude — a PHY/I2C address, a channel). Render a plain
+    // number input, same shape as the `pin` case, whatever the underlying numeric type. The WS-patch path
+    // (updateModuleControls) reads the input by [data-mid][data-key] the same way, so no extra patch case.
+    const isNumericType = ctrl.type === "uint8" || ctrl.type === "uint16" || ctrl.type === "int16";
+    if (ctrl.numberField && isNumericType) {
+        const nMin = Number(ctrl.min ?? 0);
+        const nMax = Number(ctrl.max ?? 65535);
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = nMin;
+        input.max = nMax;
+        input.value = ctrl.value ?? 0;
+        input.dataset.mid = moduleName;
+        input.dataset.key = ctrl.name;
+        input.addEventListener("input", () => {
+            dragTs[key] = Date.now();
+            let v = parseInt(input.value, 10);
+            if (Number.isNaN(v)) v = nMin;
+            v = Math.max(nMin, Math.min(nMax, v));
+            debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
+        });
+        row.appendChild(input);
+        appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+        return row;
+    }
+
     switch (ctrl.type) {
         case "uint8": {
             const input = document.createElement("input");

@@ -1139,7 +1139,20 @@ protected:
         // mid-tick: a use-after-free, the same class the structural-mutation quiesce fixes. The swap is
         // not a child-array mutation, so it does not pass through MoonModule::quiesceForMutation; reach
         // the same render-worker hook directly. The trailing reinit()/tick re-engages the split.
-        MoonModule::notifyQuiesceRender();
+        //
+        // Only when there is a PRIOR backend to free (`peripheral_` set). The hook exists to quiesce the
+        // worker before the `delete peripheral_` below — so with no backend yet there is nothing to free
+        // and nothing to guard. This matters because the FIRST swap of a fresh instance (the default-
+        // peripheral selection in defineDriverControls) runs with `peripheral_` null: a throwaway probe
+        // that /api/types builds via ModuleFactory to read a type's defaults constructs a ParallelLedDriver
+        // and hits exactly that path. Firing the hook there tears down the LIVE Drivers' split (the hook
+        // resolves to it via the static active() seat) for an instance that never had a backend — the "UI
+        // refresh freezes the LEDs" bug, since /api/types runs on every page load. Gating on `peripheral_`
+        // fires the notify for precisely the case it protects (a real swap that frees a live backend, whose
+        // in-flight DMA the worker must be quiesced away from before the free) and skips the harmless
+        // no-backend first build. (Not gated on parent(): a swap that frees a real backend must quiesce
+        // regardless of tree attachment — the guard is "is there a backend to protect", not "am I live".)
+        if (peripheral_) MoonModule::notifyQuiesceRender();
         deinit();                                   // stop any in-flight transfer on the old bus first
         if (peripheral_) {
             peripheral_->busDeinit();

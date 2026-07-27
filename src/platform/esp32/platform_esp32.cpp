@@ -405,6 +405,14 @@ static const char* NET_TAG = "mm_net";
 #ifndef MM_NO_ETH
 static bool ethLinkUp_ = false;
 static bool ethConnected_ = false;
+// Static-addressing state for Ethernet, so the CONNECTED handler restores the static IP on a
+// re-plug instead of letting IDF's per-link-up DHCP-client restart pull a lease. Set by
+// netSetStaticIPv4(Eth) (which stores the octets), cleared by netSetDhcp(Eth).
+static bool ethStatic_ = false;
+static uint8_t ethStaticIp_[4]   = {};
+static uint8_t ethStaticGw_[4]   = {};
+static uint8_t ethStaticMask_[4] = {};
+static uint8_t ethStaticDns_[4]  = {};
 static esp_netif_t* ethNetif_ = nullptr;
 // Retained so a live W5500 reconfigure (ethStop → re-init) can tear the driver
 // down cleanly. eth_handle is the running driver (set on both RMII and W5500 init);
@@ -464,6 +472,18 @@ static void applyHostname(esp_netif_t* netif) {
 // WiFi-only state — absent in the Ethernet-only build.
 static bool wifiStaConnected_ = false;
 static bool wifiApActive_ = false;
+// L2 association state, distinct from wifiStaConnected_ (which means "has an IP"): true between
+// WIFI_EVENT_STA_CONNECTED and _DISCONNECTED. A static STA is reachable once associated (no DHCP
+// round), so this is the signal the static apply keys off — see netSetStaticIPv4(Sta).
+static bool wifiStaAssociated_ = false;
+// Static-addressing state for WiFi STA, mirroring the eth pair. `wifiStaConnected_` normally means
+// "has a DHCP IP" (set on GOT_IP), which never fires on a DHCP-less network — so for a static STA
+// the address is pinned at L2 association (WIFI_EVENT_STA_CONNECTED) and connected is marked there.
+static bool staStatic_ = false;
+static uint8_t staStaticIp_[4]   = {};
+static uint8_t staStaticGw_[4]   = {};
+static uint8_t staStaticMask_[4] = {};
+static uint8_t staStaticDns_[4]  = {};
 static esp_netif_t* staNetif_ = nullptr;
 static esp_netif_t* apNetif_ = nullptr;
 static bool wifiInitDone_ = false;
@@ -485,14 +505,22 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
         if (id == ETHERNET_EVENT_CONNECTED) {
             ESP_LOGI(NET_TAG, "Ethernet link up");
             ethLinkUp_ = true;
-            // Set the DHCP hostname HERE, on link-up, not in ethInit(): IDF's default
-            // eth netif starts the DHCP client from its own CONNECTED handler, so a
-            // hostname set earlier (in ethInit, before link-up) is clobbered when that
-            // client (re)starts nameless — the lease lands blank. Bouncing the client
-            // here (after the netif is started, when set_hostname takes) makes the
-            // DISCOVER carry the name. WiFi doesn't need this: its DHCP client only
-            // starts on association, well after we set the name in wifiStaInit.
-            applyHostname(ethNetif_);
+            if (ethStatic_) {
+                // Static mode: do NOT let the DHCP client restart on this link-up (applyHostname
+                // would) — that is what made a re-plugged cable grab a DHCP lease instead of the
+                // configured static IP. Re-pin the stored static config directly so the interface
+                // returns to its static address immediately (netSetStaticIPv4 stops dhcpc + sets it).
+                netSetStaticIPv4(NetIface::Eth, ethStaticIp_, ethStaticGw_, ethStaticMask_, ethStaticDns_);
+            } else {
+                // Set the DHCP hostname HERE, on link-up, not in ethInit(): IDF's default
+                // eth netif starts the DHCP client from its own CONNECTED handler, so a
+                // hostname set earlier (in ethInit, before link-up) is clobbered when that
+                // client (re)starts nameless — the lease lands blank. Bouncing the client
+                // here (after the netif is started, when set_hostname takes) makes the
+                // DISCOVER carry the name. WiFi doesn't need this: its DHCP client only
+                // starts on association, well after we set the name in wifiStaInit.
+                applyHostname(ethNetif_);
+            }
         } else if (id == ETHERNET_EVENT_DISCONNECTED) {
             ethLinkUp_ = false;
             ESP_LOGI(NET_TAG, "Ethernet link down");
@@ -525,6 +553,63 @@ void setEthConfig(const EthPinConfig& cfg) { ethConfig_ = cfg; }
 // in one function branched on the chip (a compile-time #ifdef, since the RGMII
 // interface is S31-only) rather than two near-identical copies.
 #ifdef CONFIG_ETH_USE_ESP32_EMAC
+
+#ifdef CONFIG_IDF_TARGET_ESP32S31
+// YT8531 (Motorcomm) RGMII PHY board init — the two vendor-specific steps the generic 802.3 driver
+// can't do, applied through the standard esp_eth_ioctl() register API (no dedicated PHY driver exists
+// for the YT8531; IDF v6 ships only esp_eth_phy_new_generic). Without step 1 the RGMII link never
+// negotiates (no speed/duplex agreed) — the reason the S31's link/activity LED stays dark. Mirrors
+// IDF's own examples/ethernet/basic YT8531 handler (the S31 is Espressif's reference board for it):
+//   1. Re-enable auto-negotiation — the YT8531 disables it on hardware reset (undocumented behaviour;
+//      the generic driver's reset leaves it off), so no speed/duplex is agreed and the link is unusable.
+//   2. Configure the RGMII Tx/Rx internal clock delays (~2 ns each) via the extended-register interface
+//      (write the ext-reg address to 0x1E, read/modify/write the data via 0x1F): RX coarse delay enable
+//      in EXT_CHIP_CONFIG (0xA001 bit 8), TX delay 13×150 ps ≈ 1.95 ns in EXT_RGMII_CONFIG1 (0xA003
+//      bits [7:0]). These are the delay values IDF's example uses; a board whose PCB trace lengths need
+//      a different skew tunes them here. (DHCP at 100M on a 10/100 switch needs a further MAC Tx-clock
+//      fix that isn't here yet — see docs/backlog/backlog-core.md; this init is what brings the link up.)
+static esp_err_t ethYt8531BoardInit(esp_eth_handle_t eth_handle) {
+    bool autoNegoEn = true;
+    esp_err_t err = esp_eth_ioctl(eth_handle, ETH_CMD_S_AUTONEGO, &autoNegoEn);
+    if (err != ESP_OK) return err;
+
+    uint32_t regVal = 0;
+    esp_eth_phy_reg_rw_data_t phyReg = {};
+    phyReg.reg_value_p = &regVal;
+
+    // RX ~2 ns coarse delay: EXT_CHIP_CONFIG (0xA001) bit 8 (rxc_dly_en).
+    regVal = 0xA001; phyReg.reg_addr = 0x1E;
+    if ((err = esp_eth_ioctl(eth_handle, ETH_CMD_WRITE_PHY_REG, &phyReg)) != ESP_OK) return err;
+    phyReg.reg_addr = 0x1F;
+    if ((err = esp_eth_ioctl(eth_handle, ETH_CMD_READ_PHY_REG,  &phyReg)) != ESP_OK) return err;
+    regVal |= (1U << 8);
+    if ((err = esp_eth_ioctl(eth_handle, ETH_CMD_WRITE_PHY_REG, &phyReg)) != ESP_OK) return err;
+
+    // TX + RX delays: EXT_RGMII_CONFIG1 (0xA003). Bits [3:0] ge_tx_delay, [7:4] fe_tx_delay,
+    // [13:10] rx_delay — each 0..15 = 0.000..2.250 ns in 0.150 ns steps (Motorcomm YT8521/YT8531 map).
+    // TX = 13 (1.95 ns). RX data delay [13:10] is set here (the 0xA001 bit-8 above is only the coarse RXC
+    // enable). MM_YT8531_{RX,TX}_DELAY are per-board tuning knobs; the defaults match IDF's example.
+#ifndef MM_YT8531_RX_DELAY
+#define MM_YT8531_RX_DELAY 0
+#endif
+#ifndef MM_YT8531_TX_DELAY
+#define MM_YT8531_TX_DELAY 13
+#endif
+    regVal = 0xA003; phyReg.reg_addr = 0x1E;
+    if ((err = esp_eth_ioctl(eth_handle, ETH_CMD_WRITE_PHY_REG, &phyReg)) != ESP_OK) return err;
+    phyReg.reg_addr = 0x1F;
+    if ((err = esp_eth_ioctl(eth_handle, ETH_CMD_READ_PHY_REG,  &phyReg)) != ESP_OK) return err;
+    regVal = (regVal & ~0x3CFFU)                     // clear rx_delay [13:10] + tx [7:0]
+           | ((uint32_t)(MM_YT8531_RX_DELAY & 0xF) << 10)  // rx_delay
+           | ((uint32_t)(MM_YT8531_TX_DELAY & 0xF) << 4)   // fe_tx
+           | ((uint32_t)(MM_YT8531_TX_DELAY & 0xF) << 0);  // ge_tx
+    if ((err = esp_eth_ioctl(eth_handle, ETH_CMD_WRITE_PHY_REG, &phyReg)) != ESP_OK) return err;
+
+    ESP_LOGI(NET_TAG, "YT8531 RGMII init: auto-nego re-enabled, Rx+Tx delays set");
+    return ESP_OK;
+}
+#endif  // CONFIG_IDF_TARGET_ESP32S31
+
 static bool ethInitEmac() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     ethNetif_ = esp_netif_new(&netif_cfg);
@@ -612,6 +697,17 @@ static bool ethInitEmac() {
     }
     // From here the driver owns mac+phy (driver_uninstall frees them); the
     // remaining failure paths uninstall the driver instead of del-ing mac/phy.
+#ifdef CONFIG_IDF_TARGET_ESP32S31
+    // The YT8531 needs a vendor-specific auto-nego re-enable (+ RGMII delays) the generic driver
+    // can't do — without it the RGMII link never negotiates. Run right after install (driver/PHY
+    // exist, before start), the same order IDF's example uses. Non-fatal: a failed register write
+    // logs a warning and continues (the link just may not come up) rather than dropping Ethernet.
+    {
+        esp_err_t yterr = ethYt8531BoardInit(eth_handle);
+        if (yterr != ESP_OK) ESP_LOGW(NET_TAG, "YT8531 RGMII init failed: %s (link may not come up)",
+                                      esp_err_to_name(yterr));
+    }
+#endif
     ESP_ERROR_CHECK(esp_netif_attach(ethNetif_, esp_eth_new_netif_glue(eth_handle)));
 
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
@@ -824,8 +920,18 @@ static std::atomic<uint32_t> apClients_{0};
 static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                              int32_t id, void* data) {
     if (base == WIFI_EVENT) {
-        if (id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (id == WIFI_EVENT_STA_CONNECTED) {
+            // L2 association complete (before DHCP). In Static mode, pin the stored config now and
+            // mark connected — a DHCP-less network never fires GOT_IP, so waiting for it would strand
+            // a static STA. Mirrors the eth CONNECTED handler's ethStatic_ re-pin. DHCP mode is a
+            // no-op here (the DHCP client runs and GOT_IP sets wifiStaConnected_ as before).
+            wifiStaAssociated_ = true;
+            if (staStatic_) {
+                netSetStaticIPv4(NetIface::Sta, staStaticIp_, staStaticGw_, staStaticMask_, staStaticDns_);
+            }
+        } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
             wifiStaConnected_ = false;
+            wifiStaAssociated_ = false;
             // **The reconnect must be explicit — IDF does not do it for us.** Without this
             // esp_wifi_connect(), a dropped association is permanent: the device keeps rendering but
             // is unreachable until it is power-cycled, which for a controller in a ceiling is a real
@@ -1168,6 +1274,111 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 // answers correctly on every firmware.
 bool networkReady() {
     return ethConnected() || wifiStaConnected() || wifiApConnected();
+}
+
+// Resolve a NetIface to its netif pointer. Each arm is compiled out on a build that lacks that
+// interface (MM_NO_ETH / MM_NO_WIFI), so the static-addressing setters below compile everywhere
+// and simply no-op for an absent interface (null netif → the callers return early).
+static esp_netif_t* resolveNetif(NetIface iface) {
+    switch (iface) {
+        case NetIface::Eth:
+#ifndef MM_NO_ETH
+            return ethNetif_;
+#else
+            return nullptr;
+#endif
+        case NetIface::Sta:
+#ifndef MM_NO_WIFI
+            return staNetif_;
+#else
+            return nullptr;
+#endif
+    }
+    return nullptr;
+}
+
+// Pin a static IPv4 config onto a client interface: stop its DHCP client (so it does not overwrite
+// the address with a lease) and set ip/gateway/mask, plus DNS when a non-zero server is given.
+// Mirrors the SoftAP static block (see wifiApInit) in client form (dhcpc vs dhcps). All-zero ip is
+// a no-op guard. Idempotent. IP4_ADDR (the lwip macro the AP block uses) packs the four octets
+// straight into each esp_ip4_addr_t.
+void netSetStaticIPv4(NetIface iface, const uint8_t ip[4], const uint8_t gw[4],
+                      const uint8_t mask[4], const uint8_t dns[4]) {
+    esp_netif_t* netif = resolveNetif(iface);
+    if (!netif) return;
+    if (!ip || (!ip[0] && !ip[1] && !ip[2] && !ip[3])) return;   // no static IP set — leave DHCP
+
+    esp_netif_dhcpc_stop(netif);   // ignore ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED
+
+    esp_netif_ip_info_t info = {};
+    IP4_ADDR(&info.ip,      ip[0],   ip[1],   ip[2],   ip[3]);
+    IP4_ADDR(&info.gw,      gw[0],   gw[1],   gw[2],   gw[3]);
+    IP4_ADDR(&info.netmask, mask[0], mask[1], mask[2], mask[3]);
+    esp_netif_set_ip_info(netif, &info);
+
+    if (dns && (dns[0] || dns[1] || dns[2] || dns[3])) {   // only set DNS if one was given
+        esp_netif_dns_info_t dnsInfo = {};
+        dnsInfo.ip.type = ESP_IPADDR_TYPE_V4;
+        IP4_ADDR(&dnsInfo.ip.u_addr.ip4, dns[0], dns[1], dns[2], dns[3]);
+        esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dnsInfo);
+    }
+
+    // Applying a static IP IS the "interface now has an address" moment — there is no DHCP GOT_IP
+    // event to wait for. Both interfaces' "connected" flags key off that DHCP event, so a static
+    // apply must set them itself (symmetric with how GOT_IP would). Record the config + flag too, so
+    // each interface's link-up handler re-pins static on a reconnect instead of restarting DHCP.
+#ifndef MM_NO_ETH
+    if (iface == NetIface::Eth) {
+        ethStatic_ = true;
+        // Mark connected only if the link is actually up — else a static apply racing a cable pull
+        // would leave ethConnected() true on a dead link (the state machine would sit in ConnectedEth
+        // instead of cascading). On a genuine link-up the CONNECTED handler re-applies + sets it.
+        if (ethLinkUp_) ethConnected_ = true;
+        for (int i = 0; i < 4; i++) {
+            ethStaticIp_[i] = ip[i]; ethStaticGw_[i] = gw[i];
+            ethStaticMask_[i] = mask[i]; ethStaticDns_[i] = dns ? dns[i] : 0;
+        }
+    }
+#endif
+#ifndef MM_NO_WIFI
+    if (iface == NetIface::Sta) {
+        staStatic_ = true;
+        // wifiStaConnected_ normally means "got a DHCP IP", which never fires on a DHCP-less network
+        // — the very case static addressing exists for. So mark connected here (the IP is applied);
+        // WIFI_EVENT_STA_CONNECTED re-applies on a reconnect. Only when the STA is actually
+        // associated, so a static apply while the radio is down doesn't fake a connection.
+        if (wifiStaAssociated_) wifiStaConnected_ = true;
+        for (int i = 0; i < 4; i++) {
+            staStaticIp_[i] = ip[i]; staStaticGw_[i] = gw[i];
+            staStaticMask_[i] = mask[i]; staStaticDns_[i] = dns ? dns[i] : 0;
+        }
+    }
+#endif
+    ESP_LOGI(NET_TAG, "Static IPv4 set on %s: %u.%u.%u.%u",
+             iface == NetIface::Eth ? "eth" : "sta", ip[0], ip[1], ip[2], ip[3]);
+}
+
+// Return a client interface to DHCP: (re)start its DHCP client so it re-leases without a reboot.
+// The counterpart to netSetStaticIPv4 for a Static→DHCP toggle. Safe if already running.
+void netSetDhcp(NetIface iface) {
+    esp_netif_t* netif = resolveNetif(iface);
+    if (!netif) return;
+#ifndef MM_NO_ETH
+    if (iface == NetIface::Eth) {
+        ethStatic_ = false;      // link-up handler goes back to the DHCP hostname path
+        ethConnected_ = false;   // static forced this true; drop it so the state machine re-evaluates
+                                 // (GOT_IP re-sets it on a lease). Else a Static→DHCP toggle on a
+                                 // network that can't lease wedges in ConnectedEth at 0.0.0.0.
+    }
+#endif
+#ifndef MM_NO_WIFI
+    if (iface == NetIface::Sta) {
+        staStatic_ = false;         // stop re-pinning static on the next association
+        wifiStaConnected_ = false;  // static forced this true; GOT_IP re-sets it once DHCP leases
+    }
+#endif
+    esp_netif_dhcpc_start(netif);   // ignore ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED
+    ESP_LOGI(NET_TAG, "DHCP restarted on %s", iface == NetIface::Eth ? "eth" : "sta");
 }
 
 // Bring the mDNS stack up (idempotent) and ADVERTISE this device as <deviceName>.local.
