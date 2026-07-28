@@ -47,7 +47,7 @@ namespace mm {
 /// @card lightpresets.png
 class LightPresetsModule : public MoonModule, public ListSource {
 public:
-    ModuleRole role() const override { return ModuleRole::Generic; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Generic; }
 
     // A boot-wired singleton (exactly one, added under Drivers at boot): not user-deletable, the same
     // as the boot-wired PreviewDriver. Drivers accepts only `driver` children, so a deleted preset

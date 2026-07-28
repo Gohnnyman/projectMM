@@ -136,9 +136,14 @@ def mechanical_gates(firmware, esp32="freshness", triggered=True):
              when(*COMPILES_DESKTOP, "test/scenarios/")),
         Gate("platform boundary", UV + ["moondeck/check/check_platform_boundary.py"],
              when("src/", exclude=("src/platform/",))),
-        # A lint, not a proof: it sees allocation/blocking written directly in a hot
-        # method, not what a callee does. A finding is a question to answer.
-        Gate("hot-path discipline", UV + ["moondeck/check/check_hotpath.py"],
+        # Reports what the compiler proved about THIS change: -Wfunction-effects checks the
+        # render path transitively, and `--incremental` restricts the rebuild to what the commit
+        # touched, so the gate answers "did this add a blocking call" in ~1s rather than
+        # re-reporting the whole 107-entry baseline. It never fails the event — a new blocking
+        # call may be legitimate (a driver that must wait for hardware), so this states the
+        # finding and the product owner judges it. Full picture: the clang-hotpath card.
+        Gate("hot-path discipline",
+             UV + ["moondeck/check/check_nonblocking.py", "--incremental"],
              when("src/")),
     ]
 

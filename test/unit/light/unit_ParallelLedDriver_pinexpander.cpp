@@ -28,7 +28,7 @@ using mm::nrOfLightsType;
 // (powerOfTwoBus true — the expander only ever runs on an i80-shaped bus).
 class MockPeripheral : public mm::LedPeripheral {
 public:
-    uint8_t lanesAvailable() const override { return 8; }   // 8 data lines, like an 8-bit bus
+    uint8_t lanesAvailable() const MM_NONBLOCKING override { return 8; }   // 8 data lines, like an 8-bit bus
     bool powerOfTwoBus() const override { return true; }    // the BUS rounds to 8/16 whatever the pin count
     bool loopbackFullWidth() const override { return false; }
     bool supportsPinExpander() const override { return true; }   // memory bus: the expander is allowed

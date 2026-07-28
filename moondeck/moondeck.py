@@ -10,11 +10,23 @@ import sys
 import tempfile
 import threading
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 
 PORT = 8420
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = Path(__file__).resolve().parent
+
+# Last run's output per script, so a card can answer "what did this do last time" after the
+# stream is gone — a page reload, a different tab, or simply coming back later. Under build/
+# because it is derived state, not repo state (build/ is gitignored). One file per script id,
+# overwritten each run: this is a "last run" record, not a history.
+LOG_DIR = ROOT / "build" / "moondeck-logs"
+# Cap per log. An ESP32 build or a docs screenshot run can print megabytes, and this is a
+# convenience record, not an archive. The TAIL is what matters (the result, the exit code),
+# so once the cap is hit the writer stops and says so — truncating the end would throw away
+# the part you came for.
+LOG_MAX_BYTES = 1_000_000
 UI_DIR = SCRIPTS_DIR / "moondeck_ui"
 ASSETS_DIR = ROOT / "docs" / "assets"
 STATE_FILE = SCRIPTS_DIR / "moondeck.json"
@@ -1299,7 +1311,14 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/scripts":
-            self._send_json({"scripts": SCRIPTS, "firmwares": FIRMWARES})
+            # Which scripts have a stored last run, so the UI shows the 📄 button only where
+            # there is something to show. The absence is informative too: a card with no 📄 is
+            # one nobody has run yet.
+            have_logs = set()
+            if LOG_DIR.exists():
+                have_logs = {f.stem for f in LOG_DIR.glob("*.log")}
+            scripts = [{**s, "hasLog": s["id"] in have_logs} for s in SCRIPTS]
+            self._send_json({"scripts": scripts, "firmwares": FIRMWARES})
 
         elif self.path == "/api/ports":
             # Enrich each port with chip family + specific board (levels 2/3),
@@ -1355,6 +1374,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith("/api/stream/"):
             script_id = self.path.split("/")[-1]
             self._handle_stream(script_id)
+
+        elif self.path.startswith("/api/log/"):
+            self._serve_log(self.path.split("/")[-1])
 
         elif self.path.startswith("/api/help"):
             self._serve_help()
@@ -1777,6 +1799,19 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         # master read raises OSError (EIO) once the child exits and closes the slave; treat that as
         # EOF, same as the pipe's b"" sentinel.
         stream = getattr(proc, "_mm_read_stream", None) or proc.stdout
+
+        # Tee to disk as we stream, rather than buffering and writing at the end: a long run
+        # killed with Stop (or a crashed server) still leaves everything it printed up to
+        # that point, which is exactly when you want the log.
+        log = None
+        log_bytes = 0
+        with suppress(OSError):
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            log = (LOG_DIR / f"{script_id}.log").open("w", encoding="utf-8")
+            # Timezone-aware: a bare local timestamp is ambiguous when the log is read from
+            # another machine or after a DST change.
+            log.write(f"# {script_id} — {datetime.now().astimezone().isoformat(timespec='seconds')}\n")
+
         try:
             while True:
                 try:
@@ -1786,11 +1821,28 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 if not line:
                     break            # pipe EOF
                 text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if log:
+                    # Every write is best-effort: a full disk or a removed build/ must not kill
+                    # the stream the user is watching.
+                    try:
+                        if log_bytes < LOG_MAX_BYTES:
+                            log_bytes += log.write(text + "\n")
+                            log.flush()
+                            if log_bytes >= LOG_MAX_BYTES:
+                                log.write(f"\n[log truncated at {LOG_MAX_BYTES} bytes]\n")
+                                log.flush()
+                    except OSError:
+                        with suppress(OSError):
+                            log.close()
+                        log = None
                 self.wfile.write(f"data: {json.dumps(text)}\n\n".encode())
                 self.wfile.flush()
 
             proc.wait()
             exit_msg = f"[exit code: {proc.returncode}]"
+            if log:
+                with suppress(OSError):
+                    log.write(exit_msg + "\n")   # always recorded, even past the cap
             self.wfile.write(f"data: {json.dumps(exit_msg)}\n\n".encode())
             done_data = json.dumps({"exitCode": proc.returncode})
             self.wfile.write(f"event: done\ndata: {done_data}\n\n".encode())
@@ -1798,6 +1850,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
+            if log:
+                with suppress(OSError):
+                    log.close()
             # Close the pty master fd (Unix) so the kernel reclaims it; the pipe closes with proc.
             master_fd = getattr(proc, "_mm_master_fd", None)
             if master_fd is not None:
@@ -2020,6 +2075,29 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
         self.send_header("Content-Length", str(len(data_bytes)))
         self.end_headers()
         self.wfile.write(data_bytes)
+
+    def _serve_log(self, script_id: str) -> None:
+        """The last run's output for one script, as plain text.
+
+        404 when a script has not run since the server had a log dir — the UI treats that as
+        "no previous run" rather than an error. Reads at most LOG_MAX_BYTES: the writer caps
+        too, but a log from an older build could predate that cap.
+        """
+        import re as _re
+        if not _re.fullmatch(r"[A-Za-z0-9_-]+", script_id or ""):
+            self.send_error(400, "bad script id")
+            return
+        path = LOG_DIR / f"{script_id}.log"
+        if not path.exists():
+            self.send_error(404, "no log for this script yet")
+            return
+        with path.open("rb") as f:
+            body = f.read(LOG_MAX_BYTES)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_help(self):
         """Serve MoonDeck.md as styled HTML with deep-link anchor support."""

@@ -37,10 +37,9 @@ public:
         controls_.addUint8("speed", speed, 0, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
-        if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};

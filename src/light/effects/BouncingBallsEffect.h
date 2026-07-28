@@ -46,12 +46,11 @@ public:
         balls_.resize(cols * maxNumBalls);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!balls_) return;
 
         const int cols = width();
         const int rows = height();
-        if (cols <= 0 || rows <= 0) return;
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};

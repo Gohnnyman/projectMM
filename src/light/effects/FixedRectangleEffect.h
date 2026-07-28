@@ -57,11 +57,10 @@ public:
         controls_.addBool("alternateWhite", alternateWhite);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
         const int d = depth();
-        if (w <= 0 || h <= 0) return;
 
         Buffer& buf = layer()->buffer();
         const uint8_t cpl = channelsPerLight();

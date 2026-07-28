@@ -79,7 +79,7 @@ public:
 
     /// Diagnostics keep ticking regardless — disabling System hides uptime/heap/fps
     /// from the UI for no good reason, and the user can't easily re-enable.
-    bool respectsEnabled() const override { return false; }
+    bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
     /// Accepts no user-added children — System is fixed infrastructure. Its child
     /// modules (Tasks, I2cScan, …) are wired by code in main.cpp and marked
@@ -229,7 +229,7 @@ public:
         MoonModule::defineControls();
     }
 
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         // deviceName is the single network identity (mDNS <name>.local, SoftAP SSID,
         // DHCP hostname all derive from it), so it must stay a valid hostname whatever
         // the user typed or persistence restored. Coerce it here each tick — idempotent

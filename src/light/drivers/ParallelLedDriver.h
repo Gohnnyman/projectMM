@@ -549,7 +549,14 @@ public:
     /// buffer + correction. (The double-buffer defaults ON — it overlaps the blocking wire wait and
     /// lifted the P4 whole-board rate 48→76 fps; OFF is the sound-reactive 0-latency opt-out and pays
     /// for exactly one buffer — see the doubleBuffer control + docs/history/lessons.md.)
-    void tick() override {
+    // REPORTED AS BLOCKING, deliberately: tickSync()/tickRing() reach busWaitIfBusy(), which
+    // waits for the DMA transfer to finish (bounded by waitBudgetMs, and self-limiting via
+    // deadFrames_). The wait is by design — the driver owns the bus for the frame, and encoding
+    // over a live transfer corrupts output — but it IS blocking, so clang-hotpath lists it.
+    // Not suppressed: a report of what blocks the render path is worthless if the two worst
+    // offenders are hidden from it. Moving the wait off the render path is backlogged
+    // (backlog-core: hot path).
+    void tick() MM_NONBLOCKING override {
         if (!peripheral_ || peripheral_->lanesAvailable() == 0) return;  // no backend / inert off this chip
         // Loopback mode owns the peripheral EXCLUSIVELY. While it is on, the render loop must not
         // transmit — the loopback tears the bus down, drives its own private frame, and rebuilds it.
@@ -689,7 +696,7 @@ public:
     /// wire time and the fps ceiling it implies (1e6 / frameTime). This is the pure WS2812 output floor —
     /// the render loop can never beat it, so it's the target the multicore work drives the system tick
     /// toward, and it tracks an overclocked slot rate directly. "—" until the first transfer completes.
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         if (!peripheral_) return;
         const uint32_t us = peripheral_->busLastTransmitUs();
         if (us == 0) std::snprintf(frameTimeStr_, sizeof(frameTimeStr_), "—");

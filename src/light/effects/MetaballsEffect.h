@@ -27,12 +27,18 @@ public:
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void tick() override {
+    // Class scope, not function-local: -Wfunction-effects flags ANY static local in a
+    // nonblocking function, including a constexpr that needs no guard variable. Same
+    // storage and value here, and these are per-effect constants anyway.
+    static constexpr uint8_t SPEED_MUL[MAX_BALLS]  = { 1, 2, 3, 1, 2, 3, 1, 2 };
+    static constexpr uint8_t PHASE_X[MAX_BALLS]    = { 0, 30, 60, 120, 160, 200, 90, 220 };
+    static constexpr uint8_t PHASE_Y[MAX_BALLS]    = { 64, 94, 124, 184, 16, 210, 150, 40 };
+
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
-
         uint32_t now = elapsed();
         uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
@@ -47,9 +53,6 @@ public:
         const uint8_t n = count < MAX_BALLS ? count : MAX_BALLS;
         int16_t bx[MAX_BALLS];
         int16_t by[MAX_BALLS];
-        static constexpr uint8_t SPEED_MUL[MAX_BALLS]  = { 1, 2, 3, 1, 2, 3, 1, 2 };
-        static constexpr uint8_t PHASE_X[MAX_BALLS]    = { 0, 30, 60, 120, 160, 200, 90, 220 };
-        static constexpr uint8_t PHASE_Y[MAX_BALLS]    = { 64, 94, 124, 184, 16, 210, 150, 40 };
         for (uint8_t b = 0; b < n; b++) {
             uint8_t tb = static_cast<uint8_t>(t * SPEED_MUL[b]);
             bx[b] = static_cast<int16_t>((sin8(static_cast<uint8_t>(tb + PHASE_X[b])) * w) >> 8);

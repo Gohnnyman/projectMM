@@ -98,7 +98,11 @@ TEST_CASE("NetworkModule mode control reflects current state") {
 // parseDottedQuad (in Control.h) is the validator on every IPv4 write,
 // over both the HTTP API and persistence. Pin the contract.
 TEST_CASE("parseDottedQuad accepts valid dotted-quads and rejects junk") {
-    uint8_t out[4];
+    // Zero-initialized: the analyzer cannot see that parseDottedQuad fills every octet on
+    // success, so it reads the CHECKs below as comparing garbage. Cheaper to state the
+    // starting value than to argue about it, and a failing parse then compares against a
+    // known 0 rather than whatever was on the stack.
+    uint8_t out[4] = {};
 
     CHECK(mm::parseDottedQuad("0.0.0.0", out));
     CHECK((out[0] == 0 && out[1] == 0 && out[2] == 0 && out[3] == 0));

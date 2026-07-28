@@ -411,7 +411,7 @@ void MqttModule::resetConnection(const char* status) {
     setStatusLine(status);
 }
 
-void MqttModule::tick1s() {
+void MqttModule::tick1s() MM_NONBLOCKING {
     if constexpr (!platform::hasNetwork) { MoonModule::tick1s(); return; }
 
     if (!enabled() || broker_[0] == '\0') {

@@ -129,7 +129,10 @@ public:
     /// The frame rate self-limits to what the link sustains (sheds rate first, then
     /// spatial resolution via adaptive downscale), so a large grid never stalls the
     /// loop or tears — it always delivers a complete frame.
-    void tick() override {
+    // REPORTED AS BLOCKING, deliberately: sendFrame() writes to a socket and
+    // buildAndSendCoordTable() resizes keptIdx_. Both are real and both are on the render path,
+    // so clang-hotpath lists them rather than hiding them. Backlogged (backlog-core: hot path).
+    void tick() MM_NONBLOCKING override {
         if (fps == 0) return;
         uint32_t now = platform::millis();
         uint32_t interval = 1000 / fps;

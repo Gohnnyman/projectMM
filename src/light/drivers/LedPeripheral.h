@@ -47,7 +47,7 @@ public:
 
     // --- Static descriptors: per-peripheral constants the orchestrator reads through the interface ---
     /// Parallel lanes this peripheral's silicon provides on the current chip (0 = not this chip).
-    virtual uint8_t lanesAvailable() const = 0;
+    virtual uint8_t lanesAvailable() const MM_NONBLOCKING = 0;
     /// Can this peripheral host the 74HCT595 pin expander? (Needs a DMA that reaches PSRAM.)
     virtual bool supportsPinExpander() const = 0;
     /// Can this peripheral run the async double-buffer (a second whole-frame buffer, encode overlaps
@@ -95,7 +95,7 @@ public:
     /// Send one frame on the ring (prime + arm + ISR refill). False if the ring isn't up.
     virtual bool busTransmitRing() { return false; }
     /// Is the live bus a streaming ring?
-    virtual bool busIsRing() const { return false; }
+    virtual bool busIsRing() const MM_NONBLOCKING { return false; }
     /// Should reinit build a ring for the current config instead of the whole-frame path?
     virtual bool wantsRing() const { return false; }
     /// The ring's active-mode label for the status line, or nullptr for the whole-frame path.

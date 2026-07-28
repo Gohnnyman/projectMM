@@ -341,23 +341,115 @@ Fix options: (a) make every live mutate scenario clear+rebuild its own canvas (c
 
 ## Housekeeping
 
-### clang-tidy: triage the 47 clang-analyzer findings, then gate
+### Hot path: move blocking work off the render callbacks (architecture)
+
+`-Wfunction-effects` proves the render path really does block — these are not annotation gaps,
+they are synchronous I/O, allocation and lifecycle work reachable from `tick()`. Each needs the
+work moved to a worker or made resumable, so each is a design change rather than a lint fix.
+Confirmed by external review (CodeRabbit, PR #56).
+
+**`tick()` — every frame, the sharp ones:**
+- `PreviewDriver::tick` — `sendFrame()` writes a socket synchronously; `buildAndSendCoordTable()`
+  resizes `keptIdx_`. Currently suppressed at the site with the reason.
+- `ParallelLedDriver::tick` — `tickSync()`/`tickRing()` reach `busWaitIfBusy()`, which spins for
+  the DMA peripheral. Deliberate (the driver owns the bus for the frame) but blocking. Suppressed.
+- `Drivers::tick` — joins/stops the render-split worker synchronously on the timed-out recovery
+  path. Wants asynchronous handling that still preserves buffer ownership.
+- `HueDriver::tick` / `tick1s` — synchronous HTTP (`pushOneChangedLight`, `pollPairing`,
+  `fetchLights`, `fetchGroups`) plus allocation. Wants a queue to a worker.
+- `Layer::tick` — calls `applyState()` on a modifier rebuild, which runs prepare/release and
+  resizes ScratchBuffers. Wants the rebuild deferred to the scheduler's non-render prepare path,
+  keeping today's coalescing of `consumeNeedsRebuild()`.
+- `DemoReelEffect::tick` — `advance()`/`swapTo()` create, delete and `applyState()` child effects
+  from the render callback. Wants a pending-switch flag consumed off-tick.
+- `NetworkSendDriver::tick` — sends inline; wants to enqueue.
+- `RmtLedDriver::tick` — waits on hardware completion and reset; wants polling or offload.
+- `AudioService::tick` — UDP `sendTo`/`recvFrom` every frame (`syncSend`, `syncReceive`,
+  `syncEnsureSocket`).
+
+**`tick20ms()` / `tick1s()` — milder, same shape:**
+- `HttpServerModule::tick20ms` — inline `handleConnection` transport work, so the 100 ms budget
+  cannot actually bound it. Wants resumable connection handling. `tick1s` writes WLED state
+  frames inline; wants the existing resumable sender.
+- `MqttModule::tick1s` — synchronous DNS + discovery-buffer allocation.
+- `NetworkModule::tick1s` — WiFi/AP lifecycle transitions and tree rebuilds.
+- `FilesystemModule::tick1s` — the debounced `flush()` does filesystem work; the poll itself is
+  fine, the save wants a worker.
+- `FileManagerModule::tick1s` — `platform::filesystemUsed()`; wants a cached value.
+- `SystemModule::tick1s` — the P4 `coprocessorWifi()` path calls
+  `esp_hosted_get_coprocessor_fwversion()` synchronously; wants a cached snapshot.
+- `ImprovProvisioningModule::tick` — runs the queued APPLY_OP inline; wants a cold task to
+  execute and publish only the result.
+- `Scheduler::tick` — dispatches all of the above, so its own contract is only as good as theirs.
+
+**Explicitly NOT in scope:** the float-math findings (`BouncingBallsEffect`, `RipplesEffect`,
+`SphereMoveEffect`). Review suggested fixed-point, but the float trajectory IS the ported
+MoonLight behaviour and fidelity is deliberate. If the FPU-less Xtensa cost is real, that is a
+profiling question first, not a lint fix.
+
+`-Wfunction-effects` reports these but never fails a build, and
+`docs/metrics/hotpath-baseline.txt` freezes the known set so a NEW blocking call stands out
+in the report. The pre-commit gate runs the same check incrementally.
+
+### ESP32 clang/LLVM toolchain — extend the clang checks to src/platform/esp32/
+
+Espressif ships an xtensa LLVM (their fork), but the installed `esp-clangd` package contains
+**only `clangd`** — no `clang++` driver — so a clang analysis pass over ESP32 sources needs their
+full LLVM installed separately.
+
+What it would buy: `-Wfunction-effects` (and clang-tidy, clang-query) over `src/platform/esp32/`
+— 20 translation units, the only code the desktop build excludes. Everything else, including the
+LED drivers, already compiles on desktop and is already checked.
+
+What it costs: a second ~1 GB toolchain, maintained purely for analysis — the firmware would
+still be built by GCC, so the analysing compiler is not the shipping compiler. That is a real
+"one rule, one owner" tension, and the reason this is a decision rather than an obvious yes.
+
+Worth revisiting when either the coverage gap bites (a hot-path bug traced to the platform layer
+that the desktop check could not see) or Espressif's LLVM becomes the default toolchain.
+
+### lizard: 94 functions are measured under a mis-parsed name (baseline can't pin them)
+
+lizard's C++ parser loses the function name on certain bodies and falls back to the first keyword
+or cast it meets inside, so `mm::SolidEffect::tick` is reported as `mm::SolidEffect::static_cast<lengthType>`
+and `mm::NetworkModule::tick1s` as `mm::NetworkModule::switch`. Measured across `src/`: **94 of
+2404** functions carry such a name (`if` 47, `for` 41, `static_cast` 5, `switch` 1), of which **10**
+are over threshold and therefore reach the report.
+
+The consequence is the part that matters. `whitelizard.txt` matches by NAME, so those entries pin
+nothing: **35 of 162** baseline lines name a function lizard no longer produces. Each is a function
+whose complexity is now unmeasured against the baseline — real growth in it would either surface as
+a spurious "NEW violation" under the fallback name, or not surface at all. The check currently
+reports `FAIL — 9 NEW` on an unmodified tree for exactly this reason, which trains the reader to
+ignore the number.
+
+It is not a threshold problem and not fixable by re-baselining: re-running `--baseline` just freezes
+today's fallback names, which shift again the moment a line moves inside the body. Real options, in
+order of preference: key the baseline on `file:startline`-anchored identity or lizard's `long_name`
+instead of `name`; pre-process so the parser keeps the name; or replace lizard's C++ front end with
+a clang-AST-based complexity pass (`check_clang_query.py` already has the AST machinery, so the
+metric could move there and drop the dependency entirely). Sizeable enough for its own `/plan`.
+
+### clang-tidy: triage the remaining 30 findings
 
 `.clang-tidy` runs `*` minus a documented disable list and reaches zero on everything except the
-path-sensitive `clang-analyzer-*` family: **47 findings**, led by `core.UndefinedBinaryOperatorResult`
-(11), `bugprone-unchecked-string-to-number-conversion` (9), `security.insecureAPI.strcpy` (5),
-`cplusplus.NewDeleteLeaks` (4) and `core.NonNullParamChecker` (4). `NewDeleteLeaks` and
-`cplusplus.Move` are the two worth reading first — the analyzer traces real paths, so a finding is
-a claim about an execution, not a style opinion.
+path-sensitive `clang-analyzer-*` family: **30 findings**, led by
+`bugprone-unchecked-string-to-number-conversion` (9), `security.insecureAPI.strcpy` (5),
+`core.NonNullParamChecker` (4), `deadcode.DeadStores` (3) and `unix.cstring.NullArg` (3). Roughly
+half sit in test code (`strcpy` into fixed local buffers, a deliberate divide-by-zero probe).
+
+The nine `unchecked-string-to-number-conversion` sites were read individually and are all safe:
+HueDriver guards on `if (id > 0)`, JsonUtil documents 0-means-absent, MqttModule uses a `v = -1`
+sentinel and clamps. They stay reported rather than suppressed — a report shows the real situation,
+and a `NOLINT` would hide a genuine class of bug for the next person who writes one of these.
 
 These surfaced late for an instructive reason: the report parser's check-name pattern rejected the
 `,-warnings-as-errors` suffix clang-tidy appends when `WarningsAsErrors` is set, so **every finding
 was silently dropped** the moment the ratchet was switched on. Fixed; recorded here because it is
 the sixth silent-zero this tooling has produced, and each looked like a clean tree.
 
-Once triaged (fix / `NOLINT` with a reason / disable with a measured one), set
-`WarningsAsErrors: '*'`. That one line is the ratchet that stops a zero decaying back into noise;
-it is deliberately not set today because it would fail the gate on the 47.
+`WarningsAsErrors` stays empty: clang-tidy reports, it does not gate
+([testing.md § Static analysis](../testing.md#static-analysis)).
 
 
 ### Heap-allocate the `registerType<T>` boot probe (lift a per-module lesson into core)

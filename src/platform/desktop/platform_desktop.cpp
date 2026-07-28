@@ -105,7 +105,19 @@ static std::atomic<uint32_t> testNowMs{0};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
 
-uint32_t millis() {
+// steady_clock::now() is a vDSO clock_gettime read — no allocation, no lock, no syscall on
+// any platform we build for. libc++ does not annotate it, so -Wfunction-effects has to assume
+// the worst; this is the standard-library gap, not ours. Scoped to the two clock readers, and
+// desktop-only (the ESP32 millis/micros call esp_timer_get_time directly).
+// #ifdef-guarded: `#pragma clang ...` is an UNKNOWN PRAGMA to GCC, and the CI sanitizer lanes
+// build with GCC + -Werror, so an unguarded clang pragma fails the build there. (`#pragma GCC`
+// would be understood by both, but -Wfunction-effects is a clang-only warning, so the pragma
+// must be clang-only too.)
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfunction-effects"
+#endif
+uint32_t millis() MM_NONBLOCKING {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
     if (override_) return override_;
     auto now = std::chrono::steady_clock::now();
@@ -114,12 +126,15 @@ uint32_t millis() {
     );
 }
 
-uint32_t micros() {
+uint32_t micros() MM_NONBLOCKING {
     auto now = std::chrono::steady_clock::now();
     return static_cast<uint32_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(now - startTime).count()
     );
 }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 void* alloc(size_t bytes) {
     return std::malloc(bytes);
@@ -510,12 +525,36 @@ int fsRead(const char* path, char* buf, size_t maxLen) {
     return static_cast<int>(n);
 }
 
+// Open a temp file for atomic-write, owner-only (0600) where the OS has file modes.
+//
+// std::fopen creates with 0666 & ~umask, so on a typical umask 022 the file lands world-readable
+// — and these are /.config/*.json, which hold WiFi PSKs and MQTT passwords. Nothing here is
+// multi-user on ESP32 (LittleFS has no modes at all, so the platform layer's ESP32 half is
+// unaffected), but the desktop build runs on real machines with real other users.
+//
+// POSIX gets O_CREAT|O_EXCL with an explicit 0600 — EXCL because a pre-existing temp file is
+// either a crashed run's leftover or someone else's, and inheriting its mode would defeat the
+// point. Windows has no mode_t; its files inherit the parent directory's ACL, which is the
+// platform's own answer to the same question, so it keeps plain fopen.
+static FILE* openTempOwnerOnly(const char* path) {
+#ifdef _WIN32
+    return std::fopen(path, "wb");
+#else
+    ::unlink(path);                       // clear a leftover so O_EXCL cannot fail on our own temp
+    const int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600);
+    if (fd < 0) return nullptr;
+    FILE* f = ::fdopen(fd, "wb");
+    if (!f) ::close(fd);                  // fdopen failure leaves the descriptor ours to release
+    return f;
+#endif
+}
+
 bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     auto target = toFsPath(path);
     auto tmp = target;
     tmp += ".tmp";
 
-    FILE* f = std::fopen(tmp.string().c_str(), "wb");
+    FILE* f = openTempOwnerOnly(tmp.string().c_str());
     if (!f) return false;
     size_t written = std::fwrite(data, 1, len, f);
     if (written != len) {
@@ -567,7 +606,7 @@ bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
     auto tmp = target;
     tmp += ".tmp";
 
-    FILE* f = std::fopen(tmp.string().c_str(), "wb");
+    FILE* f = openTempOwnerOnly(tmp.string().c_str());
     if (!f) return false;
     // Pull chunks from the source and write each straight through — fixed buffer, any file size.
     // `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.
@@ -638,9 +677,9 @@ size_t filesystemTotal() {
 void setEthConfig(const EthPinConfig&) {}   // no eth on desktop; ethInit stubs false
 void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
-bool ethLinkUp() { return false; }
-bool ethConnected() { return false; }
-void ethGetIPv4(uint8_t out[4]) {
+bool ethLinkUp() MM_NONBLOCKING { return false; }
+bool ethConnected() MM_NONBLOCKING { return false; }
+void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING {
     // Desktop has no real interface state, but DevicesModule needs the host's LAN
     // IP to scan from (otherwise a desktop projectMM instance reports "no network" and
     // never sweeps). hostIp() resolves it via the outbound-route trick; report it
@@ -668,7 +707,7 @@ void setTestWifiStaAvailable(bool available) { testWifiStaAvailable.store(availa
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) {
     return testWifiStaAvailable.load(std::memory_order_relaxed);
 }
-bool wifiStaConnected() { return false; }
+bool wifiStaConnected() MM_NONBLOCKING { return false; }
 void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 // Addressing is OS-managed on desktop; the static/DHCP setters are inert (no netif to reconfigure).
 // The per-interface apply counter is the observable a host test pins the static-addressing path on.
@@ -1182,7 +1221,7 @@ bool rmtWs2812Init(RmtWs2812Handle& /*h*/, uint8_t /*gpio*/, uint32_t /*resoluti
                    bool /*invert*/) {
     return false;
 }
-uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) { return 0; }
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) MM_NONBLOCKING { return 0; }
 bool rmtWs2812Transmit(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
                        size_t /*symbolCount*/) {
     return false;

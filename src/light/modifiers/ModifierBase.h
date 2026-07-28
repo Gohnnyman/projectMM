@@ -36,7 +36,7 @@ namespace mm {
 /// **Prior art:** the two building blocks are the textbook image-warping pattern — bake a coordinate transform into a precomputed spatial LUT, and build that table by BACKWARD mapping (walk the destinations, find each one's source) so no output pixel is ever left unmapped (https://towardsdatascience.com/forward-and-backward-mapping-for-computer-vision-833436e2472/). What is specific here — and credited to MoonLight — is collapsing a whole *chain* of discrete pixel folds into ONE index table: a desktop node graph (TouchDesigner, shader graphs) gives each node its own frame buffer; an ESP32 can't spare a buffer per modifier, so the chain is folded into a single LUT and the hot path stays one gather. MoonLight's `modifySize` / `modifyPosition` / `modifyXYZ` map to our `modifyLogicalSize` / `modifyLogical` / `modifyLive`, written fresh against our `MappingLUT` (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h).
 class ModifierBase : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Modifier; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Modifier; }
 
     /// A modifier control change alters the mapping, so the owning Layer must rebuild
     /// it — the pipeline-wide rebuild path. See MoonModule::onControlChanged.

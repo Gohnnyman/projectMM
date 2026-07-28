@@ -115,10 +115,22 @@ _SCRATCH = re.compile(
 # The type a `new` produces: `CXXNewExpr 0x... <...> 'Foo *' array ...`.
 _NEW_TYPE = re.compile(r"CXXNewExpr 0x\w+ <[^>]*> '(?P<type>[^']+?) ?\*'")
 
+# Three constraints this matcher set was built around. Recorded here because two are NEGATIVE
+# results — the kind that gets re-attempted by whoever forgets they were already tried:
+#
+#   1. There is NO size-threshold matcher. `hasSize(N)` is exact-match and `sizeGreaterThan`
+#      does not exist, so every "> N bytes" decision happens in Python below, not in the AST.
+#   2. `varDecl` alone silently misses EVERY class member — it needs `fieldDecl` beside it.
+#      The first version of this rule had only `varDecl` and reported a plausible, wrong list.
+#   3. "Fixed number vs named constant" is NOT RECOVERABLE. The AST folds `kMaxLanes` to `[16]`
+#      before a matcher sees it: `busPinBuf_` reads as `uint16_t[16]` with no trace of the
+#      spelling. Only regex over source text could tell them apart, which is the fragile
+#      approach this whole script exists to replace. Do not try again.
 RULES = {
     "arrays": {
         "title": "RAM-costing fixed arrays",
         "output": "dump",
+        # constexpr and static-storage arrays are excluded: they live in flash and cost no RAM.
         "matcher": ("namedDecl(anyOf("
                     "varDecl(hasType(constantArrayType()), "
                     "unless(anyOf(isConstexpr(), hasStaticStorageDuration()))), "

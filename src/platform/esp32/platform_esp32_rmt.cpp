@@ -88,7 +88,7 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
     return true;
 }
 
-uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) {
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) MM_NONBLOCKING {
     auto* st = static_cast<RmtTxState*>(h.impl);
     return st ? st->resolutionHz : 0;
 }

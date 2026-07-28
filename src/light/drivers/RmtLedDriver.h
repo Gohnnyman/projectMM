@@ -231,7 +231,7 @@ public:
     /// over this driver's window, then start every pin's transmit before waiting on
     /// any, so the tick costs the longest strand rather than the sum. Inert off RMT
     /// chips and idle until inited with a source buffer + correction.
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data()) return;
 
@@ -357,7 +357,7 @@ private:
 
     // Convert a ns duration to RMT ticks using the resolution the platform
     // granted. Falls back to the requested clock when not inited (host/desktop).
-    uint16_t nsToTicks(uint32_t ns) const {
+    uint16_t nsToTicks(uint32_t ns) const MM_NONBLOCKING {
         uint32_t hz = inited_ ? platform::rmtWs2812Resolution(rmt_[0]) : kResolutionHz;
         if (hz == 0) hz = kResolutionHz;
         return static_cast<uint16_t>((static_cast<uint64_t>(ns) * hz) / 1'000'000'000ull);

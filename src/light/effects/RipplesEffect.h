@@ -34,13 +34,12 @@ public:
         controls_.addUint8("interval", interval, 1, 254);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();
         const lengthType d = depth();
         const uint8_t cpl = channelsPerLight();
-        if (w <= 0 || h <= 0 || d <= 0) return;
 
         // Clear: every column lights at most one y, so the rest must be black.
         std::memset(buf, 0, static_cast<size_t>(nrOfLights()) * cpl);

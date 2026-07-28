@@ -48,7 +48,7 @@ public:
     /// release() then deleteTree; removeChild() quiesces). A stack-declared driver in a test must be
     /// declared BEFORE its Drivers, so reverse-declaration order destroys the container (and stops its
     /// worker) first. TSan enforces this.
-    ModuleRole role() const override { return ModuleRole::Driver; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Driver; }
     virtual void setSourceBuffer(Buffer* buf) = 0;
 
     /// The hardware peripheral block this driver drives, for the parallel-driver claim guard (two live

@@ -101,7 +101,7 @@ public:
     void setHttpServerModule(HttpServerModule* h) { httpServerModule_ = h; }
 
     /// Diagnostics keep ticking; matches FirmwareUpdateModule / SystemModule.
-    bool respectsEnabled() const override { return false; }
+    bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
     /// Apparatus, not swappable content — provisioning is a fixed device service.
     /// Not deletable (matches Board / Preview); can still be disabled.
@@ -139,7 +139,7 @@ public:
     /// writes are visible before we read them). The TX-power cap is applied first on purpose (see
     /// the inline note), and the deviceModel arrives like any other catalog default via the
     /// APPLY_OP poll below rather than here.
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         // Vendor SET_TX_POWER RPC — handled BEFORE the credentials on purpose:
         // when an installer sends the cap and the credentials back-to-back,
         // both flags can land within one tick, and the cap must be persisted
@@ -174,7 +174,7 @@ public:
     /// mutation off the serial task — the same discipline the credentials/deviceModel paths
     /// follow. A failed op can't travel back on the already-spent frame ack, so it's surfaced
     /// over serial + in provision_status rather than looking like a clean install.
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (pendingOpReady_.load(std::memory_order_acquire) && httpServerModule_) {
             // The Improv task already acked frame RECEIPT; the op is APPLIED here. A
             // failed op (UnknownType, OutOfRange, a not-found target) can't travel back

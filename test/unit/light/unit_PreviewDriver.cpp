@@ -26,6 +26,13 @@ namespace {
 // WS header (begin is given the PAYLOAD length, so what's pushed is exactly the payload), and
 // classifies by first byte at end. dropCoord/acceptNext make endBinaryFrame report a client that
 // didn't get the whole frame (false) to drive the coord-pending retry + adaptive-downscale paths.
+// -Wnon-virtual-dtor: BinaryBroadcaster's own destructor is protected and non-virtual on
+// purpose ("not owned through this interface"), so no code can delete through a base pointer.
+// This double is a stack local in every test, never owned polymorphically — and it cannot copy
+// the base's protected-destructor trick, because that would forbid the stack construction the
+// tests rely on. Scoped to this one type.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 struct CaptureBroadcaster : mm::BinaryBroadcaster {
     int coordMsgs = 0, frameMsgs = 0;
     std::vector<uint8_t> lastCoord, lastFrame;
@@ -96,6 +103,7 @@ private:
     mutable bool active_ = false;     // a buffered send is in flight
     mutable int remaining_ = 0;       // bufferedSendIdle polls left before it goes idle
 };
+#pragma GCC diagnostic pop
 
 // Wire PreviewDriver under Drivers, over a Layer + single layout, with a
 // CaptureBroadcaster — the full real path (sparse driver buffer + layout coords).

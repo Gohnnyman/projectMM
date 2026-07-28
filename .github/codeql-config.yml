@@ -1,0 +1,11 @@
+name: "projectMM CodeQL config"
+
+# Code we did not write and will not change is not a finding we can act on. doctest.h is the
+# vendored single-header test framework (test/doctest.h) and produced the only critical alert
+# in the tree that we do not own — excluding it here is the standard mechanism, rather than
+# dismissing the same alert by hand after every scan.
+#
+# This is the ONLY vendored source in the repo; everything else under src/ and test/ is ours.
+# Add to this list only for genuinely third-party code, never to quiet a finding in our own.
+paths-ignore:
+  - test/doctest.h

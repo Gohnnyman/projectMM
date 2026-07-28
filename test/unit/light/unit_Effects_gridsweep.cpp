@@ -8,6 +8,16 @@
 // grid to 0x0x0 (every layout child disabled), and a 1-wide or 1-deep grid is what a
 // single strand or a flat panel actually is.
 //
+// Layer::tick owns the degenerate-grid gate: it skips the effect pass when any axis is 0,
+// so effects may assume width/height/depth >= 1 and carry no such guard themselves. The
+// 0x0x0 row therefore pins the LAYER's behaviour, not each effect's: that a folded-away
+// grid produces a clean no-op and a zero-byte buffer rather than a crash. Effect bodies
+// are covered by the three non-degenerate rows, where they do run.
+//
+// Do NOT "improve" this by calling fx->tick() directly on the zero grid. That asserts a
+// contract no effect makes, and it fails: GEQ3DEffect divides by width() (imap over a
+// zero range) and takes SIGFPE. The single Layer gate is what makes that safe.
+//
 // Per-effect tests pin this one effect at a time, which means a NEW effect is covered only
 // if its author remembers to write that case. This sweep asks the factory for every
 // registered effect instead, so the floor is enforced for effects that do not exist yet:

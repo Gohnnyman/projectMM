@@ -63,7 +63,7 @@ void Scheduler::setup() {
     lastTimingUpdate_ = platform::millis();
 }
 
-void Scheduler::tick() {
+void Scheduler::tick() MM_NONBLOCKING {
     uint32_t now = platform::millis();
     uint32_t tickStart = platform::micros();
 

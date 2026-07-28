@@ -9,6 +9,7 @@ Below: the UI behaviours common to every card, described once, then one section 
 ## UI Features
 
 - **Status dots** on each card: grey (not run), orange (running), green (exit 0), red (exit non-zero).
+- **Last-run log** — the **📄** button replays that script's last run in the log pane. It appears **only on cards that have actually run** (and shows up the moment a first run finishes, no reload needed), so its absence is informative too: a card with no 📄 is one nobody has used yet. Every run is teed to `build/moondeck-logs/<id>.log` as it streams (not buffered to the end, so a run you Stop still leaves what it printed), which answers "what did this do last time" after a page reload or a switch to another card — the case a live-only stream cannot. One file per script, overwritten each run: a last-run record, not a history. Gitignored, being derived state.
 - **Run/Stop toggle** for long-running scripts (Run desktop, Monitor ESP32).
 - **Duration hint** — every card shows how long it takes: ⚡ about a second, ⏱️ a few seconds up to ~30, 🐌 more than 30 seconds (a build, a flash, a gate list, clang-tidy). All three are shown rather than only the extremes, so a blank badge reads as "nobody set a speed on this card" instead of being confused with medium. Set per script as `"speed": "instant" | "medium" | "slow"` in `moondeck_config.json`. This is a *label*, not a timeout — nothing enforces it, so a script that grows slower needs its flag updated by hand. Separate from `long_running`, which controls the Run/Stop toggle rather than expected duration.
 - **Group headers** in the sidebar (setup, build, flash, run, test, check, scenario).
@@ -104,17 +105,6 @@ uv run moondeck/check/check_platform_boundary.py
 
 Scans all source files outside `src/platform/` for forbidden includes and platform `#ifdef`s.
 
-### check_hotpath
-
-Flag allocation or blocking written directly in a render-path method.
-
-```bash
-uv run moondeck/check/check_hotpath.py          # report findings
-uv run moondeck/check/check_hotpath.py --list   # list the methods it scans
-```
-
-Reads the body of every `tick()` / `tick20ms()` / `tick1s()` under `src/` and reports the banned constructs it can see: `new` / `malloc` / `push_back` / `std::string` / `make_unique` / `make_shared` (allocation) and `delay` / `sleep` / `mutex.lock()` (blocking). A **lint, not a proof** — it cannot see what a callee allocates, so a clean run means "nothing visible in the render path's own source". A justified exception is marked `// hot-path-ok: <reason>` at the line, so the reason lives at the site.
-
 ### check_esp32_built
 
 Check that a firmware binary exists and is newer than every source that feeds it.
@@ -198,6 +188,15 @@ Two properties worth knowing. Measurements read **tracked files only** (`git ls-
 Static-analysis tools, run **manually**: they take minutes rather than seconds, so they are not
 in the commit/merge gate lists yet.
 
+**A report shows the real situation.** Array usage, hot-path blocking, complexity — the number
+is only worth reading if nothing was hidden to make it smaller. A finding is *fixed*, or it is
+*shown with its reason*; it is never suppressed to tidy the output. `ParallelLedDriver::tick`
+and `PreviewDriver::tick` genuinely block, so they appear in clang-hotpath every run — hiding
+the two worst offenders would have made the report worthless while making the count look better.
+The only suppression that earns its place is one where the tool is wrong about our code (e.g.
+libc++ not annotating `steady_clock::now`, which does not block), and it carries that reason at
+the site.
+
 ### check_module
 
 Every static-analysis tool, on ONE module — the repo-wide reports turned around.
@@ -244,11 +243,9 @@ finding grouped by file. No report file to open: a run this slow should answer o
 and the old `build/clang-tidy-report.md` was gitignored anyway, so it existed only to be read
 once.
 
-**Verify a zero before believing it.** A tool that analysed nothing also reports zero, and this
-one has four documented ways to fail silently (the reasons are in the script). The control is a
-check you know must fire: `--check readability-magic-numbers` returns thousands. If that returns
-zero too, the run is broken, not the tree. The script also refuses to report when more than ten
-files fail to compile, because "most files errored" is a broken run and not a result.
+**Verify a zero before believing it** ([testing.md](../docs/testing.md#verify-a-zero-before-believing-it)
+covers why and lists the known silent-failure modes). This script's own guard: it refuses to
+report when more than ten files fail to compile.
 
 ### check_clang_query
 
@@ -321,6 +318,53 @@ positives pointing at the wrong lines.
 Takes ~50s cold (a few seconds once the compilation database is warm). clang-query has no
 parallel runner of its own and costs ~44s per translation unit, so this runs the 15 `src/` TUs
 across cores; serial would be ~11 minutes.
+
+### check_nonblocking
+
+What the render path calls that can block or allocate — checked by the compiler.
+
+```bash
+uv run moondeck/check/check_nonblocking.py                # summary by callee, then every site
+uv run moondeck/check/check_nonblocking.py --module AudioService
+```
+
+`MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` ([platform.h](../src/platform/platform.h)),
+and Clang 20+ verifies under `-Wfunction-effects` that nothing they reach allocates or blocks —
+**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/coding-standards.md#static-checks) owns the rule).
+
+The attribute is inherited by overrides, so three annotations cover every module's tick. It also
+sits in `tickChildren`'s **member-pointer type** — without that, the indirect call through `fn`
+is a hole the check cannot reason about, and passing an unannotated method now fails to compile.
+
+Reports unique **sites**: a header included by N translation units emits the same warning N
+times, so a raw build prints ~1350 lines for ~180 real findings.
+
+**Split by tick tier**, because the same blocking call costs roughly two orders of magnitude
+more in one than another: `tick()` runs every frame, `tick20ms()` fifty times a second, `tick1s()` once.
+Pooling them hides which findings actually matter. `OTHER` is a site whose enclosing method could
+not be resolved from source.
+
+| Column | |
+|---|---|
+| **CALLS** | the function that blocks — or `(static local variable)`, a violation with no callee: a static local needs a guard variable and a one-time lock on first use |
+| **IN** | the method the call sits in, which is what places it in a tier. Clang names the call and the callee but *not* their enclosing function, so this is read back from the source |
+| **WHY IT BLOCKS** | clang's own root cause, e.g. `calls mm::platform::UdpSocket::sendTo`. `—` means a leaf the compiler could not look inside (external or unannotated) |
+| **FILE:LINE** | where to go |
+
+**Desktop-only, and that loses nothing.** On GCC `MM_NONBLOCKING` expands to `noexcept` — the
+exception contract still holds; only the clang attribute and the warning are absent. The ESP32 toolchain
+has neither the attribute nor the warning, and builds with `-Werror`, so a bare attribute there
+is a build break. Every tick method compiles on desktop — modules, effects, and the **LED
+drivers** — so the render path itself is covered.
+
+The gap is real but narrow: `src/platform/esp32/` has no tick methods (it is free functions the
+tick path calls into), and while a call INTO one of them is reported at the call site, the
+function's own body is never analyzed. A platform function that blocks internally without
+carrying `MM_NONBLOCKING` is invisible. Closing that needs an xtensa clang — backlogged as
+"ESP32 clang/LLVM toolchain" in backlog-core.md.
+
+Not a gate yet: `-Wno-error=function-effects` keeps the build green while the findings are
+triaged. Each is a judgement — fix it, annotate the callee, or accept it with a scoped reason.
 
 ### check_lizard
 

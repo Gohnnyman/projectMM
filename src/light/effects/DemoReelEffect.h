@@ -53,7 +53,7 @@ public:
         swapTo(cursor_ < eligibleCount_ ? cursor_ : 0);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (eligibleCount_ == 0 || !current_) return;
 
         // Advance on the interval. elapsed() is the Layer's monotonic ms clock (same source every

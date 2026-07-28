@@ -60,7 +60,7 @@ struct SwapMock : mm::LedPeripheral {
         if (owner_) { attachedDtors++; g_hookFiredBeforeLastDtor = (g_hookFires > 0); }
     }
 
-    uint8_t lanesAvailable() const override { return 8; }
+    uint8_t lanesAvailable() const MM_NONBLOCKING override { return 8; }
     bool powerOfTwoBus() const override { return true; }
     bool loopbackFullWidth() const override { return false; }
     bool supportsPinExpander() const override { return false; }

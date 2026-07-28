@@ -1,37 +1,35 @@
 name: CodeQL
 
-# POC (docs/history/plans/Plan-20260727): does CodeQL's stock C/C++ suite find anything
-# real in this firmware? The question that motivated it: we parse six network packet
-# formats (ArtNet, DDP, E1.31, WLED audio sync, MQTT, WLED) plus HTTP, doing ~22 memcpy
-# operations on data arriving from the LAN, on a device with no MMU and no process
-# isolation — and we run NO security analysis at all today. Nothing else in our toolchain
-# looks for that class of bug: the compiler checks effects, lizard counts branches, our
-# Python checks read text.
+# Layer 4 of the analysis stack (docs/testing.md § Static analysis) — the only one that sees
+# whole-program taint. It earns its place on one question: we parse six network packet formats
+# (ArtNet, DDP, E1.31, WLED audio sync, MQTT, WLED) plus HTTP, doing ~22 memcpy operations on
+# data arriving from the LAN, on a device with no MMU and no process isolation. Nothing else in
+# the stack looks for that class of bug — the compiler checks effects, lizard counts branches,
+# the Python checks read text.
 #
-# `build-mode: none` (GA Oct 2025) scans C/C++ WITHOUT building it, inferring compile flags
-# per file. That matters here because our real firmware build is an ESP-IDF cross-compile
-# for Xtensa/RISC-V that a runner would have to reproduce; build-free skips that entirely.
-# The trade is some extraction noise on macro/template-dense headers — acceptable for a POC
-# whose question is "is there anything here", not "prove there is nothing".
+# It has paid for itself: 3 critical `localtime` findings in main_desktop.cpp (shared static,
+# not thread-safe), fixed via a portable isoTimestamp helper. The six packet parsers produced
+# no taint-flow findings, which is positive evidence nothing else in the stack could give.
 #
-# Free on public repos, so the cost is wall-clock only. Scheduled weekly + on demand rather
-# than per-push: this is a sweep, not a gate, until the POC says otherwise.
+# `build-mode: none` scans C/C++ WITHOUT building it, inferring compile flags per file. That
+# matters here because the real firmware build is an ESP-IDF cross-compile for Xtensa/RISC-V a
+# runner would have to reproduce. The trade is some extraction noise on macro/template-dense
+# headers.
 #
-# If this finds nothing actionable after a few runs, that is a RESULT — record it in the
-# scorecard and delete this file.
+# Free on public repos, so the cost is wall-clock only.
 
 on:
-  # Push-triggered on the POC branch, deliberately.
+  # NOT A GATE: no `pull_request` trigger, so it cannot block a merge. The reasoning is
+  # docs/testing.md § Static analysis, which every analyser here follows. The Security tab
+  # keeps the open/fixed alert lifecycle, which is the baselining we would otherwise build.
   #
-  # `workflow_dispatch` alone would NOT work here: GitHub only offers the "Run workflow"
-  # button for workflows that exist on the DEFAULT branch, and this one lives on
-  # next-iteration until the POC is judged. A push trigger is the only way to get a first
-  # result without merging an unevaluated workflow into main.
-  #
-  # This is still not a gate: it does not run on pull_request, so it cannot block a merge.
-  # It runs, we read the findings, and we decide.
+  # Both branches are listed on purpose. A workflow whose trigger names a branch nobody is
+  # pushing to runs never, and reports nothing while looking healthy — this job sat idle for
+  # two commits when the working branch was called `next` instead of `next-iteration`
+  # (docs/history/lessons.md). `main` keeps it firing once this branch is merged and retired.
   push:
     branches:
+      - main
       - next-iteration
     paths:
       # Only when C/C++ or the workflow itself changes — a docs commit has nothing new to
@@ -70,6 +68,8 @@ jobs:
           # question above, and the quality ones tell us whether CodeQL sees anything our
           # existing checks miss. Narrow it later if the noise is not worth it.
           queries: security-and-quality
+          # Excludes vendored code (test/doctest.h) — see the file for why.
+          config-file: ./.github/codeql-config.yml
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3

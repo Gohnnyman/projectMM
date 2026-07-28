@@ -156,7 +156,7 @@
         "desktop-macos": {
           "tick_us": [
             4,
-            14
+            21
           ],
           "free_heap": [
             0,
@@ -234,7 +234,7 @@
         "desktop-macos": {
           "tick_us": [
             17,
-            48
+            52
           ],
           "free_heap": [
             0,
@@ -390,7 +390,7 @@
         "desktop-macos": {
           "tick_us": [
             273,
-            1036
+            1115
           ],
           "free_heap": [
             0,
@@ -900,7 +900,7 @@
         "desktop-macos": {
           "tick_us": [
             17,
-            81
+            94
           ],
           "free_heap": [
             0,
@@ -1155,7 +1155,7 @@
         "desktop-macos": {
           "tick_us": [
             4,
-            13
+            19
           ],
           "free_heap": [
             0,
@@ -1310,7 +1310,7 @@
         },
         "desktop-macos": {
           "tick_us": [
-            69,
+            68,
             245
           ],
           "free_heap": [
@@ -1389,7 +1389,7 @@
         "desktop-macos": {
           "tick_us": [
             273,
-            948
+            1357
           ],
           "free_heap": [
             0,

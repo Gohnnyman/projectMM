@@ -27,6 +27,71 @@ Three test categories, each with a clear purpose:
 
 Per-module timing, memory, and sizeof measurements per platform live in [performance.md](performance.md).
 
+## Static analysis
+
+Tests pin behaviour that runs; static analysis catches what never gets exercised. Five layers,
+cheapest first — each catches something the layer above cannot:
+
+| # | Layer | Catches | Where |
+|---|---|---|---|
+| 0 | Compiler warnings | shadowing, double promotion, fallthrough, null deref | Every build, all targets |
+| 1 | [clang-tidy](../.clang-tidy) | bug patterns, performance, portability | Editor (clangd) + MoonDeck card |
+| 2 | Sanitizers (ASan, TSan) | real memory/threading faults at run time | Desktop CI lanes |
+| 3 | RTSan + `[[clang::nonblocking]]` | allocation/blocking in the render path, **transitively** | Compile time + CI |
+| 4 | [CodeQL](../.github/codeql-config.yml) | untrusted input, whole-program taint, use-after-free | CI, Security tab |
+
+Alongside them: **lizard** counts complexity per commit for the trend (a fuzzy tokenizer, not a
+parser — it can never express an architectural rule), **clang-query** is the home for bespoke
+AST rules we invent, and the Python checks in `moondeck/check/` cover contracts whose other half
+is a Markdown page, a JSON catalog or a built binary. Every one has a MoonDeck card
+([MoonDeck.md](../moondeck/MoonDeck.md)).
+
+**Every one of these is a report, not a gate.** They state what they find; a consumer decides
+what to do about it. `WarningsAsErrors` is empty, CodeQL never runs on `pull_request`, and the
+hot-path check never fails the event. A gate nobody can satisfy gets disabled rather than
+obeyed, and it pushes people to suppress a finding under time pressure — which is the opposite
+of why the tool is there. The exception is layer 0: compiler warnings ARE `-Werror`, because
+they are few, actionable, and fixed at the moment they appear.
+
+**One rule, one owner.** Each rule is enforced in exactly one place, so a finding has one home
+and cannot drift between two tools that half-agree:
+
+| Rule | Enforced by |
+|---|---|
+| No allocation/blocking in the render path | `[[clang::nonblocking]]` + RTSan |
+| No platform code outside `src/platform/` | `check_platform_boundary.py` |
+| Specs match the code | `check_specs.py` |
+| Catalog matches the modules | `check_devices.py` |
+| Untrusted input is memory-safe | CodeQL |
+| Bug patterns / performance | clang-tidy |
+| Complexity does not grow | lizard (baselined) |
+| Size/LOC/docs do not grow silently | `repo_health.py` |
+
+### Verify a zero before believing it
+
+An analyser reporting "0 findings" is indistinguishable from one that read nothing, and every
+silent-failure mode below produced a plausible clean report rather than an error:
+
+| Defect | What it looked like |
+|---|---|
+| `#` inside a YAML `>-` folded scalar is not a comment | Every disable after the first was folded into the check string; `abseil-*` stayed on → 12,181 findings |
+| `run-clang-tidy` shells out to `clang-tidy` by name | Not on PATH → exits 0 having analysed nothing → "0 findings" |
+| `-extra-arg VALUE` (space form) is silently ignored | Only `-extra-arg=VALUE` works → 0 findings |
+| Same trap in `-checks` | The filter had never worked |
+| Compilation database records a different compiler than the tool runs | `'cstdint' file not found` on 129/129 files; unparsed files are never analysed |
+| Missing `-isysroot` | Under-report, not an error: 5 matches where there were 14 |
+| A baseline keyed on a name the tool no longer emits | Pins nothing while looking green (see backlog-core.md § lizard) |
+
+So: **run a control check that MUST fire.** After reaching 0, enabling a deliberately-disabled
+check (`--check readability-magic-numbers`) returned 3,307 — that is what proves the pipeline
+reads the code. `check_clang_tidy.py` also refuses to report when more than ten files fail to
+compile, because "most files errored" is a broken run, not a result.
+
+A tool's *default* output is not its verdict, either. Evaluating an analyser without a curated
+check list measures the configuration, not the tool: an unconfigured clang-tidy run here gave
+6,073 findings, two thirds of them from one check that every comparable project disables by
+name. The curated config takes it to 30.
+
 ## Standards
 
 Two principles drive every standard below:

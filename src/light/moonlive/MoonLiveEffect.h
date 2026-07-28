@@ -73,7 +73,7 @@ public:
         setDynamicBytes(engine_.ok() ? engine_.codeCap() : 0);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         // The native emitter stores R,G,B at offsets +0/+1/+2 with channelsPerLight() only as the
         // stride (moonlive_lower_*: addr = index * cpl, then 3 writes). A 0/1/2-channel layer would
         // let the last light's +1/+2 write run past the buffer, so a sub-RGB layout renders dark.

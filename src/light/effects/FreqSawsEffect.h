@@ -64,10 +64,9 @@ public:
         clearState();
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int sizeX = width();
         const int sizeY = height();
-        if (sizeX <= 0 || sizeY <= 0 || channelsPerLight() < 3) return;
 
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)

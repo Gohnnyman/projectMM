@@ -59,11 +59,10 @@ public:
         controls_.addBool("audioSpeed", audioSpeed);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         // D1: read the live grid each frame; the scroll runs down the x=0 column, length = height().
         const int cols = width();
         const int len  = height();
-        if (cols <= 0 || len <= 0) return;
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(len), depthDim()};

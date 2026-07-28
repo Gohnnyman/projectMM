@@ -34,7 +34,7 @@ public:
         heat_.resize(static_cast<size_t>(width()) * height());
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!heat_) return;
 
         uint8_t* buf = buffer();

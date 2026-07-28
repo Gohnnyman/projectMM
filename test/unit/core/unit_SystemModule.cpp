@@ -14,8 +14,8 @@ class CountingChild : public mm::MoonModule {
 public:
     uint32_t setupCalls = 0, tick20msCalls = 0, tick1sCalls = 0;
     void setup() override { setupCalls++; }
-    void tick20ms() override { tick20msCalls++; }
-    void tick1s() override { tick1sCalls++; }
+    void tick20ms() MM_NONBLOCKING override { tick20msCalls++; }
+    void tick1s() MM_NONBLOCKING override { tick1sCalls++; }
 };
 } // namespace
 

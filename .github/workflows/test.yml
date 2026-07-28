@@ -80,7 +80,11 @@ jobs:
     strategy:
       fail-fast: false          # a TSan race and an ASan UAF are independent signals — report both
       matrix:
-        kind: [address, thread]
+        # `realtime` is the runtime half of the hot-path check: MM_NONBLOCKING marks the tick
+        # methods, -Wfunction-effects proves what it can at compile time, and RTSan catches what
+        # it cannot — allocation or blocking reached through virtual dispatch or a function
+        # pointer. Same attribute drives both, so this lane costs one matrix entry.
+        kind: [address, thread, realtime]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,12 +92,34 @@ jobs:
       # The CMake configure needs uv on PATH — it resolves UV_EXECUTABLE for the UI-embed step
       # (CLAUDE.md § Use uv for every Python invocation), so a build without it fails at configure.
       - uses: astral-sh/setup-uv@v3
+      # RTSan needs Clang 20+; ubuntu-latest ships Clang 18, which rejects
+      # `-fsanitize=realtime` at the compiler-probe stage. Install a new enough one for that
+      # lane only — ASan/TSan run on the runner's default compiler.
+      - name: install clang for RealtimeSanitizer
+        if: matrix.kind == 'realtime'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/llvm.asc
+          sudo add-apt-repository -y "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main"
+          sudo apt-get install -y clang-20
       - name: build + run unit tests under ${{ matrix.kind }}sanitizer
         run: |
-          cmake -S . -B build/san -DCMAKE_BUILD_TYPE=Debug \
+          # RTSan is clang-only — GCC rejects `-fsanitize=realtime` outright — and the attribute
+          # it keys off is [[clang::nonblocking]], which GCC ignores anyway. Passed as a CMake
+          # variable on this lane only, rather than exporting CXX: an empty CXX="" on the other
+          # lanes is not the same as unset, and some probes read it as a broken compiler path.
+          compiler=""
+          if [ "${{ matrix.kind }}" = "realtime" ]; then
+            compiler="-DCMAKE_CXX_COMPILER=clang++-20"
+          fi
+          cmake -S . -B build/san -DCMAKE_BUILD_TYPE=Debug $compiler \
             -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.kind }} -fno-omit-frame-pointer -g" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=${{ matrix.kind }}"
           cmake --build build/san --target mm_tests -j"$(nproc)"
           # Leak detection is a different concern from the races/UAF this gate hunts, and it fires on
           # third-party static init; keep the signal on what we're actually looking for.
-          ASAN_OPTIONS=detect_leaks=0 TSAN_OPTIONS=halt_on_error=1 ./build/san/test/mm_tests
+          #
+          # RTSan does NOT halt: the render path's known blocking calls are frozen in
+          # docs/metrics/hotpath-baseline.txt and backlogged as architecture work, so halting would
+          # fail this lane on every run. It reports; the log is the signal.
+          ASAN_OPTIONS=detect_leaks=0 TSAN_OPTIONS=halt_on_error=1 \
+            RTSAN_OPTIONS=halt_on_error=0 ./build/san/test/mm_tests

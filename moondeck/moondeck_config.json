@@ -135,15 +135,6 @@
       "script": "report/history_report.py"
     },
     {
-      "id": "check_hotpath",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Hot Path",
-      "speed": "instant",
-      "help": "check_hotpath",
-      "script": "check/check_hotpath.py"
-    },
-    {
       "id": "check_esp32_built",
       "tab": "esp32",
       "group": "build",
@@ -208,6 +199,15 @@
       "speed": "medium",
       "help": "check_clang_query",
       "script": "check/check_clang_query.py"
+    },
+    {
+      "id": "check_nonblocking",
+      "tab": "desktop",
+      "group": "tools",
+      "label": "clang-hotpath",
+      "speed": "slow",
+      "help": "check_nonblocking",
+      "script": "check/check_nonblocking.py"
     },
     {
       "id": "check_lizard",

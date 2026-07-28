@@ -101,7 +101,7 @@ public:
     /// Diagnostics keep ticking regardless of the user toggle; matches
     /// SystemModule + NetworkModule. The user can't easily re-enable a
     /// disabled diagnostic module without it being visible.
-    bool respectsEnabled() const override { return false; }
+    bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
     void setup() override {
         // Copy the file-scope globals into the bound buffers on boot so the
@@ -152,7 +152,7 @@ public:
         controls_.addProgress("update_pct", bytesRead_, totalSnap_);
     }
 
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         // Poll the OTA task's progress + status. No locks: the writer is
         // a single task, reads are atomic at this granularity, and a torn
         // read shows as a brief mid-update glimpse — visually harmless.

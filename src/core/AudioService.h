@@ -89,7 +89,7 @@ public:
     static constexpr size_t kBlock = 512;
     static constexpr size_t kMag = kBlock / 2;   ///< real-FFT magnitude bins
 
-    ModuleRole role() const override { return ModuleRole::Service; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Service; }
 
 
     /// Unlike a zero-cost diagnostic peripheral, this module pays a
@@ -301,13 +301,17 @@ public:
     /// `tick()` — so a device with two mics reads the first consistently, and
     /// removing the active one lets a survivor take over. Add/remove in any order
     /// leaves a coherent answer (the robustness rule).
-    static const AudioFrame* latestFrame() {
-        static const AudioFrame kSilence{};
+    static const AudioFrame* latestFrame() MM_NONBLOCKING {
+        // constexpr, not a function-local static: a static needs a guard variable and a
+        // one-time lock on first use, which is a blocking operation on the render path — and
+        // this is called from EIGHT audio-reactive effects' tick(). constexpr is initialized at
+        // compile time, so there is no guard and no lock.
+        static constexpr AudioFrame kSilence{};
         AudioService* a = ActiveInstance<AudioService>::active();
         return a ? &a->frame_ : &kSilence;
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         // Self-elect as the active mic if the seat is empty. prepare() gives it to the first live
         // module and release() vacates it, but removing the active module while a second one is still running
         // would otherwise leave the seat empty (effects go silent). A running module re-claiming an
@@ -441,7 +445,7 @@ public:
         if (frame_.level > levelPeak_) levelPeak_ = static_cast<uint8_t>(frame_.level);
     }
 
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(levelPeak_));
         std::snprintf(peakStr_, sizeof(peakStr_), "%u Hz", static_cast<unsigned>(frame_.peakHz));
         levelPeak_ = 0;   // reset for the next window

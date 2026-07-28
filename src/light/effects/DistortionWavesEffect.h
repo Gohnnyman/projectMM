@@ -33,7 +33,7 @@ public:
         controls_.addUint8("speed", speed, 0, 100);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

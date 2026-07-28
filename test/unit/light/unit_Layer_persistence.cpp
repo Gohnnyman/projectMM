@@ -23,7 +23,7 @@ struct WriteOnceEffect : mm::EffectBase {
     int calls = 0;
     const char* tags() const override { return ""; }
     mm::Dim dimensions() const override { return mm::Dim::D3; }
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (calls++ == 0) {
             mm::Buffer& b = layer()->buffer();
             mm::Coord3D dims{width(), height(), depth()};
@@ -38,7 +38,7 @@ struct FadeOnlyEffect : mm::EffectBase {
     uint8_t amt = 0;
     const char* tags() const override { return ""; }
     mm::Dim dimensions() const override { return mm::Dim::D3; }
-    void tick() override { layer()->fadeToBlackBy(amt); }
+    void tick() MM_NONBLOCKING override { layer()->fadeToBlackBy(amt); }
 };
 
 struct Scene {
@@ -113,7 +113,7 @@ TEST_CASE("Layer: collected fade resets after it is consumed") {
         int n = 0;
         const char* tags() const override { return ""; }
         mm::Dim dimensions() const override { return mm::Dim::D3; }
-        void tick() override { if (n++ == 0) layer()->fadeToBlackBy(128); }
+        void tick() MM_NONBLOCKING override { if (n++ == 0) layer()->fadeToBlackBy(128); }
     } oneFade;
     s.layer.addChild(&once);
     s.layer.addChild(&oneFade);

@@ -67,7 +67,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
 class D1StubEffect : public mm::EffectBase {
 public:
     mm::Dim dimensions() const override { return mm::Dim::D1; }
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         mm::lengthType w = width();
         mm::lengthType h = height();

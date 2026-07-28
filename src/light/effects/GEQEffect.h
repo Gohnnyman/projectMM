@@ -61,10 +61,9 @@ public:
         rippleCounter_ = 0;
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int cols = width();
         const int rows = height();
-        if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;
         if (!peaks_) return;   // build hasn't allocated yet (e.g. disabled) — nothing to draw
 
         const AudioFrame* f = AudioService::latestFrame();

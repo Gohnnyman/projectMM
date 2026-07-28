@@ -50,7 +50,7 @@ namespace mm {
 /// @card IrService.png
 class IrService : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Service; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Service; }
 
     void defineControls() override {
         controls_.addPin("pin", pin_);
@@ -97,7 +97,7 @@ public:
         }
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (pin_ < 0) return;
         uint32_t code = 0;
         if (platform::irRead(static_cast<uint16_t>(pin_), code)) processCode(code);

@@ -18,7 +18,7 @@ using namespace mm;
 namespace {
 // A stand-in Service-role child (what Audio/IR are): the container accepts it by role.
 struct FakeService : MoonModule {
-    ModuleRole role() const override { return ModuleRole::Service; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Service; }
 };
 } // namespace
 

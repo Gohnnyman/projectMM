@@ -29,6 +29,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
+# Third-party code that lives inside our tree. Findings here are upstream's to fix.
+VENDORED = ("test/doctest.h",)
+
 # A diagnostic line: path:line:col: severity: message [check-name]
 #
 # The trailing bracket can hold MORE than the check name: with WarningsAsErrors set, clang-tidy
@@ -137,7 +140,10 @@ def run(build_dir, check_filter=None, tu_regex=None):
         d = m.groupdict()
         d["check"] = d["check"].split(",")[0]      # drop the `,-warnings-as-errors` suffix
         # Our code only: a TU drags in SDK and vendored headers we neither own nor fix.
-        if not d["file"].startswith(("src/", "test/")):
+        # test/doctest.h is vendored too — it sits under test/ but is upstream's single-header
+        # release, so its findings (4 NewDeleteLeaks + a garbage-value read) are not ours to act
+        # on and would never reach zero.
+        if not d["file"].startswith(("src/", "test/")) or d["file"] in VENDORED:
             continue
         # A header analysed via N translation units yields N identical diagnostics.
         key = (d["file"], d["line"], d["col"], d["check"])

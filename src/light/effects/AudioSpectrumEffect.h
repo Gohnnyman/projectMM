@@ -34,7 +34,7 @@ public:
         controls_.addSelect("colorMode", colorMode, kColorOptions, 2);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

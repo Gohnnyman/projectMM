@@ -62,7 +62,7 @@ public:
 
     void addModule(MoonModule* mod);
     void setup();
-    void tick();
+    void tick() MM_NONBLOCKING;
     void release();
 
     uint32_t elapsed() const;

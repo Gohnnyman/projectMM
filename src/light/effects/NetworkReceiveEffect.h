@@ -85,7 +85,7 @@ public:
         staging_.resize(static_cast<size_t>(nrOfLights()) * channelsPerLight());
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!staging_) return;
         // Bounded non-blocking drain per socket: 128 packets ≈ one full ArtNet
         // frame for ~21k RGB lights; a flood costs at most 3×128 recvfrom calls

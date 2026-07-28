@@ -66,12 +66,11 @@ public:
         }
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!stars_) return;
 
         const lengthType w = width();
         const lengthType h = height();
-        if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;
 
         // Throttle: pause when speed==0, else advance at most once per 1000/speed ms.
         if (speed == 0) return;

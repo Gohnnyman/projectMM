@@ -65,7 +65,7 @@ class Layer; // forward declaration (defined in light/layers/Layer.h, included a
 /// https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
 class EffectBase : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Effect; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Effect; }
 
     /// Which axes the effect *iterates* — a claim, not a guarantee about the layer.
     ///

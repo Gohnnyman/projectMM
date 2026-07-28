@@ -42,7 +42,28 @@ if(MSVC)
     # Static MSVC runtime so the Windows binary doesn't need vcredist.
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 else()
-    add_compile_options(-Wall -Wextra -Werror)
+    # Tier zero on top of -Wall -Wextra: five warnings that catch real defects the base set
+    # misses. -Wdouble-promotion is the one that earns its place here specifically — the Xtensa
+    # has no FPU, so an accidental float->double promotion is a silent softfloat call in the
+    # render path, and it enforces the integer-math rule the coding standards ask for.
+    # (GCC/Clang only; the MSVC branch above uses /W4 /WX, which has no direct equivalents.)
+    add_compile_options(-Wall -Wextra -Werror
+                        -Wshadow -Wnon-virtual-dtor -Wdouble-promotion
+                        -Wimplicit-fallthrough -Wnull-dereference)
+
+    # Hot-path discipline, enforced by the compiler. MM_NONBLOCKING marks tick/tick20ms/tick1s
+    # (platform.h); -Wfunction-effects then checks TRANSITIVELY that nothing they reach
+    # allocates or blocks, through the whole call graph. Clang 20+ only; the flag does not
+    # exist on GCC, so the ESP32 build gets no hot-path check — src/platform/esp32/ is
+    # analysed only where the desktop build reaches it (docs/testing.md § Static analysis).
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 20)
+        # -Wno-error is PERMANENT, not a stepping stone: this is a report, not a gate. The
+        # findings are real and frozen in docs/metrics/hotpath-baseline.txt as architecture
+        # work; failing the build on them would block every other gate, and a new one may be
+        # legitimate (a driver that must wait on hardware). The clang-hotpath card reports
+        # what is NEW; a human judges it.
+        add_compile_options(-Wfunction-effects -Wno-error=function-effects)
+    endif()
 endif()
 
 # `uv` is the project's Python launcher (see CLAUDE.md / moondeck/MoonDeck.md).

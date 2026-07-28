@@ -30,7 +30,7 @@ public:
         controls_.addUint8("fade", fade, 0, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         Buffer& buf = layer()->buffer();
         const nrOfLightsType n = nrOfLights();
         const uint8_t cpl = buf.channelsPerLight();

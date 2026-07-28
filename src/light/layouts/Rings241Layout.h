@@ -52,7 +52,7 @@ public:
         // Shared centre — MoonLight: leftMargin = 1.1 * getRadius(60), assigned to
         // a uint8_t (implicit truncation), stored as ringCenter's integer x/y, then
         // scaled per LED: x = scale * ringCenter.x.
-        const uint8_t leftMargin = static_cast<uint8_t>(1.1 * getRadius(60));
+        const uint8_t leftMargin = static_cast<uint8_t>(1.1f * getRadius(60));
 
         nrOfLightsType idx = 0;
         // Rings emitted smallest-to-largest, the same order MoonLight calls

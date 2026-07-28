@@ -154,7 +154,7 @@ def measure_tests():
 
 
 def measure_complexity():
-    """Complexity, the number lizard owns (plan § one rule, one owner).
+    """Complexity, the number lizard owns (docs/testing.md § Static analysis).
 
     Deliberately the RAW count, not the baselined one: the gate (check_lizard.py) subtracts
     whitelizard.txt so it fails only on new violations, but the TREND has to see the whole

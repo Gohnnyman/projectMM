@@ -45,7 +45,7 @@ public:
     std::vector<Call> calls;              // transmit/wait order, in call sequence
 
     // --- LedPeripheral hooks (mock, host-only) ---
-    uint8_t lanesAvailable() const override { return 8; }   // pretend this chip has lanes
+    uint8_t lanesAvailable() const MM_NONBLOCKING override { return 8; }   // pretend this chip has lanes
     bool powerOfTwoBus() const override { return false; }
     bool loopbackFullWidth() const override { return false; }
     // The mock bus is memory, not a peripheral, so it can host the 74HCT595 expander — which is what
