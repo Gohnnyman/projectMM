@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_clang_query  # noqa: E402  — the module→files resolver, one owner
+import check_clang_tidy   # noqa: E402  — build-dir resolution, one owner
 
 # `path:line:col: warning: <msg> [-Wfunction-effects]`
 _WARN = re.compile(r"^(?P<file>\S+?):(?P<line>\d+):(?P<col>\d+): warning: "
@@ -44,6 +45,10 @@ _NOTE = re.compile(r"note: function cannot be inferred 'nonblocking' because it 
                    r"(?:calls non-'nonblocking' function '(?P<via>[^']+)'|(?P<reason>.+))")
 
 MAX_ROWS = 40
+
+# Shown when clang gave no root cause (a leaf it could not look inside). Named rather than
+# inlined: a backslash escape inside an f-string EXPRESSION is a syntax error before 3.12.
+NO_CAUSE = "\u2014"
 
 # The enclosing method of a call site. Clang names the call and the callee but NOT the function
 # they sit in, and that is the column that says which tick tier is affected — tick() every frame
@@ -75,11 +80,24 @@ def enclosing_function(rel_path, line, _cache={}):
 
 
 def build_output(build_dir):
-    """A full rebuild's warnings. `--clean-first` because an incremental build only recompiles
-    what changed, and a cached TU prints nothing — which would read as "no findings"."""
+    """A full rebuild's warnings, or None if the build failed.
+
+    `--clean-first` because an incremental build only recompiles what changed, and a cached TU
+    prints nothing — which would read as "no findings". Likewise a FAILED build produces partial
+    output: returning it would report a small number as if the tree were nearly clean, the same
+    silent-zero trap the other checks guard against.
+    """
     proc = subprocess.run(["cmake", "--build", str(build_dir), "--clean-first"],
                           cwd=ROOT, capture_output=True, text=True)
-    return proc.stdout + proc.stderr
+    out = proc.stdout + proc.stderr
+    if proc.returncode != 0:
+        errs = [l for l in out.splitlines() if ": error:" in l]
+        print(f"Build FAILED (exit {proc.returncode}) — findings would be incomplete.",
+              file=sys.stderr)
+        for l in errs[:5]:
+            print(f"  {l.replace(str(ROOT) + '/', '')}", file=sys.stderr)
+        return None
+    return out
 
 
 def collect(out):
@@ -124,13 +142,16 @@ def main():
     ap.add_argument("--module", help="Only findings in this module's source files.")
     args = ap.parse_args()
 
-    build_dir = check_clang_query.check_clang_tidy._host_build_dir()
+    build_dir = check_clang_tidy._host_build_dir()
     if not (build_dir / "CMakeCache.txt").exists():
         print(f"No build in {build_dir.relative_to(ROOT)} — run "
               f"`uv run moondeck/build/build_desktop.py` first.", file=sys.stderr)
         return 2
 
-    rows = collect(build_output(build_dir))
+    out = build_output(build_dir)
+    if out is None:
+        return 2
+    rows = collect(out)
 
     if args.module:
         only = check_clang_query.module_files(args.module)
@@ -147,7 +168,8 @@ def main():
         return 0
 
     # Split by tick tier: tick() runs every frame, tick1s() once a second, so the same blocking
-    # call costs three orders of magnitude more in one than the other. Pooling them hides that.
+    # call costs roughly two orders of magnitude more in one than the other (50/s vs 1/s).
+    # Pooling them hides that.
     def tier_of(r):
         return r["fn"] if r["fn"] in TIERS else "other"
 
@@ -166,9 +188,10 @@ def main():
         print(f"  {'CALLS':<{callee_w}}  {'IN':<{fn_w}}  {'WHY IT BLOCKS':<{why_w}}  FILE:LINE")
         print(f"  {'-' * callee_w}  {'-' * fn_w}  {'-' * why_w}  {'-' * loc_w}")
         for r in subset[:MAX_ROWS]:
+            why = r["why"] or NO_CAUSE
             print(f"  {clip(r['callee'], callee_w):<{callee_w}}  "
                   f"{clip(r['fn'] or '?', fn_w):<{fn_w}}  "
-                  f"{clip(r['why'] or '\u2014', why_w):<{why_w}}  "
+                  f"{clip(why, why_w):<{why_w}}  "
                   f"{r['file']}:{r['line']}")
         if len(subset) > MAX_ROWS:
             print(f"  \u2026 {len(subset) - MAX_ROWS} more. Use --module <name> to scope.")

@@ -131,7 +131,7 @@ Each step is independent and revertible. **✅ done · ◻ not started · ◐ pa
 
    Four things the estimate got wrong, all measured:
    - **Not three lines.** A bare attribute gives 209 findings; annotating five platform
-     functions collapses it to 10. The bulk were unannotated helpers, not violations. Threading
+     functions collapses it to 10. The bulk of the findings were unannotated helpers, not violations. Threading
      the attribute through every override touched ~85 files.
    - **The ESP32 is GCC** — no attribute, no warning, and `-Werror` + `-Wattributes` means a
      bare attribute breaks the firmware build. Hence the macro (empty on GCC, the
@@ -150,8 +150,8 @@ Each step is independent and revertible. **✅ done · ◻ not started · ◐ pa
      pointer; the attribute had to go in the POINTER TYPE, or every module's tick escaped the
      check. Passing an unannotated method is now a compile error.
 
-   Findings split by tier (the card reports them separately, since the cost differs by three
-   orders of magnitude): **70 on `tick()`**, 6 on `tick20ms()`, 95 on `tick1s()`, 10 unresolved.
+   Findings split by tier (the card reports them separately, since the cost differs by
+   roughly two orders of magnitude): **70 on `tick()`**, 6 on `tick20ms()`, 95 on `tick1s()`, 10 unresolved.
    The sharp ones are UDP `sendTo`/`recvFrom` in `AudioService::tick` — socket I/O every frame.
    The bulk is `snprintf` ×20 (bounded, wants one policy call) and 11 static locals (a guard
    variable + one-time lock on first use, a genuine violation).

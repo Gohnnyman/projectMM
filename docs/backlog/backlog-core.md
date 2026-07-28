@@ -341,6 +341,55 @@ Fix options: (a) make every live mutate scenario clear+rebuild its own canvas (c
 
 ## Housekeeping
 
+### Hot path: move blocking work off the render callbacks (architecture)
+
+`-Wfunction-effects` proves the render path really does block — these are not annotation gaps,
+they are synchronous I/O, allocation and lifecycle work reachable from `tick()`. Each needs the
+work moved to a worker or made resumable, so each is a design change rather than a lint fix.
+Confirmed by external review (CodeRabbit, PR #56).
+
+**`tick()` — every frame, the sharp ones:**
+- `PreviewDriver::tick` — `sendFrame()` writes a socket synchronously; `buildAndSendCoordTable()`
+  resizes `keptIdx_`. Currently suppressed at the site with the reason.
+- `ParallelLedDriver::tick` — `tickSync()`/`tickRing()` reach `busWaitIfBusy()`, which spins for
+  the DMA peripheral. Deliberate (the driver owns the bus for the frame) but blocking. Suppressed.
+- `Drivers::tick` — joins/stops the render-split worker synchronously on the timed-out recovery
+  path. Wants asynchronous handling that still preserves buffer ownership.
+- `HueDriver::tick` / `tick1s` — synchronous HTTP (`pushOneChangedLight`, `pollPairing`,
+  `fetchLights`, `fetchGroups`) plus allocation. Wants a queue to a worker.
+- `Layer::tick` — calls `applyState()` on a modifier rebuild, which runs prepare/release and
+  resizes ScratchBuffers. Wants the rebuild deferred to the scheduler's non-render prepare path,
+  keeping today's coalescing of `consumeNeedsRebuild()`.
+- `DemoReelEffect::tick` — `advance()`/`swapTo()` create, delete and `applyState()` child effects
+  from the render callback. Wants a pending-switch flag consumed off-tick.
+- `NetworkSendDriver::tick` — sends inline; wants to enqueue.
+- `RmtLedDriver::tick` — waits on hardware completion and reset; wants polling or offload.
+- `AudioService::tick` — UDP `sendTo`/`recvFrom` every frame (`syncSend`, `syncReceive`,
+  `syncEnsureSocket`).
+
+**`tick20ms()` / `tick1s()` — milder, same shape:**
+- `HttpServerModule::tick20ms` — inline `handleConnection` transport work, so the 100 ms budget
+  cannot actually bound it. Wants resumable connection handling. `tick1s` writes WLED state
+  frames inline; wants the existing resumable sender.
+- `MqttModule::tick1s` — synchronous DNS + discovery-buffer allocation.
+- `NetworkModule::tick1s` — WiFi/AP lifecycle transitions and tree rebuilds.
+- `FilesystemModule::tick1s` — the debounced `flush()` does filesystem work; the poll itself is
+  fine, the save wants a worker.
+- `FileManagerModule::tick1s` — `platform::filesystemUsed()`; wants a cached value.
+- `SystemModule::tick1s` — the P4 `coprocessorWifi()` path calls
+  `esp_hosted_get_coprocessor_fwversion()` synchronously; wants a cached snapshot.
+- `ImprovProvisioningModule::tick` — runs the queued APPLY_OP inline; wants a cold task to
+  execute and publish only the result.
+- `Scheduler::tick` — dispatches all of the above, so its own contract is only as good as theirs.
+
+**Explicitly NOT in scope:** the float-math findings (`BouncingBallsEffect`, `RipplesEffect`,
+`SphereMoveEffect`). Review suggested fixed-point, but the float trajectory IS the ported
+MoonLight behaviour and fidelity is deliberate. If the FPU-less Xtensa cost is real, that is a
+profiling question first, not a lint fix.
+
+Until this lands, `-Wfunction-effects` carries `-Wno-error` and `check_hotpath.py` stays as the
+enforcing gate.
+
 ### Hot path: triage the 181 -Wfunction-effects findings, then delete check_hotpath.py
 
 `MM_NONBLOCKING` + `-Wfunction-effects` (the "clang-hotpath" card) checks hot-path discipline

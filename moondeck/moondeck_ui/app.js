@@ -377,6 +377,7 @@ function renderScripts() {
                     <span class="status-dot" data-id="${script.id}"></span>
                     <span class="label">${script.label}</span>
                     ${speedBadge(script.speed)}
+                    <button class="log-btn" title="Show this script's last run">📄</button>
                     <button class="help-btn" title="Help">?</button>
                     <button class="run-btn" data-id="${script.id}">Run</button>
                 </div>
@@ -487,6 +488,26 @@ function renderScripts() {
 
             card.querySelector(".run-btn").addEventListener("click", (e) => {
                 runScript(script, e.target);
+            });
+
+            // Its own button rather than a click on the status dot: the dot is a status
+            // INDICATOR, and making it secretly clickable gave a new reader no way to guess the
+            // feature existed. The server tees every stream to build/moondeck-logs/<id>.log, so
+            // this answers "what did this do last time" after a page reload or a switch to
+            // another card — the case a live-only stream cannot.
+            card.querySelector(".log-btn").addEventListener("click", async () => {
+                switchPane("log");
+                try {
+                    const r = await fetch(`/api/log/${script.id}`);
+                    if (!r.ok) {
+                        appendLog(`— no stored run for ${script.label} —`);
+                        return;
+                    }
+                    logEl.textContent = "";
+                    appendLog(await r.text());
+                } catch (err) {
+                    appendLog(`— could not read log: ${err} —`);
+                }
             });
 
             target.appendChild(card);

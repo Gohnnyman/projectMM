@@ -549,6 +549,15 @@ public:
     /// buffer + correction. (The double-buffer defaults ON — it overlaps the blocking wire wait and
     /// lifted the P4 whole-board rate 48→76 fps; OFF is the sound-reactive 0-latency opt-out and pays
     /// for exactly one buffer — see the doubleBuffer control + docs/history/lessons.md.)
+    // NOT nonblocking, and the annotation would assert otherwise: tickSync()/tickRing() reach
+    // busWaitIfBusy(), which spins until the DMA peripheral is free. That wait is deliberate —
+    // the driver owns the bus for the frame — but it IS blocking, so the check is suppressed
+    // here rather than the code claiming a property it does not have. Moving the wait off the
+    // render path is backlogged (backlog-core: hot path).
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfunction-effects"
+#endif
     void tick() MM_NONBLOCKING override {
         if (!peripheral_ || peripheral_->lanesAvailable() == 0) return;  // no backend / inert off this chip
         // Loopback mode owns the peripheral EXCLUSIVELY. While it is on, the render loop must not
@@ -576,6 +585,9 @@ public:
         if (peripheral_->busBuffer(1)) tickAsync(outCh);   // double-buffer (doubleBuffer ON)
         else                           tickSync(outCh);    // synchronous (doubleBuffer OFF / no 2nd buf)
     }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
     // Synchronous single-buffer path — the ORIGINAL tick, verbatim: encode buffer 0, transmit, wait
     // right here. One DMA buffer, no alternation, no deferred-wait bookkeeping, 0 added latency. This

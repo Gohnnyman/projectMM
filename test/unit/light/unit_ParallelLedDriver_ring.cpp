@@ -53,7 +53,7 @@ class MockRingDriver;   // forward decl — the peripheral's ring hooks call bac
 // MoonI80Peripheral::ringEncodeTrampoline does.
 class MockRingPeripheral : public mm::LedPeripheral {
 public:
-    uint8_t lanesAvailable() const override { return 8; }   // 8 data lines (an 8-bit bus)
+    uint8_t lanesAvailable() const MM_NONBLOCKING override { return 8; }   // 8 data lines (an 8-bit bus)
     bool powerOfTwoBus() const override { return true; }
     bool loopbackFullWidth() const override { return false; }
     bool supportsPinExpander() const override { return true; }
@@ -103,7 +103,7 @@ public:
         for (auto& f : needsPrefill_) f = true;
         return true;
     }
-    bool busIsRing() const override { return ringActive_; }
+    bool busIsRing() const MM_NONBLOCKING override { return ringActive_; }
     bool busTransmitRing() override { return true; }   // the wire itself is the platform's; the encode is what we test
 
     // Replay one frame through the ring exactly as the platform does: prime the first min(N, needed)

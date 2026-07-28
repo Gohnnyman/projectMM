@@ -196,6 +196,20 @@ select {
     cursor: default;
 }
 
+/* Replays this script's last run. Same shape as the `?` next to it — an emoji alone would be
+   ambiguous, but a button with a tooltip in a row that already has one reads as a control. */
+.script-card .log-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    padding: 1px 4px;
+    border-radius: 3px;
+    opacity: 0.6;
+}
+.script-card .log-btn:hover { opacity: 1; background: #0f3460; }
+
 .script-card .help-btn {
     background: transparent;
     border: none;

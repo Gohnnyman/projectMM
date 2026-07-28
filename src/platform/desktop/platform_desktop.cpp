@@ -109,8 +109,14 @@ void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed);
 // any platform we build for. libc++ does not annotate it, so -Wfunction-effects has to assume
 // the worst; this is the standard-library gap, not ours. Scoped to the two clock readers, and
 // desktop-only (the ESP32 millis/micros call esp_timer_get_time directly).
+// #ifdef-guarded: `#pragma clang ...` is an UNKNOWN PRAGMA to GCC, and the CI sanitizer lanes
+// build with GCC + -Werror, so an unguarded clang pragma fails the build there. (`#pragma GCC`
+// would be understood by both, but -Wfunction-effects is a clang-only warning, so the pragma
+// must be clang-only too.)
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wfunction-effects"
+#endif
 uint32_t millis() MM_NONBLOCKING {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
     if (override_) return override_;
@@ -126,7 +132,9 @@ uint32_t micros() MM_NONBLOCKING {
         std::chrono::duration_cast<std::chrono::microseconds>(now - startTime).count()
     );
 }
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
 void* alloc(size_t bytes) {
     return std::malloc(bytes);

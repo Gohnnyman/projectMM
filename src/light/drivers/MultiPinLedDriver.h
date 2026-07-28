@@ -94,7 +94,7 @@ public:
     /// inert-on-wrong-chip guards key off it. Reads whichever backend the silicon has —
     /// `lcdLanes` (LCD_CAM, S3/P4/S31) or `i2sLanes` (I2S-i80, classic ESP32) — which are mutually
     /// exclusive per chip (at most one is non-zero), so the sum picks the right one.
-    uint8_t lanesAvailable() const override { return platform::lcdLanes + platform::i2sLanes; }
+    uint8_t lanesAvailable() const MM_NONBLOCKING override { return platform::lcdLanes + platform::i2sLanes; }
     bool powerOfTwoBus() const override { return true; }   // the BUS rounds to 8/16; the pin count is free
 
     /// Whole-frame DMA byte budget. On the classic ESP32 the i80 is the I2S peripheral: its DMA is

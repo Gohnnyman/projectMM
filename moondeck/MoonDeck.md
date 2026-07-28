@@ -9,6 +9,7 @@ Below: the UI behaviours common to every card, described once, then one section 
 ## UI Features
 
 - **Status dots** on each card: grey (not run), orange (running), green (exit 0), red (exit non-zero).
+- **Last-run log** — the **📄** button on each card replays that script's last run in the log pane. Every run is teed to `build/moondeck-logs/<id>.log` as it streams (not buffered to the end, so a run you Stop still leaves what it printed), which answers "what did this do last time" after a page reload or a switch to another card — the case a live-only stream cannot. One file per script, overwritten each run: a last-run record, not a history. Gitignored, being derived state.
 - **Run/Stop toggle** for long-running scripts (Run desktop, Monitor ESP32).
 - **Duration hint** — every card shows how long it takes: ⚡ about a second, ⏱️ a few seconds up to ~30, 🐌 more than 30 seconds (a build, a flash, a gate list, clang-tidy). All three are shown rather than only the extremes, so a blank badge reads as "nobody set a speed on this card" instead of being confused with medium. Set per script as `"speed": "instant" | "medium" | "slow"` in `moondeck_config.json`. This is a *label*, not a timeout — nothing enforces it, so a script that grows slower needs its flag updated by hand. Separate from `long_running`, which controls the Run/Stop toggle rather than expected duration.
 - **Group headers** in the sidebar (setup, build, flash, run, test, check, scenario).
@@ -343,8 +344,8 @@ is a hole the check cannot reason about, and passing an unannotated method now f
 Reports unique **sites**: a header included by N translation units emits the same warning N
 times, so a raw build prints ~1350 lines for ~180 real findings.
 
-**Split by tick tier**, because the same blocking call costs three orders of magnitude more in
-one than another: `tick()` runs every frame, `tick20ms()` fifty times a second, `tick1s()` once.
+**Split by tick tier**, because the same blocking call costs roughly two orders of magnitude
+more in one than another: `tick()` runs every frame, `tick20ms()` fifty times a second, `tick1s()` once.
 Pooling them hides which findings actually matter. `OTHER` is a site whose enclosing method could
 not be resolved from source.
 

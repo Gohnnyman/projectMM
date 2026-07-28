@@ -50,6 +50,11 @@ public:
 class SlowDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer*) override {}
+    // DELIBERATELY blocking, despite MM_NONBLOCKING: the mutex and timed wait ARE the test.
+    // They hold the use-after-free window open on demand, which is the only way to observe
+    // the race this file pins. The annotation is inherited from MoonModule::tick and cannot
+    // be dropped without breaking the override, so clang-hotpath will report these lines —
+    // that report is correct and expected here.
     void tick() MM_NONBLOCKING override {
         {
             std::unique_lock<std::mutex> lk(m);

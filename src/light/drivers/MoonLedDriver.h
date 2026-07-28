@@ -256,7 +256,7 @@ public:
     /// LCD_CAM lanes on this chip (0 = none, and then the orchestrator's guards make the driver inert).
     /// Unlike the sibling this does NOT add `i2sLanes`: the classic ESP32's i80 is the I2S peripheral,
     /// which this backend does not implement.
-    uint8_t lanesAvailable() const override { return platform::lcdLanes; }
+    uint8_t lanesAvailable() const MM_NONBLOCKING override { return platform::lcdLanes; }
     /// The i80 bus width is 8 or 16 — a hardware fact (`lcd_ll_set_data_wire_width` takes nothing else).
     /// The PIN count stays free: configure only the pins that drive something and the orchestrator rounds
     /// the bus up around them, parking the spare lanes on WR (which the peripheral already drives, and
@@ -547,7 +547,7 @@ public:
     }
     /// Did the bus actually come up as a ring? The orchestrator routes tick() on this, so it reports what
     /// the platform BUILT, not what was asked for — a ring that would not fit falls back to whole-frame.
-    bool busIsRing() const override { return platform::moonI80Ws2812IsRing(bus_); }
+    bool busIsRing() const MM_NONBLOCKING override { return platform::moonI80Ws2812IsRing(bus_); }
 
     /// The platform's `MoonI80EncodeFn` seam: a plain function pointer (there is no virtual hook for it),
     /// so this static trampoline recovers `this` from `user` and encodes one slice into the ring buffer the

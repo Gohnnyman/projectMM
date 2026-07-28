@@ -401,10 +401,16 @@ size_t flashChipSize() {
 
 static const char* NET_TAG = "mm_net";
 
-// Connection state tracked by event handlers
+// Connection state tracked by event handlers.
+//
+// ATOMIC because these cross threads: the IDF event loop writes them, the render task reads
+// them through ethLinkUp()/ethConnected() every tick. A plain bool there is a data race — benign
+// in practice on this target, but undefined behaviour the compiler may fold or reorder, and
+// TSan reports it. Relaxed ordering is enough: each flag is an independent state signal, nothing
+// else is published through them.
 #ifndef MM_NO_ETH
-static bool ethLinkUp_ = false;
-static bool ethConnected_ = false;
+static std::atomic<bool> ethLinkUp_{false};
+static std::atomic<bool> ethConnected_{false};
 // Static-addressing state for Ethernet, so the CONNECTED handler restores the static IP on a
 // re-plug instead of letting IDF's per-link-up DHCP-client restart pull a lease. Set by
 // netSetStaticIPv4(Eth) (which stores the octets), cleared by netSetDhcp(Eth).
@@ -474,8 +480,9 @@ static void applyHostname(esp_netif_t* netif) {
 }
 
 #ifndef MM_NO_WIFI
-// WiFi-only state — absent in the Ethernet-only build.
-static bool wifiStaConnected_ = false;
+// WiFi-only state — absent in the Ethernet-only build. Atomic for the same reason as the eth
+// pair: written by the IDF event loop, read from the render task.
+static std::atomic<bool> wifiStaConnected_{false};
 static bool wifiApActive_ = false;
 // L2 association state, distinct from wifiStaConnected_ (which means "has an IP"): true between
 // WIFI_EVENT_STA_CONNECTED and _DISCONNECTED. A static STA is reachable once associated (no DHCP
@@ -510,7 +517,7 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
     if (base == ETH_EVENT) {
         if (id == ETHERNET_EVENT_CONNECTED) {
             ESP_LOGI(NET_TAG, "Ethernet link up");
-            ethLinkUp_ = true;
+            ethLinkUp_.store(true, std::memory_order_relaxed);
             if (ethStatic_.load(std::memory_order_acquire)) {
                 // Static mode: do NOT let the DHCP client restart on this link-up (applyHostname
                 // would) — that is what made a re-plugged cable grab a DHCP lease instead of the
@@ -528,16 +535,16 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
                 applyHostname(ethNetif_);
             }
         } else if (id == ETHERNET_EVENT_DISCONNECTED) {
-            ethLinkUp_ = false;
+            ethLinkUp_.store(false, std::memory_order_relaxed);
             ESP_LOGI(NET_TAG, "Ethernet link down");
-            ethConnected_ = false;
+            ethConnected_.store(false, std::memory_order_relaxed);
         } else if (id == ETHERNET_EVENT_START) {
             ESP_LOGI(NET_TAG, "Ethernet started");
         }
     } else if (base == IP_EVENT && id == IP_EVENT_ETH_GOT_IP) {
         auto* event = static_cast<ip_event_got_ip_t*>(data);
         ESP_LOGI(NET_TAG, "Ethernet got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        ethConnected_ = true;
+        ethConnected_.store(true, std::memory_order_relaxed);
     }
 }
 
@@ -860,8 +867,8 @@ void ethStop() {
 #ifdef MM_ETH_W5500
     if (ethSpiActive_) { spi_bus_free(SPI2_HOST); ethSpiActive_ = false; }
 #endif
-    ethLinkUp_ = false;
-    ethConnected_ = false;
+    ethLinkUp_.store(false, std::memory_order_relaxed);
+    ethConnected_.store(false, std::memory_order_relaxed);
 }
 
 bool ethInit() {
@@ -886,11 +893,11 @@ bool ethInit() {
 }
 
 bool ethLinkUp() MM_NONBLOCKING {
-    return ethLinkUp_;
+    return ethLinkUp_.load(std::memory_order_relaxed);
 }
 
 bool ethConnected() MM_NONBLOCKING {
-    return ethConnected_;
+    return ethConnected_.load(std::memory_order_relaxed);
 }
 
 void ethGetIPv4(uint8_t out[4]) {
@@ -936,7 +943,7 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                 netSetStaticIPv4(NetIface::Sta, staStaticIp_, staStaticGw_, staStaticMask_, staStaticDns_);
             }
         } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
-            wifiStaConnected_ = false;
+            wifiStaConnected_.store(false, std::memory_order_relaxed);
             wifiStaAssociated_ = false;
             // **The reconnect must be explicit — IDF does not do it for us.** Without this
             // esp_wifi_connect(), a dropped association is permanent: the device keeps rendering but
@@ -974,7 +981,7 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto* event = static_cast<ip_event_got_ip_t*>(data);
         ESP_LOGI(NET_TAG, "WiFi STA got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        wifiStaConnected_ = true;
+        wifiStaConnected_.store(true, std::memory_order_relaxed);
     }
 }
 
@@ -1096,7 +1103,7 @@ bool wifiStaInit(const char* ssid, const char* password) {
 }
 
 bool wifiStaConnected() MM_NONBLOCKING {
-    return wifiStaConnected_;
+    return wifiStaConnected_.load(std::memory_order_relaxed);
 }
 
 void wifiStaGetIPv4(uint8_t out[4]) {
@@ -1121,14 +1128,14 @@ void wifiStaStop() {
         esp_netif_destroy_default_wifi(staNetif_);
         staNetif_ = nullptr;
     }
-    wifiStaConnected_ = false;
+    wifiStaConnected_.store(false, std::memory_order_relaxed);
     wifiInitDone_ = false;
     wifiStaStopping_.store(false, std::memory_order_relaxed);   // a later wifiStaInit() reconnects normally
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
 }
 
 int wifiStaRssi() {
-    if (!wifiStaConnected_) return 0;
+    if (!wifiStaConnected_.load(std::memory_order_relaxed)) return 0;
     wifi_ap_record_t info{};
     if (esp_wifi_sta_get_ap_info(&info) != ESP_OK) return 0;
     return info.rssi;
@@ -1136,13 +1143,13 @@ int wifiStaRssi() {
 
 void wifiStaBssid(uint8_t out[6]) {
     std::memset(out, 0, 6);
-    if (!wifiStaConnected_) return;
+    if (!wifiStaConnected_.load(std::memory_order_relaxed)) return;
     wifi_ap_record_t info{};
     if (esp_wifi_sta_get_ap_info(&info) == ESP_OK) std::memcpy(out, info.bssid, 6);
 }
 
 int wifiStaChannel() {
-    if (!wifiStaConnected_) return 0;
+    if (!wifiStaConnected_.load(std::memory_order_relaxed)) return 0;
     wifi_ap_record_t info{};
     if (esp_wifi_sta_get_ap_info(&info) != ESP_OK) return 0;
     return info.primary;
@@ -1345,7 +1352,7 @@ void netSetStaticIPv4(NetIface iface, const uint8_t ip[4], const uint8_t gw[4],
         // Mark connected only if the link is actually up — else a static apply racing a cable pull
         // would leave ethConnected() true on a dead link (the state machine would sit in ConnectedEth
         // instead of cascading). On a genuine link-up the CONNECTED handler re-applies + sets it.
-        if (ethLinkUp_) ethConnected_ = true;
+        if (ethLinkUp_) ethConnected_.store(true, std::memory_order_relaxed);
     }
 #endif
 #ifndef MM_NO_WIFI
@@ -1360,7 +1367,7 @@ void netSetStaticIPv4(NetIface iface, const uint8_t ip[4], const uint8_t gw[4],
         // — the very case static addressing exists for. So mark connected here (the IP is applied);
         // WIFI_EVENT_STA_CONNECTED re-applies on a reconnect. Only when the STA is actually
         // associated, so a static apply while the radio is down doesn't fake a connection.
-        if (wifiStaAssociated_) wifiStaConnected_ = true;
+        if (wifiStaAssociated_) wifiStaConnected_.store(true, std::memory_order_relaxed);
     }
 #endif
     ESP_LOGI(NET_TAG, "Static IPv4 set on %s: %u.%u.%u.%u",
@@ -1375,7 +1382,7 @@ void netSetDhcp(NetIface iface) {
 #ifndef MM_NO_ETH
     if (iface == NetIface::Eth) {
         ethStatic_.store(false, std::memory_order_release);   // link-up handler goes back to the DHCP hostname path
-        ethConnected_ = false;   // static forced this true; drop it so the state machine re-evaluates
+        ethConnected_.store(false, std::memory_order_relaxed);   // static forced this true; drop it so the state machine re-evaluates
                                  // (GOT_IP re-sets it on a lease). Else a Static→DHCP toggle on a
                                  // network that can't lease wedges in ConnectedEth at 0.0.0.0.
     }
@@ -1383,7 +1390,7 @@ void netSetDhcp(NetIface iface) {
 #ifndef MM_NO_WIFI
     if (iface == NetIface::Sta) {
         staStatic_.store(false, std::memory_order_release);   // stop re-pinning static on the next association
-        wifiStaConnected_ = false;  // static forced this true; GOT_IP re-sets it once DHCP leases
+        wifiStaConnected_.store(false, std::memory_order_relaxed);  // static forced this true; GOT_IP re-sets it once DHCP leases
     }
 #endif
     esp_netif_dhcpc_start(netif);   // ignore ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED

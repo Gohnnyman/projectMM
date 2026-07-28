@@ -129,6 +129,14 @@ public:
     /// The frame rate self-limits to what the link sustains (sheds rate first, then
     /// spatial resolution via adaptive downscale), so a large grid never stalls the
     /// loop or tears — it always delivers a complete frame.
+    // NOT nonblocking: sendFrame() writes to a socket and buildAndSendCoordTable() resizes
+    // keptIdx_. Both are real, both are on the render path, and both are backlogged
+    // (backlog-core: hot path). Suppressed here so the annotation does not assert a property
+    // this method does not have.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfunction-effects"
+#endif
     void tick() MM_NONBLOCKING override {
         if (fps == 0) return;
         uint32_t now = platform::millis();
@@ -216,6 +224,9 @@ public:
             }
         }
     }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
     /// Build (or rebuild) the cached coordinate table from the layout's real lights
     /// and broadcast it (the `0x03` message). Above the point cap — `min(display,

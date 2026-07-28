@@ -33,7 +33,7 @@ public:
 
     /// The number of Parlio lanes this chip provides (0 = not this chip); the orchestrator's
     /// inert-on-wrong-chip guards key off it.
-    uint8_t lanesAvailable() const override { return platform::parlioLanes; }
+    uint8_t lanesAvailable() const MM_NONBLOCKING override { return platform::parlioLanes; }
     bool powerOfTwoBus() const override { return false; }   // 1..16 lanes all valid
     // Parlio builds a 1-lane private unit for the loopback, so the loopback frame stays 8-bit
     // regardless of the operational bus width (unlike i80, which needs a full-width bus).
