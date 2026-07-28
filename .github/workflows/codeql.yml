@@ -19,21 +19,17 @@ name: CodeQL
 # Free on public repos, so the cost is wall-clock only.
 
 on:
-  # Push-triggered on the POC branch, deliberately.
+  # NOT A GATE: no `pull_request` trigger, so it cannot block a merge. The reasoning is
+  # docs/testing.md § Static analysis, which every analyser here follows. The Security tab
+  # keeps the open/fixed alert lifecycle, which is the baselining we would otherwise build.
   #
-  # `workflow_dispatch` alone would NOT work here: GitHub only offers the "Run workflow"
-  # button for workflows that exist on the DEFAULT branch, and this one lives on
-  # next-iteration until the POC is judged. A push trigger is the only way to get a first
-  # result without merging an unevaluated workflow into main.
-  #
-  # NOT A GATE — settled, not provisional. It does not run on pull_request, so it cannot
-  # block a merge. Same rule as clang-tidy and the hot-path check: a report states what it
-  # finds and consumers decide what to do about it. Gating on a scanner nobody can satisfy
-  # gets the scanner disabled rather than obeyed, and it pushes people to dismiss alerts
-  # under time pressure — the opposite of why we run it. The Security tab keeps the
-  # open/fixed lifecycle, which is the baselining we would otherwise have to build.
+  # Both branches are listed on purpose. A workflow whose trigger names a branch nobody is
+  # pushing to runs never, and reports nothing while looking healthy — this job sat idle for
+  # two commits when the working branch was called `next` instead of `next-iteration`
+  # (docs/history/lessons.md). `main` keeps it firing once this branch is merged and retired.
   push:
     branches:
+      - main
       - next-iteration
     paths:
       # Only when C/C++ or the workflow itself changes — a docs commit has nothing new to

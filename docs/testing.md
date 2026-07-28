@@ -69,7 +69,7 @@ and cannot drift between two tools that half-agree:
 
 ### Verify a zero before believing it
 
-A analyser reporting "0 findings" is indistinguishable from one that read nothing, and every
+An analyser reporting "0 findings" is indistinguishable from one that read nothing, and every
 silent-failure mode below produced a plausible clean report rather than an error:
 
 | Defect | What it looked like |

@@ -330,7 +330,7 @@ uv run moondeck/check/check_nonblocking.py --module AudioService
 
 `MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` ([platform.h](../src/platform/platform.h)),
 and Clang 20+ verifies under `-Wfunction-effects` that nothing they reach allocates or blocks —
-**transitively**, through the whole call graph ([coding-standards.md](../docs/coding-standards.md#tests) owns the rule).
+**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/coding-standards.md#static-checks) owns the rule).
 
 The attribute is inherited by overrides, so three annotations cover every module's tick. It also
 sits in `tickChildren`'s **member-pointer type** — without that, the indirect call through `fn`
