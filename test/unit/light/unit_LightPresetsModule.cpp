@@ -15,7 +15,6 @@
 
 using mm::LightPresetsModule;
 using mm::Correction;
-using mm::ChannelRole;
 
 namespace {
 // The count of seeded read-only built-ins (see LightPresetsModule::seedBuiltins). Referenced by

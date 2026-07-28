@@ -20,8 +20,7 @@
 // engine: off = (z·h·w + y·w + x)·cpl. A pixel outside [0,w)×[0,h)×[0,d) is silently clipped, so
 // a line that runs off the grid just stops drawing — no out-of-bounds write (the robustness rule).
 
-namespace mm {
-namespace draw {
+namespace mm::draw {
 
 // One pixel, clipped to the grid. Writes R/G/B where channels fit (cpl may be 1..N); extra
 // channels (e.g. a W in RGBW) are left as-is — the driver derives white, same as effects do.
@@ -67,6 +66,9 @@ inline void line(Buffer& buf, Coord3D dims, Coord3D a, Coord3D b, RGB c, uint8_t
     const lengthType sz = b.z >= a.z ? 1 : -1;
 
     // Drive the loop off the longest axis; accumulate error toward the other two.
+    // The `if ((e = e - d) < 0)` step-and-test below is Bresenham's canonical form — the assignment
+    // inside the condition IS the algorithm, and splitting it reads worse than the textbook.
+    // NOLINTBEGIN(bugprone-assignment-in-if-condition)
     if (dx >= dy && dx >= dz) {
         lengthType ey = static_cast<lengthType>(dx / 2), ez = ey;
         for (;; p.x = static_cast<lengthType>(p.x + sx)) {
@@ -92,6 +94,7 @@ inline void line(Buffer& buf, Coord3D dims, Coord3D a, Coord3D b, RGB c, uint8_t
             if ((ey = static_cast<lengthType>(ey - dy)) < 0) { ey = static_cast<lengthType>(ey + dz); p.y = static_cast<lengthType>(p.y + sy); }
         }
     }
+    // NOLINTEND(bugprone-assignment-in-if-condition)
 }
 
 // --- Buffer read/modify helpers --------------------------------------------
@@ -260,5 +263,4 @@ inline lengthType text(Buffer& buf, Coord3D dims, const fonts::Font& font, const
     return onFirstLine ? static_cast<lengthType>(cx - x) : firstLineWidth;
 }
 
-}  // namespace draw
-}  // namespace mm
+}  // namespace mm::draw

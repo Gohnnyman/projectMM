@@ -309,7 +309,7 @@ TEST_CASE("ParallelLedDriver drives an N-channel (>4) correction without overflo
     CHECK(d.frameBytes() > 0);
     // The status reports the total channel count for a multi-channel fixture (lights × channels) —
     // the DMX-universe footprint the user sizes against, not just the light count.
-    CHECK(std::string(d.status()).find("(") != std::string::npos);   // "... (N channels)"
+    CHECK(std::string(d.status()).find('(') != std::string::npos);   // "... (N channels)"
     CHECK(std::string(d.status()).find("channels") != std::string::npos);
     peripheral.calls.clear();
     d.tick();

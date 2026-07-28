@@ -522,6 +522,9 @@ private:
     nrOfLightsType* keptIdx_ = nullptr;   // sparse layouts: kept lights' buffer indices, coord-table order
     nrOfLightsType keptIdxCap_ = 0, keptCount_ = 0;
 
+protected:
+    // Matches DriverBase's visibility — a private override would silently hide the hook from any
+    // future caller holding a DriverBase*. ParallelLedDriver keeps it protected for the same reason.
     /// This driver's heap = the base scratch + the two preview buffers (the resumable-send staging buffer
     /// and the kept-index cache). Both live only under resumableFrames; summed for the per-module memory
     /// readout (see DriverBase::driverHeapBytes). PreviewDriver holds no wire_ scratch, but chaining to
@@ -530,6 +533,8 @@ private:
         return DriverBase::driverHeapBytes() + stageCap_
              + static_cast<size_t>(keptIdxCap_) * sizeof(nrOfLightsType);
     }
+
+private:
 
     // Frame cap: the most points one preview frame carries before the spatial-lattice downsample
     // engages — derived at runtime from free contiguous memory, not a fixed per-board constant

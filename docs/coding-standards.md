@@ -113,6 +113,28 @@ All targets build warnings-as-errors: `-Wall -Wextra -Werror` on Clang/GCC (macO
 - In a comparison, keep both sides the same signedness — don't mix a signed expression with an unsigned literal (`== 1`, not `== 1u`, when the other side is signed). Watch `& `, `%`, and subtraction results, which carry the signedness of their operands.
 - A change that only built+passed on macOS/Linux is **not** verified for Windows. The Windows CI job (`release.yml`) is the real gate for MSVC-only warnings; let it run before considering a `src/`-touching change done, or build with MSVC locally if you have it.
 
+## Editor setup (clangd)
+
+Diagnostics appear **as you type**, from the same [`.clang-tidy`](../.clang-tidy) config CI
+uses — so a finding shows up while the code is still in your head, not ten minutes later in a
+pipeline.
+
+Once per machine: install the **clangd** extension (`llvm-vs-code-extensions.vscode-clangd`)
+and **disable Microsoft's C/C++ IntelliSense** — running both produces duplicated and
+contradictory diagnostics. Nothing else to configure: [`.clangd`](../.clangd) at the repo root
+points at the compilation database, and `CMAKE_EXPORT_COMPILE_COMMANDS` (set in
+`CMakeLists.txt`) means any normal build refreshes it.
+
+Two things worth knowing:
+
+- **If every file reports `'cstdint' file not found`**, the build directory was configured
+  with a different compiler than clangd is. `.clangd`'s `--query-driver` handles the usual
+  cases; if a new toolchain appears, add it there. This failure is loud and total — real
+  diagnostics disappear behind it — so it is worth recognising on sight.
+- **clangd runs a subset of the CI check set**, skipping checks it considers slow (>10%
+  AST-build cost). That is deliberate and means the same config file is safe to share: CI
+  remains the authority.
+
 ## Static checks
 
 - **Platform boundary** (`moondeck/check/check_platform_boundary.py`) — scans all files outside `src/platform/` for `#ifdef` / `#if defined` with platform macros and `#include` of platform-specific headers (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, `wiringPi.h`, …). Fails if any are found. The platform boundary rule itself: [architecture.md § Platform abstraction](architecture.md#platform-abstraction).

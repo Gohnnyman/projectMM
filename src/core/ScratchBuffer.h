@@ -19,10 +19,10 @@ class MoonModule;  // forward — the full definition is only needed in ScratchB
 /// effect writes `heat_.resize(n)` and nothing else — the primitive is the free-helper,
 /// the destructor, the `setDynamicBytes` call, and the null-guard, all at once.
 class ScratchBufferBase {
-protected:
-    explicit ScratchBufferBase(MoonModule& owner);   // registers with owner (.cpp)
-    ~ScratchBufferBase();                            // frees + deregisters (.cpp)
-
+public:
+    // Public, though the constructors below are protected: a deleted-but-private member makes the
+    // compiler say "inaccessible", which sends the reader hunting for an access fix that does not
+    // exist. Public says "deleted" — the accurate diagnostic. Standard rule-of-five placement.
     ScratchBufferBase(const ScratchBufferBase&) = delete;
     ScratchBufferBase& operator=(const ScratchBufferBase&) = delete;
     // Move is NOT provided: a ScratchBuffer is a fixed member of its module, tied by
@@ -31,6 +31,10 @@ protected:
     // is a standalone value; ScratchBuffer is deliberately not — it is an owned member.)
     ScratchBufferBase(ScratchBufferBase&&) = delete;
     ScratchBufferBase& operator=(ScratchBufferBase&&) = delete;
+
+protected:
+    explicit ScratchBufferBase(MoonModule& owner);   // registers with owner (.cpp)
+    ~ScratchBufferBase();                            // frees + deregisters (.cpp)
 
     /// Size to exactly `bytes` (0 frees), reallocating only when the byte count
     /// changes. Zero-fills on (re)alloc. Adjusts owner_'s dynamic-bytes total by

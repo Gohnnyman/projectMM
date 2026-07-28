@@ -59,7 +59,7 @@ public:
             release.wait_for(lk, 5s, [this] { return released; });
         }
         touched = 0xABCD;                    // ASan traps here if core 0 freed us mid-tick
-        std::lock_guard<std::mutex> lk(m);
+        std::scoped_lock<std::mutex> lk(m);
         inTick = false;
         exited.notify_all();
     }
@@ -70,10 +70,10 @@ public:
         return entered.wait_for(lk, 5s, [this] { return inTick; });
     }
     void letGo() {
-        { std::lock_guard<std::mutex> lk(m); released = true; }
+        { std::scoped_lock<std::mutex> lk(m); released = true; }
         release.notify_all();
     }
-    bool isInTick() { std::lock_guard<std::mutex> lk(m); return inTick; }
+    bool isInTick() { std::scoped_lock<std::mutex> lk(m); return inTick; }
 
     std::mutex m;
     std::condition_variable entered, release, exited;

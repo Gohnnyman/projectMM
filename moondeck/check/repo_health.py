@@ -153,6 +153,33 @@ def measure_tests():
     return {"cases": cases, "scenarios": len(scenarios)}
 
 
+def measure_complexity():
+    """Complexity, the number lizard owns (plan § one rule, one owner).
+
+    Deliberately the RAW count, not the baselined one: the gate (check_lizard.py) subtracts
+    whitelizard.txt so it fails only on new violations, but the TREND has to see the whole
+    number or it flatlines at 0 the moment a baseline lands and hides all future growth.
+
+    Imported lazily and tolerantly — repo_health must stay runnable when lizard is not
+    installed, and a missing tool should carry the previous value forward rather than write a
+    misleading 0. (Returning {} lets merge_carry_forward do exactly that.)
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import check_lizard
+        funcs = check_lizard.measure()
+        if not funcs:
+            return {}
+        viol = check_lizard.violations(funcs)
+        return {
+            "functions": len(funcs),
+            "over_threshold": len(viol),
+            "worst_ccn": max((f["ccn"] for f in funcs), default=0),
+        }
+    except Exception:
+        return {}
+
+
 def _head():
     """The short SHA the measurement describes."""
     return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
@@ -171,6 +198,7 @@ def snapshot(perf=None):
         "comments": measure_comments(),
         "tests": measure_tests(),
         "docs": measure_docs(),
+        "complexity": measure_complexity(),
     }
 
 
@@ -190,7 +218,7 @@ def merge_carry_forward(new, old):
     silently drop those numbers — the alternative is a file whose contents depend on which
     targets happened to be built, which makes every diff unreadable.
     """
-    for key in ("flash", "perf"):
+    for key in ("flash", "perf", "complexity"):
         merged = dict(old.get(key, {}))
         merged.update(new.get(key, {}))
         new[key] = merged
@@ -296,6 +324,16 @@ def render_markdown(new, old):
           f"| unit cases | {_arrow(t.get('cases', 0), ot, 'cases', lambda n: f'{n:,}', lower_is_better=False)} |",
           f"| scenarios | {_arrow(t.get('scenarios', 0), ot, 'scenarios', str, lower_is_better=False)} |",
           ""]
+
+    cx, ocx = new.get("complexity", {}), o.get("complexity")
+    if cx:
+        # `functions` rising is neutral-to-good (the codebase grows); the two that matter are
+        # how many are over threshold and how bad the worst one is.
+        L += ["## Complexity", "", "| Metric | Value |", "|---|---:|",
+              f"| functions | {_arrow(cx.get('functions', 0), ocx, 'functions', lambda n: f'{n:,}', lower_is_better=False)} |",
+              f"| over threshold | {_arrow(cx.get('over_threshold', 0), ocx, 'over_threshold', str)} |",
+              f"| worst CCN | {_arrow(cx.get('worst_ccn', 0), ocx, 'worst_ccn', str)} |",
+              ""]
 
     d, od = new.get("docs", {}), o.get("docs")
     L += ["## Documentation", "", "| Metric | Value |", "|---|---:|",

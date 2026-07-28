@@ -182,6 +182,20 @@ select {
     font-weight: 500;
 }
 
+/* Duration hint (⚡ / 🐌). Sits between the label and the buttons; slightly dimmed so it
+   reads as metadata rather than competing with the status dot. */
+/* Every card carries one, so these form a column — a fixed width keeps them aligned rather
+   than letting each emoji's natural advance shift the buttons (⏱️ is wider than ⚡). */
+.speed-badge {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1;
+    opacity: 0.75;
+    cursor: default;
+}
+
 .script-card .help-btn {
     background: transparent;
     border: none;
@@ -494,11 +508,17 @@ select {
     flex: 1;
     overflow-y: auto;
     padding: 8px 16px;
+    /* A real monospace stack, not the body font's trailing `monospace` fallback (which never
+       wins on macOS). Script output is column-aligned with spaces — a proportional font makes
+       every table ragged. */
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     font-size: 12px;
     line-height: 1.5;
     color: #c0c0c0;
     white-space: pre-wrap;
-    word-break: break-all;
+    /* `break-all` would split a long C++ symbol mid-token and destroy column alignment;
+       `break-word` only breaks when a word genuinely cannot fit. */
+    word-break: break-word;
 }
 #log a {
     color: var(--accent);

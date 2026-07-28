@@ -1,0 +1,68 @@
+# clangd configuration — live diagnostics in the editor.
+#
+# Repo root is not a choice: clangd reads project config from a `.clangd` file in the project
+# directory, with no override flag. Same constraint as `.clang-tidy` next to it — both are
+# discovered by convention, so neither can move under docs/ with the rest of the tooling state.
+#
+# clangd is the language server behind VS Code's clangd extension (and most other editors).
+# It runs the SAME .clang-tidy config CI will use, so a finding appears while you type rather
+# than in a pipeline ten minutes later. Nothing here gates anything: this file only affects
+# what your editor shows you.
+#
+# Setup (once): install the `llvm-vs-code-extensions.vscode-clangd` extension and DISABLE
+# Microsoft's C/C++ IntelliSense — running both produces duplicated and contradictory
+# diagnostics. Everything else is automatic; `cmake --build` refreshes the database.
+#
+# NOTE clangd deliberately skips clang-tidy checks it considers slow (>10% AST-build cost,
+# e.g. misc-const-correctness), so the editor runs a subset of the CI set. That is why the
+# same config file is safe to share between the two: CI stays the authority.
+
+CompileFlags:
+  # Where to find compile_commands.json — the real include paths and flags for each file.
+  # Without it clangd guesses, and reports phantom "file not found" errors on every header.
+  # build/macos is this host's dir (the build script writes build/<macos|linux|windows>);
+  # clangd falls back to searching parent dirs if this one is absent, so a Linux or Windows
+  # checkout still works after its own build.
+  CompilationDatabase: build/macos
+
+  # THE ONE SETTING THAT MAKES OR BREAKS THIS. The database records whichever compiler CMake
+  # picked (/usr/bin/c++, Apple Clang, on a stock Mac), but clangd is usually a DIFFERENT
+  # clang — Homebrew LLVM, or the one bundled with the extension. A different clang does not
+  # know Apple Clang's standard-library paths, so EVERY file reports `'cstdint' file not
+  # found` and all real diagnostics vanish behind the noise.
+  #
+  # --query-driver tells clangd to ask the recorded compiler where its headers live. The
+  # globs cover the system compilers and any Homebrew/Xcode toolchain; harmless if a path
+  # does not exist. (Same class of bug as the CI trap recorded in the plan: analysing with a
+  # toolchain that did not produce the database.)
+  # NOTE --query-driver is a clangd COMMAND-LINE flag, not a compile flag — putting it in
+  # `Add:` passes it to the compiler, which rejects it ("unknown argument") and breaks every
+  # file. Set it in the editor instead: VS Code → clangd extension → "Clangd: Arguments" →
+  # add `--query-driver=/usr/bin/c++`. Left here as a comment so the next reader does not
+  # re-add it to Add:.
+  Add:
+    # macOS: clangd is usually Homebrew LLVM while CMake recorded Apple Clang, and a different
+    # clang cannot find Apple's SDK headers — every file then reports `'cstdint' file not
+    # found` and real diagnostics vanish.
+    #
+    # MACHINE-SPECIFIC, and this file cannot avoid that: `.clangd` has no conditionals and no
+    # command substitution, so the path is literal and applies on EVERY platform, not only
+    # macOS. It is correct for Command Line Tools. Change it if `xcrun --show-sdk-path`
+    # disagrees (full Xcode puts the SDK under /Applications/Xcode.app/...), and delete the
+    # line on Linux/Windows, where the system clang already knows its own include paths.
+    # (check_clang_tidy.py has no such limit — it shells out to `xcrun` and gets this right
+    # automatically. Only the editor needs a hardcoded value.)
+    - -isysroot/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+
+Diagnostics:
+  # The .clang-tidy file at the repo root is picked up automatically; nothing to repeat here.
+  # This block is for editor-only adjustments that should NOT apply to CI.
+  ClangTidy:
+    # Editor-only removals go here. (Anything in .clang-tidy is already applied; repeating a
+    # name clangd does not know produces a "check was not found" warning on this file.)
+    Remove: []
+
+  # Suppress diagnostics from headers we do not own, so opening one of our files does not
+  # fill the Problems pane with ESP-IDF or standard-library noise.
+  Suppress:
+    - unused-includes

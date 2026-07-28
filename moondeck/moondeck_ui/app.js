@@ -230,6 +230,21 @@ window.addEventListener("message", (e) => {
 // Script cards
 // ---------------------------------------------------------------------------
 
+// How long a script takes, as one emoji before the buttons — so you can tell at a glance
+// whether clicking costs a second or a coffee. `speed` comes from moondeck_config.json.
+// All three tiers are shown: a blank would be ambiguous between "medium" and "nobody set a
+// speed on this card", and only a visible badge makes a missing one obvious.
+const SPEED_BADGE = {
+    instant: { icon: "⚡", title: "Instant — runs in about a second" },
+    medium:  { icon: "⏱️", title: "Medium — a few seconds up to about 30" },
+    slow:    { icon: "🐌", title: "Slow — takes more than 30 seconds" },
+};
+
+function speedBadge(speed) {
+    const b = SPEED_BADGE[speed];
+    return b ? `<span class="speed-badge" title="${b.title}">${b.icon}</span>` : "";
+}
+
 // Build a module-filter row: <select> with "all modules" + every test module,
 // plus a Tests button that opens the per-module unit-test list. Used both for
 // the shared row above a group and the per-card row inside a script-card.
@@ -361,6 +376,7 @@ function renderScripts() {
                 <div class="card-row">
                     <span class="status-dot" data-id="${script.id}"></span>
                     <span class="label">${script.label}</span>
+                    ${speedBadge(script.speed)}
                     <button class="help-btn" title="Help">?</button>
                     <button class="run-btn" data-id="${script.id}">Run</button>
                 </div>

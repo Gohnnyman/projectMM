@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Every static-analysis tool, on ONE module — the repo-wide reports turned around.
+
+The other check scripts each run one tool over the whole repo: good for a sweep, wrong shape
+when you are working on a single file and want to know what the tools say about *it*. This runs
+the whole set against one module and prints them under one heading, so "is my module clean" is
+one click rather than three runs and three filters.
+
+Adds no analysis of its own — it invokes the same scripts with `--module`, so this report and
+the repo-wide ones can never disagree about a finding.
+
+Tools, in order (sequential by design: each already parallelises across cores internally, so
+running them concurrently would just make them contend):
+
+    clang-tidy    bug patterns, performance, portability
+    clang-query   our own AST rules — RAM-costing arrays, heap allocation sites
+    lizard        complexity (CCN / NLOC), baseline-filtered
+
+A module is resolved to `src/**/<Module>.h` and `.cpp` (see check_clang_query.module_files) —
+the same names the MoonDeck dropdown offers.
+
+Usage:
+  uv run moondeck/check/check_module.py --module Control
+  uv run moondeck/check/check_module.py --module Layer --skip clang-tidy
+"""
+
+import argparse
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+HERE = Path(__file__).resolve().parent
+
+sys.path.insert(0, str(HERE))
+import check_clang_query  # noqa: E402  — the module→files resolver, one owner
+
+# `--all` on lizard and `--max-rows=0` on clang-query: the repo-wide defaults exist to keep a
+# 362-row sweep readable, but you scoped to ONE module precisely to see all of its findings.
+# Truncating here would hide the tail that scoping was meant to expose (HttpServerModule alone
+# has 71 arrays).
+TOOLS = [
+    ("clang-tidy", ["check_clang_tidy.py"]),
+    ("clang-query", ["check_clang_query.py", "--max-rows=0"]),
+    ("lizard", ["check_lizard.py", "--all"]),
+]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--module", required=True, help="Module name, e.g. Control or ParallelLedDriver.")
+    ap.add_argument("--skip", action="append", default=[],
+                    help="Skip a tool by name (repeatable): clang-tidy, clang-query, lizard.")
+    args = ap.parse_args()
+
+    files = check_clang_query.module_files(args.module)
+    if not files:
+        print(f"No source files for module '{args.module}' — looked for "
+              f"src/**/{args.module}.h and src/**/{args.module}.cpp.", file=sys.stderr)
+        return 2
+
+    print(f"All tools on module: {args.module}")
+    print(f"Files: {', '.join(files)}")
+    print()
+
+    failed = []
+    for name, argv in TOOLS:
+        if name in args.skip:
+            print(f"--- {name}: skipped ---\n")
+            continue
+        print(f"{'=' * 70}\n=== {name}\n{'=' * 70}")
+        started = time.time()
+        proc = subprocess.run(
+            ["uv", "run", str(HERE / argv[0]), *argv[1:], "--module", args.module],
+            cwd=ROOT, capture_output=True, text=True)
+        # Each tool already prints a readable report; pass it through rather than re-format,
+        # so this stays an orchestrator and the formatting has one owner per tool.
+        sys.stdout.write(proc.stdout)
+        if proc.returncode not in (0, 1):      # 1 = findings, which is a result not a failure
+            sys.stderr.write(proc.stderr)
+            failed.append(name)
+        print(f"[{name}: {time.time() - started:.0f}s]\n")
+
+    if failed:
+        print(f"Tools that could not run: {', '.join(failed)}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

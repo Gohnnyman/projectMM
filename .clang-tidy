@@ -1,0 +1,203 @@
+# clang-tidy configuration.
+#
+# WHY THIS SITS IN THE REPO ROOT and not under docs/ with the other tooling state: clangd finds
+# it ONLY by walking up the directory tree from each source file, and has no flag to point
+# elsewhere (clang-tidy's --config-file would work, clangd's equivalent does not exist). Moving
+# it would silently kill editor diagnostics while CI stayed green — the worst possible split.
+# It must live at or above src/.
+#
+# Shape: `*` minus an explicit disable list — the archetype ESPHome and ClickHouse use. The
+# alternative (a short opt-in list, as LLVM and Chromium do) suits codebases too large to
+# ever get clean; at ~50k LOC we can reach zero findings, and `*`-minus catches new check
+# families as LLVM adds them instead of silently ignoring them.
+#
+# The list is derived from ESPHome's (a large ESP32-targeted C++ codebase, our closest peer —
+# theirs is `*` minus 175 checks with WarningsAsErrors: ''), then tuned against this tree.
+# Tuning mattered: `*` with only their FAMILY disables gave 6,073 findings here; adding the
+# style and cert disables brought it to 131 real ones.
+#
+# WHY THE REASONS LIVE HERE AND NOT INLINE: a `#` inside the `>-` folded block below is NOT a
+# YAML comment — it is folded into the check string as literal text and silently corrupts
+# every disable after it. (Learned the hard way: a commented version of this file left
+# `abseil-*` enabled and produced 12,181 findings.) So the block stays pure, and every
+# disable is justified in the table below. A check removed without a stated reason will be
+# re-litigated by the next reader; recording rejected checks is the Chromium pattern.
+#
+# OTHER PLATFORMS' RULE SETS — not our target, pure noise:
+#   abseil, altera, android, boost, fuchsia, hicpp, llvmlibc, mpi, objc, zircon
+#
+# CPPCOREGUIDELINES (whole family) — mostly aliases of checks we already run, plus bounds
+#   and cast rules that hardware register access and DMA buffer work must violate by nature.
+#   ClickHouse disables it as "impractical... also slow"; ESPHome disables ~25 individually.
+#
+# CERT — almost entirely aliases of bugprone-*, so enabling both double-reports.
+#   cert-err33-c alone produced 3,678 findings here: it fires on every snprintf whose return
+#   value we ignore deliberately.
+#
+# LOUD WITH NO ACTIONABLE FIX ON THIS CODEBASE:
+#   bugprone-easily-swappable-parameters — flags every (int x, int y); in a geometry/LED
+#     codebase that is most of them, and the "fix" is strong types for every coordinate pair,
+#     an architecture decision rather than a lint fix. Disabled by SerenityOS, ClickHouse,
+#     ESPHome, Godot and the Zephyr template.
+#   bugprone-narrowing-conversions — fires on every uint8_t pixel-math expression.
+#   performance-enum-size — 3 bytes per enum is real on a 180 KB-heap device, but the fix
+#     touches every enum for a gain the linker mostly recovers. ESPHome disables it despite
+#     shipping on the same class of hardware.
+#   bugprone-implicit-widening-of-multiplication-result — MEASURED 47 findings, 0 reachable.
+#     27 are compile-time constants (`256 * 1024`) the compiler folds. The other 20 are
+#     buffer index arithmetic on nrOfLightsType, which is already uint32_t where it matters
+#     (light_types.h). Overflow needs 32 bits of product; the largest real installation, the
+#     48x256 wall, needs 17 — a margin of ~87,000x. "Fixing" it means casting every index in
+#     the hot path for a hazard that cannot occur.
+#   bugprone-signed-char-misuse — MEASURED 12/12 FALSE, and its suggested fix is a BUG. Every hit
+#     is an int8_t GPIO pin widening to int/int16_t/uint16_t, where -1 is the "unset pin" sentinel
+#     (platform.h EthPinConfig, the addPin controls). Sign extension is precisely what we want;
+#     "cast to unsigned char first" would turn -1 into 255 and silently claim GPIO 255. The check
+#     is aimed at char-typed *text* (where a negative byte indexes out of a table), not at a
+#     signed-integer-with-sentinel convention.
+#   performance-no-int-to-ptr — MEASURED 9/9 the SAME deliberate idiom, none a hardware address:
+#     ControlDescriptor::aux (Control.h) is a `uintptr_t` tagged field holding either a count or an
+#     options-array pointer. Storing a pointer in an integer field is the point; the check's premise
+#     (an int that happens to be cast to a pointer defeats alias analysis) does not apply to a
+#     round-tripped pointer. Splitting aux into a union to satisfy it grows the descriptor on a
+#     180 KB-heap device for no correctness gain.
+#   bugprone-throwing-static-initialization — MEASURED 7/8 provably cannot throw: the peripheral
+#     registrations and the MoonLive builtin tables write into fixed-size static arrays with no heap
+#     and no std::string/vector, and Palette::fromBuiltin is plain array math. The 8th is a desktop
+#     std::filesystem::path built from a literal — theoretically bad_alloc, never reachable, and
+#     desktop-only. A check that is wrong 7 times out of 8 costs more attention than it earns.
+#   bugprone-infinite-loop — MEASURED 28/28 FALSE on this tree. It cannot track uint8_t loop
+#     counters, and `for (uint8_t i = ...; i > 0; i--)` is a house convention
+#     (coding-standards § Prefer integers); it also misfires on `while (b)` in a textbook
+#     Euclid gcd. The upstream FPs are a known LLVM issue with fixes still landing, so this
+#     is worth re-testing on a future LLVM — but a check that is wrong every single time
+#     teaches us to ignore its whole family, which costs more than it catches.
+#
+# CONFLICTS WITH DELIBERATE ARCHITECTURE:
+#   misc-no-recursion — the JSON reader is deliberately recursive (Minimalism means elegance).
+#   misc-non-private-member-variables-in-classes — the module tree uses plain member data by
+#     design, so the UI can render any module generically.
+#   misc-multiple-inheritance — both hits are `MoonModule + ListSource`, where ListSource is a
+#     pure interface (no data, virtual dtor) and MoonModule is the one stateful base. That is the
+#     textbook data-source/adapter shape CLAUDE.md sanctions by name (UITableView's data source,
+#     Qt's QAbstractItemModel); the check cannot tell it from real multiple state inheritance
+#     because ListSource gives one convenience override a default body.
+#   misc-use-anonymous-namespace / misc-use-internal-linkage /
+#     llvm-prefer-static-over-anonymous-namespace — fight header-only light modules.
+#   portability-avoid-pragma-once / llvm-header-guard — `#pragma once` is our convention.
+#
+# TOO SLOW, OR FILTERED BY CLANGD ANYWAY:
+#   misc-const-correctness (>10x AST cost), misc-include-cleaner ("very very noisy"),
+#   misc-header-include-cycle.
+#
+# OWNED BY ANOTHER TOOL (one rule, one owner):
+#   readability-function-cognitive-complexity / *-function-size — complexity is lizard's job;
+#     it produces the per-commit number repo-health.json trends.
+#   bugprone-branch-clone — fires on deliberate parallel switch arms.
+#   clang-analyzer-security.ArrayBound — analyses the macOS SDK's headers, not our code.
+#
+# Everything else disabled below is a style opinion we do not hold; enabling any of them
+# would gate a rewrite rather than a fix.
+#
+# NOT GATED YET. `WarningsAsErrors` stays empty until the remaining 47 clang-analyzer findings
+# are triaged (backlog: "clang-tidy: triage the 47 clang-analyzer findings"). Switching it to
+# `'*'` is the ratchet that stops a zero decaying, and it is one line — but it fails the gate
+# today, so it lands with that triage rather than before it.
+---
+Checks: >-
+  *,
+  -abseil-*,
+  -altera-*,
+  -android-*,
+  -boost-*,
+  -fuchsia-*,
+  -hicpp-*,
+  -llvmlibc-*,
+  -mpi-*,
+  -objc-*,
+  -zircon-*,
+  -cppcoreguidelines-*,
+  -cert-err33-c,
+  -cert-err58-cpp,
+  -cert-dcl50-cpp,
+  -cert-str34-c,
+  -cert-int09-c,
+  -cert-oop57-cpp,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-infinite-loop,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-signed-char-misuse,
+  -bugprone-throwing-static-initialization,
+  -performance-no-int-to-ptr,
+  -performance-enum-size,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  -misc-multiple-inheritance,
+  -misc-use-anonymous-namespace,
+  -misc-use-internal-linkage,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -misc-header-include-cycle,
+  -llvm-prefer-static-over-anonymous-namespace,
+  -llvm-header-guard,
+  -llvm-include-order,
+  -llvm-namespace-comment,
+  -llvm-else-after-return,
+  -llvm-qualified-auto,
+  -llvm-use-ranges,
+  -portability-avoid-pragma-once,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -modernize-avoid-c-style-cast,
+  -modernize-avoid-variadic-functions,
+  -modernize-use-nodiscard,
+  -modernize-use-auto,
+  -modernize-use-nullptr,
+  -modernize-use-designated-initializers,
+  -modernize-use-integer-sign-comparison,
+  -modernize-use-equals-default,
+  -modernize-use-default-member-init,
+  -modernize-type-traits,
+  -modernize-raw-string-literal,
+  -modernize-return-braced-init-list,
+  -modernize-loop-convert,
+  -modernize-use-ranges,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-uppercase-literal-suffix,
+  -readability-braces-around-statements,
+  -readability-inconsistent-ifelse-braces,
+  -readability-else-after-return,
+  -readability-isolate-declaration,
+  -readability-math-missing-parentheses,
+  -readability-avoid-nested-conditional-operator,
+  -readability-named-parameter,
+  -readability-qualified-auto,
+  -readability-redundant-inline-specifier,
+  -readability-redundant-parentheses,
+  -readability-redundant-casting,
+  -readability-enum-initial-value,
+  -readability-convert-member-functions-to-static,
+  -readability-make-member-function-const,
+  -readability-static-accessed-through-instance,
+  -readability-use-std-min-max,
+  -readability-use-concise-preprocessor-directives,
+  -readability-container-contains,
+  -readability-simplify-boolean-expr,
+  -readability-function-cognitive-complexity,
+  -readability-function-size,
+  -google-explicit-constructor,
+  -google-readability-casting,
+  -google-readability-namespace-comments,
+  -google-readability-todo,
+  -google-readability-braces-around-statements,
+  -google-readability-function-size,
+  -google-build-using-namespace,
+  -google-runtime-int,
+  -clang-analyzer-security.ArrayBound
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/(core|light)/'
+FormatStyle: none

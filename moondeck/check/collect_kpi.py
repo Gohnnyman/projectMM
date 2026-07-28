@@ -28,6 +28,7 @@ from _moondeck_config import active_device_ips, raised_log_level, LOG_INFO  # no
 # other cross-script imports here use).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import repo_health  # noqa: E402
+import check_lizard  # noqa: E402
 
 # Per-host desktop build dir (matches build_desktop.py / package_desktop.py).
 # We pick the directory belonging to the OS this script runs on so KPI
@@ -348,27 +349,16 @@ def collect_code():
     kpi["specs"] = len(list((ROOT / "docs" / "moonmodules").rglob("*.md")))
     kpi["scenarios"] = len(list((ROOT / "test" / "scenarios").rglob("*.json")))
 
-    # Lizard
-    out, _ = run(
-        ["uv", "run", "--with", "lizard", "python3", "-m", "lizard",
-         "src/", "-l", "cpp", "-T", "nloc=60", "-T", "cyclomatic_complexity=10",
-         "-x", "src/ui/*"],
-        cwd=ROOT, timeout=30
-    )
-    warnings = []
-    in_warnings = False
-    for line in out.splitlines():
-        if "Warning" in line and "!!!!" in line:
-            in_warnings = True
-            continue
-        if in_warnings and "---" in line:
-            continue
-        if in_warnings and line.strip() and "NLOC" not in line and "Total" not in line and "====" not in line:
-            warnings.append(line.strip())
-        if in_warnings and "Total" in line:
-            in_warnings = False
+    # Lizard — the RAW count, deliberately ignoring whitelizard.txt. The gate
+    # (check_lizard.py) subtracts the baseline so it fails only on new violations; the KPI must
+    # not, or the trend flatlines at 0 and hides every future regression. Two different jobs on
+    # the same measurement: the gate asks "did we get worse since the baseline", the KPI asks
+    # "how much complexity is there". Shared parsing so the two can never disagree on the count.
+    funcs = check_lizard.measure()
+    warnings = check_lizard.violations(funcs) if funcs else []
     kpi["lizard_warnings"] = len(warnings)
-    kpi["lizard_details"] = warnings
+    kpi["lizard_details"] = [f"{v['ccn']} CCN, {v['nloc']} NLOC: {v['name']} ({v['file']})"
+                             for v in warnings]
 
     return kpi
 

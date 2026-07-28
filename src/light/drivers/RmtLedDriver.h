@@ -445,12 +445,17 @@ private:
         if (symbols_) { platform::free(symbols_); symbols_ = nullptr; symbolCap_ = 0; publishHeapBytes(); }
     }
 
+protected:
+    // Matches DriverBase's visibility — a private override would silently hide the hook from any
+    // future caller holding a DriverBase*. ParallelLedDriver keeps it protected for the same reason.
     /// This driver's heap = the base scratch + the RMT symbol buffer (one word per WS2812 data bit,
     /// the driver's largest buffer). Summed for the per-module memory readout — see
     /// DriverBase::driverHeapBytes.
     size_t driverHeapBytes() const override {
         return DriverBase::driverHeapBytes() + static_cast<size_t>(symbolCap_) * sizeof(uint32_t);
     }
+
+private:
 
     // --- loopback self-test (control-driven) ---
 

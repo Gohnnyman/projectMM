@@ -77,6 +77,9 @@ struct WledPacket {
         if (name) {
             size_t n = std::strlen(name);
             if (n > kNameMax) n = kNameMax;   // bytes 6..37, null-padded by the memset
+            // `out` is memset to 0 above, so the name is null-padded by construction; there is
+            // no terminator to copy.
+            // NOLINTNEXTLINE(bugprone-not-null-terminated-result)
             std::memcpy(out + kNameOff, name, n);
         }
         out[kTypeOff] = static_cast<uint8_t>((boardType & 0x7f) | (lightsOn ? 0x80 : 0));

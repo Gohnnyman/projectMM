@@ -3,6 +3,7 @@
 #include "doctest.h"
 #include "light/layouts/SphereLayout.h"
 
+#include <algorithm>
 #include <vector>
 
 // SphereLayout places lights on the surface of a hollow sphere — a one-light-
@@ -79,8 +80,9 @@ TEST_CASE("SphereLayout shell is centre-symmetric") {
     auto pts = collectPoints(s);
 
     auto has = [&](mm::lengthType x, mm::lengthType y, mm::lengthType z) {
-        for (const auto& p : pts) if (p.x == x && p.y == y && p.z == z) return true;
-        return false;
+        return std::ranges::any_of(pts, [&](const auto& p) {
+            return p.x == x && p.y == y && p.z == z;
+        });
     };
     for (const auto& p : pts) {
         // Mirror through centre: (r - d) on each axis.

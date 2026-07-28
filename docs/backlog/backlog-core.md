@@ -341,6 +341,25 @@ Fix options: (a) make every live mutate scenario clear+rebuild its own canvas (c
 
 ## Housekeeping
 
+### clang-tidy: triage the 47 clang-analyzer findings, then gate
+
+`.clang-tidy` runs `*` minus a documented disable list and reaches zero on everything except the
+path-sensitive `clang-analyzer-*` family: **47 findings**, led by `core.UndefinedBinaryOperatorResult`
+(11), `bugprone-unchecked-string-to-number-conversion` (9), `security.insecureAPI.strcpy` (5),
+`cplusplus.NewDeleteLeaks` (4) and `core.NonNullParamChecker` (4). `NewDeleteLeaks` and
+`cplusplus.Move` are the two worth reading first — the analyzer traces real paths, so a finding is
+a claim about an execution, not a style opinion.
+
+These surfaced late for an instructive reason: the report parser's check-name pattern rejected the
+`,-warnings-as-errors` suffix clang-tidy appends when `WarningsAsErrors` is set, so **every finding
+was silently dropped** the moment the ratchet was switched on. Fixed; recorded here because it is
+the sixth silent-zero this tooling has produced, and each looked like a clean tree.
+
+Once triaged (fix / `NOLINT` with a reason / disable with a measured one), set
+`WarningsAsErrors: '*'`. That one line is the ratchet that stops a zero decaying back into noise;
+it is deliberately not set today because it would fail the gate on the 47.
+
+
 ### Heap-allocate the `registerType<T>` boot probe (lift a per-module lesson into core)
 
 `ModuleFactory::registerType<T>` stack-constructs a `T probe` at boot to capture `sizeof(T)`. On the main task's ~8 KB stack, a module with large inline members can overflow it and bootloop — a lesson the code records *per module* as a comment rather than fixing once in core: GameOfLifeEffect (`an inline array here caused a P4 stack-overflow bootloop`), HueDriver (`the lightsBuf_ stack-probe lesson`), and AudioService still carries ~5 KB of inline scratch while being factory-registered. This is the [*Complexity lives in core*](../../CLAUDE.md#principles) "lift the rule into core, don't paste it per module" clause: heap-allocate the probe (`MoonModule::operator new` already routes to PSRAM), or capture `sizeof` without constructing at all, so no module author ever has to remember the stack budget. Flagged by the 👾 Reviewer on PR #43. Small, core-only, its own `/plan`.

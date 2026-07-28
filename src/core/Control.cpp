@@ -165,6 +165,9 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
         case ControlType::Select: {
             sink.append(",\"options\":[");
             auto* options = reinterpret_cast<const char* const*>(c.aux);
+            // addSelect takes a uint8_t option count, so c.max can never exceed 255 and the
+            // counter cannot wrap.
+            // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
             for (uint8_t o = 0; o < c.max; o++) {
                 sink.appendf("%s\"%s\"", o > 0 ? "," : "", options[o]);
             }
@@ -236,7 +239,7 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
     auto clampInto = [](auto* dst, int v, int lo, int hi) {
         if (v < lo) v = lo;
         if (v > hi) v = hi;
-        using T = typename std::remove_pointer<decltype(dst)>::type;
+        using T = std::remove_pointer_t<decltype(dst)>;
         *dst = static_cast<T>(v);
         return ApplyResult::Ok;
     };

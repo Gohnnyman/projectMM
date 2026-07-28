@@ -53,7 +53,14 @@ struct Rig {
     }
     // Restore the DEFAULT root (fsSetRoot("") → "build"), not ".", so a later test in the same
     // binary starts from the same baseline this Rig assumed, never a leaked "." repo-root.
-    ~Rig() { platform::fsSetRoot(""); std::filesystem::remove_all(root); }
+    // Teardown must never propagate: this Rig is destroyed while the stack unwinds from a failed
+    // CHECK, and a throw there terminates the process, losing the very failure being reported.
+    // Hence both the error_code overload of remove_all (which cannot throw) and noexcept.
+    // The only residual throw path is fsSetRoot's std::filesystem::path assignment (a
+    // theoretical bad_alloc on a short literal). noexcept turning that into terminate is the
+    // right trade here: a test rig that cannot reset the fs root must not limp on.
+    // NOLINTNEXTLINE(bugprone-exception-escape)
+    ~Rig() noexcept { platform::fsSetRoot(""); std::error_code ec; std::filesystem::remove_all(root, ec); }
 
     bool onDisk(const char* rel) const {
         return std::filesystem::exists(std::string(root) + rel);
@@ -146,6 +153,9 @@ TEST_CASE("HttpServer::parseFilePath rejects traversal, empty, missing, and over
 // byte-for-byte — the streamed-upload contract.
 namespace {
 struct SpanSrc { const char* p; size_t left; };
+// The signature must match the FsWriteSrc typedef, where `abort` is an out-parameter a source
+// sets to stop the stream early — so it cannot become a pointer-to-const.
+// NOLINTNEXTLINE(readability-non-const-parameter)
 size_t spanPull(char* out, size_t cap, void* user, bool* abort) {
     (void)abort;   // this source always ends cleanly (no early close / timeout to signal)
     auto* s = static_cast<SpanSrc*>(user);

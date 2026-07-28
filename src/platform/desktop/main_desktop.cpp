@@ -46,13 +46,27 @@ static void crashHandler(int sig) {
     raise(sig);
 }
 
+// Local time as an ISO-8601 stamp, thread-safely. `std::localtime` returns a pointer to a
+// SHARED static tm, so two threads formatting a timestamp can each see the other's value —
+// flagged independently by clang-tidy (concurrency-mt-unsafe) and CodeQL (critical). The
+// reentrant form is spelled differently per platform, hence the branch.
+static void isoTimestamp(char* out, size_t n) {
+    const std::time_t t = std::time(nullptr);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);        // MSVC: arguments reversed relative to POSIX
+#else
+    localtime_r(&t, &tm);
+#endif
+    std::strftime(out, n, "%Y-%m-%dT%H:%M:%S", &tm);
+}
+
 // Fires on std::exit() — distinguishes reboot (platform::reboot prints its own
 // line first) from a genuine unexpected exit with no preceding crash signal.
 static void atExitHandler() {
     if (!cleanExit) {
-        std::time_t t = std::time(nullptr);
         char tbuf[32];
-        std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%dT%H:%M:%S", std::localtime(&t));
+        isoTimestamp(tbuf, sizeof(tbuf));
         std::fprintf(stderr, "*** process exited without clean shutdown at %s ***\n", tbuf);
         std::fflush(stderr);
     }
@@ -99,17 +113,15 @@ int main() {
 
     std::atexit(atExitHandler);
 
-    std::time_t t = std::time(nullptr);
     char tbuf[32];
-    std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%dT%H:%M:%S", std::localtime(&t));
+    isoTimestamp(tbuf, sizeof(tbuf));
     std::printf("projectMM started at %s\n", tbuf);
     std::printf("Press Ctrl-C to stop.\n");
 
     mm_main(running, 8080);
 
     cleanExit = true;
-    t = std::time(nullptr);
-    std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%dT%H:%M:%S", std::localtime(&t));
+    isoTimestamp(tbuf, sizeof(tbuf));
     std::printf("projectMM exited cleanly at %s\n", tbuf);
     return 0;
 }

@@ -37,6 +37,9 @@ TEST_CASE("Buffer move constructor") {
     CHECK(b.data() == ptr);
     CHECK(b.count() == 100);
     CHECK(b.channelsPerLight() == 3);
+    // Asserting the moved-from state IS the test: Buffer's move must leave the source empty,
+    // not merely valid-but-unspecified.
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     CHECK(a.data() == nullptr);
     CHECK(a.count() == 0);
 }
@@ -51,6 +54,9 @@ TEST_CASE("Buffer move assignment") {
     b = std::move(a);
     CHECK(b.data() == ptr);
     CHECK(b.count() == 100);
+    // Asserting the moved-from state IS the test: Buffer's move must leave the source empty,
+    // not merely valid-but-unspecified.
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     CHECK(a.data() == nullptr);
 }
 

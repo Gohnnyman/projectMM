@@ -1,471 +1,367 @@
 # Plan: static analysis + repo-health tooling
 
-**Date:** 2026-07-27 · **Status:** proposed
+**Date:** 2026-07-27 · **Status:** in progress — clang-tidy, lizard and clang-query landed (steps 2, 5, 8). Open: warnings tier-zero (1), `[[clang::nonblocking]]` (3), RTSan (4), CodeQL housekeeping (6)
 
 Temporary document: this text becomes the PR description and the file is deleted once the
 plan is realized (CLAUDE.md § Branch).
 
-## Why
+## The question
 
-Two questions started this: *"is lizard the right tool?"* and *"how do I monitor the repo
-against our principles, drill down, and find what to work on?"* Research into the 2025-26
-field (SonarQube, CodeScene, Qlty, Semgrep, Aikido, clang-tidy, CodeQL, cppcheck, and what
-Zephyr/ESP-IDF/Chromium actually do) produced one clear answer:
+*Is lizard the right tool, and how do we monitor the repo against our own principles?*
 
-> Keep the bespoke checks as the rule **content**; adopt SARIF + GitHub code scanning as the
-> shared **reporting plane**; add the two tools that can express what our checks cannot.
+Answered by researching what serious C++ projects actually **configure** — LLVM, Chromium,
+ClickHouse, SerenityOS, Godot, ESPHome, Zephyr, ESP-IDF — rather than by running each tool
+once and scoring the output. That distinction matters, and getting it wrong the first time is
+what produced the earlier draft of this plan (see *What we got wrong* at the end).
 
-Our Python checks encode domain knowledge no shelf tool ships (spec/doc drift, catalog
-consistency, flash budgets). What they lack is not intelligence but infrastructure: PR
-annotations, baselining, history. GitHub gives that free to anything emitting SARIF.
+## The stack
 
-But "keep the checks" is not a free pass: two of the nine are code-semantics rules that a
-real tool does better, and they should retire. Step 4 audits all nine and records a verdict
-for each, so this plan removes as well as adds.
+Five layers, cheapest and most immediate first. Each catches something the layer above cannot.
 
-The full research is in the PR discussion; the decisions that survive it are below.
+| # | Layer | Catches | Where |
+|---|---|---|---|
+| 0 | **Compiler warnings** | shadowing, double promotion, fallthrough, null deref | Every build, all targets |
+| 1 | **clang-tidy** (curated) | bug patterns, performance, portability | Editor as you type **+** CI |
+| 2 | **Sanitizers** (ASan+UBSan, TSan) | real memory/threading faults at run time | Desktop CI lanes |
+| 3 | **RTSan + `[[clang::nonblocking]]`** | allocation/blocking in the render loop, **transitively** | Compile time + run time |
+| 4 | **CodeQL** (stock suite) | untrusted input, whole-program taint, use-after-free | CI, Security tab |
 
-## Findings that shape the plan
+Alongside them, three tools that measure or extend rather than analyse:
 
-- **lizard is maintained** (1.23.0, June 2026) but is a *fuzzy tokenizer, not a parser* — its
-  own README warns about templates and macros. It measures size and branching; it can never
-  express an architectural rule. **Keep it as a counter, not a platform.**
-- **Its VS Code extension is dead** (v1.0.1, Oct 2022). The live-in-editor equivalent is
-  clang-tidy's `readability-function-cognitive-complexity` through clangd.
-- **Our 162 lizard warnings are a threshold artifact**, not a health verdict: 161 come from
-  `CCN>10` alone, and 80% of 2,185 functions sit at CCN ≤ 5. The tail is 4 functions above
-  CCN 50. A metric that can never reach zero is a poor ratchet — hence baselining.
-- **Clang 22 is installed locally and `[[clang::nonblocking]]` works today.** Verified: it
-  caught a `push_back` two levels deep through a helper and traced the chain into libc++ —
-  something a regex lint cannot do in principle. **The attribute is inherited by overrides**,
-  so annotating `MoonModule::tick()` once covers every module.
-- **The repo is public**, so CodeQL and Actions minutes are free.
-- **CodeQL C/C++ build-free scanning went GA in Oct 2025**, so no ESP-IDF cross-build needs
-  tracing in CI, and QL has transitive call-graph reachability (`f.calls*(g)`) — the one
-  thing that expresses "allocation *reachable from* tick()".
-- **Aikido is the wrong category** (AppSec/ASPM aggregator, generic rules over C++).
-  **Semgrep's C++ is GA only in the paid tier.** Both rejected.
-
-## Shape: a POC, then one judgement
-
-This is **not** a commitment to adopt seven tools in order. It is a **proof of concept**: run
-each candidate against this codebase, on a throwaway branch, long enough to see what it
-actually finds here — then make **one** decision about the final set, combining the best of
-each and discarding the rest.
-
-The reason is that none of the research answers the question that matters. "clang-tidy is
-industry standard" is true and useless; what matters is *what it finds in `src/light/` that
-we care about*, and whether that is worth its config. A tool that is excellent in general and
-silent on our code has not earned a place in our gates.
-
-**Phase 1 — POC (throwaway, nothing lands in main).** Run every candidate, capture what it
-found on our code, and record the cost of running it. Timebox each; a tool that needs a week
-of fighting to produce a first result has told us something.
-
-**Phase 2 — one judgement.** With every candidate's real output in hand, pick the final set
-in a single decision and write it down: which tool owns which rule, what got deleted, and
-what we deliberately declined. Then implement only that.
-
-Two candidates are exempt from the POC, and it is worth being explicit about why:
-
-- **`[[clang::nonblocking]]`** is not a tool adoption — it is three lines in a header and a
-  compiler flag we already have. It has effectively been POC'd already: verified on this
-  machine, on real code, catching a transitive allocation. Nothing to evaluate.
-- **The lizard baseline** is not a tool choice either; lizard is already in the gates and the
-  whitelist just makes it usable. Do it whenever, independent of everything else.
-
-Everything else — clang-tidy, CodeQL (both jobs), SARIF reporting, cppcheck addons,
-SonarCloud, RTSan — gets tried before it gets adopted.
-
-## What each POC must produce
-
-For every candidate, the same six answers, so the final judgement compares like with like.
-The first three are about **coverage** (what it does for us now), the next two about
-**configurability and extensibility** (what it will do for us later), and the last about cost.
-
-**Coverage — what it catches today**
-
-1. **Real findings on our code.** Not "it supports X" — the actual list, and how many of them
-   we would act on. A tool with 200 findings we would all ignore scores worse than one with
-   three we would fix.
-2. **What it uniquely covers.** The rules it can enforce that nothing else in the candidate
-   set can. This is what earns it a place; overlap alone earns nothing.
-3. **Signal quality.** False-positive rate on our code, and whether a finding is actionable
-   or just true. This is what decides whether it gets gated on or merely reported.
-
-**Configurability — can we shape it to this codebase?**
-
-4. **Tuning, scoping and baselining.** Can thresholds and rule sets be set *per directory*,
-   so `src/core/` can be stricter than `src/platform/`? Can existing violations be frozen so
-   the gate fails only on new ones? Is the config a file in the repo (reviewable, versioned)
-   or CLI flags buried in a script? Can a single justified violation be suppressed **at the
-   line, with its reason**, the way our `-Wno-…` and `// hot-path-ok:` conventions require?
-
-   *Concretely, each tool must answer:* how would we express "CCN limit 8 in core, 12 in the
-   light domain", and how would we silence one deliberate exception without silencing the rule?
-
-**Extensibility — can it absorb the rules we have not invented yet?**
-
-5. **Writing a new rule.** The stated expectation is that project-specific rules keep coming.
-   So for each tool: **write one real custom rule during the POC** and record what it took —
-   an hour, a day, or "not possible". Suggested probe, since it is a rule we would actually
-   want and no tool ships it: *a control must be registered below the control it depends on*
-   (coding-standards § Conventions), or failing that, any rule from CLAUDE.md the tool could
-   plausibly express.
-
-   Also record: what *class* of rule is reachable (lexical? per-function AST? whole-program
-   call graph?), whether the rule lives in our repo as reviewable source, and whether writing
-   it couples us to a toolchain version or a vendor.
-
-**Cost**
-
-6. **Cost to run and keep.** Setup, CI wall-clock, config surface, and what breaks when the
-   toolchain moves. A check that only works on one developer's machine is not a gate.
-
-Record these per tool in the PR as the POC runs, not from memory afterwards. **A tool that
-scores well on 1–3 but badly on 4–5 is a trap**: it looks good on the day we adopt it and
-becomes the thing we cannot bend six months later.
-
-The scorecard to fill in — one row per candidate, so phase 2 is a comparison and not a
-recollection:
-
-| Tool | Findings we'd act on | Uniquely covers | False positives | Per-dir config / baseline / line-suppress | Custom rule: effort + class | Cost |
-|---|---|---|---|---|---|---|
-| clang-tidy | ~90 of 384 unique (34 enum-size + ~56 to review) | enum sizing, narrowing, in-editor via clangd | **high: 66% noise + `infinite-loop` 26/28 false** | per-dir `.clang-tidy` + `InheritParentConfig`; `NOLINT(reason)`; no baseline file | via clang-query: **minutes**, per-function AST only | 4.6 s full run; needs a compiler-matched `compile_commands.json` |
-| clang-query *(new candidate)* | n/a — a rule engine, not a finder | bespoke per-function/lexical rules, no plugin build | n/a (we write the rule) | matchers are plain text in-repo | **minutes**; reaches the 245 control registrations the ordering rule needs | free; same database as clang-tidy |
-| CodeQL (stock) | | | | | | |
-| CodeQL (custom QL) | | | | | | |
-| cppcheck (+addon) | | | | | | |
-| SonarCloud | | | | | | |
-| lizard *(incumbent)* | | | | | | |
-| our Python checks *(incumbent)* | | | | | | |
-
-The two incumbents are in the table deliberately: they have to survive the same comparison as
-the newcomers, or the audit is only looking one way.
-
-## The rule this plan runs under
-
-The goal is **one lean, coherent, industry-standard toolset** — not a pile of overlapping
-analysers that each half-cover the same rule. A tool that duplicates another tool's job is
-worse than no tool: it doubles the config, splits the findings across two reports, and makes
-"where is this rule enforced?" unanswerable.
-
-So every step below ends with the same three questions, answered in writing in the PR before
-the step counts as done:
-
-1. **What does this tool now own, exclusively?** Name the rules it is the single home for.
-2. **What did it make redundant?** Name what is now deleted or scheduled for deletion. A
-   step that adds a tool and retires nothing needs an explicit reason why.
-3. **Is it still the leanest way to get this?** If a tool earns its place for one rule only,
-   say so and consider whether that rule is worth a whole tool.
-
-**Overlaps are decided, not accumulated.** Where two tools *can* check the same thing, one is
-designated the owner and the other's version is turned off — briefly running both to compare
-is fine, permanently running both is not. Known candidates, to be settled as we go:
-
-| Rule | Candidate owners | Decision |
+| Tool | Job | Status |
 |---|---|---|
-| No allocation/blocking in the render path | `check_hotpath.py`, Clang function-effects, RTSan, CodeQL | Static owner = Clang attributes (step 2); RTSan is the *dynamic* complement, not a duplicate; delete `check_hotpath.py`; do **not** also write a CodeQL query for it |
-| Platform boundary | `check_platform_boundary.py`, CodeQL | Settle at step 6 — keep exactly one |
-| Function complexity | lizard, clang-tidy `readability-function-*` | Settle at step 5 — lizard for the *metric/trend*, clang-tidy for the *in-editor nudge*; do not gate on both |
-| Finding transport | bespoke stdout, SARIF | SARIF, once step 4 lands |
-| Drill-down + history | hand-built dashboard, GitHub code scanning, SonarCloud | Settle at step 7 |
-| **Security / untrusted input** | **nothing today**, CodeQL, cppcheck, PVS-Studio | **CodeQL** — no overlap to settle, because nothing currently covers this at all |
+| **lizard** | Complexity *number* per commit, for the trend | Keep, baselined |
+| **Our Python checks** | Cross-artifact contracts nothing else can see | Keep as-is |
+| **clang-query** | Home for the next bespoke rule | Shipped — 3 rules in `check_clang_query.py` |
 
-The end state to aim for: **each rule has exactly one enforcing tool, each tool has a clear
-job, and every finding arrives through the same channel.** If we cannot say that at the end,
-the plan has failed regardless of how many tools we adopted.
+**Our Python checks** stay untouched: ~0.4 s for all four, and they cover contracts whose
+other half is a Markdown page, a JSON catalog or a built binary — not a C++ question, so no
+analyser can replace them.
 
-## The candidates
+**clang-query** is the designated home for the *next* bespoke rule: the stack enforces the
+rules we have, this is how we add the ones we invent. Matchers are plain text in the repo,
+minutes to write, no plugin to build and no LLVM ABI coupling — which is why it beats a
+compiled clang-tidy check (LLVM-version-locked, and **clangd will not load one**, so a custom
+check would never appear in the editor). Same compilation database as layer 1, so adopting it
+later costs nothing now. Off until a rule needs it: a tool running zero rules is overhead.
 
-What follows is the POC backlog, not a running order. Each entry says what to try and what
-would make it worth keeping; the six answers above get recorded for each as it runs.
+**First named candidate: large static array declarations** (`char buf[512]` and friends), which
+bloat RAM on a 180 KB-heap device and which nothing else in the stack reports. PROBED and it
+works — `varDecl(hasType(constantArrayType()))` matches, and `set output dump` yields
+`file:line`, the name, and the full type (`char[80]`), so the byte size parses straight out.
 
-Two of them (1 and 2) are the exempt pair from above — do them whenever, they need no
-evaluation. The rest are candidates until phase 2 says otherwise.
+Two things that probe established, both of which shape the eventual script:
 
-### 1. Baseline lizard (small)
+- **There is no size-threshold matcher.** `hasSize(64)` is exact-match only; `sizeGreaterThan`
+  does not exist. So the matcher takes ALL constant arrays and the "> N bytes" filter, the
+  our-files-only filter, and the dedupe (template instantiations repeat a declaration) happen
+  in Python — the same shape as `check_lizard.py`, which already parses a tool's raw output
+  and applies our policy on top.
+- **It needs the same `-isysroot` fix as clang-tidy.** Without it, `Control.cpp` reported 5
+  matches; with it, 14. Identical silent-under-report trap to the one recorded below — a wrong
+  answer, not an error. Any clang-query script must reuse `check_clang_tidy._toolchain_args()`.
 
-Turn an unreachable number into a working ratchet.
+Unprobed: whether stack arrays, class members and statics are worth separating (they are
+different problems — a 512-byte local is a stack-depth risk, a 512-byte member is per-instance
+RAM), and where the threshold should sit. Both are policy questions for when the rule lands.
 
-- Generate `moondeck/check/whitelizard.txt` freezing today's 162 violations.
-- Run lizard with `-W`, so the gate fails only on **new** violations.
-- Keep feeding the count into `repo-health.json` for the trend.
+### Is lizard the right tool? Yes — as a counter, not an analyser
 
-*Outcome:* complexity becomes a gate that can pass, and any new offender is visible
-immediately. Existing debt stays measured but stops crying wolf.
+The question this plan opened with, answered directly.
 
-### 2. `[[clang::nonblocking]]` on the tick methods (small, highest value)
+**Keep it.** It is actively maintained (1.23.0, June 2026), runs in ~1 s, and it does one
+thing the rest of the stack does not: it produces a **number per commit** that we can trend.
+clang-tidy tells you a function is too complex *today*; lizard tells you whether the codebase
+is getting worse *over time*. Those are different jobs, and `repo-health.json` needs the
+second.
 
-Replace a best-effort regex lint with a compiler-verified, transitive guarantee.
+**But only as a counter.** Its own README warns it is a fuzzy tokenizer, not a parser — no
+macro expansion, confused by heavy templates. It can never express an architectural rule, so
+it is not a platform to build on.
 
-- Annotate `MoonModule::tick/tick20ms/tick1s` (three lines).
-- Add `-Wfunction-effects` to the desktop build; the ESP32 build keeps its own toolchain.
-- Fix or explicitly opt out whatever it surfaces. Early probe suggests the hot path is
-  already clean, so fallout should be small.
-- Keep `check_hotpath.py` until the compiler check is green on both toolchains, then delete
-  it — the compiler subsumes it, and per *Default to subtraction* the weaker check goes.
+**Its 162 warnings are a threshold artifact, not a verdict:** 161 come from `CCN>10` alone,
+and 80% of 2,185 functions sit at CCN ≤ 5. The real tail is 4 functions above CCN 50. A metric
+that can never reach zero is a poor gate, which is what baselining fixes.
 
-*Risk:* the ESP32 toolchain's clang may lag on this attribute; the desktop build is the gate
-either way, so this degrades to "checked on one target", which is still more than today.
+**Its VS Code extension is dead** (v1.0.1, Oct 2022) — do not build on it. The live in-editor
+equivalent is clang-tidy's `readability-function-*` through clangd, which is layer 1.
 
-### 3. RealtimeSanitizer in the sanitizer matrix (small)
+**Overlap with clang-tidy, settled:** both can measure complexity, so they do not both gate.
+**lizard owns the metric and the trend**; clang-tidy's complexity checks stay off. One number,
+one owner.
 
-The dynamic counterpart: `kind: [address, thread, realtime]` in `test.yml`, running the
-existing scenarios. Catches at run time what the static analysis over-approximates.
+**Deleted:** `check_hotpath.py` (170 lines) once layer 3 is green — the compiler subsumes it
+transitively, which a regex never could.
 
-*Note:* only meaningful once step 2 lands, since RTSan keys off the same attributes.
+**Declined:** cppcheck (modest unique yield next to a clean clang-tidy), SonarCloud (a second
+findings home; no custom C++ rules at any tier), custom CodeQL queries (the one rule we named
+is owned by layer 3), Semgrep (C++ GA is paywalled), Aikido (AppSec aggregator, wrong
+category), PVS-Studio / CodeScene / MISRA suites (built for certification, not for us),
+`-Weverything` and GCC `-fanalyzer` (Clang's and GCC's own docs advise against, respectively).
 
-### 4. Re-evaluate every existing check, then migrate (medium)
+### One rule, one owner
 
-Before adding tooling, audit what we already run. The MoonDeck **Check** group holds nine
-entries; each gets a verdict — *keep as is*, *migrate*, or *delete* — and the reasoning is
-recorded here so a future reader knows why each survived.
+| Rule | Enforced by |
+|---|---|
+| No allocation/blocking in the render path | `[[clang::nonblocking]]` + RTSan |
+| No platform code outside `src/platform/` | `check_platform_boundary.py` |
+| Specs match the code | `check_specs.py` |
+| Catalog matches the modules | `check_devices.py` |
+| Untrusted input is memory-safe | CodeQL |
+| Bug patterns / performance | clang-tidy |
+| Complexity does not grow | lizard (baselined) |
+| Size/LOC/docs do not grow silently | `repo_health.py` |
 
-The distinction that decides most of them: a check validating **C++ semantics** can move to
-a shelf tool; a check validating **consistency between artifacts** (code ↔ docs, code ↔ JSON
-catalog, source ↔ built binary) cannot, because the other half of the contract is not C++.
-No static analyser models "this module's spec page lists the controls the header declares".
+## How clang-tidy gets configured
 
-| Check | Lines | What it validates | Proposed verdict |
-|---|---:|---|---|
-| `check_specs` | 438 | code ↔ docs drift (control names, ranges, docPath anchors) | **Keep** — cross-artifact; nothing else can see both sides. Add SARIF output. |
-| `check_platform_boundary` | 79 | no platform `#include`/`#ifdef` outside `src/platform/` | **Migrate to CodeQL** (step 6), keep both briefly, then delete the weaker one. It is a code-semantics rule and CodeQL sees includes properly. |
-| `check_hotpath` | 170 | regex for allocation/blocking in tick methods | **Delete** once step 2 is green on both toolchains — the compiler subsumes it transitively, which the regex cannot do at all. |
-| `check_devices` | 292 | installer catalog ↔ registered module types + assets on disk | **Keep** — cross-artifact (JSON ↔ C++ ↔ image files). Add SARIF. |
-| `check_firmwares` | 48 | `firmwares.json` matches the `FIRMWARES` dict | **Keep** — pure generated-file drift check, trivially cheap. |
-| `check_esp32_built` | 126 | firmware binary newer than its sources | **Keep** — build-state check, not code analysis. |
-| `collect_kpi` | — | performance + size measurement | **Keep** — measurement, not a rule. |
-| `repo_health` | — | the ratchet snapshot | **Keep**, but see step 7 for its UI half. |
-| `check_sanitizers` | — | ASan/TSan wrapper | **Keep**, extended by step 3. |
+The centrepiece, and the part the first attempt botched. Real projects use one of three
+shapes; ours is **archetype B — enable families, disable individually with a stated reason**
+(the [SerenityOS](https://github.com/SerenityOS/serenity/blob/master/.clang-tidy) shape).
 
-Then give every *surviving* check a `--sarif` flag and upload each under its own category in
-CI.
+Nobody serious enables `cppcoreguidelines-*` or `hicpp-*` wholesale: mostly aliases plus
+bounds/cast rules that firmware register access must violate. ClickHouse disables the family
+as *"impractical… also slow"*; ESPHome — a large ESP32 C++ codebase, our closest peer — does
+the same and still runs `WarningsAsErrors: '*'`.
 
-*Outcome:* findings become PR line annotations with GitHub's own open/fixed/dismissed
-lifecycle — baselining and history we would otherwise have to build — and the check list
-shrinks by the two that a real tool does better.
+Starting config, **derived bottom-up from ESPHome's** (their `.clang-tidy` is `*` minus 175
+checks with `WarningsAsErrors: '*'` — battle-tested on a large ESP32 C++ codebase, the closest
+peer we have), then tuned top-down against our own tree. The full file is written at
+implementation time; the shape is `*` minus ~78 disables, `HeaderFilterRegex: 'src/(core|light)/'`.
 
-*This step is where the plan pays for itself in subtraction:* two checks retire, and the
-remaining seven stop needing bespoke reporting.
+**Tuning it was iterative, and the numbers show why the first attempt failed:**
 
-### 5. clang-tidy + clangd (medium)
+| Config | Unique findings in our code |
+|---|---:|
+| My original shotgun (`bugprone-*,performance-*,concurrency-*`) | 384, of which 66% one noisy check |
+| `*` + ESPHome's family disables only | **6,073** |
+| + their style-check disables | 3,949 |
+| + the `cert-*` family (`cert-err33-c` alone was 3,678 — every `snprintf`) | **131** |
 
-- Root `.clang-tidy` with a deliberately small set (`bugprone-*`, `performance-*`,
-  `concurrency-*`), tightened per-directory — `InheritParentConfig` maps onto our
-  core/light/platform split.
-- Desktop build already emits a compilation database; add `CMAKE_EXPORT_COMPILE_COMMANDS`
-  if missing.
-- Same config drives clangd, so the rules appear in the editor as you type.
+**131 real findings** — a tractable, mostly-actionable list. Three checks ESPHome disables that
+I had wrongly called useful in the first evaluation: `performance-enum-size`,
+`bugprone-narrowing-conversions`, `bugprone-easily-swappable-parameters`. They run the same
+class of memory-constrained device and still reject all three.
 
-*Rule:* never enable a check family we are not willing to gate on. Expand one at a time.
+**Triage outcome: 125 → 47.** Every finding was read against the actual code rather than
+trusted. The remaining 47 are all `clang-analyzer-*` — the path-sensitive family — and they
+were invisible until `WarningsAsErrors` was switched on: the report parser rejected the
+`,-warnings-as-errors` suffix clang-tidy then appends and dropped every finding. So the
+"0" this section originally claimed was partly a parser bug, which is the sixth silent-zero
+this exercise produced. Backlogged: *clang-tidy: triage the 47 clang-analyzer findings*.
+The split, which is the number worth remembering for the next tool evaluation:
 
-**Overlap to settle here:** clang-tidy's `readability-function-size` and
-`readability-function-cognitive-complexity` measure what lizard measures. Do not gate on
-both. The split that keeps each earning its place: **lizard owns the metric and the trend**
-(it feeds `repo-health.json`, and its whitelist is the ratchet), **clang-tidy owns the
-in-editor nudge** (it tells you while you type, which lizard cannot). If that split feels
-like a distinction without a difference once both are running, drop the clang-tidy checks —
-the trend matters more than the nudge.
-
-### 6. CodeQL with a custom query pack (larger)
-
-CodeQL is doing **two jobs**, and they justify themselves separately. An earlier draft of
-this plan treated it as an optional extra for custom rules only; that undersold it.
-
-**Job one — security analysis of untrusted input. This one stands on its own.** The firmware
-parses six network packet formats (`ArtNetPacket`, `DdpPacket`, `E131Packet`,
-`WLEDAudioSyncPacket`, `MqttPacket`, `WledPacket`) plus HTTP, doing ~22 `memcpy` operations
-on data that arrives from the LAN — on a device with no MMU and no process isolation, where a
-buffer overrun is remote code execution on someone's lighting controller. **We run no
-security scanning at all today.** CodeQL's stock C/C++ suite is built precisely for this:
-taint tracking from a network source to a memory-unsafe sink, reported as a data-flow path.
-Nothing else in this plan looks for that class of bug — the compiler checks effects, lizard
-counts branches, our Python checks read text. This is a genuine hole, and it is the strongest
-argument for CodeQL regardless of the custom-rule question.
-
-**Job two — bespoke rules whose enforcement needs the call graph.** Assessed on its own
-merits *after* job one is running, against a specific named rule (see the prohibition below).
-
-- Advanced-setup workflow, `build-mode: none`, nightly + on PR.
-- Stock `cpp` suite first, with the `security-and-quality` query set — that is job one, and
-  it is the part to keep even if we never write a line of QL.
-- Only then, if a rule needs it, an in-repo query pack.
-
-**Do NOT write a CodeQL query for allocation-reachable-from-`tick()`.** Step 2 already owns
-that rule at compile time, where it is faster and closer to the author. A second
-implementation would be exactly the overlap this plan exists to avoid — and the earlier draft
-of this plan proposed it, which is how easily it happens.
-
-The platform-boundary rule is the honest CodeQL candidate: it is code semantics, and CodeQL
-sees includes properly where a regex sees text. If it lands, `check_platform_boundary.py`
-is **deleted**, not kept alongside.
-
-*Cost:* QL has a real learning curve. The VS Code extension (GitHub-published, released
-within the week) is the authoring environment — note it is for *writing queries*, not live
-diagnostics.
-
-### 7. Decide the dashboard question (decision, not code)
-
-With steps 4 and 6 in place, GitHub code scanning already provides drill-down, history and
-ranked findings for free. **Re-evaluate whether the hand-built repo-health drill-down still
-earns its place** — it may be replaceable by code scanning plus optionally switching on
-SonarQube Cloud's free automatic analysis (one click, no CI change, deletable).
-
-The `repo-health.json` ratchet stays regardless: no static analyser tracks flash size per
-firmware variant, and that is our tightest constraint.
-
-## Explicitly not doing
-
-- A lizard VS Code extension (dead upstream, and clang-tidy covers it live).
-- Compiled clang-tidy plugin checks — LLVM-version-coupled, and **clangd will not load
-  them**, so they would never appear in the editor. CodeQL does the same job better.
-- Semgrep for C++ architectural rules (paid GA; free tier experimental and per-file).
-- Aikido, and any enterprise MISRA suite (Klocwork/Parasoft/QAC/Polyspace).
-- Porting the Python checks *into* a shelf tool for its own sake. The checks are fine; it is
-  the reporting plane that standardises.
-
-## Running the POC
-
-**Cheapest-first, because an early answer changes later questions.** Enabling CodeQL's stock
-suite is a workflow file and no code change; clang-tidy needs a config and a compilation
-database; SARIF output needs a flag per check. Start where the answer costs least.
-
-A rough order, adjustable as results come in:
-
-1. **CodeQL stock suite** — one workflow file, free, and it answers the biggest open question
-   (do we have real security findings in six untrusted-input parsers?). If it finds nothing,
-   that is worth knowing; if it finds something, everything else waits.
-2. **clang-tidy** on the desktop compilation database with a small check set — one run tells
-   us whether it finds anything we would act on.
-3. **SARIF from one Python check** — prove the reporting plane on `check_platform_boundary`
-   (the smallest at 79 lines) before converting the rest.
-4. **RTSan**, once the Clang attributes are in — it keys off them.
-5. **cppcheck addon / SonarCloud** — only if a gap survives the above.
-
-Timebox each. The output is one filled-in scorecard row per tool, recorded in the PR.
-
-**Include the custom-rule probe in the timebox.** A tool's config and extensibility only
-reveal themselves when you try to bend it — the day-one experience of every analyser is
-good, and that is not what we are measuring.
-
-## Phase 2: the judgement
-
-One decision, made once, written down. It must state:
-
-- **The final set** — which tools we keep, and which rule each one *owns*.
-- **What is deleted** — every check the new set makes redundant, retired in the same change.
-  If nothing is deleted, the plan failed its own subtraction test.
-- **What we declined and why** — so this research is not repeated in six months. Candidates
-  rejected in the POC are as valuable a record as the ones adopted.
-- **Where findings go** — ideally one channel for everything.
-
-**The measure of success is not how many tools we adopted.** It is whether a new contributor
-can say, for any rule, which single thing enforces it — and whether the toolset came out
-smaller and clearer than the pile of overlapping analysers we could have accumulated instead.
-
-**Two entries exist to remove things, not add them** — candidate 4 (retire `check_hotpath`,
-migrate `check_platform_boundary`) and candidate 7 (re-evaluate the hand-built drill-down
-against what code scanning gives free).
-
-## POC results
-
-Recorded as each candidate runs. Raw numbers, not impressions.
-
-### clang-tidy — run 2026-07-27, one translation unit (`HttpServerModule.cpp` + its headers)
-
-Setup cost was low: no `CMAKE_EXPORT_COMPILE_COMMANDS` in our CMakeLists, but generating a
-database into a throwaway build dir took one command and touched nothing in the repo.
-Homebrew LLVM 22 was already installed.
-
-Checks tried: `bugprone-*`, `cppcoreguidelines-no-malloc`, `performance-*`, `concurrency-*`.
-**119 findings from ONE translation unit**, distributed:
-
-| Check | Count | Verdict |
+| Disposition | Count | Examples |
 |---|---:|---|
-| `bugprone-easily-swappable-parameters` | 85 | **noise** — 71% of the total from one check almost nobody enables |
-| `performance-enum-size` | 14 | **worth considering** — each is 3 wasted bytes per enum; on a 180 KB-heap ESP32 that is not nothing, and it aligns with our minimal-memory principle |
-| `bugprone-infinite-loop` | 6 | **false positive** — verified `AudioBands.h:74`, a plain `for (uint8_t e = 0; e <= 16; e++)`. Not infinite. |
-| `bugprone-narrowing-conversions` | 4 | plausible, needs review |
-| `bugprone-branch-clone` | 4 | plausible, needs review |
-| `bugprone-assignment-in-if-condition` | 3 | plausible, needs review |
-| `bugprone-implicit-widening-of-multiplication-result` | 2 | plausible, needs review |
-| `clang-diagnostic-error` (`'cstdint' file not found`) | 1 | **extraction gap** — header resolution imperfect even with the database |
+| Real defects, fixed | 2 | `std::forward` inside a loop (below); a duplicated `TEST_CASE` + its duplicate include |
+| Genuine improvements, applied | ~20 | `localtime`→`localtime_r`, `std::numbers::pi`, `scoped_lock`, `ranges::any_of`, two accidentally-private overrides, a throwing test-rig destructor |
+| Deliberate convention → check disabled with a measured reason | ~80 | see the disable table in `.clang-tidy` |
+| Deliberate at one site → `NOLINT` with a reason | 12 | Bresenham's assign-and-test; asserting moved-from state *is* the test |
 
-**Reading:** the default-ish check set is unusable as a gate — one check produces 71% of the
-output and another produces confident false positives. But a *narrow* set looks genuinely
-useful, and `performance-enum-size` in particular speaks directly to a project principle.
+**The real bug it found** is in `HttpServerModule.cpp`: `visitModuleLeaves(mod, std::forward<Fn>(fn))`
+called inside a `for` loop, at two levels. Forwarding moves the callable into the first module,
+so every later sibling receives a moved-from object. It survived because the callables in use
+happen to be cheap-to-copy lambdas, which is precisely the kind of latent, works-by-luck defect
+a reviewer skims past.
 
-**Implication for adoption:** the value is real but conditional on curation. This is the
-"never enable a family we are not willing to gate on" rule proving itself on day one: had we
-adopted the recommended set wholesale, we would have imported 85 findings we do not care
-about and 6 that are wrong.
+**The disabled checks are the more interesting result.** Four families were wrong on *every*
+occurrence, each because it collides with a deliberate convention: `bugprone-signed-char-misuse`
+(12/12 — and its suggested fix would turn the `-1` unset-pin sentinel into GPIO 255, a real bug),
+`performance-no-int-to-ptr` (9/9, the `uintptr_t` tagged-pointer field), `bugprone-infinite-loop`
+(28/28, `uint8_t` counters), `bugprone-implicit-widening-of-multiplication-result` (47 findings,
+0 reachable — margin ~87,000×). A check that is wrong every time trains you to ignore its family,
+which costs more than it catches; the reasoning for each is recorded in `.clang-tidy` so the next
+reader does not re-litigate it.
 
-#### Full-codebase run (same day)
+A sample false positive for contrast: `WledPacket.h:80` "memcpy result is not
+null-terminated" — the buffer is pre-zeroed by a `memset`, as the adjacent comment says. That
+one gets a `NOLINTNEXTLINE` with the reason, which is the intended workflow.
 
-`run-clang-tidy` over every `.cpp` in `src/core` + `src/light`, 4 jobs: **4.6 seconds wall
-clock** — cheap enough to gate on. Raw output was 6,305 findings, but that counts each header
-once per translation unit that includes it; **deduplicated it is 384 unique findings.** Always
-deduplicate before judging a header-heavy codebase, or the number is meaningless.
+`bugprone-infinite-loop` **stays enabled** despite being 26/28 false on our `uint8_t` counters
+in the first run: the FPs are a known LLVM issue with fixes still landing, and an FP there
+sometimes reveals a genuinely missing `volatile`. Each gets a `NOLINTNEXTLINE` with a reason.
 
-| Check | Unique | Verdict |
-|---|---:|---|
-| `bugprone-easily-swappable-parameters` | 254 | **noise** — 66%, consistent with the single-file sample |
-| `performance-enum-size` | 34 | **worth doing** — 3 bytes each, and it matches our minimal-memory principle |
-| `bugprone-branch-clone` | 31 | needs review |
-| `bugprone-infinite-loop` | 28 | **broken here — see below** |
-| `bugprone-narrowing-conversions` | 17 | needs review |
-| `clang-diagnostic-error` | 9 | extraction gaps |
-| `bugprone-throwing-static-initialization` | 6 | needs review — plausibly real |
-| others | 5 | needs review |
+Rejected checks stay listed in the config with their reason, so they are never re-litigated —
+[the Chromium pattern](https://github.com/chromium/chromium/blob/main/.clang-tidy).
 
-**`bugprone-infinite-loop` is systematically wrong on this codebase: 26 of its 28 findings
-have the loop counter incremented on the very line it flags.** Verified examples:
-`for (uint8_t e = 0; e <= 16; e++)`, `for (uint8_t i = childCount_; i > 0; i--)`. The check
-cannot track `uint8_t` counters — and `uint8_t` counters are a deliberate convention here
-(coding-standards § Prefer integers). A check that misfires on a house convention is worse
-than useless: it would train us to ignore its whole family.
+**A structural catch for our layout:** clang-tidy picks its config from the *translation
+unit's main file*, so a `src/light/.clang-tidy` would **not** govern our header-only light
+modules — they are compiled as part of some `.cpp` elsewhere. Per-directory strictness on the
+core/light split therefore does not work as one might assume. The working shape is one root
+config plus a relaxed `test/.clang-tidy` (`InheritParentConfig: true`), with
+`HeaderFilterRegex` covering the headers.
 
-**Toolchain gotcha worth recording:** the first `compile_commands.json` was generated with
-Apple Clang (`/usr/bin/c++`) while the analysis ran under Homebrew LLVM 22, so every file hit
-`'cstdint' file not found`. That produced the 9 extraction errors AND silently blocked
-clang-query entirely. **The database's compiler must match the tool's.** Regenerating with
-`-DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++` fixed it completely.
+## Implementation
 
-#### Custom-rule probe (criterion 5) — clang-query
+Each step is independent and revertible. **✅ done · ◻ not started · ◐ partly done.**
 
-Tried `clang-query` before any compiled plugin, per the research's "cheap path first".
-Findings:
+1. ◻ **Warnings tier-zero** — add `-Wshadow -Wnon-virtual-dtor -Wdouble-promotion
+   -Wimplicit-fallthrough -Wnull-dereference` to the existing `-Wall -Wextra -Werror`.
+   `-Wdouble-promotion` catches accidental `double` math: real cost on Xtensa, and it enforces
+   the integer-math rule. Trial `-Wconversion` separately — expect to reject it for `light/`.
+2. ✅ **Baseline lizard** — DONE. `docs/metrics/whitelizard.txt` freezes today's 162 and
+   `check_lizard.py` fails only on new violations (verified both ways: a probe function makes it
+   exit 1, removing it returns green). Deliberately NOT at the repo root — that is lizard's
+   default whitelist path, and a baseline that applies itself silently zeroed the KPI's
+   complexity count. The KPI and repo-health now record the RAW number via shared code; the
+   baseline is applied only by the gate. `repo-health.json` gained a `complexity` block, so the
+   trend the plan asked for actually exists now.
+3. ◻ **`[[clang::nonblocking]]`** on `MoonModule::tick/tick20ms/tick1s` (three lines; the
+   attribute is inherited by overrides, so ~90 modules are covered) + `-Wfunction-effects` on
+   the desktop build. Then delete `check_hotpath.py`.
+4. ◻ **RealtimeSanitizer** — add `realtime` to the sanitizer matrix in `test.yml`. Only
+   meaningful after step 3, since it keys off the same attributes.
+5. ◐ **clang-tidy** — config landed, clangd wired, and the tree triaged from 125 findings to
+   **0** (see the triage table above). What remains is the ratchet: `WarningsAsErrors` is still
+   `''`, and cannot go to `'*'` until the 47 clang-analyzer findings are triaged — switching it
+   on today fails the gate. One line, and it is what stops a zero decaying, so it lands WITH that
+   triage. Original text: land the config above, wire **clangd first** (editor-only, gates nothing,
+   and it filters slow checks automatically). Then one full run per family: real bug → fix;
+   FP → `NOLINTNEXTLINE` with a reason; loud-and-useless → the disable list with a comment.
+   When a family is clean it joins `WarningsAsErrors`. Target end state is **zero baseline** —
+   at 50k LOC that is reachable, which is why we skip CodeChecker and diff-only CI entirely.
+6. ◻ **CodeQL housekeeping** — exclude vendored code (`test/doctest.h` produced the only
+   critical we do not own) and decide whether it gates PRs or stays a weekly sweep.
+7. ◐ **Triage the 4 real CodeQL findings** — the 3 `localtime` criticals are DONE (a portable
+   `isoTimestamp` helper in `main_desktop.cpp`, `localtime_r`/`localtime_s` behind the file's
+   existing `_WIN32` branch); clang-tidy's `concurrency-mt-unsafe` flagged the identical three,
+   so two independent tools agreeing was the signal to fix rather than suppress. Remaining: file
+   modes `0666` → `0600` where it matters (desktop only; meaningless on LittleFS).
 
-- **Writing a matcher is minutes, not days.** `match callExpr(callee(functionDecl(hasName(
-  "malloc"))), hasAncestor(functionDecl(matchesName("tick.*"))))` — one line, no build, no
-  LLVM-linked plugin, runs against the existing database.
-- **Verified it detects rather than silently passing.** The malloc-in-tick probe returned 0
-  matches (a true clean result); a deliberately broad control matcher returned 42 and 245,
-  proving the matcher machinery works.
-- **The bespoke ordering rule's raw material is reachable.** A matcher for
-  `add(Uint8|Uint16|Int16|Pin|Select|Text)` member calls found **245 registrations** through
-  `main.cpp`, with source locations — everything the "a conditional control is registered
-  below the control it depends on" rule needs. Note controls live in headers, so the matcher
-  must run against a TU that includes them, not the `.cpp` files.
-- **Class of rule reachable: per-function AST, lexical position.** *Not* whole-program call
-  reachability — clang-query has no call graph, so "allocation *reachable from* tick()" stays
-  out of reach (that is CodeQL's or the compiler's job, and the compiler already owns it).
-- **Cost/coupling:** matchers are plain text in our repo, no plugin to build, no LLVM version
-  lock. The one coupling is matcher syntax across major LLVM releases, which is far cheaper
-  than the ABI coupling a compiled clang-tidy check carries.
+8. ✅ **clang-query — the bespoke-rule report. DONE.** `check_clang_query.py`, MoonDeck card
+   "AST Rules". Shipped with two rules and the frame for more. Measured on this tree: 290
+   RAM-costing arrays over 10 bytes (193 local, 97 member) and 78 heap allocation sites.
+   Thresholds settled from the real numbers, not in advance — excluding constexpr/static
+   storage took the array list from >1000 to 362, which is what made a 10-byte default usable.
+   Two traps hit while building it, both silent-zero: a bare top-level `anyOf()` of `Stmt`
+   matchers is ambiguous and matches NOTHING while exiting 0 (needs a `stmt(...)` wrapper), and
+   the guard against that must key on more than `"error:"` — clang-query says "Input value has
+   unresolved overloaded type". Original design: One MoonDeck entry,
+   `check_clang_query.py`, holding a GROWING LIST of rules we invent — not one script per rule.
+   Each rule is a matcher plus a Python predicate, and the report prints a section per rule, so
+   rule two costs a list entry rather than a new script, a new card and a new help page.
 
-**Verdict so far:** clang-tidy's value is real but *entirely conditional on curating the
-check list* — the recommended set is 66% noise plus one systematically broken check.
-clang-query is the pleasant surprise: cheap, capable of our per-function bespoke rules, and
-with no maintenance tail.
+   **First rule: large array declarations** (`char buf[512]`), the RAM-bloat question nothing
+   else in the stack answers. Probed and working (§ clang-query above): match all
+   `constantArrayType()` declarations, then filter in Python — there is no size-threshold
+   matcher, so `> N bytes`, our-files-only, and the dedupe of repeated template instantiations
+   are ours to do. Reuse `check_clang_tidy._toolchain_args()`: without `-isysroot` the same
+   silent under-report appears (5 matches instead of 14).
 
-**Not yet done:** the clangd in-editor experience, and turning the ordering probe into an
-actual enforced rule.
+   **PO's categories, each probed against the real tree:**
 
-### CodeQL — workflow written, awaiting a run
+   | Ask | Verdict |
+   |---|---|
+   | Stack vs heap vs member | ✅ Separable. `varDecl` = locals/statics, `fieldDecl` = members (my first probe used only `varDecl` and silently missed EVERY class member). `hasStaticStorageDuration()` and `isConstexpr()` split flash-resident tables from real RAM. |
+   | Fixed number vs named constant | ❌ **Not recoverable.** The AST folds `kMaxLanes` to `[16]` before we see it — `busPinBuf_` reads as `uint16_t[16]` with no trace of the spelling. Source text has it (730 literal-sized vs 105 `kConstant`-sized) but only via regex, which is the fragile approach this whole plan moved away from. Recommend dropping. |
+   | Heap allocs and frees | ✅ Works. `cxxNewExpr()` / `cxxDeleteExpr()` match, as does `callExpr(callee(functionDecl(hasAnyName("malloc","calloc","realloc","free","heap_caps_malloc",…))))` with exact locations. Needs the our-files filter — a raw `cxxNewExpr()` run returns standard-library internals like `new _Codecvt`. |
+   | 10-byte threshold | ⚠️ **Measured, and it is too low as a flat rule.** Three sampled files alone hold 245 array declarations: 212 are >10 bytes, 106 >64, 25 >256. Extrapolated across `src/`, >10 bytes is over a thousand findings. |
+   | Nothing fixed, all dynamic | Agreed as the principle — but see below on what the 10-64 byte band actually contains. |
 
-`.github/workflows/codeql.yml` added: `build-mode: none`, `security-and-quality`, manual +
-weekly. Cannot produce results until pushed (CodeQL runs in CI, not locally, without the
-CLI). The question it answers is the untrusted-input one — six packet parsers, ~22 `memcpy`
-on LAN data, no security analysis today.
+   **Why a flat 10-byte threshold would misfire.** Sampling the 10-64 byte band shows it is
+   almost entirely small fixed string buffers and constant lookup tables, and several are the
+   minimalism principle already applied rather than violated:
+   - `MoonModule::name_[16]` — its own comment records it was shrunk FROM `char[24]` to save
+     8 bytes per module (~240 bytes across a typical tree). Flagging it reports a past win as a
+     problem.
+   - `kRGB[3]` / `kGRB[3]` / `kBuiltins[]` — `static constexpr`, so they live in FLASH and cost
+     no RAM at all. 16 of 17 array decls in `LightPresetsModule.h` are static-storage.
+
+   So the useful report is not "arrays over N bytes" but **arrays that cost RAM**, which the
+   probed matchers can express: exclude `isConstexpr()` / `hasStaticStorageDuration()`, then
+   report locals (stack-depth risk), members (per-instance RAM × instance count) and mutable
+   statics (unconditional RAM) as three separate lists. At that point a threshold near 10 bytes
+   is plausible, because the flash-resident noise is already gone. **Measure before fixing it.**
+
+   Still open, and to be decided on the first real run rather than now: the exact threshold per
+   category, and whether the count needs `check_lizard.py`'s baseline shape or is small enough
+   to be a plain report.
+
+   The rule after that is unassigned on purpose — the point of the step is the *frame*, so the
+   next rule is a matcher and a threshold rather than a project.
+
+## Evidence
+
+### CodeQL — run, and it delivered
+
+CodeQL 2.26.1, `build-mode: none`: ~3 min, **179 rules, 867 results**, no build required.
+
+- **3 × critical** `localtime` in `main_desktop.cpp` — real (shared static, not thread-safe),
+  desktop-only. FIXED via a portable `isoTimestamp` helper; clang-tidy independently flagged the
+  same three as `concurrency-mt-unsafe`.
+- **1 × critical** use-after-free in `test/doctest.h` — vendored; exclude it.
+- **5 × high** files created mode `0666` — meaningless on LittleFS, minor hardening on desktop.
+- **1 × high** `Control.cpp:168`, `uint8_t o < c.max` where `max` is `int32_t` — benign today
+  (`addSelect` takes a `uint8_t` count) but a latent trap if that signature widens.
+
+**The six network packet parsers produced no taint-flow findings** — positive evidence about
+~22 `memcpy` calls on LAN data that nothing else in the stack could have given.
+
+### clang-query — probed as the bespoke-rule engine
+
+The one part of the first evaluation worth keeping, because it tested *authoring a rule*
+rather than reading default output.
+
+A matcher took minutes and no build:
+`match callExpr(callee(functionDecl(hasName("malloc"))), hasAncestor(functionDecl(matchesName("tick.*"))))`
+→ 0 matches, a true clean result (broad control matchers returned 42 and 245, proving the
+machinery works rather than silently passing). It reaches the **245 control registrations** a
+future "a conditional control is registered below the control it depends on" rule would need.
+
+Class of rule reachable: per-function AST and lexical position — **not** whole-program
+reachability. That limit is fine, because the one rule needing reachability (allocation
+reachable from `tick()`) is owned by layer 3.
+
+### `[[clang::nonblocking]]` — verified locally
+
+Clang 22 caught a `push_back` two levels deep through a helper, tracing the chain into libc++.
+The attribute is **inherited by overrides**, so one annotation on the base covers every module.
+
+### Two gotchas worth keeping
+
+- **The compilation database's compiler must match the tool's.** A database generated by Apple
+  Clang while analysing under Homebrew LLVM produced `'cstdint' file not found` on every file
+  and silently blocked clang-query entirely.
+- **`workflow_dispatch` only offers a "Run workflow" button on the default branch**, so a POC
+  workflow on a feature branch needs a `push:` trigger. And `/code-scanning/alerts` returns
+  `0` for a non-default branch unless you pass `?ref=refs/heads/<branch>` — that zero does not
+  mean "clean".
+
+## What we got wrong
+
+Recorded because the mistake is instructive, and because the first draft of this plan
+**declined clang-tidy on bad evidence**.
+
+The first evaluation ran each tool *once, unconfigured*, and scored the raw output. For
+clang-tidy that meant enabling `bugprone-*,performance-*,concurrency-*` — a shotgun — then
+counting the noise that choice produced and calling it a tool defect. 66% of the findings came
+from `bugprone-easily-swappable-parameters`, **a check that SerenityOS, ClickHouse, ESPHome,
+Godot and the Zephyr template all disable by name**. Turning it off is standard practice.
+
+The comparison was also structurally unfair: CodeQL was given a written workflow with a
+curated query set, clang-tidy got one command line, and the two outputs were then compared as
+though that were like-for-like.
+
+The lesson, and the reason this plan now leads with configuration: **a static-analysis tool's
+default output is not its verdict.** Evaluating one without a curated check list measures the
+evaluator's config, not the tool.
+
+### The silent-failure modes, all of which read as "clean"
+
+Five separate defects in the tooling each produced a plausible-looking report rather than an
+error. This is the part worth carrying forward, because every one of them would have let a
+green check certify an unanalysed tree:
+
+| Defect | What it looked like |
+|---|---|
+| `#` inside a YAML `>-` folded scalar is not a comment | Every disable after the first comment was folded into the check string; `abseil-*` stayed on → 12,181 findings |
+| `run-clang-tidy` shells out to `clang-tidy` **by name** | Not on PATH → exits 0 having analysed nothing → "0 findings" |
+| `-extra-arg VALUE` (space form) is silently ignored | Only `-extra-arg=VALUE` works → 0 findings |
+| Same trap in `-checks` | `--check X` filtered nothing; the filter had never worked |
+| Compilation database recorded a *different* compiler | `'cstdint' file not found` on 129/129 files; unparsed files are never analysed, so the findings were debris |
+
+The defence now in `check_clang_tidy.py`: it refuses to report when more than ten files fail to
+compile, because "most files errored" is a broken run, not a result. The general rule — **verify
+a zero before believing it.** After reaching 0 findings, running a deliberately-disabled check
+(`--check readability-magic-numbers`) returned 3,307, which is what proves the pipeline is
+actually reading the code. A zero with no control is indistinguishable from a tool that ran
+nothing.

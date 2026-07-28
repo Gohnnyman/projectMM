@@ -45,6 +45,8 @@ uv run moondeck/check/check_specs.py                    # spec/doc drift check
 
 All Python goes through `uv run`, never bare `python` (full rule: [coding-standards](docs/coding-standards.md)).
 
+Keep a branch under ~100 changed files: past that CodeRabbit declines the PR outright rather than reviewing part of it, so the branch silently loses a review layer. Split, or say so in the PR.
+
 **MoonDeck** is the project's tooling: every build, flash, monitor, test, and check task is one Python script under `moondeck/`, and MoonDeck itself is the local web dashboard that runs those same scripts for a human ([moondeck/MoonDeck.md](moondeck/MoonDeck.md) is the per-script reference). Agents invoke the scripts from the command line — one set of scripts, two front ends — and every gate invokes one of them. Deliberately our own scripts rather than an embedded toolchain like PlatformIO: the firmware builds vendor-native against pinned ESP-IDF versions, and the tooling covers far more than compile-and-flash — one script per task keeps humans, agents, and CI on the identical path (rationale: [building.md § MoonDeck](docs/building.md#moondeck--the-dev-console)).
 
 ### Test

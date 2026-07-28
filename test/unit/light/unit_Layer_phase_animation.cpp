@@ -9,7 +9,6 @@
 #include "light/effects/MetaballsEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/LavaLampEffect.h"
-#include "light/effects/SpiralEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "platform/platform.h"
 
@@ -79,11 +78,6 @@ TEST_CASE("SpiralEffect animates over a 100ms gap") {
 // LavaLamp animates across 100ms (blobs move).
 TEST_CASE("LavaLampEffect animates over a 100ms gap") {
     CHECK(animates_over_ms<mm::LavaLampEffect>(100));
-}
-
-// Spiral animates across 100ms (rotation visible).
-TEST_CASE("SpiralEffect animates over a 100ms gap") {
-    CHECK(animates_over_ms<mm::SpiralEffect>(100));
 }
 
 // Replace path: swap one effect for another mid-flight (same shape as

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/modifiers/ModifierBase.h"
+#include <numbers>
 
 namespace mm {
 
@@ -127,7 +128,7 @@ private:
 
     // Radians → degrees. MoonLight uses Arduino's degrees() macro; reproduced here
     // as a plain helper so the header carries no Arduino dependency.
-    static float degrees_(float rad) { return rad * (180.0f / 3.14159265358979323846f); }
+    static float degrees_(float rad) { return rad * (180.0f / std::numbers::pi_v<float>); }
 };
 
 } // namespace mm

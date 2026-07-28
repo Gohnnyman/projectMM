@@ -633,6 +633,8 @@ TEST_CASE("shift encoder: the packed transpose matches the reference at every pi
         mm::encodeWs2812ShiftData<Slot>(wire, activeMask, physPins, latchBit, kSh, kCh, got.data());
 
         INFO("bus=", sizeof(Slot), " physPins=", physPins, " mask=", activeMask);
+        // Binary struct compare, not a string: `== 0` is the correct test for identical bytes.
+        // NOLINTNEXTLINE(bugprone-suspicious-string-compare)
         CHECK(std::memcmp(ref.data(), got.data(), slots * sizeof(Slot)) == 0);
     };
 

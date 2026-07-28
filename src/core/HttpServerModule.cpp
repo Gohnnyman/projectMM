@@ -882,9 +882,12 @@ static uint32_t fnv1a(const char* s, size_t len) {
 template <class Fn>
 void HttpServerModule::forEachStateLeaf(Fn&& fn) {
     if (!scheduler_) return;
+    // `fn`, not `std::forward<Fn>(fn)`: forwarding inside a loop moves the callable on the
+    // first module, leaving every later module a moved-from object. Passing the lvalue binds
+    // to visitModuleLeaves' own forwarding reference without transferring ownership.
     for (uint8_t m = 0; m < scheduler_->moduleCount(); m++)
         if (auto* mod = scheduler_->module(m))
-            if (mod->appearsInUi()) visitModuleLeaves(mod, std::forward<Fn>(fn));
+            if (mod->appearsInUi()) visitModuleLeaves(mod, fn);
 }
 
 template <class Fn>
@@ -934,8 +937,10 @@ void HttpServerModule::visitModuleLeaves(MoonModule* mod, Fn&& fn) {
         JsonSink vs; writeControlValue(vs, c);
         fn(fnv1a(path, std::strlen(path)), fnv1a(vs.data(), vs.size()), path, vs);
     }
+    // `fn`, not `std::forward<Fn>(fn)` — same reason as the caller above: forwarding inside a
+    // loop moves the callable into the first child, leaving every later sibling a moved-from one.
     for (uint8_t i = 0; i < mod->childCount(); i++)
-        if (auto* ch = mod->child(i)) visitModuleLeaves(ch, std::forward<Fn>(fn));
+        if (auto* ch = mod->child(i)) visitModuleLeaves(ch, fn);
 }
 
 // Look up a leaf's cached value-hash by path-hash; returns nullptr if not yet seen. Linear over the

@@ -10,6 +10,7 @@ Below: the UI behaviours common to every card, described once, then one section 
 
 - **Status dots** on each card: grey (not run), orange (running), green (exit 0), red (exit non-zero).
 - **Run/Stop toggle** for long-running scripts (Run desktop, Monitor ESP32).
+- **Duration hint** — every card shows how long it takes: ⚡ about a second, ⏱️ a few seconds up to ~30, 🐌 more than 30 seconds (a build, a flash, a gate list, clang-tidy). All three are shown rather than only the extremes, so a blank badge reads as "nobody set a speed on this card" instead of being confused with medium. Set per script as `"speed": "instant" | "medium" | "slow"` in `moondeck_config.json`. This is a *label*, not a timeout — nothing enforces it, so a script that grows slower needs its flag updated by hand. Separate from `long_running`, which controls the Run/Stop toggle rather than expected duration.
 - **Group headers** in the sidebar (setup, build, flash, run, test, check, scenario).
 - **Destructive-action confirm** — scripts flagged `destructive: true` (e.g. Erase Flash) pop a native confirm dialog before running.
 - **Tab persistence** — selected tab survives page refresh.
@@ -191,6 +192,174 @@ uv run moondeck/check/repo_health.py --write   # rewrite repo-health.json
 **One small file, current state only — the trend is its git history** (`git log -p repo-health.json`), so the file never grows. The KPI gate rewrites it on every `--commit` run and prints the delta first, so growth is visible while you work and again in the commit's diff. A **soft ratchet**: nothing here fails a build. The numbers count things; they cannot tell a valuable comment from a restating one, so the judgment stays human.
 
 Two properties worth knowing. Measurements read **tracked files only** (`git ls-files`), so a stray build artifact or scratch file can't move a number. And anything this run could not measure — a firmware variant that wasn't built, a tick with no board attached — **carries its previous value forward** rather than disappearing, so a docs-only commit doesn't blank the flash sizes and make the next diff unreadable.
+
+### Tools group
+
+Static-analysis tools, run **manually**: they take minutes rather than seconds, so they are not
+in the commit/merge gate lists yet.
+
+### check_module
+
+Every static-analysis tool, on ONE module — the repo-wide reports turned around.
+
+```bash
+uv run moondeck/check/check_module.py --module Control
+uv run moondeck/check/check_module.py --module Layer --skip clang-tidy
+```
+
+The other tool cards sweep the whole repo, which is the wrong shape when you are working on one
+file and want to know what the tools say about *it*. This runs clang-tidy, clang-query and
+lizard against one module and prints them under one heading. It adds no analysis of its own —
+it invokes the same scripts with `--module`, so this and the repo-wide reports can never
+disagree about a finding. Each tool also accepts `--module` on its own if you want just one.
+
+**Module is not the same as a translation unit.** A TU is one `.cpp` plus everything it
+includes — the unit the compiler processes, and there are 15 under `src/`. A module is one class
+with its `.h` and optional `.cpp`, and there are ~90. Most are **header-only**, so they have no
+TU of their own: `ParallelLedDriver.h` is analysed through whichever `.cpp` includes it. That is
+why `--module` filters the findings rather than the file list — scoping by TU would analyse
+nothing for a header-only module and report a confident, wrong zero.
+
+It still scopes the *parse*, by resolving which TUs actually reach the module's files —
+following `#include` edges transitively, so a header-only module is analysed through the one or
+two `.cpp` files that include it rather than all 15. `BouncingBallsEffect` is reached only by
+`main.cpp`: **8s for all three tools, down from over four minutes**. The run prints which TUs it
+picked, so the scope is visible rather than assumed.
+
+### check_clang_tidy
+
+Run clang-tidy over the whole tree and write a Markdown report.
+
+```bash
+uv run moondeck/check/check_clang_tidy.py                              # full run, report to stdout
+uv run moondeck/check/check_clang_tidy.py --check bugprone-infinite-loop   # one check, for triage
+```
+
+Configured by [`.clang-tidy`](../.clang-tidy) at the repo root — the same file clangd reads, so
+this report and your editor agree. Takes ~2-3 minutes; the baseline is **zero findings**, so
+anything it prints is new.
+
+The findings print straight to the log — a per-check summary, the worst files, then every
+finding grouped by file. No report file to open: a run this slow should answer on the spot,
+and the old `build/clang-tidy-report.md` was gitignored anyway, so it existed only to be read
+once.
+
+**Verify a zero before believing it.** A tool that analysed nothing also reports zero, and this
+one has four documented ways to fail silently (the reasons are in the script). The control is a
+check you know must fire: `--check readability-magic-numbers` returns thousands. If that returns
+zero too, the run is broken, not the tree. The script also refuses to report when more than ten
+files fail to compile, because "most files errored" is a broken run and not a result.
+
+### check_clang_query
+
+Our own AST rules — the checks we invent, that no off-the-shelf tool reports.
+
+```bash
+uv run moondeck/check/check_clang_query.py               # every rule
+uv run moondeck/check/check_clang_query.py --rule=arrays # one rule
+uv run moondeck/check/check_clang_query.py --min-bytes=256
+```
+
+One script holding a **growing list** of rules, not one script per rule: a new rule is a matcher
+plus a few lines of Python, so it costs a list entry rather than another card and another help
+page. clang-query rather than a compiled clang-tidy plugin — matchers are plain text, there is no
+plugin to build and no LLVM ABI to track, and clangd cannot load a compiled plugin anyway.
+
+**Rule `arrays` — fixed arrays that cost RAM.** A fixed array is a fixed size, and the
+architecture sizes buffers at runtime from available memory. Reported worst-first, split by where
+the RAM lives, because the fix differs:
+
+| Where | Cost | Why it matters |
+|---|---|---|
+| `local` | Stack | A 2 KB local on a 4 KB task stack is an overflow waiting for the wrong call depth. |
+| `member` | Per instance | Multiplied by how many instances exist — 200 bytes × 90 modules is 18 KB. |
+
+`constexpr` and static-storage arrays are **excluded**: they live in flash and cost no RAM.
+Including them roughly triples the list with entries nobody should act on. `MoonModule::name_[16]` is the cautionary case: its
+comment records that it was *shrunk* from `char[24]` to save 8 bytes per module, so reporting it
+would flag a past win as a problem.
+
+Element sizes come from a table of the types we actually use; anything else (a struct, a class)
+falls back to 4 bytes. The number is an order-of-magnitude guide, not an ABI-exact figure.
+
+**No size threshold.** Every RAM-costing array is reported, however small — a cutoff hides
+things for the wrong reason (`bool birthNumbers_[9]` is 9 bytes and was invisible under the old
+10-byte default), and it bought little anyway: 362 findings with no threshold against 290 at
+>10 bytes. Volume is capped by `--max-rows` (default 60, worst-first) instead, which truncates
+the longest lists rather than silently dropping the smallest entries — and the cut is always
+announced, because a table that quietly stops reads as "that is all there is". `--max-rows 0`
+prints everything, and `--min-bytes N` restores a size cutoff — both CLI-only, since the card is
+one button and the default plus the "N more not shown" line already answer the question from the
+browser.
+
+The per-module card runs with no cap: you scoped to one module precisely to see all of its
+findings, and `HttpServerModule` alone has 71 arrays.
+
+**Rule `scratch` — `ScratchBuffer` members.** `ScratchBuffer` *is* the project's heap manager,
+so a module that uses one allocates without any `new` or `malloc` appearing in its own source —
+`GameOfLifeEffect` has three (`cells_`, `future_`, `colors_`) and the `heap` rule reports zero
+for it, because the real `platform::alloc` lives once inside `ScratchBuffer.cpp`. This rule
+closes that blind spot: 18 members across 13 files. No size column — a ScratchBuffer is sized at
+runtime from the light count, which is the entire point of it.
+
+**Rule `heap` — every allocation site in `src/`.** `new` / `delete` / the `malloc` family
+(including `heap_caps_*` and `ps_malloc`), in **two tables — ALLOCATE and FREE**. They answer
+different questions: the acquire list is where RAM comes from and what the hot path must not do;
+the release list is what pairs with it. Reading them side by side is how an unpaired allocation
+shows up — and the split is what reveals, for example, that `HttpServerModule` frees five times
+and allocates nothing, or that only **8 places in the whole codebase acquire memory**.
+
+Each row carries what the site is, what it touches, and **the enclosing function** — the column
+that turns a location into a lead ("this file allocates" is weak, "`handleConnection` allocates"
+says where to look). `realloc` counts as acquiring, since it can move and grow. Not violations:
+the driver layer allocates deliberately, but the hot path must not.
+
+Member methods named `free()` are excluded. We have three (`MoonLive`, `Buffer`, `MappingLUT`),
+and matching on the name alone counted every call to them as heap deallocation — 15 false
+positives pointing at the wrong lines.
+
+Takes ~50s cold (a few seconds once the compilation database is warm). clang-query has no
+parallel runner of its own and costs ~44s per translation unit, so this runs the 15 `src/` TUs
+across cores; serial would be ~11 minutes.
+
+### check_lizard
+
+Complexity gate: fail on **new** over-complex functions, not the ones already there.
+
+```bash
+uv run moondeck/check/check_lizard.py             # report NEW violations, exit 1 if any
+uv run moondeck/check/check_lizard.py --all       # every violation, baseline ignored
+uv run moondeck/check/check_lizard.py --baseline  # rewrite whitelizard.txt from today
+```
+
+Results print as one table, sorted worst-first, so the top row is the next thing worth
+simplifying. The five numbers are the same ones lizard's own summary reports:
+
+| Column | Meaning | Gated |
+|---|---|---|
+| **CCN** | Cyclomatic complexity — independent paths through the function: 1, plus one for every branch point (`if`, `for`, `while`, `case`, and each short-circuit `&&` / logical-or operator). The count of things that must hold at once to reason about it, and the number of tests needed to cover it. | **Yes**, > 10 |
+| **NLOC** | Non-comment lines of code — the body's real size, blank lines and comments excluded. | **Yes**, > 60 |
+| **TOKEN** | Total tokens (identifiers, operators, literals). Density rather than length: a high TOKEN against a modest NLOC means long, packed expressions. | No |
+| **PARAM** | Parameter count. A long list usually means the function does several jobs, or wants a struct. | No |
+| **LINES** | Raw line span, first to last — **includes** comments and blanks, so `LINES` minus `NLOC` is roughly how much of the function is documentation. | No |
+
+A `*` next to CCN or NLOC marks which threshold tripped. It matters because the two point at
+different fixes: `HttpServerModule::handleConnection` is `93* 178*` (both — split it), while
+`json::parseString` is `40* 47` — branchy but short, so it wants a lookup table rather than a
+split. TOKEN, PARAM and LINES are context for *why* a function is heavy; nothing gates on them.
+
+A raw run reports 162 functions over threshold (CCN > 10 or NLOC > 60), and a metric that can
+never reach zero is a poor gate — people stop reading it. So [`docs/metrics/whitelizard.txt`](../docs/metrics/whitelizard.txt)
+freezes today's set and the check fails only on something new. The baseline is lizard's own
+`--whitelist` format, matched on **file + function name** rather than line numbers, so it
+survives edits above a function.
+
+**The list only shrinks.** Simplify a function, delete its line; the check reports baselined
+entries that no longer violate so they don't linger. Adding a line means admitting a new
+violation, which is the thing this exists to prevent.
+
+Lizard owns the complexity number (`collect_kpi.py` reports the same 162 for the repo-health
+trend); clang-tidy's `readability-function-*` checks stay off so one rule has one owner.
 
 ### scenario_pipeline
 

@@ -31,6 +31,7 @@
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
 #ifdef __APPLE__
 #include <pthread.h>    // pthread_jit_write_protect_np — macOS arm64 W^X JIT toggle
+#include <numbers>
 #endif
 #endif
 
@@ -272,7 +273,7 @@ bool spawnPinnedTask(WorkerTask& t, const char* /*name*/, WorkerFn fn, void* use
 void notifyTask(WorkerTask& t) {
     auto* w = static_cast<DesktopWorker*>(t.impl);
     if (!w) return;
-    { std::lock_guard<std::mutex> lk(w->mtx); w->pending = true; }
+    { std::scoped_lock<std::mutex> lk(w->mtx); w->pending = true; }
     w->cv.notify_one();
 }
 
@@ -290,7 +291,7 @@ bool waitNotify(WorkerTask& t, uint32_t timeoutMs) {
 void stopPinnedTask(WorkerTask& t) {
     auto* w = static_cast<DesktopWorker*>(t.impl);
     if (!w) return;
-    { std::lock_guard<std::mutex> lk(w->mtx); w->stop = true; }
+    { std::scoped_lock<std::mutex> lk(w->mtx); w->stop = true; }
     w->cv.notify_one();
     if (w->thread.joinable()) w->thread.join();
     delete w;
@@ -880,6 +881,10 @@ void reboot() {
     // browser-side WS reconnect logic expects.
     std::printf("platform::reboot() — exiting\n");
     std::fflush(stdout);
+    // Exiting the process IS the desktop reboot — there is no firmware to restart into. The
+    // mt-unsafe warning is about exit() racing other threads' atexit handlers, which is exactly
+    // the abrupt teardown a reboot models.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(0);
 }
 
@@ -1317,7 +1322,7 @@ void audioMicDeinit(AudioMicHandle& /*h*/) {}
 // fills outMag[0..n/2) with the bin magnitudes.
 void audioFft(const float* windowed, size_t n, float* outMag) {
     if (!windowed || !outMag || n == 0) return;
-    const float twoPiOverN = -2.0f * 3.14159265358979323846f / static_cast<float>(n);
+    const float twoPiOverN = -2.0f * std::numbers::pi_v<float> / static_cast<float>(n);
     for (size_t k = 0; k < n / 2; k++) {
         float re = 0.0f, im = 0.0f;
         for (size_t t = 0; t < n; t++) {

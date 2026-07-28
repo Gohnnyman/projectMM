@@ -287,9 +287,9 @@ private:
         const int moveCount = cubeSize * 10 + rng_.below(20);
 
         for (int x = 0; x < 3; x++) {
-            if (rng_.below(2)) cube_.rotateRight(1, cubeSize);
-            if (rng_.below(2)) cube_.rotateTop(1, cubeSize);
-            if (rng_.below(2)) cube_.rotateFront(1, cubeSize);
+            if (rng_.below(2)) cube_.rotateRight(true, cubeSize);
+            if (rng_.below(2)) cube_.rotateTop(true, cubeSize);
+            if (rng_.below(2)) cube_.rotateFront(true, cubeSize);
         }
 
         const int cappedMoves = (moveCount > kMaxMoves) ? kMaxMoves : moveCount;
