@@ -28,8 +28,12 @@ on:
   # next-iteration until the POC is judged. A push trigger is the only way to get a first
   # result without merging an unevaluated workflow into main.
   #
-  # This is still not a gate: it does not run on pull_request, so it cannot block a merge.
-  # It runs, we read the findings, and we decide.
+  # NOT A GATE — settled, not provisional. It does not run on pull_request, so it cannot
+  # block a merge. Same rule as clang-tidy and the hot-path check: a report states what it
+  # finds and consumers decide what to do about it. Gating on a scanner nobody can satisfy
+  # gets the scanner disabled rather than obeyed, and it pushes people to dismiss alerts
+  # under time pressure — the opposite of why we run it. The Security tab keeps the
+  # open/fixed lifecycle, which is the baselining we would otherwise have to build.
   push:
     branches:
       - next-iteration
@@ -70,6 +74,8 @@ jobs:
           # question above, and the quality ones tell us whether CodeQL sees anything our
           # existing checks miss. Narrow it later if the noise is not worth it.
           queries: security-and-quality
+          # Excludes vendored code (test/doctest.h) — see the file for why.
+          config-file: ./.github/codeql-config.yml
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3

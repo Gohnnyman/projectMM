@@ -525,12 +525,36 @@ int fsRead(const char* path, char* buf, size_t maxLen) {
     return static_cast<int>(n);
 }
 
+// Open a temp file for atomic-write, owner-only (0600) where the OS has file modes.
+//
+// std::fopen creates with 0666 & ~umask, so on a typical umask 022 the file lands world-readable
+// — and these are /.config/*.json, which hold WiFi PSKs and MQTT passwords. Nothing here is
+// multi-user on ESP32 (LittleFS has no modes at all, so the platform layer's ESP32 half is
+// unaffected), but the desktop build runs on real machines with real other users.
+//
+// POSIX gets O_CREAT|O_EXCL with an explicit 0600 — EXCL because a pre-existing temp file is
+// either a crashed run's leftover or someone else's, and inheriting its mode would defeat the
+// point. Windows has no mode_t; its files inherit the parent directory's ACL, which is the
+// platform's own answer to the same question, so it keeps plain fopen.
+static FILE* openTempOwnerOnly(const char* path) {
+#ifdef _WIN32
+    return std::fopen(path, "wb");
+#else
+    ::unlink(path);                       // clear a leftover so O_EXCL cannot fail on our own temp
+    const int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600);
+    if (fd < 0) return nullptr;
+    FILE* f = ::fdopen(fd, "wb");
+    if (!f) ::close(fd);                  // fdopen failure leaves the descriptor ours to release
+    return f;
+#endif
+}
+
 bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     auto target = toFsPath(path);
     auto tmp = target;
     tmp += ".tmp";
 
-    FILE* f = std::fopen(tmp.string().c_str(), "wb");
+    FILE* f = openTempOwnerOnly(tmp.string().c_str());
     if (!f) return false;
     size_t written = std::fwrite(data, 1, len, f);
     if (written != len) {
@@ -582,7 +606,7 @@ bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
     auto tmp = target;
     tmp += ".tmp";
 
-    FILE* f = std::fopen(tmp.string().c_str(), "wb");
+    FILE* f = openTempOwnerOnly(tmp.string().c_str());
     if (!f) return false;
     // Pull chunks from the source and write each straight through — fixed buffer, any file size.
     // `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.

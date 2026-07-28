@@ -134,6 +134,15 @@ add_custom_target(effect_sweep_gen ALL
 
 target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(mm_tests PRIVATE mm_core mm_platform)
+
+# doctest::Approx takes a double, so every CHECK against a float literal promotes — inside
+# doctest.h itself, which is vendored. -Wdouble-promotion stays -Werror for the firmware
+# (the Xtensa has no FPU, so a stray promotion is a silent softfloat call in the render
+# path); it just cannot also police a third-party header. Test-target only, and only the
+# error, not the warning. Surfaced by the RTSan lane: clang diagnoses this where GCC does not.
+if(NOT MSVC)
+    target_compile_options(mm_tests PRIVATE -Wno-error=double-promotion)
+endif()
 add_dependencies(mm_tests effect_sweep_gen)
 
 add_test(NAME unit_tests COMMAND mm_tests)

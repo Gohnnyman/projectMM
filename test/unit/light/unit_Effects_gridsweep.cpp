@@ -9,10 +9,14 @@
 // single strand or a flat panel actually is.
 //
 // Layer::tick owns the degenerate-grid gate: it skips the effect pass when any axis is 0,
-// so effects may assume width/height/depth >= 1 and carry no such guard themselves. That
-// makes the 0x0x0 row a test of the LAYER unless the effect is driven directly, which is
-// what runEffectOnGrid does below — otherwise this row would pass without running a single
-// line of effect code.
+// so effects may assume width/height/depth >= 1 and carry no such guard themselves. The
+// 0x0x0 row therefore pins the LAYER's behaviour, not each effect's: that a folded-away
+// grid produces a clean no-op and a zero-byte buffer rather than a crash. Effect bodies
+// are covered by the three non-degenerate rows, where they do run.
+//
+// Do NOT "improve" this by calling fx->tick() directly on the zero grid. That asserts a
+// contract no effect makes, and it fails: GEQ3DEffect divides by width() (imap over a
+// zero range) and takes SIGFPE. The single Layer gate is what makes that safe.
 //
 // Per-effect tests pin this one effect at a time, which means a NEW effect is covered only
 // if its author remembers to write that case. This sweep asks the factory for every
@@ -70,16 +74,6 @@ void runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase
     layer.applyState();
     layer.tick();
     layer.tick();
-
-    // Layer::tick skips the effect pass entirely on a degenerate grid, so the loop above
-    // never enters an effect body on the 0x0x0 case — driving the effect DIRECTLY is what
-    // keeps this row testing effects rather than testing the Layer's guard 39 times over.
-    // Effects may assume width/height/depth >= 1 (Layer owns that gate), so this is not a
-    // contract they must honour; it pins that violating it degrades rather than crashes,
-    // which is what makes the guard safe to hold in one place instead of twenty-one.
-    if (g.w == 0 || g.h == 0 || g.d == 0) {
-        static_cast<mm::EffectBase*>(fx)->tick();
-    }
 
     // The buffer contract holds even at zero size: a zero-light layer reports zero bytes
     // rather than a stale non-zero span a driver would then read past.

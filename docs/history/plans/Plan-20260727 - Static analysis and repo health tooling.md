@@ -192,13 +192,31 @@ Each step is independent and revertible. **✅ done · ◻ not started · ◐ pa
 
    Superseded by the above: the original plan said each clean family joins `WarningsAsErrors` and
    the target is a zero baseline. Neither is the goal any more — reporting correctly is.
-6. ◻ **CodeQL housekeeping** — exclude vendored code (`test/doctest.h` produced the only
-   critical we do not own) and decide whether it gates PRs or stays a weekly sweep.
-7. ◐ **Triage the 4 real CodeQL findings** — the 3 `localtime` criticals are DONE (a portable
-   `isoTimestamp` helper in `main_desktop.cpp`, `localtime_r`/`localtime_s` behind the file's
-   existing `_WIN32` branch); clang-tidy's `concurrency-mt-unsafe` flagged the identical three,
-   so two independent tools agreeing was the signal to fix rather than suppress. Remaining: file
-   modes `0666` → `0600` where it matters (desktop only; meaningless on LittleFS).
+6. ✅ **CodeQL housekeeping. DONE.** `.github/codeql-config.yml` excludes `test/doctest.h`
+   via `paths-ignore` — the standard mechanism, rather than dismissing the same alert by hand
+   after every scan. It is the only vendored source in the repo.
+
+   **Gating decision: it stays a sweep, and that is settled.** Same rule as clang-tidy and the
+   hot-path check — a report states what it finds, consumers decide. It runs on push to this
+   branch plus a weekly cron, never on `pull_request`, so it cannot block a merge. The Security
+   tab keeps the open/fixed alert lifecycle, which is the baselining we would otherwise build.
+
+   Also fixed here: the workflow triggers on branch `next-iteration`, but the branch had been
+   named `next` — so CodeQL silently never ran on any push. Renamed the branch to match.
+7. ✅ **Triage the real CodeQL findings. DONE.** The 3 `localtime` criticals were fixed earlier
+   (a portable `isoTimestamp` helper in `main_desktop.cpp`); clang-tidy's `concurrency-mt-unsafe`
+   flagged the identical three, and two independent tools agreeing was the signal to fix rather
+   than suppress.
+
+   The file-mode finding was NOT a literal `0666` — nothing in the tree ever had one. It is
+   `std::fopen(..., "wb")` in `fsWriteAtomic` and the streaming-write path, which creates at
+   `0666 & ~umask` (0644 in practice). These files are `/.config/*.json`, holding WiFi PSKs and
+   MQTT passwords. Both now go through one `openTempOwnerOnly` helper: POSIX gets
+   `O_CREAT|O_EXCL` with an explicit `0600`, Windows keeps plain `fopen` (no `mode_t`; files
+   inherit the parent ACL). Verified on disk — 0644 before, 0600 after — and end-to-end against
+   the running desktop binary: a live control change rewrote `SystemModule.json` as `-rw-------`.
+
+   Open alerts are currently **0**, so there is nothing further to triage.
 
 8. ✅ **clang-query — the bespoke-rule report. DONE.** `check_clang_query.py`, MoonDeck card
    "AST Rules". Shipped with two rules and the frame for more. Measured on this tree: 290
