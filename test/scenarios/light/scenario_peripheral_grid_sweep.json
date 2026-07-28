@@ -311,7 +311,7 @@
         },
         "desktop-macos": {
           "tick_us": [
-            69,
+            68,
             232
           ],
           "free_heap": [
@@ -389,7 +389,7 @@
         },
         "desktop-macos": {
           "tick_us": [
-            275,
+            273,
             1036
           ],
           "free_heap": [
@@ -1055,7 +1055,7 @@
         },
         "desktop-macos": {
           "tick_us": [
-            274,
+            273,
             945
           ],
           "free_heap": [
@@ -1310,7 +1310,7 @@
         },
         "desktop-macos": {
           "tick_us": [
-            70,
+            69,
             245
           ],
           "free_heap": [

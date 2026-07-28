@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>     // cosf/sinf/sqrtf for the naive desktop DFT (audioFft)
+#include <numbers>   // std::numbers::pi_v — same DFT
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,7 +32,6 @@
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
 #ifdef __APPLE__
 #include <pthread.h>    // pthread_jit_write_protect_np — macOS arm64 W^X JIT toggle
-#include <numbers>
 #endif
 #endif
 
