@@ -42,7 +42,7 @@ public:
         controls_.setHidden(controls_.count() - 1, !dots);         // panel dots only
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         const lengthType w   = width();
         const lengthType h   = height();

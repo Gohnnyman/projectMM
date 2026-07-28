@@ -39,7 +39,7 @@ public:
         controls_.addBool("phase_chaos", phase_chaos);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const lengthType cols = width(), rows = height(), depth = this->depth();
         const uint8_t cpl = channelsPerLight();
         if (cols == 0 || rows == 0 || cpl < 3) return;   // 0×0×0 and short-channel guard

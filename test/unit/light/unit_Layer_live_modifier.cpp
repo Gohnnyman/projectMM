@@ -29,7 +29,7 @@ namespace {
 // the live pass, not the effect animating itself.
 class GradientEffect : public mm::EffectBase {
 public:
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         if (!buf) return;
         const mm::lengthType w = width(), h = height();

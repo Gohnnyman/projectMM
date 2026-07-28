@@ -28,7 +28,7 @@ public:
         controls_.addUint8("intensity", intensity, 1, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();

@@ -66,7 +66,7 @@ public:
         }
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!stars_) return;
 
         const lengthType w = width();

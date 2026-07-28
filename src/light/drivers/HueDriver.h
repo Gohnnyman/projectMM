@@ -105,7 +105,7 @@ public:
     /// round-trip would stall the single-thread render loop (the "never block the loop" rule,
     /// lessons.md). One PUT every kPutIntervalMs, round-robined across the lights; pairing + the
     /// bridge announce ride the slow 1 Hz tick.
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (pairTicksLeft_ > 0) return;            // pairing owns the bridge during its window
         if (!appKey[0] || !haveBridge() || lightCount_ == 0) return;
         const uint32_t now = platform::millis();
@@ -117,7 +117,7 @@ public:
     /// The 1 Hz tick handles the non-render-critical, slower bridge work: the pairing poll, the
     /// one-shot light + group fetch, and the periodic DevicesModule announce. Each is at most one
     /// bridge call per second — acceptable on a 1 Hz tick, and never in the per-frame tick().
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         if (pairTicksLeft_ > 0) { pollPairing(); DriverBase::tick1s(); return; }
         if (!appKey[0] || !haveBridge()) { DriverBase::tick1s(); return; }
         if (!sawLights_) { fetchLights(); DriverBase::tick1s(); return; }

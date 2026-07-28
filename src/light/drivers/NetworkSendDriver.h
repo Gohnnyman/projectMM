@@ -205,7 +205,7 @@ public:
 
     /// Rate-limit to `fps`, apply this driver's correction into corrected_ (passthrough if it
     /// emits no channels), then chunk the window slice into protocol packets and send inline.
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!sourceBuffer_ || !sourceBuffer_->data()) return;
 
         // No destination → idle. An unconfigured driver does nothing; it never falls back to

@@ -253,7 +253,7 @@ public:
     /// broadcast our own presence on a slow cadence, and age out devices unheard for
     /// kStaleMs. The drain is non-blocking (recvFrom returns -1 when nothing pending), so it
     /// never stalls the tick — the hot-path-safe replacement for the old mDNS query.
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         MoonModule::tick1s();
         uint8_t local[4] = {};
         localIp(local);
@@ -286,7 +286,7 @@ public:
         ageOut(local);
     }
 
-    ModuleRole role() const override { return ModuleRole::Generic; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Generic; }
 
     /// Test seam: feed a synthetic presence datagram through the real classify→upsert
     /// pipeline, exactly as the live recvFrom loop does. The desktop unit/scenario tests

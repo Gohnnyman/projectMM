@@ -46,7 +46,7 @@ public:
         balls_.resize(cols * maxNumBalls);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!balls_) return;
 
         const int cols = width();

@@ -67,37 +67,17 @@ RAM), and where the threshold should sit. Both are policy questions for when the
 
 ### Is lizard the right tool? Yes — as a counter, not an analyser
 
-The question this plan opened with, answered directly.
+The question this plan opened with. **Answered and shipped** (step 2).
 
-**Keep it.** It is actively maintained (1.23.0, June 2026), runs in ~1 s, and it does one
-thing the rest of the stack does not: it produces a **number per commit** that we can trend.
-clang-tidy tells you a function is too complex *today*; lizard tells you whether the codebase
-is getting worse *over time*. Those are different jobs, and `repo-health.json` needs the
-second.
+Keep it, because it produces a **number per commit** that repo-health trends — clang-tidy tells
+you a function is complex today, only a trend says the codebase is getting worse. But only as a
+counter: its own README calls it a fuzzy tokenizer, not a parser (no macro expansion, confused
+by templates), so it can never express an architectural rule. Its VS Code extension is dead
+(v1.0.1, Oct 2022) — the in-editor equivalent is clang-tidy through clangd.
 
-**But only as a counter.** Its own README warns it is a fuzzy tokenizer, not a parser — no
-macro expansion, confused by heavy templates. It can never express an architectural rule, so
-it is not a platform to build on.
-
-**Its 162 warnings are a threshold artifact, not a verdict:** 161 come from `CCN>10` alone,
-and 80% of 2,185 functions sit at CCN ≤ 5. The real tail is 4 functions above CCN 50. A metric
-that can never reach zero is a poor gate, which is what baselining fixes.
-
-**Its VS Code extension is dead** (v1.0.1, Oct 2022) — do not build on it. The live in-editor
-equivalent is clang-tidy's `readability-function-*` through clangd, which is layer 1.
-
-**Overlap with clang-tidy, settled:** both can measure complexity, so they do not both gate.
-**lizard owns the metric and the trend**; clang-tidy's complexity checks stay off. One number,
-one owner.
-
-**Deleted:** `check_hotpath.py` (170 lines) once layer 3 is green — the compiler subsumes it
-transitively, which a regex never could.
-
-**Declined:** cppcheck (modest unique yield next to a clean clang-tidy), SonarCloud (a second
-findings home; no custom C++ rules at any tier), custom CodeQL queries (the one rule we named
-is owned by layer 3), Semgrep (C++ GA is paywalled), Aikido (AppSec aggregator, wrong
-category), PVS-Studio / CodeScene / MISRA suites (built for certification, not for us),
-`-Weverything` and GCC `-fanalyzer` (Clang's and GCC's own docs advise against, respectively).
+The 162 warnings are a threshold artifact, not a verdict: 161 come from `CCN>10` alone and 80%
+of functions sit at CCN ≤ 5, with a real tail of 4 above CCN 50. A metric that can never reach
+zero is a poor gate, which is what the baseline fixes.
 
 ### One rule, one owner
 
@@ -114,87 +94,26 @@ category), PVS-Studio / CodeScene / MISRA suites (built for certification, not f
 
 ## How clang-tidy gets configured
 
-The centrepiece, and the part the first attempt botched. Real projects use one of three
-shapes; ours is **archetype B — enable families, disable individually with a stated reason**
-(the [SerenityOS](https://github.com/SerenityOS/serenity/blob/master/.clang-tidy) shape).
+Archetype B — `*` minus an explicit disable list, each entry carrying its reason — derived
+bottom-up from ESPHome's (our closest peer: a large ESP32 C++ codebase) then tuned against this
+tree. **The config and every reason now live in [`.clang-tidy`](../../../.clang-tidy)**; that
+file is the record, not this one.
 
-Nobody serious enables `cppcoreguidelines-*` or `hicpp-*` wholesale: mostly aliases plus
-bounds/cast rules that firmware register access must violate. ClickHouse disables the family
-as *"impractical… also slow"*; ESPHome — a large ESP32 C++ codebase, our closest peer — does
-the same and still runs `WarningsAsErrors: '*'`.
-
-Starting config, **derived bottom-up from ESPHome's** (their `.clang-tidy` is `*` minus 175
-checks with `WarningsAsErrors: '*'` — battle-tested on a large ESP32 C++ codebase, the closest
-peer we have), then tuned top-down against our own tree. The full file is written at
-implementation time; the shape is `*` minus ~78 disables, `HeaderFilterRegex: 'src/(core|light)/'`.
-
-**Tuning it was iterative, and the numbers show why the first attempt failed:**
-
-| Config | Unique findings in our code |
-|---|---:|
-| My original shotgun (`bugprone-*,performance-*,concurrency-*`) | 384, of which 66% one noisy check |
-| `*` + ESPHome's family disables only | **6,073** |
-| + their style-check disables | 3,949 |
-| + the `cert-*` family (`cert-err33-c` alone was 3,678 — every `snprintf`) | **131** |
-
-**131 real findings** — a tractable, mostly-actionable list. Three checks ESPHome disables that
-I had wrongly called useful in the first evaluation: `performance-enum-size`,
-`bugprone-narrowing-conversions`, `bugprone-easily-swappable-parameters`. They run the same
-class of memory-constrained device and still reject all three.
-
-**Triage outcome: 125 → 47.** Every finding was read against the actual code rather than
-trusted. The remaining 47 are all `clang-analyzer-*` — the path-sensitive family — and they
-were invisible until `WarningsAsErrors` was switched on: the report parser rejected the
-`,-warnings-as-errors` suffix clang-tidy then appends and dropped every finding. So the
-"0" this section originally claimed was partly a parser bug, which is the sixth silent-zero
-this exercise produced. Backlogged: *clang-tidy: triage the 47 clang-analyzer findings*.
-The split, which is the number worth remembering for the next tool evaluation:
-
-| Disposition | Count | Examples |
-|---|---:|---|
-| Real defects, fixed | 2 | `std::forward` inside a loop (below); a duplicated `TEST_CASE` + its duplicate include |
-| Genuine improvements, applied | ~20 | `localtime`→`localtime_r`, `std::numbers::pi`, `scoped_lock`, `ranges::any_of`, two accidentally-private overrides, a throwing test-rig destructor |
-| Deliberate convention → check disabled with a measured reason | ~80 | see the disable table in `.clang-tidy` |
-| Deliberate at one site → `NOLINT` with a reason | 12 | Bresenham's assign-and-test; asserting moved-from state *is* the test |
-
-**The real bug it found** is in `HttpServerModule.cpp`: `visitModuleLeaves(mod, std::forward<Fn>(fn))`
-called inside a `for` loop, at two levels. Forwarding moves the callable into the first module,
-so every later sibling receives a moved-from object. It survived because the callables in use
-happen to be cheap-to-copy lambdas, which is precisely the kind of latent, works-by-luck defect
-a reviewer skims past.
-
-**The disabled checks are the more interesting result.** Four families were wrong on *every*
-occurrence, each because it collides with a deliberate convention: `bugprone-signed-char-misuse`
-(12/12 — and its suggested fix would turn the `-1` unset-pin sentinel into GPIO 255, a real bug),
-`performance-no-int-to-ptr` (9/9, the `uintptr_t` tagged-pointer field), `bugprone-infinite-loop`
-(28/28, `uint8_t` counters), `bugprone-implicit-widening-of-multiplication-result` (47 findings,
-0 reachable — margin ~87,000×). A check that is wrong every time trains you to ignore its family,
-which costs more than it catches; the reasoning for each is recorded in `.clang-tidy` so the next
-reader does not re-litigate it.
-
-A sample false positive for contrast: `WledPacket.h:80` "memcpy result is not
-null-terminated" — the buffer is pre-zeroed by a `memset`, as the adjacent comment says. That
-one gets a `NOLINTNEXTLINE` with the reason, which is the intended workflow.
-
-`bugprone-infinite-loop` **stays enabled** despite being 26/28 false on our `uint8_t` counters
-in the first run: the FPs are a known LLVM issue with fixes still landing, and an FP there
-sometimes reveals a genuinely missing `volatile`. Each gets a `NOLINTNEXTLINE` with a reason.
-
-Rejected checks stay listed in the config with their reason, so they are never re-litigated —
-[the Chromium pattern](https://github.com/chromium/chromium/blob/main/.clang-tidy).
-
-**A structural catch for our layout:** clang-tidy picks its config from the *translation
-unit's main file*, so a `src/light/.clang-tidy` would **not** govern our header-only light
-modules — they are compiled as part of some `.cpp` elsewhere. Per-directory strictness on the
-core/light split therefore does not work as one might assume. The working shape is one root
-config plus a relaxed `test/.clang-tidy` (`InheritParentConfig: true`), with
-`HeaderFilterRegex` covering the headers.
+Tuning mattered, and the numbers are why the first attempt failed: a shotgun
+(`bugprone-*,performance-*,concurrency-*`) gave 384 findings of which 66% were one noisy check;
+`*` plus ESPHome's family disables gave **6,073**; adding their style disables 3,949; adding the
+`cert-*` family (aliases of `bugprone-*`, and `cert-err33-c` alone was 3,678 — every `snprintf`)
+brought it to **131**. Then triage took it to 47.
 
 ## Implementation
 
 Each step is independent and revertible. **✅ done · ◻ not started · ◐ partly done.**
 
-1. ◻ **Warnings tier-zero** — add `-Wshadow -Wnon-virtual-dtor -Wdouble-promotion
+1. ✅ **Warnings tier-zero** — DONE. All five landed on `-Wall -Wextra -Werror`; the ESP32
+   build is clean under them too. Three real findings, all fixed: a float→double promotion in
+   `Rings241Layout` (a softfloat call on the FPU-less Xtensa), a parameter shadowing a control
+   field in `RubiksCubeEffect`, and a test double with virtual functions and a public
+   non-virtual destructor. Original text: add `-Wshadow -Wnon-virtual-dtor -Wdouble-promotion
    -Wimplicit-fallthrough -Wnull-dereference` to the existing `-Wall -Wextra -Werror`.
    `-Wdouble-promotion` catches accidental `double` math: real cost on Xtensa, and it enforces
    the integer-math rule. Trial `-Wconversion` separately — expect to reject it for `light/`.
@@ -205,11 +124,45 @@ Each step is independent and revertible. **✅ done · ◻ not started · ◐ pa
    complexity count. The KPI and repo-health now record the RAW number via shared code; the
    baseline is applied only by the gate. `repo-health.json` gained a `complexity` block, so the
    trend the plan asked for actually exists now.
-3. ◻ **`[[clang::nonblocking]]`** on `MoonModule::tick/tick20ms/tick1s` (three lines; the
-   attribute is inherited by overrides, so ~90 modules are covered) + `-Wfunction-effects` on
-   the desktop build. Then delete `check_hotpath.py`.
-4. ◻ **RealtimeSanitizer** — add `realtime` to the sanitizer matrix in `test.yml`. Only
-   meaningful after step 3, since it keys off the same attributes.
+3. ◐ **`[[clang::nonblocking]]`** — LANDED as `MM_NONBLOCKING` (platform.h) on
+   `tick/tick20ms/tick1s`, with `-Wfunction-effects` on the desktop build and a MoonDeck card
+   (`check_nonblocking.py`, "clang-hotpath"). **181 findings remain to triage**, so the flag
+   carries `-Wno-error=function-effects` and `check_hotpath.py` stays.
+
+   Four things the estimate got wrong, all measured:
+   - **Not three lines.** A bare attribute gives 209 findings; annotating five platform
+     functions collapses it to 10. The bulk were unannotated helpers, not violations. Threading
+     the attribute through every override touched ~85 files.
+   - **The ESP32 is GCC** — no attribute, no warning, and `-Werror` + `-Wattributes` means a
+     bare attribute breaks the firmware build. Hence the macro (empty on GCC, the
+     `MM_PRINTF_FORMAT` shape). So this is a DESKTOP check.
+   - **`check_hotpath.py` can be deleted — but not yet, and not for the reason assumed.**
+     MEASURED: it scans 67 tick METHODS, all in `src/core/` and `src/light/`, and **zero** in
+     `src/platform/esp32/` (that layer has no tick methods; it is free functions the tick path
+     calls into). All 60 of its files compile on desktop, so `-Wfunction-effects` covers the
+     identical set — transitively, where the regex reads only the tick body's own text. Proof
+     it is blind: it reports **0** findings where the compiler reports **181** in the same code.
+     The real blocker is gate ordering — `check_hotpath.py` FAILS pre-commit today while
+     `-Wfunction-effects` carries `-Wno-error`, so deleting it now leaves hot-path discipline
+     with nothing enforcing. Order: triage the 181 → drop `-Wno-error` → delete the script and
+     swap the gate.
+   - **The indirect call was the real hole.** `tickChildren` dispatches through a member
+     pointer; the attribute had to go in the POINTER TYPE, or every module's tick escaped the
+     check. Passing an unannotated method is now a compile error.
+
+   Findings split by tier (the card reports them separately, since the cost differs by three
+   orders of magnitude): **70 on `tick()`**, 6 on `tick20ms()`, 95 on `tick1s()`, 10 unresolved.
+   The sharp ones are UDP `sendTo`/`recvFrom` in `AudioService::tick` — socket I/O every frame.
+   The bulk is `snprintf` ×20 (bounded, wants one policy call) and 11 static locals (a guard
+   variable + one-time lock on first use, a genuine violation).
+
+   Remaining: triage the 181, then drop `-Wno-error`. Every file involved is already in this
+   branch's diff, so the fix costs no new files — but it is a substantial piece of work and
+   probably its own branch.
+4. ◻ **RealtimeSanitizer** — add `realtime` to the sanitizer matrix in `test.yml`. Verified
+   available (`-fsanitize=realtime`, Homebrew clang 22). Keys off the same `MM_NONBLOCKING`
+   attributes, so it is nearly free once step 3's findings are triaged — and it catches at
+   runtime what the static check cannot prove: virtual dispatch and function pointers.
 5. ◐ **clang-tidy** — config landed, clangd wired, and the tree triaged from 125 findings to
    **0** (see the triage table above). What remains is the ratchet: `WarningsAsErrors` is still
    `''`, and cannot go to `'*'` until the 47 clang-analyzer findings are triaged — switching it
@@ -296,25 +249,11 @@ CodeQL 2.26.1, `build-mode: none`: ~3 min, **179 rules, 867 results**, no build 
 **The six network packet parsers produced no taint-flow findings** — positive evidence about
 ~22 `memcpy` calls on LAN data that nothing else in the stack could have given.
 
-### clang-query — probed as the bespoke-rule engine
+### clang-query — the reachability limit
 
-The one part of the first evaluation worth keeping, because it tested *authoring a rule*
-rather than reading default output.
-
-A matcher took minutes and no build:
-`match callExpr(callee(functionDecl(hasName("malloc"))), hasAncestor(functionDecl(matchesName("tick.*"))))`
-→ 0 matches, a true clean result (broad control matchers returned 42 and 245, proving the
-machinery works rather than silently passing). It reaches the **245 control registrations** a
-future "a conditional control is registered below the control it depends on" rule would need.
-
-Class of rule reachable: per-function AST and lexical position — **not** whole-program
-reachability. That limit is fine, because the one rule needing reachability (allocation
-reachable from `tick()`) is owned by layer 3.
-
-### `[[clang::nonblocking]]` — verified locally
-
-Clang 22 caught a `push_back` two levels deep through a helper, tracing the chain into libc++.
-The attribute is **inherited by overrides**, so one annotation on the base covers every module.
+Reachable rule class: per-function AST and lexical position — **not** whole-program
+reachability. That limit still shapes what goes here: the one rule needing reachability
+(allocation reachable from `tick()`) is owned by step 3's compiler check, not by a matcher.
 
 ### Two gotchas worth keeping
 

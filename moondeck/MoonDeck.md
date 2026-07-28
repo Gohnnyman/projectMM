@@ -322,6 +322,48 @@ Takes ~50s cold (a few seconds once the compilation database is warm). clang-que
 parallel runner of its own and costs ~44s per translation unit, so this runs the 15 `src/` TUs
 across cores; serial would be ~11 minutes.
 
+### check_nonblocking
+
+What the render path calls that can block or allocate — checked by the compiler.
+
+```bash
+uv run moondeck/check/check_nonblocking.py                # summary by callee, then every site
+uv run moondeck/check/check_nonblocking.py --module AudioService
+```
+
+`MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` ([platform.h](../src/platform/platform.h)),
+and Clang 20+ verifies under `-Wfunction-effects` that nothing they reach allocates or blocks —
+**transitively**, through the whole call graph. That is the half [check_hotpath](#check_hotpath)
+cannot see: a regex reads the text of a tick body and is blind to what its callees do.
+
+The attribute is inherited by overrides, so three annotations cover every module's tick. It also
+sits in `tickChildren`'s **member-pointer type** — without that, the indirect call through `fn`
+is a hole the check cannot reason about, and passing an unannotated method now fails to compile.
+
+Reports unique **sites**: a header included by N translation units emits the same warning N
+times, so a raw build prints ~1350 lines for ~180 real findings.
+
+**Split by tick tier**, because the same blocking call costs three orders of magnitude more in
+one than another: `tick()` runs every frame, `tick20ms()` fifty times a second, `tick1s()` once.
+Pooling them hides which findings actually matter. `OTHER` is a site whose enclosing method could
+not be resolved from source.
+
+| Column | |
+|---|---|
+| **CALLS** | the function that blocks — or `(static local variable)`, a violation with no callee: a static local needs a guard variable and a one-time lock on first use |
+| **IN** | the method the call sits in, which is what places it in a tier. Clang names the call and the callee but *not* their enclosing function, so this is read back from the source |
+| **WHY IT BLOCKS** | clang's own root cause, e.g. `calls mm::platform::UdpSocket::sendTo`. `—` means a leaf the compiler could not look inside (external or unannotated) |
+| **FILE:LINE** | where to go |
+
+**Desktop-only, and that loses nothing.** `MM_NONBLOCKING` is empty on GCC — the ESP32 toolchain
+has neither the attribute nor the warning, and builds with `-Werror`, so a bare attribute there
+is a build break. But every tick method compiles on desktop: modules, effects, and the **LED
+drivers**. `src/platform/esp32/` has no tick methods — it is free functions the tick path calls
+into, and those are checked through their call sites.
+
+Not a gate yet: `-Wno-error=function-effects` keeps the build green while the findings are
+triaged. Each is a judgement — fix it, annotate the callee, or accept it with a scoped reason.
+
 ### check_lizard
 
 Complexity gate: fail on **new** over-complex functions, not the ones already there.

@@ -50,7 +50,7 @@ public:
         controls_.addUint8("microMutatorMax", microMutatorMax, 0, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
         if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;

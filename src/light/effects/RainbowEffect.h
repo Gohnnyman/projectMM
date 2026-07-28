@@ -20,7 +20,7 @@ public:
         controls_.addUint8("speed", speed, 1, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         // D2 effect — writes only z=0; Layer::extrude duplicates across z.
         uint8_t* buf = buffer();
         lengthType w = width();

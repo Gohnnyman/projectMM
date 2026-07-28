@@ -61,7 +61,7 @@ public:
             doInit_ = true;
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const lengthType w = width(), h = height(), d = depth();
         if (w <= 0 || h <= 0 || d <= 0 || channelsPerLight() < 3) return;
 
@@ -110,8 +110,8 @@ private:
         using Face = std::array<std::array<uint8_t, MAX_SIZE>, MAX_SIZE>;
         Face front, back, left, right, top, bottom;
 
-        void init(uint8_t cubeSize) {
-            SIZE = cubeSize;
+        void init(uint8_t order) {
+            SIZE = order;
             for (int i = 0; i < MAX_SIZE; i++)
                 for (int j = 0; j < MAX_SIZE; j++) {
                     front[i][j] = 0; back[i][j] = 1; left[i][j] = 2;

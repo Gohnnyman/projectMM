@@ -47,7 +47,7 @@ void FilesystemModule::setup() {
 // The filesystem-usage gauge likewise lives on FileManagerModule (that's where filesystem state
 // is topical).
 
-void FilesystemModule::tick1s() {
+void FilesystemModule::tick1s() MM_NONBLOCKING {
     if (!mounted_ || !scheduler_) return;
     updateLastSavedStr();
     if (!dirtyPending_) return;

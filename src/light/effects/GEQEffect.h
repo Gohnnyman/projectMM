@@ -61,7 +61,7 @@ public:
         rippleCounter_ = 0;
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int cols = width();
         const int rows = height();
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;

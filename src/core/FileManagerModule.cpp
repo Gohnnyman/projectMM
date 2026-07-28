@@ -41,7 +41,7 @@ void FileManagerModule::defineControls() {
     MoonModule::defineControls();
 }
 
-void FileManagerModule::tick1s() {
+void FileManagerModule::tick1s() MM_NONBLOCKING {
     if (totalBytes_ > 0) usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
 }
 

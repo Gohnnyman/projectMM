@@ -65,7 +65,7 @@ struct CoordSink {
 /// control change triggers the pipeline-wide rebuild.
 class LayoutBase : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Layout; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Layout; }
     virtual nrOfLightsType lightCount() const = 0;
     virtual void forEachCoord(const CoordSink& sink) const = 0;
 

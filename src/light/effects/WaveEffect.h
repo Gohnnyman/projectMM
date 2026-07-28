@@ -60,7 +60,7 @@ public:
         trailW_ = w; trailH_ = h; trailCpl_ = cpl;
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!trail_) return;
         const lengthType w = width();
         const lengthType h = height();

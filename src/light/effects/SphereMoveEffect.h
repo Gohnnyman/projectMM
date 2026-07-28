@@ -33,7 +33,7 @@ public:
         controls_.addUint8("speed", speed, 0, 99);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
         const int d = depth();

@@ -64,7 +64,7 @@ void HttpServerModule::release() {
     MoonModule::release();   // chain: uniform override-and-chain (no buffers/children today, but the convention holds)
 }
 
-void HttpServerModule::tick20ms() {
+void HttpServerModule::tick20ms() MM_NONBLOCKING {
     // Drain the in-flight resumable preview frame on the TRANSPORT-poll cadence (20 ms), NOT the
     // per-render-tick tick(): pushing frame bytes to the socket must not be charged to the LED
     // render hot path. The render tick stays free of preview work; the preview frame rate is
@@ -108,7 +108,7 @@ void HttpServerModule::tick20ms() {
     }
 }
 
-void HttpServerModule::tick1s() {
+void HttpServerModule::tick1s() MM_NONBLOCKING {
     pushStateToWebSockets();
 }
 

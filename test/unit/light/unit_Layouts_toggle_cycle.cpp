@@ -17,7 +17,7 @@ namespace {
 class CaptureDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer* buf) override { source_ = buf; }
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (source_ && source_->data()) {
             lastBytes = source_->bytes();
             lastNonZero = false;

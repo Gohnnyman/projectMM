@@ -231,7 +231,7 @@ public:
     /// over this driver's window, then start every pin's transmit before waiting on
     /// any, so the tick costs the longest strand rather than the sum. Inert off RMT
     /// chips and idle until inited with a source buffer + correction.
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data()) return;
 

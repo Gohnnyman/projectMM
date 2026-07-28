@@ -73,7 +73,7 @@ public:
     // the new angle on the next frame. The angle is uint8 turn units (256 = a turn);
     // dt·speed accumulates so a sub-ms frame isn't lost (the integer-accumulator idiom
     // the effects use). Layer::tick() invokes this per enabled modifier child.
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const uint32_t now = platform::millis();
         if (lastElapsed_ == 0) lastElapsed_ = now;
         const uint32_t dt = now - lastElapsed_;

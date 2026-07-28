@@ -61,7 +61,7 @@ public:
         validIndices_.resize(256);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
         const int d = depth();

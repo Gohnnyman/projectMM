@@ -80,7 +80,7 @@ public:
     void defineControls() override;
     void onControlChanged(const char* controlName) override;   // a broker/port/cred change re-homes the socket
     void onEnabled(bool enabled) override;             // enable/disable → connect / clean DISCONNECT
-    void tick1s() override;
+    void tick1s() MM_NONBLOCKING override;
 
     /// Feed inbound bytes as if they arrived from the broker socket — the entry the host unit tests
     /// drive (there's no live broker in ctest). Mirrors IrService::injectCodeForTest.

@@ -64,7 +64,7 @@ public:
         }
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!indexes_ || !fadeDir_ || !brightness_ || !colors_ || nbStars_ == 0) return;
         const lengthType w = width(), h = height(), d = depthDim();
         if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;

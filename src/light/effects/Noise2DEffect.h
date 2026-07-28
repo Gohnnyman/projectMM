@@ -36,7 +36,7 @@ public:
         controls_.addUint8("scale", scale, 2, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int cols = width();
         const int rows = height();
         if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;

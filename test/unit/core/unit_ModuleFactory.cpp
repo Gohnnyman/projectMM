@@ -10,19 +10,19 @@ namespace {
 // Real domain types are excluded so this test stays a unit test of the factory itself.
 class EffectStub : public mm::MoonModule {
 public:
-    mm::ModuleRole role() const override { return mm::ModuleRole::Effect; }
+    mm::ModuleRole role() const MM_NONBLOCKING override { return mm::ModuleRole::Effect; }
 };
 class ModifierStub : public mm::MoonModule {
 public:
-    mm::ModuleRole role() const override { return mm::ModuleRole::Modifier; }
+    mm::ModuleRole role() const MM_NONBLOCKING override { return mm::ModuleRole::Modifier; }
 };
 class DriverStub : public mm::MoonModule {
 public:
-    mm::ModuleRole role() const override { return mm::ModuleRole::Driver; }
+    mm::ModuleRole role() const MM_NONBLOCKING override { return mm::ModuleRole::Driver; }
 };
 class LayoutStub : public mm::MoonModule {
 public:
-    mm::ModuleRole role() const override { return mm::ModuleRole::Layout; }
+    mm::ModuleRole role() const MM_NONBLOCKING override { return mm::ModuleRole::Layout; }
 };
 class GenericStub : public mm::MoonModule {
     // No override — inherits ModuleRole::Generic.

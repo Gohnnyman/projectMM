@@ -163,7 +163,7 @@ public:
 
     /// Keep running even when "disabled" via the UI — otherwise the user has no way
     /// to re-enable themselves through the same UI.
-    bool respectsEnabled() const override { return false; }
+    bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
     /// Non-UI: this IS the server that renders /api/state — it doesn't list itself as a card.
     /// The "not a UI module" opt-out (shared with FilesystemModule), read by the state serializer's
@@ -173,8 +173,8 @@ public:
     void defineControls() override;
     void setup() override;
     void release() override;
-    void tick20ms() override;
-    void tick1s() override;
+    void tick20ms() MM_NONBLOCKING override;
+    void tick1s() MM_NONBLOCKING override;
 
     // -----------------------------------------------------------------------
     // Transport-free apply-core — "the REST API, callable in-process"

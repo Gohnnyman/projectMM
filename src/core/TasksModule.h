@@ -60,7 +60,7 @@ public:
 
     /// Refresh the RTOS snapshot + the current-per-core names once a second (off the hot path). The
     /// module cost table needs no refresh — it reads the live tree on each serialize.
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         MoonModule::tick1s();
         tasks_.refresh();
         platform::currentTaskOnCore(0, core0_, sizeof(core0_));

@@ -35,7 +35,7 @@ public:
         controls_.addUint8("width", width, 0, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int sizeX = width_();
         const int sizeY = height();
         const int sizeZ = depthDim();

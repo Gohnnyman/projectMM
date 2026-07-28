@@ -149,7 +149,7 @@ public:
     bool birthForTest(uint8_t n) const { return birthNumbers_[n]; }
     bool surviveForTest(uint8_t n) const { return surviveNumbers_[n]; }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!cells_ || !future_ || !colors_ || cellCount_ == 0) return;
         const lengthType w = width(), h = height(), d = depth();
         const uint8_t cpl = channelsPerLight();

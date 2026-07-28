@@ -105,7 +105,13 @@ static std::atomic<uint32_t> testNowMs{0};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
 
-uint32_t millis() {
+// steady_clock::now() is a vDSO clock_gettime read — no allocation, no lock, no syscall on
+// any platform we build for. libc++ does not annotate it, so -Wfunction-effects has to assume
+// the worst; this is the standard-library gap, not ours. Scoped to the two clock readers, and
+// desktop-only (the ESP32 millis/micros call esp_timer_get_time directly).
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfunction-effects"
+uint32_t millis() MM_NONBLOCKING {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
     if (override_) return override_;
     auto now = std::chrono::steady_clock::now();
@@ -114,12 +120,13 @@ uint32_t millis() {
     );
 }
 
-uint32_t micros() {
+uint32_t micros() MM_NONBLOCKING {
     auto now = std::chrono::steady_clock::now();
     return static_cast<uint32_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(now - startTime).count()
     );
 }
+#pragma clang diagnostic pop
 
 void* alloc(size_t bytes) {
     return std::malloc(bytes);
@@ -638,8 +645,8 @@ size_t filesystemTotal() {
 void setEthConfig(const EthPinConfig&) {}   // no eth on desktop; ethInit stubs false
 void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
-bool ethLinkUp() { return false; }
-bool ethConnected() { return false; }
+bool ethLinkUp() MM_NONBLOCKING { return false; }
+bool ethConnected() MM_NONBLOCKING { return false; }
 void ethGetIPv4(uint8_t out[4]) {
     // Desktop has no real interface state, but DevicesModule needs the host's LAN
     // IP to scan from (otherwise a desktop projectMM instance reports "no network" and
@@ -668,7 +675,7 @@ void setTestWifiStaAvailable(bool available) { testWifiStaAvailable.store(availa
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) {
     return testWifiStaAvailable.load(std::memory_order_relaxed);
 }
-bool wifiStaConnected() { return false; }
+bool wifiStaConnected() MM_NONBLOCKING { return false; }
 void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 // Addressing is OS-managed on desktop; the static/DHCP setters are inert (no netif to reconfigure).
 // The per-interface apply counter is the observable a host test pins the static-addressing path on.

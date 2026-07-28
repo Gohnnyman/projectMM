@@ -118,9 +118,9 @@ public:
     /// reverse-iterates children; override and chain late so the parent shuts down its
     /// own state first.
     virtual void setup() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->setup(); }
-    virtual void tick() { tickChildren(&MoonModule::tick); }
-    virtual void tick20ms() { tickChildren(&MoonModule::tick20ms); }
-    virtual void tick1s() { tickChildren(&MoonModule::tick1s); }
+    virtual void tick() MM_NONBLOCKING { tickChildren(&MoonModule::tick); }
+    virtual void tick20ms() MM_NONBLOCKING { tickChildren(&MoonModule::tick20ms); }
+    virtual void tick1s() MM_NONBLOCKING { tickChildren(&MoonModule::tick1s); }
     virtual void release() {
         // release() frees ALL of a module's held resources on disable, not only buffers: a driver's
         // GPIO/RMT/Parlio pins, a service's I²S mic, an effect's sockets are freed by that module's
@@ -359,7 +359,7 @@ public:
     const char* typeName() const { return typeName_; }
     void setTypeName(const char* tn) { typeName_ = tn ? tn : ""; }
 
-    bool enabled() const { return enabled_; }
+    bool enabled() const MM_NONBLOCKING { return enabled_; }
     void setEnabled(bool e) {
         if (enabled_ == e) return;
         enabled_ = e;
@@ -370,7 +370,7 @@ public:
     /// Default true — disabled modules don't have their loop fns called. Override to
     /// return false for system modules that must keep running regardless (HttpServer,
     /// Network, Filesystem) so the user can re-enable other modules through them.
-    virtual bool respectsEnabled() const { return true; }
+    virtual bool respectsEnabled() const MM_NONBLOCKING { return true; }
 
     /// True unless this module — or an ancestor that respects the enabled flag — is disabled.
     /// The single predicate the resource-lifecycle gate keys off: `prepare()` acquires
@@ -450,7 +450,7 @@ public:
     }
 
     /// Role for type identification (no RTTI needed).
-    virtual ModuleRole role() const { return ModuleRole::Generic; }
+    virtual ModuleRole role() const MM_NONBLOCKING { return ModuleRole::Generic; }
 
     /// Curated emoji tags for the module picker's chip filter — extras beyond the
     /// role chip (which the UI derives from role() on its own). A short string of
@@ -648,7 +648,7 @@ public:
     /// Per-module timing: parents time children, Scheduler times top-level modules.
     /// tickTimeUs() is the average microseconds per tick over the last 1-second window.
     uint32_t tickTimeUs() const { return tickTimeUs_; }
-    void addAccumUs(uint32_t us) { accumUs_ += us; }
+    void addAccumUs(uint32_t us) MM_NONBLOCKING { accumUs_ += us; }
 
     /// Called by Scheduler every ~1 second. Averages the accumulated tick time and recurses
     /// into children.
@@ -676,8 +676,12 @@ protected:
     /// worker while the rest tick on the render core) must not re-implement the gate and the timing
     /// per side — that rule is core's, not the module's (CLAUDE.md § Complexity lives in core).
     enum class RoleFilter : uint8_t { All, Only, Except };
-    void tickChildren(void (MoonModule::*fn)(), RoleFilter filter = RoleFilter::All,
-                      ModuleRole role = ModuleRole::Generic) {
+    // The attribute is part of the POINTER TYPE, not decoration: without it clang cannot know
+    // that `fn` only ever holds one of the three annotated ticks, and the indirect call becomes
+    // the one hole in the transitive check. With it, passing an unannotated method here is a
+    // compile error at the call site.
+    void tickChildren(void (MoonModule::*fn)() MM_NONBLOCKING, RoleFilter filter = RoleFilter::All,
+                      ModuleRole role = ModuleRole::Generic) MM_NONBLOCKING {
         for (uint8_t i = 0; i < childCount_; i++) {
             MoonModule* c = children_[i];
             if (filter == RoleFilter::Only   && c->role() != role) continue;

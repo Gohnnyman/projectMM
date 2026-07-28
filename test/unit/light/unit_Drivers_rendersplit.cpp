@@ -32,7 +32,7 @@ namespace {
 class MockDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer* b) override { src_ = b; }
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         ticks.fetch_add(1);
         if (src_ && src_->data() && src_->count() > 0 && src_->data()[0] == 0xEE)
             sawTear.store(true);
@@ -50,7 +50,7 @@ public:
 class SlowDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer*) override {}
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         {
             std::unique_lock<std::mutex> lk(m);
             inTick = true;

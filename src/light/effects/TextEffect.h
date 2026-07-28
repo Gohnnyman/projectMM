@@ -42,7 +42,7 @@ public:
         controls_.addUint8("hue", hue, 0, 255);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
         if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;

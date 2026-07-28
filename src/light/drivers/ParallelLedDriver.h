@@ -549,7 +549,7 @@ public:
     /// buffer + correction. (The double-buffer defaults ON — it overlaps the blocking wire wait and
     /// lifted the P4 whole-board rate 48→76 fps; OFF is the sound-reactive 0-latency opt-out and pays
     /// for exactly one buffer — see the doubleBuffer control + docs/history/lessons.md.)
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!peripheral_ || peripheral_->lanesAvailable() == 0) return;  // no backend / inert off this chip
         // Loopback mode owns the peripheral EXCLUSIVELY. While it is on, the render loop must not
         // transmit — the loopback tears the bus down, drives its own private frame, and rebuilds it.
@@ -689,7 +689,7 @@ public:
     /// wire time and the fps ceiling it implies (1e6 / frameTime). This is the pure WS2812 output floor —
     /// the render loop can never beat it, so it's the target the multicore work drives the system tick
     /// toward, and it tracks an overclocked slot rate directly. "—" until the first transfer completes.
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         if (!peripheral_) return;
         const uint32_t us = peripheral_->busLastTransmitUs();
         if (us == 0) std::snprintf(frameTimeStr_, sizeof(frameTimeStr_), "—");

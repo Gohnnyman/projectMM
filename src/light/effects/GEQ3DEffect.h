@@ -46,7 +46,7 @@ public:
         controls_.addBool("borders", borders);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (numBands == 0) return;
 
         const int cols = width();

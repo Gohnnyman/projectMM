@@ -201,7 +201,7 @@ public:
     /// Networking is infrastructure — keep the cascade ticking even when the user
     /// toggled "enabled" off, otherwise the device would silently drop off the LAN
     /// and become unreachable.
-    bool respectsEnabled() const override { return false; }
+    bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
     void setup() override {
         // Push the DHCP hostname (option 12) before any bring-up so the device shows
@@ -377,7 +377,7 @@ public:
         // Chain to base is at the top of this method — see comment there.
     }
 
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         uint32_t now = platform::millis();
         uint32_t elapsed = now - stateChangeTime_;
 

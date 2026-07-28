@@ -210,6 +210,15 @@
       "script": "check/check_clang_query.py"
     },
     {
+      "id": "check_nonblocking",
+      "tab": "desktop",
+      "group": "tools",
+      "label": "clang-hotpath",
+      "speed": "slow",
+      "help": "check_nonblocking",
+      "script": "check/check_nonblocking.py"
+    },
+    {
       "id": "check_lizard",
       "tab": "desktop",
       "group": "tools",

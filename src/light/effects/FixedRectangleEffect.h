@@ -57,7 +57,7 @@ public:
         controls_.addBool("alternateWhite", alternateWhite);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
         const int d = depth();

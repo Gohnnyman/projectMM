@@ -34,7 +34,7 @@ public:
         controls_.addUint8("interval", interval, 1, 254);
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         const lengthType w = width();
         const lengthType h = height();

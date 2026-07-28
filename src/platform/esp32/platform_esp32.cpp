@@ -90,13 +90,13 @@ void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed);
 // Host-test hook (see platform.h); no ESP32 test drives a bind failure, so it is inert here.
 void setTestBindFails(bool) {}
 
-uint32_t millis() {
+uint32_t millis() MM_NONBLOCKING {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
     if (override_) return override_;
     return static_cast<uint32_t>(esp_timer_get_time() / 1000);
 }
 
-uint32_t micros() {
+uint32_t micros() MM_NONBLOCKING {
     return static_cast<uint32_t>(esp_timer_get_time());
 }
 
@@ -885,11 +885,11 @@ bool ethInit() {
     }
 }
 
-bool ethLinkUp() {
+bool ethLinkUp() MM_NONBLOCKING {
     return ethLinkUp_;
 }
 
-bool ethConnected() {
+bool ethConnected() MM_NONBLOCKING {
     return ethConnected_;
 }
 
@@ -904,8 +904,8 @@ void ethGetIPv4(uint8_t out[4]) {
 void setEthConfig(const EthPinConfig&)  {}
 void ethStop()                          {}
 bool ethInit()                          { return false; }
-bool ethLinkUp()                        { return false; }
-bool ethConnected()                     { return false; }
+bool ethLinkUp() MM_NONBLOCKING                        { return false; }
+bool ethConnected() MM_NONBLOCKING                     { return false; }
 void ethGetIPv4(uint8_t out[4])         { out[0] = out[1] = out[2] = out[3] = 0; }
 
 #endif // MM_NO_ETH
@@ -1095,7 +1095,7 @@ bool wifiStaInit(const char* ssid, const char* password) {
     return true;
 }
 
-bool wifiStaConnected() {
+bool wifiStaConnected() MM_NONBLOCKING {
     return wifiStaConnected_;
 }
 
@@ -1256,7 +1256,7 @@ bool wifiSetTxPower(int8_t quarterDbm) {
 // With hasWiFi==false the calls are not code-generated, so --gc-sections drops
 // these stubs from the final image.
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
-bool wifiStaConnected() { return false; }
+bool wifiStaConnected() MM_NONBLOCKING { return false; }
 void wifiStaGetIPv4(uint8_t out[4])      { out[0] = out[1] = out[2] = out[3] = 0; }
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }

@@ -58,7 +58,7 @@ public:
     /// owner name + role into its own storage, so the rows serialize safely even if the owning module is
     /// deleted between refreshes — the snapshot holds no pointers into module memory. The next refresh
     /// rebuilds from the live tree, so a deleted module's claim drops within a second.
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         MoonModule::tick1s();
         pins_.refresh();
     }

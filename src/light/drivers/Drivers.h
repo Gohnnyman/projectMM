@@ -247,7 +247,7 @@ public:
     /// single frame's — a lone sample lands wherever tick1s happens to fall and reads ~0 even when the
     /// core is idling most frames. The peak is the number the Step 2b (ping-pong buffer) decision
     /// wants: how much time core 0 gives up at worst. A dash when the split isn't running.
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         if (renderSplitActive_) std::snprintf(renderWaitStr_, sizeof(renderWaitStr_), "%u µs",
                                               static_cast<unsigned>(renderWaitPeakUs_));
         else                    std::snprintf(renderWaitStr_, sizeof(renderWaitStr_), "—");
@@ -382,7 +382,7 @@ public:
         return true;
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         // Split active: core 1 is encoding the PREVIOUS frame from outputBuffer_. Wait for it to
         // finish before overwriting the shared buffer (the boundary). The stall is timed — it's the
         // Step 2b trigger metric: ~0 when render ≈ encode (heavy effect), large when render ≪ encode.

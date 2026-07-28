@@ -27,15 +27,15 @@ public:
     uint32_t tick20msCalls = 0;
     uint32_t tick1sCalls = 0;
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         loopCalls++;
         mm::MoonModule::tick();   // chain so this counter doubles as a parent too
     }
-    void tick20ms() override {
+    void tick20ms() MM_NONBLOCKING override {
         tick20msCalls++;
         mm::MoonModule::tick20ms();
     }
-    void tick1s() override {
+    void tick1s() MM_NONBLOCKING override {
         tick1sCalls++;
         mm::MoonModule::tick1s();
     }
@@ -45,7 +45,7 @@ public:
 // NetworkModule / SystemModule / FirmwareUpdateModule today.
 class AlwaysOn : public Counting {
 public:
-    bool respectsEnabled() const override { return false; }
+    bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 };
 
 } // namespace

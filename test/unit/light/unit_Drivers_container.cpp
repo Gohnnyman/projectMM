@@ -22,7 +22,7 @@ namespace {
 class CountingDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer*) override {}
-    void tick() override { loopCalls++; }
+    void tick() MM_NONBLOCKING override { loopCalls++; }
     int loopCalls = 0;
 };
 
@@ -34,7 +34,7 @@ public:
 class CorrectionCapturingDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer*) override {}
-    void tick() override {}
+    void tick() MM_NONBLOCKING override {}
     void defineDriverControls() override { defineCorrectionControls(); }
 };
 
@@ -44,7 +44,7 @@ public:
 class RebuildTrackingDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer*) override {}
-    void tick() override {}
+    void tick() MM_NONBLOCKING override {}
     void defineDriverControls() override { defineCorrectionControls(); }
     void prepare() override { prepareCalls++; }
     void onCorrectionChanged() override { correctionCalls++; }

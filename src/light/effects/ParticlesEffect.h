@@ -36,7 +36,7 @@ public:
         if (trail_) initParticles();
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         if (!trail_) return;
 
         lengthType w = width();

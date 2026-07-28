@@ -34,7 +34,7 @@ namespace mm {
 /// @card Layer.png
 class Layer : public MoonModule {
 public:
-    ModuleRole role() const override { return ModuleRole::Layer; }
+    ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Layer; }
     const char* acceptsChildRoles() const override { return "effect,modifier"; }
 
     ~Layer() override { if (liveScratch_) platform::free(liveScratch_); }
@@ -145,7 +145,7 @@ public:
         // applyState() recurses to the effects next — they allocate against the LUT/buffer just built.
     }
 
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         // Scheduler already gates the Layer itself by enabled() via respectsEnabled().
         // We still gate per-effect-child explicitly because Layer iterates its own
         // children rather than going through the Scheduler.

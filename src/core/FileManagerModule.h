@@ -45,7 +45,7 @@ class FileManagerModule : public MoonModule {
 public:
     void defineControls() override;
     void setup() override;
-    void tick1s() override;
+    void tick1s() MM_NONBLOCKING override;
 
 private:
     bool showHidden_ = false;      // reveal dot-prefixed entries (forwarded to /api/dir by the UI)

@@ -96,7 +96,7 @@ public:
     /// Persistence must keep flushing dirty subtrees regardless of the `enabled` toggle —
     /// otherwise the user could lose changes by accidentally disabling this module via
     /// the UI before the 2s debounce expires.
-    bool respectsEnabled() const override { return false; }
+    bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
     /// Non-UI: a pure persistence engine with no controls — not shown as a card (its "last saved"
     /// status is displayed by FileManagerModule). See MoonModule::appearsInUi.
@@ -104,7 +104,7 @@ public:
 
     void setScheduler(Scheduler* s);
     void setup() override;
-    void tick1s() override;
+    void tick1s() MM_NONBLOCKING override;
 
     /// The engine's live "last saved" buffer — "never" before the first save, else "5m ago". This
     /// is the persistence engine's status; FileManagerModule binds its read-only "lastSaved" control

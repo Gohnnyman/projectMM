@@ -5,10 +5,30 @@
 #include <cstddef>
 #include "platform_config.h"  // hasOta / hasPsram / … — flags this header's contract refers to
 
+// The render path must not allocate or block (architecture.md § Hot path discipline). Clang 20+
+// checks that TRANSITIVELY under -Wfunction-effects: the attribute is inherited by overrides, so
+// marking the three tick methods here covers every module's tick and everything it calls, which a
+// regex over source text (check_hotpath.py) can never do.
+//
+// Empty on GCC — the ESP32 toolchain has neither the attribute nor the warning, and it builds with
+// -Werror, so a bare [[clang::nonblocking]] there is a build break (-Wattributes). Same shape as
+// MM_PRINTF_FORMAT in JsonSink.h. That makes this a DESKTOP-side check, which loses nothing: every
+// tick method — modules, effects, and the LED drivers — compiles on desktop. src/platform/esp32/
+// has no tick methods at all; it is free functions the tick path calls INTO, and those are checked
+// through their call sites.
+#if defined(__clang__) && __clang_major__ >= 20
+  // noexcept is part of the contract, not decoration: clang warns
+  // (-Wperf-constraint-implies-noexcept) if a nonblocking function can throw, because
+  // unwinding allocates. Folded in here so the two never drift apart.
+  #define MM_NONBLOCKING noexcept [[clang::nonblocking]]
+#else
+  #define MM_NONBLOCKING noexcept
+#endif
+
 namespace mm::platform {
 
-uint32_t millis();
-uint32_t micros();
+uint32_t millis() MM_NONBLOCKING;
+uint32_t micros() MM_NONBLOCKING;
 
 // Test-only override: when set to non-zero, millis() returns this value instead
 // of reading the platform clock. Production code never calls this; tests use it
@@ -317,8 +337,8 @@ bool ethInit();
 // the live reconfigure path (used for W5500/SPI, which tears down cleanly; RMII
 // keeps apply-on-next-init). Safe to call when nothing is running. Desktop: no-op.
 void ethStop();
-bool ethLinkUp();       // PHY link detected (cable plugged, fast check)
-bool ethConnected();    // IP assigned (DHCP complete)
+bool ethLinkUp() MM_NONBLOCKING;       // PHY link detected (cable plugged, fast check)
+bool ethConnected() MM_NONBLOCKING;    // IP assigned (DHCP complete)
 // Current IP as raw octets — out[0..3]. All-zero (0.0.0.0) means "no IP yet".
 // Octets, not a string: the IP's canonical form is uint8_t[4] (matching the
 // static-IP controls and formatDottedQuad); callers that need text format at
@@ -326,7 +346,7 @@ bool ethConnected();    // IP assigned (DHCP complete)
 void ethGetIPv4(uint8_t out[4]);
 
 bool wifiStaInit(const char* ssid, const char* password);
-bool wifiStaConnected();
+bool wifiStaConnected() MM_NONBLOCKING;
 void wifiStaGetIPv4(uint8_t out[4]);   // see ethGetIPv4 — same octet contract
 void wifiStaStop();
 

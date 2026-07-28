@@ -73,7 +73,7 @@ public:
     // generation (so the next rebuild reshuffles) and trigger the Layer's rebuild.
     // bpm 0 freezes. Layer::tick() invokes this per enabled modifier child; it sets a
     // dirty flag the Layer coalesces into one rebuild (see Layer::tick()).
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         const uint32_t now = platform::millis();
         if (lastElapsed_ == 0) lastElapsed_ = now;   // first tick: no dt jump
         const uint32_t dt = now - lastElapsed_;

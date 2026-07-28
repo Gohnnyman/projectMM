@@ -48,7 +48,7 @@ public:
     /// ticking it through Layers would run its loop at the wrong tree
     /// depth (an Effect that should be ticked inside a Layer). Matches
     /// the role-filter precedent in setLayouts / activeLayer above.
-    void tick() override {
+    void tick() MM_NONBLOCKING override {
         for (uint8_t i = 0; i < childCount(); i++) {
             MoonModule* c = child(i);
             if (!c || c->role() != ModuleRole::Layer) continue;
