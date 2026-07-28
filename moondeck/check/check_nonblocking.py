@@ -225,9 +225,12 @@ def main():
         return 0
 
     # Mark what is new since the baseline. Not a filter — everything is still shown.
+    # Existence, not emptiness: an EMPTY baseline is a deliberate "nothing is known-good", so
+    # every finding is new. Only a MISSING file means "no baseline taken yet".
+    has_baseline = BASELINE.exists()
     known = read_baseline()
     for r in rows:
-        r["new"] = bool(known) and (r["file"], r["callee"]) not in known
+        r["new"] = has_baseline and (r["file"], r["callee"]) not in known
 
     if args.module:
         only = check_clang_query.module_files(args.module)
@@ -239,7 +242,7 @@ def main():
 
     n_new = sum(1 for r in rows if r.get("new"))
     print(f"{len(rows)} call(s) from the render path that can block or allocate.")
-    if known:
+    if has_baseline:
         print(f"{n_new} NEW since the baseline ({len(known)} known, backlogged as architecture "
               f"work)." if n_new else
               f"None new since the baseline — all {len(known)} are known and backlogged.")

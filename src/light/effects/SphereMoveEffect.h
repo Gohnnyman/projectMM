@@ -37,7 +37,6 @@ public:
         const int w = width();
         const int h = height();
         const int d = depth();
-        if (w <= 0 || h <= 0 || d <= 0 || channelsPerLight() < 3) return;
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), static_cast<lengthType>(d)};

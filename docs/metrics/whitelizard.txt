@@ -40,7 +40,7 @@ src/core/MqttModule.cpp:mm::MqttModule::routePublish   # CCN 25, NLOC 61
 src/core/HttpServerModule.cpp:mm::HttpServerModule::parseFilePath   # CCN 25, NLOC 33
 src/main.cpp:mm_main   # CCN 24, NLOC 148
 src/light/layers/Layer.h:mm::Layer::buildFoldedLUT   # CCN 24, NLOC 68
-src/light/effects/FreqSawsEffect.h:mm::FreqSawsEffect::tick   # CCN 24, NLOC 62
+src/light/effects/FreqSawsEffect.h:mm::FreqSawsEffect::for   # CCN 13, NLOC 36 (was 24/62; lizard cannot name this tick and falls back to an inner token)
 src/light/draw.h:mm::draw::line   # CCN 24, NLOC 43
 src/light/drivers/Drivers.h:mm::Drivers::prepare   # CCN 24, NLOC 36
 src/light/drivers/ParallelLedDriver.h:mm::ParallelLedDriver::runLoopbackSelfTest   # CCN 23, NLOC 65

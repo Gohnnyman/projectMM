@@ -71,7 +71,6 @@ public:
 
         const lengthType w = width();
         const lengthType h = height();
-        if (w <= 0 || h <= 0 || channelsPerLight() < 1) return;
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{w, h, depthDim()};

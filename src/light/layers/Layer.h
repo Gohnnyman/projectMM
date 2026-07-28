@@ -162,7 +162,16 @@ public:
         // fading effects on one layer cost ONE buffer pass (the gentlest amount wins, preserving the
         // most light / longest trail) instead of each effect fading the whole shared buffer itself.
         if (fadeBy_ > 0) { draw::fade(buffer_, fadeBy_); fadeBy_ = 0; }
-        for (uint8_t i = 0; i < childCount(); i++) {
+        // A degenerate grid has nothing to draw. This is orchestration — the Layer owns the
+        // decision to run the effect pass at all, the same way it owns the enabled/role gates
+        // below — so it is checked ONCE here rather than repeated as a guard clause in every
+        // effect's tick(). Effects may assume width/height/depth are all >= 1.
+        //
+        // It gates only the EFFECT pass, not the whole tick: the modifier pass below advances
+        // per-frame state (a beat-driven RandomMap) that must keep running so the chain is in
+        // the right phase when the grid comes back.
+        const bool hasGrid = width_ > 0 && height_ > 0 && depth_ > 0;
+        for (uint8_t i = 0; hasGrid && i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Effect) continue;
             if (!child(i)->enabled()) continue;
             auto* eff = static_cast<EffectBase*>(child(i));

@@ -39,7 +39,6 @@ public:
         lengthType w = width();
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
-        if (w <= 0 || h <= 0) return;
 
         // Visible radius limit (octagonal distance to far corner)
         uint8_t maxR = dist8(static_cast<int16_t>(w), static_cast<int16_t>(h));

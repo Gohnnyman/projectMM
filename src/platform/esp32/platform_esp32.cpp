@@ -1131,6 +1131,9 @@ void wifiStaStop() {
         staNetif_ = nullptr;
     }
     wifiStaConnected_.store(false, std::memory_order_relaxed);
+    // Association state must clear with the interface: a later netSetStaticIPv4(Sta) keys off
+    // this flag, and a stale `true` from a torn-down STA would apply a static IP to nothing.
+    wifiStaAssociated_.store(false, std::memory_order_relaxed);
     wifiInitDone_ = false;
     wifiStaStopping_.store(false, std::memory_order_relaxed);   // a later wifiStaInit() reconnects normally
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");

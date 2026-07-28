@@ -103,10 +103,11 @@
 # Everything else disabled below is a style opinion we do not hold; enabling any of them
 # would gate a rewrite rather than a fix.
 #
-# NOT GATED YET. `WarningsAsErrors` stays empty until the remaining 47 clang-analyzer findings
-# are triaged (backlog: "clang-tidy: triage the 47 clang-analyzer findings"). Switching it to
-# `'*'` is the ratchet that stops a zero decaying, and it is one line — but it fails the gate
-# today, so it lands with that triage rather than before it.
+# NOT A GATE, BY DESIGN. `WarningsAsErrors` stays empty: this is a report, and other tools or
+# scripts decide what to do with what it finds. Turning findings into build errors would fail
+# every build on the ones that remain, and a gate nobody can satisfy gets disabled rather than
+# obeyed — it would also push people to NOLINT a finding under time pressure, which is the
+# opposite of what a report is for.
 ---
 Checks: >-
   *,

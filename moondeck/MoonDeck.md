@@ -356,9 +356,14 @@ not be resolved from source.
 **Desktop-only, and that loses nothing.** On GCC `MM_NONBLOCKING` expands to `noexcept` — the
 exception contract still holds; only the clang attribute and the warning are absent. The ESP32 toolchain
 has neither the attribute nor the warning, and builds with `-Werror`, so a bare attribute there
-is a build break. But every tick method compiles on desktop: modules, effects, and the **LED
-drivers**. `src/platform/esp32/` has no tick methods — it is free functions the tick path calls
-into, and those are checked through their call sites.
+is a build break. Every tick method compiles on desktop — modules, effects, and the **LED
+drivers** — so the render path itself is covered.
+
+The gap is real but narrow: `src/platform/esp32/` has no tick methods (it is free functions the
+tick path calls into), and while a call INTO one of them is reported at the call site, the
+function's own body is never analyzed. A platform function that blocks internally without
+carrying `MM_NONBLOCKING` is invisible. Closing that needs an xtensa clang — backlogged as
+"ESP32 clang/LLVM toolchain" in backlog-core.md.
 
 Not a gate yet: `-Wno-error=function-effects` keeps the build green while the findings are
 triaged. Each is a judgement — fix it, annotate the callee, or accept it with a scoped reason.

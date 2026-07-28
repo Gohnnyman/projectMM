@@ -100,7 +100,6 @@ private:
     void initParticles() {
         lengthType w = width();
         lengthType h = height();
-        if (w <= 0 || h <= 0) return;
         if (initialized_) return;
         for (uint8_t i = 0; i < MAX_PARTICLES; i++) {
             particles_[i].x = static_cast<int16_t>((static_cast<uint16_t>(rand8()) * w) >> 4);

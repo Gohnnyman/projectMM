@@ -39,7 +39,7 @@ TEST_CASE("Buffer move constructor") {
     CHECK(b.channelsPerLight() == 3);
     // Asserting the moved-from state IS the test: Buffer's move must leave the source empty,
     // not merely valid-but-unspecified.
-    // NOLINTNEXTLINE(bugprone-use-after-move)
+    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     CHECK(a.data() == nullptr);
     CHECK(a.count() == 0);
 }
@@ -56,7 +56,7 @@ TEST_CASE("Buffer move assignment") {
     CHECK(b.count() == 100);
     // Asserting the moved-from state IS the test: Buffer's move must leave the source empty,
     // not merely valid-but-unspecified.
-    // NOLINTNEXTLINE(bugprone-use-after-move)
+    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     CHECK(a.data() == nullptr);
 }
 

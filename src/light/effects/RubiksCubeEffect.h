@@ -63,7 +63,6 @@ public:
 
     void tick() MM_NONBLOCKING override {
         const lengthType w = width(), h = height(), d = depth();
-        if (w <= 0 || h <= 0 || d <= 0 || channelsPerLight() < 3) return;
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{w, h, d};

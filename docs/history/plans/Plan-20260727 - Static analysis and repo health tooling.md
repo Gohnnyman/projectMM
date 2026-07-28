@@ -103,7 +103,7 @@ Tuning mattered, and the numbers are why the first attempt failed: a shotgun
 (`bugprone-*,performance-*,concurrency-*`) gave 384 findings of which 66% were one noisy check;
 `*` plus ESPHome's family disables gave **6,073**; adding their style disables 3,949; adding the
 `cert-*` family (aliases of `bugprone-*`, and `cert-err33-c` alone was 3,678 — every `snprintf`)
-brought it to **131**. Then triage took it to 47.
+brought it to **131**. Then triage took it to 30.
 
 ## Implementation
 
@@ -167,9 +167,11 @@ Each step is independent and revertible. **✅ done · ◻ not started · ◐ pa
    matrix entry.
 
    Two things the step needed that the plan did not anticipate:
-   - **The lane must pin clang.** GCC rejects `-fsanitize=realtime` outright, and
-     `ubuntu-latest` defaults to GCC, so the job would have failed at configure. Only this lane
-     changes compiler; ASan/TSan stay on the runner default.
+   - **The lane must pin clang 20+, and install it.** GCC rejects `-fsanitize=realtime`
+     outright; `ubuntu-latest` defaults to GCC *and* its `/usr/bin/clang++` is **18**, which
+     rejects the flag at the compiler-probe stage — CI caught this after a local check on
+     Homebrew clang 22 passed. The lane now installs `clang-20` from apt.llvm.org. Only this
+     lane changes compiler; ASan/TSan stay on the runner default.
    - **`RTSAN_OPTIONS=halt_on_error=0`.** The render path has ~50 known blocking calls, so
      halting would fail the lane on every run. It reports; the log is the signal — the same
      report-don't-gate shape as the compile-time half.
@@ -177,15 +179,19 @@ Each step is independent and revertible. **✅ done · ◻ not started · ◐ pa
    Verified locally: RTSan intercepts a `malloc` inside a `[[clang::nonblocking]]` function and
    prints the stack.
 
-5. ◐ **clang-tidy** — config landed, clangd wired, and the tree triaged from 125 findings to
-   **0** (see the triage table above). What remains is the ratchet: `WarningsAsErrors` is still
-   `''`, and cannot go to `'*'` until the 47 clang-analyzer findings are triaged — switching it
-   on today fails the gate. One line, and it is what stops a zero decaying, so it lands WITH that
-   triage. Original text: land the config above, wire **clangd first** (editor-only, gates nothing,
-   and it filters slow checks automatically). Then one full run per family: real bug → fix;
-   FP → `NOLINTNEXTLINE` with a reason; loud-and-useless → the disable list with a comment.
-   When a family is clean it joins `WarningsAsErrors`. Target end state is **zero baseline** —
-   at 50k LOC that is reachable, which is why we skip CodeChecker and diff-only CI entirely.
+5. ✅ **clang-tidy** — config landed, clangd wired, the MoonDeck card reports into the log, and
+   the tree triaged from 125 findings to **30** (`.clang-tidy` runs `*` minus a documented disable
+   list; what remains is the path-sensitive `clang-analyzer-*` family, roughly half of it in test
+   code). Remaining findings are tracked in backlog-core.md, not here.
+
+   **`WarningsAsErrors` stays `''` — that is the finished state, not a missing step.** clang-tidy
+   is a *report*: it shows what it finds, and other tools decide what to do with that. Making
+   findings build errors would fail every build on the 30, and a gate nobody can satisfy gets
+   disabled rather than obeyed — it would also push people to `NOLINT` under time pressure, the
+   opposite of what a report is for. Same rule as the hot-path check.
+
+   Superseded by the above: the original plan said each clean family joins `WarningsAsErrors` and
+   the target is a zero baseline. Neither is the goal any more — reporting correctly is.
 6. ◻ **CodeQL housekeeping** — exclude vendored code (`test/doctest.h` produced the only
    critical we do not own) and decide whether it gates PRs or stays a weekly sweep.
 7. ◐ **Triage the 4 real CodeQL findings** — the 3 `localtime` criticals are DONE (a portable

@@ -92,14 +92,26 @@ jobs:
       # The CMake configure needs uv on PATH — it resolves UV_EXECUTABLE for the UI-embed step
       # (CLAUDE.md § Use uv for every Python invocation), so a build without it fails at configure.
       - uses: astral-sh/setup-uv@v3
-      - name: build + run unit tests under ${{ matrix.kind }}sanitizer
-        env:
-          # RTSan is clang-only — GCC rejects `-fsanitize=realtime` outright — and the attribute
-          # it keys off is [[clang::nonblocking]], which GCC ignores anyway. ASan/TSan stay on the
-          # runner default so this lane is the only one that changes compiler.
-          CXX: ${{ matrix.kind == 'realtime' && 'clang++' || '' }}
+      # RTSan needs Clang 20+; ubuntu-latest ships Clang 18, which rejects
+      # `-fsanitize=realtime` at the compiler-probe stage. Install a new enough one for that
+      # lane only — ASan/TSan run on the runner's default compiler.
+      - name: install clang for RealtimeSanitizer
+        if: matrix.kind == 'realtime'
         run: |
-          cmake -S . -B build/san -DCMAKE_BUILD_TYPE=Debug \
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/llvm.asc
+          sudo add-apt-repository -y "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main"
+          sudo apt-get install -y clang-20
+      - name: build + run unit tests under ${{ matrix.kind }}sanitizer
+        run: |
+          # RTSan is clang-only — GCC rejects `-fsanitize=realtime` outright — and the attribute
+          # it keys off is [[clang::nonblocking]], which GCC ignores anyway. Passed as a CMake
+          # variable on this lane only, rather than exporting CXX: an empty CXX="" on the other
+          # lanes is not the same as unset, and some probes read it as a broken compiler path.
+          compiler=""
+          if [ "${{ matrix.kind }}" = "realtime" ]; then
+            compiler="-DCMAKE_CXX_COMPILER=clang++-20"
+          fi
+          cmake -S . -B build/san -DCMAKE_BUILD_TYPE=Debug $compiler \
             -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.kind }} -fno-omit-frame-pointer -g" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=${{ matrix.kind }}"
           cmake --build build/san --target mm_tests -j"$(nproc)"

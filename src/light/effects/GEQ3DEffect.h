@@ -51,7 +51,6 @@ public:
 
         const int cols = width();
         const int rows = height();
-        if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;
 
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};

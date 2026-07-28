@@ -40,7 +40,6 @@ public:
         lengthType w = width();
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
-        if (w <= 0 || h <= 0) return;
 
         uint32_t now = elapsed();
         uint32_t dt = now - lastElapsed_;

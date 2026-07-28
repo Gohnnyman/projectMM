@@ -65,7 +65,6 @@ public:
         const int w = width();
         const int h = height();
         const int d = depth();
-        if (w <= 0 || h <= 0 || channelsPerLight() < 3) return;
 
         Buffer& buf = layer()->buffer();
         const lengthType dz = d > 0 ? static_cast<lengthType>(d) : 1;
