@@ -240,6 +240,29 @@ const SPEED_BADGE = {
     slow:    { icon: "🐌", title: "Slow — takes more than 30 seconds" },
 };
 
+// Replay a script's stored last run into the log pane. Shared by the button rendered at load
+// and the one created when a first run completes.
+let logLoadToken = 0;
+
+async function showLastRun(script) {
+    switchPane("log");
+    // Clear BEFORE the fetch, and token the request: clicking two cards quickly must not let
+    // the slower response paint over the log you actually asked for last.
+    const token = ++logLoadToken;
+    logEl.textContent = "";
+    appendLog(`— loading last run for ${script.label} —`);
+    try {
+        const r = await fetch(`/api/log/${script.id}`);
+        if (token !== logLoadToken) return;          // superseded by a later click
+        logEl.textContent = "";
+        appendLog(r.ok ? await r.text() : `— no stored run for ${script.label} —`);
+    } catch (err) {
+        if (token !== logLoadToken) return;
+        logEl.textContent = "";
+        appendLog(`— could not read log: ${err} —`);
+    }
+}
+
 function speedBadge(speed) {
     const b = SPEED_BADGE[speed];
     return b ? `<span class="speed-badge" title="${b.title}">${b.icon}</span>` : "";
@@ -377,7 +400,7 @@ function renderScripts() {
                     <span class="status-dot" data-id="${script.id}"></span>
                     <span class="label">${script.label}</span>
                     ${speedBadge(script.speed)}
-                    <button class="log-btn" title="Show this script's last run">📄</button>
+                    ${script.hasLog ? `<button class="log-btn" title="Show this script's last run" aria-label="Show this script's last run">📄</button>` : ""}
                     <button class="help-btn" title="Help">?</button>
                     <button class="run-btn" data-id="${script.id}">Run</button>
                 </div>
@@ -495,20 +518,7 @@ function renderScripts() {
             // feature existed. The server tees every stream to build/moondeck-logs/<id>.log, so
             // this answers "what did this do last time" after a page reload or a switch to
             // another card — the case a live-only stream cannot.
-            card.querySelector(".log-btn").addEventListener("click", async () => {
-                switchPane("log");
-                try {
-                    const r = await fetch(`/api/log/${script.id}`);
-                    if (!r.ok) {
-                        appendLog(`— no stored run for ${script.label} —`);
-                        return;
-                    }
-                    logEl.textContent = "";
-                    appendLog(await r.text());
-                } catch (err) {
-                    appendLog(`— could not read log: ${err} —`);
-                }
-            });
+            card.querySelector(".log-btn")?.addEventListener("click", () => showLastRun(script));
 
             target.appendChild(card);
         }
@@ -621,6 +631,22 @@ async function runScriptOnce(script, btn, extraParams) {
                     // instead of waiting up to 5s for the poll, so the button
                     // flips back to "Stop" without a visible blink.
                     if (script.long_running) updateRunningState();
+                    // A first run just created this script's log, so the 📄 appears without
+                    // needing a page reload.
+                    if (!script.hasLog) {
+                        script.hasLog = true;
+                        const row = document.querySelector(
+                            `.status-dot[data-id="${script.id}"]`)?.parentElement;
+                        if (row && !row.querySelector(".log-btn")) {
+                            const b = document.createElement("button");
+                            b.className = "log-btn";
+                            b.title = "Show this script's last run";
+                            b.setAttribute("aria-label", "Show this script's last run");
+                            b.textContent = "📄";
+                            b.addEventListener("click", () => showLastRun(script));
+                            row.insertBefore(b, row.querySelector(".help-btn"));
+                        }
+                    }
                     resolve(data.exitCode === 0);
                 } catch {
                     resetBtn(1);

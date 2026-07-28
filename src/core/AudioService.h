@@ -301,8 +301,12 @@ public:
     /// `tick()` — so a device with two mics reads the first consistently, and
     /// removing the active one lets a survivor take over. Add/remove in any order
     /// leaves a coherent answer (the robustness rule).
-    static const AudioFrame* latestFrame() {
-        static const AudioFrame kSilence{};
+    static const AudioFrame* latestFrame() MM_NONBLOCKING {
+        // constexpr, not a function-local static: a static needs a guard variable and a
+        // one-time lock on first use, which is a blocking operation on the render path — and
+        // this is called from EIGHT audio-reactive effects' tick(). constexpr is initialized at
+        // compile time, so there is no guard and no lock.
+        static constexpr AudioFrame kSilence{};
         AudioService* a = ActiveInstance<AudioService>::active();
         return a ? &a->frame_ : &kSilence;
     }

@@ -10,7 +10,8 @@
 // marking the three tick methods here covers every module's tick and everything it calls, which a
 // regex over source text (check_hotpath.py) can never do.
 //
-// Empty on GCC — the ESP32 toolchain has neither the attribute nor the warning, and it builds with
+// On GCC it expands to `noexcept` alone — that toolchain has neither the attribute nor the warning
+// (so the effect check is desktop-only), but the exception contract still holds. It builds with
 // -Werror, so a bare [[clang::nonblocking]] there is a build break (-Wattributes). Same shape as
 // MM_PRINTF_FORMAT in JsonSink.h. That makes this a DESKTOP-side check, which loses nothing: every
 // tick method — modules, effects, and the LED drivers — compiles on desktop. src/platform/esp32/
@@ -343,7 +344,7 @@ bool ethConnected() MM_NONBLOCKING;    // IP assigned (DHCP complete)
 // Octets, not a string: the IP's canonical form is uint8_t[4] (matching the
 // static-IP controls and formatDottedQuad); callers that need text format at
 // their own boundary, callers that need bytes (ArtNet) use them directly.
-void ethGetIPv4(uint8_t out[4]);
+void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING;
 
 bool wifiStaInit(const char* ssid, const char* password);
 bool wifiStaConnected() MM_NONBLOCKING;
@@ -645,7 +646,7 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
 
 // The tick resolution the platform actually granted (may differ from requested).
 // The driver converts its ns timings to ticks with this. 0 if not initialised.
-uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h);
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) MM_NONBLOCKING;
 
 // Start transmitting `symbolCount` pre-encoded WS2812 RMT symbols and return
 // immediately — channels started back-to-back clock out concurrently. Pair with

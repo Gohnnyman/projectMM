@@ -387,32 +387,9 @@ Confirmed by external review (CodeRabbit, PR #56).
 MoonLight behaviour and fidelity is deliberate. If the FPU-less Xtensa cost is real, that is a
 profiling question first, not a lint fix.
 
-Until this lands, `-Wfunction-effects` carries `-Wno-error` and `check_hotpath.py` stays as the
-enforcing gate.
-
-### Hot path: triage the 181 -Wfunction-effects findings, then delete check_hotpath.py
-
-`MM_NONBLOCKING` + `-Wfunction-effects` (the "clang-hotpath" card) checks hot-path discipline
-TRANSITIVELY — through the whole call graph, where `check_hotpath.py`'s regex reads only the
-tick body's own text. The new check finds **181** sites; the old one finds **0** in the same
-code, which is the measure of how blind it is.
-
-Split by tier, because the cost differs by orders of magnitude: **70 on `tick()`** (every
-frame), 6 on `tick20ms()`, 95 on `tick1s()`, 10 unresolved. The sharp ones are UDP
-`sendTo`/`recvFrom` inside `AudioService::tick` — socket I/O every frame. The bulk is
-`snprintf` ×20 (bounded and non-allocating; wants one policy call, not 20 edits) and 11 static
-locals (a guard variable + one-time lock on first use — a real violation).
-
-Then `check_hotpath.py` (170 lines) goes. It scans 67 tick methods, all in `src/core/` and
-`src/light/`, all compiled on desktop — a strict subset of what the compiler now covers. It is
-NOT the ESP32's safety net: `src/platform/esp32/` has no tick methods at all.
-
-**Order matters.** `check_hotpath.py` fails pre-commit today; `-Wfunction-effects` carries
-`-Wno-error` while the findings stand. Deleting the script first would leave hot-path
-discipline with nothing enforcing. So: triage → drop `-Wno-error` → delete and swap the gate.
-
-Every file with a finding is already touched by the branch that added this, so the fix costs
-no new files — but it is substantial, and wants its own branch.
+`-Wfunction-effects` reports these but never fails a build, and
+`docs/metrics/hotpath-baseline.txt` freezes the known set so a NEW blocking call stands out
+in the report. The pre-commit gate runs the same check incrementally.
 
 ### ESP32 clang/LLVM toolchain — extend the clang checks to src/platform/esp32/
 

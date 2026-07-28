@@ -135,15 +135,6 @@
       "script": "report/history_report.py"
     },
     {
-      "id": "check_hotpath",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Hot Path",
-      "speed": "instant",
-      "help": "check_hotpath",
-      "script": "check/check_hotpath.py"
-    },
-    {
       "id": "check_esp32_built",
       "tab": "esp32",
       "group": "build",

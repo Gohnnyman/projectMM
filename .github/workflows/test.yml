@@ -80,7 +80,11 @@ jobs:
     strategy:
       fail-fast: false          # a TSan race and an ASan UAF are independent signals — report both
       matrix:
-        kind: [address, thread]
+        # `realtime` is the runtime half of the hot-path check: MM_NONBLOCKING marks the tick
+        # methods, -Wfunction-effects proves what it can at compile time, and RTSan catches what
+        # it cannot — allocation or blocking reached through virtual dispatch or a function
+        # pointer. Same attribute drives both, so this lane costs one matrix entry.
+        kind: [address, thread, realtime]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,6 +93,11 @@ jobs:
       # (CLAUDE.md § Use uv for every Python invocation), so a build without it fails at configure.
       - uses: astral-sh/setup-uv@v3
       - name: build + run unit tests under ${{ matrix.kind }}sanitizer
+        env:
+          # RTSan is clang-only — GCC rejects `-fsanitize=realtime` outright — and the attribute
+          # it keys off is [[clang::nonblocking]], which GCC ignores anyway. ASan/TSan stay on the
+          # runner default so this lane is the only one that changes compiler.
+          CXX: ${{ matrix.kind == 'realtime' && 'clang++' || '' }}
         run: |
           cmake -S . -B build/san -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.kind }} -fno-omit-frame-pointer -g" \
@@ -96,4 +105,9 @@ jobs:
           cmake --build build/san --target mm_tests -j"$(nproc)"
           # Leak detection is a different concern from the races/UAF this gate hunts, and it fires on
           # third-party static init; keep the signal on what we're actually looking for.
-          ASAN_OPTIONS=detect_leaks=0 TSAN_OPTIONS=halt_on_error=1 ./build/san/test/mm_tests
+          #
+          # RTSan does NOT halt: the render path has ~50 known blocking calls (frozen in
+          # docs/metrics/hotpath-baseline.txt, backlogged as architecture work), so halting would
+          # fail this lane on every run. It reports; the log is the signal.
+          ASAN_OPTIONS=detect_leaks=0 TSAN_OPTIONS=halt_on_error=1 \
+            RTSAN_OPTIONS=halt_on_error=0 ./build/san/test/mm_tests

@@ -487,7 +487,9 @@ static bool wifiApActive_ = false;
 // L2 association state, distinct from wifiStaConnected_ (which means "has an IP"): true between
 // WIFI_EVENT_STA_CONNECTED and _DISCONNECTED. A static STA is reachable once associated (no DHCP
 // round), so this is the signal the static apply keys off — see netSetStaticIPv4(Sta).
-static bool wifiStaAssociated_ = false;
+// Atomic for the same reason as wifiStaConnected_ above: written by the IDF event handler,
+// read by netSetStaticIPv4() on the caller's thread.
+static std::atomic<bool> wifiStaAssociated_{false};
 // Static-addressing state for WiFi STA, mirroring the eth pair. `wifiStaConnected_` normally means
 // "has a DHCP IP" (set on GOT_IP), which never fires on a DHCP-less network — so for a static STA
 // the address is pinned at L2 association (WIFI_EVENT_STA_CONNECTED) and connected is marked there.
@@ -900,7 +902,7 @@ bool ethConnected() MM_NONBLOCKING {
     return ethConnected_.load(std::memory_order_relaxed);
 }
 
-void ethGetIPv4(uint8_t out[4]) {
+void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING {
     netifIPv4(ethNetif_, out);
 }
 
@@ -913,7 +915,7 @@ void ethStop()                          {}
 bool ethInit()                          { return false; }
 bool ethLinkUp() MM_NONBLOCKING                        { return false; }
 bool ethConnected() MM_NONBLOCKING                     { return false; }
-void ethGetIPv4(uint8_t out[4])         { out[0] = out[1] = out[2] = out[3] = 0; }
+void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING         { out[0] = out[1] = out[2] = out[3] = 0; }
 
 #endif // MM_NO_ETH
 
@@ -938,13 +940,13 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
             // mark connected — a DHCP-less network never fires GOT_IP, so waiting for it would strand
             // a static STA. Mirrors the eth CONNECTED handler's ethStatic_ re-pin. DHCP mode is a
             // no-op here (the DHCP client runs and GOT_IP sets wifiStaConnected_ as before).
-            wifiStaAssociated_ = true;
+            wifiStaAssociated_.store(true, std::memory_order_relaxed);
             if (staStatic_.load(std::memory_order_acquire)) {
                 netSetStaticIPv4(NetIface::Sta, staStaticIp_, staStaticGw_, staStaticMask_, staStaticDns_);
             }
         } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
             wifiStaConnected_.store(false, std::memory_order_relaxed);
-            wifiStaAssociated_ = false;
+            wifiStaAssociated_.store(false, std::memory_order_relaxed);
             // **The reconnect must be explicit — IDF does not do it for us.** Without this
             // esp_wifi_connect(), a dropped association is permanent: the device keeps rendering but
             // is unreachable until it is power-cycled, which for a controller in a ceiling is a real
@@ -1367,7 +1369,7 @@ void netSetStaticIPv4(NetIface iface, const uint8_t ip[4], const uint8_t gw[4],
         // — the very case static addressing exists for. So mark connected here (the IP is applied);
         // WIFI_EVENT_STA_CONNECTED re-applies on a reconnect. Only when the STA is actually
         // associated, so a static apply while the radio is down doesn't fake a connection.
-        if (wifiStaAssociated_) wifiStaConnected_.store(true, std::memory_order_relaxed);
+        if (wifiStaAssociated_.load(std::memory_order_relaxed)) wifiStaConnected_.store(true, std::memory_order_relaxed);
     }
 #endif
     ESP_LOGI(NET_TAG, "Static IPv4 set on %s: %u.%u.%u.%u",

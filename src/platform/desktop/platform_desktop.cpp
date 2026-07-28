@@ -655,7 +655,7 @@ void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
 bool ethLinkUp() MM_NONBLOCKING { return false; }
 bool ethConnected() MM_NONBLOCKING { return false; }
-void ethGetIPv4(uint8_t out[4]) {
+void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING {
     // Desktop has no real interface state, but DevicesModule needs the host's LAN
     // IP to scan from (otherwise a desktop projectMM instance reports "no network" and
     // never sweeps). hostIp() resolves it via the outbound-route trick; report it
@@ -1197,7 +1197,7 @@ bool rmtWs2812Init(RmtWs2812Handle& /*h*/, uint8_t /*gpio*/, uint32_t /*resoluti
                    bool /*invert*/) {
     return false;
 }
-uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) { return 0; }
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) MM_NONBLOCKING { return 0; }
 bool rmtWs2812Transmit(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
                        size_t /*symbolCount*/) {
     return false;

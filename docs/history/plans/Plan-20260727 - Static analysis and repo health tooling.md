@@ -36,7 +36,7 @@ Alongside them, three tools that measure or extend rather than analyse:
 
 **Our Python checks** stay untouched: ~0.4 s for all four, and they cover contracts whose
 other half is a Markdown page, a JSON catalog or a built binary — not a C++ question, so no
-analyser can replace them.
+analyzer can replace them.
 
 **clang-query** is the designated home for the *next* bespoke rule: the stack enforces the
 rules we have, this is how we add the ones we invent. Matchers are plain text in the repo,
@@ -65,7 +65,7 @@ Unprobed: whether stack arrays, class members and statics are worth separating (
 different problems — a 512-byte local is a stack-depth risk, a 512-byte member is per-instance
 RAM), and where the threshold should sit. Both are policy questions for when the rule lands.
 
-### Is lizard the right tool? Yes — as a counter, not an analyser
+### Is lizard the right tool? Yes — as a counter, not an analyzer
 
 The question this plan opened with. **Answered and shipped** (step 2).
 
@@ -124,45 +124,59 @@ Each step is independent and revertible. **✅ done · ◻ not started · ◐ pa
    complexity count. The KPI and repo-health now record the RAW number via shared code; the
    baseline is applied only by the gate. `repo-health.json` gained a `complexity` block, so the
    trend the plan asked for actually exists now.
-3. ◐ **`[[clang::nonblocking]]`** — LANDED as `MM_NONBLOCKING` (platform.h) on
-   `tick/tick20ms/tick1s`, with `-Wfunction-effects` on the desktop build and a MoonDeck card
-   (`check_nonblocking.py`, "clang-hotpath"). **181 findings remain to triage**, so the flag
-   carries `-Wno-error=function-effects` and `check_hotpath.py` stays.
+3. ✅ **`[[clang::nonblocking]]`** — DONE. `MM_NONBLOCKING` (platform.h) on
+   `tick/tick20ms/tick1s`, `-Wfunction-effects` on the desktop build, the "clang-hotpath"
+   MoonDeck card, and `docs/metrics/hotpath-baseline.txt` freezing the 107 known
+   (file, callee) pairs. `check_hotpath.py` deleted; the pre-commit gate now runs
+   `check_nonblocking.py --incremental` (~0.7 s: it rebuilds only what the commit touched, so
+   it answers "did this change add a blocking call" rather than re-listing the baseline).
 
-   Four things the estimate got wrong, all measured:
+   **It reports, it does not gate.** `-Wno-error=function-effects` stays, and the gate never
+   fails the event. Two reasons, both learned here: failing on the ~50 known findings would
+   block every build until the architecture work lands, and a gate nobody can satisfy gets
+   disabled rather than obeyed; and a NEW blocking call may be entirely legitimate — a driver
+   that must wait for hardware — so forcing a failure pushes people to suppress it under time
+   pressure, which is the thing this exists to prevent. The report states the finding and marks
+   it NEW; the product owner judges. Other consumers can still choose to fail on it.
+
+   Four things the original estimate got wrong, all measured:
    - **Not three lines.** A bare attribute gives 209 findings; annotating five platform
-     functions collapses it to 10. The bulk of the findings were unannotated helpers, not violations. Threading
-     the attribute through every override touched ~85 files.
+     functions collapses it to 10. The bulk of the findings were unannotated helpers, not
+     violations. Threading the attribute through every override touched ~85 files.
    - **The ESP32 is GCC** — no attribute, no warning, and `-Werror` + `-Wattributes` means a
-     bare attribute breaks the firmware build. Hence the macro (empty on GCC, the
-     `MM_PRINTF_FORMAT` shape). So this is a DESKTOP check.
-   - **`check_hotpath.py` can be deleted — but not yet, and not for the reason assumed.**
-     MEASURED: it scans 67 tick METHODS, all in `src/core/` and `src/light/`, and **zero** in
-     `src/platform/esp32/` (that layer has no tick methods; it is free functions the tick path
-     calls into). All 60 of its files compile on desktop, so `-Wfunction-effects` covers the
-     identical set — transitively, where the regex reads only the tick body's own text. Proof
-     it is blind: it reports **0** findings where the compiler reports **181** in the same code.
-     The real blocker is gate ordering — `check_hotpath.py` FAILS pre-commit today while
-     `-Wfunction-effects` carries `-Wno-error`, so deleting it now leaves hot-path discipline
-     with nothing enforcing. Order: triage the 181 → drop `-Wno-error` → delete the script and
-     swap the gate.
+     bare attribute breaks the firmware build. Hence the macro (on GCC it expands to `noexcept`,
+     keeping the exception contract; only the clang attribute and the warning are absent).
+   - **`check_hotpath.py` was NOT the ESP32's safety net**, as first assumed. Measured: it
+     scanned 67 tick METHODS, all in `src/core/` and `src/light/`, zero in `src/platform/esp32/`
+     (that layer has no tick methods — it is free functions the tick path calls into). All 60 of
+     its files compile on desktop, so the compiler check covers the identical set. It reported
+     **0** where the compiler reports 165.
    - **The indirect call was the real hole.** `tickChildren` dispatches through a member
      pointer; the attribute had to go in the POINTER TYPE, or every module's tick escaped the
      check. Passing an unannotated method is now a compile error.
 
-   Findings split by tier (the card reports them separately, since the cost differs by
-   roughly two orders of magnitude): **70 on `tick()`**, 6 on `tick20ms()`, 95 on `tick1s()`, 10 unresolved.
-   The sharp ones are UDP `sendTo`/`recvFrom` in `AudioService::tick` — socket I/O every frame.
-   The bulk is `snprintf` ×20 (bounded, wants one policy call) and 11 static locals (a guard
-   variable + one-time lock on first use, a genuine violation).
+   Findings that remain are real and shown, never suppressed: **50 on `tick()`**, 6 on
+   `tick20ms()`, 95 on `tick1s()`. The sharp ones are UDP `sendTo`/`recvFrom` in
+   `AudioService::tick` — socket I/O every frame. Moving that work off the render path is
+   backlogged as architecture (backlog-core: "move blocking work off the render callbacks").
 
-   Remaining: triage the 181, then drop `-Wno-error`. Every file involved is already in this
-   branch's diff, so the fix costs no new files — but it is a substantial piece of work and
-   probably its own branch.
-4. ◻ **RealtimeSanitizer** — add `realtime` to the sanitizer matrix in `test.yml`. Verified
-   available (`-fsanitize=realtime`, Homebrew clang 22). Keys off the same `MM_NONBLOCKING`
-   attributes, so it is nearly free once step 3's findings are triaged — and it catches at
-   runtime what the static check cannot prove: virtual dispatch and function pointers.
+4. ✅ **RealtimeSanitizer** — DONE. `realtime` added to the sanitizer matrix in `test.yml`,
+   the runtime half of step 3: `-Wfunction-effects` proves what it can at compile time, RTSan
+   catches what it cannot — allocation or blocking reached through virtual dispatch or a
+   function pointer. It keys off the same `MM_NONBLOCKING` attribute, so the lane costs one
+   matrix entry.
+
+   Two things the step needed that the plan did not anticipate:
+   - **The lane must pin clang.** GCC rejects `-fsanitize=realtime` outright, and
+     `ubuntu-latest` defaults to GCC, so the job would have failed at configure. Only this lane
+     changes compiler; ASan/TSan stay on the runner default.
+   - **`RTSAN_OPTIONS=halt_on_error=0`.** The render path has ~50 known blocking calls, so
+     halting would fail the lane on every run. It reports; the log is the signal — the same
+     report-don't-gate shape as the compile-time half.
+
+   Verified locally: RTSan intercepts a `malloc` inside a `[[clang::nonblocking]]` function and
+   prints the stack.
+
 5. ◐ **clang-tidy** — config landed, clangd wired, and the tree triaged from 125 findings to
    **0** (see the triage table above). What remains is the ratchet: `WarningsAsErrors` is still
    `''`, and cannot go to `'*'` until the 47 clang-analyzer findings are triaged — switching it

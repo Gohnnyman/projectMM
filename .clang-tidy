@@ -94,7 +94,11 @@
 #   readability-function-cognitive-complexity / *-function-size — complexity is lizard's job;
 #     it produces the per-commit number repo-health.json trends.
 #   bugprone-branch-clone — fires on deliberate parallel switch arms.
-#   clang-analyzer-security.ArrayBound — analyses the macOS SDK's headers, not our code.
+#   clang-analyzer-security.ArrayBound — analyzes the macOS SDK's headers, not our code.
+#   clang-diagnostic-function-effects — the hot-path check, owned by check_nonblocking.py
+#     and the clang-hotpath card, which splits findings by tick tier and marks what is NEW
+#     against docs/metrics/hotpath-baseline.txt. Leaving it on here double-reports the same
+#     165 findings with none of that context, and buries clang-tidy's own 47 under them.
 #
 # Everything else disabled below is a style opinion we do not hold; enabling any of them
 # would gate a rewrite rather than a fix.
@@ -197,7 +201,8 @@ Checks: >-
   -google-readability-function-size,
   -google-build-using-namespace,
   -google-runtime-int,
-  -clang-analyzer-security.ArrayBound
+  -clang-analyzer-security.ArrayBound,
+  -clang-diagnostic-function-effects
 WarningsAsErrors: ''
 HeaderFilterRegex: 'src/(core|light)/'
 FormatStyle: none
