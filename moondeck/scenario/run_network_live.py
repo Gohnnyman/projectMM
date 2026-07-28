@@ -7,14 +7,14 @@ list, active network, online only). Each round one device is the SENDER and
 every other device LISTENS:
 
   1. The desktop seeds the sender three times — once per protocol, each with its own
-     colour — to the sender's protocol ports (6454/5568/4048); the
+     color — to the sender's protocol ports (6454/5568/4048); the
      NetworkReceiveEffect (added to each device's Layer for the run) listens on
-     all three at once. The sender's /ws preview stream must show each colour —
+     all three at once. The sender's /ws preview stream must show each color —
      proves desktop → device receive per protocol.
   2. The sender's own NetworkSendDriver is pointed at each listener in turn,
      with its protocol control cycled round-robin so all three send paths get
      exercised across a matrix run; the listener's preview must show the
-     sender's CORRECTED colour (the send driver applies brightness + channel
+     sender's CORRECTED color (the send driver applies brightness + channel
      order) — proves device → device over real firmware send + receive.
 
 With one online device only step 1 runs (the matrix needs ≥2 boards). All
@@ -39,20 +39,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_live_scenario import Client, _control_value  # shared HTTP wrapper  # noqa: E402
 import _preview_ws  # noqa: E402
 # Shared lights-over-UDP surface (ports, packet builders, device set) — see
-# _net_probe.py; the matrix-only colour-correction/Board logic stays below.
+# _net_probe.py; the matrix-only color-correction/Board logic stays below.
 from _net_probe import (  # noqa: E402
     ARTNET_PORT, E131_PORT, DDP_PORT, CHANNELS_PER_UNIVERSE, PROTOCOLS,
     MOONDECK_STATE, build_artdmx, build_e131, build_ddp, load_selected_devices,
 )
 
-# Round colours: channel values far apart so they stay distinct after the
+# Round colors: channel values far apart so they stay distinct after the
 # sender's brightness scale (default 20/255 → e.g. (255,128,0) → (20,10,0)),
 # and distinct per round so a stale frame from an earlier round can't pass.
-ROUND_COLOURS = [(255, 128, 0), (0, 255, 128), (128, 0, 255),
+ROUND_COLORS = [(255, 128, 0), (0, 255, 128), (128, 0, 255),
                  (255, 0, 128), (128, 255, 0), (0, 128, 255)]
 
 # Mirrors src/light/drivers/Correction.h (briLut scale + order[] reorder) — a
-# listener sees the sender's corrected bytes, so the expected colour replicates
+# listener sees the sender's corrected bytes, so the expected color replicates
 # that transform. 3-channel presets only; RGBW senders emit 4 bytes/light which
 # misaligns a 3-channel listener buffer, so those legs are skipped. Keep in sync.
 PRESET_ORDER = {"RGB": (0, 1, 2), "RBG": (0, 2, 1), "GRB": (1, 0, 2),
@@ -72,7 +72,7 @@ def corrected(rgb, brightness, preset):
 
 def send_solid(host: str, rgb, protocol: str = "ArtNet", universes: int = 2,
                repeats: int = 10, pace_ms: int = 50):
-    """Send `repeats` full frames of solid colour to the device via the given
+    """Send `repeats` full frames of solid color to the device via the given
     protocol (the receiver autodetects on all three ports). Repeats absorb WiFi
     power-save first-packet loss; the receiver's hold-last-frame staging means
     one arrival suffices."""
@@ -200,7 +200,7 @@ def main() -> int:
     ap.add_argument("--host", help="only run rounds where this host is the sender "
                                    "(MoonDeck forwards the selected device here)")
     ap.add_argument("--tolerance", type=int, default=0,
-                    help="per-channel colour tolerance (default 0 — preview is byte-exact)")
+                    help="per-channel color tolerance (default 0 — preview is byte-exact)")
     ap.add_argument("--timeout", type=float, default=10.0,
                     help="seconds to wait for a matching preview frame per leg")
     ap.add_argument("--packets", type=int, default=10, help="desktop seed frame repeats")
@@ -235,40 +235,40 @@ def main() -> int:
                 continue
             if args.host and sender.host != args.host:
                 continue
-            colour = ROUND_COLOURS[k % len(ROUND_COLOURS)]
+            color = ROUND_COLORS[k % len(ROUND_COLORS)]
             print(f"== round {k + 1}/{len(boards)}: sender {sender.name}, "
-                  f"colour {colour}", flush=True)
+                  f"color {color}", flush=True)
 
             # Leg 1 — the seed sweep: the desktop seeds the sender once per protocol,
-            # each with a rotated colour (a stale frame from the previous
+            # each with a rotated color (a stale frame from the previous
             # protocol can't false-pass); the receiver autodetects all three.
-            # The sender's preview shows the RAW colour (uncorrected buffer).
-            seeded_colour = None
+            # The sender's preview shows the RAW color (uncorrected buffer).
+            seeded_color = None
             for pi, proto in enumerate(PROTOCOLS):
-                proto_colour = colour[pi:] + colour[:pi]
-                send_solid(sender.host, proto_colour, protocol=proto,
+                proto_color = color[pi:] + color[:pi]
+                send_solid(sender.host, proto_color, protocol=proto,
                            repeats=args.packets, pace_ms=args.pace_ms)
                 ok, pct, pts, detail = _preview_ws.wait_for_solid(
-                    sender.host, proto_colour, args.tolerance, 100.0, args.timeout)
+                    sender.host, proto_color, args.tolerance, 100.0, args.timeout)
                 if ok:
                     print(f"PASS  desktop → {sender.name} [{proto}] (preview solid, {pts} points)",
                           flush=True)
                     passed += 1
-                    seeded_colour = proto_colour
+                    seeded_color = proto_color
                 else:
                     print(f"FAIL  pc → {sender.name} [{proto}] (best {pct:.0f}% of {pts} points"
                           f"{', ' + detail if detail else ''})"
                           " — desktop listeners: check the OS firewall allows UDP 6454/5568/4048",
                           flush=True)
                     failed += 1
-            if seeded_colour is None:
+            if seeded_color is None:
                 continue  # without a seeded sender the relay legs can't mean anything
-            colour = seeded_colour  # the sender's buffer now holds the last seeded colour
+            color = seeded_color  # the sender's buffer now holds the last seeded color
 
             # Legs 2..N — sender relays to each listener via its own
             # NetworkSendDriver, cycling the protocol control round-robin so a
             # full matrix run exercises all three firmware send paths;
-            # listeners see the sender's CORRECTED colour.
+            # listeners see the sender's CORRECTED color.
             for listener in boards:
                 if listener is sender:
                     continue
@@ -278,7 +278,7 @@ def main() -> int:
                     continue
                 relay_proto = relay_count % len(PROTOCOLS)
                 relay_count += 1
-                expected = corrected(colour, sender.brightness, sender.preset)
+                expected = corrected(color, sender.brightness, sender.preset)
                 if not sender.artnet_enabled and not sender.enable_changed:
                     sender.set_control("NetworkSend", "enabled", True)
                     sender.enable_changed = True
@@ -314,12 +314,12 @@ def main() -> int:
 def _relay_skip_reason(sender: "Board"):
     """A relay leg is meaningless when the sender's correction destroys the
     signal: RGBW presets emit 4 bytes/light (misaligns a 3-channel listener),
-    and brightness 0 corrects every colour to black — black also matches a
+    and brightness 0 corrects every color to black — black also matches a
     listener that received NOTHING (staging zero-fill), a guaranteed false pass."""
     if sender.preset not in PRESET_ORDER:
         return f"sender preset {sender.preset} is 4-channel — relay assert supports 3-channel presets"
     if all(c == 0 for c in corrected((255, 255, 255), sender.brightness, "RGB")):
-        return "sender Drivers.brightness too low — corrected colour is black (raise brightness)"
+        return "sender Drivers.brightness too low — corrected color is black (raise brightness)"
     return None
 
 

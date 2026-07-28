@@ -7,7 +7,7 @@
 #include "light/layouts/GridLayout.h"
 #include "core/AudioService.h"
 
-// Blurz is an audio-reactive effect: its dot is coloured by the current band's magnitude and only
+// Blurz is an audio-reactive effect: its dot is colored by the current band's magnitude and only
 // appears when there is a signal. The frame comes from AudioService::latestFrame() (a process-wide
 // static). To feed a signal on the host (no I2S mic) we run a live AudioService with `simulate` set to
 // an "always" mode — synthesizeFrame() then fills the bands each tick(). Every case brackets its own
@@ -43,7 +43,7 @@ TEST_CASE("BlurzEffect stays black without an audio frame") {
     CHECK_FALSE(anyLit);
 }
 
-// With a synthesized audio frame the effect lights the buffer: the coloured dot appears and the blur
+// With a synthesized audio frame the effect lights the buffer: the colored dot appears and the blur
 // smears it into a soft blob, so at least some lights become non-zero.
 TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
     mm::AudioService audio;
@@ -88,7 +88,7 @@ TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
 TEST_CASE("BlurzEffect geqScanner sweeps the dot to a new position each frame") {
     mm::AudioService audio;
     audio.defineControls();
-    audio.simulate = 3;   // music (always): keeps the bands non-zero so the dot has colour
+    audio.simulate = 3;   // music (always): keeps the bands non-zero so the dot has color
     audio.setup();
 
     mm::Layouts layouts;

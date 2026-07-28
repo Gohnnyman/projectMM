@@ -12,7 +12,7 @@ namespace mm {
 /// MQTT client service: bridges the device's light controls (on / brightness / palette) to an MQTT
 /// broker so home-automation hubs can drive it. The headline consumer is **Homebridge** (via the
 /// `homebridge-mqttthing` "lightbulb" accessory), which publishes to `set` topics and reads `get`
-/// topics — a bare on/off + brightness + colour surface. It is a network sub-service, a code-wired
+/// topics — a bare on/off + brightness + color surface. It is a network sub-service, a code-wired
 /// child of NetworkModule alongside Improv/Devices, and it drives the shared apply-core exactly as
 /// IR and the WLED bridge do: every command routes through `Scheduler::setControl("Drivers", …)`,
 /// so MQTT adds a transport, not new control plumbing.
@@ -36,7 +36,7 @@ namespace mm {
 /// device publishes a RETAINED JSON-schema light config to `homeassistant/light/projectMM_<mac6>/config`,
 /// so HA (and any Discovery-aware hub — the Tasmota/ESPHome/Zigbee2MQTT convention) **auto-creates a
 /// wired light entity** — no hand-matching topics. It defaults off because the WLED-compat surface (the
-/// HttpServerModule `/json` shim) already gives HA a richer light — colour, palette, sensors — over
+/// HttpServerModule `/json` shim) already gives HA a richer light — color, palette, sensors — over
 /// mDNS with no broker, so a device on defaults appears in HA once, not twice; MQTT discovery is the
 /// opt-in for broker-only / cross-subnet setups where mDNS doesn't reach. When on it speaks HA's own
 /// schema alongside the mqttthing topics above:

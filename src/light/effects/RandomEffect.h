@@ -5,8 +5,8 @@
 namespace mm {
 
 // Random: each frame the whole buffer is dimmed a little, then exactly ONE randomly chosen
-// light is lit to a random palette colour. Over many frames this scatters fading sparkles of
-// colour across the whole volume — a slow, twinkling field whose density is set by the fade
+// light is lit to a random palette color. Over many frames this scatters fading sparkles of
+// color across the whole volume — a slow, twinkling field whose density is set by the fade
 // amount (less fade = pixels linger and the field fills; more fade = sparse, quick-decaying
 // specks).
 //
@@ -16,7 +16,7 @@ namespace mm {
 // chosen by a flat light index across all nrOfLights (the engine's native ordering, the direct
 // equivalent of MoonLight's index-based setRGB), so it can land anywhere in a 1D/2D/3D layer.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
-/// Effect that fills the layer with animated random colours.
+/// Effect that fills the layer with animated random colors.
 class RandomEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
@@ -39,7 +39,7 @@ public:
         // Dim the whole buffer (source: layer->fadeToBlackBy(fade)).
         layer()->fadeToBlackBy(fade);
 
-        // Light one random light to a random palette colour (source:
+        // Light one random light to a random palette color (source:
         // setRGB(random16(nrOfLights), ColorFromPalette(pal, random8()))). The index is a flat
         // light index — the engine's native light ordering — so the write goes straight into the
         // buffer at that light, the direct equivalent of MoonLight's index-based setRGB. (There is

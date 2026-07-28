@@ -45,9 +45,9 @@ TEST_CASE("SphereMoveEffect leaves most of a large volume dark (thin shell, full
     CHECK(lit < buf.count() / 2);
 }
 
-// Every voxel the effect lights is a real palette colour (non-black) — the shell is drawn, not
+// Every voxel the effect lights is a real palette color (non-black) — the shell is drawn, not
 // left as leftover noise.
-TEST_CASE("SphereMoveEffect only writes non-black palette colours") {
+TEST_CASE("SphereMoveEffect only writes non-black palette colors") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     mm::Layer layer;
@@ -59,8 +59,8 @@ TEST_CASE("SphereMoveEffect only writes non-black palette colours") {
     mm::Palettes::setActive(0);
     layer.tick();
 
-    // Any pixel that is set has all-black or a genuine colour; because the buffer was zero-initialised
-    // and cleared, every non-zero pixel here is a shell voxel. Assert the shell exists and is coloured.
+    // Any pixel that is set has all-black or a genuine color; because the buffer was zero-initialised
+    // and cleared, every non-zero pixel here is a shell voxel. Assert the shell exists and is colored.
     auto& buf = layer.buffer();
     bool anyLit = false;
     for (size_t p = 0; p < buf.count(); p++) {
@@ -68,7 +68,7 @@ TEST_CASE("SphereMoveEffect only writes non-black palette colours") {
         if (px[0] || px[1] || px[2]) { anyLit = true; break; }
     }
     // A diameter ~2..3 shell on a 16³ grid with an origin inside the volume lights some voxels; the
-    // colour comes from the palette so it is never a stray single-channel artifact.
+    // color comes from the palette so it is never a stray single-channel artifact.
     CHECK(anyLit);
 }
 

@@ -341,6 +341,27 @@ int wifiStaRssi();
 void wifiStaBssid(uint8_t out[6]);
 int  wifiStaChannel();
 
+// A client interface (STA or Ethernet) whose addressing NetworkModule sets. One enum so a
+// single netSetStaticIPv4 serves both, rather than a per-interface duplicate. (The AP is not
+// here: it is always the DHCP *server* at a fixed IP, a different role — wifiApInit sets that.)
+enum class NetIface : uint8_t { Sta, Eth };
+// Switch a client interface to a STATIC IPv4 config: stop its DHCP client and pin ip/gateway/mask
+// (+ DNS if non-zero) onto the netif. Octets, matching ethGetIPv4/wifiStaGetIPv4. Passing an
+// all-zero `ip` is a no-op guard (treated as "not static"). Idempotent — safe to re-apply. To go
+// back to DHCP, call netSetDhcp(iface). Desktop: no-op (host uses OS networking). The netif must
+// exist (interface init has run); NetworkModule calls this after bring-up / on a live toggle.
+void netSetStaticIPv4(NetIface iface, const uint8_t ip[4], const uint8_t gw[4],
+                      const uint8_t mask[4], const uint8_t dns[4]);
+// Return a client interface to DHCP: restart its DHCP client so it re-leases live (no reboot).
+// The counterpart to netSetStaticIPv4 for a Static→DHCP toggle. Desktop: no-op.
+void netSetDhcp(NetIface iface);
+// Test seams (desktop-only impls, same contract as setTestBindFails — reset in release so cases
+// stay independent): make wifiStaInit() succeed so a host test can drive the STA cascade
+// (WaitingSta) that the radio-less desktop otherwise never enters, and count netSetStaticIPv4()
+// applies per interface so the test can pin that the static-addressing path reached the platform.
+void setTestWifiStaAvailable(bool available);
+uint32_t testNetStaticApplyCount(NetIface iface);
+
 bool wifiApInit(const char* apName, const char* ip);
 bool wifiApConnected();
 void wifiApStop();

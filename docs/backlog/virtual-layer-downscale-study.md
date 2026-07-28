@@ -9,7 +9,7 @@
 
 Run an effect authored for **many** pixels — a virtual 32×32 grid — and **summarize** it onto a
 **small** number of physical lights: Philips Hue bulbs, or a handful of PAR/DMX fixtures. Each
-physical light shows the **average colour of its region of the virtual frame, ignoring black
+physical light shows the **average color of its region of the virtual frame, ignoring black
 pixels**, so a fire / plasma / GEQ effect reads as a coherent ambient wash across N bulbs instead of N
 arbitrary single-pixel samples.
 
@@ -29,7 +29,7 @@ The request began as "make a modifier." Two verification steps ruled that out:
    walks destination pixels and asks the modifier for **one** source coordinate, then copies **one**
    pixel (`Layer::applyLivePass`, Layer.h:~218). Pooling *combines* many source pixels into one output
    value (sum + count, skip black, divide) — a computation a coordinate remap structurally can't
-   express (it returns a coordinate, not a colour).
+   express (it returns a coordinate, not a color).
 
 2. **Not a modifier at all — the real blocker is render size.** A Layer's logical (render) box
    **starts at the physical light count** and modifiers only ever *shrink* it (`Layer::rebuildLUT`,

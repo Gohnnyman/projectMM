@@ -24,7 +24,7 @@ This is "small in depth AND broad": depth = one statement; broad = the whole ver
 ## Decisions locked with the product owner
 
 - **First commit = hand-emitted bytes (Stage −1), then grow into the doc's Stage 0** (a tiny real front-end). Not one-shot Stage 0 — the two risks are separated so a first-pixel failure is unambiguous, and 1a is the test oracle for 2.
-- **Solid colour first (1a), then per-frame hue (1b)** — a static fill answers "does our native code run and write the buffer" unambiguously; passing `elapsed()` then proves dynamic input reaches native code, a distinct fact worth isolating.
+- **Solid color first (1a), then per-frame hue (1b)** — a static fill answers "does our native code run and write the buffer" unambiguously; passing `elapsed()` then proves dynamic input reaches native code, a distinct fact worth isolating.
 - **S3 only.** Xtensa backend + the desktop x86-64 backend (needed anyway for in-process unit tests); no other ISA this spike.
 - **Aligns with the precompiled-effect surface.** The emitted function uses the exact `buffer()` + `nrOfLights()*channelsPerLight()` raw-write surface a compiled effect uses today, so swapping hand-bytes → codegen later changes nothing host-side. If the producer-buffer set/get surface wants to change (the RGB-into-buffer question the product owner flagged), this spike is the cheapest place to discover it.
 
@@ -73,7 +73,7 @@ public:
 
 **Binding (`MoonLiveEffect.h`):** a normal `EffectBase`; `setup()`→`engine_.compile()`; `loop()`→ `if (engine_.ok()) engine_.run(buffer(), nrOfLights(), channelsPerLight())`; `teardown()`→`engine_.free()`. Register in `main.cpp` + `scenario_runner.cpp`.
 
-**Acceptance:** desktop unit test — compile, run over a known buffer, assert every light == the fill colour. On the **S3**: add `MoonLiveEffect` to a Layer (via API), grid lights **solid blue**, fps stable, no crash, survives add/delete/replace.
+**Acceptance:** desktop unit test — compile, run over a known buffer, assert every light == the fill color. On the **S3**: add `MoonLiveEffect` to a Layer (via API), grid lights **solid blue**, fps stable, no crash, survives add/delete/replace.
 
 ### Step 1b — per-frame hue (dynamic input reaches native code)
 
@@ -91,7 +91,7 @@ A bare recursive-descent slice in `src/core/moonlive/` (neutral): tokenize → p
 
 - `test/unit/core/unit_moonlive_emit.cpp` — desktop: `compile()` produces a non-empty exec block; `run()` over a known buffer yields the exact fill (golden buffer). Step 2 adds: parsed-source bytes == hand-emitted golden bytes.
 - `test/unit/core/unit_platform_allocexec.cpp` — `allocExec` returns executable, writable memory; a trivial emitted "return 42" function called through it returns 42 (desktop); nullptr-on-exhaustion path degrades.
-- `test/scenarios/light/scenario_moonlive_hello.json` — wire `MoonLiveEffect` as a real MoonModule: add, measure (buffer non-zero == fill colour), delete, re-add (robustness), at a couple grid sizes incl 0×0×0 (no crash). Runs in-process (desktop backend) on every commit; runs live on the S3 over REST for the ISA backend.
+- `test/scenarios/light/scenario_moonlive_hello.json` — wire `MoonLiveEffect` as a real MoonModule: add, measure (buffer non-zero == fill color), delete, re-add (robustness), at a couple grid sizes incl 0×0×0 (no crash). Runs in-process (desktop backend) on every commit; runs live on the S3 over REST for the ISA backend.
 - Robustness: add/delete/replace the scripted effect in any order alongside compiled effects — the hard rule.
 
 ## Validation

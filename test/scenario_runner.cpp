@@ -925,6 +925,10 @@ static int runScenario(const char* path) {
     return result.passed ? 0 : 1;
 }
 
+// Directory iteration can throw filesystem_error (a scenarios/ dir deleted mid-run). Letting it
+// escape main is the correct outcome for a CLI test runner: it terminates with a diagnostic and
+// a non-zero status, which is exactly what a harness needs to see.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         // Run all scenarios in the scenarios/ directory tree.

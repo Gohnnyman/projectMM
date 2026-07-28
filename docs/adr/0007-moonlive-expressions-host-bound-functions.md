@@ -4,7 +4,7 @@ Status: Accepted
 
 ## Context
 
-The MoonLive compiler was first built around a fixed *statement shape*, `setRGB(idx, r, g, b)`, with per-slot parser rules (the index could be `random16`, colours were literal-only) and an RGB-specific `Store` op baked into the core. Three product-owner remarks exposed one root flaw: `random16` worked only in the index slot; `random16(255)` capped at a byte (validators conflated ranges); and the core compiler was light-domain-specific.
+The MoonLive compiler was first built around a fixed *statement shape*, `setRGB(idx, r, g, b)`, with per-slot parser rules (the index could be `random16`, colors were literal-only) and an RGB-specific `Store` op baked into the core. Three product-owner remarks exposed one root flaw: `random16` worked only in the index slot; `random16(255)` capped at a byte (validators conflated ranges); and the core compiler was light-domain-specific.
 
 ## Decision
 

@@ -31,6 +31,7 @@
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
 #ifdef __APPLE__
 #include <pthread.h>    // pthread_jit_write_protect_np — macOS arm64 W^X JIT toggle
+#include <numbers>
 #endif
 #endif
 
@@ -272,7 +273,7 @@ bool spawnPinnedTask(WorkerTask& t, const char* /*name*/, WorkerFn fn, void* use
 void notifyTask(WorkerTask& t) {
     auto* w = static_cast<DesktopWorker*>(t.impl);
     if (!w) return;
-    { std::lock_guard<std::mutex> lk(w->mtx); w->pending = true; }
+    { std::scoped_lock<std::mutex> lk(w->mtx); w->pending = true; }
     w->cv.notify_one();
 }
 
@@ -290,7 +291,7 @@ bool waitNotify(WorkerTask& t, uint32_t timeoutMs) {
 void stopPinnedTask(WorkerTask& t) {
     auto* w = static_cast<DesktopWorker*>(t.impl);
     if (!w) return;
-    { std::lock_guard<std::mutex> lk(w->mtx); w->stop = true; }
+    { std::scoped_lock<std::mutex> lk(w->mtx); w->stop = true; }
     w->cv.notify_one();
     if (w->thread.joinable()) w->thread.join();
     delete w;
@@ -660,9 +661,26 @@ void ethGetIPv4(uint8_t out[4]) {
     }
 }
 
-bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
+// Test seam: the host has no STA radio, so wifiStaInit() reports "no STA" — unless a test fakes
+// one to drive NetworkModule's WaitingSta path. Cross-thread atomic, the setTestNowMs contract.
+static std::atomic<bool> testWifiStaAvailable{false};
+void setTestWifiStaAvailable(bool available) { testWifiStaAvailable.store(available, std::memory_order_relaxed); }
+bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) {
+    return testWifiStaAvailable.load(std::memory_order_relaxed);
+}
 bool wifiStaConnected() { return false; }
 void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
+// Addressing is OS-managed on desktop; the static/DHCP setters are inert (no netif to reconfigure).
+// The per-interface apply counter is the observable a host test pins the static-addressing path on.
+static std::atomic<uint32_t> testStaticApplies[2] = {};   // indexed by NetIface
+void netSetStaticIPv4(NetIface iface, const uint8_t[4], const uint8_t[4],
+                      const uint8_t[4], const uint8_t[4]) {
+    testStaticApplies[static_cast<uint8_t>(iface)].fetch_add(1, std::memory_order_relaxed);
+}
+uint32_t testNetStaticApplyCount(NetIface iface) {
+    return testStaticApplies[static_cast<uint8_t>(iface)].load(std::memory_order_relaxed);
+}
+void netSetDhcp(NetIface /*iface*/) {}
 void setHostname(const char* /*name*/) {}   // no DHCP client on desktop
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
@@ -863,6 +881,10 @@ void reboot() {
     // browser-side WS reconnect logic expects.
     std::printf("platform::reboot() — exiting\n");
     std::fflush(stdout);
+    // Exiting the process IS the desktop reboot — there is no firmware to restart into. The
+    // mt-unsafe warning is about exit() racing other threads' atexit handlers, which is exactly
+    // the abrupt teardown a reboot models.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(0);
 }
 
@@ -1300,7 +1322,7 @@ void audioMicDeinit(AudioMicHandle& /*h*/) {}
 // fills outMag[0..n/2) with the bin magnitudes.
 void audioFft(const float* windowed, size_t n, float* outMag) {
     if (!windowed || !outMag || n == 0) return;
-    const float twoPiOverN = -2.0f * 3.14159265358979323846f / static_cast<float>(n);
+    const float twoPiOverN = -2.0f * std::numbers::pi_v<float> / static_cast<float>(n);
     for (size_t k = 0; k < n / 2; k++) {
         float re = 0.0f, im = 0.0f;
         for (size_t t = 0; t < n; t++) {

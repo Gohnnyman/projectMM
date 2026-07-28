@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layouts/LayoutBase.h"
+#include <numbers>
 
 namespace mm {
 
@@ -46,9 +47,8 @@ public:
         const uint32_t limit = lightCount();
         if (limit == 0) return;
 
-        // π as a float literal — the codebase convention (see platform_desktop.cpp);
-        // M_PI is not defined portably under MSVC's <cmath> without _USE_MATH_DEFINES.
-        constexpr float pi = 3.14159265358979323846f;
+        // std::numbers is the portable π (M_PI needs _USE_MATH_DEFINES under MSVC).
+        constexpr float pi = std::numbers::pi_v<float>;
 
         // Base sits at (bottomRadius, 0, bottomRadius) so all coords are >= 0.
         const float middleX = static_cast<float>(bottomRadius);

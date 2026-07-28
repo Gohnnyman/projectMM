@@ -74,7 +74,7 @@ private:
     uint32_t lastElapsed_ = 0;
     bool     started_ = false;   // first-tick guard: seed lastElapsed_ before the first delta
     // The value-noise field itself (hash + smoothstep + bi/trilinear interp) is the shared
-    // inoise8 in core/noise.h — this effect just scales coordinates into it and colours the
+    // inoise8 in core/noise.h — this effect just scales coordinates into it and colors the
     // result through the palette.
 };
 

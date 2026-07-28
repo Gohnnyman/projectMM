@@ -15,7 +15,6 @@
 
 using mm::LightPresetsModule;
 using mm::Correction;
-using mm::ChannelRole;
 
 namespace {
 // The count of seeded read-only built-ins (see LightPresetsModule::seedBuiltins). Referenced by
@@ -141,7 +140,7 @@ TEST_CASE("LightPresets: growing channels preserves existing role picks") {
     Correction c;
     REQUIRE(m.deriveCorrection(id, 255, c));
     CHECK(c.outChannels == 6);
-    // Pan(5)/Tilt(6) are non-colour roles → not colour offsets, but ch2 was Blue and MUST survive.
+    // Pan(5)/Tilt(6) are non-color roles → not color offsets, but ch2 was Blue and MUST survive.
     CHECK(c.offBlue == 2);     // ch2 = B preserved across the grow (the bug lost this)
     // A second grow then a shrink keeps the head stable.
     CHECK(m.setListRowField(id, "channels", "{\"value\":4}"));   // shrink 6 → 4
@@ -424,7 +423,7 @@ uint32_t builtinId(LightPresetsModule& m, const char* name) {
 }
 }  // namespace
 
-// The migrated colour-order built-ins resolve to the right channel offsets. WRGB (ws2814) puts
+// The migrated color-order built-ins resolve to the right channel offsets. WRGB (ws2814) puts
 // white at channel 0, so R/G/B shift up one — a distinctive layout that catches a bad migration.
 TEST_CASE("Built-in WRGB resolves to W,R,G,B offsets") {
     LightPresetsModule m;
@@ -456,7 +455,7 @@ TEST_CASE("Built-in RGBCCT has white (WarmWhite counts) and resolves 5 channels"
 // A moving-head built-in migrates as a wide fixture: the RGB block sits at its real offset within
 // the DMX map (BeeEyes: R@10,G@11,B@12 of 15), the fixture is the right width, and it resolves
 // without crashing at that odd width (Robust-to-any-input). The Pan/Tilt/Zoom/Gobo channels carry
-// their roles in the preset but aren't colour offsets, so they're inert until effect writers land.
+// their roles in the preset but aren't color offsets, so they're inert until effect writers land.
 TEST_CASE("Built-in moving head (BeeEyes-15) resolves at full width with the RGB block placed") {
     LightPresetsModule m;
     m.setup();
@@ -471,9 +470,9 @@ TEST_CASE("Built-in moving head (BeeEyes-15) resolves at full width with the RGB
 }
 
 // APPEND-ONLY regression: inserting WarmWhite/Yellow/UV after White must NOT renumber the existing
-// colour roles, or every persisted RGBW preset's bytes would resolve to the wrong colours. A
+// color roles, or every persisted RGBW preset's bytes would resolve to the wrong colors. A
 // straight RGBW built-in still deriving R@0,G@1,B@2,W@3 proves the low indices are unchanged.
-TEST_CASE("Colour roles keep their indices after the vocabulary grew (append-only)") {
+TEST_CASE("Color roles keep their indices after the vocabulary grew (append-only)") {
     LightPresetsModule m;
     m.setup();
     Correction c;

@@ -63,12 +63,12 @@ void driveLoudTone(mm::AudioService& mic) {
     for (int i = 0; i < 20; i++) mic.tick();   // EMA converges toward level 254
     const mm::AudioFrame* f = mm::AudioService::latestFrame();
     REQUIRE(f->peakHz > 80);          // a real tone, above the effect's gate
-    REQUIRE(f->levelSmoothed > 64);   // above the effect's brightness/colour gate
+    REQUIRE(f->levelSmoothed > 64);   // above the effect's brightness/color gate
 }
 
 } // namespace
 
-// A real tone above the 80 Hz gate paints a lit colour at the source pixel (0,0).
+// A real tone above the 80 Hz gate paints a lit color at the source pixel (0,0).
 TEST_CASE("FreqMatrixEffect paints a lit source pixel from a live tone") {
     mm::AudioService mic;
     AudioGuard guard{mic};
@@ -84,7 +84,7 @@ TEST_CASE("FreqMatrixEffect paints a lit source pixel from a live tone") {
     g.layer.tick();   // paints the new pixel at y=0 (elapsed = kToneMs, throttle passes)
 
     auto* data = g.layer.buffer().data();
-    // Pixel (0,0) is index 0: the source end carries the freshly-painted lit colour.
+    // Pixel (0,0) is index 0: the source end carries the freshly-painted lit color.
     CHECK((data[0] > 0 || data[1] > 0 || data[2] > 0));
 }
 
@@ -101,7 +101,7 @@ TEST_CASE("FreqMatrixEffect scrolls the painted pixel one step along Y") {
     g.layer.addChild(&fx);
     g.layer.applyState();
 
-    g.layer.tick();   // tick 1 at kToneMs: paints the lit colour at y=0
+    g.layer.tick();   // tick 1 at kToneMs: paints the lit color at y=0
     auto* data = g.layer.buffer().data();
     const uint8_t r0 = data[0], g0 = data[1], b0 = data[2];
     REQUIRE((r0 > 0 || g0 > 0 || b0 > 0));   // something lit landed at the source
@@ -110,10 +110,10 @@ TEST_CASE("FreqMatrixEffect scrolls the painted pixel one step along Y") {
     // lit band (pos = (t/250)%16 = 1 at t=380, env still high) — the column shifts.
     mm::platform::setTestNowMs(kToneMs + 5);
     mic.tick();     // refresh the frame at the new time (still a loud tone on band 1)
-    g.layer.tick();   // tick 2: the y=0 colour of tick 1 moves up to y=1
+    g.layer.tick();   // tick 2: the y=0 color of tick 1 moves up to y=1
 
     data = g.layer.buffer().data();   // buffer may have been rebuilt; re-read
-    // Pixel (0,1) is index 1*3 = 3: it now carries the colour painted at y=0 on tick 1.
+    // Pixel (0,1) is index 1*3 = 3: it now carries the color painted at y=0 on tick 1.
     CHECK(data[3] == r0);
     CHECK(data[4] == g0);
     CHECK(data[5] == b0);

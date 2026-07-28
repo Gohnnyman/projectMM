@@ -234,7 +234,7 @@ def _emit_row(b: dict, details_names: set) -> str:
     if name in details_names:
         links.append(f"[⌄ details](#{_slug(name + ' — details')})")
     # Wrap so the plain attribution text greys (.mm-links); the actual links keep
-    # their accent link colour (Material's `a` styling wins over the grey).
+    # their accent link color (Material's `a` styling wins over the grey).
     col4 = f'<span class="mm-links">{_cell("<br>".join(links))}</span>' if links else "—"
 
     return f"| {col1} | {col2} | {col3} | {col4} |"
@@ -355,6 +355,62 @@ def on_files(files, config):
     for uri, md in api_pages.items():
         _add(uri, md)
     return files
+
+
+# Pages that embed a file living at the REPO ROOT via a pymdownx snippet. Their
+# borrowed text spells doc links `docs/architecture.md` — correct from the root (that
+# is where CLAUDE.md is read by agents and on GitHub), but one level too deep once the
+# text is rendered from inside docs/, where it resolves to docs/docs/… and 404s.
+_EMBEDS_REPO_ROOT_FILE = {"principles-and-process.md"}
+
+# `href="docs/<rest>"` → `href="<rest>"`, and the same for the `.md` → `.html` form MkDocs
+# has already applied by this stage. Only the `docs/` prefix is dropped; anchor and path
+# ride along untouched.
+_DOCS_PREFIXED_HREF_RE = re.compile(r'href="docs/([^"#]+?)(\.md)?(#[^"]*)?"')
+
+# The page's first `<h1 ...>text</h1>`, split so the tag and its attributes (the id the
+# table of contents anchors on) survive and only the text is replaced.
+_FIRST_H1_RE = re.compile(r"(<h1[^>]*>)(.*?)(</h1>)", re.S)
+
+
+def _rebase_repo_root_doc_links(html):
+    """Drop the leading `docs/` from links in content embedded from the repo root.
+
+    Runs on the rendered HTML, not the source markdown: pymdownx expands a `--8<--`
+    snippet during markdown *conversion*, so at on_page_markdown time this page is still
+    just the one-line directive and there is nothing to rewrite yet.
+
+    The alternative — rewriting CLAUDE.md's own links to be docs-relative — would break
+    them everywhere they are actually used (an agent reading the file, GitHub's own
+    rendering) to satisfy one embedded copy. Rebasing at build time keeps the source
+    correct at the root and correct on the site.
+
+    `.md` becomes `.html` here too. MkDocs normally does that itself, but only for links
+    whose target it resolved during validation — and these did not resolve, precisely
+    because of the `docs/` prefix this function strips. So they arrive still pointing at
+    the source file and would 404 on the built site.
+    """
+    def _fix(m):
+        path, _, anchor = m.group(1), m.group(2), m.group(3) or ""
+        return f'href="{path}.html{anchor}"' if _ else f'href="{path}{anchor}"'
+    return _DOCS_PREFIXED_HREF_RE.sub(_fix, html)
+
+
+def on_page_content(html, page, config, files):
+    """Post-conversion fixups for a page that embeds a repo-root file: rebase its doc
+    links, and replace the embedded `# <filename>` heading with the page's own title.
+
+    The embedded file opens with a heading that names it as a file (`# CLAUDE.md`) —
+    right at the repo root and on GitHub, wrong in a docs menu, where the reader wants
+    the subject. Front matter `title:` fixes the nav entry and the browser tab but not
+    the rendered H1, so it is swapped here rather than by editing the source file."""
+    if page.file.src_uri not in _EMBEDS_REPO_ROOT_FILE:
+        return html
+    html = _rebase_repo_root_doc_links(html)
+    if page.title:
+        html = _FIRST_H1_RE.sub(
+            lambda m: f"{m.group(1)}{page.title}{m.group(3)}", html, count=1)
+    return html
 
 
 def on_page_markdown(markdown, page, config, files):

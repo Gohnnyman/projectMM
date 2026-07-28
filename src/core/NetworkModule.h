@@ -47,7 +47,7 @@ namespace mm {
 ///  - `ethType` — PHY dropdown; the stored index maps 0=None, 1=LAN8720 (RMII),
 ///    2=IP101 (RMII), 3=W5500 (SPI), 4=YT8531 (RGMII, the S31's on-chip 1 Gb EMAC),
 ///    matching the `EthPhyType` enum order. 0 shows no pin rows; a type reveals only its set.
-///  - `ethPhyAddr` — SMI/PHY MDIO address (0..31, typically 0 or 1).
+///  - `ethPhyAddr` — SMI/PHY MDIO address: -1 = auto-detect (scan the bus, the RGMII default), else 0..31 (typically 0 or 1).
 ///  - `ethRstGpio` — PHY reset GPIO (−1 = none / module self-resets).
 ///  - `ethMdcGpio` / `ethMdioGpio` — RMII SMI clock / data GPIOs (−1 = IDF default). RMII only.
 ///  - `ethClockGpio` — RMII 50 MHz reference-clock GPIO; `ethClockExtIn` = clock direction
@@ -58,6 +58,16 @@ namespace mm {
 /// **mDNS:** included here (not a separate module). Registers the deviceName on whichever
 /// interface is active and re-registers when the active interface changes or the name is
 /// renamed live. Uses ESP-IDF's `mdns_init()` / `mdns_hostname_set()`.
+///
+/// **Addressing (DHCP / Static):** the `addressing` selector chooses how the active client
+/// interface — WiFi STA *or* Ethernet — gets its IPv4 address. DHCP (the default) runs the
+/// interface's DHCP client. Static pins the `ip` / `gateway` / `subnet` / `dns` controls onto the
+/// netif via `platform::netSetStaticIPv4` (which stops the DHCP client and sets the address); the
+/// same octets that on DHCP would come from the server. Applied at each interface's bring-up
+/// (`applyStaticIfConfigured`) and live on a change (`syncAddressingLive`, no reboot — toggling
+/// back to DHCP restarts the client and re-leases). On Static there is no DHCP `GOT_IP` event, so
+/// the platform marks the interface connected when the static IP is set. A static IP on Ethernet
+/// bypasses DHCP entirely — useful where a DHCP handshake is unreliable but the link is fine.
 ///
 /// **Device name:** the network name is owned solely by SystemModule; this module only
 /// READS it (see `readDeviceName`), and it is the single identity behind the mDNS
@@ -211,6 +221,11 @@ public:
         // Push the board's eth config (persisted controls, loaded before setup)
         // into the platform layer before ethInit reads it.
         syncEthConfig();
+        // Baseline the addressing signature so syncAddressingLive only fires on a *later* change:
+        // the initial static apply is done by the bring-up path (WaitingEth / onConnected), and a
+        // DHCP-mode device must not have its client needlessly restarted on the first tick.
+        appliedAddressingSig_ = addressingSig();
+        addressingSigApplied_ = true;
         // Try Ethernet first (non-blocking)
         if (platform::ethInit()) {
             state_ = State::WaitingEth;
@@ -296,7 +311,7 @@ public:
         // but visibility flips based on addressing mode. Toggling the Select triggers a
         // rebuildControls() in HttpServerModule which re-runs this method and re-evaluates
         // the hidden flags.
-        const bool hideStatic = (addressing_ != 1);
+        const bool hideStatic = (addressing_ != kAddressingStatic);
         controls_.addIPv4("ip", staticIp_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
         controls_.addIPv4("gateway", staticGateway_);
@@ -327,11 +342,14 @@ public:
             const bool isEth   = isRmii || isSpi || isRgmii;
             // GPIO controls use addPin → a plain number input (ControlType::Pin),
             // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
-            // phyAddr is a PHY MDIO address (0..31), NOT a GPIO — it's a plain uint8
-            // number, so it uses addUint8, not addPin. (A Pin here would make the pin
-            // ownership map report it as a false GPIO claim, since that map reads every
-            // ControlType::Pin as a claimed GPIO.)
-            controls_.addUint8("ethPhyAddr", ethPhyAddr_, 0, 31);
+            // phyAddr is a PHY MDIO address (-1 = auto-detect, else 0..31), NOT a GPIO —
+            // so it uses a signed int control (addInt16), not addPin. (A Pin here would
+            // make the pin ownership map report it as a false GPIO claim, since that map
+            // reads every ControlType::Pin as a claimed GPIO.) It must be signed: -1 is
+            // IDF's ESP_ETH_PHY_ADDR_AUTO sentinel (scan the MDIO bus), the S31's RGMII
+            // default — a uint8 mangled -1 to 31 and the PHY never answered.
+            controls_.addInt16("ethPhyAddr", ethPhyAddr_, -1, 31);
+            controls_.setNumberField(controls_.count() - 1);   // an MDIO address is an identity, not a magnitude — a number field, not a slider
             controls_.setHidden(controls_.count() - 1, !isEth);
             controls_.addPin("ethRstGpio", ethRstGpio_);
             controls_.setHidden(controls_.count() - 1, !isEth);
@@ -363,11 +381,42 @@ public:
         uint32_t now = platform::millis();
         uint32_t elapsed = now - stateChangeTime_;
 
+        // The Ethernet-degraded warning is held only while the leaseless cable is still plugged in.
+        // Once the link drops (cable out), reset the retry clock and clear the warning so the normal
+        // connected status returns; the next re-plug then gets a fresh DHCP window (see ConnectedSta).
+        if (!platform::ethLinkUp() && (ethDegraded_ || ethLinkUpAt_ != 0)) {
+            ethLinkUpAt_ = 0;
+            if (ethDegraded_) {
+                ethDegraded_ = false;
+                updateStatusIP();   // reverts to the WiFi/AP IP line (or leaves prior status if none)
+            }
+        }
+
         switch (state_) {
             case State::WaitingEth:
+                // Static mode: as soon as the link is up, pin the IP (no DHCP round to wait for).
+                // netSetStaticIPv4 marks eth connected, so the ethConnected() check below promotes
+                // to Ethernet on the same or next tick. DHCP mode: this is a no-op, cascade as usual.
+                if (addressing_ == kAddressingStatic && platform::ethLinkUp() && !platform::ethConnected())
+                    applyStaticIfConfigured(platform::NetIface::Eth);
                 if (platform::ethConnected()) {
                     onConnected("Ethernet");
-                } else if ((elapsed > 3000 && !platform::ethLinkUp()) || elapsed > 15000) {
+                } else if ((elapsed > 3000 && !platform::ethLinkUp()) || elapsed > kEthDhcpWaitMs) {
+                    // Surface WHY Ethernet is being abandoned. Two distinct cases: the link never
+                    // came up (no cable, or the PHY didn't negotiate), vs. the link is up but no
+                    // address was assigned (the S31-at-100M DHCP gap — see docs/backlog-core.md).
+                    // When the link IS up but leaseless, remember it (ethDegraded_) so the warning
+                    // is not buried under the WiFi-fallback "connected" status the cascade is about
+                    // to set: a live-but-unusable Ethernet cable is worth the user's attention until
+                    // they unplug it (which drops ethLinkUp → the warning clears, see tick1s/onConnected).
+                    if (platform::ethLinkUp()) {
+                        ethDegraded_ = true;
+                        writeEthDegradedStatus();
+                    } else {
+                        ethDegraded_ = false;
+                        std::snprintf(statusBuf_, sizeof(statusBuf_), "Ethernet not detected: no cable/link");
+                        setStatus(statusBuf_, Severity::Warning);
+                    }
                     if constexpr (platform::hasWiFi) {
                         // No cable after 3s, or link up but no IP after 15s — cascade to WiFi
                         std::printf("NetworkModule: Ethernet %s, cascading\n",
@@ -389,6 +438,13 @@ public:
 
             case State::WaitingSta:
                 if constexpr (platform::hasWiFi) {
+                    // Static mode: pin the IP during bring-up, the WaitingEth mirror — a DHCP-less
+                    // network never fires a lease event, so waiting for "connected" before applying
+                    // static would strand the STA into the AP fallback. netSetStaticIPv4 marks the
+                    // STA connected once it is associated (platform-gated), so the check below
+                    // promotes on the same or next tick. DHCP mode: no-op.
+                    if (addressing_ == kAddressingStatic && !platform::wifiStaConnected())
+                        applyStaticIfConfigured(platform::NetIface::Sta);
                     if (platform::wifiStaConnected()) {
                         onConnected("WiFi STA");
                     } else if (elapsed > kStaGraceMs) {
@@ -431,10 +487,32 @@ public:
                     // WiFi STA down. Gated on ethConnected() (link + DHCP IP), not
                     // bare link-up, so WiFi is never dropped for a not-yet-working
                     // Ethernet — matches the State::AP upgrade check.
+                    // Static mode: an Ethernet cable that is up needs no DHCP lease — pin its IP
+                    // directly (netSetStaticIPv4 marks eth connected), so the promotion below fires
+                    // this tick. Ethernet ALWAYS outranks WiFi when a cable is present (the AP → STA
+                    // → ETH cascade is the architecture's contract, never conditional on a per-board
+                    // quirk). This lets Ethernet win on a link where DHCP can't complete (the S31 at
+                    // 100M): static bypasses the handshake entirely. DHCP mode skips this and relies
+                    // on the lease (the ethConnected() check).
+                    if (addressing_ == kAddressingStatic && platform::ethLinkUp() && !platform::ethConnected())
+                        applyStaticIfConfigured(platform::NetIface::Eth);
                     if (platform::ethConnected()) {
                         std::printf("NetworkModule: Ethernet up, switching from WiFi STA\n");
                         platform::mdnsStop();
                         onConnected("Ethernet");
+                    } else if (platform::ethLinkUp()) {
+                        // DHCP mode, cable plugged while on WiFi. IDF restarts the eth DHCP client
+                        // automatically on each link-up, so Ethernet IS being retried — the check above
+                        // promotes to it the moment a lease lands (eth outranks WiFi). Only if the link
+                        // stays up WITHOUT a lease past the DHCP window (the S31-at-100M gap) do we raise
+                        // the "no address assigned" warning; the grace period lets a healthy cable that
+                        // just needs a few seconds to lease get promoted, not flashed as failed.
+                        // (In Static mode this branch is unreachable: the apply above already connected eth.)
+                        if (ethLinkUpAt_ == 0) ethLinkUpAt_ = now;   // link just (re)appeared: start the clock
+                        if (!ethDegraded_ && now - ethLinkUpAt_ > kEthDhcpWaitMs) {
+                            ethDegraded_ = true;
+                            writeEthDegradedStatus();
+                        }
                     } else if (!platform::wifiStaConnected()) {
                         // **A dropout is not a divorce.** The radio reconnects itself (the platform's
                         // STA_DISCONNECTED handler calls esp_wifi_connect), and the common causes — a
@@ -526,7 +604,8 @@ public:
 
         syncMdns();
         syncTxPower();
-        syncEthLive();   // hot-apply a W5500 eth config change (no reboot)
+        syncEthLive();          // hot-apply a W5500 eth config change (no reboot)
+        syncAddressingLive();   // hot-apply a DHCP↔Static change (no reboot)
 
         // Refresh the live-readout values every tick — the UI polls /api/state
         // for them, so writing the same storage addresses is enough; no
@@ -576,6 +655,11 @@ private:
     /// initial connect (WaitingSta) and a mid-session dropout (ConnectedSta) — the question is the
     /// same in both places, so the answer should be too.
     static constexpr uint32_t kStaGraceMs = 10000;
+    /// How long an Ethernet link may sit up without a DHCP lease before we give up on it — the
+    /// WaitingEth timeout, and the same window a re-plugged cable's automatic DHCP retry gets in
+    /// ConnectedSta before the "no address assigned" warning is raised. DHCP can take several
+    /// seconds (~7 s measured on the P4-NANO), so the window is comfortably above that.
+    static constexpr uint32_t kEthDhcpWaitMs = 15000;
     /// How often the AP fallback goes back and retries WiFi STA. Long, because each attempt
     /// re-inits the radio and briefly bounces the AP (a user mid-setup on 4.3.2.1 sees a blip), and
     /// because the causes it recovers from — a rebooting router, a device carried back into range —
@@ -583,6 +667,15 @@ private:
     /// does not do it instantly.
     static constexpr uint32_t kApRetryStaMs = 60000;
     bool apShutdownPending_ = false;
+    // Ethernet link is up but never got an address, so we cascaded to WiFi/AP. Kept set so the
+    // "Ethernet detected: no address assigned" warning outranks the fallback's connected status
+    // (updateStatusIP), until the cable is unplugged (ethLinkUp drops → cleared in tick1s).
+    bool ethDegraded_ = false;
+    // While on WiFi/AP: millis() when the Ethernet link most recently came up (0 = link down).
+    // A re-plugged cable makes IDF retry DHCP automatically; we give that retry the same window as
+    // first boot (kEthDhcpWaitMs) before declaring the cable degraded, so a healthy cable that just
+    // needs a few seconds to lease is promoted to Ethernet, not flashed as failed. See ConnectedSta.
+    uint32_t ethLinkUpAt_ = 0;
     bool mdnsRunning_ = false;
     // The device name last registered with mDNS, so syncMdns() can detect a live
     // rename (deviceName changed in SystemModule) and re-advertise — without it,
@@ -593,7 +686,11 @@ private:
     // Controls
     char ssid_[33] = {};
     char password_[64] = {};
-    uint8_t addressing_ = 0; // 0=DHCP, 1=Static
+    // Addressing mode: the `addressing` Select's stored index. Named so the `== kAddressingStatic`
+    // checks read as intent, not a magic literal (matches the addressingOptions_ order).
+    static constexpr uint8_t kAddressingDhcp = 0;
+    static constexpr uint8_t kAddressingStatic = 1;
+    uint8_t addressing_ = kAddressingDhcp;
     bool mdnsEnabled_ = true;
     // Module-owned backing store for the status slot inherited from MoonModule.
     // The base class only holds a const char* into this buffer (see
@@ -653,7 +750,7 @@ private:
     // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
     // → number input). ethConfigDefault's fields are plain int; the values are all
     // small (≤52 / -1) so the copy into int8_t is lossless.
-    uint8_t ethPhyAddr_    = static_cast<uint8_t>(platform::ethConfigDefault.phyAddr);  // PHY MDIO addr 0..31, not a GPIO
+    int16_t ethPhyAddr_    = static_cast<int16_t>(platform::ethConfigDefault.phyAddr);  // PHY MDIO addr 0..31, or -1 = auto-detect (scan the bus). Signed (int16, via addInt16) so -1 round-trips — a uint8 cast the platform's -1 to 255 and the 0..31 control showed 31, a fixed address no PHY answered, so the S31's RGMII never linked. NOT a GPIO (deliberately not addPin, or the pin-map would false-claim it).
     int8_t  ethMdcGpio_    = static_cast<int8_t>(platform::ethConfigDefault.mdcGpio);
     int8_t  ethMdioGpio_   = static_cast<int8_t>(platform::ethConfigDefault.mdioGpio);
     int8_t  ethRstGpio_    = static_cast<int8_t>(platform::ethConfigDefault.rstGpio);
@@ -670,6 +767,10 @@ private:
     // valid hash output. setup()'s syncEthConfig() sets it before any compare.
     uint32_t appliedEthSig_ = 0;
     bool ethSigApplied_ = false;
+    // Last-applied addressing signature (mode + static octets), same guard shape as ethSig — so
+    // syncAddressingLive re-applies only on a real DHCP↔Static / static-field change.
+    uint32_t appliedAddressingSig_ = 0;
+    bool addressingSigApplied_ = false;
 
     // A cheap order-sensitive hash of the eth control members — changes whenever
     // any eth control does, so tick1s() can detect a live reconfigure. uint32_t so
@@ -681,7 +782,7 @@ private:
                           ethSpiSck_, ethSpiCs_, ethSpiIrq_}) {
             h = h * 131u + static_cast<uint32_t>(v);
         }
-        h = h * 131u + ethPhyAddr_;                  // PHY addr (uint8, not a GPIO), folded in separately
+        h = h * 131u + static_cast<uint32_t>(ethPhyAddr_ & 0xFF);   // PHY addr (int16, -1=auto; not a GPIO), folded in separately
         h = h * 131u + (ethClockExtIn_ ? 1u : 0u);   // bool, folded in separately
         return h;
     }
@@ -751,6 +852,42 @@ private:
         }
     }
 
+    // Hot-apply a DHCP↔Static change (or an edit to the static fields while in Static mode) on the
+    // active interface, no reboot — the "every setting takes effect live" principle. Same
+    // change-detect shape as syncTxPower/syncEthLive: a signature over addressing_ + the static
+    // octets, compared to the last applied one. Static → pin the config; DHCP → restart the client
+    // so it re-leases. Only touches whichever interface is currently connected.
+    void syncAddressingLive() {
+        uint32_t sig = addressingSig();
+        if (addressingSigApplied_ && sig == appliedAddressingSig_) return;   // nothing changed
+        appliedAddressingSig_ = sig;
+        addressingSigApplied_ = true;
+
+        platform::NetIface iface;
+        if (state_ == State::ConnectedEth) iface = platform::NetIface::Eth;
+        else if constexpr (platform::hasWiFi) {
+            if (state_ != State::ConnectedSta) return;   // not on a client interface: nothing to apply
+            iface = platform::NetIface::Sta;
+        } else return;
+
+        if (addressing_ == kAddressingStatic) {
+            applyStaticIfConfigured(iface);
+        } else {
+            platform::netSetDhcp(iface);   // Static → DHCP: re-lease live
+        }
+        updateStatusIP();   // reflect the new address (static IP, or the re-leased one once it lands)
+    }
+
+    // Signature folding addressing mode + the four static octets, so an edit to any of them (in
+    // Static mode) re-triggers syncAddressingLive. Cheap FNV-style roll, same idea as ethSig().
+    uint32_t addressingSig() const {
+        uint32_t h = 2166136261u;
+        auto fold = [&](uint8_t b) { h = (h ^ b) * 16777619u; };
+        fold(addressing_);
+        for (int i = 0; i < 4; i++) { fold(staticIp_[i]); fold(staticGateway_[i]); fold(staticSubnet_[i]); fold(staticDns_[i]); }
+        return h;
+    }
+
     static constexpr const char* addressingOptions_[] = {"DHCP", "Static"};
     // ethType dropdown options — index order MUST match the EthPhyType enum
     // (None=0, LAN8720=1, IP101=2, W5500=3, YT8531=4) since the Select stores the index.
@@ -782,8 +919,13 @@ private:
     void onConnected(const char* via) {
         if (std::strcmp(via, "Ethernet") == 0) {
             state_ = State::ConnectedEth;
+            ethDegraded_ = false;   // Ethernet itself got a lease — no longer degraded
         } else {
             state_ = State::ConnectedSta;
+            // Static mode on WiFi: the STA is associated (wifiStaConnected) but its address comes
+            // from us, not DHCP — pin it now, before updateStatusIP reads the netif. (Ethernet's
+            // static apply already happened in WaitingEth, where it also set ethConnected.)
+            if constexpr (platform::hasWiFi) applyStaticIfConfigured(platform::NetIface::Sta);
         }
         stateChangeTime_ = platform::millis();
 
@@ -835,6 +977,15 @@ public:
     }
 
 private:
+    /// If the user selected Static addressing, pin the configured IP/gw/mask/dns onto the given
+    /// interface (the platform stops its DHCP client and sets the address); a no-op in DHCP mode.
+    /// Called at each interface's bring-up transition — the one place that turns the `addressing`
+    /// dropdown + static-IP controls into an actually-applied config, for both STA and Ethernet.
+    void applyStaticIfConfigured(platform::NetIface iface) {
+        if (addressing_ != kAddressingStatic) return;   // DHCP mode: leave the client running
+        platform::netSetStaticIPv4(iface, staticIp_, staticGateway_, staticSubnet_, staticDns_);
+    }
+
     /// The device's network name is owned solely by SystemModule; NetworkModule only
     /// READS it. This is the single identity behind every network name — the mDNS
     /// `<name>.local`, the SoftAP SSID, and the DHCP hostname are all this exact string,
@@ -846,7 +997,28 @@ private:
     const char* readDeviceName() const {
         return systemModule_ ? systemModule_->deviceName() : "";
     }
+    // The Ethernet-degraded warning: link is up but no address was assigned. Shown (Warning
+    // severity) in preference to a WiFi/AP-fallback "connected" line, because a live-but-unusable
+    // cable is worth flagging until the user unplugs it. Reports any address that WAS captured
+    // (a partial/lost lease) so they have an IP to work with. Cleared when ethLinkUp() drops
+    // (cable out) in tick1s, at which point updateStatusIP falls through to the normal IP line.
+    void writeEthDegradedStatus() {
+        uint8_t ip[4] = {};
+        platform::ethGetIPv4(ip);
+        if (ip[0] || ip[1] || ip[2] || ip[3]) {
+            char ipStr[16]; formatDottedQuad(ipStr, ip);
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "Ethernet detected (%s): no lease", ipStr);
+        } else {
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "Ethernet detected: no address assigned");
+        }
+        setStatus(statusBuf_, Severity::Warning);
+    }
+
     void updateStatusIP() {
+        // A live-but-leaseless Ethernet cable outranks the WiFi/AP-fallback IP line: keep the
+        // warning up so it isn't buried the moment the cascade connects WiFi. (On Ethernet itself,
+        // ethDegraded_ is false — a real ConnectedEth means a lease succeeded.)
+        if (ethDegraded_ && state_ != State::ConnectedEth) { writeEthDegradedStatus(); return; }
         uint8_t ip[4];
         currentIp(ip);   // same eth/wifi getter dispatch, in one place
         if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) return;   // not connected — keep prior status

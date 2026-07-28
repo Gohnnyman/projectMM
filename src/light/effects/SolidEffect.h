@@ -4,14 +4,14 @@
 
 namespace mm {
 
-// Solid colour fill with five colour modes: a flat RGB(W) colour, the active palette laid across
-// the lights, an RMS-averaged single palette colour, or the palette banded along the rows / columns
+// Solid color fill with five color modes: a flat RGB(W) color, the active palette laid across
+// the lights, an RMS-averaged single palette color, or the palette banded along the rows / columns
 // of the grid. A brightness scales the flat and palette-spread results. In the two band modes a
 // `minRGB` floor drops near-black palette entries, and `randomColors` shuffles the surviving entries
 // with a fixed LCG so the bands re-order deterministically. The R/G/B/white members are the flat-
-// colour source; in the palette modes they're unused.
+// color source; in the palette modes they're unused.
 //
-// Prior art: MoonLight's Solid effect (E_MoonModules / MoonModules). The five colour modes, the
+// Prior art: MoonLight's Solid effect (E_MoonModules / MoonModules). The five color modes, the
 // brightness scaling, the RMS palette average (skip black, sqrt of the mean of squares), the
 // minRGB valid-entry filter, and the deterministic LCG shuffle (seed 12345, *25173 +13849) are
 // reproduced exactly here, written fresh on EffectBase + the shared palette/draw primitives.
@@ -20,7 +20,7 @@ namespace mm {
 // MoonLight's per-entry scan one-for-one. The optional white channel is written only when the layer
 // carries a 4th channel (channelsPerLight() >= 4); on RGB layers the white member is ignored.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
-/// Effect that fills the whole layer with one palette colour.
+/// Effect that fills the whole layer with one palette color.
 class SolidEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }   // MoonLight origin
@@ -75,13 +75,13 @@ public:
         const nrOfLightsType nLights = nrOfLights();
 
         switch (colorMode) {
-            case 0: {  // RGB(W): flat colour, brightness pre-applied per channel (CRGB(red*bri/255,…)).
+            case 0: {  // RGB(W): flat color, brightness pre-applied per channel (CRGB(red*bri/255,…)).
                 const RGB c{static_cast<uint8_t>(red   * brightness / 255),
                             static_cast<uint8_t>(green * brightness / 255),
                             static_cast<uint8_t>(blue  * brightness / 255)};
                 draw::fill(buf, c);
                 // Write W every frame (white may be 0) so a stale W from a prior frame/effect is cleared.
-                // Scale W by brightness like RGB, so the whole RGBW colour dims together.
+                // Scale W by brightness like RGB, so the whole RGBW color dims together.
                 if (cpl >= 4) writeWhite(buf, nLights, cpl, static_cast<uint8_t>(white * brightness / 255));
                 break;
             }
@@ -99,7 +99,7 @@ public:
                 if (cpl >= 4) writeWhite(buf, nLights, cpl, 0);
                 break;
             }
-            case 2: {  // RMS average of the (non-black) palette colours, filled solid (no brightness — source).
+            case 2: {  // RMS average of the (non-black) palette colors, filled solid (no brightness — source).
                 uint32_t sumR = 0, sumG = 0, sumB = 0;
                 int n = 0;
                 for (int i = 0; i < 256; i++) {

@@ -184,7 +184,7 @@ One picker serves **add** (`+ add child`) and **replace** (the ✎ button), rend
   `font-variant-numeric: tabular-nums` so digits don't dance.
 - **Module nesting** by progressively lighter card backgrounds (depth 0 / 1 / 2).
 - **Responsive breakpoint** at 820 px.
-- **Colour semantics** consistent across the app: green (`#22c55e`/`#6ee7b7`) = connected/ok/pass; red
+- **Color semantics** consistent across the app: green (`#22c55e`/`#6ee7b7`) = connected/ok/pass; red
   (`#f87171`) = error/fail/crashed/delete; purple (`#a78bfa`/`#c4b5fd`) = accent/brand/active/value;
   gray (`#6b7280`/`#9ca3af`/`#4b5563`) = secondary/muted.
 

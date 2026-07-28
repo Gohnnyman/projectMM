@@ -59,9 +59,9 @@ TEST_CASE("TetrixEffect renders black during the start delay") {
 }
 
 // Once virtual time advances past the start delay, columns spawn bricks that fall and render: after a
-// span of frames at least one light is lit, and every lit light carries a real (non-black) RGB colour
+// span of frames at least one light is lit, and every lit light carries a real (non-black) RGB color
 // pulled from the palette rather than partial/garbage channels.
-TEST_CASE("TetrixEffect lights up with palette colour after the start delay") {
+TEST_CASE("TetrixEffect lights up with palette color after the start delay") {
     ClockGuard guard;
     mm::platform::setTestNowMs(0);
 
@@ -79,15 +79,15 @@ TEST_CASE("TetrixEffect lights up with palette colour after the start delay") {
     REQUIRE(lit);
 
     // Every non-black light is a full RGB triple from colorFromPalette — assert no lit light is a
-    // single stray channel (a lit light means at least one channel > 0; the brick colour is a palette
-    // entry written across all three channels, so a lit pixel is a genuine colour, not noise).
+    // single stray channel (a lit light means at least one channel > 0; the brick color is a palette
+    // entry written across all three channels, so a lit pixel is a genuine color, not noise).
     auto& buf = rig.layer.buffer();
-    bool foundColoured = false;
+    bool foundColored = false;
     for (size_t p = 0; p + 2 < buf.bytes(); p += 3) {
         const uint8_t r = buf.data()[p], g = buf.data()[p + 1], b = buf.data()[p + 2];
-        if (r || g || b) { foundColoured = true; break; }
+        if (r || g || b) { foundColored = true; break; }
     }
-    CHECK(foundColoured);
+    CHECK(foundColored);
 }
 
 // Effects must run at every grid size: a degenerate 0×0×0 grid and a 1×1 grid both survive a build +

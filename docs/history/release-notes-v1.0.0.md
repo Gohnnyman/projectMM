@@ -33,7 +33,7 @@ Full set: Lines, Rainbow, Noise, Plasma, PlasmaPalette, Metaballs, Fire, Particl
 
 ## Under the hood
 
-What makes projectMM different: **16,384 LEDs on a classic ESP32** (not just the S3), **pure ESP-IDF v6.x with no Arduino**, **no third-party libraries** (own colour math, HTTP/WebSocket server, control storage), and **one module model** — every effect, modifier, layout, and driver is a `MoonModule`, which is why the UI renders any of them with zero per-module code. Full rationale in the [README § Under the hood](https://github.com/MoonModules/projectMM#under-the-hood).
+What makes projectMM different: **16,384 LEDs on a classic ESP32** (not just the S3), **pure ESP-IDF v6.x with no Arduino**, **no third-party libraries** (own color math, HTTP/WebSocket server, control storage), and **one module model** — every effect, modifier, layout, and driver is a `MoonModule`, which is why the UI renders any of them with zero per-module code. Full rationale in the [README § Under the hood](https://github.com/MoonModules/projectMM#under-the-hood).
 
 Two things worth calling out for this first release:
 

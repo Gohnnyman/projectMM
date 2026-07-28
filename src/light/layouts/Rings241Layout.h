@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layouts/LayoutBase.h"
+#include <numbers>
 
 namespace mm {
 
@@ -85,7 +86,7 @@ private:
     // division is in double then narrowed, matching n / TWO_PI on the double macro).
     static float getRadius(uint8_t n) { return static_cast<float>(n / kTwoPi); }
 
-    static constexpr double kPi = 3.14159265358979323846;
+    static constexpr double kPi = std::numbers::pi;
     static constexpr double kTwoPi = 2.0 * kPi;
 
     // The nine ring sizes of the 241-LED disc, inner to outer.

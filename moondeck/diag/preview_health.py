@@ -9,20 +9,20 @@ never sees AND masks problems the user does see. Both failure modes burned real 
 this tool.
 
 What it replicates from the real client (src/ui/app.js connectWs):
-  - reads binary frames (0x03 coord table, 0x02 RGB colour) — see src/light/drivers/PreviewDriver.h;
+  - reads binary frames (0x03 coord table, 0x02 RGB color) — see src/light/drivers/PreviewDriver.h;
   - sends a "ping" TEXT frame every 25 s (app.js heartbeat — Safari reaps idle sockets otherwise);
   - AUTO-RECONNECTS on close with 500ms→5s backoff (app.js ws.onclose → connectWs). The browser never
     gives up, so a momentary device-side close shows as a brief visual blip, not a frozen preview. A
     probe that quits on close measures something no user experiences.
 
 What it reports (the honest "what does the user see" metrics):
-  - colour frames + sustained fps over the window;
+  - color frames + sustained fps over the window;
   - reconnects: each one is a blip the user might notice (a ~0.5 s gap as the browser re-handshakes);
-  - maxgap: the longest stretch with NO colour frame — the real "did it freeze?" number. A browser
+  - maxgap: the longest stretch with NO color frame — the real "did it freeze?" number. A browser
     that reconnects in 500 ms has a ~0.5 s gap (looks continuous); a multi-second maxgap is a visible
     freeze the reconnect could not hide.
   - verdict: SMOOTH (no long gaps, frames flowing) / CHOPPY (frames but long gaps or reconnects) /
-    DEAD (no colour frames at all).
+    DEAD (no color frames at all).
 
 Stdlib-only (socket/base64/os/struct/time/json/urllib), like the scenario helpers — runs anywhere uv
 runs, no third-party deps. Devices come from an explicit ip[:port] argument, or (no arg) every online
@@ -142,9 +142,9 @@ def measure(host, seconds, grid):
 def _measure_loop(host, seconds, grid):
     t0 = time.monotonic()
     deadline = t0 + seconds
-    colour = coord = reconnects = 0
+    color = coord = reconnects = 0
     pts = None
-    last_colour = 0.0
+    last_color = 0.0
     maxgap = 0.0
     backoff = 0.5
 
@@ -170,10 +170,10 @@ def _measure_loop(host, seconds, grid):
                     continue                 # text (state JSON) / ping / pong — skip
                 t = time.monotonic()
                 if payload[0] == 0x02:
-                    if last_colour and t - last_colour > maxgap:
-                        maxgap = t - last_colour
-                    last_colour = t
-                    colour += 1
+                    if last_color and t - last_color > maxgap:
+                        maxgap = t - last_color
+                    last_color = t
+                    color += 1
                 elif payload[0] == 0x03:
                     coord += 1
                     if len(payload) >= 5:
@@ -189,12 +189,12 @@ def _measure_loop(host, seconds, grid):
 
     elapsed = time.monotonic() - t0
     reconnects -= 1                          # the first connect is not a "re"-connect
-    if last_colour:                          # a trailing no-colour stretch is a freeze at the end
-        tail = time.monotonic() - last_colour
+    if last_color:                          # a trailing no-color stretch is a freeze at the end
+        tail = time.monotonic() - last_color
         maxgap = max(maxgap, tail)
-    fps = colour / elapsed if elapsed else 0
-    verdict = "SMOOTH" if (maxgap < 1.5 and colour > elapsed) else ("CHOPPY" if colour else "DEAD")
-    print(f"  [{host} grid={grid or '?'}] {colour}f over {elapsed:.0f}s ({fps:.1f}fps), "
+    fps = color / elapsed if elapsed else 0
+    verdict = "SMOOTH" if (maxgap < 1.5 and color > elapsed) else ("CHOPPY" if color else "DEAD")
+    print(f"  [{host} grid={grid or '?'}] {color}f over {elapsed:.0f}s ({fps:.1f}fps), "
           f"{coord} coord (pts={pts}), {reconnects} reconnect(s), maxgap={maxgap:.1f}s -> {verdict}")
     return verdict
 

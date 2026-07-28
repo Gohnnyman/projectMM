@@ -25,12 +25,12 @@ A projectMM light show is a small tree of MoonModules:
 Layouts   →  where the LEDs are in space (a Grid, a sphere, a strip)
 Layers    →  a stack of images being drawn
   Layer   →  one image, built by…
-    Effect     →  draws colour into the image (the fun part)
+    Effect     →  draws color into the image (the fun part)
     Modifier   →  bends/masks/repeats the image
 Drivers   →  send the finished image to the physical LEDs
 ```
 
-An **effect** is the most creative and the easiest to write, so we start there. An effect's whole job is: **every frame, write colours into a buffer.** The buffer is just an array of bytes — 3 per LED (red, green, blue) — and the framework hands it to you already sized to the grid. You loop over the pixels and set colours. That's it.
+An **effect** is the most creative and the easiest to write, so we start there. An effect's whole job is: **every frame, write colors into a buffer.** The buffer is just an array of bytes — 3 per LED (red, green, blue) — and the framework hands it to you already sized to the grid. You loop over the pixels and set colors. That's it.
 
 Everything else — allocating that buffer, figuring out where each pixel is, pushing the finished frame to real LEDs, stopping cleanly when the user turns your effect off — is done *for* you by the core.
 
@@ -44,7 +44,7 @@ Your module is a class with a handful of **hook functions**. You override the on
 |---|---|---|
 | `defineControls()` | At startup, and whenever the control set changes | Declare your sliders/toggles (e.g. a `speed` control) |
 | `prepare()` | At boot, and whenever the grid size / config changes | *(only if you need memory)* size a `ScratchBuffer` to the grid — one line |
-| `tick()` | **Every render tick** | Draw your colours. This is the heart of an effect. |
+| `tick()` | **Every render tick** | Draw your colors. This is the heart of an effect. |
 | `release()` | When your module is removed or **switched off** | *(usually nothing)* the core frees your `ScratchBuffer`s for you; override only to release a non-buffer resource like a GPIO |
 
 **The core calls these — you only fill them in.** It decides when to build, when to run, and when to release. A single traffic-cop method — `applyState()` — visits every module in the tree and either **builds it** (calls `prepare()`) when it's enabled or **releases it** (calls `release()`) when it's disabled, then runs `tick()` on the enabled ones each render tick.
@@ -123,7 +123,7 @@ We build the moving `phase` from `elapsed()` (milliseconds since the show starte
 
 ### Writing pixels by coordinate
 
-`draw::pixel(buf, dims, {x, y, z}, colour)` sets one pixel at a coordinate. It works out the byte offset into the buffer for you and safely ignores a coordinate that's off the grid — so you think in `(x, y, z)`, not array indices. There are matching helpers for common jobs: `draw::fill` (whole buffer one colour), `draw::line`, `draw::fade` (dim the buffer for trails), `draw::blur`. Reach for these before hand-rolling buffer arithmetic; they're in `light/draw.h`.
+`draw::pixel(buf, dims, {x, y, z}, color)` sets one pixel at a coordinate. It works out the byte offset into the buffer for you and safely ignores a coordinate that's off the grid — so you think in `(x, y, z)`, not array indices. There are matching helpers for common jobs: `draw::fill` (whole buffer one color), `draw::line`, `draw::fade` (dim the buffer for trails), `draw::blur`. Reach for these before hand-rolling buffer arithmetic; they're in `light/draw.h`.
 
 ### Controls are just member variables
 
@@ -236,7 +236,7 @@ For **more than one** buffer — a game-of-life keeps three planes, a starfield 
 ```cpp
 ScratchBuffer<uint8_t> cells_{*this};    // current generation
 ScratchBuffer<uint8_t> future_{*this};   // next generation
-ScratchBuffer<uint8_t> colors_{*this};   // one colour per cell
+ScratchBuffer<uint8_t> colors_{*this};   // one color per cell
 ```
 
 The element type can be anything — a `uint8_t` heat value, a packed cell plane, or a small struct (`ScratchBuffer<Ball>`); the buffer multiplies by `sizeof(T)` for you.
@@ -293,7 +293,7 @@ The framework uses your coordinates to build the mapping that turns an effect's 
 
 ### Modifiers — bend the picture
 
-A **modifier** sits between the effect and the LEDs and reshapes space: mirror it, mask a region, tile it, rotate it. Instead of drawing colours, a modifier transforms *coordinates*. Its main hook, `modifyLogical`, takes a light's position and folds it into a new one (or rejects it). Several modifiers can stack, and the framework collapses the whole chain into a single fast lookup so the per-frame cost stays tiny.
+A **modifier** sits between the effect and the LEDs and reshapes space: mirror it, mask a region, tile it, rotate it. Instead of drawing colors, a modifier transforms *coordinates*. Its main hook, `modifyLogical`, takes a light's position and folds it into a new one (or rejects it). Several modifiers can stack, and the framework collapses the whole chain into a single fast lookup so the per-frame cost stays tiny.
 
 Modifiers are the most abstract of the four, so treat them as a step up from effects — but the shape is the same class with the same lifecycle: declare controls, implement your transform hook, let the core run it.
 
@@ -308,8 +308,8 @@ You get all of that "release the pin on disable" behaviour by implementing the s
 
 ## A suggested classroom path
 
-1. **Copy the rainbow.** Change the maths in `tick()` — make it pulse, or swap the palette lookup for a fixed colour. Rebuild and add it in the UI. See it move.
-2. **Add a control.** Give it a `brightness` slider (`addUint8`) and multiply your colours by it. Watch the UI wire itself up.
+1. **Copy the rainbow.** Change the maths in `tick()` — make it pulse, or swap the palette lookup for a fixed color. Rebuild and add it in the UI. See it move.
+2. **Add a control.** Give it a `brightness` slider (`addUint8`) and multiply your colors by it. Watch the UI wire itself up.
 3. **Add memory.** Write an effect that keeps a per-pixel value between frames (a fading trail, a bouncing dot). Now you need `prepare()` + `release()` — practice matching them.
 4. **Make it robust.** Resize the grid live to 1×1, then 0×0. Your effect must not crash. (Reading `width()`/`height()` each frame is what saves you.)
 5. **Write a test.** Add `test/unit/light/unit_MyEffect.cpp` with one case: build a small grid, run a frame, `CHECK` the buffer got painted (and doesn't crash on 0×0). Run `ctest`. That's the habit — a module and its test travel together.

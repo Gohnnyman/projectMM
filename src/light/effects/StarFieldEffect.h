@@ -35,7 +35,7 @@ public:
     uint8_t speed      = 20;     // advance rate (0..30); 0 = paused. Throttle is 1000/speed ms.
     uint8_t numStars   = 16;     // active stars (1..255)
     uint8_t blur       = 128;    // per-frame fade-to-black amount (0..255); higher = stronger fade = shorter streaks (draw::fade keep = 255-blur, matching MoonLight's fadeToBlackBy(blur))
-    bool    usePalette = false;  // colour stars from the palette instead of greyscale
+    bool    usePalette = false;  // color stars from the palette instead of greyscale
 
     void defineControls() override {
         controls_.addUint8("speed", speed, 0, 30);
@@ -147,7 +147,7 @@ private:
         return (v - inLo) * (outHi - outLo) / den + outLo;
     }
 
-    // Spawn a star at a random x/y far position with a fresh colour index. `far` selects the depth:
+    // Spawn a star at a random x/y far position with a fresh color index. `far` selects the depth:
     //   far=false  → initial seed: z in [0, w)  (MoonLight init: z = random(size.x))
     //   far=true   → respawn:      z = w        (MoonLight respawn: z = size.x)
     void spawn(Star& s, lengthType w, lengthType h, bool far) {

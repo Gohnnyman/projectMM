@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Emit build/<host>/compile_commands.json — the compilation database clangd reads to give
+# real diagnostics in the editor (it needs the actual include paths and flags, not guesses).
+# On by default because it costs nothing, is ignored by every consumer that doesn't want it,
+# and a missing database is the single most common reason clangd reports phantom errors.
+# `.clangd` at the repo root points at it; see docs/coding-standards.md § Editor setup.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Warning flags differ between GCC/Clang and MSVC. Gate by compiler so the
 # desktop build runs cleanly on Windows runners (no -W flags on MSVC) and on
 # macOS/Linux (no /W flags on Clang/GCC).

@@ -72,7 +72,7 @@ TEST_CASE("FixedRectangleEffect defaults light the origin corner and fill a smal
 
     auto* data = layer.buffer().data();
 
-    // Origin corner (0,0) is lit with the default colour {182,15,98}.
+    // Origin corner (0,0) is lit with the default color {182,15,98}.
     CHECK(data[0] == 182);
     CHECK(data[1] == 15);
     CHECK(data[2] == 98);

@@ -1,10 +1,10 @@
 # Effects
 
-Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel colour into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index colour read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md).)
+Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md).)
 
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
-**Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, colour mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
+**Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, color mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
 
 > Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../assets/…` gif show our own output.
 
@@ -14,7 +14,7 @@ Every effect, one block each: its preview, what it does, and what each control m
 
 ### DistortionWaves 💫 · 2D
 
-Two interfering sine waves beat against each other into a moiré colour field.
+Two interfering sine waves beat against each other into a moiré color field.
 
 - `freq_x` / `freq_y` — horizontal/vertical wave frequency (1–8).
 - `speed` — animation rate (0 = frozen).
@@ -29,9 +29,9 @@ Detail: [technical](moxygen/DistortionWavesEffect.md)
 
 ### FixedRectangle 💫 · 3D
 
-A solid colour filling a positioned box within the grid, with an optional alternating-white checker on the box's pixels.
+A solid color filling a positioned box within the grid, with an optional alternating-white checker on the box's pixels.
 
-- `red` / `green` / `blue` / `white` — the box colour.
+- `red` / `green` / `blue` / `white` — the box color.
 - `X position` / `Y position` / `Z position` — the box's origin corner.
 - `Rectangle width` / `Rectangle height` / `Rectangle depth` — the box extent on each axis.
 - `alternateWhite` — alternate box pixels to white in a checker pattern.
@@ -186,7 +186,7 @@ Detail: [technical](moxygen/RainbowEffect.md)
 
 ### Random 💫 · 3D
 
-Lights one random light per frame in a random palette colour over a fading background — a sparse, palette-tinted sparkle.
+Lights one random light per frame in a random palette color over a fading background — a sparse, palette-tinted sparkle.
 
 - `fade` — how fast prior sparkles fade to black.
 
@@ -236,12 +236,12 @@ Detail: [technical](moxygen/RipplesEffect.md)
 
 ### RubiksCube 💫🧊 · 3D
 
-A 3D Rubik's Cube projected onto the volume: it scrambles, then plays its solution back one turn at a time, the six faces in their standard colours.
+A 3D Rubik's Cube projected onto the volume: it scrambles, then plays its solution back one turn at a time, the six faces in their standard colors.
 
 - `turnsPerSecond` — how fast the cube turns.
 - `cubeSize` — the cube order (2×2 up to 8×8).
 - `randomTurning` — turn endlessly at random instead of scramble-then-solve.
-- `usePalette` — colour the six faces from the system-wide palette instead of the classic Rubik's colours.
+- `usePalette` — color the six faces from the system-wide palette instead of the classic Rubik's colors.
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
@@ -253,9 +253,9 @@ Detail: [technical](moxygen/RubiksCubeEffect.md)
 
 ### Solid 💫 · 3D
 
-A flat fill with five colour modes: a plain RGB(W) colour, the active palette spread across the lights, an RMS-averaged single palette colour, or the palette banded along the grid's rows or columns.
+A flat fill with five color modes: a plain RGB(W) color, the active palette spread across the lights, an RMS-averaged single palette color, or the palette banded along the grid's rows or columns.
 
-- `red` / `green` / `blue` / `white` — the flat colour in `RGB(W)` mode (ignored in the palette modes).
+- `red` / `green` / `blue` / `white` — the flat color in `RGB(W)` mode (ignored in the palette modes).
 - `brightness` — scales the flat and palette-spread output.
 - `colorMode` — `RGB(W)`, `Palette` (spread across the lights), `Palette avg` (RMS mean of the palette), `Palette rows`, `Palette cols` (palette banded along that axis).
 - `minRGB` — in the band modes, drops palette entries whose every channel is below this floor.
@@ -271,7 +271,7 @@ Detail: [technical](moxygen/SolidEffect.md)
 
 ### SphereMove 💫🧊 · 3D
 
-A hollow spherical shell that bounces through the 3D volume, its surface coloured from the palette, leaving no trail.
+A hollow spherical shell that bounces through the 3D volume, its surface colored from the palette, leaving no trail.
 
 - `speed` — how fast the sphere moves through the volume.
 
@@ -308,7 +308,7 @@ A perspective starfield: stars approach the viewer from a vanishing point, brigh
 - `speed` — how fast stars approach (frame throttle).
 - `numStars` — how many stars are active.
 - `blur` — motion-trail fade per frame.
-- `usePalette` — colour the stars from the palette instead of white.
+- `usePalette` — color the stars from the palette instead of white.
 
 Origin: MoonLight · by [@Brandon502](https://github.com/Brandon502), inspired by Daniel Shiffman / [Coding Train](https://www.youtube.com/watch?v=17WoOqgXsRM) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
@@ -326,7 +326,7 @@ Twinkling stars at random light positions, each fading in and out independently 
 
 - `speed` — fade rate per frame (how fast each star brightens/dims).
 - `star_fill_ratio` — how many stars (as a fraction of the light count).
-- `usePalette` — colour the stars from the active palette instead of white.
+- `usePalette` — color the stars from the active palette instead of white.
 
 Origin: MoonLight · by [limpkin](https://github.com/limpkin) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
@@ -338,13 +338,13 @@ Detail: [technical](moxygen/StarSkyEffect.md)
 
 ### Text 💫 · 2D
 
-Renders a multi-line string in a bitmap font. Static by default (laid out top-left, each newline dropping one font-height, clipped where it runs off the grid); turn on `scroll` to march the whole block leftwards as a wrapping marquee. Text colour comes from the active palette.
+Renders a multi-line string in a bitmap font. Static by default (laid out top-left, each newline dropping one font-height, clipped where it runs off the grid); turn on `scroll` to march the whole block leftwards as a wrapping marquee. Text color comes from the active palette.
 
 - `text` — the string to show; a **multi-line text area** (each line renders on its own row).
 - `scroll` — off (default) = static; on = horizontal marquee.
 - `font` — glyph size (`4x6` compact, `6x8` larger).
 - `speed` — marquee speed (only used when `scroll` is on).
-- `hue` — palette index for the text colour.
+- `hue` — palette index for the text color.
 
 Origin: projectMM original, on MoonLight's Scrolling Text · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
@@ -358,19 +358,19 @@ Detail: [technical](moxygen/TextEffect.md)
 
 ### GameOfLife 💫🌙 · 2D/3D
 
-Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom `B#/S#`), cells that inherit a neighbour's palette colour on birth, optional green→red age colouring, a dead-cell blur fading toward the background colour, toroidal `wrap`, a 1.5 s settle pause, and 3-CRC stasis self-respawn (R-pentomino/glider) when the board goes static.
+Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom `B#/S#`), cells that inherit a neighbour's palette color on birth, optional green→red age coloring, a dead-cell blur fading toward the background color, toroidal `wrap`, a 1.5 s settle pause, and 3-CRC stasis self-respawn (R-pentomino/glider) when the board goes static.
 
-- `backgroundColorR` / `backgroundColorG` / `backgroundColorB` — the colour dead cells fade toward (0–255 each).
+- `backgroundColorR` / `backgroundColorG` / `backgroundColorB` — the color dead cells fade toward (0–255 each).
 - `ruleset` — the birth/survive rule (Conway, HighLife, InverseLife, Maze, Mazecentric, DrighLife, or Custom).
 - `customRuleString` — a custom `B#/S#` rule, read only when `ruleset` = Custom.
 - `GameSpeed (FPS)` — generation rate (0–100, 100 = uncapped).
 - `startingLifeDensity` — % of cells alive at start (10–90).
-- `mutationChance` — % chance a newborn gets a random colour (0–100).
+- `mutationChance` — % chance a newborn gets a random color (0–100).
 - `wrap` — toroidal edges (cells wrap around).
 - `disablePause` — skip the 1.5 s settle pause between boards.
-- `colorByAge` — green→red aging instead of inheriting a neighbour's palette colour.
+- `colorByAge` — green→red aging instead of inheriting a neighbour's palette color.
 - `infinite` — respawn on stasis (R-pentomino/glider) instead of resetting.
-- `blur` — dead-cell fade strength toward the background colour.
+- `blur` — dead-cell fade strength toward the background color.
 
 Origin: MoonModules · by Ewoud Wijma (2022), mods by Brandon Butler / [@Brandon502](https://github.com/Brandon502) · [natureofcode](https://natureofcode.com/book/chapter-7-cellular-automata/) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h)
 
@@ -384,11 +384,11 @@ Detail: [technical](moxygen/GameOfLifeEffect.md)
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_139.gif" width="300" alt="GEQ effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 139; replace with our own capture once bench-verified -->
 
-A flat graphic equaliser: the 16 audio bands rise as vertical bars from the bottom, with optional smoothing between bars, per-bar palette colouring, and falling peak markers.
+A flat graphic equaliser: the 16 audio bands rise as vertical bars from the bottom, with optional smoothing between bars, per-bar palette coloring, and falling peak markers.
 
 - `fadeOut` — how fast bars fade each frame.
 - `ripple` — falling-peak marker decay.
-- `colorBars` — colour each bar from the palette by band instead of by row.
+- `colorBars` — color each bar from the palette by band instead of by row.
 - `smoothBars` — blend neighbouring bands for smoother bar heights.
 
 Origin: WLED (audio) · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
@@ -458,7 +458,7 @@ Falling Tetris-style blocks: each column drops a brick that lands on the growing
 
 - `speed` — fall speed (0 = randomised per brick).
 - `width` — brick height (0 = randomised).
-- `oneColor` — one advancing palette colour for all bricks instead of random per-brick colours.
+- `oneColor` — one advancing palette color for all bricks instead of random per-brick colors.
 
 Origin: WLED · by Andrew Tuline (WLED-SR) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
@@ -493,7 +493,7 @@ Detail: [technical](moxygen/BlurzEffect.md)
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_091.gif" width="300" alt="BouncingBalls effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 91; replace with our own capture once bench-verified -->
 
-A row of balls per column bounce under gravity, each losing energy on impact and relaunching when it stops, palette-coloured by ball index over a fading background.
+A row of balls per column bounce under gravity, each losing energy on impact and relaunching when it stops, palette-colored by ball index over a fading background.
 
 - `grav` — gravity strength (higher = faster fall, snappier bounce).
 - `numBalls` — balls per column (1–16).
@@ -530,7 +530,7 @@ Detail: [technical](moxygen/FreqMatrixEffect.md)
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_176.gif" width="300" alt="Lissajous effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 176; replace with our own capture once bench-verified -->
 
-A Lissajous curve traced across the grid from two phase-shifted `sin8`/`cos8` sweeps, palette-coloured along its length, with a fading trail.
+A Lissajous curve traced across the grid from two phase-shifted `sin8`/`cos8` sweeps, palette-colored along its length, with a fading trail.
 
 - `xFrequency` — the x-axis sweep frequency (sets the curve's lobe count).
 - `fadeRate` — trail fade per frame.
@@ -548,7 +548,7 @@ Detail: [technical](moxygen/LissajousEffect.md)
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_136.gif" width="300" alt="NoiseMeter effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 136; replace with our own capture once bench-verified -->
 
-An audio VU meter rendered as a noise bar: the volume sets how many rows light from the bottom, each row coloured by drifting Perlin noise, filling the full width and depth.
+An audio VU meter rendered as a noise bar: the volume sets how many rows light from the bottom, each row colored by drifting Perlin noise, filling the full width and depth.
 
 - `fadeRate` — trail decay per frame (200–254).
 - `width` — how strongly the volume drives the bar height.
@@ -588,7 +588,7 @@ Fire2012-style heat field — sparks at the base rise and cool through the activ
 - `cooling` — how fast heat dissipates as it rises (higher = shorter flames).
 - `sparking` — chance of a new spark at the base each frame (higher = livelier fire).
 
-The flame colour comes from the **active palette**. For the classic fire look pick the **Lava** palette (black→red→orange→yellow→white — the recommended default); any palette works, so an Ocean or Forest palette turns the flame blue or green.
+The flame color comes from the **active palette**. For the classic fire look pick the **Lava** palette (black→red→orange→yellow→white — the recommended default); any palette works, so an Ocean or Forest palette turns the flame blue or green.
 
 Origin: FastLED / MoonLight · Mark Kriegsman's Fire2012; MoonLight adapts [MatrixFireFast](https://github.com/toggledbits/MatrixFireFast) (toggledbits)
 
@@ -621,7 +621,7 @@ Detail: [technical](moxygen/NoiseEffect.md)
 
 The 16 mic frequency bands spread across X, each column lit bottom-up by its magnitude.
 
-- `colorMode` — bar colouring: `height` (green base → red top, the VU look) or `per-band` (each column its own hue, the rainbow analyser look).
+- `colorMode` — bar coloring: `height` (green base → red top, the VU look) or `per-band` (each column its own hue, the rainbow analyser look).
 
 Origin: projectMM original, on the WLED-SR GEQ / spectrum concept (Andrew Tuline) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
@@ -633,7 +633,7 @@ Detail: [technical](moxygen/AudioSpectrumEffect.md)
 
 ### AudioVolume 🔊
 
-A whole-grid VU meter: every light pulses with the mic level, colour indexing the palette by loudness.
+A whole-grid VU meter: every light pulses with the mic level, color indexing the palette by loudness.
 
 - `brightness` — overall brightness ceiling for the VU pulse (1–255).
 
@@ -681,7 +681,7 @@ Detail: [technical](moxygen/NetworkReceiveEffect.md)
 
 ### Sine 🌀 · 3D
 
-R/G/B each follow a sine along one axis at 120° phase offset — a glowing, scrolling colour box.
+R/G/B each follow a sine along one axis at 120° phase offset — a glowing, scrolling color box.
 
 - `frequency` — spatial frequency, waves across the box (1–20).
 - `amplitude` — peak brightness (0–255, 255 = full).

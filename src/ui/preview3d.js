@@ -5,7 +5,7 @@
 //   preview.setupLayout()     once, for docked-split ↔ floating-PiP responsiveness
 //   preview.onBinaryMessage(buf)  per WebSocket binary frame
 // It owns its own GL context, camera, and geometry; it talks to the rest of the
-// app only through the DOM (#preview canvas, --bg-0 theme colour) and
+// app only through the DOM (#preview canvas, --bg-0 theme color) and
 // localStorage (mm_cam). No app.js state crosses the boundary.
 
 let gl = null;
@@ -45,7 +45,7 @@ let lastVertCount = 0;
 let lastMaxDim = 1;
 let vertsBuf = null;         // reused worst-case Float32Array; grows but never shrinks
 // True-shape preview geometry, set from the 0x03 coordinate table and reused
-// across 0x02 colour frames (positions change only on a layout/LUT rebuild).
+// across 0x02 color frames (positions change only on a layout/LUT rebuild).
 let previewCoords_ = null;   // Float32Array[count*3], normalised + box-centred positions
 let previewCoordCount_ = 0;
 let previewMaxDim_ = 1;
@@ -120,7 +120,7 @@ function initWebGL() {
                 if (a < 0.01) discard;
                 gl_FragColor = vec4(vec3(0.32), a);
             } else {
-                // Pass 2 — lit LEDs only, solid disc in the real colour, on top.
+                // Pass 2 — lit LEDs only, solid disc in the real color, on top.
                 if (lit < 0.5) discard;                       // off LEDs were pass 1
                 if (disc < 0.01) discard;
                 gl_FragColor = vec4(bright, disc);
@@ -156,7 +156,7 @@ function initWebGL() {
 
     // A second, minimal program for the wireframe bounding box (a faint cuboid around
     // the light volume — gives the scene bounds + 3D orientation while orbiting, and a
-    // frame even when every LED is off). Flat colour, no per-vertex attributes beyond pos.
+    // frame even when every LED is off). Flat color, no per-vertex attributes beyond pos.
     const lvs = `attribute vec3 aPos; uniform mat4 uMVP; void main(){ gl_Position = uMVP * vec4(aPos,1.0); }`;
     const lfs = `precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor = uColor; }`;
     const lv = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(lv, lvs); gl.compileShader(lv);
@@ -428,9 +428,9 @@ function setupLayout() {
 //   0x03 coordinate table (once per layout/LUT rebuild + ~1 Hz keepalive):
 //        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
 //        Stores the real lights' normalised positions in previewCoords_ (the
-//        geometry); per-frame 0x02 messages then just recolour those points.
+//        geometry); per-frame 0x02 messages then just recolor those points.
 //   0x02 per-frame channels: [0x02][count:u32][stride:u16][(r,g,b) × count]
-//        Colour for light i sits at position previewCoords_[i].
+//        Color for light i sits at position previewCoords_[i].
 // count is u32 so a >65535-light panel (HUB75 walls) isn't capped by the wire format.
 // Light index i in the 0x02 stream matches coordinate-table entry i (both are
 // every stride-th driver light, in the same order) — no dense grid, no decompress.
@@ -483,8 +483,8 @@ function parsePreviewCoords(view, buf) {
     previewCoordCount_ = count;
     previewBox_ = { x: bx, y: by, z: bz };
     // Draw the grid layout NOW, off (placeholder rings), so a fresh page / UI refresh shows the
-    // geometry the instant the table arrives — not only once the first colour frame happens to land
-    // (which never comes if the scene is paused/idle). Colour frames then light it.
+    // geometry the instant the table arrives — not only once the first color frame happens to land
+    // (which never comes if the scene is paused/idle). Color frames then light it.
     drawLights(null);
 }
 
@@ -500,10 +500,10 @@ function renderPreviewFrame(view, buf) {
     const stride = view.getUint16(5, true) || 1;
     if (buf.byteLength < 7 + count * 3) return;
     const rgb = new Uint8Array(buf, 7);
-    // RGB[i] colours the light at previewCoords_[i]. The colour frame and the coordinate table
+    // RGB[i] colors the light at previewCoords_[i]. The color frame and the coordinate table
     // MUST describe the same light set — if their count OR stride (downscale factor) disagree, a
     // geometry rebuild (a resize, or the device's adaptive downscale changing the lattice) is
-    // mid-flight: the colours would land on the wrong positions (a visibly scrambled frame).
+    // mid-flight: the colors would land on the wrong positions (a visibly scrambled frame).
     // Skip such a frame; the matching coord table arrives within ~1 frame and they realign.
     if (count !== previewCoordCount_ || stride !== previewStride_) return;
     drawLights(rgb);
@@ -527,10 +527,10 @@ function measureFrameRate() {
     updatePreviewStatus();
 }
 
-// Build the vertex buffer from previewCoords_ + per-light colour and (re)start the render loop.
+// Build the vertex buffer from previewCoords_ + per-light color and (re)start the render loop.
 // rgb may be null — then every light is drawn off (the shader's placeholder ring), so the grid
 // LAYOUT shows the instant the coordinate table arrives (a fresh page / UI refresh), before any
-// colour frame. A colour frame then calls this again with its rgb to light the scene.
+// color frame. A color frame then calls this again with its rgb to light the scene.
 function drawLights(rgb) {
     if (!gl) initWebGL();
     if (!gl) return;
@@ -633,7 +633,7 @@ function drawVerts() {
     const ez = camTgtZ + camDist * Math.cos(camPhi) * Math.cos(camTheta);
     const mvp = buildMVP(ex, ey, ez, camTgtX, camTgtY, camTgtZ, canvas.width / Math.max(1, canvas.height));
 
-    // alpha:false context — clear to page background colour so the canvas
+    // alpha:false context — clear to page background color so the canvas
     // blends seamlessly in both light and dark themes. Read from <body>, not
     // <html>: the theme override is `body[data-theme="light"]`, so --bg-0 is
     // redefined on the body; getComputedStyle(documentElement) would only ever
@@ -858,6 +858,6 @@ export const preview = {
     resetCamera: resetCamera,
     // Redraw the last frame with the current theme's background — call on a theme
     // toggle so an idle preview (no live frames) repaints to the new --bg-0
-    // instead of keeping the previous theme's clear colour until the next frame.
+    // instead of keeping the previous theme's clear color until the next frame.
     redraw: redrawCached,
 };

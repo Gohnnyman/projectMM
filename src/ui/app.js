@@ -1366,6 +1366,41 @@ function createControl(moduleName, moduleType, ctrl) {
     const key = moduleName + ":" + ctrl.name;
     const def = defaultFor(moduleType, ctrl.name);
 
+    // numberField: a numeric control that opted out of the slider (server sets it for a value where each
+    // integer is a discrete identity, not a magnitude — a PHY/I2C address, a channel). Render a plain
+    // number input, same shape as the `pin` case, whatever the underlying numeric type. The WS-patch path
+    // (updateModuleControls) reads the input by [data-mid][data-key] the same way, so no extra patch case.
+    const isNumericType = ctrl.type === "uint8" || ctrl.type === "uint16" || ctrl.type === "int16";
+    if (ctrl.numberField && isNumericType) {
+        const nMin = Number(ctrl.min ?? 0);
+        const nMax = Number(ctrl.max ?? 65535);
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = nMin;
+        input.max = nMax;
+        input.value = ctrl.value ?? 0;
+        input.dataset.mid = moduleName;
+        input.dataset.key = ctrl.name;
+        input.addEventListener("input", () => {
+            dragTs[key] = Date.now();
+            let v = parseInt(input.value, 10);
+            if (Number.isNaN(v)) return;   // mid-edit empty field: send nothing until digits arrive
+            v = Math.max(nMin, Math.min(nMax, v));
+            if (String(v) !== input.value) input.value = v;   // display always matches what's sent
+            debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
+        });
+        input.addEventListener("change", () => {   // blur/Enter with a still-empty field: snap to min + send
+            if (Number.isNaN(parseInt(input.value, 10))) {
+                dragTs[key] = Date.now();
+                input.value = nMin;
+                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, nMin));
+            }
+        });
+        row.appendChild(input);
+        appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+        return row;
+    }
+
     switch (ctrl.type) {
         case "uint8": {
             const input = document.createElement("input");
@@ -1678,7 +1713,7 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "palette": {
-            // A colour-palette dropdown where EVERY option shows its own gradient — so the colours
+            // A color-palette dropdown where EVERY option shows its own gradient — so the colors
             // are visible before selecting, not just after. A native <select> can't do this
             // (browsers ignore a gradient background on <option>, and the macOS popup is OS-drawn),
             // so this is a custom dropdown: a trigger button (selected swatch + name + caret) that
@@ -1948,7 +1983,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
         summary.tabIndex = 0;
         summary.setAttribute("role", "button");
         // Freshness dot (always-visible age at a glance) when the row carries a `*Sec`
-        // duration; coloured by ageBucketClass. Generic — no device knowledge here.
+        // duration; colored by ageBucketClass. Generic — no device knowledge here.
         // The age fields (`ageSec`/`cached`) live in the DETAIL object, not the summary,
         // so read the detail for the dot (it also carries `self`); fall back to the
         // summary item when a list has no separate detail.
@@ -2246,7 +2281,7 @@ function rowAgeClass(item) {
 
 // Severity CSS class from a row's `severity` field ("error"/"warn"), or "" if none/absent. Generic
 // over the field name, exactly like rowAgeClass over `*Sec`: any ListSource that emits a `severity`
-// string gets the same visual (a coloured row marker). PinsModule is the first user — it flags a GPIO
+// string gets the same visual (a colored row marker). PinsModule is the first user — it flags a GPIO
 // claim on a reserved/strap/input-only pin — but nothing here is pins-specific; a task in a bad state
 // or a device with an error could emit `severity` and light up the same way.
 function rowSeverityClass(item) {
@@ -2281,6 +2316,9 @@ function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
     const eq = controlValuesEqual(ctrl, def);
     btn.classList.toggle("active", !eq);
     btn.addEventListener("click", () => {
+        const key = moduleName + ":" + ctrl.name;
+        clearTimeout(dragTimers[key]);   // a pending debounced edit must not overwrite the reset
+        dragTs[key] = Date.now();        // and a stale WS patch must not revert it
         applyVisually();
         sendControl(moduleName, ctrl.name, def);
     });
@@ -2739,7 +2777,7 @@ function cssEscape(s) {
 // source of truth in the UI saves repeating the same character in ~30 module
 // headers and a few bytes per type in /api/types. Each module's tags() then
 // only carries its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED)
-// and any feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 colour ·
+// and any feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 color ·
 // 🗼 movement). The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from
 // the type's `dim` field. All three are merged in emojiTagsFor().
 const ROLE_EMOJI = {
@@ -3085,7 +3123,7 @@ function setupStatusBarButtons() {
         applyTheme(theme);
         // Repaint the preview to the new theme's background — a live preview would
         // pick it up on its next frame, but an idle one (no incoming frames) needs
-        // a nudge so the canvas doesn't keep the previous theme's clear colour.
+        // a nudge so the canvas doesn't keep the previous theme's clear color.
         preview.redraw();
     });
 
@@ -3735,7 +3773,7 @@ function fmFilesystemUsage(mod) {
 
 // Format a file's text for the editor, by extension. JSON is re-indented (2 spaces) so the persisted
 // config files are readable; anything that doesn't parse is shown verbatim rather than erroring.
-// Extension seam for later: MoonLive `.ml` source wants syntax *highlighting* (a colour layer over
+// Extension seam for later: MoonLive `.ml` source wants syntax *highlighting* (a color layer over
 // the textarea), not reformatting — that's a bigger editor change, added when MoonLive `.ml` files
 // land on disk.
 function fmPrettify(text, relPath) {

@@ -37,14 +37,14 @@ using AnimFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t)
 // signature compileSource()'d code is called through.
 using CtrlFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls);
 
-// Emit the fixed-colour fill routine's machine code into `out` (capacity `cap` bytes), for
-// the ISA this translation unit was compiled for, with the colour baked in. Returns the
+// Emit the fixed-color fill routine's machine code into `out` (capacity `cap` bytes), for
+// the ISA this translation unit was compiled for, with the color baked in. Returns the
 // number of bytes written, or 0 if `cap` is too small (the caller degrades). The emitted
 // bytes ARE the function — the engine makes `out` executable and casts it to FillFn. The
 // parser-driven codegen (MoonLiveCompiler) reproduces these exact bytes (the golden-bytes test).
 size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b);
 
-// Emit a routine that derives its colour from the runtime arg `t` —
+// Emit a routine that derives its color from the runtime arg `t` —
 //   red = (t >> 3) & 0xFF, green = 0, blue = 64  for every light.
 // Proves a per-frame host value flows into the emitted native code and changes the output
 // (the grid's red ramps over time). Same emit/exec/call path as emitFill, one extra arg.

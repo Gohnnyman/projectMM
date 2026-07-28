@@ -4,10 +4,10 @@
 
 namespace mm {
 
-// Blurz — an audio-reactive "blurred dot" effect. Each frame it lights ONE pixel coloured by the
+// Blurz — an audio-reactive "blurred dot" effect. Each frame it lights ONE pixel colored by the
 // current frequency band's magnitude, then blurs the whole strip, so the dot bleeds into a soft
 // glowing smear that drifts and fades. A `freqBand` cursor advances one band per frame (0..15,
-// wrapping), so over 16 frames the colour cycles through the whole spectrum. Where the lit pixel
+// wrapping), so over 16 frames the color cycles through the whole spectrum. Where the lit pixel
 // lands is the lever:
 //   - freqMap on:  the dot's position maps to the dominant frequency (majorPeak) — bass at one end,
 //                  treble at the other, so the spectrum scrolls spatially with pitch.
@@ -15,7 +15,7 @@ namespace mm {
 //   - default:     the dot jumps to a random position each frame (WLED's classic Blurz).
 // fadeRate dims the trail each frame; blur is the box-blur strength applied after the dot is drawn.
 //
-// Prior art: WLED's "Blurz" audio effect, carried into MoonLight. The per-band colour cursor, the
+// Prior art: WLED's "Blurz" audio effect, carried into MoonLight. The per-band color cursor, the
 // frequency→position map, and the fade-then-blur pipeline are reproduced here, written fresh on
 // EffectBase + the shared draw primitives. Reads AudioService::latestFrame(); with simulation off or no
 // publisher the bands read 0 → the strip fades to black, safe on any target and grid size.
@@ -105,7 +105,7 @@ public:
         if (segLoc < 0) segLoc = 0;
         if (segLoc > maxLen - 1) segLoc = maxLen - 1;
 
-        // Colour the dot by the current band's magnitude, scaled across the strip the way WLED's
+        // Color the dot by the current band's magnitude, scaled across the strip the way WLED's
         // Blurz does: pixColor = (2 * fftResult[band] * 240) / max(1, maxLen - 1). WLED passes this
         // straight to ColorFromPalette, whose index is a uint8_t — so a value above 255 WRAPS around
         // the palette wheel (mod 256), it does NOT clamp. We reproduce that by truncating to uint8_t.
@@ -132,7 +132,7 @@ public:
 
         // Re-stamp the dot core ON TOP of the blur (WLED's addRGB after blur2d). The blur spreads the
         // dot into its halo but also dilutes its centre — a blurred dot fades to near-nothing without
-        // this. Re-adding the colour keeps the core bright so the smear reads as a glowing dot.
+        // this. Re-adding the color keeps the core bright so the smear reads as a glowing dot.
         for (int oy = -r; oy <= r; oy++)
             for (int ox = -r; ox <= r; ox++)
                 draw::addPixel(buf, dims, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);

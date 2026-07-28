@@ -66,7 +66,7 @@ What landed on [WLED-MM](https://github.com/MoonModules/WLED-MM)'s `mdev` (defau
 
 - **Animartrix** overhauled — optional gamma correction, always paints in 2D, big math speedups, dependency upgrade, and several bugfixes (segment-option changes now respected).
 - **New ESP32 node types** for ESP-NOW (WizMote data); Philips Hue robustness; PixelForge GIF tool gains image rotation.
-- **Fixed:** DMX-output now rate-limited to prevent watchdog resets; "relay does not turn on" sporadic issue; stack-smashing crash risk from `notify()`; better 2D preview colour accuracy and PS Fireworks trails.
+- **Fixed:** DMX-output now rate-limited to prevent watchdog resets; "relay does not turn on" sporadic issue; stack-smashing crash risk from `notify()`; better 2D preview color accuracy and PS Fireworks trails.
 - New V4 build environments incl. `esp32_16MB_V4_M_eth` (16 MB ESP32 with Ethernet); IR re-enabled for the Athom Music build.
 
 ## January 2026 (up to v14.7.1)
@@ -74,7 +74,7 @@ What landed on [WLED-MM](https://github.com/MoonModules/WLED-MM)'s `mdev` (defau
 *Summarised from 32 first-parent commits on `mdev`, 2026-01-01 … 2026-01-13 — released as **v14.7.1**.*
 
 - **Release v14.7.1.**
-- Random per-LED colours via the JSON API (`"col":["r","r","r"]`); manual/dual auto-white modes work with palettes; segment-palette functions inlined for speed.
+- Random per-LED colors via the JSON API (`"col":["r","r","r"]`); manual/dual auto-white modes work with palettes; segment-palette functions inlined for speed.
 - PixelForge effect adjustments; GIFs no longer blurred by default; the Colors column stays visible when toggling the GFX button.
 - **Fixed:** preset/file-access glitches, status-LED stops blinking; clearer "Connection to light failed!" message; Info page shows the GitHub repo, build flags, and status-LED pin.
 
@@ -115,7 +115,7 @@ What landed on [WLED-MM](https://github.com/MoonModules/WLED-MM)'s `mdev` (defau
 
 **New / effects**
 
-- ParticleFX better defaults for 64-px-height matrices and a framebuffer memory-calc fix; HUB75 drops colour-temperature correction for performance.
+- ParticleFX better defaults for 64-px-height matrices and a framebuffer memory-calc fix; HUB75 drops color-temperature correction for performance.
 - WLED-MM-specific error effect instead of the plain orange flash on effect-memory failure; low-brightness gradient "jumpyness" fixed.
 
 **Fixed**

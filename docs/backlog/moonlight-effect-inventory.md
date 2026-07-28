@@ -8,7 +8,7 @@ The full set of MoonLight effects to migrate, grouped by **origin library** (a *
 
 | Effect | Markers | Status | Notes |
 |---|---|---|---|
-| Solid | | ⬜ | background/base colour |
+| Solid | | ⬜ | background/base color |
 | Lines | | ✅ | LinesEffect |
 | Frequency Saws | ♫ | ⬜ | audio (Stage 3d) |
 | Moon Man | | ⬜ | |

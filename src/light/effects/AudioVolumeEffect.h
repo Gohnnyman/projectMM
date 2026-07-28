@@ -6,11 +6,11 @@ namespace mm {
 
 // Audio-reactive VU effect: the whole grid pulses with the microphone's sound
 // level. The simplest audio consumer — one scalar (AudioFrame::level) drives a
-// single brightness, a colour shifting from calm to hot as it rises. Reads the
+// single brightness, a color shifting from calm to hot as it rises. Reads the
 // live frame from AudioService::latestFrame(); with no mic (or silence) the frame is
 // zero and the grid stays dark, so the effect is safe on any target.
 // Author: projectMM original (VU-meter)
-/// Audio-reactive effect: drives brightness/colour from the overall sound level.
+/// Audio-reactive effect: drives brightness/color from the overall sound level.
 class AudioVolumeEffect : public EffectBase {
 public:
     const char* tags() const override { return "🔊"; }

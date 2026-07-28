@@ -14,7 +14,7 @@ namespace mm::moonlive {
 
 // arm64 register map: R0..R4 = the host-ABI arg registers x0..x4 (buf, nLights, cpl, t, ctrls —
 // the control-values arena pointer, kArg4). R5..R13 = caller-saved scratch x9..x14 then x5..x7.
-// Index math uses the 64-bit views (xN) for addresses, 32-bit (wN) for counters/colours — same
+// Index math uses the 64-bit views (xN) for addresses, 32-bit (wN) for counters/colors — same
 // register number, so one map suffices. x15 is the call() address/immediate scratch (not a vreg).
 static const uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
 static uint8_t mr(Reg r) { return kArm64Reg[r]; }

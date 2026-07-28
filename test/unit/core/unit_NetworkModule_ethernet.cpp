@@ -28,6 +28,8 @@
 #include "doctest.h"
 #include "platform_config.h"   // EthPhyType, EthPinConfig, hasEthernet, ethConfigDefault
 #include "platform/platform.h" // setEthConfig / ethStop / ethInit / ethConnected
+#include "core/NetworkModule.h"
+#include <cstring>
 
 // The enum values are a wire contract: the Select index, the ethInit() switch, and
 // every deviceModels.json `ethType` all agree on these. Pin them so a reorder fails here.
@@ -82,4 +84,101 @@ TEST_CASE("Desktop Ethernet seam is a safe no-op") {
     // for later tests (setEthConfig writes a static on ESP32; a no-op on desktop,
     // but keep the test order-independent regardless of platform).
     mm::platform::setEthConfig(mm::platform::ethConfigDefault);
+}
+
+// Regression: the `ethPhyAddr` control MUST be a SIGNED int16 whose range starts at -1 and
+// which renders as a number field (not a slider). -1 is ESP_ETH_PHY_ADDR_AUTO (scan the MDIO
+// bus — the RGMII default). It was once an addUint8(0,31): the uint8 mangled the platform's -1
+// default to 255 and the 0..31 control clamped it to 31, a fixed address no PHY answered, so
+// the S31's RGMII never linked. This pins the control-metadata contract that fixed it — signed
+// storage so -1 round-trips, min == -1 so the sentinel is in-range, and numberField because an
+// MDIO address is an identity, not a magnitude. Tests the addInt16 + setNumberField seam
+// directly (the NetworkModule control is `if constexpr (hasEthernet)`-gated, absent on desktop),
+// so a future edit that reverts to a slider or an unsigned type fails here, off-hardware.
+TEST_CASE("ethPhyAddr-style control: signed int16, -1 sentinel in range, number field") {
+    mm::ControlList controls;
+    int16_t phyAddr = -1;   // ESP_ETH_PHY_ADDR_AUTO — must survive as -1, not become 255/31
+    controls.addInt16("ethPhyAddr", phyAddr, -1, 31);
+    controls.setNumberField(controls.count() - 1);
+
+    const auto& c = controls[controls.count() - 1];
+    CHECK(std::strcmp(c.name, "ethPhyAddr") == 0);
+    CHECK(c.type == mm::ControlType::Int16);   // signed, so -1 is representable (a uint8 mangled it)
+    CHECK(c.min == -1);                         // the auto-detect sentinel is in-range, not clamped away
+    CHECK(c.max == 31);
+    CHECK(c.numberField);                       // rendered as a plain number input, not a 0..31 slider
+    CHECK(phyAddr == -1);                        // the bound value still reads -1 through the int16 control
+}
+
+// Static-IP addressing contract. The `addressing` Select (DHCP=0 / Static=1) and the four IPv4
+// controls (ip/gateway/subnet/dns) are what platform::netSetStaticIPv4 applies to the active
+// interface. Pin the control shape a future edit could break: the Select stores the mode index and
+// defaults to DHCP, the static fields exist with their documented defaults, and they are HIDDEN in
+// DHCP mode (visible only when addressing==Static). These are always bound (not hasEthernet-gated),
+// so the contract is testable on the desktop host.
+TEST_CASE("addressing Select + static-IP controls: DHCP default, Static reveals the fields") {
+    mm::NetworkModule net;
+    net.setup();
+    net.rebuildControls();   // single clean build (setup already built once via startAP); see mode test
+
+    const mm::ControlDescriptor* addressing = nullptr;
+    const mm::ControlDescriptor* ip = nullptr;
+    const mm::ControlDescriptor* subnet = nullptr;
+    for (uint8_t i = 0; i < net.controls().count(); i++) {
+        const auto& c = net.controls()[i];
+        if (std::strcmp(c.name, "addressing") == 0) addressing = &c;
+        else if (std::strcmp(c.name, "ip") == 0)     ip = &c;
+        else if (std::strcmp(c.name, "subnet") == 0) subnet = &c;
+    }
+    REQUIRE(addressing != nullptr);
+    CHECK(addressing->type == mm::ControlType::Select);
+    // Default is DHCP: the static fields are present but hidden until Static is selected.
+    REQUIRE(ip != nullptr);
+    REQUIRE(subnet != nullptr);
+    CHECK(ip->type == mm::ControlType::IPv4);
+    CHECK(ip->hidden);        // DHCP mode → static fields hidden
+    CHECK(subnet->hidden);
+}
+
+// The desktop platform's static/DHCP setters are inert no-ops: addressing is OS-managed on the
+// host, so netSetStaticIPv4 / netSetDhcp must accept any input and change nothing (no crash, no
+// interface brought up). Mirrors the "desktop net seam is a safe no-op" guarantee for ethInit etc.
+TEST_CASE("Desktop static-addressing seam is a safe no-op") {
+    const uint8_t ip[4]   = {192, 168, 1, 50};
+    const uint8_t gw[4]   = {192, 168, 1, 1};
+    const uint8_t mask[4] = {255, 255, 255, 0};
+    const uint8_t dns[4]  = {192, 168, 1, 1};
+    mm::platform::netSetStaticIPv4(mm::platform::NetIface::Eth, ip, gw, mask, dns);
+    mm::platform::netSetStaticIPv4(mm::platform::NetIface::Sta, ip, gw, mask, dns);
+    mm::platform::netSetDhcp(mm::platform::NetIface::Eth);
+    mm::platform::netSetDhcp(mm::platform::NetIface::Sta);
+    // Desktop reports no eth/sta connection regardless — the setters didn't fake one.
+    CHECK_FALSE(mm::platform::ethConnected());
+}
+
+// Static addressing on WiFi STA is applied during BRING-UP (WaitingSta), not only after a lease
+// event: a DHCP-less network never fires one, so waiting for "connected" before pinning the static
+// IP would strand a static STA into the AP fallback (the WaitingEth static poll's mirror). The test
+// seam fakes an STA radio so the host can drive the cascade into WaitingSta; the platform apply
+// counter pins that tick1s invoked netSetStaticIPv4(Sta).
+TEST_CASE("Static mode pins the static IP during STA bring-up (WaitingSta)") {
+    mm::platform::setTestWifiStaAvailable(true);
+    {
+        mm::NetworkModule net;
+        net.setWifiCredentials("bench-ssid", "bench-pass");
+        net.setup();   // desktop ethInit() fails → cascades to STA; the seam lands it in WaitingSta
+        // Switch to Static with a real address via the normal control-apply path (the octets bind
+        // by reference, so the module reads them directly).
+        for (uint8_t i = 0; i < net.controls().count(); i++) {
+            auto& c = net.controls()[i];
+            if (std::strcmp(c.name, "addressing") == 0)
+                mm::applyControlValue(c, "{\"addressing\":1}", "addressing", mm::ApplyPolicy::Clamp);
+            else if (std::strcmp(c.name, "ip") == 0)
+                mm::applyControlValue(c, "{\"ip\":\"192.168.1.250\"}", "ip", mm::ApplyPolicy::Clamp);
+        }
+        uint32_t before = mm::platform::testNetStaticApplyCount(mm::platform::NetIface::Sta);
+        net.tick1s();   // WaitingSta: Static + not connected → applyStaticIfConfigured(Sta)
+        CHECK(mm::platform::testNetStaticApplyCount(mm::platform::NetIface::Sta) > before);
+    }
+    mm::platform::setTestWifiStaAvailable(false);   // reset — cases stay independent
 }

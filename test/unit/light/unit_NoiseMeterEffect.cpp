@@ -8,7 +8,7 @@
 #include "core/AudioService.h"
 
 // NoiseMeter is an audio-reactive 1D effect: a vertical VU column whose height tracks the overall sound
-// level and whose colour is a scrolling 2D noise field. It writes only the x=0 column and Layer::extrude
+// level and whose color is a scrolling 2D noise field. It writes only the x=0 column and Layer::extrude
 // fans each lit row across every x (and z), so a lit row is a complete horizontal band. The column fills
 // bottom-up: row y=0 lights first (the floor is buffer row height-1, since drawY = sizeY-1-y). The frame
 // comes from AudioService::latestFrame() (a process-wide static); on the host with no I2S mic we run a
@@ -74,7 +74,7 @@ TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     mm::Layer layer;
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
-    mm::Palettes::setActive(0);   // colourful palette so a drawn pixel is non-black (order-independent)
+    mm::Palettes::setActive(0);   // colorful palette so a drawn pixel is non-black (order-independent)
 
     mm::NoiseMeterEffect meter;
     meter.fadeRate = 254;   // fastest fade so a lit row this frame is this frame's fill, not a stale trail

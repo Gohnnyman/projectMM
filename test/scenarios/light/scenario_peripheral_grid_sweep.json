@@ -1,0 +1,1434 @@
+{
+  "name": "scenario_peripheral_grid_sweep",
+  "module": "ParallelLedDriver",
+  "mode": "mutate",
+  "also": [
+    "MultiPinLedDriver",
+    "MoonLedDriver",
+    "ParlioLedDriver",
+    "RmtLedDriver",
+    "Layouts",
+    "GridLayout",
+    "Layers",
+    "Layer",
+    "NoiseEffect",
+    "Drivers",
+    "PreviewDriver"
+  ],
+  "description": "Cross-product benchmark: for EACH output peripheral (RMT, i80, MoonI80, Parlio), sweep the grid 16x16 -> 32x32 -> 64x64 -> 128x128 and measure the tick/heap at each size, driving the FULL grid out that peripheral (16 lanes so 128x128=16384 lights distribute ~1024/lane). This is the apples-to-apples per-board number set: run it identically on any board and the per-peripheral, per-size ticks compare directly (an S31 vs a P4, say). Each peripheral block is optional:true, so a board that lacks one (a classic ESP32 has no MoonI80/Parlio; a P4 has all three) skips it without failing, and the observed blocks record only where the peripheral is real. A NoiseEffect fills every cell so the render cost is non-trivial at every size. Pins are the S3/P4/S31 clean 16-lane set; a board whose pins differ records a driver that failed to init (a small bailout tick, not an encode) for that peripheral. NOTE the driver drives the full grid, so at 128x128 (16384 lights) a whole-frame path may exceed its DMA budget and idle with a status (a clean degrade, captured as a fast bail tick) while the streaming ring / PSRAM path keeps driving; that contrast IS the measurement.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "clear-layers",
+      "op": "clear_children",
+      "id": "Layers"
+    },
+    {
+      "name": "clear-drivers",
+      "op": "clear_children",
+      "id": "Drivers"
+    },
+    {
+      "name": "build-grid",
+      "description": "One GridLayout, resized live per sweep step below.",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "build-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "build-fx",
+      "description": "A NoiseEffect fills every cell, so render is non-trivial at every grid size.",
+      "op": "add_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "add-rmt",
+      "description": "RMT output (every ESP32). One pin; RMT drives per-channel, so this is the single-strand output baseline.",
+      "op": "add_module",
+      "id": "Out",
+      "type": "RmtLedDriver",
+      "parent_id": "Drivers",
+      "props": {
+        "pins": "18"
+      },
+      "optional": true
+    },
+    {
+      "name": "rmt-16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "rmt-16-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "measure-rmt-16",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            186,
+            236
+          ],
+          "free_heap": [
+            16970835,
+            16995271
+          ],
+          "max_alloc_block": [
+            167936,
+            188416
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            103,
+            165
+          ],
+          "free_heap": [
+            33938615,
+            33942295
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            14
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "rmt-32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "rmt-32-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "measure-rmt-32",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            679,
+            883
+          ],
+          "free_heap": [
+            16896067,
+            16916943
+          ],
+          "max_alloc_block": [
+            167936,
+            188416
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            491,
+            559
+          ],
+          "free_heap": [
+            33860283,
+            33863779
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            17,
+            48
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "rmt-64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "rmt-64-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "measure-rmt-64",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            2888,
+            3989
+          ],
+          "free_heap": [
+            16582719,
+            16603591
+          ],
+          "max_alloc_block": [
+            167936,
+            188416
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            2208,
+            2480
+          ],
+          "free_heap": [
+            33546939,
+            33550603
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            69,
+            232
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "rmt-128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "rmt-128-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "measure-rmt-128",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            6188,
+            8730
+          ],
+          "free_heap": [
+            15325471,
+            15346695
+          ],
+          "max_alloc_block": [
+            167936,
+            188416
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            11495,
+            11565
+          ],
+          "free_heap": [
+            32293559,
+            32297207
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            275,
+            1036
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-rmt",
+      "op": "remove_module",
+      "id": "Out",
+      "optional": true
+    },
+    {
+      "name": "add-i80",
+      "description": "i80 (esp_lcd): LCD_CAM on S3/P4/S31, I2S on classic. 16 lanes so 128x128=16384 distributes ~1024/lane.",
+      "op": "add_module",
+      "id": "Out",
+      "type": "ParallelLedDriver",
+      "parent_id": "Drivers",
+      "props": {
+        "pins": "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16"
+      },
+      "controls": {
+        "peripheral": "i80"
+      },
+      "optional": true
+    },
+    {
+      "name": "i80-16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "i80-16-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "measure-i80-16",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            405,
+            577
+          ],
+          "free_heap": [
+            16997363,
+            17014551
+          ],
+          "max_alloc_block": [
+            167936,
+            192512
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            208,
+            581
+          ],
+          "free_heap": [
+            33961747,
+            33965431
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            13
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "i80-32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "i80-32-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "measure-i80-32",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            545,
+            863
+          ],
+          "free_heap": [
+            16992607,
+            17006071
+          ],
+          "max_alloc_block": [
+            167936,
+            192512
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            446,
+            495
+          ],
+          "free_heap": [
+            33956971,
+            33960823
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            17,
+            56
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "i80-64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "i80-64-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "measure-i80-64",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            2279,
+            4090
+          ],
+          "free_heap": [
+            16974167,
+            16995367
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            1867,
+            2296
+          ],
+          "free_heap": [
+            33938707,
+            33942223
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            68,
+            227
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "i80-128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "i80-128-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "measure-i80-128",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            6638,
+            10961
+          ],
+          "free_heap": [
+            16900439,
+            16921639
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            9046,
+            11371
+          ],
+          "free_heap": [
+            33864991,
+            33868491
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            273,
+            984
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-i80",
+      "op": "remove_module",
+      "id": "Out",
+      "optional": true
+    },
+    {
+      "name": "add-moonI80",
+      "description": "MoonI80 (own-GDMA below esp_lcd, LCD_CAM only): the streaming ring, so length is not a memory question. Same 16-lane pin set.",
+      "op": "add_module",
+      "id": "Out",
+      "type": "ParallelLedDriver",
+      "parent_id": "Drivers",
+      "props": {
+        "pins": "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16"
+      },
+      "controls": {
+        "peripheral": "MoonI80"
+      },
+      "optional": true
+    },
+    {
+      "name": "moon-16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "moon-16-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "measure-moon-16",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            240,
+            638
+          ],
+          "free_heap": [
+            16997207,
+            17014551
+          ],
+          "max_alloc_block": [
+            167936,
+            192512
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            240,
+            598
+          ],
+          "free_heap": [
+            33961783,
+            33965427
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            20
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "moon-32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "moon-32-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "measure-moon-32",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            677,
+            824
+          ],
+          "free_heap": [
+            16992811,
+            17013811
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            502,
+            685
+          ],
+          "free_heap": [
+            33957171,
+            33960823
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            17,
+            81
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "moon-64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "moon-64-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "measure-moon-64",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            1531,
+            3852
+          ],
+          "free_heap": [
+            16974503,
+            16989575
+          ],
+          "max_alloc_block": [
+            167936,
+            192512
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            2304,
+            2609
+          ],
+          "free_heap": [
+            33938739,
+            33942371
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            68,
+            347
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "moon-128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "moon-128-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "measure-moon-128",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            6047,
+            7911
+          ],
+          "free_heap": [
+            16895471,
+            16921583
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            6674,
+            11410
+          ],
+          "free_heap": [
+            33864999,
+            33868651
+          ],
+          "max_alloc_block": [
+            352256,
+            360448
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            274,
+            945
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-moonI80",
+      "op": "remove_module",
+      "id": "Out",
+      "optional": true
+    },
+    {
+      "name": "add-parlio",
+      "description": "Parlio (P4 / S31): the Parallel-IO peripheral, 16 lanes.",
+      "op": "add_module",
+      "id": "Out",
+      "type": "ParallelLedDriver",
+      "parent_id": "Drivers",
+      "props": {
+        "pins": "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16"
+      },
+      "controls": {
+        "peripheral": "Parlio"
+      },
+      "optional": true
+    },
+    {
+      "name": "parlio-16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "parlio-16-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "measure-parlio-16",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            370,
+            1001
+          ],
+          "free_heap": [
+            16993499,
+            17018415
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            387,
+            572
+          ],
+          "free_heap": [
+            33961771,
+            33965099
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            4,
+            13
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "parlio-32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "parlio-32-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "optional": true
+    },
+    {
+      "name": "measure-parlio-32",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            573,
+            703
+          ],
+          "free_heap": [
+            16992939,
+            17013807
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            510,
+            535
+          ],
+          "free_heap": [
+            33957163,
+            33960819
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            17,
+            56
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "parlio-64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "parlio-64-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "optional": true
+    },
+    {
+      "name": "measure-parlio-64",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            2545,
+            2820
+          ],
+          "free_heap": [
+            16974347,
+            16995383
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            2313,
+            2384
+          ],
+          "free_heap": [
+            33938727,
+            33942387
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            70,
+            245
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "parlio-128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "parlio-128-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "optional": true
+    },
+    {
+      "name": "measure-parlio-128",
+      "op": "measure",
+      "measure": true,
+      "optional": true,
+      "observed": {
+        "esp32s31": {
+          "tick_us": [
+            12273,
+            14105
+          ],
+          "free_heap": [
+            16900583,
+            16921655
+          ],
+          "max_alloc_block": [
+            167936,
+            196608
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            4622,
+            11440
+          ],
+          "free_heap": [
+            33865011,
+            33868663
+          ],
+          "max_alloc_block": [
+            352256,
+            352256
+          ],
+          "at": [
+            "2026-07-25",
+            "2026-07-25"
+          ]
+        },
+        "desktop-macos": {
+          "tick_us": [
+            273,
+            948
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-07-26",
+            "2026-07-28"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-parlio",
+      "op": "remove_module",
+      "id": "Out",
+      "optional": true
+    },
+    {
+      "name": "cleanup-fx",
+      "op": "remove_module",
+      "id": "FX",
+      "optional": true
+    },
+    {
+      "name": "cleanup-layer",
+      "op": "remove_module",
+      "id": "Layer",
+      "optional": true
+    },
+    {
+      "name": "cleanup-grid",
+      "op": "remove_module",
+      "id": "Grid",
+      "optional": true
+    }
+  ]
+}

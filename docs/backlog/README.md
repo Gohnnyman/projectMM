@@ -12,7 +12,7 @@ Split along the codebase's own boundary (`src/core/` vs `src/light/`), with a th
 - **[backlog-light.md](backlog-light.md)** — the light domain: LED drivers (architecture + deferred increments), LCD/DMA driver work, effects & preview, and sensors / audio-reactive input.
 - **[backlog-mixed.md](backlog-mixed.md)** — cross-domain items where a core mechanism interacts with a light driver/effect/modifier.
 
-Completed items are removed; a file is deleted when empty (per [*Mandatory subtraction*](../../CLAUDE.md#process-rules)). Tags in item titles: *(investigation)* = needs measurement before a fix · *(backlog)* = scoped but not started · *(deferred)* = waiting on a prerequisite · *(future / long term)* = directional.
+Completed items are removed; a file is deleted when empty (per [*Mandatory subtraction*](../../CLAUDE.md#the-process)). Tags in item titles: *(investigation)* = needs measurement before a fix · *(backlog)* = scoped but not started · *(deferred)* = waiting on a prerequisite · *(future / long term)* = directional.
 
 ## At a glance
 

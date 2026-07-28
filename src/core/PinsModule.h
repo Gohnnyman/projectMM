@@ -137,7 +137,7 @@ private:
             sink.append(",\"role\":");
             sink.writeJsonString(c.role);
             // Emit `severity` only when the pin is unsafe — the UI keys its generic per-row warning
-            // colour on this field (like the `*Sec` age convention); a safe pin omits it, no colour.
+            // color on this field (like the `*Sec` age convention); a safe pin omits it, no color.
             if (c.severity) {
                 sink.append(",\"severity\":");
                 sink.writeJsonString(c.severity);
@@ -180,7 +180,7 @@ private:
 
         // Row detail = every claim on this row's GPIO (as "owner · role" chips — a double-claim lists all
         // co-owners), plus a `warning` line explaining WHY the row is flagged when it is (boot strap,
-        // reserved, input-only, conflict — so the coloured edge isn't just "something's wrong" but names
+        // reserved, input-only, conflict — so the colored edge isn't just "something's wrong" but names
         // it). Scalar fields, so the generic list-detail UI renders the chips + the warning line with no
         // pins-specific UI code.
         void writeListRowDetail(JsonSink& sink, uint8_t row) const override {
@@ -278,7 +278,7 @@ private:
         }
 
         // Grade a claim against the pin's hardware capability (platform::gpioCapability), setting BOTH
-        // its severity (the row colour) and its reason (shown when the row is expanded — the *why*). In
+        // its severity (the row color) and its reason (shown when the row is expanded — the *why*). In
         // priority order: reserved (flash/PSRAM/USB) or invalid GPIO → "error" for ANY role (routing I/O
         // there corrupts the device / isn't a pin); a driven role on an input-only pin or a boot strap →
         // "warn" (the GPIO-46-strap class of bug). An input role on an input-only pin is fine (no flag).

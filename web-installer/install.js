@@ -1176,7 +1176,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const meta = document.createElement("div"); meta.className = "bg-meta";
         meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
         body.appendChild(meta);
-        // Capability chips, three states by colour (not text): green = active
+        // Capability chips, three states by color (not text): green = active
         // (supported AND a module configured in deviceModels.json), yellow = supported
         // (firmware supports it, not pre-configured), orange = planned (no module
         // yet — the backlog seed). All chips are shown (labels kept short in
@@ -1192,7 +1192,7 @@ document.addEventListener('DOMContentLoaded', () => {
           for (const { c, cls, label } of caps) {
             const chip = document.createElement("span");
             chip.className = "bg-cap " + cls;
-            chip.textContent = c;   // colour conveys active / supported / planned
+            chip.textContent = c;   // color conveys active / supported / planned
             chip.title = c + " — " + label;
             capsEl.appendChild(chip);
           }

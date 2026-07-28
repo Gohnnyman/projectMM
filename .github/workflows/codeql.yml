@@ -1,0 +1,77 @@
+name: CodeQL
+
+# POC (docs/history/plans/Plan-20260727): does CodeQL's stock C/C++ suite find anything
+# real in this firmware? The question that motivated it: we parse six network packet
+# formats (ArtNet, DDP, E1.31, WLED audio sync, MQTT, WLED) plus HTTP, doing ~22 memcpy
+# operations on data arriving from the LAN, on a device with no MMU and no process
+# isolation — and we run NO security analysis at all today. Nothing else in our toolchain
+# looks for that class of bug: the compiler checks effects, lizard counts branches, our
+# Python checks read text.
+#
+# `build-mode: none` (GA Oct 2025) scans C/C++ WITHOUT building it, inferring compile flags
+# per file. That matters here because our real firmware build is an ESP-IDF cross-compile
+# for Xtensa/RISC-V that a runner would have to reproduce; build-free skips that entirely.
+# The trade is some extraction noise on macro/template-dense headers — acceptable for a POC
+# whose question is "is there anything here", not "prove there is nothing".
+#
+# Free on public repos, so the cost is wall-clock only. Scheduled weekly + on demand rather
+# than per-push: this is a sweep, not a gate, until the POC says otherwise.
+#
+# If this finds nothing actionable after a few runs, that is a RESULT — record it in the
+# scorecard and delete this file.
+
+on:
+  # Push-triggered on the POC branch, deliberately.
+  #
+  # `workflow_dispatch` alone would NOT work here: GitHub only offers the "Run workflow"
+  # button for workflows that exist on the DEFAULT branch, and this one lives on
+  # next-iteration until the POC is judged. A push trigger is the only way to get a first
+  # result without merging an unevaluated workflow into main.
+  #
+  # This is still not a gate: it does not run on pull_request, so it cannot block a merge.
+  # It runs, we read the findings, and we decide.
+  push:
+    branches:
+      - next-iteration
+    paths:
+      # Only when C/C++ or the workflow itself changes — a docs commit has nothing new to
+      # analyse and would just burn a runner.
+      - 'src/**'
+      - '.github/workflows/codeql.yml'
+  workflow_dispatch:
+  schedule:
+    # Monday 04:00 UTC. Weekly is enough for a codebase this size, and keeps the signal
+    # from becoming background noise nobody reads.
+    - cron: '0 4 * * 1'
+
+permissions:
+  contents: read
+  # Required to upload results to the Security tab (this is what buys the alert lifecycle:
+  # open/fixed/dismissed tracked across runs, i.e. baselining we would otherwise build).
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze C/C++
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          build-mode: none
+          # security-and-quality is the widest stock set: the security queries answer the
+          # question above, and the quality ones tell us whether CodeQL sees anything our
+          # existing checks miss. Narrow it later if the noise is not worth it.
+          queries: security-and-quality
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:c-cpp"

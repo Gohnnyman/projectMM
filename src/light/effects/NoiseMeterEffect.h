@@ -4,12 +4,12 @@
 
 namespace mm {
 
-// Noise Meter: a vertical VU column whose height tracks the overall sound level and whose colour is a
+// Noise Meter: a vertical VU column whose height tracks the overall sound level and whose color is a
 // scrolling 2D value-noise field, so a loud moment fills the panel from the bottom up with a drifting,
 // organic gradient instead of a flat bar. Each frame the buffer fades a little (motion trail), the
 // audio level (scaled by `width`) sets how many rows light up from the bottom, and for each lit row a
 // noise sample — taken from a field that both scrolls (the aux0/aux1 phase accumulators) and is
-// modulated by the live level — picks the palette colour. The colour depends only on the row (y), so
+// modulated by the live level — picks the palette color. The color depends only on the row (y), so
 // the effect writes the x=0 column and Layer::extrude fans each row across every x and z — the meter
 // reads as one wide block of light without the effect duplicating the broadcast itself (that is the
 // framework's job; see architecture.md § Dimensionality).
@@ -68,7 +68,7 @@ public:
         for (int y = 0; y < maxLen; y++) {
             // Scrolling, level-modulated 2D noise field. The two coordinates are 16.8 fixed (our
             // inoise8 treats the high byte as the cell), exactly as WLED feeds inoise8: the row index
-            // times the live level walks one axis, the aux phase the other, so the colour drifts both
+            // times the live level walks one axis, the aux phase the other, so the color drifts both
             // with motion (aux) and with loudness (level).
             const uint32_t coordA = static_cast<uint32_t>(y) * level + aux0_;
             const uint32_t coordB = aux1_ + static_cast<uint32_t>(y) * level;

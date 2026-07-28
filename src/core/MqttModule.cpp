@@ -9,7 +9,7 @@
                                         // the OTA task the update entity's install command triggers
 #include "light/Palette.h"      // Palettes::nearestForHue — a pure hue/sat→index CONVERSION with no
                                 // light state or objects, the one narrow reach this core module makes
-                                // into the light domain. PO-accepted: routing a HomeKit colour to a
+                                // into the light domain. PO-accepted: routing a HomeKit color to a
                                 // palette needs the palette set, which is inherently light-domain, and
                                 // a format conversion is the least-coupling way to bridge it (the
                                 // module still drives the palette via Scheduler::setControl, not a

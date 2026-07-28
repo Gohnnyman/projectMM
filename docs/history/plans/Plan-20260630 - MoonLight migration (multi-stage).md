@@ -9,7 +9,7 @@ Bring MoonLight's full library of **effects, modifiers and layouts** into projec
 Two cross-cutting rules govern every stage, from [CLAUDE.md](../../../CLAUDE.md):
 
 - **Industry standards, our own code.** MoonLight effects are studied for *behaviour and algorithm*, then written **fresh** against our architecture (our `EffectBase`, our primitives, our names). We do **not** trace MoonLight/WLED/FastLED structure or copy code. For *effects specifically* the **visual behaviour is the spec** — we reproduce what the effect looks like faithfully (the product owner's clarification), but the implementation is ours. Prior art credited per-module + in `history/`.
-- **A shared light primitive library.** Effects need a common set of small math/colour helpers (a beat/sine oscillator, integer noise, saturating add/subtract, scale, fade, a colour blend, a fast PRNG, draw primitives). projectMM provides these, extending the `color.h` set (`scale8`, `sin8`, `cos8`, `hsvToRgb` already there): **hot-path-tuned** (integer-only, LUT-backed, no float in the per-light path) and **dimension-agnostic where it makes sense** (the product owner's steer: our 3D-native model means a primitive like `drawLine` works 1D→3D, written once, not re-implemented per effect).
+- **A shared light primitive library.** Effects need a common set of small math/color helpers (a beat/sine oscillator, integer noise, saturating add/subtract, scale, fade, a color blend, a fast PRNG, draw primitives). projectMM provides these, extending the `color.h` set (`scale8`, `sin8`, `cos8`, `hsvToRgb` already there): **hot-path-tuned** (integer-only, LUT-backed, no float in the per-light path) and **dimension-agnostic where it makes sense** (the product owner's steer: our 3D-native model means a primitive like `drawLine` works 1D→3D, written once, not re-implemented per effect).
   - **Naming follows *Common patterns first* + *Industry standards, our own code*: the recognisable name AND our own implementation.** The LED-embedded world's canonical resource is FastLED, and its names (`beatsin8`, `inoise8`, `qadd8`, `nscale8`, `random8`/`random16`, `ColorFromPalette`) are exactly the ones a contributor recognises in 30 seconds — and consistent with the `scale8`/`sin8` we already ship. So **we use those names** (carrying the established convention), **write our own implementation** against our engine, and **credit FastLED as prior art** in each module's "Prior art" section. The point of the principle is independence-by-construction (own code, own architecture, behaviour pinned by tests), *not* a renamed copy — so the names stay recognisable; only the implementation is ours. Each primitive's design is justified at its introduction site, and we reorganise a borrowed concept when ours is genuinely cleaner (e.g. the dimension-agnostic draw set).
 
 ## What exists today (baseline)
@@ -24,7 +24,7 @@ Two cross-cutting rules govern every stage, from [CLAUDE.md](../../../CLAUDE.md)
 
 ## Dependency analysis (what must come first)
 
-1. **Palette** — hard prerequisite. Many MoonLight effects colour via `ColorFromPalette`. Nothing palette-dependent can be faithfully ported until this lands. **Stage 1.**
+1. **Palette** — hard prerequisite. Many MoonLight effects color via `ColorFromPalette`. Nothing palette-dependent can be faithfully ported until this lands. **Stage 1.**
 2. **The shared primitive library** (beat / noise / blend / scale / random / draw) — most effects need several. **Stage 1.**
 3. **Tags/emoji legend** — must be settled before batch-migrating, so every migrated module is consistent from the first batch. Cheap; **Stage 1** (a doc + a sweep of existing `tags()`).
 4. **Doc model change** — must land before the doc explosion, i.e. before batch migration. A page per **library** (type-first name, underscore-joined): `effects_moonlight.md`, `effects_wled.md`, … (and `modifiers_<lib>.md` etc. only where a library has them; most are effects-only). Library is a *doc* split only — NOT a `src`/`assets`/`tests` folder (those stay `domain/type` flat; library is the `tags()` emoji there). Fixed by the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md). **Stage 2**.
@@ -48,7 +48,7 @@ The proving-ground stage: build the shared tools, prove them on one hard effect.
   - *blend/scale:* `qadd8`/`qsub8` (saturating), `nscale8`, `fadeToBlackBy`, `blend(RGB, RGB, amt)` (`scale8` already in `color.h`).
   - *random:* `random8`/`random16` — a small fast seedable PRNG, hot-path-cheap (not `std::rand`).
   - *draw (the dimension-agnostic part the product owner called out):* `drawPixel`/`drawLine` (and later `drawCircle`/fill) operating on `Coord3D`, working **1D→3D** against the `Buffer`, so effects and modifiers share one set instead of re-rolling Bresenham per effect. This is the "core absorbs the hard part" principle — geometry primitives live once.
-- **Re-port Game of Life** properly — the *real* MoonLight GoL algorithm (the cellular-automaton rules + its palette colouring + blur/mutation it actually uses), on top of the new palette + primitives, replacing the current 272-line version. This is the stage's proof: a real effect that exercises palette + random + neighbour math, done faithfully.
+- **Re-port Game of Life** properly — the *real* MoonLight GoL algorithm (the cellular-automaton rules + its palette coloring + blur/mutation it actually uses), on top of the new palette + primitives, replacing the current 272-line version. This is the stage's proof: a real effect that exercises palette + random + neighbour math, done faithfully.
 - **Tags/emoji legend.** Write the canonical legend (MoonLight as basis) into architecture.md § Web UI / a tags reference, and sweep existing effects' `tags()` to match. Lightweight.
 
 Stage-1 exit: palette + primitives compile (-Werror), are unit-tested (each primitive pinned: `beatsin8` range, `inoise8` determinism, `qadd8` saturation, `drawLine` endpoints in 1D/2D/3D), GoL re-port renders correctly + has a scenario, tags legend documented. **No doc explosion yet** (GoL keeps its existing single `.md`; the doc-model change is Stage 2).
@@ -69,7 +69,7 @@ Stage-2 exit: the library pages render with gifs, `check_specs.py` green on the 
 With foundations + doc model in place, migrate MoonLight effects in **themed batches**, each a stage/commit: study behaviour → write fresh on our primitives → unit + scenario test → add to `effects.md` + gif. Batching keeps each commit reviewable.
 
 **Scope: ALL effects across MoonLight's `Nodes/Effects/E_*.h` files**, not a cherry-picked subset — the [breadth-parity gate](../../backlog/rename-to-moonlight.md) needs the full set. The source files (each an effect library, mapped to our origin sections + future per-library doc pages):
-- **`E_MoonModules.h`** (MoonModules-authored, 3): **GameOfLife** (Conway, 2D/3D, rulesets/wrap/colour-aging/infinite-mode), **GEQ3D** ♫ (perspective 3D equalizer bars), **PaintBrush** ♫ (frequency-modulated animated lines, chaos/softness). — verified 2026-06-30 from source.
+- **`E_MoonModules.h`** (MoonModules-authored, 3): **GameOfLife** (Conway, 2D/3D, rulesets/wrap/color-aging/infinite-mode), **GEQ3D** ♫ (perspective 3D equalizer bars), **PaintBrush** ♫ (frequency-modulated animated lines, chaos/softness). — verified 2026-06-30 from source.
 - **`E_MoonLight.h`** (MoonLight-original geometric set).
 - **`E_WLED.h`** (WLED ports/enhancements).
 - moving-head / DMX effect files → Stage 5.
@@ -96,7 +96,7 @@ The MoonLight modifiers (mirror/tile/kaleidoscope/pinwheel/transpose…) and lay
 2. **Primitive implementation is ours** — the temptation under deadline is to copy a source's implementation, not just its recognisable name. The names follow the established FastLED convention (what a contributor recognises); the *code* is written fresh against our engine, behaviour pinned by tests, FastLED credited as prior art. Guard: independence-by-construction (own implementation + own architecture), not a renamed copy and not a traced one.
 3. **Dimension-agnostic draw** — making `drawLine` etc. genuinely 1D→3D (not 2D with a z-loop bolted on) needs thought; get the abstraction right in Stage 1 or effects will work around it.
 4. **Doc-model migration is a one-way door** — deleting 21 per-module `.md`s and rewriting the spec-check; do it as one coherent Stage-2 change, not piecemeal, so docs are never half-migrated.
-5. **GoL "done right"** — we already got it wrong once; Stage 1 must pin the real algorithm against a reference (the actual rules + colouring), tested, so it's faithful this time.
+5. **GoL "done right"** — we already got it wrong once; Stage 1 must pin the real algorithm against a reference (the actual rules + coloring), tested, so it's faithful this time.
 6. **Scope discipline** — "migrate all of it" is dozens of modules. The batching is what keeps it from becoming one un-reviewable mega-diff; resist merging batches.
 
 ## Verification (per stage)

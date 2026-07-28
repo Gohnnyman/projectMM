@@ -38,7 +38,7 @@ TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
     CHECK(hasNonZero);
 }
 
-// Pixel (0,0) carries a lit palette colour — confirms the effect writes a real RGB there.
+// Pixel (0,0) carries a lit palette color — confirms the effect writes a real RGB there.
 TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -55,17 +55,17 @@ TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     layer.addChild(&rainbow);
 
     layer.applyState();
-    // Pin a known-colourful palette (Rainbow=0, generated at full saturation/value so no entry is
+    // Pin a known-colorful palette (Rainbow=0, generated at full saturation/value so no entry is
     // black) — Palettes::active() is a process-wide static any prior test can mutate, so this makes
     // the non-black assertion order-independent.
     mm::Palettes::setActive(0);
     layer.tick();
 
     auto* data = layer.buffer().data();
-    // Pixel (0,0): the effect maps the diagonal hue through the active palette, so the exact colour
+    // Pixel (0,0): the effect maps the diagonal hue through the active palette, so the exact color
     // depends on elapsed() (the phase) and the palette. The stable, time-independent contract is that
-    // the effect writes a LIT colour there (not black) — asserting a channel == 255 was false, since
-    // palette colours are not all fully saturated (the old hsvToRgb(h,255,255) assumption is stale).
+    // the effect writes a LIT color there (not black) — asserting a channel == 255 was false, since
+    // palette colors are not all fully saturated (the old hsvToRgb(h,255,255) assumption is stale).
     uint8_t r = data[0], g = data[1], b = data[2];
     CHECK((r > 0 || g > 0 || b > 0));
 }

@@ -4,9 +4,9 @@
 
 namespace mm {
 
-// Conway's Game of Life, generalised to 2D and 3D, with selectable rulesets, palette-coloured
-// cells that inherit a living neighbour's colour on birth, optional green→red age colouring, a
-// dead-cell blur trail that fades toward a configurable background colour, a 1.5 s settle pause on
+// Conway's Game of Life, generalised to 2D and 3D, with selectable rulesets, palette-colored
+// cells that inherit a living neighbour's color on birth, optional green→red age coloring, a
+// dead-cell blur trail that fades toward a configurable background color, a 1.5 s settle pause on
 // each new game, and self-respawn (R-pentomino / glider) when the pattern goes static. A living
 // cell survives if its live-neighbour count is in the ruleset's SURVIVE set; a dead cell is born if
 // its count is in the BIRTH set. Neighbours are the 8 around a cell in 2D, the 26 in 3D, optionally
@@ -16,7 +16,7 @@ namespace mm {
 //
 // Prior art: MoonLight's GameOfLife (E_MoonModules, MoonModules; Ewoud Wijma 2022 after
 // natureofcode ch.7 + DougHaber/nlife-color, Brandon Butler / @Brandon502 2024) — its behaviour is
-// reproduced here (rulesets, 2D/3D neighbourhoods, neighbour-colour inheritance, age colouring,
+// reproduced here (rulesets, 2D/3D neighbourhoods, neighbour-color inheritance, age coloring,
 // background blur, 3-CRC stasis, R-pentomino respawn, settle pause), written fresh on projectMM's
 // EffectBase + shared primitives (Random8, colorFromPalette, draw::, crc16). Conway's Game of Life
 // (John Conway, 1970) is the underlying automaton.
@@ -63,7 +63,7 @@ public:
     uint8_t blur       = 128;
 
     void defineControls() override {
-        // MoonLight's bgC is a Coord3D 0..255 read as RGB. projectMM has no colour control, so the
+        // MoonLight's bgC is a Coord3D 0..255 read as RGB. projectMM has no color control, so the
         // three components are three uint8s — the native, recognisable shape for an RGB triple here.
         controls_.addUint8("backgroundColorR", backgroundColorR, 0, 255);
         controls_.addUint8("backgroundColorG", backgroundColorG, 0, 255);
@@ -80,8 +80,8 @@ public:
         controls_.addUint8("blur", blur, 0, 255);
     }
 
-    // Grid state lives on the heap (cells + next-gen + per-cell colour), sized to the light count.
-    // Bit-packed alive/dead keeps it small (16K cells = 2KB each plane); colours are one byte each.
+    // Grid state lives on the heap (cells + next-gen + per-cell color), sized to the light count.
+    // Bit-packed alive/dead keeps it small (16K cells = 2KB each plane); colors are one byte each.
     // Off the hot path (cf. Fire's heat_) — never an inline member, so sizeof(GameOfLife) stays tiny
     // (an inline array here caused a P4 stack-overflow bootloop with HueDriver).
     void prepare() override {
@@ -247,7 +247,7 @@ private:
         return static_cast<nrOfLightsType>((static_cast<size_t>(z) * h + y) * w + x);
     }
 
-    // A live cell's colour: green when colorByAge (it ages toward red), else its palette colour.
+    // A live cell's color: green when colorByAge (it ages toward red), else its palette color.
     RGB liveColor(uint8_t colorIndex) const {
         return colorByAge ? RGB{0, 255, 0} : colorFromPalette(*Palettes::active(), colorIndex);
     }
@@ -307,7 +307,7 @@ private:
     }
 
     // Repaint every live cell on a fresh fill — the "show the start" frame between games while the
-    // settle timer runs. (MoonLight relies on the redraw loop; here the cells/colours are already
+    // settle timer runs. (MoonLight relies on the redraw loop; here the cells/colors are already
     // set by startNewGame, so painting them is a straight pass.)
     void renderInitial(lengthType w, lengthType h, lengthType d) {
         Buffer& buf = layer()->buffer();
@@ -352,8 +352,8 @@ private:
                     if (nx >= w || ny >= h) continue;
                     const nrOfLightsType i2 = idx(nx, ny, z, w, h);
                     setBit(future_.data(), i2, true);
-                    // Record the cell's colour index so later neighbour-colour inheritance sees a
-                    // live (non-zero marker) colour for these injected cells, not 0 (dead). Drawn
+                    // Record the cell's color index so later neighbour-color inheritance sees a
+                    // live (non-zero marker) color for these injected cells, not 0 (dead). Drawn
                     // green under colorByAge, but colors_ still carries the palette index it ages from.
                     colors_[i2] = colorIndex;
                     if (buf) draw::pixel(*buf, dims, {nx, ny, z}, colorByAge ? RGB{0, 255, 0} : color);
@@ -363,7 +363,7 @@ private:
         }
     }
 
-    // One generation: count neighbours (collecting up to 9 neighbour colours for inheritance), apply
+    // One generation: count neighbours (collecting up to 9 neighbour colors for inheritance), apply
     // the rules into future_, paint each cell, then run the 3-CRC stasis + respawn / reset logic.
     // `testMode` skips rendering and the timing/respawn rendering side-effects (test seam path);
     // buf/dims/bg/frameBlur/fadedBackground are only read off the test path.
@@ -399,9 +399,9 @@ private:
                                 const nrOfLightsType nIndex = idx(nx, ny, nz, w, h);
                                 if (getBit(cells_.data(), nIndex)) {
                                     neighbors++;
-                                    if (cellValue || colorByAge) continue;  // colour not needed
-                                    if (colors_[nIndex] == 0) continue;      // dead-marker colour
-                                    // Cap collected colours at nColors' size 9: 3D's 26-neighbour
+                                    if (cellValue || colorByAge) continue;  // color not needed
+                                    if (colors_[nIndex] == 0) continue;      // dead-marker color
+                                    // Cap collected colors at nColors' size 9: 3D's 26-neighbour
                                     // count can exceed 9, and the random pick below indexes with
                                     // rng_.below(colorCount), so an uncapped colorCount would read
                                     // out of bounds. Nine samples are plenty for the inheritance pick.
@@ -421,9 +421,9 @@ private:
                         setBit(future_.data(), cIndex, false);
                         if (!testMode && buf) draw::blendPixel(*buf, dims, p, bg, frameBlur);
                     } else if (!cellValue && born) {
-                        // Reproduction: inherit a living neighbour's colour, mutate sometimes. Both
+                        // Reproduction: inherit a living neighbour's color, mutate sometimes. Both
                         // fallbacks use rng_.below(1, 255) (1..254) so a live cell never gets 0, the
-                        // dead-cell marker (matches startNewGame's fill colour).
+                        // dead-cell marker (matches startNewGame's fill color).
                         setBit(future_.data(), cIndex, true);
                         uint8_t colorIndex = (colorCount > 0) ? nColors[rng_.below(colorCount)] : rng_.below(1, 255);
                         if (rng_.below(100) < mutation) colorIndex = rng_.below(1, 255);
@@ -431,7 +431,7 @@ private:
                         if (!testMode && buf) draw::pixel(*buf, dims, p, liveColor(colorIndex));
                     } else {
                         // Unchanged cell: dead → blur (honour the faded-background floor); live →
-                        // age toward red, or repaint its palette colour.
+                        // age toward red, or repaint its palette color.
                         if (!cellValue) {
                             setBit(future_.data(), cIndex, false);
                             if (!testMode && buf) {

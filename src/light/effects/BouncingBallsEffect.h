@@ -80,6 +80,7 @@ public:
                 // (truncating) assigned to a float, NOT a full-float divide (which would keep
                 // sub-millisecond precision the source discards). Fidelity: the truncation shifts
                 // every trajectory identically to the original.
+                // NOLINTNEXTLINE(bugprone-integer-division) — the truncation is the point; see above.
                 const float timeSinceLastBounce = static_cast<float>((time - ball.lastBounceTime) / timeScale);
                 const float timeSec = timeSinceLastBounce / 1000.0f;
                 float height = (0.5f * gravity * timeSec + ball.impactVelocity) * timeSec;

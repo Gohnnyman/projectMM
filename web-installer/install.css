@@ -243,7 +243,7 @@
     .bg-name { font-weight: 600; font-size: 12px; line-height: 1.2; }
     .bg-meta { color: var(--muted); font-size: 11px; }
     /* Capability chips: supported (green) vs planned (orange) — distinguished by
-       colour, not by extra text. Labels are kept short in deviceModels.json so every
+       color, not by extra text. Labels are kept short in deviceModels.json so every
        chip fits the ~150px card; the full label + state is in the chip's title
        tooltip. */
     .bg-caps { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }

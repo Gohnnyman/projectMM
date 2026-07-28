@@ -68,6 +68,8 @@ The system is two layers, separated as much as practical:
 
 When mixing is needed (for performance or simplicity), it must be an explicit decision: consciously choosing minimalism over separation, not accidentally blurring the boundary. Use domain-neutral naming in those cases ("producer buffer" not "LED buffer", "output driver" not "LED driver" in core interfaces) to keep the door open for future separation.
 
+**Core primitives, not one-offs.** Core earns growth only by adding a recognizable, reusable primitive many modules lean on (a streaming write, a positional read, a bounded arena, a recursive JSON reader); a core change that only one caller needs is the smell. When a complex system will need a capability, build the cleanest complete version rather than a crippled subset that pushes hacks outward (a JSON reader that can't read arrays is not "minimal"). And concrete first, abstract later: build one working feature end-to-end before extracting the shared abstraction.
+
 # Core
 
 The core's job is the runtime: modules, their lifecycle, their parameters, how they're scheduled, how they're persisted, how they reach the platform underneath.
@@ -120,7 +122,7 @@ Controls are dynamic: when a value changes, the control set can be rebuilt. A se
 
 Prefer `uint8_t` (0–255) for slider controls. Minimises per-control memory, aligns with DMX channel values, keeps the UI range manageable.
 
-Controls are the bridge between the [web UI](moonmodules/core/ui.md) and the running module tree: the UI renders a control from what the MoonModule declares, and a value the user changes there writes straight back into the module's member variable. The exact control types (slider, toggle, colour picker, text input, dropdown) are defined in the [UI spec](moonmodules/core/ui.md#control-types). The principle: modules declare what they need, the UI renders it.
+Controls are the bridge between the [web UI](moonmodules/core/ui.md) and the running module tree: the UI renders a control from what the MoonModule declares, and a value the user changes there writes straight back into the module's member variable. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the [UI spec](moonmodules/core/ui.md#control-types). The principle: modules declare what they need, the UI renders it.
 
 ## Persistence
 
@@ -201,7 +203,7 @@ Why this needs stating as its own guarantee: the mutation-driven rebuild above (
 - **Resolve links at `prepare`, don't cache them across mutations.** A module that depends on another (a `Drivers` reading the active `Layer`, a `Layer` reading its `Layouts`) re-resolves that link from the tree at every rebuild rather than pinning a pointer once at wiring time. When the dependency is gone, the link resolves to null, not to freed memory.
 - **Tolerate null at the point of use.** Every consumer of a resolved link null-checks it and falls back to an idle state (no buffer, zero lights, nothing sent) rather than dereferencing. A driver with no Layer sends nothing; a Layer with no Layouts reports zero lights. Idle, not crashed.
 
-The enforcement is the test framework, not discipline alone (see the [Hard Rule](../CLAUDE.md#hard-rules)). When a sequence is found that crashes or wedges the device, the fix is **incomplete until a test reproduces that sequence**, so the same break can't return. Worked example: deleting the last Layer once left `Drivers` holding a dangling pointer to the freed Layer; `PreviewDriver` then read it and panicked (`LoadProhibited`), and because the tree persists, the device boot-looped. The fix made `Drivers` clear its drivers' Layer pointers to null when no Layer is active, and a regression test (`unit_PreviewDriver`, "tolerates the active Layer being deleted") drives a Layer delete + rebuild and asserts the driver ends up null, not dangling. The scenario layer adds the same coverage end-to-end: `clear_children` lets a scenario clear a container and rebuild its own pipeline from any starting tree, so the delete/rebuild path is exercised on real hardware, not just in unit tests.
+The enforcement is the test framework, not discipline alone (see the [Robustness principle](../CLAUDE.md#principles)). When a sequence is found that crashes or wedges the device, the fix is **incomplete until a test reproduces that sequence**, so the same break can't return. Worked example: deleting the last Layer once left `Drivers` holding a dangling pointer to the freed Layer; `PreviewDriver` then read it and panicked (`LoadProhibited`), and because the tree persists, the device boot-looped. The fix made `Drivers` clear its drivers' Layer pointers to null when no Layer is active, and a regression test (`unit_PreviewDriver`, "tolerates the active Layer being deleted") drives a Layer delete + rebuild and asserts the driver ends up null, not dangling. The scenario layer adds the same coverage end-to-end: `clear_children` lets a scenario clear a container and rebuild its own pipeline from any starting tree, so the delete/rebuild path is exercised on real hardware, not just in unit tests.
 
 ## Hot path discipline
 
@@ -214,6 +216,10 @@ The render loop (`Scheduler::tick` and everything it calls: every effect, modifi
 **Memory layout** is the corollary: allocate buffers as single contiguous blocks outside the hot path. Never allocate many small scattered objects in a loop; fragmentation catches up even off-path. On ESP32 with PSRAM, use `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers; the `platform::alloc` wrapper does this automatically.
 
 **Network input** follows the same discipline: process synchronously at a defined point in the frame loop. Async input with staging buffers is allowed when memory is plentiful (desktop, PSRAM-rich ESP32), but the default is synchronous to keep the loop's worst case predictable.
+
+**Data over objects.** The hot path is designed around plain contiguous data: flat buffers one stage writes and the next stage reads, no per-element objects, no virtual calls per light. The module tree is the one deliberate class hierarchy (uniform polymorphism is what lets the UI render any module generically, see [§ Web UI](#web-ui)); off the hot path, a proven adapter interface is fine, e.g. `ListSource`: the textbook data-source shape (UITableView's data source, Qt's `QAbstractItemModel`).
+
+**The sub-hot path is a hot path too.** `tick20ms()` and `tick1s()` run inline on the render thread between two frames, so any code on a timer is on the hot path the moment it fires; a heavy periodic step shows as a stutter at exactly that tick's cadence (a 1 Hz hitch for `tick1s`). Periodic work is therefore *cheap per firing* (bounded, no O(tree) serialize of unchanging data), *amortized* across ticks (drain a chunk per tick, like the preview/state resumable sender), or *gated on a real change signal* so the common case is near-zero. Never re-serialize data that doesn't change: the canonical example is the WS control `optionSets`, emitted once per list and referenced by `optionsRef` rather than re-inlined every `tick1s` (which would be a ~20 KB/s serialize spike on the render thread). The KPI tick timing is the guard; a spike at a tick's cadence is the tell.
 
 ## Platform abstraction
 
@@ -228,7 +234,7 @@ Only abstract what you actually need. Currently:
 
 Abstractions are added when a concrete implementation needs them, not pre-designed.
 
-**Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags, never a preprocessor `#ifdef`. The boundary is enforced by [`moondeck/check/check_platform_boundary.py`](../moondeck/check/check_platform_boundary.py), a commit gate (see [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events)).
+**Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags, never a preprocessor `#ifdef`. The boundary is enforced by [`moondeck/check/check_platform_boundary.py`](../moondeck/check/check_platform_boundary.py), a commit gate (see [CLAUDE.md § The Process](../CLAUDE.md#the-process)).
 
 ## Firmware vs deviceModel vs board
 
@@ -290,7 +296,7 @@ A device has **one** network name, `deviceName`, and every name the device prese
 
 # Light domain
 
-The light domain is everything specific to driving lights. **Light** here means any controllable light source: an addressable LED pixel (WS2812, APA102), a DMX fixture (RGB par, moving head, dimmer), or any other output that takes colour/intensity data. The term is used instead of "pixel" because the system controls both LEDs and conventional lighting fixtures.
+The light domain is everything specific to driving lights. **Light** here means any controllable light source: an addressable LED pixel (WS2812, APA102), a DMX fixture (RGB par, moving head, dimmer), or any other output that takes color/intensity data. The term is used instead of "pixel" because the system controls both LEDs and conventional lighting fixtures.
 
 ## The pipeline
 
@@ -363,7 +369,7 @@ A **Layer** (a MoonModule, child of Layers) owns:
 - **Effects** (ordered list): write light values into the buffer.
 - **Modifiers** (ordered list): transform the LUT or light values.
 
-A layer can have **multiple effects**. Each effect writes to the buffer sequentially in its listed order, overwriting or adding to the previous — so the effects stack (a base-colour effect followed by a sparkle effect).
+A layer can have **multiple effects**. Each effect writes to the buffer sequentially in its listed order, overwriting or adding to the previous — so the effects stack (a base-color effect followed by a sparkle effect).
 
 A layer applies **all its enabled modifiers as a chain** during the mapping build (`Layer::rebuildLUT`): each modifier is a coordinate fold, and they compose in child order (M₁∘M₂∘…). Modifiers are **reorderable** in the UI, and order is meaningful (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror). The fold contract (the three hooks, the physical→logical build, the live pass) is documented in [ModifierBase](moonmodules/light/moxygen/ModifierBase.md).
 
@@ -371,7 +377,7 @@ Each layer references the shared Layouts. The layer builds its mapping by walkin
 
 ## Effects
 
-Effects produce light colours. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
+Effects produce light colors. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
 
 Effects use elapsed time for animation, not frame count. Animation speed becomes frame-rate independent: an effect looks the same at 30 fps and 60 fps. This is also what makes the cross-device clock sync work: a shared elapsed-time base means synced visuals across controllers (see [§ Multi-device sync](#multi-device-sync)).
 
@@ -421,7 +427,7 @@ uint8_t t = static_cast<uint8_t>((phase_num_ * 256) / 60000);
 
 See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed must depend only on `bpm` and wallclock, not on tick rate or grid size.
 
-**An effect renders a pattern; it does not transform geometry.** When migrating or adding an effect, strip out anything that is really a *modifier* — mirroring, tiling, rotation, scrolling/offset, a kaleidoscope fold, masking, any remap of *where* pixels land — and add it as a separate [modifier](#modifiers) instead. WLED (and other sources we port from) routinely fold these into the effect's own loop (a "mirror" checkbox, a "2D" rotation, a built-in pinwheel), because WLED has no modifier concept; we do. Keeping them out of the effect is what lets any effect compose with any modifier (the same RotateModifier rotates Fire, Noise, or a network-received frame) instead of every effect re-implementing its own half-baked mirror. The test: an effect's `tick()` should only *write colours into the logical buffer for its own coordinates*; if it's reading or rewriting positions to move/fold/duplicate the image, that behaviour belongs in a modifier. (This is the light-domain face of *Complexity lives in core; domain modules stay simple* — geometry transforms are the modifier's job, shared once, not duplicated into every effect.)
+**An effect renders a pattern; it does not transform geometry.** When migrating or adding an effect, strip out anything that is really a *modifier* — mirroring, tiling, rotation, scrolling/offset, a kaleidoscope fold, masking, any remap of *where* pixels land — and add it as a separate [modifier](#modifiers) instead. WLED (and other sources we port from) routinely fold these into the effect's own loop (a "mirror" checkbox, a "2D" rotation, a built-in pinwheel), because WLED has no modifier concept; we do. Keeping them out of the effect is what lets any effect compose with any modifier (the same RotateModifier rotates Fire, Noise, or a network-received frame) instead of every effect re-implementing its own half-baked mirror. The test: an effect's `tick()` should only *write colors into the logical buffer for its own coordinates*; if it's reading or rewriting positions to move/fold/duplicate the image, that behaviour belongs in a modifier. (This is the light-domain face of *Complexity lives in core; domain modules stay simple* — geometry transforms are the modifier's job, shared once, not duplicated into every effect.)
 
 ## MoonLive: the live-script engine
 
@@ -448,7 +454,7 @@ A modifier is a coordinate transform, applied in one of two ways (the fold contr
 
 ## Mapping and blending
 
-The blend+map step walks each layer in turn: reads each logical light, uses that layer's LUT to find the physical position(s), blends the colour into the physical output buffer. This is where logical space meets physical space.
+The blend+map step walks each layer in turn: reads each logical light, uses that layer's LUT to find the physical position(s), blends the color into the physical output buffer. This is where logical space meets physical space.
 
 Each mapping LUT is a flat, contiguous lookup table allocated outside the hot path. It is built in `Layer::prepare()` and rebuilt whenever a Layout or Modifier control changes (the controls' `affectsPrepare` returns true) or a Modifier/Layout child is added/removed/replaced/moved; both triggers flow through the same core mechanism, see [§ Event triggering between modules](#event-triggering-between-modules).
 
@@ -560,7 +566,7 @@ The UI is a handful of hand-maintained files: `index.html`, `app.js`, `style.css
 The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific effects, layouts, or drivers. It queries the system for the current MoonModule tree (layers, effects, modifiers, layouts, drivers, each with their controls) and renders generically:
 
 - Each MoonModule shows as a card with its name and declared controls.
-- Controls are auto-rendered by type (slider, toggle, colour picker, text input, dropdown).
+- Controls are auto-rendered by type (slider, toggle, color picker, text input, dropdown).
 - Modules can be switched (change which effect a layer uses) and linked (assign a layout to a layer).
 
 Adding a new MoonModule with controls needs **zero changes** to the UI files. This extends to the tree-mutation affordances: which modules accept children (and of what role) comes from each type's `acceptsChildRoles()`, and whether a module can be deleted/replaced comes from its `userEditable()`: both declared on the C++ side and reported in `/api/types` + `/api/state`. The UI hardcodes no list of "which types are containers" or "which roles are editable"; a new container type or a fixed child is a one-line C++ override.

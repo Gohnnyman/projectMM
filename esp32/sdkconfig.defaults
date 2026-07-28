@@ -7,8 +7,10 @@
 # KB free RAM, so the extra 4 KB is cheap, and the S3/P4 have even more.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
-# CPU at the chip's rated maximum (IDF defaults to 160 MHz) — the render loop and the ring ISR's
-# encode deadline are compute-bound, and the P4 ignores this symbol (its own 360 MHz default applies).
+# CPU at 240 MHz (IDF defaults to 160) — the render loop and the ring ISR's encode deadline are
+# compute-bound. This is the rated maximum for the classic/S3 chips; a target whose silicon goes
+# higher overrides it in its own fragment (the S31 at 320), and the P4 ignores this symbol
+# entirely (its own 360 MHz default applies).
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # GDMA control functions in IRAM: the streaming ring's EOF ISR is registered cache-safe (it keeps

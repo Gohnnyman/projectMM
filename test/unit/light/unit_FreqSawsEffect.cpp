@@ -49,7 +49,7 @@ TEST_CASE("FreqSawsEffect keepOn draws bands even with no audio") {
     mm::Layer layer;
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
-    mm::Palettes::setActive(0);   // colourful palette so a drawn pixel is non-black (order-independent)
+    mm::Palettes::setActive(0);   // colorful palette so a drawn pixel is non-black (order-independent)
 
     mm::FreqSawsEffect saws;
     saws.keepOn = true;           // draw a band whose speed has decayed to zero

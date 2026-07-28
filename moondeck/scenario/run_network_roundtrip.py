@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Measure desktop→device→desktop round-trip latency per protocol on the checked boards.
 
-The simplest honest latency probe: the desktop sends one solid-colour frame to a
-device, then times how long until that colour shows up in the device's preview
+The simplest honest latency probe: the desktop sends one solid-color frame to a
+device, then times how long until that color shows up in the device's preview
 WebSocket stream. The path is desktop → device's NetworkReceiveEffect (writes the
 layer buffer) → PreviewDriver (broadcasts the buffer over /ws) → desktop. It sweeps
 all three protocols — ArtNet, E1.31, DDP — per device (the receiver autodetects
@@ -19,7 +19,7 @@ useful signal for the hiccups/latency symptom.
 
 Extend later (hooks left intentionally simple): per-frame sequence matching,
 the device→device forwarding chain, jitter/drop histograms. This version sweeps
-the three protocols with one probe colour, N repeats each.
+the three protocols with one probe color, N repeats each.
 
 Exit codes follow the other live scripts: 0 = measured ok, 1 = no frame came
 back (a real failure), 2 = environment problem (no device, moondeck.json
@@ -43,7 +43,7 @@ from _net_probe import (  # shared lights-over-UDP surface  # noqa: E402
 import socket  # noqa: E402
 import _preview_ws  # noqa: E402
 
-# A colour the idle effects are unlikely to paint by themselves, so a preview
+# A color the idle effects are unlikely to paint by themselves, so a preview
 # match means OUR frame arrived, not a coincidence. Distinct on all 3 channels.
 PROBE_RGB = (0x11, 0x22, 0x33)
 
@@ -72,7 +72,7 @@ def seed_once(ip: str, rgb, universes: int, seq: int, protocol: str = "ArtNet"):
 
 
 def measure_roundtrip(host: str, repeats: int, timeout_s: float, protocol: str):
-    """Send the probe colour `repeats` times over `protocol`; time
+    """Send the probe color `repeats` times over `protocol`; time
     send→preview-arrival each time. Returns the list of latencies in
     milliseconds (one per successful repeat)."""
     ip = host.partition(":")[0]
@@ -106,7 +106,7 @@ def measure_roundtrip(host: str, repeats: int, timeout_s: float, protocol: str):
         else:
             print(f"    repeat {i + 1}/{repeats}: NO FRAME (best {best_pct:.0f}% "
                   f"of {points} pts; {detail})", flush=True)
-        # Clear the probe colour between repeats so the next match is a fresh
+        # Clear the probe color between repeats so the next match is a fresh
         # arrival, not the held last frame. Send black on the same protocol;
         # don't time it.
         seed_once(ip, (0, 0, 0), universes, seq=(i + 128) & 0xFF, protocol=protocol)
@@ -204,7 +204,7 @@ def main() -> int:
                                    "every device checked in MoonDeck's Live tab")
     ap.add_argument("--repeats", type=int, default=10, help="probes per protocol per device")
     ap.add_argument("--timeout", type=float, default=5.0,
-                    help="seconds to wait for the probe colour per repeat")
+                    help="seconds to wait for the probe color per repeat")
     args = ap.parse_args()
 
     if args.host:

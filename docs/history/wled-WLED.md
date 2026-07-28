@@ -27,7 +27,7 @@ Post-16.0 stabilisation month: no new version tag (v16.0.0 shipped 2026-05-03 of
 
 **Watching**
 - Discussion opened on switching from plain gamma to an sRGB transfer function for better low-brightness accuracy (#5707), and on improving the Nodes/Instances page (#5711) — no shipped outcome yet.
-- Several v16.0 field reports still open: multi-controller sync losing colour (#5705), UDP sync failing in AP mode (#5709), and OTA-update trouble on some boards (#5682, #5702).
+- Several v16.0 field reports still open: multi-controller sync losing color (#5705), UDP sync failing in AP mode (#5709), and OTA-update trouble on some boards (#5682, #5702).
 
 _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`repos/wled/WLED/commits?sha=main`, first-line view; a few older-dated cherry-picks appear in-range and were excluded as non-June). Issues via `search/issues` for repo:wled/WLED created:2026-06-01..2026-06-30 (18 opened) and closed:2026-06-01..2026-06-30 (25 closed); only user-facing ones surfaced. No versioned release published in June (v16.0.0 was 2026-05-03), so no month split._
 
@@ -41,7 +41,7 @@ _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`re
 
 **Fixed / hardened**
 
-- Effects: restored palette wrap in `color_wheel()` (a regression since 0.15.x), Twinkle fixes, Dissolve "Complete" same-colour-as-background fix, gravity audio-reactive top-LED fix.
+- Effects: restored palette wrap in `color_wheel()` (a regression since 0.15.x), Twinkle fixes, Dissolve "Complete" same-color-as-background fix, gravity audio-reactive top-LED fix.
 - Audio-reactive auto-suspends in realtime modes (but stays on with "use main segment only").
 - DDP and all realtime protocols: relaxed-but-safer header acceptance + bounds checks; Improv/UDP parsing hardened; `/reset` auth clarified.
 - Auto-migration for legacy sunrise/sunset config; animated-staircase inverted-PIR support.
@@ -66,14 +66,14 @@ _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`re
 
 **New / effects**
 
-- **Full FastLED replacement** merged (#4615) — WLED's own colour/math instead of the FastLED dependency.
+- **Full FastLED replacement** merged (#4615) — WLED's own color/math instead of the FastLED dependency.
 - Many new user_fx effects: Spinning Wheel, Color Clouds, Lava Lamp, Magma, Ants, Morse Code, Comet (fire particle system), a slow >4-hour transition FX, Tetris line-clear flash.
 - Scrolling-text FX gains custom fonts + international UTF-8; stencil blending mode; ESP32-C3 audio-reactive (DSP FFT + integer math); more macro/timer slots; longer max playlist duration.
 - OTA update page restyled (auto-sets download URL from `info.repo`); clearer UI tool icons.
 
 **Fixed**
 
-- Segment-index misalignment; hostname/DNS cleanup; hue preservation in colour fade; array-bounds on short WS payloads; DDP rejects unsupported/non-display packets.
+- Segment-index misalignment; hostname/DNS cleanup; hue preservation in color fade; array-bounds on short WS payloads; DDP rejects unsupported/non-display packets.
 
 ## February 2026
 
@@ -84,7 +84,7 @@ _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`re
 - **Version scheme changed to Major.minor** (dropped the leading "0."), heading toward v16; bumped to 16.0.0-alpha.
 - New **Pin Info** page (used/available pins overview); UI settings readability improvements.
 - Improved bus handling — free choice of bus driver in any order, better memory calculations; gamma lower-limit removed (enables inverse gamma correction, applied to segment brightness too).
-- Extended CCT blending (exclusive blend, colour-jump fix); full WiFi scan with BSSID apply; new ESP32-S3 8MB QSPI build; experimental ESP32-C5/C6 in the node list.
+- Extended CCT blending (exclusive blend, color-jump fix); full WiFi scan with BSSID apply; new ESP32-S3 8MB QSPI build; experimental ESP32-C5/C6 in the node list.
 
 **Fixed**
 
@@ -96,7 +96,7 @@ _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`re
 
 **New**
 
-- **New custom-palettes editor** (#5010); WPA-Enterprise WiFi support; random per-LED colours via JSON API; option to save unmodified presets to autosave; PixelForge GIF image rotation.
+- **New custom-palettes editor** (#5010); WPA-Enterprise WiFi support; random per-LED colors via JSON API; option to save unmodified presets to autosave; PixelForge GIF image rotation.
 - Removed the MAX_LEDS_PER_BUS limit for virtual buses; new ESP32 node types; JSON validation + minify on file upload in the UI.
 
 **Fixed**
@@ -147,4 +147,4 @@ _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`re
 
 **Fixed**
 
-- Tri Fade FX; custom-palette colour picker; Colortwinkles; LED buffer-size calculation; UDP name-sync rework; crash debug output added.
+- Tri Fade FX; custom-palette color picker; Colortwinkles; LED buffer-size calculation; UDP name-sync rework; crash debug output added.

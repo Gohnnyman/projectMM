@@ -168,10 +168,10 @@ public:
     // per driver on DriverBase (defineCorrectionControls) — a GRB strip and an RGBW panel on
     // the same board each carry their own preset. The container owns only the GLOBAL brightness
     // above, which each driver's LUT multiplies with its local brightness.
-    /// The global active colour palette (index into `mm::palettes::kBuiltins`;
+    /// The global active color palette (index into `mm::palettes::kBuiltins`;
     /// `Rainbow`, `Party`, `Lava`, `Ocean`, …). Palette-driven effects read it via
-    /// `Palettes::active()` and colour their pixels through `colorFromPalette(index)`, so
-    /// changing this recolours every such effect live. The select index expands the chosen
+    /// `Palettes::active()` and color their pixels through `colorFromPalette(index)`, so
+    /// changing this recolors every such effect live. The select index expands the chosen
     /// gradient into the active 16-entry palette on `onControlChanged` (cheap, off the hot path).
     uint8_t palette = 0;
 
@@ -366,7 +366,7 @@ public:
         passBufferToDrivers();
     }
 
-    // First output light as RGB — the live colour of pixel 0, read from whichever buffer
+    // First output light as RGB — the live color of pixel 0, read from whichever buffer
     // tick() is currently driving (the composited outputBuffer_ when allocated, else the
     // first enabled layer's own buffer — the zero-copy single-layer path). The WLED shim
     // tints the app's device card with this. RGB is the buffer's logical channel order

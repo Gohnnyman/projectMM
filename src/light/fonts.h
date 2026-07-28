@@ -10,8 +10,7 @@
 // Prior art: the public raster-fonts set (https://github.com/idispatch/raster-fonts), the same
 // bitmap console fonts WLED/MoonLight ship. Carried as data; the blitter (draw::glyph/draw::text)
 // is ours. Two sizes: a compact 4x6 and a larger 6x8. More fonts are pure data to add later.
-namespace mm {
-namespace fonts {
+namespace mm::fonts {
 
 struct Font { const uint8_t* rows; uint8_t width; uint8_t height; };  // rows: 95*height bytes
 
@@ -221,5 +220,4 @@ static_assert(sizeof(kFont6x8_rows) == 95 * 8, "kFont6x8: 95 printable ASCII gly
 inline constexpr Font kAll[] = { kFont4x6, kFont6x8 };
 inline constexpr uint8_t kCount = sizeof(kAll) / sizeof(kAll[0]);
 
-}  // namespace fonts
-}  // namespace mm
+}  // namespace mm::fonts

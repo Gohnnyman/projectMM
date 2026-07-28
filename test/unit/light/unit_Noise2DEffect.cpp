@@ -22,7 +22,7 @@ TEST_CASE("Noise2DEffect writes a non-zero palette-mapped noise field") {
     layer.addChild(&noise);
 
     layer.applyState();
-    // Palettes::active() is a process-wide static any prior test can mutate; pin a colourful palette
+    // Palettes::active() is a process-wide static any prior test can mutate; pin a colorful palette
     // (Rainbow=0) so the non-black assertion is order-independent.
     mm::Palettes::setActive(0);
     layer.tick();
@@ -38,8 +38,8 @@ TEST_CASE("Noise2DEffect writes a non-zero palette-mapped noise field") {
     CHECK(hasNonZero);
 }
 
-// The field is spatial: distant pixels read different noise samples, so their colours differ.
-TEST_CASE("Noise2DEffect distant pixels carry different colours") {
+// The field is spatial: distant pixels read different noise samples, so their colors differ.
+TEST_CASE("Noise2DEffect distant pixels carry different colors") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;

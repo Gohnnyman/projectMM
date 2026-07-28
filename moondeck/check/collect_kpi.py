@@ -24,6 +24,12 @@ ESP32_DIR = ROOT / "esp32"
 sys.path.insert(0, str(ROOT / "moondeck"))
 from _moondeck_config import active_device_ips, raised_log_level, LOG_INFO  # noqa: E402
 
+# Same directory; imported by path so this needs no PYTHONPATH tweak (the pattern the
+# other cross-script imports here use).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import repo_health  # noqa: E402
+import check_lizard  # noqa: E402
+
 # Per-host desktop build dir (matches build_desktop.py / package_desktop.py).
 # We pick the directory belonging to the OS this script runs on so KPI
 # numbers reflect the binary the developer actually has on disk.
@@ -267,8 +273,19 @@ def _extract_esp32_tick(log, kpi):
         return "tick_us" in kpi
     return False
 
+# Whether a stale monitor.log may be refreshed by opening the serial port. On by default —
+# a live reading is the honest one for a commit message. The gate lists turn it off
+# (--no-live-capture): a capture costs ~80s and needs a bench board plugged in, which makes
+# the gate's cost unpredictable, and a gate people avoid running protects nothing.
+_LIVE_CAPTURE_ENABLED = True
+
+
 def _live_capture(log, seconds=15):
     """Capture ESP32 serial output to monitor.log for ~seconds. Returns True on success."""
+    if not _LIVE_CAPTURE_ENABLED:
+        print("  ESP32 KPI: live capture disabled (--no-live-capture); "
+              "using monitor.log if present")
+        return False
     import json
     cfg = ROOT / "moondeck" / "moondeck.json"
     if not cfg.exists():
@@ -332,27 +349,16 @@ def collect_code():
     kpi["specs"] = len(list((ROOT / "docs" / "moonmodules").rglob("*.md")))
     kpi["scenarios"] = len(list((ROOT / "test" / "scenarios").rglob("*.json")))
 
-    # Lizard
-    out, _ = run(
-        ["uv", "run", "--with", "lizard", "python3", "-m", "lizard",
-         "src/", "-l", "cpp", "-T", "nloc=60", "-T", "cyclomatic_complexity=10",
-         "-x", "src/ui/*"],
-        cwd=ROOT, timeout=30
-    )
-    warnings = []
-    in_warnings = False
-    for line in out.splitlines():
-        if "Warning" in line and "!!!!" in line:
-            in_warnings = True
-            continue
-        if in_warnings and "---" in line:
-            continue
-        if in_warnings and line.strip() and "NLOC" not in line and "Total" not in line and "====" not in line:
-            warnings.append(line.strip())
-        if in_warnings and "Total" in line:
-            in_warnings = False
+    # Lizard — the RAW count, deliberately ignoring whitelizard.txt. The gate
+    # (check_lizard.py) subtracts the baseline so it fails only on new violations; the KPI must
+    # not, or the trend flatlines at 0 and hides every future regression. Two different jobs on
+    # the same measurement: the gate asks "did we get worse since the baseline", the KPI asks
+    # "how much complexity is there". Shared parsing so the two can never disagree on the count.
+    funcs = check_lizard.measure()
+    warnings = check_lizard.violations(funcs) if funcs else []
     kpi["lizard_warnings"] = len(warnings)
-    kpi["lizard_details"] = warnings
+    kpi["lizard_details"] = [f"{v['ccn']} CCN, {v['nloc']} NLOC: {v['name']} ({v['file']})"
+                             for v in warnings]
 
     return kpi
 
@@ -434,7 +440,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--commit", action="store_true",
                         help="Output in commit message format (one-liner + details)")
+    parser.add_argument("--no-live-capture", action="store_true",
+                        help="Never open the serial port for a fresh ESP32 tick reading; "
+                             "use esp32/monitor.log only, however old it is. Turns an "
+                             "~80s step into a few seconds, at the cost of the ESP32 "
+                             "tick/FPS numbers when no recent log exists. For the gate "
+                             "lists, where predictable cost matters more than a live "
+                             "reading; omit it when composing a commit message.")
     args = parser.parse_args()
+    if args.no_live_capture:
+        global _LIVE_CAPTURE_ENABLED
+        _LIVE_CAPTURE_ENABLED = False
 
     desktop = collect_desktop()
     esp32 = collect_esp32()
@@ -467,6 +483,20 @@ def main():
     # Event 1 gate 7 — KPI collection).
     # Only --commit mode aborts on a breach; a plain interactive report just
     # warns, so viewing KPIs on an unlucky slow sample does not exit non-zero.
+    # The repo-health snapshot rides along with the KPI run: it needs the tick/FPS this
+    # collector just measured, and running at the same moment keeps the two views of
+    # "how is the project doing" consistent. Written only in --commit mode, so an
+    # interactive report never rewrites a committed file behind the reader's back.
+    if args.commit:
+        print()
+        perf = {}
+        if desktop.get("tick_us"):
+            perf["desktop"] = {"tick_us": desktop["tick_us"][0],
+                               "fps": desktop.get("fps", [None])[0]}
+        if esp32.get("tick_us"):
+            perf["esp32"] = {"tick_us": esp32["tick_us"], "fps": esp32.get("fps")}
+        repo_health.write(perf)
+
     esp32_tick = esp32.get("tick_us")
     lights = desktop.get("lights")
     if esp32_tick is not None and lights:

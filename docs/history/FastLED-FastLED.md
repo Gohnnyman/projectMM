@@ -43,7 +43,7 @@ _Auditability: 481 commits with author-date in 2026-06-01..2026-06-30 on `master
 **New**
 
 - New **Channels API** for managing multiple LED drivers at once — a `fl::Bus` type, `FastLED.add<Bus>(...)`, `fl::enableAllDrivers()`, and `FastLED.setExclusiveDriver(...)`, with a diagnostic that warns when a strip's driver doesn't match its bus. (The month's biggest effort.)
-- **RGBW / RGBWW colour**: proper colorimetric RGB→RGBW conversion with a lookup table, colour-temperature (CCT) control, and an RGB+CCT mode.
+- **RGBW / RGBWW color**: proper colorimetric RGB→RGBW conversion with a lookup table, color-temperature (CCT) control, and an RGB+CCT mode.
 - ESP32-P4 gains a SIMD (PIE) acceleration backend for faster pixel processing.
 
 **Faster**
@@ -59,7 +59,7 @@ _Auditability: 481 commits with author-date in 2026-06-01..2026-06-30 on `master
 
 **Fixed**
 
-- RGBW driver no longer kept a dangling pointer to its colour profile (could crash or corrupt output).
+- RGBW driver no longer kept a dangling pointer to its color profile (could crash or corrupt output).
 - AVR boards no longer try to compile RGBWW examples that overflow their memory.
 
 ## April 2026
@@ -132,7 +132,7 @@ _Auditability: 481 commits with author-date in 2026-06-01..2026-06-30 on `master
 - **RP2040 automatic parallel output** using the standard FastLED API.
 - Per-platform ESP32 clockless controllers + configurable ESP32/ESP8266 timing; nanosecond timing support for ARM K66/KL26; SPI chipset controllers split into their own headers.
 - Fallback **OTA** implementation for ESP-IDF < 4.0.
-- PARLIO strategic buffer-breaking at colour boundaries.
+- PARLIO strategic buffer-breaking at color boundaries.
 - 8-bit math optimised for ATtiny; math template/float overloads; a beat-detection `AudioProcessor` facade.
 - New "advanced effects" and "LED cookbook" documentation chapters.
 

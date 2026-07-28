@@ -10,6 +10,7 @@
 
 #include "doctest.h"
 #include "light/drivers/Drivers.h"
+#include "light/drivers/ParallelLedDriver.h"
 #include "light/layers/Layers.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
@@ -58,7 +59,7 @@ public:
             release.wait_for(lk, 5s, [this] { return released; });
         }
         touched = 0xABCD;                    // ASan traps here if core 0 freed us mid-tick
-        std::lock_guard<std::mutex> lk(m);
+        std::scoped_lock<std::mutex> lk(m);
         inTick = false;
         exited.notify_all();
     }
@@ -69,10 +70,10 @@ public:
         return entered.wait_for(lk, 5s, [this] { return inTick; });
     }
     void letGo() {
-        { std::lock_guard<std::mutex> lk(m); released = true; }
+        { std::scoped_lock<std::mutex> lk(m); released = true; }
         release.notify_all();
     }
-    bool isInTick() { std::lock_guard<std::mutex> lk(m); return inTick; }
+    bool isInTick() { std::scoped_lock<std::mutex> lk(m); return inTick; }
 
     std::mutex m;
     std::condition_variable entered, release, exited;
@@ -191,6 +192,45 @@ TEST_CASE("render-split: multicore off → drivers tick inline on the render cor
     CHECK_FALSE(r.drivers.renderSplitActive());   // no split, no worker task
     for (int i = 0; i < 3; i++) r.drivers.tick();
     CHECK(d.ticks.load() == 3);               // ticked inline, once per frame, on this thread
+    r.drivers.release();
+}
+
+// REGRESSION (v3.0.0 "UI refresh freezes the LEDs"): GET /api/types (which the web UI fetches on every
+// page load) builds a throwaway probe of each registered type to read its default control values. A
+// ParallelLedDriver probe runs selectDefaultPeripheral → swapPeripheral in its constructor/defineControls,
+// and swapPeripheral fired MoonModule::notifyQuiesceRender() unconditionally. That global hook resolves to
+// the LIVE Drivers via the static ActiveInstance seat (Drivers::active()) — so a DETACHED probe (never in
+// the tree) tore down the running split, and nothing re-engaged it. On a fast board it silently dropped to
+// single-core; on a slower one the LEDs visibly froze until multicore was toggled. The fix: swapPeripheral
+// notifies only when it is about to free a real backend (`peripheral_` non-null). A probe's first swap
+// selects the default peripheral from a null backend, so it never notifies — the live worker is untouched.
+// This pins that a detached ParallelLedDriver swapping its peripheral leaves a live split untouched.
+TEST_CASE("render-split: a detached ParallelLedDriver's peripheral swap does not disturb the live split") {
+    // RAII: a doctest REQUIRE failure throws, so a bare set-then-reset would leak the global hook
+    // into later tests; the guard resets it on every exit path.
+    struct HookGuard {
+        HookGuard()  { mm::MoonModule::setQuiesceRenderHook([] { if (auto* d = mm::Drivers::active()) d->quiesceRenderSplit(); }); }
+        ~HookGuard() { mm::MoonModule::setQuiesceRenderHook(nullptr); }
+    } hookGuard;
+
+    Rig r(64);
+    MockDriver d;
+    r.drivers.addChild(&d);
+    r.drivers.setup();
+    r.drivers.prepare();
+    REQUIRE(r.drivers.renderSplitActive());   // the LIVE split is engaged
+
+    // A DETACHED ParallelLedDriver (never addChild'd — no parent), exactly like the /api/types probe.
+    // Its construction + defineControls run selectDefaultPeripheral → swapPeripheral, which must NOT reach
+    // the live render worker through the global hook.
+    {
+        mm::ParallelLedDriver probe;
+        probe.defineDriverControls();   // triggers the default-peripheral selection + swap
+    }   // probe destructs — the moment /api/types tears its throwaway down
+
+    // THE ASSERTION: the detached probe's swap must not have touched the live split.
+    CHECK(r.drivers.renderSplitActive());     // fails on the v3.0.0 bug (probe fired the hook → live teardown)
+
     r.drivers.release();
 }
 

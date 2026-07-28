@@ -419,7 +419,7 @@ TEST_CASE("PinsModule: a safe pin carries no severity field") {
 
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"gpio\":18") != std::string::npos);
-    CHECK(rows.find("\"severity\"") == std::string::npos);   // safe → no field, no colour
+    CHECK(rows.find("\"severity\"") == std::string::npos);   // safe → no field, no color
 }
 
 // --- live state (increment #4) ----------------------------------------------------------------

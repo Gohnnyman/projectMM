@@ -1,7 +1,7 @@
 // @module Drivers
 
 // Pins Drivers::firstOutputRgb — the domain-neutral seam the WLED-compatibility shim uses to
-// tint the app's device card with the live first-LED colour. It reads pixel 0 of whichever
+// tint the app's device card with the live first-LED color. It reads pixel 0 of whichever
 // buffer Drivers is driving (the single-layer fast path here: the layer's own buffer).
 
 #include "doctest.h"
