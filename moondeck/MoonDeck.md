@@ -243,11 +243,9 @@ finding grouped by file. No report file to open: a run this slow should answer o
 and the old `build/clang-tidy-report.md` was gitignored anyway, so it existed only to be read
 once.
 
-**Verify a zero before believing it.** A tool that analysed nothing also reports zero, and this
-one has four documented ways to fail silently (the reasons are in the script). The control is a
-check you know must fire: `--check readability-magic-numbers` returns thousands. If that returns
-zero too, the run is broken, not the tree. The script also refuses to report when more than ten
-files fail to compile, because "most files errored" is a broken run and not a result.
+**Verify a zero before believing it** ([testing.md](../docs/testing.md#verify-a-zero-before-believing-it)
+covers why and lists the known silent-failure modes). This script's own guard: it refuses to
+report when more than ten files fail to compile.
 
 ### check_clang_query
 
@@ -332,7 +330,7 @@ uv run moondeck/check/check_nonblocking.py --module AudioService
 
 `MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` ([platform.h](../src/platform/platform.h)),
 and Clang 20+ verifies under `-Wfunction-effects` that nothing they reach allocates or blocks —
-**transitively**, through the whole call graph. A regex over the tick body — the shape this replaced — is blind to what its callees do.
+**transitively**, through the whole call graph ([coding-standards.md](../docs/coding-standards.md#tests) owns the rule).
 
 The attribute is inherited by overrides, so three annotations cover every module's tick. It also
 sits in `tickChildren`'s **member-pointer type** — without that, the indirect call through `fn`

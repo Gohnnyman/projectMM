@@ -98,16 +98,13 @@
 #   clang-diagnostic-function-effects — the hot-path check, owned by check_nonblocking.py
 #     and the clang-hotpath card, which splits findings by tick tier and marks what is NEW
 #     against docs/metrics/hotpath-baseline.txt. Leaving it on here double-reports the same
-#     165 findings with none of that context, and buries clang-tidy's own 47 under them.
+#     hot-path findings with none of that context, and buries clang-tidy's own under them.
 #
 # Everything else disabled below is a style opinion we do not hold; enabling any of them
 # would gate a rewrite rather than a fix.
 #
-# NOT A GATE, BY DESIGN. `WarningsAsErrors` stays empty: this is a report, and other tools or
-# scripts decide what to do with what it finds. Turning findings into build errors would fail
-# every build on the ones that remain, and a gate nobody can satisfy gets disabled rather than
-# obeyed — it would also push people to NOLINT a finding under time pressure, which is the
-# opposite of what a report is for.
+# NOT A GATE, BY DESIGN. `WarningsAsErrors` stays empty — the reasoning lives once, in
+# docs/testing.md § Static analysis, and applies to every analyser here.
 ---
 Checks: >-
   *,

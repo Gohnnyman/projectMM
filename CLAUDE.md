@@ -63,6 +63,8 @@ Git only with the PO in the loop: staging, committing, and pushing happen only w
 
 On "run pre-commit": `uv run moondeck/event/precommit.py`. It runs every gate whose trigger the change matches and reports PASS / FAIL / SKIP / MANUAL. Then wait for an explicit "commit now".
 
+**"commit now" applies to the diff the PO just reviewed, and any later edit cancels it.** The PO reviews every line before committing (§ Roles), so the go-ahead is scoped to the files as they stood when it was given. Change one afterwards — a review finding, a CI fix, a doc touch-up — and the order is void: say what changed and wait for a fresh "commit now". This holds however small the change and however clearly an earlier instruction seems to cover it ("we commit in one go" says how *many* commits, not *when*).
+
 Commit message: title ≤ 72 characters, imperative. Then a 1–3 sentence end-user TL;DR (no file lists). Then the performance one-liner, measured for every supported target by running `collect_kpi.py --commit` with a board attached. Then change sections as bullets: **Core**, **Light domain**, **UI**, **Scripts/MoonDeck**, **Tests**, **Docs/CI**, **Reviews** (🐇 external / 👾 Reviewer, one bullet per finding: flagged → done/accepted/deferred + why). Core and Light domain are the preferred default categories (a core-module test → Core; a script fix touching a light driver → Light domain). No hard wraps inside a part. Full performance block at the bottom.
 
 **Reviewer at commit-time:** run the Reviewer on the staged diff when the commit is large (roughly ten files or more across areas) or on PO request — start it first so the other checks run in parallel; findings fixed or accepted-with-reason before "commit now".

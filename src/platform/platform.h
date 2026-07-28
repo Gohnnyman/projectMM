@@ -8,7 +8,7 @@
 // The render path must not allocate or block (architecture.md § Hot path discipline). Clang 20+
 // checks that TRANSITIVELY under -Wfunction-effects: the attribute is inherited by overrides, so
 // marking the three tick methods here covers every module's tick and everything it calls, which a
-// regex over source text (check_hotpath.py) can never do.
+// regex over source text can never do — it sees a tick body, not what its callees reach.
 //
 // On GCC it expands to `noexcept` alone — that toolchain has neither the attribute nor the warning
 // (so the effect check is desktop-only), but the exception contract still holds. It builds with

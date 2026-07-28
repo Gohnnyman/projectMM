@@ -4,7 +4,7 @@
 `MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` (platform.h). Clang 20+ then verifies
 under `-Wfunction-effects` that nothing they reach allocates or blocks — TRANSITIVELY, through
 the whole call graph — the half a regex over the tick body cannot see, being blind to what its
-callees do. (It replaced exactly such a lint, check_hotpath.py.)
+callees do.
 
 Reports unique SITES. A header included by N translation units yields N copies of the same
 warning, so a raw build prints ~1350 lines for ~175 real findings; deduplicating on

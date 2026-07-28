@@ -33,6 +33,10 @@ public:
         // layers — avoids allocating depth× more heap than needed. resize() reallocs (zero-filled)
         // only when the byte count changes, frees on 0, and keeps dynamicBytes current.
         trail_.resize(static_cast<size_t>(width()) * height() * channelsPerLight());
+        // `trail_` IS the degenerate-grid gate on this path. Layer::tick's gate covers tick()
+        // only, and prepare() runs outside it — so a zero grid is stopped here by resize(0)
+        // freeing the buffer, not by that gate. Without this, initParticles seeds every
+        // particle from `(rand8() * w) >> 4` with w == 0.
         if (trail_) initParticles();
     }
 

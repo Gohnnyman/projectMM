@@ -53,14 +53,15 @@ else()
 
     # Hot-path discipline, enforced by the compiler. MM_NONBLOCKING marks tick/tick20ms/tick1s
     # (platform.h); -Wfunction-effects then checks TRANSITIVELY that nothing they reach
-    # allocates or blocks — which check_hotpath.py's regex cannot do, since it only sees the
-    # text of the tick body and not its callees. Clang 20+ only; the flag does not exist on
-    # GCC, so the ESP32 build keeps check_hotpath.py for src/platform/esp32/.
+    # allocates or blocks, through the whole call graph. Clang 20+ only; the flag does not
+    # exist on GCC, so the ESP32 build gets no hot-path check — src/platform/esp32/ is
+    # analysed only where the desktop build reaches it (docs/testing.md § Static analysis).
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 20)
-        # -Wno-error while the findings are triaged: they are real (status formatting and
-        # the audio sync path on tick), but each needs a judgement — fix, accept with a
-        # scoped reason, or annotate the callee — and a red build blocks every other
-        # gate meanwhile. Drop the -Wno-error once check_hotpath reports zero.
+        # -Wno-error is PERMANENT, not a stepping stone: this is a report, not a gate. The
+        # findings are real and frozen in docs/metrics/hotpath-baseline.txt as architecture
+        # work; failing the build on them would block every other gate, and a new one may be
+        # legitimate (a driver that must wait on hardware). The clang-hotpath card reports
+        # what is NEW; a human judges it.
         add_compile_options(-Wfunction-effects -Wno-error=function-effects)
     endif()
 endif()

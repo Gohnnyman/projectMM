@@ -1357,7 +1357,7 @@ void netSetStaticIPv4(NetIface iface, const uint8_t ip[4], const uint8_t gw[4],
         // Mark connected only if the link is actually up — else a static apply racing a cable pull
         // would leave ethConnected() true on a dead link (the state machine would sit in ConnectedEth
         // instead of cascading). On a genuine link-up the CONNECTED handler re-applies + sets it.
-        if (ethLinkUp_) ethConnected_.store(true, std::memory_order_relaxed);
+        if (ethLinkUp_.load(std::memory_order_relaxed)) ethConnected_.store(true, std::memory_order_relaxed);
     }
 #endif
 #ifndef MM_NO_WIFI

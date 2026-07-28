@@ -448,9 +448,8 @@ These surfaced late for an instructive reason: the report parser's check-name pa
 was silently dropped** the moment the ratchet was switched on. Fixed; recorded here because it is
 the sixth silent-zero this tooling has produced, and each looked like a clean tree.
 
-`WarningsAsErrors` stays empty — clang-tidy is a report, not a gate (the same rule the hot-path
-check follows). A finding is fixed where it is real, or stays visible with its reason; it does not
-become a build error, which would only invite a `NOLINT` under time pressure.
+`WarningsAsErrors` stays empty: clang-tidy reports, it does not gate
+([testing.md § Static analysis](../testing.md#static-analysis)).
 
 
 ### Heap-allocate the `registerType<T>` boot probe (lift a per-module lesson into core)
