@@ -31,8 +31,13 @@ namespace {
 // This double is a stack local in every test, never owned polymorphically — and it cannot copy
 // the base's protected-destructor trick, because that would forbid the stack construction the
 // tests rely on. Scoped to this one type.
+// #ifndef _MSC_VER: `#pragma GCC` is an unknown pragma to MSVC (C4068), and the Windows build
+// runs /WX, so an unguarded one fails it. MSVC has no -Wnon-virtual-dtor equivalent to silence,
+// so excluding it there is complete, not a workaround. Clang understands `#pragma GCC`.
+#ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+#endif
 struct CaptureBroadcaster : mm::BinaryBroadcaster {
     int coordMsgs = 0, frameMsgs = 0;
     std::vector<uint8_t> lastCoord, lastFrame;
@@ -103,7 +108,9 @@ private:
     mutable bool active_ = false;     // a buffered send is in flight
     mutable int remaining_ = 0;       // bufferedSendIdle polls left before it goes idle
 };
+#ifndef _MSC_VER
 #pragma GCC diagnostic pop
+#endif
 
 // Wire PreviewDriver under Drivers, over a Layer + single layout, with a
 // CaptureBroadcaster — the full real path (sparse driver buffer + layout coords).

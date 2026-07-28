@@ -56,7 +56,12 @@ else()
     # allocates or blocks, through the whole call graph. Clang 20+ only; the flag does not
     # exist on GCC, so the ESP32 build gets no hot-path check — src/platform/esp32/ is
     # analysed only where the desktop build reaches it (docs/testing.md § Static analysis).
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 20)
+    # Probe for the flag instead of inferring it from a version: AppleClang reports its own
+    # version line (the CI macos-14 runner reads >= 20 while predating the warning), so a version
+    # comparison enables -Wfunction-effects on toolchains that reject it — and it is -Werror.
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag(-Wfunction-effects MM_HAS_WFUNCTION_EFFECTS)
+    if(MM_HAS_WFUNCTION_EFFECTS)
         # -Wno-error is PERMANENT, not a stepping stone: this is a report, not a gate. The
         # findings are real and frozen in docs/metrics/hotpath-baseline.txt as architecture
         # work; failing the build on them would block every other gate, and a new one may be

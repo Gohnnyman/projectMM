@@ -26,6 +26,11 @@ Main is always releasable: what's on main ships as the latest *pre-release*; tag
 
 ### Branch
 
+**The product owner creates every branch — never the agent.** Branching is a git operation, and
+git is PO-controlled (§ Roles): the agent works on whatever branch it is given, and asks when a
+change does not belong there. This holds even when a branch seems obviously right (a one-line
+fix, keeping main clean) — creating one silently moves work somewhere the PO is not looking.
+
 1. **Pick.** One module/effect/driver/capability — the product owner picks what to build next.
 2. **Spec.** Specs before code: the module spec and the UI spec sufficient to implement from (a draft may sit in the backlog until it ships); when in doubt, ask.
 3. **Plan.** Plan mode before every feature; save the approved plan to `docs/history/plans/` as `Plan-YYYYMMDD - <title>.md` — a temporary document: it ends up as the PR description and the file is deleted once the plan is realized; the merged PR is the design record. For a restructure ("make it simpler/cleaner"): enumerate 2–4 end states, name what each gains and loses, pick the leanest that solves the actual problem; propose as a question, implement only what's picked; surface follow-ups before starting so it's one coherent refactor.

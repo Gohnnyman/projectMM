@@ -17,7 +17,10 @@
 // tick method — modules, effects, and the LED drivers — compiles on desktop. src/platform/esp32/
 // has no tick methods at all; it is free functions the tick path calls INTO, and those are checked
 // through their call sites.
-#if defined(__clang__) && __clang_major__ >= 20
+// Feature-tested, not version-inferred: Apple Clang carries its own version line, so a
+// `__clang_major__ >= 20` check reports true on toolchains that predate the attribute — the CI
+// macos-14 runner is exactly that case. __has_cpp_attribute asks the compiler directly.
+#if defined(__clang__) && defined(__has_cpp_attribute) && __has_cpp_attribute(clang::nonblocking)
   // noexcept is part of the contract, not decoration: clang warns
   // (-Wperf-constraint-implies-noexcept) if a nonblocking function can throw, because
   // unwinding allocates. Folded in here so the two never drift apart.
