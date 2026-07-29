@@ -9,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>   // HostBus frame buffers — the memory-backed parallel bus
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -1219,21 +1220,44 @@ void TcpServer::close() {
 }
 
 // ---------------------------------------------------------------------------
-// RMT WS2812 — no-op stubs. Desktop has no RMT peripheral; the driver guards
-// every call with `if constexpr (platform::rmtTxChannels == 0)` (0 here), so
-// these exist only to satisfy the linker and are never reached at runtime.
+// RMT WS2812 on the host: accepted and counted, not refused.
+//
+// Same rule as the parallel buses above (architecture.md § Platform abstraction). Refusing here
+// made RmtLedDriver inert off device, so nothing in it could be tested on a host.
+//
+// RMT is symbol-based rather than buffer-based, so there is nothing to hand back: the driver owns
+// the symbol array and this seam only has to accept it. The resolution is echoed so the driver's
+// timing arithmetic (which divides by it) works on real numbers instead of zero.
 // ---------------------------------------------------------------------------
-bool rmtWs2812Init(RmtWs2812Handle& /*h*/, uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
-                   bool /*invert*/) {
-    return false;
+namespace {
+struct HostRmt { uint32_t resolutionHz = 0; };
+HostRmt* hostRmt(void*& impl) {
+    if (!impl) impl = new HostRmt();
+    return static_cast<HostRmt*>(impl);
 }
-uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) MM_NONBLOCKING { return 0; }
-bool rmtWs2812Transmit(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
-                       size_t /*symbolCount*/) {
-    return false;
+}  // namespace
+
+bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t /*gpio*/, uint32_t resolutionHz,
+                   bool /*invert*/) {
+    // A zero resolution would make the driver divide by zero when it converts nanoseconds to
+    // ticks — refuse it here rather than hand back a channel that cannot be used.
+    if (resolutionHz == 0) return false;
+    hostRmt(h.impl)->resolutionHz = resolutionHz;
+    return true;
+}
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) MM_NONBLOCKING {
+    return h.impl ? static_cast<HostRmt*>(h.impl)->resolutionHz : 0;
+}
+bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols,
+                       size_t symbolCount) {
+    if (!h.impl || !symbols || symbolCount == 0) return false;
+    return true;
 }
 void rmtWs2812Wait(RmtWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
-void rmtWs2812Deinit(RmtWs2812Handle& /*h*/) {}
+void rmtWs2812Deinit(RmtWs2812Handle& h) {
+    delete static_cast<HostRmt*>(h.impl);
+    h.impl = nullptr;
+}
 size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
                           uint32_t* /*outSymbols*/, size_t /*maxSymbols*/,
                           uint32_t /*timeoutMs*/) {
@@ -1253,22 +1277,80 @@ RmtLoopbackResult ws2812LoopbackRide(uint16_t /*rxGpio*/, const uint8_t* /*sent*
 }
 
 // ---------------------------------------------------------------------------
-// LCD_CAM WS2812 — no-op stubs. Desktop has no i80 peripheral; the LCD LED
-// driver guards every call with `if constexpr (platform::lcdLanes == 0)`
-// (0 here), so these exist only to satisfy the linker.
+// Parallel-WS2812 buses on desktop: REAL MEMORY, no silicon.
+//
+// The repo's rule is that everything runs on the desktop build — the platform layer simply has
+// no hardware behind the call. These used to return false/nullptr, which made every parallel
+// backend report failure, so ParallelLedDriver's ~2500-line body never executed off-device: not
+// runnable, not unit-testable, and invisible to every AST-based check.
+//
+// So the bus is implemented against a heap buffer. `init` allocates and zeroes, `Buffer` hands
+// back writable memory, `Transmit` records the byte count, `Wait` returns immediately. Everything
+// ABOVE the seam is then the same code that runs on hardware — the driver encodes real WS2812 bit
+// patterns into a real buffer — and only the DMA hand-off is absent.
+//
+// What is deliberately NOT modelled: timing, wire protocol, pin state, and loopback capture.
+// Those need silicon, and faking them would make the driver's self-test lie about hardware it
+// never touched.
 // ---------------------------------------------------------------------------
-bool i80Ws2812Init(I80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
-                   uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
-                   size_t /*bufferBytes*/, bool /*wantSecondBuffer*/,
-                   uint8_t /*clockMultiplier*/) {
-    return false;
+namespace {
+
+/// One memory-backed parallel bus. Shared by the i80, MoonI80 and Parlio seams below — they are
+/// three DMA peripherals for the same job, and off-device the job is "hold a frame".
+struct HostBus {
+    std::vector<uint8_t> buf[2];
+    size_t capacity = 0;
+
+    bool init(size_t bytes, bool wantSecond) {
+        if (bytes == 0) return false;
+        capacity = bytes;
+        buf[0].assign(bytes, 0);
+        if (wantSecond) buf[1].assign(bytes, 0);
+        else            buf[1].clear();
+        return true;
+    }
+    uint8_t* buffer(uint8_t i) {
+        if (i > 1 || buf[i].empty()) return nullptr;
+        return buf[i].data();
+    }
+    bool transmit(uint8_t i, size_t bytes) {
+        if (i > 1 || buf[i].empty() || bytes > capacity) return false;
+        return true;
+    }
+};
+
+HostBus* hostBus(void*& impl) {
+    if (!impl) impl = new HostBus();
+    return static_cast<HostBus*>(impl);
 }
-uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
-size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& /*h*/) { return 0; }
-bool i80Ws2812Transmit(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+void freeHostBus(void*& impl) {
+    delete static_cast<HostBus*>(impl);
+    impl = nullptr;
+}
+
+}  // namespace
+
+bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* /*dataPins*/,
+                   uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                   size_t bufferBytes, bool wantSecondBuffer,
+                   uint8_t /*clockMultiplier*/) {
+    if (bufferBytes == 0) return false;   // refuse before allocating, as the RMT seam does
+    return hostBus(h.impl)->init(bufferBytes, wantSecondBuffer);
+}
+uint8_t* i80Ws2812Buffer(const I80Ws2812Handle& h, uint8_t buffer) {
+    return h.impl ? static_cast<HostBus*>(h.impl)->buffer(buffer) : nullptr;
+}
+size_t i80Ws2812BufferCapacity(const I80Ws2812Handle& h) {
+    return h.impl ? static_cast<HostBus*>(h.impl)->capacity : 0;
+}
+bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes) {
+    return h.impl && static_cast<HostBus*>(h.impl)->transmit(buffer, bytes);
+}
+// True, not false: the driver reads a false as "the previous frame never completed" and holds
+// the next one back, which would stall the render path on a bus that is never busy.
 bool i80Ws2812Wait(I80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
 uint32_t i80Ws2812LastTransmitUs(const I80Ws2812Handle& /*h*/) { return 0; }
-void i80Ws2812Deinit(I80Ws2812Handle& /*h*/) {}
+void i80Ws2812Deinit(I80Ws2812Handle& h) { freeHostBus(h.impl); }
 RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                     uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
                                     uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
@@ -1277,14 +1359,15 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
     return {};   // not supported off the S3
 }
 
-// MoonI80 (our own LCD_CAM DMA driver, ADR-0014) — no-op stubs, same as the esp_lcd-backed family
-// above. Desktop has no LCD_CAM, so the driver instantiates (lanesAvailable() == 0) and idles, which
-// is what lets its config/validation half be tested on the host.
-bool moonI80Ws2812Init(MoonI80Ws2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+// MoonI80 (our own LCD_CAM DMA driver, ADR-0014) — the same memory-backed bus as the esp_lcd
+// family above. The RING path stays inert: it is a GDMA construct with no host equivalent, so a
+// driver that would stream on device runs whole-frame here (busInitRing returns false and the
+// orchestrator falls back, exactly as its contract specifies).
+bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* /*dataPins*/,
                        uint8_t /*laneCount*/, uint16_t /*wrGpio*/,
-                       size_t /*bufferBytes*/, bool /*wantSecondBuffer*/,
+                       size_t bufferBytes, bool wantSecondBuffer,
                        uint8_t /*clockMultiplier*/) {
-    return false;
+    return hostBus(h.impl)->init(bufferBytes, wantSecondBuffer);
 }
 // Ring mode is a GDMA construct with no host equivalent — inert here, bench-verified on the S3, exactly
 // like the whole-frame path above. A driver that would pick the ring on device stays whole-frame on host.
@@ -1301,13 +1384,19 @@ void moonI80Ws2812PrimeRange(MoonI80Ws2812Handle& /*h*/, uint8_t /*bufLo*/, uint
 bool moonI80Ws2812ArmRing(MoonI80Ws2812Handle& /*h*/) { return false; }
 bool moonI80Ws2812IsRing(const MoonI80Ws2812Handle& /*h*/) { return false; }
 bool moonI80Ws2812InternalFits(size_t /*bytes*/) { return false; }
-uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
-size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& /*h*/) { return 0; }
-bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+uint8_t* moonI80Ws2812Buffer(const MoonI80Ws2812Handle& h, uint8_t buffer) {
+    return h.impl ? static_cast<HostBus*>(h.impl)->buffer(buffer) : nullptr;
+}
+size_t moonI80Ws2812BufferCapacity(const MoonI80Ws2812Handle& h) {
+    return h.impl ? static_cast<HostBus*>(h.impl)->capacity : 0;
+}
+bool moonI80Ws2812Transmit(MoonI80Ws2812Handle& h, uint8_t buffer, size_t bytes) {
+    return h.impl && static_cast<HostBus*>(h.impl)->transmit(buffer, bytes);
+}
 bool moonI80Ws2812Wait(MoonI80Ws2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
 uint32_t moonI80Ws2812LastTransmitUs(const MoonI80Ws2812Handle& /*h*/) { return 0; }
 MoonI80RingStats moonI80Ws2812RingStats(const MoonI80Ws2812Handle& /*h*/) { return {}; }
-void moonI80Ws2812Deinit(MoonI80Ws2812Handle& /*h*/) {}
+void moonI80Ws2812Deinit(MoonI80Ws2812Handle& h) { freeHostBus(h.impl); }
 RmtLoopbackResult moonI80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                         uint16_t /*wrGpio*/,
                                         uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
@@ -1323,19 +1412,25 @@ RmtLoopbackResult moonI80Ws2812LoopbackRide(uint16_t /*rxGpio*/, const uint8_t* 
     return {};   // not supported off LCD_CAM
 }
 
-// Parlio WS2812 — no-op stubs. Desktop has no Parlio peripheral; the driver
-// idles (parlioLanes == 0). Sizing/slicing is host-pinned by the driver tests.
-bool parlioWs2812Init(ParlioWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
-                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t /*bufferBytes*/,
-                      bool /*wantSecondBuffer*/) {
-    return false;
+// Parlio WS2812 — the same memory-backed bus. No Parlio silicon here, but the driver runs and
+// its sizing/slicing is host-pinned by the driver tests.
+bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* /*dataPins*/,
+                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t bufferBytes,
+                      bool wantSecondBuffer) {
+    return hostBus(h.impl)->init(bufferBytes, wantSecondBuffer);
 }
-uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/) { return nullptr; }
-size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& /*h*/) { return 0; }
-bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, size_t /*bytes*/) { return false; }
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer) {
+    return h.impl ? static_cast<HostBus*>(h.impl)->buffer(buffer) : nullptr;
+}
+size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h) {
+    return h.impl ? static_cast<HostBus*>(h.impl)->capacity : 0;
+}
+bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
+    return h.impl && static_cast<HostBus*>(h.impl)->transmit(buffer, bytes);
+}
 bool parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& /*h*/) { return 0; }
-void parlioWs2812Deinit(ParlioWs2812Handle& /*h*/) {}
+void parlioWs2812Deinit(ParlioWs2812Handle& h) { freeHostBus(h.impl); }
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                        uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                        size_t /*frameBytes*/, size_t /*dataBytes*/,

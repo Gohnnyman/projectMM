@@ -98,6 +98,11 @@ constexpr uint8_t lcdLanes = 16;
 constexpr uint8_t lcdLanes = 0;
 #endif
 
+// hasLcdCam — is this LCD_CAM silicon (S3/P4/S31)? Separate from the lane COUNT because the host
+// sets a non-zero count so the parallel driver RUNS there against a memory bus, while having no
+// LCD_CAM at all. On a real chip the two coincide; the pin expander keys off the capability.
+constexpr bool hasLcdCam = (lcdLanes > 0);
+
 // Parallel WS2812 lanes over the Parlio (Parallel IO) TX peripheral — the
 // ESP32-P4's scale path. The unit does 16 data lines; the driver derives the bus
 // width (8 or 16) from the pin count. SOC-derived like the others, so a future
@@ -304,3 +309,8 @@ constexpr bool hasImprov = true;
 // in src/platform/esp32/moonlive_emit.cpp), validated by the live hardware run, not host tests.
 // Kept in platform_config.h so the core header stays free of architecture #ifs.
 #define MM_MOONLIVE_HAS_HOST_JIT 0
+
+// MM_LINKS_ALL_LED_DRIVERS — 0 on ESP32: a board links only the drivers its silicon can run, so
+// the type picker stays honest and the binary lean. See the desktop config for why the host is
+// the other way round.
+#define MM_LINKS_ALL_LED_DRIVERS 0

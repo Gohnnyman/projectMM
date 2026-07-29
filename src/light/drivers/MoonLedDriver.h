@@ -274,7 +274,7 @@ public:
     const char* initFailMsg() const override { return "MoonI80 bus init failed — check pins / memory"; }
     /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this backend is
     /// LCD_CAM-only, so the answer is simply "wherever this backend runs at all".
-    bool supportsPinExpander() const override { return platform::lcdLanes > 0; }
+    bool supportsPinExpander() const override { return platform::hasLcdCam; }
 
     /// No async double-buffer on this backend — the own-GDMA two-buffer completion handshake races and
     /// wedges the bus (see busInit). Single-buffer only; the ring is where MoonI80's speed lives.

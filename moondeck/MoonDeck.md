@@ -315,6 +315,87 @@ Member methods named `free()` are excluded. We have three (`MoonLive`, `Buffer`,
 and matching on the name alone counted every call to them as heap deallocation — 15 false
 positives pointing at the wrong lines.
 
+**Rule `comments` — which declarations are documented, and with which kind.** The project's rule
+is that every class, method and attribute carries a short, readable `///` (that is what moxydoc
+publishes), while `//` developer notes belong in the code lines rather than stacked on a
+declaration. The report gives the matrix:
+
+```
+  DECL            DOC      DEV     NONE   %DOC
+  class            53      116       25    27%
+  method          415      651     1141    18%
+  attribute       133      183      923    10%
+
+  950 declarations carry only a `//` where the rule asks for `///`; 2089 carry no comment at all.
+  Public surface: 503 of 2558 documented (19%) — the part doxygen publishes.
+```
+
+Three columns because there are three states, each with a different fix: `///` is documented;
+`//` documents it in the wrong kind (promote it, or move it into the code lines); `NONE` has no
+comment at all (write one). `%DOC` is the share carrying a real doc comment.
+
+Then every declaration, ranked by how far it sits from the ideal:
+
+```
+  DOC DEVIATION  DOC WORDS  DEV WORDS  DECL       NAME               FILE:LINE
+         +1135%       1606          0  class      MoonI80Peripheral  MoonLedDriver.h:10
+          +797%       1166          0  class      HttpServerModule   HttpServerModule.h:17
+          -100%          0         61  method     driversOn          Scheduler.h:138
+```
+
+**Sizes are WORDS, not lines.** A line is a formatting accident — the same paragraph is 5 lines at
+100 columns and 9 at 60 — while words are what a reader absorbs. Measured here, a comment line
+carries a median of **13 words** in both kinds, so a line-based yardstick of class 10 / method 3 /
+attribute 3 converts to the ideals below.
+
+| Column | Meaning |
+|---|---|
+| `DOC DEVIATION` | Signed % difference from the ideal doc size — **class 130 words, method and attribute 40**. `0%` is ideal, `-100%` is absent, and over-documenting is unbounded. Not a "ratio": a ratio is a bare quotient (2.3×), this is a deviation from a target. |
+| `DOC WORDS` | Raw `///` word count — the number the deviation is derived from, so it sits beside it. |
+| `DEV WORDS` | Raw `//` word count. **No deviation column**, because zero is the ideal: measuring against "one line" made the best case (no note at all) read as `-100%`, i.e. worst. |
+| `VIS` | `pub` or `priv`. Doxygen publishes only public members, so an undocumented public method is an **API gap** while a private one is a maintenance note. Both are reported — a bloated comment is bloat either way, and clangd's hover shows both kinds to whoever maintains the code — but the reader can weigh them. |
+
+The `Public surface: N of M documented` line is the number the doc site reflects. It differs
+sharply from the overall figure: `HueDriver` reads 40% public against 13% overall, because 52 of
+its 77 declarations are private.
+
+Rows sort by **|DOC DEVIATION|**, so both failure modes surface together: a bloated header and a
+declaration with no comment at all are equally wrong in opposite directions, and ranking on the
+signed value would bury one of them.
+
+The ideals are a ruler, not a gate. `MoonI80Peripheral`'s 1606 words may be exactly right — they
+ARE the driver's spec. The ratio says how far from typical something sits; a human decides.
+
+**How `//` becomes visible to the AST.** Clang's lexer discards `//` — only `///` and `/** */`
+become AST nodes, because the compiler consumes those itself. So the rule parses a SHADOW COPY of
+`src/` under `build/comment-shadow/`, where every leading `//` has been rewritten to
+`/// MMDEV: …`. The marker survives into the comment text, which is what keeps the two kinds
+apart; `src/` is never touched and the reported paths are mapped back.
+
+The marker must be plain text — an `@`-prefixed one is parsed as a doc *command* and stripped,
+which silently merges the two kinds again. `-Wdocumentation` would fabricate warnings on
+rewritten dev notes (`// @param wrong` becomes a real diagnostic), but clang-query never enables
+it, so that risk does not apply here.
+
+Not reported, because none of them is a declaration anyone documents: **forward declarations**
+(`class JsonSink;` — no body, and the real class is reported from the header that defines it),
+**lambdas** (`unless(isLambda())` on the record and `unless(ofClass(isLambda()))` on the method
+— a lambda written inside a function body is code, not a documented declaration, and its
+synthesised closure class plus call operator would otherwise report as 53 undocumented
+"methods"), `implicit` closure classes, `invalid` declarations that only parse in the TU that
+owns them, and `= default` / `= delete` members.
+
+A **real** `operator()` on a named functor class is still reported — the exclusion asks the AST
+whether the enclosing record is a lambda, rather than testing the method's name, so writing
+`struct Compare { bool operator()(…) const; }` tomorrow does not silently drop it.
+
+Not reported: function PARAMETERS. C++ cannot attach a doc comment to one — 1054 probed, zero
+with a comment — they are documented via `@param` inside the method's own comment, and this tree
+uses `@param` 8 times, all in a `.js` file. Class ATTRIBUTES are the per-member scope that does
+exist, and they are the `field` row above. Declarations clang marks `implicit` (a lambda's
+closure class) or `invalid` (a parse that only succeeds in the TU that owns it) are skipped:
+both are anonymous, so their only "name" is the literal word `definition`.
+
 Takes ~50s cold (a few seconds once the compilation database is warm). clang-query has no
 parallel runner of its own and costs ~44s per translation unit, so this runs the 15 `src/` TUs
 across cores; serial would be ~11 minutes.

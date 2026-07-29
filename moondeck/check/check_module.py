@@ -36,13 +36,16 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import check_clang_query  # noqa: E402  — the module→files resolver, one owner
 
-# `--all` on lizard and `--max-rows=0` on clang-query: the repo-wide defaults exist to keep a
-# 362-row sweep readable, but you scoped to ONE module precisely to see all of its findings.
-# Truncating here would hide the tail that scoping was meant to expose (HttpServerModule alone
-# has 71 arrays).
+# `--all` on lizard ignores the baseline: you scoped to ONE module precisely to see all of its
+# findings, not just the ones newer than the freeze.
+#
+# clang-query keeps its 60-row cap, unlike lizard. It used to run `--max-rows=0` on the same
+# reasoning, but the comments rule made a single module's report unreadable — HttpServerModule
+# alone prints 212 declarations, and a wall of rows is skimmed rather than read. The cap is per
+# TABLE and always announces what it dropped, so the tail is one `--max-rows=0` away.
 TOOLS = [
     ("clang-tidy", ["check_clang_tidy.py"]),
-    ("clang-query", ["check_clang_query.py", "--max-rows=0"]),
+    ("clang-query", ["check_clang_query.py"]),
     ("lizard", ["check_lizard.py", "--all"]),
 ]
 

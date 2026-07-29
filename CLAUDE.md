@@ -33,7 +33,7 @@ fix, keeping main clean) — creating one silently moves work somewhere the PO i
 
 1. **Pick.** One module/effect/driver/capability — the product owner picks what to build next.
 2. **Spec.** Specs before code: the module spec and the UI spec sufficient to implement from (a draft may sit in the backlog until it ships); when in doubt, ask.
-3. **Plan.** Plan mode before every feature; save the approved plan to `docs/history/plans/` as `Plan-YYYYMMDD - <title>.md` — a temporary document: it ends up as the PR description and the file is deleted once the plan is realized; the merged PR is the design record. For a restructure ("make it simpler/cleaner"): enumerate 2–4 end states, name what each gains and loses, pick the leanest that solves the actual problem; propose as a question, implement only what's picked; surface follow-ups before starting so it's one coherent refactor.
+3. **Plan.** Plan mode before every feature; save the approved plan to `docs/history/plans/` as `Plan-YYYYMMDD - <title>.md` — a temporary document: it ends up as the PR description and the file is deleted once the plan is realized; the merged PR is the design record. **Deleting a plan is the product owner's call — never the agent's.** "The code is written" is not "the plan is realized": a plan is realized when its *verification* is done too, including the judgement steps (thresholds tuned, results read together, the bench check). Ask; do not infer it from a green build. For a restructure ("make it simpler/cleaner"): enumerate 2–4 end states, name what each gains and loses, pick the leanest that solves the actual problem; propose as a question, implement only what's picked; surface follow-ups before starting so it's one coherent refactor.
 
 ### Build
 
@@ -73,6 +73,8 @@ On "run pre-commit": `uv run moondeck/event/precommit.py`. It runs every gate wh
 Commit message: title ≤ 72 characters, imperative. Then a 1–3 sentence end-user TL;DR (no file lists). Then the performance one-liner, measured for every supported target by running `collect_kpi.py --commit` with a board attached. Then change sections as bullets: **Core**, **Light domain**, **UI**, **Scripts/MoonDeck**, **Tests**, **Docs/CI**, **Reviews** (🐇 external / 👾 Reviewer, one bullet per finding: flagged → done/accepted/deferred + why). Core and Light domain are the preferred default categories (a core-module test → Core; a script fix touching a light driver → Light domain). No hard wraps inside a part. Full performance block at the bottom.
 
 **Reviewer at commit-time:** run the Reviewer on the staged diff when the commit is large (roughly ten files or more across areas) or on PO request — start it first so the other checks run in parallel; findings fixed or accepted-with-reason before "commit now".
+
+**Handling review findings** — from the Reviewer, CodeRabbit, or a human: *verify each finding against current code; fix only still-valid issues, skip the rest with a brief reason, keep changes minimal, and validate.* A reviewer reads a snapshot and can be wrong or already out of date, so a finding is a claim to check, not an instruction to apply. Work through **every** finding, lowest severity first — a nit is a one-line fix while attention is cheap, and leaving the small ones for later means they are never done. Rising to the serious findings last also means the cheap context is already loaded.
 
 ### Merge
 

@@ -111,17 +111,70 @@ lizard covers 94% of it already.
 
 ## Verification
 
-1. `uv run moondeck/check/check_clang_query.py --rule comments` — table appears, split by scope.
-2. **Control check that must fire** (a zero is indistinguishable from a tool that read nothing):
-   the report must contain `MoonLedDriver.h` at ~9731 chars / 129 lines and `HttpServerModule.h`
-   at ~8085 / 101. If the longest known comments are absent, the run is broken, not the tree.
-3. Cross-check against the source-text count in this plan: **619 blocks** (class 114 / method 400
-   / field 63 / other 42). A materially lower AST count means the matcher is missing a scope —
-   the `varDecl`-without-`fieldDecl` mistake that silently dropped every class member from the
-   array rule.
-4. Run it through the **MoonDeck card**, not the terminal, so the PO's 📄 log is the real number.
-5. `cmake --build build` + `ctest` unaffected (no `src/` change); `check_specs.py` clean.
-6. Then read the output together and set the per-scope thresholds.
+1. ✅ The rule runs and prints a per-scope table.
+2. ✅ **Control check fired.** `HttpServerModule.h` at 7968/101 and `MoonI80Peripheral` at
+   9334/129 are both in the report. Four parsing bugs were caught by exactly this step: every
+   NAME read as `col`; the largest comment in the tree dropped by a fixed 80-line lookahead;
+   ~45 one-line `///` blocks missed because a same-line span prints `<col:23, col:71>` with no
+   line number; and 365 of 474 rows mis-attributed until the matcher bound the declaration.
+3. ✅ Cross-checked. **629 found** (class 124 / method 400 / field 105) against 642 in source —
+   the remainder is 4 blocks in `ImprovFrame.h` plus enum/typedef scopes outside the matcher.
+4. ✅ Run through the MoonDeck card; the log reads 629.
+5. ✅ 876 unit tests, 19 scenarios, specs clean, three ESP32 firmwares byte-identical.
+6. ◻ **OPEN — the reason this plan is not yet realized.** Read the output together and set the
+   per-scope thresholds. The report deliberately ships with none.
+
+### Where the thresholds landed
+
+The report went through three shapes on PO direction, each discarded for a measured reason:
+
+1. **Per comment, by characters** — the biggest single comments. Covered only `///`, so it saw
+   24% of the tree's comment lines, and could not tell "one huge comment" from "a file of many".
+2. **Per file, by line ratio** — hid the outlier inside an average (a 16-line comment in a 27-line
+   header is fine), and the PO's "2× the line count" budget could not apply: `/// lines ÷ total
+   lines` is capped at 1.0 by construction, so 2.0 would flag nothing.
+3. **Per declaration, by words** — what shipped. A line is a formatting accident; words are what a
+   reader absorbs. Measured: a comment line carries a median of **13 words** in both kinds, so the
+   PO's line yardstick (class 10, method/attribute 3) converts to **130 / 40 / 40 words**.
+
+`DOC DEVIATION` is the signed % against those ideals. `DEV WORDS` is a raw count with no ideal,
+because zero IS the ideal there — measuring deviation from "one line" made the best case (no
+developer note at all) read as -100%, i.e. worst. Rows sort by |deviation| so both failure modes —
+bloated and missing — surface together.
+
+A `VIS` column separates public from private: doxygen publishes only public members, so an
+undocumented public method is an API gap while a private one is a maintenance note. Both are
+reported; a bloated comment is bloat either way.
+
+**No cutoff is enforced.** The ideals are a ruler — `MoonI80Peripheral`'s header may be right at
+ten times the ideal, because it IS the driver's spec.
+
+## Grew out of this plan: the host runs every driver
+
+Not in the original scope, added on PO direction while implementing. The plan predicted a
+permanent coverage limit — 184 `///` blocks in `src/light/drivers/` that the desktop AST could
+never see, because the drivers were `#if defined(CONFIG_SOC_*)`-gated in `main.cpp`. The PO's
+question ("shouldn't we instead run all existing drivers on the desktop?") turned out to be
+right, and the premise wrong: those headers have zero direct ESP includes, already route
+everything through `platform.h`, and already had desktop stubs. Only the *constants* said "not
+my chip".
+
+So the host now **emulates** the peripherals rather than declaring itself incapable:
+`lcdLanes`/`parlioLanes` 16, `rmtTxChannels` 4, `hasLcdCam` true, and the platform seams back the
+buses with heap memory instead of returning `false`/`nullptr`. `ParallelLedDriver` runs on macOS
+against all three real backends, switchable live.
+
+Recorded as a hard rule in [architecture.md § Platform abstraction](../../architecture.md). Its
+limit is deliberate: timing, wire protocol and pin state are NOT emulated, because faking them
+would let a self-test report on hardware it never touched.
+
+Coverage side effects, all from the same change: doc comments 454 → 629, RAM-costing arrays
+362 → 390, heap allocation sites 63 → 80. Three ESP32 firmwares stayed byte-identical.
+
+**Follow-up the PO raised, not yet planned:** a host LED-strip emulator that decodes the encoded
+buffer back to RGB — `busLoopback` is already the "read back what the wire carried" seam, with a
+fully specified `RmtLoopbackResult`. That would catch encode bugs `PreviewDriver` structurally
+cannot, since it shows the *layer* buffer rather than the wire.
 
 ## Deliberately not in this plan
 

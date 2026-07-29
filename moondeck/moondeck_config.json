@@ -17,7 +17,9 @@
       "speed": "slow",
       "help": "compile_tests",
       "script": "build/build_desktop.py",
-      "args": ["--tests"]
+      "args": [
+        "--tests"
+      ]
     },
     {
       "id": "test_desktop",
@@ -277,7 +279,9 @@
       "speed": "slow",
       "help": "build_docs",
       "script": "docs/build_docs.py",
-      "args": ["--serve"],
+      "args": [
+        "--serve"
+      ],
       "long_running": true,
       "process_name": "mkdocs"
     },

@@ -2,6 +2,7 @@
 // @also Drivers, Correction
 
 #include "doctest.h"
+#include "host_bus.h"
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
 #include "light/drivers/MultiPinLedDriver.h"
@@ -416,7 +417,10 @@ TEST_CASE("MultiPinLedDriver loopbackTxPin tracks the loopbackTest toggle") {
 // driver's peripheral_ (which is protected).
 TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
     mm::I80Peripheral peripheral;
-    CHECK_FALSE(peripheral.supportsPinExpander());   // desktop lcdLanes==0 → unsupported
+    // Tied to the capability flag, not to a hard-coded value: the host now EMULATES LCD_CAM (so
+    // the expander path is reachable off-device), and a classic ESP32 still reports false. The
+    // control's visibility must track whatever the target says, which is what this pins.
+    CHECK(peripheral.supportsPinExpander() == mm::platform::hasLcdCam);
 
     mm::ParallelLedDriver d;
     d.setPeripheralForTest(&peripheral);
@@ -431,4 +435,15 @@ TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
         }
     }
     CHECK(found);   // still BOUND (a saved value survives), just not shown
+}
+
+// The host bus is REAL MEMORY, not a refusal: `busInit` used to return false on desktop, so
+// every bus assertion was unreachable off-device and the driver's encode path only ever ran
+// on hardware. The contract is identical for all three peripherals, so it lives in one place.
+TEST_CASE("MultiPinLedDriver allocates a real host bus the driver can encode into") {
+    mm::test::checkHostBusAllocates<mm::I80Peripheral>();
+}
+
+TEST_CASE("MultiPinLedDriver gives the host bus two distinct buffers when asked") {
+    mm::test::checkHostBusDoubleBuffer<mm::I80Peripheral>();
 }

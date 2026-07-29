@@ -210,7 +210,7 @@ public:
     /// the flag on `lcdLanes` (non-zero only on the LCD_CAM chips, S3/P4/S31) makes the refusal a
     /// compile-time property of the silicon rather than a runtime surprise, and the orchestrator then
     /// reports it as a config error instead of letting the bus die at init with "check pins / memory".
-    bool supportsPinExpander() const override { return platform::lcdLanes > 0; }
+    bool supportsPinExpander() const override { return platform::hasLcdCam; }
 
     /// The bus pin list comes from the orchestrator: in shift mode it appends the latch to the data pins
     /// (the latch is a bus lane), so the peripheral drives it. busClockMultiplier() tells the platform

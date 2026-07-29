@@ -2,6 +2,7 @@
 // @also Drivers, Correction
 
 #include "doctest.h"
+#include "host_bus.h"
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
 #include "light/drivers/ParlioLedDriver.h"
@@ -195,7 +196,7 @@ TEST_CASE("ParlioLedDriver frame grows on RGBW preset") {
 // latch pad. So the max lights/lane is ~ (65535 − 864) / (channels × 24): **897 for RGB (3ch)**, ~673
 // for RGBW (4ch), ~538 for RGBCCT (5ch) — wider fixtures fit fewer lights per one-shot transfer. This
 // pins the boundary in host-visible frameBytes terms for the RGB and RGBW cases. The reject itself is
-// hardware-only (busInit is a desktop no-op), verified on the P4 (LEDs burn at 8×896 RGB/lane; the
+// hardware-only (the host bus allocates but enforces no Parlio transfer ceiling), verified on the P4 (LEDs burn at 8×896 RGB/lane; the
 // driver reports a status error above the ceiling). Catches the ceiling shifting if the encoding
 // changes. Mirrors the platform constant.
 TEST_CASE("ParlioLedDriver frame at the Parlio single-transfer ceiling (byte limit, channel-relative)") {
@@ -362,4 +363,15 @@ TEST_CASE("ParlioLedDriver loopbackTxPin tracks the loopbackTest toggle") {
         mm::test::setControlValue<bool>(d, "loopbackTest", on);
     };
     mm::test::checkConditionalControl(d, "loopbackTxPin", setTest, /*visibleWhenTrue=*/true);
+}
+
+// The host bus is REAL MEMORY, not a refusal: `busInit` used to return false on desktop, so
+// every bus assertion was unreachable off-device and the driver's encode path only ever ran
+// on hardware. The contract is identical for all three peripherals, so it lives in one place.
+TEST_CASE("ParlioLedDriver allocates a real host bus the driver can encode into") {
+    mm::test::checkHostBusAllocates<mm::ParlioPeripheral>();
+}
+
+TEST_CASE("ParlioLedDriver gives the host bus two distinct buffers when asked") {
+    mm::test::checkHostBusDoubleBuffer<mm::ParlioPeripheral>();
 }
