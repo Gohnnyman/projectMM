@@ -106,6 +106,12 @@ endif()
 if(MM_ETH_ONLY)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_WIFI)
 endif()
+if(MM_PANEL_CARDS)
+    # Links PanelSendDriver (panel receiver cards over raw L2). Opt-in per firmware because the
+    # cards want a gigabit link and no CONFIG_SOC_* macro distinguishes a gigabit board from a
+    # 100 Mbit one — see the gate in src/main.cpp.
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_PANEL_CARDS)
+endif()
 if(MM_NO_ETH)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_ETH)
 endif()

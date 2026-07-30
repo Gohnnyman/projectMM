@@ -24,11 +24,11 @@ namespace mm {
 /// survives only as legacy compatibility.
 ///
 /// **Synchronous send:** this driver's WINDOW (`start`/`count`, not necessarily the whole buffer)
-/// goes out inline in tick() — ~35 ms Ethernet / ~90 ms WiFi for a full-buffer window at 128×128
-/// ArtNet, less for DDP and proportionally less for a narrower window. A decoupling send task is a
-/// PSRAM-gated backlog item. Added per board
-/// via the catalog like the LED drivers; applies the same shared Correction, so network and wired
-/// outputs show identical colors.
+/// goes out inline in tick() — 38 ms Ethernet to 155 ms WiFi for a full-buffer window at 128×128
+/// ArtNet (the spread is the lwIP/WiFi buffer pool, not the protocol: performance.md § ArtNet send),
+/// less for DDP and proportionally less for a narrower window. A decoupling send task is a
+/// PSRAM-gated backlog item. Added per board via the catalog like the LED drivers; applies the same
+/// shared Correction, so network and wired outputs show identical colors.
 ///
 /// The deep dives are under *More info*, below the attribute/method lists:
 /// @xref{why-unicast-is-the-default|why unicast is the default},
@@ -105,7 +105,9 @@ public:
     /// ArtNet / E1.31 split at 510 channels per universe (whole RGB lights, the xLights/Falcon
     /// convention; 170 lights/packet), consecutive universes from `universeStart`; DDP uses
     /// 1440-byte byte-offset chunks (480 lights/packet) and is the fast path — per-packet cost
-    /// dominates wire time, so a 128×128 WiFi frame drops from ~110 ms (ArtNet) to ~40 ms.
+    /// dominates wire time, so a 128×128 ArtNet frame drops to roughly a third on DDP. The ArtNet
+    /// figure itself spans 38-155 ms across boards (performance.md § ArtNet send): the buffer pool
+    /// dominates it, so quote a range rather than one number.
     uint8_t protocol = 0;
     /// First universe the slice maps onto (ArtNet / E1.31; DDP is byte-addressed). Emitted verbatim,
     /// no hidden 1-based adjust: buffer offset = `(universe − universeStart) × 510`. Strict sACN

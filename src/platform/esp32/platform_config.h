@@ -213,6 +213,10 @@ constexpr bool hasNetwork = hasWiFi || hasEthernet;
 // P4 board (RMII only) ethInit() can't bring up W5500, so the live path must not
 // tear down the working RMII interface for a type it can't init. Mirrors the
 // MM_ETH_W5500 marker in platform_esp32.cpp; false on desktop (no SPI-eth there).
+// hasNamedNetInterfaces — false on every ESP32: one MAC per chip, so a raw sender has nothing to
+// choose between and a NIC-name control would do nothing. See the desktop config for the true case.
+constexpr bool hasNamedNetInterfaces = false;
+
 #if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC)
 constexpr bool hasEthW5500 = true;
 #else

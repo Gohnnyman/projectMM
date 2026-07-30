@@ -44,6 +44,7 @@ Usage:
 
 import argparse
 import collections
+import hashlib
 import json
 import os
 import re
@@ -412,8 +413,22 @@ def _shadow_tree(build_dir):
     # cannot change mid-run. A stale tree from a PREVIOUS run would be wrong, so the marker file
     # records which source state it was built from.
     stamp = shadow / ".built-from"
-    newest = max((f.stat().st_mtime for f in (ROOT / "src").rglob("*") if f.is_file()), default=0)
-    if stamp.exists() and stamp.read_text(encoding="utf-8").strip() == str(newest):
+    # A FINGERPRINT of every source path + its size and mtime, not just the newest mtime. Max-mtime
+    # cannot see a DELETION (deleting anything but the newest leaves the max unchanged) nor an edit
+    # that restores an older timestamp — in both cases the shadow tree stays stale and the report
+    # describes source that is no longer there. Path and size are in the digest too, so a rename or
+    # a same-mtime content change also invalidates.
+    #
+    # Hashing metadata rather than file CONTENT is deliberate: it is one stat() per file instead of
+    # reading all of src/, and the failure it must catch is a stale tree between runs, not a
+    # deliberate forgery.
+    digest = hashlib.sha256()
+    for f in sorted((ROOT / "src").rglob("*")):
+        if f.is_file():
+            st = f.stat()
+            digest.update(f"{f.relative_to(ROOT)}|{st.st_size}|{st.st_mtime_ns}\n".encode())
+    fingerprint = digest.hexdigest()
+    if stamp.exists() and stamp.read_text(encoding="utf-8").strip() == fingerprint:
         return shadow
     if shadow.exists():
         shutil.rmtree(shadow)
@@ -423,7 +438,7 @@ def _shadow_tree(build_dir):
         marked = _LEADING_DEV.sub(rf"\1/// {_DEV_MARK}\2", text)
         if marked != text:
             f.write_text(marked, encoding="utf-8")
-    stamp.write_text(str(newest), encoding="utf-8")
+    stamp.write_text(fingerprint, encoding="utf-8")
     return shadow
 
 
@@ -907,6 +922,20 @@ def render_heap(rows, max_rows=0):
     return L + table("ALLOCATE", alloc) + table("FREE", free)
 
 
+def _matcher_rejected(out):
+    """True when clang-query refused the matcher rather than finding nothing.
+
+    A rejected matcher still exits 0 with no matches, so the two are indistinguishable by status —
+    and its complaints do not all say `error:` (an ambiguous top-level `anyOf()` reports "Input
+    value has unresolved overloaded type"). Shared by the primary rule and the visibility pass:
+    the second had no validation at all, so a refused matcher there silently marked every row
+    `pub` instead of failing.
+    """
+    bad = [ln for ln in out.splitlines()
+           if "error: " in ln or "unresolved overloaded type" in ln or "not found" in ln]
+    return bool(bad) and "binds here" not in out and "Match #" not in out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--rule", choices=sorted(RULES), help="Run one rule only.")
@@ -967,7 +996,7 @@ def main():
         # result for these rules on this codebase.
         bad = [ln for ln in out.splitlines()
                if "error: " in ln or "unresolved overloaded type" in ln or "not found" in ln]
-        if bad and "binds here" not in out and "Match #" not in out:
+        if _matcher_rejected(out):
             print(f"[{name}] clang-query rejected the matcher: {bad[0].strip()}", file=sys.stderr)
             return 2
 
@@ -992,9 +1021,15 @@ def main():
                 return 2
             # Second pass for visibility — see collect_nonpublic. Cheap next to the main run:
             # same TUs, a matcher with no comment traversal.
-            nonpub = collect_nonpublic(
-                _run_rule({"output": "dump", "matcher": _NONPUBLIC_MATCHER, "shadow": True},
-                          tus, build_dir, tool))
+            vis_out = _run_rule({"output": "dump", "matcher": _NONPUBLIC_MATCHER, "shadow": True},
+                                tus, build_dir, tool)
+            # Fail closed, exactly as the primary query does: an empty visibility result would mark
+            # EVERY row `pub`, which reads as a fully-public API rather than as a failed query.
+            if _matcher_rejected(vis_out):
+                print("[comments] clang-query rejected the visibility matcher; VIS cannot be "
+                      "reported. Refusing to mark every declaration public.", file=sys.stderr)
+                return 2
+            nonpub = collect_nonpublic(vis_out)
             for r in rows:
                 r["vis"] = "priv" if (r["file"], r["decl_line"]) in nonpub else "pub"
         else:

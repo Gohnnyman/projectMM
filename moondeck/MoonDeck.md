@@ -202,7 +202,7 @@ the site.
 
 Every static-analysis tool, on ONE module — the repo-wide reports turned around.
 
-**The stack, and why it is five tools.** Each answers a question the others structurally cannot,
+**The stack, and why it is six tools.** Each answers a question the others structurally cannot,
 which is what keeps them from being redundant:
 
 | | sees | answers |
@@ -212,6 +212,7 @@ which is what keeps them from being redundant:
 | **`-Wfunction-effects`** | the whole call graph, from the compiler | can the render path block? |
 | **lizard** | tokens, no types | is this function getting more complex over time? |
 | **CodeQL** | a queryable database of the program | can LAN bytes reach a `memcpy`? |
+| **footprint** | the linked ELF | how many bytes does this cost, and in which memory? |
 
 One rule, one owner: where two tools could report the same thing, one is switched off (lizard owns
 complexity, so clang-tidy's `readability-function-*` checks stay disabled). The individual cards
@@ -577,6 +578,77 @@ group declare `needs_module`, which moves it out of *All Tools on Module* where 
 **Exit 2 when the answer is unknown** — no `gh`, not authenticated, code scanning disabled — with
 the reason on stderr. An empty list and an unreachable API look identical in a table, and only one
 of them means the code is clean.
+
+### check_footprint
+
+Where a module's bytes land on the device: flash, RAM, or strings.
+
+```bash
+uv run moondeck/check/check_footprint.py                    # every file, biggest first
+uv run moondeck/check/check_footprint.py --module HueDriver
+uv run moondeck/check/check_footprint.py --firmware esp32   # another target
+uv run moondeck/check/check_footprint.py --strings          # the string table
+```
+
+**What the tool is.** No tool of its own — it reads the ESP32 **ELF** the build already produced,
+through the toolchain's `nm` and `objdump`. The linker's accounting is ground truth: it has
+already resolved every inline, template instantiation and dead-stripped symbol, so this measures
+what actually ships rather than what the source suggests.
+
+**What it does for us.** The other size checks answer "how big is the binary"; this answers
+**which module made it that big, and which memory it spends** — because those bytes are not
+interchangeable. Flash is ~1.5 MB and cheap; internal RAM is ~320 KB shared with WiFi, the HTTP
+stack and every task stack. A report that adds them together hides the only distinction that
+matters.
+
+| Column | |
+|---|---|
+| **CODE** | `.text` — flash (or IRAM). Costs space, not headroom |
+| **RODATA** | **named** constants only. String literals carry no symbol, so most of the ~427 KB in `.flash.rodata` cannot be credited to a file — `--strings` measures that half wholesale |
+| **STATIC** | `.bss` + `.data` — RAM held from boot **whether the module is enabled or not**. This is the "an unused module should cost nothing" check: anything here is a standing tax. Not a synonym for *global*: it counts anything with static STORAGE DURATION, which includes a function-local `static` buffer and a file-local one in an anonymous namespace. Measured here, all 69 are file- or function-local; the codebase has no true globals |
+
+**Sorted STATIC-first**, then by size within each group: every file holding static RAM appears
+above every file holding none. A pure size sort buried the rows that matter — `platform_esp32_tasks.cpp`
+is 230 B of code against 1440 B of static, so it sat below files with more code and could fall off
+a capped table entirely.
+
+**The columns are not interchangeable, and the ratio is why.** Flash is ~1.5 MB and only read when
+the code runs; internal RAM is ~320 KB shared with WiFi, the HTTP stack and every task stack. So a
+byte of STATIC costs roughly five times what a byte of CODE does, and a module reading STATIC 0 is
+the healthy case rather than an empty measurement. The report deliberately does not total the
+columns together — a single "size" number would hide the only distinction worth having.
+
+Attribution comes from **DWARF** (`nm --line-numbers`), so a symbol is credited to the source file
+that defines it — including free functions and file-statics no name-parsing heuristic could place.
+
+**Strings ride along in the same run** — one report, both halves, no flag: they answer the same
+question and a separate mode is one you forget to run.
+
+**Ours are separated from ESP-IDF's**, which is the difference between a number you can act on and
+one you cannot. The string table is read from the per-source **object files** under
+`__idf_main.dir`, not from the linked image — the link merges every `.rodata.*.str` input section
+into one `.flash.rodata` and a literal carries no symbol, so from the ELF alone a string cannot be
+traced to who wrote it. Reading the objects also excludes IDF by construction: only our sources
+have objects there.
+
+`-ffunction-sections` is what makes the attribution exact: each function's literals land in
+`.rodata.<mangled>.str1.N` inside its own object, so **the section name is the owning function and
+the object path is the source file**. Both are printed next to each literal, so a long one can be
+found and judged rather than just counted.
+
+Measured: **28 KB of the 106 KB** in `.flash.rodata` is ours; the rest is ESP-IDF, WiFi, lfs and
+FreeRTOS — which is why the whole-image view was misleading (its longest entries are all IDF
+assert expressions). Of our share, prose and identifiers are ~35% each, wire formats 17%, and
+error text 13% — so trimming error messages is the smallest of the four levers.
+
+**Architecture-matched binutils.** `.espressif/tools` also holds `esp32ulp-elf-*` (the ULP
+coprocessor's) and, on a P4 machine, the RISC-V set. The ULP `nm` reads an Xtensa ELF happily and
+returns a plausible symbol list with every `.bss`/`.data` symbol silently unattributed — the
+STATIC column read 0 tree-wide until the tool was picked by architecture. A wrong-tool answer that
+looks right is worse than no answer.
+
+**Needs a built firmware**, and exits 2 when the ELF is missing or carries no DWARF rather than
+printing an empty table — an absent measurement is not a zero.
 
 ### check_lizard
 

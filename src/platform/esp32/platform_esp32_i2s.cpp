@@ -21,6 +21,7 @@
 #if SOC_I2S_SUPPORTED
 
 #include "driver/i2s_std.h"
+#include "esp_heap_caps.h"   // heap_caps_malloc — the FFT scratch, internal RAM only
 #include "esp_log.h"
 #include "dsps_fft2r.h"
 
@@ -39,11 +40,21 @@ struct MicState {
 };
 
 // esp-dsp's float FFT works in place on an interleaved complex array (re, im,
-// re, im, …). We keep one scratch sized to the largest block we'll see; the
-// twiddle tables are initialised once, lazily, on first use.
+// re, im, …). One scratch sized to the largest block we'll see; the twiddle
+// tables are initialised once, lazily, on first use.
+//
+// ALLOCATED on first FFT, not held in .bss. As a plain array this was 8 KB of
+// INTERNAL RAM reserved from boot on every board — 2.5% of the ~320 KB pool that
+// WiFi, the HTTP stack and every task stack share — including the many boards
+// with no microphone fitted, where nothing ever reads it. A module that is not
+// used should cost nothing (surfaced by check_footprint's STATIC column, where
+// this file read 561 B of code against 8193 B of static). Now a board without
+// audio pays 4 bytes for the pointer, and one with audio allocates on its first
+// analysed frame and keeps it for the process — no per-frame allocation on the
+// audio path, which runs at block rate.
 constexpr size_t kMaxFftN = 1024;
-float g_fftBuf[kMaxFftN * 2];
-bool  g_fftReady = false;
+float* g_fftBuf = nullptr;
+bool   g_fftReady = false;
 
 bool ensureFftInit() {
     if (g_fftReady) return true;
@@ -52,6 +63,15 @@ bool ensureFftInit() {
     if (dsps_fft2r_init_fc32(nullptr, CONFIG_DSP_MAX_FFT_SIZE) != ESP_OK) {
         ESP_LOGE(I2S_TAG, "esp-dsp FFT init failed");
         return false;
+    }
+    // Internal RAM, not PSRAM: esp-dsp's assembly kernels run per audio block and
+    // a PSRAM scratch would put a cache miss in the middle of every butterfly.
+    g_fftBuf = static_cast<float*>(
+        heap_caps_malloc(kMaxFftN * 2 * sizeof(float), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    if (!g_fftBuf) {
+        ESP_LOGE(I2S_TAG, "FFT scratch alloc failed (%u B internal)",
+                 static_cast<unsigned>(kMaxFftN * 2 * sizeof(float)));
+        return false;   // audioFft zero-fills its output, so the caller degrades to silence
     }
     g_fftReady = true;
     return true;

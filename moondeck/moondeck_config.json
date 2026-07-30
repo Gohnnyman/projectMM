@@ -146,6 +146,15 @@
       ]
     },
     {
+      "id": "check_footprint",
+      "tab": "desktop",
+      "group": "tools",
+      "label": "Footprint (ESP32)",
+      "speed": "instant",
+      "help": "check_footprint",
+      "script": "check/check_footprint.py"
+    },
+    {
       "id": "check_specs",
       "tab": "desktop",
       "group": "check",

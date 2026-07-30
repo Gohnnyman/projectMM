@@ -409,6 +409,8 @@ public:
                     // is not buried under the WiFi-fallback "connected" status the cascade is about
                     // to set: a live-but-unusable Ethernet cable is worth the user's attention until
                     // they unplug it (which drops ethLinkUp → the warning clears, see tick1s/onConnected).
+                    // Unless something is driving the link directly (raw L2, no IP wanted) — then
+                    // writeEthDegradedStatus reports it as normal rather than as a fault.
                     if (platform::ethLinkUp()) {
                         ethDegraded_ = true;
                         writeEthDegradedStatus();
@@ -1003,6 +1005,14 @@ private:
     // (a partial/lost lease) so they have an IP to work with. Cleared when ethLinkUp() drops
     // (cable out) in tick1s, at which point updateStatusIP falls through to the normal IP line.
     void writeEthDegradedStatus() {
+        // A driver has claimed the link for direct L2 use, so it is doing its job rather than
+        // failing: a raw-L2 sender addresses the wire below IP and never wants a lease. Report it as Status rather than Warning — the "no address" line would otherwise
+        // tell the user to unplug the very cable that is driving their panels.
+        if (platform::ethRawL2Claimed()) {
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "Ethernet: link up, no IP (L2 in use)");
+            setStatus(statusBuf_, Severity::Status);
+            return;
+        }
         uint8_t ip[4] = {};
         platform::ethGetIPv4(ip);
         if (ip[0] || ip[1] || ip[2] || ip[3]) {

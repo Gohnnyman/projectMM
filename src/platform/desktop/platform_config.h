@@ -79,6 +79,11 @@ struct EthPinConfig {
 // (shared code) `if constexpr (hasEthernet)`s the eth controls off, and seeds its
 // members from this default; both must exist here for that shared code to compile.
 constexpr bool hasEthernet = false;
+
+// hasNamedNetInterfaces — the host has several NICs and a raw sender must name one ("eth0", "en0").
+// True on desktop, false on a microcontroller with a single MAC, where the name would be a control
+// that does nothing. Drivers use it to hide the field rather than to choose behaviour.
+constexpr bool hasNamedNetInterfaces = true;
 // Some-IP-stack flag (WiFi OR Ethernet) — mirrors the esp32 config so shared code
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).

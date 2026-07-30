@@ -13,6 +13,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"   // heap_caps_malloc/free — the upload chunk buffer
 #include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
@@ -21,9 +22,14 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <memory>        // unique_ptr — frees the upload buffer on every exit path
 #include <new>           // std::nothrow for the OtaTaskParams alloc below
 
 namespace mm::platform {
+
+// One upload chunk. 4 KB matches the flash page granularity esp_ota_write prefers and is
+// the size the HTTP path already streams in.
+constexpr size_t kOtaChunkBytes = 4096;
 
 namespace {
 
@@ -207,11 +213,31 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
     // Pull the upload body chunk-by-chunk and write each into the partition — the same producer
     // callback fsWriteStream drives, here feeding esp_ota_write instead of a file. `abort` from the
     // caller (an incomplete/timed-out upload) fails the OTA, and esp_ota_abort discards the partial.
-    static uint8_t buf[4096];   // static: keep it off this call's stack (4 KB is large for a task frame)
+    // Heap, not static, and not the stack either. 4 KB is far too large for a task frame, but as a
+    // `static` it held 4 KB of INTERNAL RAM from boot to power-off for a buffer used only while a
+    // firmware image is uploading — minutes of the device's life at most, and never at all on a
+    // device that is never updated. An OTA is the one moment when spare RAM is least scarce (the
+    // render path is the only other big consumer), so allocating here and freeing at every exit
+    // costs nothing and gives the 4 KB back to WiFi and the HTTP stack for the other 99.9% of
+    // uptime. Surfaced by check_footprint's STATIC column: this file read 1016 B of code against
+    // 4096 B of static.
+    //
+    // Failing the alloc aborts the OTA cleanly rather than proceeding — a firmware write with no
+    // buffer is not something to degrade around.
+    // unique_ptr, not a raw malloc: there are six exit paths below (abort, write error, truncated
+    // upload, three esp_ota failures) and a leak on any of them would be a 4 KB hole per attempt.
+    const std::unique_ptr<uint8_t, decltype(&heap_caps_free)> owned(
+        static_cast<uint8_t*>(heap_caps_malloc(kOtaChunkBytes, MALLOC_CAP_8BIT)), &heap_caps_free);
+    uint8_t* const buf = owned.get();
+    if (!buf) {
+        setStatus("error: out of memory for the upload buffer");
+        esp_ota_abort(handle);
+        return false;
+    }
     uint32_t written = 0;
     for (;;) {
         bool abort = false;
-        const size_t n = src(reinterpret_cast<char*>(buf), sizeof(buf), user, &abort);
+        const size_t n = src(reinterpret_cast<char*>(buf), kOtaChunkBytes, user, &abort);
         if (abort) {
             setStatus("error: upload aborted");
             esp_ota_abort(handle);

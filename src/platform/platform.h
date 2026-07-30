@@ -349,6 +349,79 @@ bool ethConnected() MM_NONBLOCKING;    // IP assigned (DHCP complete)
 // their own boundary, callers that need bytes (ArtNet) use them directly.
 void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING;
 
+// Put one complete Ethernet frame on the wire, below IP: `frame` starts at the destination MAC and
+// carries its own EtherType, so nothing here has an address, a route, or a DHCP lease. Panel
+// receiver cards are addressed this way: they answer to a MAC and an EtherType,
+// never to an IP.
+//
+// Needs a link, not an IP: ethLinkUp() is the precondition, ethConnected() is not. That split is
+// the point of the seam — a board whose DHCP never completes can still drive panels, and the
+// driver's status says which of the two is missing.
+//
+// `len` is the payload as handed to the MAC: below 60 bytes the hardware pads to the Ethernet
+// minimum, so callers need not. Returns false when no driver is running, the link is down, or the
+// MAC rejects the frame (a full TX ring) — a dropped frame, like a dropped UDP packet, is the
+// caller's to tolerate. Desktop records the frame instead of sending it, which is what lets the
+// driver and its tests run on the host.
+bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING;
+
+// Claim the Ethernet interface for direct L2 use, or release it. A driver that addresses the wire
+// below IP calls this in prepare/release to STATE its intent, rather than leaving
+// NetworkModule to infer it from traffic — the driver knows, and a claim made before the first frame
+// cannot race the cascade's DHCP timeout.
+//
+// What it changes: nothing about the hardware. Ethernet keeps running and the cascade still moves on
+// to WiFi for IP service (which is what a panel rig wants — panels on the wire, UI over WiFi). It
+// only tells NetworkModule that a leaseless link is intended rather than broken.
+//
+// Reference-counted, so two drivers sharing the link both have to release before the claim drops.
+void ethClaimRawL2(bool claim);
+
+// True while any driver holds a raw-L2 claim. NetworkModule reads this to tell "Ethernet is broken"
+// apart from "Ethernet carries no IP because something is driving it directly".
+bool ethRawL2Claimed() MM_NONBLOCKING;
+
+// Consecutive ethSendRaw() failures since the last success. A raw sender polls this to tell a
+// dropped frame (normal back-pressure, count returns to 0) from a wedged transmit path: the IDF
+// driver refuses every frame once ITS link flag reads down, which can outlive our own event-driven
+// flag and would otherwise look like a healthy link sending nothing.
+uint32_t ethSendFailStreak() MM_NONBLOCKING;
+
+// Negotiated link speed in Mbit/s (10 / 100 / 1000); 0 when no link or no driver. Reported rather
+// than enforced: panel cards want a gigabit link, and a driver that knows the actual speed can say
+// "100 Mbit, expect tearing" instead of either failing silently or refusing to run.
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING;
+
+// Bind raw sending to a host network interface by name ("eth0", "en0"). ESP32 ignores this — it has
+// one MAC and ethSendRaw always uses it. On desktop it opens the raw socket (Linux AF_PACKET, macOS
+// BPF) that makes a host a real panel controller: the same driver on a Pi or a mini-PC does what an
+// FPP host does, which is worth having both as a product and as the way to test the wire format
+// without an ESP32 in the loop.
+//
+// Returns false when the interface is unknown or the process lacks the privilege (raw L2 is
+// root/CAP_NET_RAW on every OS). Failure is not fatal: sending falls back to CAPTURE mode, where
+// frames are recorded for the tests and the driver reports why nothing reached the wire. Call with
+// nullptr or "" to return to capture mode.
+bool ethBindRawInterface(const char* ifName);
+
+// Desktop-only test seam: the frames ethSendRaw() captured, so a host test can pin what the driver
+// put on the wire. Active whenever no raw interface is bound, which is the default and the only
+// mode an unprivileged test process ever sees. Count resets with ethTestClearFrames(); a frame
+// longer than kEthTestFrameMax is recorded truncated (its true length still reported) so an
+// oversized send is visible, not silent.
+#ifndef ESP_PLATFORM
+constexpr size_t kEthTestFrameMax = 1512;   // the panel format's largest frame
+size_t ethTestFrameCount();
+size_t ethTestFrameLength(size_t i);
+const uint8_t* ethTestFrameData(size_t i);
+void ethTestClearFrames();
+// Make the next ethSendRaw() calls fail, so a test can exercise the link-down path
+// (mirrors setTestBindFails for UdpSocket).
+void setTestEthSendFails(bool fail);
+// Override the reported link speed so a test can exercise the too-slow-link status.
+void setTestEthLinkSpeed(uint16_t mbps);
+#endif
+
 bool wifiStaInit(const char* ssid, const char* password);
 bool wifiStaConnected() MM_NONBLOCKING;
 void wifiStaGetIPv4(uint8_t out[4]);   // see ethGetIPv4 — same octet contract

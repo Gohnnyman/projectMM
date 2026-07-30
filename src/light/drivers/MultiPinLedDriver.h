@@ -211,9 +211,11 @@ public:
     /// ×8 frame fits), it has no single-transfer cap, and its WR pixel-clock pin IS the shift clock a
     /// '595 needs. The classic ESP32 shares this backend but not that silicon path — its i80 is the I2S
     /// peripheral, whose DMA cannot read PSRAM at all, so a 154 KB frame has nowhere to live. Keying
-    /// the flag on `lcdLanes` (non-zero only on the LCD_CAM chips, S3/P4/S31) makes the refusal a
-    /// compile-time property of the silicon rather than a runtime surprise, and the orchestrator then
-    /// reports it as a config error instead of letting the bus die at init with "check pins / memory".
+    /// the flag on `platform::hasLcdCam` makes the refusal a compile-time property of the silicon
+    /// rather than a runtime surprise, and the orchestrator then reports it as a config error instead
+    /// of letting the bus die at init with "check pins / memory". `hasLcdCam`, not `lcdLanes`: the
+    /// two agree on ESP32 (it is defined as `lcdLanes > 0` there) but not on the desktop, which
+    /// declares the capability outright so the emulated build can exercise this path.
     bool supportsPinExpander() const override { return platform::hasLcdCam; }
 
     /// The bus pin list comes from the orchestrator: in shift mode it appends the latch to the data pins

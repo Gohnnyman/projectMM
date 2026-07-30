@@ -105,6 +105,15 @@
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/ParlioLedDriver.h"        // Parlio backend (ParlioPeripheral)
 #endif
+// Panel receiver cards over raw Ethernet — opt-in PER FIRMWARE (MM_PANEL_CARDS), not per chip.
+// The panels need a gigabit link, and no SOC capability macro separates the boards that have one
+// from the boards that do not: classic ESP32 and P4 both report an internal MAC, and both are
+// 100 Mbit. So the firmware catalogue names the variants that get it (build_esp32.py: today the
+// S31, which is RGMII gigabit, and the P4, where the 100 Mbit wire-time limit is worth measuring).
+// Everything else would carry ~2.8 KB of flash for a driver it cannot use, so it does not link it.
+#if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
+#include "light/drivers/PanelCardDriver.h"
+#endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/Services.h"
@@ -220,6 +229,10 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HueDriver>("HueDriver", "light/drivers.md#hue");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers.md#networksend");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers.md#preview");
+    // Same firmware gate as the include above.
+#if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
+    mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");
+#endif
     // Register only the LED drivers this chip's silicon can run (see the gated
     // includes above) — keeps the type picker honest (no MultiPinLedDriver offered on a
     // chip without an i80 bus) and the binary lean.

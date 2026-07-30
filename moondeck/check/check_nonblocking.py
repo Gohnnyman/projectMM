@@ -585,8 +585,10 @@ def main():
         # Unconditional first: a call that runs every time its tick does is strictly worse than
         # the same call behind a branch. (file, line) breaks ties, so the order stays stable
         # between runs and findings in one file stay together — that is how they get fixed.
-        subset = sorted(subset, key=lambda r: (r["cond"] not in (NO_CAUSE, "?"),
-                                               r["file"], r["line"]))
+        # Only NO_CAUSE leads: `?` is UNKNOWN, not proven-unconditional, so ranking it as urgently
+        # would assert something the run did not establish. (It is also all-or-nothing — when the
+        # guard query fails every row reads `?` — so it only ever affects a mixed table.)
+        subset = sorted(subset, key=lambda r: (r["cond"] != NO_CAUSE, r["file"], r["line"]))
         # Never narrower than the header: a tier where every row is `—` is width 1, and the dashes
         # then stop lining up under "COND".
         cond_w = max(min(max(len(r["cond"]) for r in subset), 9), len("COND"))
