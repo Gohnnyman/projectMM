@@ -117,6 +117,10 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 # which PHY/pins a given board uses is runtime config (deviceModels.json →
 # NetworkModule → ethInit), so one binary per chip serves every board.
 #
+# `panel_cards`: True links PanelCardDriver (panel receiver cards over raw Ethernet). Opt-in
+# because the cards need a gigabit link: the S31 has one, and the P4 is included to measure what
+# 100 Mbit actually does. Absent = the driver is not compiled in.
+#
 # `ships`: True for variants the release matrix builds + publishes. A variant can
 # exist here (buildable from the CLI) yet be held out of CI with ships=False.
 # This dict is the SINGLE source of truth — generate_firmwares.py projects it to
@@ -192,6 +196,7 @@ FIRMWARES: dict[str, dict] = {
         "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY). The "
                        "WiFi-less fallback; esp32p4-eth-wifi adds the C6 radio.",
         "ships": True,
+        "panel_cards": True,
     },
     "esp32p4-eth-wifi": {
         "chip": "esp32p4",
@@ -211,6 +216,7 @@ FIRMWARES: dict[str, dict] = {
         # CI doesn't boot-test. NOT a usable firmware: the board's deviceModels entry
         # flags it experimental so the installer warns before flashing.
         "ships": True,
+        "panel_cards": True,
     },
     "esp32s31": {
         "chip": "esp32s31",
@@ -222,6 +228,7 @@ FIRMWARES: dict[str, dict] = {
                        "when a cable is present, WiFi otherwise. esp32s31 is a preview "
                        "target on the v6.1 IDF line.",
         "ships": True,
+        "panel_cards": True,
     },
 }
 
@@ -465,6 +472,11 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "",
 
     if not any(fragment_enables_eth(frag) for frag in spec["fragments"]):
         args.append("-DMM_NO_ETH=1")
+    # Panel receiver cards over raw L2 (PanelCardDriver). Opt-in per firmware rather than per chip:
+    # the cards want a gigabit link, and classic ESP32 / P4 / S31 all report an internal MAC while
+    # only the S31 is gigabit. Firmwares that don't set it save ~2.8 KB of flash.
+    if spec.get("panel_cards"):
+        args.append("-DMM_PANEL_CARDS=1")
     return args
 
 
@@ -533,7 +545,7 @@ def stale_feature_cache(build_dir: Path, extra: list[str], chip: str) -> str | N
     # MM_TASK_CPU_STATS is here too: toggling --task-cpu-stats on an existing dir must wipe, or the
     # sdkconfig fragment (GENERATE_RUN_TIME_STATS) never re-seeds — CPU% would read all-0 with the flag
     # on, or leave a hidden ~5% tick tax with it off. Same stale-cache trap as MM_NO_ETH.
-    for flag in ("MM_NO_ETH", "MM_ETH_ONLY", "MM_NO_WIFI", "MM_TASK_CPU_STATS"):
+    for flag in ("MM_NO_ETH", "MM_ETH_ONLY", "MM_NO_WIFI", "MM_TASK_CPU_STATS", "MM_PANEL_CARDS"):
         wanted = any(a.startswith(f"-D{flag}") for a in extra)
         cached = f"{flag}:" in text  # CMake writes `MM_NO_ETH:UNINITIALIZED=1`
         if wanted != cached:

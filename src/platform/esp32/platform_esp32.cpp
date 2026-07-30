@@ -906,6 +906,72 @@ void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING {
     netifIPv4(ethNetif_, out);
 }
 
+// One raw frame straight to the MAC, bypassing lwIP entirely — see platform.h for the contract.
+// esp_eth_transmit takes the frame as-is (destination MAC first, EtherType at offset 12) and hands
+// it to the DMA; there is no netif, so no IP, no route lookup, and no DHCP lease involved.
+//
+// Gated on the LINK, not on ethConnected(): the IP stack is a layer above this one, and requiring
+// an address here would make a board that never completes DHCP unable to drive panels it is
+// perfectly capable of driving.
+//
+// Synchronous by contract: esp_eth_transmit returns once the frame is queued to the DMA, so the
+// caller may reuse its buffer immediately (which is why the driver can hold one packet buffer and
+// loop). Any error means the frame did not go out — a full TX ring under back-pressure being the
+// normal case — and the caller drops it rather than retrying, the same tolerance a UDP send has.
+// How many drivers have claimed the link for direct L2 use. Atomic: claimed on the render task,
+// read by NetworkModule's tick.
+static std::atomic<int> ethRawClaims_{0};
+
+void ethClaimRawL2(bool claim) {
+    if (claim) {
+        ethRawClaims_.fetch_add(1, std::memory_order_relaxed);
+    } else if (ethRawClaims_.load(std::memory_order_relaxed) > 0) {
+        ethRawClaims_.fetch_sub(1, std::memory_order_relaxed);
+    }
+}
+
+bool ethRawL2Claimed() MM_NONBLOCKING {
+    return ethRawClaims_.load(std::memory_order_relaxed) > 0;
+}
+
+// Consecutive failures, so a caller can distinguish back-pressure from a wedged path (see
+// platform.h). Written on the render task, read by the driver's 1 Hz status tick.
+static std::atomic<uint32_t> ethSendFails_{0};
+
+bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
+    if (!ethHandle_ || !frame || len == 0) return false;
+    if (!ethLinkUp_.load(std::memory_order_relaxed)) return false;
+    if (esp_eth_transmit(ethHandle_, const_cast<uint8_t*>(frame), len) != ESP_OK) {
+        ethSendFails_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    ethSendFails_.store(0, std::memory_order_relaxed);
+    return true;
+}
+
+uint32_t ethSendFailStreak() MM_NONBLOCKING {
+    return ethSendFails_.load(std::memory_order_relaxed);
+}
+
+// One MAC per chip, so there is no interface to choose: ethSendRaw always uses it. Accepting the
+// call (rather than failing) keeps the driver's control identical on every target — the field is
+// simply ignored here, which is what the driver's own comment tells the user.
+bool ethBindRawInterface(const char*) { return true; }
+
+// Negotiated link speed, asked of the driver rather than assumed from the PHY type: a gigabit PHY
+// on a 100 Mbit switch (or a bad cable) negotiates down, and that is precisely the case worth
+// reporting. 0 when there is no link to describe.
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING {
+    if (!ethHandle_ || !ethLinkUp_.load(std::memory_order_relaxed)) return 0;
+    eth_speed_t speed = ETH_SPEED_10M;
+    if (esp_eth_ioctl(ethHandle_, ETH_CMD_G_SPEED, &speed) != ESP_OK) return 0;
+    switch (speed) {
+        case ETH_SPEED_1000M: return 1000;
+        case ETH_SPEED_100M:  return 100;
+        default:              return 10;
+    }
+}
+
 #else // MM_NO_ETH — firmware excludes EMAC support (chip-side or sdkconfig fragment
       // wasn't layered. Provide stubs matching the desktop platform's no-eth
       // behaviour so NetworkModule's cascade falls straight to WiFi (or AP).
@@ -916,6 +982,12 @@ bool ethInit()                          { return false; }
 bool ethLinkUp() MM_NONBLOCKING                        { return false; }
 bool ethConnected() MM_NONBLOCKING                     { return false; }
 void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING         { out[0] = out[1] = out[2] = out[3] = 0; }
+bool ethSendRaw(const uint8_t*, size_t) MM_NONBLOCKING { return false; }   // no MAC to hand a frame to
+void ethClaimRawL2(bool)                               {}                  // no link to claim
+bool ethRawL2Claimed() MM_NONBLOCKING                  { return false; }
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING             { return 0; }       // no link to describe
+uint32_t ethSendFailStreak() MM_NONBLOCKING            { return 0; }       // nothing sends, nothing fails
+bool ethBindRawInterface(const char*)                  { return true; }    // no MAC, nothing to bind
 
 #endif // MM_NO_ETH
 

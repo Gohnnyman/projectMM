@@ -660,7 +660,7 @@ void MqttModule::routePublish(const char* topic, const uint8_t* payload, size_t 
         setControlValue("on", on ? "{\"value\":true}" : "{\"value\":false}");
     } else if (std::strcmp(suffix, "brightness/set") == 0) {
         // mqttthing sends 0..100; rescale to 0..255.
-        int pct = std::atoi(value);
+        int pct = mm::json::parseIntStr(value);
         if (pct < 0) pct = 0;
         if (pct > 100) pct = 100;
         const int bri = (pct * 255) / 100;

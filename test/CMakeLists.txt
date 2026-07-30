@@ -31,6 +31,7 @@ add_executable(mm_tests
     unit/core/unit_ImprovFrame.cpp
     unit/core/unit_ImprovOpReassembler.cpp
     unit/core/unit_JsonUtil_parse.cpp
+    unit/core/unit_JsonUtil_parseint.cpp
     unit/core/unit_JsonSink_detach.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
@@ -59,6 +60,8 @@ add_executable(mm_tests
     unit/light/unit_AudioBands.cpp
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
+    unit/light/unit_PanelCardDriver.cpp
+    unit/light/unit_PanelCardDriver_packet.cpp
     unit/light/unit_WledAudioSyncPacket.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_draw.cpp
@@ -80,6 +83,7 @@ add_executable(mm_tests
     unit/light/unit_WaveEffect.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GridLayout.cpp
+    unit/light/unit_SingleColumnLayout.cpp
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_WheelLayout.cpp
     unit/light/unit_Layer_extrude.cpp

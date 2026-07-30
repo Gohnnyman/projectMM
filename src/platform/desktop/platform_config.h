@@ -17,17 +17,35 @@ constexpr bool hasPsram = true;
 // (the general isEsp32/isEsp32S3 family flags had no users and were removed).
 constexpr bool isEsp32P4 = false;
 
-// No RMT peripheral — the RMT LED driver guards on this and is inert on desktop.
-constexpr uint8_t rmtTxChannels = 0;
+// RMT channels the host reports. Non-zero for the same reason as the parallel lane counts: the
+// desktop build emulates the peripheral so RmtLedDriver actually RUNS here, rather than guarding
+// itself off and leaving its encode + channel-assignment logic testable only on hardware. 4 matches
+// the S3 / P4 / S31 TX channel count (the classic ESP32 has 8), so the host exercises the tighter
+// of the two real constraints.
+constexpr uint8_t rmtTxChannels = 4;
 
-// No LCD_CAM peripheral — the LCD LED driver guards on this and is inert too.
-constexpr uint8_t lcdLanes = 0;
+// Lane counts the parallel backends report on desktop. NOT zero, deliberately: everything in the
+// repo runs on the desktop build — the platform layer just has no hardware behind the call. A
+// zero here makes every backend's lanesAvailable() report "not my silicon", so ParallelLedDriver
+// idles and its ~2500-line body never executes off-device: not runnable, not unit-testable, and
+// invisible to every AST-based check.
+//
+// 16 is the widest real rig (LightCrafter 16), so the host exercises the same lane-splitting and
+// bus-rounding arithmetic the hardware does rather than a degenerate 1-lane path. The bus behind
+// them is a heap buffer (platform_desktop.cpp § Parallel-WS2812 buses): the driver encodes real
+// WS2812 bit patterns into real memory, and only the DMA hand-off is absent.
+constexpr uint8_t lcdLanes = 16;
 
-// No Parlio peripheral — the Parlio LED driver guards on this and is inert too.
-constexpr uint8_t parlioLanes = 0;
+// hasLcdCam — TRUE on the host, like the lane counts above: the desktop build emulates the
+// peripheral rather than declaring itself incapable. Saying false here would leave the pin-expander
+// path (a real feature with real config validation) unreachable off-device, which is the same gap
+// the zero lane counts used to create. There is no LCD_CAM silicon; there is a memory bus that
+// behaves like one.
+constexpr bool hasLcdCam = true;
+constexpr uint8_t parlioLanes = 16;
 
-// No I2S-i80 peripheral — MultiPinLedDriver's lanesAvailable() reads lcdLanes + i2sLanes;
-// both 0 on desktop, so the driver is inert (host tests exercise only its parse/slice math).
+// MultiPinLedDriver's lanesAvailable() reads lcdLanes + i2sLanes, so this stays 0 — otherwise the
+// i80 backend would claim 32 lanes, which no real chip offers.
 constexpr uint8_t i2sLanes = 0;
 
 // No I2S microphone — AudioService guards on this and is inert on desktop. The
@@ -61,6 +79,11 @@ struct EthPinConfig {
 // (shared code) `if constexpr (hasEthernet)`s the eth controls off, and seeds its
 // members from this default; both must exist here for that shared code to compile.
 constexpr bool hasEthernet = false;
+
+// hasNamedNetInterfaces — the host has several NICs and a raw sender must name one ("eth0", "en0").
+// True on desktop, false on a microcontroller with a single MAC, where the name would be a control
+// that does nothing. Drivers use it to hide the field rather than to choose behaviour.
+constexpr bool hasNamedNetInterfaces = true;
 // Some-IP-stack flag (WiFi OR Ethernet) — mirrors the esp32 config so shared code
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).
@@ -98,3 +121,11 @@ constexpr bool hasImprov = false;
 #else
     #define MM_MOONLIVE_HAS_HOST_JIT 0
 #endif
+
+// MM_LINKS_ALL_LED_DRIVERS — 1 where the build links every LED driver regardless of silicon.
+// The desktop host does: the repo's rule is that everything runs there, with the platform layer
+// simply having no hardware behind the call. A driver excluded from the host binary cannot be
+// unit-tested, cannot be seen by any AST-based check, and only ever runs where it is hardest to
+// debug. A #define (not constexpr) because it gates `#include`s in main.cpp, which `if constexpr`
+// cannot do — and it lives here, not in core, per the platform-boundary rule.
+#define MM_LINKS_ALL_LED_DRIVERS 1

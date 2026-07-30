@@ -26,6 +26,16 @@ so a custom check written that way could never appear in the editor anyway.
    Not a violation — the driver layer allocates deliberately — but the hot path must not, and
    the count is the thing worth trending.
 
+3. **Comments per declaration.** Which classes, methods and attributes are documented, and with
+   which kind: `///` is what moxydoc publishes, while a `//` stacked on a declaration is usually a
+   thought that belongs in the code below it. Sized in WORDS against per-scope ideals, with the
+   deviation reported rather than a pass/fail — a class header IS the module spec, so its length
+   is a judgment, not a defect.
+
+   Clang's lexer discards `//`, so it reaches the AST only via the shadow tree below: a copy of
+   src/ where a leading `//` becomes `/// MMDEV:`. That marker is what keeps the two kinds apart
+   in the DEV column; the real source is never touched.
+
 Usage:
   uv run moondeck/check/check_clang_query.py              # every rule
   uv run moondeck/check/check_clang_query.py --rule arrays
@@ -34,9 +44,11 @@ Usage:
 
 import argparse
 import collections
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -115,6 +127,109 @@ _SCRATCH = re.compile(
 # The type a `new` produces: `CXXNewExpr 0x... <...> 'Foo *' array ...`.
 _NEW_TYPE = re.compile(r"CXXNewExpr 0x\w+ <[^>]*> '(?P<type>[^']+?) ?\*'")
 
+# A doc comment's span. The AST dump elides whatever is unchanged from the previous node, so the
+# same construct prints three ways and all three must parse:
+#   <line:272:4, line:298:76>   multi-line
+#   <line:309:8, col:61>        multi-column, one line
+#   <col:23, col:71>            ENTIRELY on the current line — no line number at all
+# The third form is why ~45 one-line `///` comments (every effect, layout and modifier header)
+# were silently missing from the first version: a regex demanding a digit pair never matched
+# them. When a `line:` is absent the line is inherited from the enclosing context, which is
+# tracked while walking.
+_FULLCOMMENT = re.compile(
+    r"FullComment 0x\w+ <(?:(?P<path>[^:>]*):(?P<pstart>\d+):\d+|line:(?P<start>\d+):\d+|col:\d+)"
+    r"(?:, (?:[^:>]*:(?P<pend>\d+):\d+|line:(?P<end>\d+):\d+|col:\d+))?>")
+
+# The text of one comment line: `TextComment 0x... <col:4, col:29> Text=" A doc comment."`.
+_TEXTCOMMENT = re.compile(r"TextComment 0x\w+ <[^>]*> Text=\"(?P<text>.*)\"")
+
+# Any node that is part of a doc comment's subtree rather than the declaration below it.
+# `Comment` alone would also swallow the FullComment of the NEXT comment, so the wrappers are
+# named explicitly and FullComment is deliberately absent — reaching one means this comment ended.
+_COMMENT_NODE = re.compile(
+    r"\b(?:ParagraphComment|BlockCommandComment|ParamCommandComment|TParamCommandComment"
+    r"|InlineCommandComment|VerbatimBlockComment|VerbatimBlockLineComment|VerbatimLineComment"
+    r"|HTMLStartTagComment|HTMLEndTagComment)\b")
+
+# The declaration a comment is attached to — the next decl node after the comment subtree.
+# Clang dumps a doc comment as the first child of the declaration it documents, so "the next
+# decl below this FullComment" is its owner. Validated on a real TU: 206 of 207 comments
+# resolved, split 17 class / 155 method / 28 field / 6 constructor.
+# The name is the LAST identifier before the type/qualifier tail, not the first token after the
+# source range — a non-greedy `\b(\w+)\b` there captures `col` out of `<line:299:1, col:7> col:7
+# implicit referenced class ControlList`, which is how the first version reported every row as
+# "col". Anchoring on the trailing keyword (`class`/`struct`/`union`) or the quoted type is what
+# makes it the declaration's own name.
+_OWNER = re.compile(
+    r"(?P<kind>CXXRecordDecl|CXXMethodDecl|CXXConstructorDecl|CXXDestructorDecl"
+    r"|CXXConversionDecl|FieldDecl"
+    r"|FunctionDecl|VarDecl|EnumDecl|EnumConstantDecl|TypedefDecl|TypeAliasDecl) 0x\w+[^<]*"
+    r"<(?:[^:>]*:)?(?:line:)?(?P<line>\d+):\d+[^>]*>"
+    # A record's name follows its keyword and may be trailed by `definition`; a `[^\n]*?` before
+    # the keyword would let the tail win, so the trailing token is matched explicitly. Without
+    # this, every `class Foo … definition` line reported its name as "definition".
+    r"(?:[^\n]*?\b(?:class|struct|union|enum)\s+(?P<cname>\w+)(?:\s+definition)?\s*$"
+    r"|[^\n]*?(?P<fname>~?(?:operator\s*\S+|\w+))\s+')", re.M)
+
+# A DIRECT child of the block head: exactly one tree connector before the node name. A deeper
+# node (`| |-`, `|   `-`) belongs to a nested declaration, which clang-query emits as its own
+# bound block — so depth is what stops a class absorbing every comment its members carry.
+_TOP_CHILD = re.compile(r"^[|`]-")
+
+# A record declaration head, for the forward-declaration test above. Only records can be
+# forward-declared; a method or attribute always has its definition where it is declared.
+_RECORD_HEAD = re.compile(r"^(?:CXXRecordDecl|ClassTemplateDecl) ")
+
+# The file a dumped node belongs to. The AST dump prints an absolute path only when it CHANGES,
+# then `line:N` for subsequent nodes in the same file — so the current file has to be tracked
+# as the dump is walked, not read off each node.
+_PATH_HINT = re.compile(r"<(?P<path>/[^:>]*\.(?:h|cpp|hpp|cc)):(?P<line>\d+):")
+
+# `<line:N:C>` with no path — same file, new line. Feeds the line that a `col:`-only span inherits.
+_LINE_HINT = re.compile(r"<line:(?P<line>\d+):\d+")
+
+# What each owner kind counts as, for the per-scope split. A constructor is a method; an enum or
+# a typedef is neither class nor method, so it reports as `other` rather than being dropped —
+# a scope nobody expected is a finding, not a reason to hide the row.
+_SCOPE = {
+    "CXXRecordDecl": "class", "EnumDecl": "class",
+    "EnumConstantDecl": "attribute",
+    "CXXMethodDecl": "method", "CXXConstructorDecl": "method",
+    "CXXDestructorDecl": "method", "CXXConversionDecl": "method", "FunctionDecl": "method",
+    "FieldDecl": "attribute", "VarDecl": "attribute",
+}
+
+# What "documented well" looks like, in WORDS, per declaration kind.
+#
+# Words rather than lines: a line is a formatting accident — the same paragraph is 5 lines at 100
+# columns and 9 at 60 — while the word count is what a reader actually absorbs. Measured on this
+# tree, a comment line carries a median of 13 words in BOTH kinds, so a line-based yardstick of
+# class 10 / method 3 / attribute 3 converts to 130 and 40.
+#
+# A class carries the spec: what it is for, how it fits, what a caller must know. A method or an
+# attribute is one idea. This is a ruler, not a gate — MoonI80Peripheral's header may be exactly
+# right at ten times the ideal, because it IS the driver's spec.
+_IDEAL_DOC_WORDS = {"class": 130, "method": 40, "attribute": 40, "other": 40}
+
+# `@moreinfo` ends the part being measured. The directive splits a class comment in two (see
+# gen_api.py): everything before it is the lead description, rendered above the attribute/method
+# lists, and everything after is deep-dive reference relocated BELOW them under `## More info`.
+#
+# Only the lead is measured, because the ideal asks "how much must a reader take in before the
+# member lists" — and reference material deliberately parked at the bottom of the page is not that.
+# Counting the whole block punished the very structure the directive exists to encourage:
+# NetworkSendDriver read +407% as one blob, and +48% once its 469 More-info words were separated
+# from its 193-word lead.
+#
+# Matched on the AST node, not the source text: clang parses the directive into
+# `InlineCommandComment ... Name="moreinfo"`, so the split point is stated rather than guessed at.
+_MOREINFO_NODE = re.compile(r'InlineCommandComment.*Name="moreinfo"')
+
+# The `//` side deliberately has NO ideal, because zero IS the ideal: a developer note stacked on
+# a declaration is usually a thought that belongs in the code below it. Measuring it as
+# deviation-from-one-line made the best case (no note at all) read as -100%, i.e. worst — so DEV
+# is reported as a raw word count. Zero reads as zero.
+
 # Three constraints this matcher set was built around. Recorded here because two are NEGATIVE
 # results — the kind that gets re-attempted by whoever forgets they were already tried:
 #
@@ -141,6 +256,32 @@ RULES = {
         "output": "dump",
         "matcher": ('fieldDecl(hasType(cxxRecordDecl(hasName("ScratchBuffer"))))'),
     },
+    "comments": {
+        "title": "Comments per declaration (scope x kind)",
+        "output": "dump",
+        # `shadow: True` parses a copy of src/ where every leading `//` became `/// MMDEV: …`,
+        # so ONE pass reports both kinds against the declaration each documents. Without it this
+        # rule sees only `///` — 24% of the tree's comment lines.
+        "shadow": True,
+        # The scopes that can actually carry a comment: class/struct, method, and class ATTRIBUTE.
+        # parmVarDecl is deliberately absent — a C++ parameter cannot hold a doc comment (1054
+        # probed, zero with one), it is documented via `@param` in the method's own comment, and
+        # this tree uses `@param` 8 times, all in a .js file. Reporting 1054 permanent violations
+        # would bury every other row.
+        # `unless(isLambda())` on the record, and `unless(ofClass(isLambda()))` on the method:
+        # a lambda written INSIDE a function body is code, not a documented declaration, and
+        # its compiler-synthesised closure class + call operator would otherwise be reported
+        # as 53 undocumented "methods". The AST knows the difference — this asks it, rather
+        # than testing the name, so a REAL `operator()` on a named functor class is still
+        # reported.
+        "matcher": ("namedDecl(anyOf(cxxRecordDecl(unless(isLambda())), "
+                    "cxxMethodDecl(unless(ofClass(cxxRecordDecl(isLambda())))), "
+                    "cxxConstructorDecl(), cxxDestructorDecl(), cxxConversionDecl(), "
+                    "fieldDecl(), enumDecl(), "
+                    "enumConstantDecl(), "
+                    "functionDecl(unless(cxxMethodDecl(ofClass(cxxRecordDecl(isLambda())))))), "
+                    'unless(isExpansionInSystemHeader())).bind("d")'),
+    },
     "heap": {
         "title": "Heap allocation sites",
         # `dump`, not `diag`: diag gives a location with no expression and print gives an
@@ -158,7 +299,13 @@ RULES = {
         # says which code allocates rather than only which line. clang-query then emits two
         # blocks per match ("fn" then "root"), which is why collect_heap parses per-match.
         "matcher": ("stmt(anyOf(cxxNewExpr(), cxxDeleteExpr(), callExpr(callee(functionDecl("
+                    # The project's OWN allocator belongs here, not just libc's: platform::alloc
+                    # is how 35 sites in src/ acquire memory, and listing only `free` made the
+                    # table read as "8 frees, 0 allocations" on HueDriver — an implied leak that
+                    # was not there. allocInternal pairs with the ordinary free() (platform.h:63);
+                    # allocExec/freeExec are their own pair.
                     'hasAnyName("malloc","calloc","realloc","free","strdup",'
+                    '"alloc","allocInternal","allocExec","freeExec",'
                     '"heap_caps_malloc","heap_caps_calloc","heap_caps_realloc","heap_caps_free",'
                     '"ps_malloc","ps_calloc"), unless(cxxMethodDecl()))))), '
                     'hasAncestor(functionDecl().bind("fn")))'),
@@ -180,7 +327,7 @@ def module_files(module):
 
 
 def including_tus(files, build_dir):
-    """The translation units that reach `files` — the TUs worth parsing to analyse them.
+    """The translation units that reach `files` — the TUs worth parsing to analyze them.
 
     A header is not a TU: it is compiled through whichever .cpp includes it. Parsing every TU to
     reach one header costs minutes (263s here) when a single TU usually suffices (18s), so this
@@ -217,17 +364,82 @@ def including_tus(files, build_dir):
         frontier = nxt
 
     hits = [tu for tu in tus if Path(tu).name in reached]
-    return hits or tus          # no edge found -> analyse everything rather than nothing
+    return hits or tus          # no edge found -> analyze everything rather than nothing
 
 
 def _source_tus(build_dir):
-    """The src/ translation units to analyse.
+    """The src/ translation units to analyze.
 
     Only src/: test/ TUs would double the runtime to report on code that never ships, and a
-    header is analysed through whichever .cpp includes it (hence the dedupe below).
+    header is analyzed through whichever .cpp includes it (hence the dedupe below).
     """
     db = json.loads((build_dir / "compile_commands.json").read_text(encoding="utf-8"))
     return sorted({e["file"] for e in db if "/src/" in e["file"].replace("\\", "/")})
+
+
+# The marker a `//` comment carries once it has been rewritten into a doc comment for parsing.
+# Plain text on purpose: an `@`-prefixed marker is parsed as a doc COMMAND and stripped from the
+# text, so `@MMDEV` vanishes and the two kinds become indistinguishable again. This survives.
+_DEV_MARK = "MMDEV:"
+
+# Leading `//` only — never `///` (already a doc comment) and never a trailing `x = 1; // note`
+# (it documents nothing, and rewriting it would change the code line).
+_LEADING_DEV = re.compile(r"^([ \t]*)//(?!/)( ?)", re.M)
+
+
+def _shadow_tree(build_dir):
+    """A copy of `src/` where every leading `//` is a MARKED doc comment.
+
+    Clang's lexer DISCARDS `//`: only `///` and `/** */` become AST nodes, because the compiler
+    consumes those itself. That leaves 76% of this tree's comment lines invisible to any matcher.
+    Rewriting them into `/// MMDEV: …` makes them parse, and the marker keeps them separable from
+    real doc comments — so one AST pass can report BOTH kinds against the declaration each one
+    documents, which is the whole point (a `//` on a class is a different finding from a `///`).
+
+    The rewrite happens in a SHADOW COPY under the build dir; `src/` is never touched. That is the
+    line between this and a bad idea: the report describes the real tree, and the only thing the
+    marker changes is which lexer bucket a comment lands in.
+
+    Two things probed and settled, recorded so they are not re-derived:
+      - `-Wdocumentation` WOULD fabricate warnings on rewritten dev notes (a `// @param wrong`
+        becomes a real diagnostic). It does not matter here: clang-query never enables it.
+      - Function PARAMETERS cannot carry a doc comment in C++ at all — 1054 ParmVarDecls in one TU,
+        zero with a comment, and `@param` appears 8 times in the tree (all in a .js file). Class
+        ATTRIBUTES (FieldDecl) are the per-member scope that does exist, and they are reported.
+    """
+    shadow = build_dir / "comment-shadow"
+    # Reused within a run: the comments rule and the visibility pass both need it, and rebuilding
+    # (rmtree + copytree + rewrite of all of src/) twice per run bought nothing — the source
+    # cannot change mid-run. A stale tree from a PREVIOUS run would be wrong, so the marker file
+    # records which source state it was built from.
+    stamp = shadow / ".built-from"
+    # A FINGERPRINT of every source path + its size and mtime, not just the newest mtime. Max-mtime
+    # cannot see a DELETION (deleting anything but the newest leaves the max unchanged) nor an edit
+    # that restores an older timestamp — in both cases the shadow tree stays stale and the report
+    # describes source that is no longer there. Path and size are in the digest too, so a rename or
+    # a same-mtime content change also invalidates.
+    #
+    # Hashing metadata rather than file CONTENT is deliberate: it is one stat() per file instead of
+    # reading all of src/, and the failure it must catch is a stale tree between runs, not a
+    # deliberate forgery.
+    digest = hashlib.sha256()
+    for f in sorted((ROOT / "src").rglob("*")):
+        if f.is_file():
+            st = f.stat()
+            digest.update(f"{f.relative_to(ROOT)}|{st.st_size}|{st.st_mtime_ns}\n".encode())
+    fingerprint = digest.hexdigest()
+    if stamp.exists() and stamp.read_text(encoding="utf-8").strip() == fingerprint:
+        return shadow
+    if shadow.exists():
+        shutil.rmtree(shadow)
+    shutil.copytree(ROOT / "src", shadow / "src")
+    for f in list((shadow / "src").rglob("*.h")) + list((shadow / "src").rglob("*.cpp")):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        marked = _LEADING_DEV.sub(rf"\1/// {_DEV_MARK}\2", text)
+        if marked != text:
+            f.write_text(marked, encoding="utf-8")
+    stamp.write_text(fingerprint, encoding="utf-8")
+    return shadow
 
 
 def _run_rule(rule, tus, build_dir, tool):
@@ -243,12 +455,29 @@ def _run_rule(rule, tus, build_dir, tool):
     cmd = [tool, "-p", str(build_dir), "-f", str(qfile)]
     cmd += [f"--extra-arg={a}" for a in check_clang_tidy._toolchain_args()]
 
+    # The comments rule parses the shadow tree instead, so `//` is visible. The include path is
+    # prepended so a TU's `#include "core/Foo.h"` resolves to the rewritten header, not the real
+    # one — without it only the .cpp itself would be marked and every header would read as clean.
+    shadow = None
+    if rule.get("shadow"):
+        shadow = _shadow_tree(build_dir)
+        # `--extra-arg-before`, NOT `--extra-arg`: the latter APPENDS, so the compile
+        # database's own `-I…/src` was searched first and every transitive include resolved
+        # to the REAL, unmarked header. Only first-level quoted includes hit the shadow, so
+        # `//` counts were a systematic undercount — a silent zero for most shared headers.
+        cmd += [f"--extra-arg-before=-I{shadow / 'src'}"]
+        tus = [str(shadow / Path(tu).relative_to(ROOT)) for tu in tus]
+
     def one(tu):
         p = subprocess.run(cmd + [tu], cwd=ROOT, capture_output=True, text=True)
         return p.stdout + p.stderr
 
     with ThreadPoolExecutor(max_workers=max(1, (os.cpu_count() or 4) - 2)) as ex:
-        return "".join(ex.map(one, tus))
+        out = "".join(ex.map(one, tus))
+    if shadow:
+        # Paths in the dump point into the shadow; map them back so a row is clickable.
+        out = out.replace(str(shadow / "src"), str(ROOT / "src"))
+    return out
 
 
 def _rel(path):
@@ -408,6 +637,227 @@ def render_scratch(rows, max_rows=0):
     return L + note
 
 
+# Access is NOT in the AST dump's declaration line — clang prints `private` only as a separate
+# AccessSpecDecl node, which a per-block parse never sees. So visibility comes from a second,
+# cheap matcher pass listing the non-public declarations by file:line, and rows are tagged
+# against that set.
+#
+# Why report private members at all, rather than filtering them out: doxygen never publishes
+# them, so the "it should reach the module page" argument does not apply — but a bloated comment
+# is still bloat, and clangd's hover shows it to whoever maintains the code. The VIS column lets
+# a reader weigh a finding (a public method with no `///` is an API gap; a private one is a
+# maintenance note) without dropping half the tree from the report.
+_NONPUBLIC_MATCHER = ("namedDecl(anyOf(cxxRecordDecl(), cxxMethodDecl(), cxxConstructorDecl(), "
+                      "cxxDestructorDecl(), cxxConversionDecl(), fieldDecl(), enumDecl(), "
+                      "enumConstantDecl(), functionDecl()), "
+                      "anyOf(isPrivate(), isProtected()), "
+                      'unless(isExpansionInSystemHeader())).bind("d")')
+
+
+def collect_nonpublic(out):
+    """The (file, line) of every private/protected declaration in the dump."""
+    seen = set()
+    cur_path = None
+    for block in out.split('Binding for "d":')[1:]:
+        head = next((ln for ln in block.split("\n") if ln.strip()), "")
+        hint = _PATH_HINT.search(head)
+        if hint:
+            cur_path = hint["path"]
+        rel = _rel(cur_path) if cur_path else None
+        owner = _OWNER.search(head)
+        if rel and owner:
+            seen.add((rel, int(owner["line"])))
+    return seen
+
+
+def collect_comments(out):
+    """Every declaration, with the WORDS of `///` and `//` attached to it.
+
+    Parsed per BOUND MATCH: `.bind("d")` makes clang-query emit one block per matched declaration,
+    headed by that declaration, so the owner is stated rather than inferred. Inferring it
+    positionally fails two ways — a class match dumps its whole subtree (so a member's comment
+    hangs off the class), and a trailing `///<` attaches to the declaration BEFORE it.
+
+    Only a DIRECT child of the block head is this declaration's own comment; a deeper FullComment
+    belongs to a nested declaration, which has its own block.
+
+    Deduplicated by (file, declaration line), and sizes are a MAX rather than a sum: a header
+    parsed by several TUs yields the same comment once per TU, and adding them reported a
+    129-line class comment as 258.
+    """
+    rows = {}
+    cur_path = None
+    for block in out.split('Binding for "d":')[1:]:
+        lines = block.split("\n")
+        head = next((ln for ln in lines if ln.strip()), "")
+
+        hint = _PATH_HINT.search(head)
+        if hint:
+            cur_path = hint["path"]
+        rel = _rel(cur_path) if cur_path else None
+        owner = _OWNER.search(head)
+        if not rel or not owner:
+            continue
+        # `implicit` — a lambda's closure class or a compiler-injected self-reference: anonymous,
+        #   so the dump's only "name" is the literal word "definition".
+        # `invalid`  — a declaration clang could not fully parse in THIS TU (it parses fine in the
+        #   TU that owns it). Same anonymous shape, and it would overwrite the good row.
+        if " implicit " in head or " invalid " in head:
+            continue
+        # A record with no body is a FORWARD DECLARATION (`class JsonSink;`) — there is nothing
+        # to document, and the real class is reported from the header that defines it. Clang
+        # marks a defined record with a trailing `definition`; without it, the two `class Foo;`
+        # lines at the top of every module header showed up as undocumented classes.
+        if _RECORD_HEAD.match(head) and not head.rstrip().endswith("definition"):
+            continue
+
+
+        # Both kinds accumulate: a `///` spec and a `//` note can sit on the same method, and
+        # keeping only whichever the dump listed first would hide half of it. A declaration with
+        # neither still earns a row — "undocumented" is the other half of the question.
+        seen = {"///": 0, "//": 0}
+        first_line = None
+        for k, line in enumerate(lines):
+            if "FullComment" not in line or not _TOP_CHILD.match(line):
+                continue
+            fc = _FULLCOMMENT.search(line)
+            if not fc:
+                continue
+            # Three span forms, and the PATH one is not optional: the dump prints a full path
+            # whenever the comment is the first node from a new file, which is exactly the case
+            # for a declaration whose doc comment opens a header. Missing it reported two
+            # correctly-documented methods as having no comment at all.
+            begin = int(fc["pstart"] or fc["start"] or owner["line"])
+            body = ""
+            for sub in lines[k + 1:]:
+                # `@moreinfo` ends the LEAD description; everything after it is relocated below
+                # the member lists at render time and is not what the ideal measures.
+                if _MOREINFO_NODE.search(sub):
+                    break
+                tc = _TEXTCOMMENT.search(sub)
+                if tc:
+                    body += tc["text"] + " "
+                    continue
+                # The subtree is not flat — ParagraphComment and friends wrap the text — so the
+                # scan ends only at a node that is not part of a comment at all.
+                if not _COMMENT_NODE.search(sub):
+                    break
+            kind = "//" if _DEV_MARK in body else "///"
+            # The marker is not prose: strip it before counting, or every rewritten `//` block
+            # would read one word longer per line than it is on disk.
+            words = len(body.replace(_DEV_MARK, " ").split())
+            seen[kind] = max(seen[kind], words)
+            if first_line is None:
+                first_line = begin
+
+        # `= default` / `= delete` have no body to document — reporting them as undocumented is
+        # noise. They still count when they DO carry a comment.
+        if not seen["///"] and not seen["//"]:
+            if " default" in head or " delete" in head:
+                continue
+
+        scope = _SCOPE.get(owner["kind"], "other")
+        ideal = _IDEAL_DOC_WORDS.get(scope, _IDEAL_DOC_WORDS["other"])
+        # MAX across TUs, not last-writer-wins. A header is parsed once per TU that includes it,
+        # and a plain assignment let a later TU that saw fewer words overwrite an earlier one that
+        # saw more — the docstring claimed max while the code overwrote.
+        key = (rel, int(owner["line"]))
+        prev = rows.get(key)
+        if prev:
+            seen["///"] = max(seen["///"], prev["doc_words"])
+            seen["//"] = max(seen["//"], prev["dev_words"])
+        rows[key] = {
+            "file": rel, "line": first_line or int(owner["line"]),
+            # The DECLARATION's line, distinct from `line` (where its comment starts) — the
+            # visibility pass keys on the declaration, so the two must not be conflated.
+            "decl_line": int(owner["line"]),
+            "doc_words": seen["///"], "dev_words": seen["//"],
+            "scope": scope,
+            # DOC is a target, so the deviation is a signed percentage: 0% ideal, -100% absent,
+            # no ceiling. DEV has no target — zero IS the ideal — so `dev_words` above is
+            # reported raw, with no deviation column at all.
+            "doc_deviation": 100 * (seen["///"] - ideal) / ideal,
+            "name": owner["cname"] or owner["fname"] or "?",
+        }
+    # Absolute deviation: a bloated header and a missing comment are both wrong, in opposite
+    # directions, and ranking by |deviation| surfaces the two together rather than burying one.
+    return sorted(rows.values(), key=lambda r: -abs(r["doc_deviation"]))
+
+
+def render_comments(rows, max_rows=0):
+    """The DECL x kind matrix, then every declaration ranked by how far it sits from the ideal.
+
+    The project's rule is that every class, method and attribute carries a short readable `///`
+    — that is what moxydoc publishes — while `//` developer notes belong in the code lines rather
+    than stacked on a declaration. Three states, three different fixes, so the matrix shows which
+    way each kind of declaration is leaning.
+
+    Sizes are WORDS, not lines: a line is a formatting accident (the same paragraph is 5 lines at
+    100 columns and 9 at 60) while words are what a reader absorbs. Measured here, a comment line
+    carries a median of 13 words in both kinds.
+
+    DOC DEVIATION is the signed % difference from `_IDEAL_DOC_WORDS`; DEV is an absolute
+    count because zero is the
+    ideal there, and a ratio would report the best case (no note at all) as -100%.
+    """
+    L = [f"{len(rows)} found."]
+    if not rows:
+        return L
+
+    scopes = ("class", "method", "attribute", "other")
+    blank = {"///": 0, "//": 0, "none": 0}
+    counts = {s: dict(blank) for s in scopes}
+    for r in rows:
+        c = counts.setdefault(r["scope"], dict(blank))
+        if r["doc_words"]:
+            c["///"] += 1
+        elif r["dev_words"]:
+            c["//"] += 1
+        else:
+            c["none"] += 1
+
+    ideals = " · ".join(f"{s} {_IDEAL_DOC_WORDS[s]}" for s in ("class", "method", "attribute"))
+    # Column names match the detail table below, so a reader carries one vocabulary down the
+    # report rather than mapping "DOC ///" onto "DOC WORDS" halfway through.
+    L += ["", f"  {'DECL':<10}  {'DOC':>7}  {'DEV':>7}  {'NONE':>7}  {'%DOC':>5}"
+              f"    (ideal doc words: {ideals}; ideal dev words: 0)",
+          f"  {'-' * 10}  {'-' * 7}  {'-' * 7}  {'-' * 7}  {'-' * 5}"]
+    for s in scopes:
+        c = counts.get(s, blank)
+        total = c["///"] + c["//"] + c["none"]
+        if total:
+            L.append(f"  {s:<10}  {c['///']:>7}  {c['//']:>7}  {c['none']:>7}  "
+                     f"{100 * c['///'] // total:>4}%")
+
+    dev = sum(1 for r in rows if not r["doc_words"] and r["dev_words"])
+    none = sum(1 for r in rows if not r["doc_words"] and not r["dev_words"])
+    L += ["", f"  {dev} declarations carry only a `//` where the rule asks for `///`; "
+              f"{none} carry no comment at all."]
+
+    name_w = min(max(len(r["name"]) for r in rows), 30)
+    # The public subset, called out because it is the part that SHIPS as documentation: doxygen
+    # publishes only public members, so an undocumented public method is an API gap while a
+    # private one is a maintenance note. Both are reported; the split says which is which.
+    pub = [r for r in rows if r.get("vis") == "pub"]
+    if pub:
+        pub_doc = sum(1 for r in pub if r["doc_words"])
+        L += [f"  Public surface: {pub_doc} of {len(pub)} documented "
+              f"({100 * pub_doc // len(pub)}%) — the part doxygen publishes."]
+
+    # DOC DEVIATION sits beside DOC WORDS: the percentage and the number it is derived from
+    # belong together, and DEV WORDS is a separate measure. "Deviation", not "ratio" — a ratio is
+    # a bare quotient (2.3x), this is a signed percentage difference from a target.
+    L += ["", f"  {'DOC DEVIATION':>13}  {'DOC WORDS':>9}  {'DEV WORDS':>9}  {'VIS':<4}  "
+              f"{'DECL':<9}  {'NAME':<{name_w}}  FILE:LINE",
+          f"  {'-' * 13}  {'-' * 9}  {'-' * 9}  {'-' * 4}  {'-' * 9}  {'-' * name_w}  {'-' * 30}"]
+    shown, note = _truncate(rows, max_rows)
+    for r in shown:
+        L.append(f"  {r['doc_deviation']:>+12.0f}%  {r['doc_words']:>9}  {r['dev_words']:>9}  "
+                 f"{r.get('vis', '?'):<4}  {r['scope']:<9}  {r['name'][:name_w]:<{name_w}}  "
+                 f"{r['file']}:{r['line']}")
+    return L + note
+
+
 def render_arrays(rows, min_bytes, max_rows=0):
     over = f" over {min_bytes} bytes" if min_bytes else ""
     L = [f"{len(rows)} found{over}."]
@@ -431,7 +881,7 @@ def render_arrays(rows, min_bytes, max_rows=0):
 
 # Which side of the lifecycle a site is on. `realloc` acquires (it can move and grow), so it
 # sits with the allocations; a bare `free`/`delete` releases.
-_RELEASING = ("free()", "delete", "delete[]", "heap_caps_free()")
+_RELEASING = ("free()", "freeExec()", "delete", "delete[]", "heap_caps_free()")
 
 
 def render_heap(rows, max_rows=0):
@@ -450,7 +900,7 @@ def render_heap(rows, max_rows=0):
 
     def table(title, subset):
         if not subset:
-            return [f"", f"{title}: none."]
+            return ["", f"{title}: none."]
         kinds = collections.Counter(r["what"] for r in subset)
         what_w = min(max(len(r["what"]) for r in subset), 12)
         tgt_w = min(max((len(r["target"]) for r in subset), default=0), 24) or 1
@@ -470,6 +920,20 @@ def render_heap(rows, max_rows=0):
         return out + note
 
     return L + table("ALLOCATE", alloc) + table("FREE", free)
+
+
+def _matcher_rejected(out):
+    """True when clang-query refused the matcher rather than finding nothing.
+
+    A rejected matcher still exits 0 with no matches, so the two are indistinguishable by status —
+    and its complaints do not all say `error:` (an ambiguous top-level `anyOf()` reports "Input
+    value has unresolved overloaded type"). Shared by the primary rule and the visibility pass:
+    the second had no validation at all, so a refused matcher there silently marked every row
+    `pub` instead of failing.
+    """
+    bad = [ln for ln in out.splitlines()
+           if "error: " in ln or "unresolved overloaded type" in ln or "not found" in ln]
+    return bool(bad) and "binds here" not in out and "Match #" not in out
 
 
 def main():
@@ -495,7 +959,7 @@ def main():
               f"run `uv run moondeck/build/build_desktop.py` first.", file=sys.stderr)
         return 2
 
-    # A module's HEADER is not a translation unit — it is analysed through whichever .cpp
+    # A module's HEADER is not a translation unit — it is analyzed through whichever .cpp
     # includes it. So --module narrows the REPORT, not the TU list; narrowing the TUs would
     # miss every header-only module, which is most of the light domain.
     only = None
@@ -530,9 +994,9 @@ def main():
         # do not all say "error:" — an ambiguous top-level anyOf() reports "Input value has
         # unresolved overloaded type" — so key on "no matches at all", which is never a real
         # result for these rules on this codebase.
-        bad = [l for l in out.splitlines()
-               if "error: " in l or "unresolved overloaded type" in l or "not found" in l]
-        if bad and "binds here" not in out and "Match #" not in out:
+        bad = [ln for ln in out.splitlines()
+               if "error: " in ln or "unresolved overloaded type" in ln or "not found" in ln]
+        if _matcher_rejected(out):
             print(f"[{name}] clang-query rejected the matcher: {bad[0].strip()}", file=sys.stderr)
             return 2
 
@@ -541,12 +1005,40 @@ def main():
             rows = collect_arrays(out, args.min_bytes)
         elif name == "scratch":
             rows = collect_scratch(out)
+        elif name == "comments":
+            rows = collect_comments(out)
+            # A zero here is indistinguishable from a shadow tree that never got included: the
+            # first version appended `--extra-arg`, so every transitive header resolved to the
+            # REAL unmarked file and `//` counts silently halved. If NOTHING carries a dev
+            # comment, the rewrite did not reach the headers — say so instead of reporting it.
+            # NO `rows and` guard: an EMPTY result is the same false zero, only more so — the
+            # matcher found not one declaration in a tree of thousands. Skipping the check when
+            # rows was empty let the worst case through as a clean report.
+            if not any(r["dev_words"] for r in rows):
+                print("[comments] no `//` comment found anywhere — the shadow tree did not reach "
+                      "the headers (include order?). Refusing to report a false zero.",
+                      file=sys.stderr)
+                return 2
+            # Second pass for visibility — see collect_nonpublic. Cheap next to the main run:
+            # same TUs, a matcher with no comment traversal.
+            vis_out = _run_rule({"output": "dump", "matcher": _NONPUBLIC_MATCHER, "shadow": True},
+                                tus, build_dir, tool)
+            # Fail closed, exactly as the primary query does: an empty visibility result would mark
+            # EVERY row `pub`, which reads as a fully-public API rather than as a failed query.
+            if _matcher_rejected(vis_out):
+                print("[comments] clang-query rejected the visibility matcher; VIS cannot be "
+                      "reported. Refusing to mark every declaration public.", file=sys.stderr)
+                return 2
+            nonpub = collect_nonpublic(vis_out)
+            for r in rows:
+                r["vis"] = "priv" if (r["file"], r["decl_line"]) in nonpub else "pub"
         else:
             rows = collect_heap(out)
         if only:
             rows = [r for r in rows if r["file"] in only]
         body = (render_arrays(rows, args.min_bytes, args.max_rows) if name == "arrays"
                 else render_scratch(rows, args.max_rows) if name == "scratch"
+                else render_comments(rows, args.max_rows) if name == "comments"
                 else render_heap(rows, args.max_rows))
         print("\n".join(body))
         print()

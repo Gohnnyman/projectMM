@@ -40,4 +40,4 @@ The alternatives weighed and rejected: **keep CRTP + one registered wrapper** (s
 
 The migration cost is documented, not coded (per [ADR-0013](0013-no-migration-code-robust-persistence-plus-documented-breaks.md)): a field device's persisted `MoonLedDriver`/`MultiPinLedDriver`/`ParlioLedDriver` type no longer resolves, so the module drops on boot and the user re-adds a Parallel LED driver and picks the peripheral — a `MIGRATING.md` entry covers it, and the web-installer catalog names the new type so a fresh install is correct.
 
-The design intent and staged plan are the [consolidation plan](../history/plans/); this ADR is the decision record.
+The design intent and staged plan are the [consolidation plan](../history/plans/README.md); this ADR is the decision record.

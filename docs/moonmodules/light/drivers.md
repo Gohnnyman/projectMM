@@ -87,6 +87,31 @@ Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 
 Detail: [technical](moxygen/NetworkSendDriver.md)
 
+<a id="panelcard"></a>
+
+### Panel Card 💫 · raw Ethernet
+
+<img src="../../assets/light/drivers/PanelCardDriver.png" width="300" alt="PanelCard controls">
+
+Streams the buffer to **LED panel cards** as raw Ethernet frames, compatible with **ColorLight 5A-75** cards. In vendor terms (ColorLight, NovaStar, Linsn) these are *receiving cards*, and this driver takes the place of the *sending card* that normally feeds them. These take a sender-card feed rather than a pixel protocol, so the driver sends row-addressed data followed by a sync frame that latches the image.
+
+The board renders and sends: effects, layers and MoonLive run on the device, so one board replaces a host PC driving the same panels. Add a Network Receive effect to take Art-Net in as well.
+
+- `format` — the card's wire format (ColorLight 5A-75).
+- **No geometry controls** — the wall comes from the [Layout](layouts.md). A `PanelsLayout` already states how many panels there are, their size, wiring order and snaking; this driver reads the finished picture and cuts it into card rows. A row wider than 497 pixels goes out as several packets.
+- `interface` — which NIC to send from on desktop/Raspberry Pi (`eth0`, `en0`). **Ignored on ESP32**, which has one MAC. Raw sending needs root; without it the driver records frames instead and says so.
+- `fps` — frame-rate limit (default 40, 1–120).
+
+**These cards need a 1 Gbit link.** Not for bandwidth — a 256×256 panel at 40 fps is only ~65 Mbit/s — but for wire time: the cards have no buffering and latch on the sync frame, so a whole frame must arrive inside the inter-frame window. At 100 Mbit the same bytes take ten times as long, which breaks that timing and shows up as tearing or wrong rows rather than as an error. The driver reads the negotiated speed and warns, but still sends: a small panel may be fine, and a measurement beats a refusal.
+
+No IP is involved — no address, no port, no DHCP — so the driver works on a link that never got a lease.
+
+Origin: ColorLight 5A-75 documented byte layout
+
+[Tests](../../tests/unit-tests.md#panelcarddriver)
+
+Detail: [technical](moxygen/PanelCardDriver.md)
+
 ## Smart light drivers
 
 <a id="hue"></a>

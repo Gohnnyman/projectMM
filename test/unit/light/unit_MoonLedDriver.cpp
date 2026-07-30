@@ -69,8 +69,10 @@ void wire(mm::ParallelLedDriver& d, mm::MoonI80Peripheral& peripheral, mm::Buffe
 TEST_CASE("MoonLedDriver is LCD_CAM-only — it does not claim the classic ESP32's I2S i80") {
     mm::MoonI80Peripheral peripheral;
     CHECK(peripheral.lanesAvailable() == mm::platform::lcdLanes);
-    // The expander needs LCD_CAM, which is exactly where this driver runs — so the two agree.
-    CHECK(peripheral.supportsPinExpander() == (mm::platform::lcdLanes > 0));
+    // The expander needs LCD_CAM silicon — `hasLcdCam`, not `lcdLanes > 0`. The two used to be
+    // the same test, until the host set a non-zero lane count so the driver would RUN there
+    // against a memory bus; a lane count is "how wide", the capability is "which peripheral".
+    CHECK(peripheral.supportsPinExpander() == mm::platform::hasLcdCam);
 }
 
 // The i80 BUS is 8 or 16 bits wide whatever the pin count, so the base rounds it up (powerOfTwoBus())

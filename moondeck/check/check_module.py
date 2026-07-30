@@ -15,6 +15,7 @@ running them concurrently would just make them contend):
     clang-tidy    bug patterns, performance, portability
     clang-query   our own AST rules — RAM-costing arrays, heap allocation sites
     lizard        complexity (CCN / NLOC), baseline-filtered
+    footprint     bytes on the device, split flash / static RAM (needs a built ESP32 ELF)
 
 A module is resolved to `src/**/<Module>.h` and `.cpp` (see check_clang_query.module_files) —
 the same names the MoonDeck dropdown offers.
@@ -36,14 +37,24 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import check_clang_query  # noqa: E402  — the module→files resolver, one owner
 
-# `--all` on lizard and `--max-rows=0` on clang-query: the repo-wide defaults exist to keep a
-# 362-row sweep readable, but you scoped to ONE module precisely to see all of its findings.
-# Truncating here would hide the tail that scoping was meant to expose (HttpServerModule alone
-# has 71 arrays).
+# `--all` on lizard ignores the baseline: you scoped to ONE module precisely to see all of its
+# findings, not just the ones newer than the freeze.
+#
+# clang-query keeps its 60-row cap, unlike lizard. It used to run `--max-rows=0` on the same
+# reasoning, but the comments rule made a single module's report unreadable — HttpServerModule
+# alone prints 212 declarations, and a wall of rows is skimmed rather than read. The cap is per
+# TABLE and always announces what it dropped, so the tail is one `--max-rows=0` away.
+#
+# `optional` marks a tool whose inputs may legitimately be absent — footprint reads an ESP32 ELF,
+# and a desktop-only checkout has none. That is a SKIP, not a failure: failing the whole card
+# because the firmware was not built would train people to ignore its exit code.
 TOOLS = [
-    ("clang-tidy", ["check_clang_tidy.py"]),
-    ("clang-query", ["check_clang_query.py", "--max-rows=0"]),
-    ("lizard", ["check_lizard.py", "--all"]),
+    ("clang-tidy", ["check_clang_tidy.py"], False),
+    ("clang-query", ["check_clang_query.py"], False),
+    ("-Wfunction-effects", ["check_nonblocking.py"], False),
+    ("lizard", ["check_lizard.py", "--all"], False),
+    ("CodeQL", ["check_codeql.py"], True),
+    ("footprint", ["check_footprint.py"], True),
 ]
 
 
@@ -51,7 +62,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--module", required=True, help="Module name, e.g. Control or ParallelLedDriver.")
     ap.add_argument("--skip", action="append", default=[],
-                    help="Skip a tool by name (repeatable): clang-tidy, clang-query, lizard.")
+                    help="Skip a tool by name (repeatable): clang-tidy, clang-query, lizard, footprint.")
     args = ap.parse_args()
 
     files = check_clang_query.module_files(args.module)
@@ -65,7 +76,7 @@ def main():
     print()
 
     failed = []
-    for name, argv in TOOLS:
+    for name, argv, optional in TOOLS:
         if name in args.skip:
             print(f"--- {name}: skipped ---\n")
             continue
@@ -79,7 +90,13 @@ def main():
         sys.stdout.write(proc.stdout)
         if proc.returncode not in (0, 1):      # 1 = findings, which is a result not a failure
             sys.stderr.write(proc.stderr)
-            failed.append(name)
+            # An optional tool says WHY it could not run (no ELF built, no toolchain). Echo that
+            # onto STDOUT too: the card streams stdout, so a stderr-only reason reads as a tool
+            # that produced nothing at all — a silent skip, which is what this must never be.
+            if optional:
+                print(f"  (not run: {proc.stderr.strip().splitlines()[0] if proc.stderr.strip() else 'no reason given'})")
+            else:
+                failed.append(name)
         print(f"[{name}: {time.time() - started:.0f}s]\n")
 
     if failed:

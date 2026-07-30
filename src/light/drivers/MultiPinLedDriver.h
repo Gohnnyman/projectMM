@@ -129,7 +129,11 @@ public:
         if constexpr (platform::i2sLanes > 0) return LedHwBlock::I2s;
         else return LedHwBlock::LcdCam;
     }
-    const char* initFailMsg() const override { return "i80 bus init failed — check pins / memory"; }
+    const char* initFailMsg() const override {
+        // Names the same peripheral the label does, so the error and the dropdown agree.
+        return (platform::i2sLanes > 0) ? "I2S-IDF: bus init failed — check pins / memory"
+                                       : "LCD-IDF: bus init failed — check pins / memory";
+    }
 
     /// Spare bus lanes (shift mode, when the board has fewer data pins than the bus is wide) park on
     /// WR: the peripheral already drives it and the board already wires it, so the lane is inert.
@@ -207,10 +211,12 @@ public:
     /// ×8 frame fits), it has no single-transfer cap, and its WR pixel-clock pin IS the shift clock a
     /// '595 needs. The classic ESP32 shares this backend but not that silicon path — its i80 is the I2S
     /// peripheral, whose DMA cannot read PSRAM at all, so a 154 KB frame has nowhere to live. Keying
-    /// the flag on `lcdLanes` (non-zero only on the LCD_CAM chips, S3/P4/S31) makes the refusal a
-    /// compile-time property of the silicon rather than a runtime surprise, and the orchestrator then
-    /// reports it as a config error instead of letting the bus die at init with "check pins / memory".
-    bool supportsPinExpander() const override { return platform::lcdLanes > 0; }
+    /// the flag on `platform::hasLcdCam` makes the refusal a compile-time property of the silicon
+    /// rather than a runtime surprise, and the orchestrator then reports it as a config error instead
+    /// of letting the bus die at init with "check pins / memory". `hasLcdCam`, not `lcdLanes`: the
+    /// two agree on ESP32 (it is defined as `lcdLanes > 0` there) but not on the desktop, which
+    /// declares the capability outright so the emulated build can exercise this path.
+    bool supportsPinExpander() const override { return platform::hasLcdCam; }
 
     /// The bus pin list comes from the orchestrator: in shift mode it appends the latch to the data pins
     /// (the latch is a bus lane), so the peripheral drives it. busClockMultiplier() tells the platform
@@ -272,7 +278,14 @@ private:
 // The label is what the `peripheral` Select shows. Gated by this header's own CONFIG_SOC include in
 // main.cpp, so it only registers on i80-capable silicon. There is no separate driver class: the one
 // registered ParallelLedDriver drives every backend, selected by the `peripheral` control.
+//
+// It names the PERIPHERAL, not the bus protocol. "i80" is the Intel 8080 bus shape esp_lcd speaks, and
+// it matches nothing a user can look up: on the classic ESP32 this backend IS the I2S peripheral, on
+// LCD_CAM chips it is the LCD peripheral (see hwBlock()). So the label follows the silicon — and says
+// `-IDF` because this backend drives it through esp_lcd, against the MoonI80 backend's `-MM` (our
+// own GDMA layer below esp_lcd). Peripheral + who drives it is the whole choice a user is making.
+inline constexpr const char* kI80Label = (platform::i2sLanes > 0) ? "I2S-IDF" : "LCD-IDF";
 inline const bool kI80PeripheralRegistered =
-    ParallelLedDriver::registerPeripheral("i80", []() -> LedPeripheral* { return new I80Peripheral(); });
+    ParallelLedDriver::registerPeripheral(kI80Label, []() -> LedPeripheral* { return new I80Peripheral(); });
 
 } // namespace mm

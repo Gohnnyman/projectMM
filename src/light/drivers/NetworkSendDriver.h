@@ -17,12 +17,27 @@ namespace mm {
 /// studied, not copied). Byte layouts live in ArtNetPacket.h / E131Packet.h / DdpPacket.h, shared
 /// with the receiver so the two sides cannot drift.
 ///
-/// **Addressing: unicast to a LIST of receivers, and why that is the default.**
+/// **Addressing:** one driver feeds N receivers (`ips`), each taking a contiguous run of the window
+/// (`lightsPerIp`, the same broadcasting idiom as an LED driver's `ledsPerPin`) and each addressed
+/// only by itself. So a wall of tubes is one driver, not N — the driver-level twin of one LED driver
+/// fanning out to N GPIO lanes. Unicast is the default, not an option among equals; broadcast
+/// survives only as legacy compatibility.
 ///
-/// One driver feeds N receivers (`ips`), each taking a contiguous run of the window (`lightsPerIp`,
-/// the same broadcasting idiom as an LED driver's `ledsPerPin`) and each addressed only by itself.
-/// So a wall of tubes is one driver, not N — the driver-level twin of one LED driver fanning out to
-/// N GPIO lanes.
+/// **Synchronous send:** this driver's WINDOW (`start`/`count`, not necessarily the whole buffer)
+/// goes out inline in tick() — 38 ms Ethernet to 155 ms WiFi for a full-buffer window at 128×128
+/// ArtNet (the spread is the lwIP/WiFi buffer pool, not the protocol: performance.md § ArtNet send),
+/// less for DDP and proportionally less for a narrower window. A decoupling send task is a
+/// PSRAM-gated backlog item. Added per board via the catalog like the LED drivers; applies the same
+/// shared Correction, so network and wired outputs show identical colors.
+///
+/// The deep dives are under *More info*, below the attribute/method lists:
+/// @xref{why-unicast-is-the-default|why unicast is the default},
+/// @xref{liveness-and-what-is-not-here|liveness, multicast and E1.31 framing}.
+/// @card NetworkSendDriver.png
+///
+/// @moreinfo
+///
+/// ## Why unicast is the default
 ///
 /// The Art-Net 4 spec leaves no room here: *"ArtDmx packets must be unicast to subscribers of the
 /// specific universe contained in the ArtDmx packet… There are no conditions in which broadcast is
@@ -50,20 +65,16 @@ namespace mm {
 /// costs the sender the same and costs every other receiver nothing. Mirroring is the one case where
 /// a broadcast address is genuinely the better tool.
 ///
-/// **Liveness.** UDP is fire-and-forget, so a dead receiver is invisible to the sender: the send
-/// loop simply tolerates it (a failed send drops that packet and moves on, so one dark tube cannot
-/// stall the others) rather than pretending to detect it. Real detection is ArtPoll/ArtPollReply
-/// discovery — the spec's own mechanism, and the next increment (backlog).
+/// ## Liveness, and what is not here
+///
+/// UDP is fire-and-forget, so a dead receiver is invisible to the sender: the send loop simply
+/// tolerates it (a failed send drops that packet and moves on, so one dark tube cannot stall the
+/// others) rather than pretending to detect it. Real detection is ArtPoll/ArtPollReply discovery —
+/// the spec's own mechanism, and the next increment (backlog).
 ///
 /// NOT multicast (no IGMP join yet — backlogged; it is sACN's native mode and the best answer on a
 /// switch with IGMP snooping, but degrades to a flood without it). E1.31 framing: CID stable per
 /// device (from the MAC), source name `projectMM`, priority 100, one frame-level sequence per frame.
-///
-/// **Synchronous send:** the whole frame goes out inline in tick() (~35 ms Ethernet / ~90 ms WiFi at
-/// 128×128 ArtNet; DDP less). A decoupling send task is a PSRAM-gated backlog item. Added per board
-/// via the catalog like the LED drivers; applies the same shared Correction, so network and wired
-/// outputs show identical colors.
-/// @card NetworkSendDriver.png
 class NetworkSendDriver : public DriverBase {
 public:
     /// DMX-over-network fixtures (ArtNet / E1.31 / DDP) are RGB by convention — the
@@ -82,6 +93,9 @@ public:
     /// destinations, so the driver idles (never falls back to broadcasting — see the class note).
     /// Capped at a wall of tubes, not a subnet scan.
     static constexpr uint8_t kMaxDestinations = 32;
+    /// Receiver addresses, comma-separated (`192.168.1.10,192.168.1.11`). Each takes a contiguous
+    /// run of the window per `lightsPerIp`, so the list order is the fan-out order. A broadcast
+    /// address works but is not the default — see the unicast rationale above.
     char ips[64] = {};
     /// Lights per destination — the same idiom as an LED driver's `ledsPerPin`, and literally the
     /// same helper (`assignCounts`): blank = even split of the window, one number = that many each,
@@ -91,7 +105,9 @@ public:
     /// ArtNet / E1.31 split at 510 channels per universe (whole RGB lights, the xLights/Falcon
     /// convention; 170 lights/packet), consecutive universes from `universeStart`; DDP uses
     /// 1440-byte byte-offset chunks (480 lights/packet) and is the fast path — per-packet cost
-    /// dominates wire time, so a 128×128 WiFi frame drops from ~110 ms (ArtNet) to ~40 ms.
+    /// dominates wire time, so a 128×128 ArtNet frame drops to roughly a third on DDP. The ArtNet
+    /// figure itself spans 38-155 ms across boards (performance.md § ArtNet send): the buffer pool
+    /// dominates it, so quote a range rather than one number.
     uint8_t protocol = 0;
     /// First universe the slice maps onto (ArtNet / E1.31; DDP is byte-addressed). Emitted verbatim,
     /// no hidden 1-based adjust: buffer offset = `(universe − universeStart) × 510`. Strict sACN
@@ -328,9 +344,9 @@ public:
     // light/ArtNetPacket.h, light/E131Packet.h and light/DdpPacket.h, shared
     // with NetworkReceiveEffect — each wire format exists in exactly one place.
 
-    // Test-only accessor for the correction-applied buffer. Lets the unit
-    // tests pin the no-allocation-in-loop contract (size set in prepare
-    // / onCorrectionChanged, never in loop). Not part of any runtime API.
+    /// Test-only accessor for the correction-applied buffer, letting the unit tests pin the
+    /// no-allocation-in-loop contract (sized in prepare / onCorrectionChanged, never in the send
+    /// loop). Not part of any runtime API.
     const Buffer& correctedBuffer() const { return corrected_; }
 
     /// The destination table prepare() derived: how many receivers, each one's address, and how many
@@ -342,24 +358,35 @@ public:
     nrOfLightsType lightsAt(uint8_t i) const { return destCounts_[i]; }
 
 private:
+    /// The send socket: opened in prepare() (the sole resource gate), reused for every
+    /// destination, and closed in release() so a disabled driver holds no socket.
     platform::UdpSocket socket_;
+    /// The shared frame this driver reads its window from; borrowed, not owned.
     Buffer* sourceBuffer_ = nullptr;
-    Buffer corrected_;               // owned: source bytes after brightness/order/white
+    /// Owned: source bytes after brightness/order/white. Sized off the hot path (resizeCorrected).
+    Buffer corrected_;
+    /// Art-Net/E1.31 per-frame sequence counter; wraps at 255, which both protocols expect.
     uint8_t sequence_ = 0;
+    /// millis() of the last frame sent — the `fps` rate limiter's reference point.
     uint32_t lastSendTime_ = 0;
-    uint8_t cid_[E131_CID_LENGTH] = {};  // E1.31 component id, built once in setup()
-    // Destinations + each one's slice of the window, both derived in prepare() (never in tick()).
+    /// E1.31 component id, built once in setup() from the MAC so it is stable per device.
+    uint8_t cid_[E131_CID_LENGTH] = {};
+    /// Destination addresses, derived in prepare() (never in tick()).
     uint8_t dest_[kMaxDestinations][4] = {};
+    /// Each destination's slice of the window, index-aligned with `dest_`.
     nrOfLightsType destCounts_[kMaxDestinations] = {};
+    /// How many entries of `dest_` / `destCounts_` are live.
     uint8_t nDest_ = 0;
 
+    /// The UDP port for a protocol index — each wire format has its own registered port.
     static uint16_t protocolPort(uint8_t p) {
         return p == 1 ? E131_PORT : p == 2 ? DDP_PORT : ARTNET_PORT;
     }
 
-    // Called off the hot path (prepare, onCorrectionChanged, setSourceBuffer) to make
-    // sure corrected_ is sized for the current source + this driver's correction. Skips
-    // when no source is wired yet, or when the existing allocation already fits.
+    /// Size `corrected_` for the current source and this driver's correction. Called only off the
+    /// hot path (prepare, onCorrectionChanged, setSourceBuffer) — that placement IS the
+    /// no-allocation-in-the-send-loop contract. Skips when no source is wired yet, or when the
+    /// existing allocation already fits.
     void resizeCorrected() {
         if (!sourceBuffer_) return;
         // Size for the window slice this sender actually transmits, not the whole

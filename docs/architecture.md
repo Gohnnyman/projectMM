@@ -236,6 +236,19 @@ Abstractions are added when a concrete implementation needs them, not pre-design
 
 **Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags, never a preprocessor `#ifdef`. The boundary is enforced by [`moondeck/check/check_platform_boundary.py`](../moondeck/check/check_platform_boundary.py), a commit gate (see [CLAUDE.md § The Process](../CLAUDE.md#the-process)).
 
+**The desktop build runs everything (hard rule).** Every module, effect and driver in the repo
+links and runs on the host — the platform layer simply has no silicon behind the call. Where a
+peripheral is absent the host *emulates* it rather than declaring itself incapable: the parallel
+WS2812 buses are backed by heap buffers, `lcdLanes` / `parlioLanes` / `rmtTxChannels` report a
+real chip's counts, and `hasLcdCam` is true. Code excluded from the host binary is code that
+cannot be unit-tested, cannot be seen by any AST-based check, and only ever runs where it is
+hardest to debug — which is exactly what the LED drivers were until they were linked here.
+
+A capability flag therefore answers *"can this build exercise the path?"*, not *"is this real
+hardware?"*. Where a flag must mean the latter (`hasLcdCam` gating the pin expander), that is a
+deliberate, commented exception. Timing, wire protocol and pin state are NOT emulated: they need
+silicon, and faking them would let a self-test report on hardware it never touched.
+
 ## Firmware vs deviceModel vs board
 
 Three distinct things, kept distinct in the vocabulary:

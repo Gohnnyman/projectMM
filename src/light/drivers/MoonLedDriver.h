@@ -85,10 +85,57 @@ namespace mm {
 /// therefore writes every value ONE SLOT EARLY (the rotation in ParallelSlots.h). Get that wrong and the
 /// first LED survives while everything after it is noise.
 ///
+/// **Why WR is the shift clock, and why there is no DC pin.** WR toggles once per bus word in
+/// hardware, exactly what a '595's SRCLK needs — so the expander costs zero DMA bytes for its clock,
+/// and the LATCH must ride a *data lane* instead (the peripheral gives only one clock output). DC
+/// exists so an LCD panel can separate command bytes from data; a WS2812 strand has no such concept,
+/// so the peripheral holds DC at a constant level and this backend never routes it to a pad. Unlike
+/// `esp_lcd`, which mandates a valid DC GPIO, spending a pin on it would buy nothing.
+///
 /// **Why the expander needs the ring.** The fan-out costs 8 bus words per WS2812 bit, so a light is 576 B
 /// and a **48 x 256** frame is ~144 KB — more contiguous internal RAM than an S3 has, and from PSRAM the
 /// DMA cannot sustain the expander's shift clock (measured at 26.67 MHz). Streaming is the only route to
 /// that target, which is why these two features are one story.
+///
+/// ## Tuning the three ring controls
+///
+/// A config at or under the prime-only boundary (`ceil(lights/strand ÷ ringRows) ≤ ringBufs`, ~224
+/// lights/strand at the defaults) needs none of them — the whole frame is encoded before arming, the
+/// pad is not even mounted, and the defaults just work. They exist for the LAPPING frontier
+/// (256+/strand), where the ISR races the wire. `ringRows`/`ringBufs` are DEVICE tuning (RAM vs
+/// interrupt rate vs jitter pool); `ringPadUs` is a HARDWARE fact of the strip. The `ringDbg`
+/// counters — `lt` above all — are the meter every sweep reads.
+///
+/// **`ringRows` — lights per DMA buffer.** A control rather than a constant because the optimum is a
+/// measurement, not a derivation. RAM is the ONLY axis that wants it small: at 1 the ring is ~18 KB
+/// flat at ANY strand length (128, 256, 1024 all cost the same), which is what puts 48x256 in reach.
+/// Three axes want it big:
+///
+/// | axis | why big wins |
+/// |---|---|
+/// | per-call overhead | the encode seam's fixed cost amortises over the rows in a buffer; at 1 it is paid per light, inside the ISR |
+/// | interrupt rate | one EOF per buffer: 256 lights at 100 fps is 25.6k int/s at 1 row vs 1.6k at 16 — and a busy ISR starves the network stack |
+/// | refill deadline | the drain of one buffer (`ringRows × 21.6 µs` + the pad) is the slice deadline the ISR's AVERAGE encode must beat |
+///
+/// The platform additionally clamps a buffer to ONE DMA descriptor node (4095 bytes — 7 rows at the
+/// 16-strand row size), so values above the clamp behave as the clamp: 7 is the effective maximum
+/// there, and the sweet spot measured on the bench.
+///
+/// **`ringPadUs` — and why its ceiling must be measured on the wall.** Sweep it up only until
+/// `ringDbg`'s `lt` counter stays 0 (hpwit's _DMA_EXTENSTION, studied then written fresh). The ceiling
+/// is the STRIP's latch threshold and it is per-silicon: a WS2812 that reads a LOW gap as a reset
+/// LATCHES AND RESETS ITS ADDRESS, and then every slice repaints LEDs 0..ringRows-1 — the unmistakable
+/// signature (each panel shows only its first few LEDs flickering through the whole frame's colors,
+/// while every ring counter stays clean). The bench wall latches at ≤60 µs (30 is safe there); other
+/// strips tolerate up to ~150. That hardware dependence is why it is a user control, not a constant.
+///
+/// **`ringAuto` — what it derives.** Per the wall-validated viability rule ((nSlices − ringBufs) ×
+/// refill ≤ frame wire time): rows = the one-descriptor-node maximum (fewest slices), bufs = as deep as
+/// fits (min of nSlices+1 — which IS prime-only when it fits — the platform max, and the internal-RAM
+/// budget after its reserve). Deeper is strictly better: more prime coverage, less ISR load.
+/// `ringPadUs` stays manual — the strip's latch threshold is a hardware fact no derivation can know.
+/// The toggle is explicit, not edit-triggered: persistence restore fires the same control-change path
+/// as a user edit, so an auto-flip-on-edit would trip on every boot.
 ///
 /// ## The `ringDbg` instrument (expert-mode read-only)
 ///
@@ -143,22 +190,10 @@ public:
     // committed elsewhere. The orchestrator declares pins="" / loopbackRxPin=-1, so nothing is
     // needed here.
 
-    /// WR — the pixel clock — and it is needed **only by a 74HCT595 expander**, which is why it is the
-    /// one bus control this backend keeps.
-    ///
-    /// WR toggles once per bus word in hardware, which is exactly what a '595's SRCLK needs: the pixel
-    /// clock IS the shift clock. That is why the expander costs zero DMA bytes for its clock, and why
-    /// the LATCH has to ride a *data lane* instead (the peripheral gives only one clock output).
-    ///
-    /// **In direct mode nothing reads WR** — WS2812 is self-clocked, so the strands ignore it — and the
-    /// platform then leaves it unrouted, so the pin stays free for a strand. The value is still used to
-    /// pick which GPIO WR would land on in shift mode, so a board with an expander sets it and a plain
-    /// board can ignore it.
-    ///
-    /// There is no `dcPin`. DC exists so an LCD panel can separate command bytes from data bytes; a
-    /// WS2812 strand has no such concept, the peripheral is configured to hold DC at a constant level,
-    /// and (unlike `esp_lcd`, which mandates a valid DC GPIO) this backend simply never routes it to a
-    /// pad. Spending a GPIO on it would buy nothing.
+    /// WR — the pixel clock — needed **only by a 74HCT595 expander** (in direct mode nothing reads it,
+    /// so the platform leaves it unrouted and the pin stays free for a strand); why it doubles as the
+    /// shift clock, and why there is no `dcPin`, is under
+    /// @xref{the-74hct595-pin-expander-skip-unless-one-is-fitted|More info → the expander}.
     int8_t clockPin = 10;
 
     /// Stream the frame as a RING of small internal DMA buffers (on, the default), or send it WHOLE from
@@ -172,41 +207,14 @@ public:
     /// measured against, not as a fallback the ring degrades into.
     bool useRing = true;
 
-    /// Compute `ringRows`/`ringBufs` automatically from the live config (ON, the default), writing the
-    /// chosen values INTO those controls so the user always sees the real numbers — the DHCP pattern
-    /// (an "automatic" toggle whose fields fill with the derived values). While ON, a manual edit to
-    /// ringRows/ringBufs is recomputed away at the next rebuild (the value visibly snaps back) — switch
-    /// this OFF to tune by hand. Explicit, not edit-triggered: persistence restore fires the same
-    /// control-change path as a user edit, so an auto-flip-on-edit would trip on every boot. The derivation, per the
-    /// wall-validated viability rule ((nSlices − ringBufs) × refill ≤ frame wire time): rows = the
-    /// one-descriptor-node maximum (fewest slices), bufs = as deep as fits (min of nSlices+1 — which IS
-    /// prime-only when it fits — the platform max, and the internal-RAM budget after its reserve). Deeper
-    /// is strictly better: more prime coverage, less ISR load. `ringPadUs` stays manual — the strip's
-    /// latch threshold is a hardware fact no derivation can know.
+    /// Derive `ringRows`/`ringBufs` from the live config (ON, the default) and write them INTO those
+    /// controls so the user sees the real numbers — the DHCP pattern; switch OFF to tune by hand, and
+    /// see @xref{tuning-the-three-ring-controls|More info → tuning the ring} for the derivation.
     bool ringAuto = true;
 
-    /// Lights per DMA buffer — the ring's grain. **Who tunes the three ring controls:** a config at or
-    /// under the prime-only boundary (`ceil(lights/strand ÷ ringRows) ≤ ringBufs`, ~224 lights/strand at
-    /// the defaults) never needs any of them — the whole frame is encoded before arming, the pad is not
-    /// even mounted, and the defaults just work. They exist for the LAPPING frontier (256+/strand), where
-    /// the ISR races the wire. `ringRows`/`ringBufs` are DEVICE tuning (RAM vs interrupt rate vs jitter
-    /// pool); `ringPadUs` is a HARDWARE fact of the strip (see its doc). The `ringDbg` counters — `lt`
-    /// above all — are the meter every sweep reads.
-    ///
-    /// A control rather than a constant because the optimum is a measurement, not a derivation. RAM is
-    /// the ONLY axis that wants it small: at 1 the ring is ~18 KB flat at ANY strand length (128, 256,
-    /// 1024 all cost the same), which is what puts 48x256 in reach. Three axes want it big:
-    ///
-    /// | axis | why big wins |
-    /// |---|---|
-    /// | per-call overhead | the encode seam's fixed cost amortises over the rows in a buffer; at 1 it is paid per light, inside the ISR |
-    /// | interrupt rate | one EOF per buffer: 256 lights at 100 fps is 25.6k int/s at 1 row vs 1.6k at 16 — and a busy ISR starves the network stack |
-    /// | refill deadline | the drain of one buffer (`ringRows × 21.6 µs` + the pad) is the slice deadline the ISR's AVERAGE encode must beat |
-    ///
-    /// The platform additionally clamps a buffer to ONE DMA descriptor node (4095 bytes — 7 rows at the
-    /// 16-strand row size), so values above the clamp behave as the clamp: 7 is the effective maximum
-    /// there, and the sweet spot measured on the bench. Pin-expander mode only; a prepare trigger (the
-    /// buffers are sized and the DMA chain mounted at build time, so a change is a rebuild).
+    /// Lights per DMA buffer — the ring's grain, the main RAM-vs-interrupt-rate lever, and a prepare
+    /// trigger (pin-expander mode only); how to pick it is under
+    /// @xref{tuning-the-three-ring-controls|More info → tuning the ring}.
     uint8_t ringRows = platform::kRingRowsDefault;
 
     /// How many buffers the DMA circulates. Depth buys **jitter absorption**, not capacity: the pool is a
@@ -217,19 +225,9 @@ public:
     /// bench. Pin-expander mode only; a prepare trigger.
     uint8_t ringBufs = platform::kRingBufsDefault;
 
-    /// Inter-buffer zero-pad, µs (LAPPING only; 0 = off). Each ring buffer is followed by a shared block
-    /// of zeros on the wire — a strand-level PAUSE that stretches the ISR's per-slice refill deadline by
-    /// exactly this long, at a linear frame-time cost (every slice grows by the pad, so the fps ceiling
-    /// drops). Sweep it up only until `ringDbg`'s `lt` counter stays 0 (hpwit's _DMA_EXTENSTION, studied
-    /// then written fresh).
-    ///
-    /// **The ceiling is the STRIP's latch threshold, and it is per-silicon — measure it on the wall.**
-    /// A WS2812 that reads a LOW gap as a reset LATCHES AND RESETS ITS ADDRESS, and then every slice
-    /// repaints LEDs 0..ringRows-1 — the unmistakable signature (each panel shows only its first few
-    /// LEDs flickering through the whole frame's colors, while every ring counter stays clean). The
-    /// bench wall latches at ≤60 µs (30 is safe there); other strips tolerate up to ~150. That hardware
-    /// dependence is why this is a user control and not a constant. A prepare trigger (the pad is a
-    /// mounted DMA node).
+    /// Inter-buffer zero-pad, µs (LAPPING only; 0 = off) — a strand-level pause that buys refill
+    /// deadline at a linear frame-time cost, whose ceiling is a HARDWARE fact of the strip measured
+    /// under @xref{tuning-the-three-ring-controls|More info → tuning the ring}.
     uint8_t ringPadUs = 0;
 
     /// Overclock the '595 shift clock: OFF (default) = 20 MHz — the reliability point, wall-verified on
@@ -271,10 +269,10 @@ public:
     /// Status text when the bus will not come up, so the cause is on screen rather than in a serial log.
     /// The two real causes are named: a pin the peripheral cannot route, or no DMA-reachable memory for
     /// the frame (or the ring's pool).
-    const char* initFailMsg() const override { return "MoonI80 bus init failed — check pins / memory"; }
+    const char* initFailMsg() const override { return "LCD-MM: bus init failed — check pins / memory"; }
     /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this backend is
     /// LCD_CAM-only, so the answer is simply "wherever this backend runs at all".
-    bool supportsPinExpander() const override { return platform::lcdLanes > 0; }
+    bool supportsPinExpander() const override { return platform::hasLcdCam; }
 
     /// No async double-buffer on this backend — the own-GDMA two-buffer completion handshake races and
     /// wedges the bus (see busInit). Single-buffer only; the ring is where MoonI80's speed lives.
@@ -445,6 +443,11 @@ public:
                                            static_cast<uint16_t>(clockPin), frameBytes,
                                            /*wantSecondBuffer=*/false, owner_->busClockMultiplier());
     }
+    /// The rest of the bus surface: one-line forwards to the platform seam, each carrying the
+    /// contract its `LedPeripheral` base already states (`busBuffer` is "DMA buffer i the encoder
+    /// writes into", and so on). Restating that here would give doxygen two copies of one contract
+    /// to drift apart — the base is the single home. Only `busDeinit` adds behaviour of its own:
+    /// the snapshot helper is this backend's, so it stops before the bus goes away.
     void busDeinit() override { stopSnapHelper(); platform::moonI80Ws2812Deinit(bus_); }
     uint8_t* busBuffer(uint8_t i) override { return platform::moonI80Ws2812Buffer(bus_, i); }
     size_t busCapacity() const override { return platform::moonI80Ws2812BufferCapacity(bus_); }
@@ -519,10 +522,11 @@ public:
         return ok;
     }
     /// Send one frame on the ring: prime the pool, fire the DMA, and let the EOF ISR refill behind it.
-    // The ring's per-frame kick. With the core-0 helper up (dual-core split active), fork-join the PRIME:
-    // ring buffers are independent (each derives its rows from its index), so the helper primes the bottom
-    // half of the pool on core 0 while this core primes the top half, the join fences both, then the arm
-    // starts the DMA. Serial fallback: the platform's prime-all-then-arm combo.
+    ///
+    /// With the core-0 helper up (dual-core split active), the PRIME is fork-joined: ring buffers are
+    /// independent (each derives its rows from its index), so the helper primes the bottom half of the
+    /// pool on core 0 while this core primes the top half, the join fences both, then the arm starts
+    /// the DMA. Serial fallback: the platform's prime-all-then-arm combo.
     bool busTransmitRing() override {
         if (snapHelperReady() && ringBufs >= 2) {
             // `done` is written-gated (leads the wire drain); the prime itself takes the wire barrier —
@@ -616,6 +620,8 @@ public:
     }
 
 
+    /// Publish this frame's prime job and wake the helper. Paired with `helperJoin` — never call
+    /// one without the other, or the next kick mutates bounds the helper is still reading.
     void helperKick() {
         if (!snapHelper_.impl) return;
         // Wait for the helper to be PARKED before notifying it for the next job. What actually keeps the
@@ -636,6 +642,9 @@ public:
         platform::notifyTask(snapHelper_);
     }
 
+    /// Block until the helper's half is primed. The fence that makes the fork-join safe: the caller
+    /// may not touch the pool or the bounds until this returns. A timeout latches the helper broken
+    /// and runs the job serially instead, so a wedged worker degrades rather than stalls the frame.
     void helperJoin() {
         if (!snapHelper_.impl) return;
         // A degraded kick (helper never parked → snapHelperBroken_, ran serially) already did the work and
@@ -658,6 +667,8 @@ public:
         }
     }
 
+    /// The job itself: prime the buffer range the kick published. Called on the helper task, and on
+    /// THIS task as the serial fallback when the helper is broken or absent.
     void runHelperJob() { platform::moonI80Ws2812PrimeRange(bus_, primeLo_, primeHi_); }
 
     /// Bring the helper task up (idempotent). Called at ring engage — see busInitRing's tail. Pinned to
@@ -673,12 +684,16 @@ public:
         platform::spawnPinnedTask(snapHelper_, "mmSnap", &MoonI80Peripheral::snapHelperTramp, this,
                                   4096, 5, /*core=*/0);
     }
+    /// Tear the helper down: signal the stop flag, wake it, and wait for it to leave its loop. Called
+    /// from `busDeinit`, so the worker cannot outlive the bus it primes into.
     void stopSnapHelper() {
         if (!snapHelper_.impl) return;
         snapHelperStop_.store(true, std::memory_order_release);
         platform::stopPinnedTask(snapHelper_);
     }
 
+    /// The worker's entry point — a plain function, because the task API takes no member pointer.
+    /// Loops: park in waitNotify, run the published job, mark done, repeat until stopped.
     static void snapHelperTramp(void* user) {
         auto* self = static_cast<MoonI80Peripheral*>(user);
         while (!self->snapHelperStop_.load(std::memory_order_acquire)) {
@@ -695,26 +710,42 @@ public:
     }
 
 private:
-    static constexpr uint32_t kSnapJoinTimeoutMs = 100;   // a half is single-digit ms; 100 = broken
+    /// Join deadline for one prime half. A half is single-digit ms, so 100 means the helper is broken,
+    /// not slow — the timeout latches `snapHelperBroken_` rather than retrying forever.
+    static constexpr uint32_t kSnapJoinTimeoutMs = 100;
+    /// The core-0 worker that primes the bottom half of the ring pool. Spawned on first ring init,
+    /// parked in waitNotify between frames.
     platform::WorkerTask snapHelper_{};
+    /// Stored by the helper when its job is finished; `helperJoin` spins on it. Starts true so the
+    /// first join returns immediately.
     std::atomic<bool> snapHelperDone_{true};
+    /// Asks the helper to exit its wait loop; set once by `stopSnapHelper` at teardown.
     std::atomic<bool> snapHelperStop_{false};
-    // Set by the trampoline right before it blocks in waitNotify; cleared by helperKick when it publishes a
-    // new job. The kick waits for this before mutating the bounds (primeLo_/primeHi_) — so the helper is
-    // provably done reading the PREVIOUS job's inputs. Starts true: the helper parks once at spawn before
-    // any kick.
+    /// Set by the trampoline right before it blocks in waitNotify; cleared by helperKick when it
+    /// publishes a new job. The kick waits for this before mutating the bounds (primeLo_/primeHi_) — so
+    /// the helper is provably done reading the PREVIOUS job's inputs. Starts true: the helper parks once
+    /// at spawn before any kick.
     std::atomic<bool> snapHelperParked_{true};
-    bool snapHelperBroken_ = false;   // self-heal latch: a timed-out join disables the helper (serial from then on)
-    uint8_t primeLo_ = 0, primeHi_ = 0;   // the helper's prime-job buffer range
+    /// Self-heal latch: one timed-out join disables the helper for good and the prime runs serial from
+    /// then on. A wedged worker must not be re-waited every frame.
+    bool snapHelperBroken_ = false;
+    /// The buffer range [lo, hi) the helper primes this frame — written only between join and kick.
+    uint8_t primeLo_ = 0, primeHi_ = 0;
 
+    /// The platform-side bus handle; opaque here, so no LCD_CAM type escapes the platform layer.
     platform::MoonI80Ws2812Handle bus_;
+    /// The clockPin the bus was last built with, so a change to the control can force a rebuild.
     int8_t lastClockPin_ = -1;
 };
 
 // Register the MoonI80 (own-GDMA below esp_lcd) backend into the peripheral registry once, at
 // static-init. Gated by this header's CONFIG_SOC include in main.cpp (LCD_CAM chips only). No separate
 // driver class — the one ParallelLedDriver drives it, chosen via the `peripheral` control.
+//
+// "LCD-MM": the same LCD peripheral the IDF backend uses, driven by our own GDMA layer instead of
+// esp_lcd — which is the whole difference a user is choosing between. No chip conditional here: this
+// backend only ever registers on LCD_CAM silicon, so the peripheral is always the LCD one.
 inline const bool kMoonI80PeripheralRegistered =
-    ParallelLedDriver::registerPeripheral("MoonI80", []() -> LedPeripheral* { return new MoonI80Peripheral(); });
+    ParallelLedDriver::registerPeripheral("LCD-MM", []() -> LedPeripheral* { return new MoonI80Peripheral(); });
 
 } // namespace mm

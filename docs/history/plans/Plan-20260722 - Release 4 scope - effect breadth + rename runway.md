@@ -24,7 +24,7 @@ Then the next migration batch on top. This is the R4 headline: it unblocks the r
 ## Two quick wins — scoped and ready
 
 - **Active-instance election primitive.** ([Plan-20260710 - Active-instance election primitive](Plan-20260710%20-%20Active-instance%20election%20primitive.md).) A core `ActiveInstance<T>` that removes duplicated singleton-election bookkeeping from `AudioService` + `DevicesModule` (both had real dangling-static bugs). Textbook *Complexity-lives-in-core* subtraction; small; in flight.
-- **CodeRabbit #29 boundary findings (4).** ([backlog-core § MoonLive core/platform layering](../../backlog/backlog-core.md#moonlive-coreplatform-layering--jit-sdkconfig-scoping-coderabbit-29-4-findings).) MoonLive core-includes-platform + compiled-into-`mm_core`, W^X disabled in the board default, a scenario riding timing + network. Real, already scoped; good hygiene to close before a named release.
+- **CodeRabbit #29 boundary findings (4).** ([backlog-core § MoonLive core/platform layering](../../backlog/backlog-core.md#moonlive-coreplatform-layering-jit-sdkconfig-scoping-coderabbit-29-4-findings).) MoonLive core-includes-platform + compiled-into-`mm_core`, W^X disabled in the board default, a scenario riding timing + network. Real, already scoped; good hygiene to close before a named release.
 
 ## The RS-485 / DMX-512 opportunity (candidate, larger)
 

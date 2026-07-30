@@ -1,18 +1,18 @@
 {
-  "commit": "4a2effa2",
+  "commit": "1aff3df2",
   "flash": {
-    "esp32": 1684240,
-    "esp32p4-eth": 1497264,
+    "esp32": 1678960,
+    "esp32p4-eth": 1502192,
     "esp32p4-eth-wifi": 1793760,
-    "esp32s3-n16r8": 1666592,
-    "esp32s3-n8r8": 1666592,
-    "esp32s31": 1919136,
-    "desktop": 878680
+    "esp32s3-n16r8": 1667216,
+    "esp32s3-n8r8": 1666992,
+    "esp32s31": 1923856,
+    "desktop": 945336
   },
   "perf": {
     "desktop": {
-      "tick_us": 127,
-      "fps": 7874
+      "tick_us": 125,
+      "fps": 8000
     },
     "esp32": {
       "tick_us": 4164,
@@ -20,54 +20,54 @@
     }
   },
   "loc": {
-    "core": 14827,
-    "light": 19515,
-    "platform": 11914,
+    "core": 14889,
+    "light": 20150,
+    "platform": 12428,
     "ui": 5811,
-    "test": 34447,
-    "moondeck": 18318
+    "test": 35207,
+    "moondeck": 19914
   },
   "comments": {
     "core": {
-      "lines": 5549,
-      "ratio": 0.408
+      "lines": 5583,
+      "ratio": 0.409
     },
     "light": {
-      "lines": 7457,
-      "ratio": 0.422
+      "lines": 7783,
+      "ratio": 0.426
     },
     "platform": {
-      "lines": 3937,
-      "ratio": 0.366
+      "lines": 4149,
+      "ratio": 0.369
     },
     "ui": {
       "lines": 1518,
       "ratio": 0.278
     },
     "test": {
-      "lines": 5898,
+      "lines": 6035,
       "ratio": 0.198
     },
     "moondeck": {
-      "lines": 2781,
-      "ratio": 0.174
+      "lines": 3182,
+      "ratio": 0.183
     }
   },
   "tests": {
-    "cases": 970,
+    "cases": 1002,
     "scenarios": 22
   },
   "docs": {
-    "md_files": 169,
-    "md_lines": 22610,
-    "plans_files": 89,
+    "md_files": 170,
+    "md_lines": 22762,
+    "plans_files": 90,
     "backlog_lines": 3114,
-    "lessons_lines": 378,
-    "claude_md_lines": 126
+    "lessons_lines": 401,
+    "claude_md_lines": 135
   },
   "complexity": {
-    "functions": 2129,
-    "over_threshold": 136,
+    "functions": 2179,
+    "over_threshold": 138,
     "worst_ccn": 93
   }
 }
