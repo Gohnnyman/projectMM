@@ -1367,6 +1367,7 @@ bool moonI80Ws2812Init(MoonI80Ws2812Handle& h, const uint16_t* /*dataPins*/,
                        uint8_t /*laneCount*/, uint16_t /*wrGpio*/,
                        size_t bufferBytes, bool wantSecondBuffer,
                        uint8_t /*clockMultiplier*/) {
+    if (bufferBytes == 0) return false;   // refuse before allocating, as the other seams do
     return hostBus(h.impl)->init(bufferBytes, wantSecondBuffer);
 }
 // Ring mode is a GDMA construct with no host equivalent — inert here, bench-verified on the S3, exactly
@@ -1417,6 +1418,7 @@ RmtLoopbackResult moonI80Ws2812LoopbackRide(uint16_t /*rxGpio*/, const uint8_t* 
 bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* /*dataPins*/,
                       uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t bufferBytes,
                       bool wantSecondBuffer) {
+    if (bufferBytes == 0) return false;   // refuse before allocating, as the other seams do
     return hostBus(h.impl)->init(bufferBytes, wantSecondBuffer);
 }
 uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer) {

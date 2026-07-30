@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,13 @@ LOG_DIR = ROOT / "build" / "moondeck-logs"
 # so once the cap is hit the writer stops and says so — truncating the end would throw away
 # the part you came for.
 LOG_MAX_BYTES = 1_000_000
+# How many times each script has been run, so a card's footer can say "run #7" — the question
+# "have I actually re-run this since the fix, or am I reading a stale number?" is otherwise
+# unanswerable from a report that looks identical either way. Alongside the logs and equally
+# derived: deleting build/ resets the counts, which is the right blast radius for a convenience
+# record. One small JSON for every script rather than a file each — it is read and rewritten
+# once per run, and a dict of ints stays tiny.
+RUNS_FILE = LOG_DIR / "run-counts.json"
 UI_DIR = SCRIPTS_DIR / "moondeck_ui"
 ASSETS_DIR = ROOT / "docs" / "assets"
 STATE_FILE = SCRIPTS_DIR / "moondeck.json"
@@ -103,6 +111,43 @@ def load_scripts():
 _scripts_data = load_scripts()
 SCRIPTS = _scripts_data["scripts"]
 FIRMWARES = _load_firmwares()
+
+
+def _duration(seconds):
+    """A run's wall time, read at a glance: `4.2s`, `1m12s`, `1h04m`.
+
+    Seconds alone stop being readable somewhere around a minute — `312s` has to be divided in
+    your head — and a clean rebuild here runs into the minutes.
+    """
+    s = int(seconds)
+    if s < 60:
+        return f"{seconds:.1f}s"
+    if s < 3600:
+        return f"{s // 60}m{s % 60:02d}s"
+    return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+
+
+def bump_run_count(script_id):
+    """Record one more run of `script_id` and return the new total.
+
+    Best-effort throughout: this is a footer on a report, so a missing or corrupt counts file
+    must never fail the run that produced the report. A read error starts from zero rather than
+    raising, and a write error is dropped — the count is the only thing lost.
+    """
+    counts = {}
+    with suppress(OSError, ValueError):
+        loaded = json.loads(RUNS_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            counts = loaded
+    # A hand-edited or half-written file can hold anything; a bad value restarts the count for
+    # that script rather than raising in the middle of reporting a successful run.
+    prev = counts.get(script_id, 0)
+    n = (prev if isinstance(prev, int) else 0) + 1
+    counts[script_id] = n
+    with suppress(OSError):
+        RUNS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RUNS_FILE.write_text(json.dumps(counts, indent=1, sort_keys=True), encoding="utf-8")
+    return n
 
 # ---------------------------------------------------------------------------
 # Device discovery
@@ -255,8 +300,6 @@ def _push_device(ip: str, model: str) -> bool:
     """
     if not model:
         return True   # nothing to push; not a failure
-    import urllib.request
-    import urllib.error
     # Look up the catalog entry. DEVICE_MODELS is loaded at module init; we don't
     # re-read deviceModels.json per push so a tight discover-refresh cycle
     # doesn't hammer the disk. If the user edits deviceModels.json, restart
@@ -1800,6 +1843,10 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         # EOF, same as the pipe's b"" sentinel.
         stream = getattr(proc, "_mm_read_stream", None) or proc.stdout
 
+        # Wall clock, from the first read to the child's exit. Monotonic, so an NTP step or a DST
+        # change mid-run cannot report a negative or wildly wrong duration.
+        started = time.monotonic()
+
         # Tee to disk as we stream, rather than buffering and writing at the end: a long run
         # killed with Stop (or a crashed server) still leaves everything it printed up to
         # that point, which is exactly when you want the log.
@@ -1839,7 +1886,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.flush()
 
             proc.wait()
-            exit_msg = f"[exit code: {proc.returncode}]"
+            exit_msg = (f"[exit code: {proc.returncode}] [{_duration(time.monotonic() - started)}]"
+                        f" [run #{bump_run_count(script_id)}]")
             if log:
                 with suppress(OSError):
                     log.write(exit_msg + "\n")   # always recorded, even past the cap

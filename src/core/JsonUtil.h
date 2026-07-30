@@ -19,6 +19,8 @@
 //      Any malformed / truncated input fails cleanly (parse() returns false, accessors
 //      return safe defaults) and never reads OOB. Off the hot path (boot load, control writes).
 
+#include <cerrno>                   // ERANGE — parseIntStr's overflow signal on 32-bit `long`
+#include <climits>                  // INT_MIN/INT_MAX — parseIntStr's range check
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -109,6 +111,34 @@ inline bool hasKey(const char* json, const char* key) {
     return std::strstr(json, search) != nullptr;
 }
 
+/// The integer `s` starts with, or `fallback` when it does not start with one or the value does
+/// not fit in `int`. The one string→int conversion these readers use.
+///
+/// `strtol`, not `atoi`: atoi cannot report a failure, so "no digits at all" and a genuine `"0"`
+/// are indistinguishable, and a value too large for `long` is undefined behavior rather than a
+/// detectable error. Callers that then narrow the result (a `uint16_t` id, a `uint8_t` percent)
+/// would silently store a DIFFERENT valid number — `"65537"` becoming 1. Out-of-range is reported
+/// as the fallback here, which is the only place it can still be seen.
+///
+/// Overflow needs BOTH checks, because they cover different targets. `long` is 64-bit on the
+/// desktop, so a huge value lands inside `long` and only the INT_MAX compare rejects it; `long` is
+/// 32-bit on ESP32 and Windows, where `LONG_MAX == INT_MAX` makes that compare dead code and
+/// strtol's own saturation-to-LONG_MAX plus `ERANGE` is the only signal. Testing one alone passes
+/// on the desktop and silently returns INT_MAX on the target this exists to protect.
+///
+/// Trailing text is deliberately allowed: these values are read out of a JSON body, so digits are
+/// followed by `,` or `}`. Only the LEADING characters decide.
+inline int parseIntStr(const char* s, int fallback = 0) {
+    if (!s) return fallback;
+    char* end = nullptr;
+    errno = 0;                                              // strtol only ever SETS it on error
+    const long v = std::strtol(s, &end, 10);
+    if (end == s) return fallback;                          // no digits — not a number at all
+    if (errno == ERANGE) return fallback;                   // saturated: outside `long`
+    if (v < INT_MIN || v > INT_MAX) return fallback;        // fits `long`, would not survive `int`
+    return static_cast<int>(v);
+}
+
 inline int parseInt(const char* json, const char* key) {
     if (!json || !key) return 0;
     char search[kSearchLen];
@@ -119,7 +149,7 @@ inline int parseInt(const char* json, const char* key) {
         start = std::strstr(json, search);
     }
     if (!start) return 0;
-    return std::atoi(start + std::strlen(search));
+    return parseIntStr(start + std::strlen(search));
 }
 
 inline bool parseBool(const char* json, const char* key) {

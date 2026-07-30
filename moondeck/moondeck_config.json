@@ -74,106 +74,6 @@
       "process_name": "preview_installer.py"
     },
     {
-      "id": "check_specs",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Spec Check",
-      "speed": "instant",
-      "help": "check_specs",
-      "script": "check/check_specs.py"
-    },
-    {
-      "id": "check_platform_boundary",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Platform Boundary",
-      "speed": "instant",
-      "help": "check_platform_boundary",
-      "script": "check/check_platform_boundary.py"
-    },
-    {
-      "id": "check_devices",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Board Catalog",
-      "speed": "instant",
-      "help": "check_devices",
-      "script": "check/check_devices.py"
-    },
-    {
-      "id": "check_firmwares",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Firmware List",
-      "speed": "instant",
-      "help": "check_firmwares",
-      "script": "check/check_firmwares.py"
-    },
-    {
-      "id": "collect_kpi",
-      "tab": "desktop",
-      "group": "check",
-      "label": "KPI Report",
-      "speed": "slow",
-      "help": "collect_kpi",
-      "script": "check/collect_kpi.py"
-    },
-    {
-      "id": "repo_health",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Repo Health",
-      "speed": "medium",
-      "help": "repo_health",
-      "script": "check/repo_health.py"
-    },
-    {
-      "id": "history_report",
-      "tab": "desktop",
-      "group": "check",
-      "label": "History Report",
-      "speed": "instant",
-      "help": "history_report",
-      "script": "report/history_report.py"
-    },
-    {
-      "id": "check_esp32_built",
-      "tab": "esp32",
-      "group": "build",
-      "label": "Firmware Up To Date",
-      "speed": "instant",
-      "help": "check_esp32_built",
-      "script": "check/check_esp32_built.py",
-      "needs_firmware": true
-    },
-    {
-      "id": "event_precommit",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Pre-Commit Gates",
-      "speed": "slow",
-      "help": "event_precommit",
-      "script": "event/precommit.py"
-    },
-    {
-      "id": "event_premerge",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Pre-Merge Gates",
-      "speed": "slow",
-      "help": "event_premerge",
-      "script": "event/premerge.py"
-    },
-    {
-      "id": "event_prerelease",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Pre-Release Gates",
-      "speed": "slow",
-      "help": "event_prerelease",
-      "script": "event/prerelease.py"
-    },
-    {
       "id": "check_module",
       "tab": "desktop",
       "group": "tools",
@@ -227,6 +127,123 @@
           "default": false
         }
       ]
+    },
+    {
+      "id": "check_codeql",
+      "tab": "desktop",
+      "group": "tools",
+      "label": "CodeQL (CI alerts)",
+      "speed": "instant",
+      "help": "check_codeql",
+      "script": "check/check_codeql.py",
+      "flags": [
+        {
+          "id": "all",
+          "label": "All states",
+          "arg": "--all",
+          "default": false
+        }
+      ]
+    },
+    {
+      "id": "check_specs",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Spec Check",
+      "speed": "instant",
+      "help": "check_specs",
+      "script": "check/check_specs.py"
+    },
+    {
+      "id": "check_platform_boundary",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Platform Boundary",
+      "speed": "instant",
+      "help": "check_platform_boundary",
+      "script": "check/check_platform_boundary.py"
+    },
+    {
+      "id": "check_esp32_built",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Firmware Up To Date",
+      "speed": "instant",
+      "help": "check_esp32_built",
+      "script": "check/check_esp32_built.py",
+      "needs_firmware": true
+    },
+    {
+      "id": "check_devices",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Board Catalog",
+      "speed": "instant",
+      "help": "check_devices",
+      "script": "check/check_devices.py"
+    },
+    {
+      "id": "check_firmwares",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Firmware List",
+      "speed": "instant",
+      "help": "check_firmwares",
+      "script": "check/check_firmwares.py"
+    },
+    {
+      "id": "collect_kpi",
+      "tab": "desktop",
+      "group": "check",
+      "label": "KPI Report",
+      "speed": "slow",
+      "help": "collect_kpi",
+      "script": "check/collect_kpi.py"
+    },
+    {
+      "id": "repo_health",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Repo Health",
+      "speed": "medium",
+      "help": "repo_health",
+      "script": "check/repo_health.py"
+    },
+    {
+      "id": "history_report",
+      "tab": "desktop",
+      "group": "check",
+      "label": "History Report",
+      "speed": "instant",
+      "help": "history_report",
+      "script": "report/history_report.py"
+    },
+    {
+      "id": "event_precommit",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Pre-Commit Gates",
+      "speed": "slow",
+      "help": "event_precommit",
+      "script": "event/precommit.py"
+    },
+    {
+      "id": "event_premerge",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Pre-Merge Gates",
+      "speed": "slow",
+      "help": "event_premerge",
+      "script": "event/premerge.py"
+    },
+    {
+      "id": "event_prerelease",
+      "tab": "desktop",
+      "group": "check",
+      "label": "Pre-Release Gates",
+      "speed": "slow",
+      "help": "event_prerelease",
+      "script": "event/prerelease.py"
     },
     {
       "id": "install_playwright",

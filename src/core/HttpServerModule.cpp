@@ -1499,7 +1499,7 @@ void HttpServerModule::applyWledState(const char* body) {
     const char* segStart = std::strstr(body, "\"seg\":");
     const char* palStart = segStart ? std::strstr(segStart, "\"pal\":") : nullptr;
     if (palStart) {
-        int pal = std::atoi(palStart + 6);
+        int pal = mm::json::parseIntStr(palStart + 6);
         if (pal < 0) pal = 0;
         if (pal >= mm::palettes::kCount) pal = mm::palettes::kCount - 1;
         char valueJson[24];

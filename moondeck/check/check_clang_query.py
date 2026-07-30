@@ -26,12 +26,15 @@ so a custom check written that way could never appear in the editor anyway.
    Not a violation — the driver layer allocates deliberately — but the hot path must not, and
    the count is the thing worth trending.
 
-3. **Doc comment size.** `///` comments become the published module pages (moxydoc), and some
-   have grown past being read. Reported per scope — class, method, field — with NO threshold:
-   the scopes have different natural sizes (a class header IS the module spec; a method comment
-   is a sentence), so one cutoff would flag the best-documented modules as defects. The summary
-   line is what the thresholds get decided from. Plain `//` is not here: the lexer discards it,
-   so it never reaches the AST at all.
+3. **Comments per declaration.** Which classes, methods and attributes are documented, and with
+   which kind: `///` is what moxydoc publishes, while a `//` stacked on a declaration is usually a
+   thought that belongs in the code below it. Sized in WORDS against per-scope ideals, with the
+   deviation reported rather than a pass/fail — a class header IS the module spec, so its length
+   is a judgment, not a defect.
+
+   Clang's lexer discards `//`, so it reaches the AST only via the shadow tree below: a copy of
+   src/ where a leading `//` becomes `/// MMDEV:`. That marker is what keeps the two kinds apart
+   in the DEV column; the real source is never touched.
 
 Usage:
   uv run moondeck/check/check_clang_query.py              # every rule
@@ -207,6 +210,20 @@ _SCOPE = {
 # right at ten times the ideal, because it IS the driver's spec.
 _IDEAL_DOC_WORDS = {"class": 130, "method": 40, "attribute": 40, "other": 40}
 
+# `@moreinfo` ends the part being measured. The directive splits a class comment in two (see
+# gen_api.py): everything before it is the lead description, rendered above the attribute/method
+# lists, and everything after is deep-dive reference relocated BELOW them under `## More info`.
+#
+# Only the lead is measured, because the ideal asks "how much must a reader take in before the
+# member lists" — and reference material deliberately parked at the bottom of the page is not that.
+# Counting the whole block punished the very structure the directive exists to encourage:
+# NetworkSendDriver read +407% as one blob, and +48% once its 469 More-info words were separated
+# from its 193-word lead.
+#
+# Matched on the AST node, not the source text: clang parses the directive into
+# `InlineCommandComment ... Name="moreinfo"`, so the split point is stated rather than guessed at.
+_MOREINFO_NODE = re.compile(r'InlineCommandComment.*Name="moreinfo"')
+
 # The `//` side deliberately has NO ideal, because zero IS the ideal: a developer note stacked on
 # a declaration is usually a thought that belongs in the code below it. Measuring it as
 # deviation-from-one-line made the best case (no note at all) read as -100%, i.e. worst — so DEV
@@ -309,7 +326,7 @@ def module_files(module):
 
 
 def including_tus(files, build_dir):
-    """The translation units that reach `files` — the TUs worth parsing to analyse them.
+    """The translation units that reach `files` — the TUs worth parsing to analyze them.
 
     A header is not a TU: it is compiled through whichever .cpp includes it. Parsing every TU to
     reach one header costs minutes (263s here) when a single TU usually suffices (18s), so this
@@ -346,14 +363,14 @@ def including_tus(files, build_dir):
         frontier = nxt
 
     hits = [tu for tu in tus if Path(tu).name in reached]
-    return hits or tus          # no edge found -> analyse everything rather than nothing
+    return hits or tus          # no edge found -> analyze everything rather than nothing
 
 
 def _source_tus(build_dir):
-    """The src/ translation units to analyse.
+    """The src/ translation units to analyze.
 
     Only src/: test/ TUs would double the runtime to report on code that never ships, and a
-    header is analysed through whichever .cpp includes it (hence the dedupe below).
+    header is analyzed through whichever .cpp includes it (hence the dedupe below).
     """
     db = json.loads((build_dir / "compile_commands.json").read_text(encoding="utf-8"))
     return sorted({e["file"] for e in db if "/src/" in e["file"].replace("\\", "/")})
@@ -627,7 +644,7 @@ def collect_nonpublic(out):
     seen = set()
     cur_path = None
     for block in out.split('Binding for "d":')[1:]:
-        head = next((l for l in block.split("\n") if l.strip()), "")
+        head = next((ln for ln in block.split("\n") if ln.strip()), "")
         hint = _PATH_HINT.search(head)
         if hint:
             cur_path = hint["path"]
@@ -657,7 +674,7 @@ def collect_comments(out):
     cur_path = None
     for block in out.split('Binding for "d":')[1:]:
         lines = block.split("\n")
-        head = next((l for l in lines if l.strip()), "")
+        head = next((ln for ln in lines if ln.strip()), "")
 
         hint = _PATH_HINT.search(head)
         if hint:
@@ -698,6 +715,10 @@ def collect_comments(out):
             begin = int(fc["pstart"] or fc["start"] or owner["line"])
             body = ""
             for sub in lines[k + 1:]:
+                # `@moreinfo` ends the LEAD description; everything after it is relocated below
+                # the member lists at render time and is not what the ideal measures.
+                if _MOREINFO_NODE.search(sub):
+                    break
                 tc = _TEXTCOMMENT.search(sub)
                 if tc:
                     body += tc["text"] + " "
@@ -864,7 +885,7 @@ def render_heap(rows, max_rows=0):
 
     def table(title, subset):
         if not subset:
-            return [f"", f"{title}: none."]
+            return ["", f"{title}: none."]
         kinds = collections.Counter(r["what"] for r in subset)
         what_w = min(max(len(r["what"]) for r in subset), 12)
         tgt_w = min(max((len(r["target"]) for r in subset), default=0), 24) or 1
@@ -909,7 +930,7 @@ def main():
               f"run `uv run moondeck/build/build_desktop.py` first.", file=sys.stderr)
         return 2
 
-    # A module's HEADER is not a translation unit — it is analysed through whichever .cpp
+    # A module's HEADER is not a translation unit — it is analyzed through whichever .cpp
     # includes it. So --module narrows the REPORT, not the TU list; narrowing the TUs would
     # miss every header-only module, which is most of the light domain.
     only = None
@@ -944,8 +965,8 @@ def main():
         # do not all say "error:" — an ambiguous top-level anyOf() reports "Input value has
         # unresolved overloaded type" — so key on "no matches at all", which is never a real
         # result for these rules on this codebase.
-        bad = [l for l in out.splitlines()
-               if "error: " in l or "unresolved overloaded type" in l or "not found" in l]
+        bad = [ln for ln in out.splitlines()
+               if "error: " in ln or "unresolved overloaded type" in ln or "not found" in ln]
         if bad and "binds here" not in out and "Match #" not in out:
             print(f"[{name}] clang-query rejected the matcher: {bad[0].strip()}", file=sys.stderr)
             return 2

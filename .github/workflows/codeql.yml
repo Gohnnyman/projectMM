@@ -14,7 +14,9 @@ name: CodeQL
 # `build-mode: none` scans C/C++ WITHOUT building it, inferring compile flags per file. That
 # matters here because the real firmware build is an ESP-IDF cross-compile for Xtensa/RISC-V a
 # runner would have to reproduce. The trade is some extraction noise on macro/template-dense
-# headers.
+# headers — and, more sharply, that what it analyzes is the DESKTOP configuration: anything whose
+# truth depends on a target typedef (`nrOfLightsType` is uint32_t here, uint16_t on a no-PSRAM
+# ESP32) is judged against the wrong build. Read findings of that shape with the target in mind.
 #
 # Free on public repos, so the cost is wall-clock only.
 
@@ -32,10 +34,14 @@ on:
       - main
       - next-iteration
     paths:
-      # Only when C/C++ or the workflow itself changes — a docs commit has nothing new to
-      # analyse and would just burn a runner.
+      # Only when C/C++ or the analysis setup itself changes — a docs commit has nothing new to
+      # analyze and would just burn a runner. Both setup files are listed: a change to the query
+      # set or the ignore list changes what a scan FINDS, so it has to trigger one. Listing only
+      # the workflow left an edit to codeql-config.yml silently unscanned until something under
+      # src/ happened to change.
       - 'src/**'
       - '.github/workflows/codeql.yml'
+      - '.github/codeql-config.yml'
   workflow_dispatch:
   schedule:
     # Monday 04:00 UTC. Weekly is enough for a codebase this size, and keeps the signal
@@ -64,10 +70,21 @@ jobs:
         with:
           languages: c-cpp
           build-mode: none
-          # security-and-quality is the widest stock set: the security queries answer the
-          # question above, and the quality ones tell us whether CodeQL sees anything our
-          # existing checks miss. Narrow it later if the noise is not worth it.
-          queries: security-and-quality
+          # security-extended, NOT security-and-quality. The quality pack was included to answer
+          # one question — does CodeQL see anything our existing checks miss — and after two runs
+          # the answer is no: its findings land in territory that already has an owner (unused
+          # variables and commented-out code are clang-tidy's, long/trivial switches are lizard's),
+          # which is the one-rule-one-owner rule this stack is built on.
+          #
+          # It was also actively misleading here. `build-mode: none` analyzes the DESKTOP
+          # configuration only, so 7 `cpp/constant-comparison` alerts flagged the layouts' overflow
+          # clamps as always-false — correct for that build, wrong for the target: `nrOfLightsType`
+          # is uint16_t on a no-PSRAM ESP32, where those guards are load-bearing. Build-dependent
+          # dead code is exactly what the quality pack hunts and exactly what it cannot judge here.
+          #
+          # The security queries are untouched, and they are the reason CodeQL has a slot at all:
+          # whole-program taint across the six packet parsers on a device with no MMU.
+          queries: security-extended
           # Excludes vendored code (test/doctest.h) — see the file for why.
           config-file: ./.github/codeql-config.yml
 

@@ -74,6 +74,26 @@ def type_name_from_md(md_file: Path) -> str:
     return md_file.stem
 
 
+def resolve_asset(path: Path) -> Path | None:
+    """`path` as it is ACTUALLY spelled on disk, or None when no such file exists.
+
+    `Path.exists()` answers through the filesystem, and macOS's is case-insensitive: it reports
+    True for `assets/core/layouts.png` when the file is `Layouts.png`. The link written from that
+    path then resolves locally and 404s on the case-sensitive Linux runner that builds the
+    published site — a failure that cannot reproduce on the machine that produced it.
+
+    So the parent directory is listed and matched case-insensitively, and the REAL name is
+    returned. Catalog pages are the case that needs it: `layouts.md` has a lowercase stem while
+    the screenshot follows the `<TypeName>.png` convention.
+    """
+    if path.exists() and path.name in {p.name for p in path.parent.iterdir()}:
+        return path            # exact match, including case
+    if not path.parent.is_dir():
+        return None
+    lowered = path.name.lower()
+    return next((p for p in sorted(path.parent.iterdir()) if p.name.lower() == lowered), None)
+
+
 def insert_extra_shot(doc_path: Path, filename: str, anchor: str,
                       dry_run: bool) -> bool:
     """Insert an image reference for filename into doc_path after anchor.
@@ -205,14 +225,16 @@ def main() -> int:
 
     for md_file in sorted(DOCS_DIR.rglob("*.md")):
         type_name = type_name_from_md(md_file)
-        png = asset_dir_for(type_name) / f"{type_name}.png"
-        gif = asset_dir_for(type_name) / f"{type_name}.gif"
+        # Resolved through the directory listing, not Path.exists(), so the link carries the name
+        # as it is really spelled — see resolve_asset.
+        png = resolve_asset(asset_dir_for(type_name) / f"{type_name}.png")
+        gif = resolve_asset(asset_dir_for(type_name) / f"{type_name}.gif")
 
-        if not png.exists():
+        if png is None:
             skipped_no_screenshot.append(md_file.relative_to(ROOT))
             continue
 
-        changed = insert_assets(md_file, png, gif if gif.exists() else None, args.dry_run)
+        changed = insert_assets(md_file, png, gif, args.dry_run)
         if changed:
             rel = md_file.relative_to(ROOT)
             verb = "would update" if args.dry_run else "updated"

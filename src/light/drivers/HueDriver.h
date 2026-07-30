@@ -228,10 +228,10 @@ private:
     /// fetchLights has run, so the list is trustworthy.
     bool     sawLights_ = false;
     /// Friendly light names for the dropdown — `kMaxLights × kNameLen`, indexed by lightNameAt().
-    /// Heap, NOT inline: a fixed array would reserve 768 B whether the bridge has 4 lights or 32
-    /// (and cap at 32). One contiguous block is allocated to the ACTUAL count when the fetch runs
-    /// and freed in release(), so memory scales to the real bridge and sizeof(HueDriver) stays
-    /// small (the lightsBuf_ stack-overflow lesson, applied to the names).
+    /// Heap, NOT inline: the block is allocated lazily on first parse and freed in release(), so
+    /// an unconfigured driver pays nothing and sizeof(HueDriver) stays small (the lightsBuf_
+    /// stack-overflow lesson, applied to the names). The capacity is the kMax bound, not the live
+    /// count — the parser fills it incrementally and the count is not known until it finishes.
     char*    lightNames_ = nullptr;
     /// Friendly room names, same shape — `kMaxRooms × kNameLen`, indexed by roomNameAt().
     char*    roomNames_  = nullptr;
@@ -414,6 +414,15 @@ private:
         return len > 0 && body[len - 1] == '}';
     }
 
+    /// The bridge id a quoted JSON key opens with (`"7":{…}` → 7), or 0 when `s` does not start
+    /// with a positive integer that fits `hueId_` — the value every caller already treats as
+    /// "not an id". The range bound is the point: an id too large would otherwise narrow into a
+    /// DIFFERENT valid light (`"65537"` → light 1).
+    static uint16_t parseId(const char* s) {
+        const int v = json::parseIntStr(s);
+        return (v > 0 && v <= 0xFFFF) ? static_cast<uint16_t>(v) : 0;
+    }
+
     /// --- Learn the bridge's light ids (window index → hue id, in id order).
     void fetchLights() {
         char host[16]; bridgeStr(host);
@@ -493,7 +502,7 @@ private:
         while (true) {
             const char* q = std::strchr(p, '"');           // next key open-quote
             if (!q) break;
-            int id = std::atoi(q + 1);                      // light id is a quoted integer key
+            int id = parseId(q + 1);                        // light id is a quoted integer key
             const char* close = std::strchr(q + 1, '"');
             // A top-level light-id key: a quoted positive integer followed by ':'.
             if (id > 0 && close && close[1] == ':') {
@@ -556,7 +565,7 @@ private:
         while (true) {
             const char* q = std::strchr(p, '"');
             if (!q) break;
-            int id = std::atoi(q + 1);
+            int id = parseId(q + 1);
             const char* close = std::strchr(q + 1, '"');
             if (id > 0 && close && close[1] == ':') {
                 commit(q);                                  // the PREVIOUS group's object ends here
@@ -581,7 +590,7 @@ private:
         uint32_t mask = 0;
         for (const char* q = s; q < end && *q != ']'; ) {
             if (*q == '"') {
-                const int id = std::atoi(q + 1);
+                const int id = parseId(q + 1);
                 for (uint8_t i = 0; i < lightCount_; i++)        // map the id to its color-light bit
                     if (hueId_[i] == id) { mask |= (1u << i); break; }
                 const char* c = std::strchr(q + 1, '"');         // skip to the value's closing quote

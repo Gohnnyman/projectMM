@@ -10,6 +10,7 @@ Below: the UI behaviours common to every card, described once, then one section 
 
 - **Status dots** on each card: grey (not run), orange (running), green (exit 0), red (exit non-zero).
 - **Last-run log** — the **📄** button replays that script's last run in the log pane. It appears **only on cards that have actually run** (and shows up the moment a first run finishes, no reload needed), so its absence is informative too: a card with no 📄 is one nobody has used yet. Every run is teed to `build/moondeck-logs/<id>.log` as it streams (not buffered to the end, so a run you Stop still leaves what it printed), which answers "what did this do last time" after a page reload or a switch to another card — the case a live-only stream cannot. One file per script, overwritten each run: a last-run record, not a history. Gitignored, being derived state.
+- **Run count** — every run ends `[exit code: 0] [run #7]`, counting that script's runs in `build/moondeck-logs/run-counts.json`. Two identical reports are otherwise indistinguishable, so the number answers "did this actually re-run since the fix, or am I reading the same output again?". Derived like the logs: deleting `build/` resets it, and a missing or corrupt file costs the count, never the run.
 - **Run/Stop toggle** for long-running scripts (Run desktop, Monitor ESP32).
 - **Duration hint** — every card shows how long it takes: ⚡ about a second, ⏱️ a few seconds up to ~30, 🐌 more than 30 seconds (a build, a flash, a gate list, clang-tidy). All three are shown rather than only the extremes, so a blank badge reads as "nobody set a speed on this card" instead of being confused with medium. Set per script as `"speed": "instant" | "medium" | "slow"` in `moondeck_config.json`. This is a *label*, not a timeout — nothing enforces it, so a script that grows slower needs its flag updated by hand. Separate from `long_running`, which controls the Run/Stop toggle rather than expected duration.
 - **Group headers** in the sidebar (setup, build, flash, run, test, check, scenario).
@@ -201,6 +202,22 @@ the site.
 
 Every static-analysis tool, on ONE module — the repo-wide reports turned around.
 
+**The stack, and why it is five tools.** Each answers a question the others structurally cannot,
+which is what keeps them from being redundant:
+
+| | sees | answers |
+|---|---|---|
+| **clang-tidy** | one statement, with full type information | is this line wrong? |
+| **clang-query** | the AST, via matchers we write | does this codebase's own rule hold? |
+| **`-Wfunction-effects`** | the whole call graph, from the compiler | can the render path block? |
+| **lizard** | tokens, no types | is this function getting more complex over time? |
+| **CodeQL** | a queryable database of the program | can LAN bytes reach a `memcpy`? |
+
+One rule, one owner: where two tools could report the same thing, one is switched off (lizard owns
+complexity, so clang-tidy's `readability-function-*` checks stay disabled). The individual cards
+run each of these across the tree; this card inverts that — everything at once, scoped to the
+module you are actually working on.
+
 ```bash
 uv run moondeck/check/check_module.py --module Control
 uv run moondeck/check/check_module.py --module Layer --skip clang-tidy
@@ -215,12 +232,12 @@ disagree about a finding. Each tool also accepts `--module` on its own if you wa
 **Module is not the same as a translation unit.** A TU is one `.cpp` plus everything it
 includes — the unit the compiler processes, and there are 15 under `src/`. A module is one class
 with its `.h` and optional `.cpp`, and there are ~90. Most are **header-only**, so they have no
-TU of their own: `ParallelLedDriver.h` is analysed through whichever `.cpp` includes it. That is
-why `--module` filters the findings rather than the file list — scoping by TU would analyse
+TU of their own: `ParallelLedDriver.h` is analyzed through whichever `.cpp` includes it. That is
+why `--module` filters the findings rather than the file list — scoping by TU would analyze
 nothing for a header-only module and report a confident, wrong zero.
 
 It still scopes the *parse*, by resolving which TUs actually reach the module's files —
-following `#include` edges transitively, so a header-only module is analysed through the one or
+following `#include` edges transitively, so a header-only module is analyzed through the one or
 two `.cpp` files that include it rather than all 15. `BouncingBallsEffect` is reached only by
 `main.cpp`: **8s for all three tools, down from over four minutes**. The run prints which TUs it
 picked, so the scope is visible rather than assumed.
@@ -228,6 +245,20 @@ picked, so the scope is visible rather than assumed.
 ### check_clang_tidy
 
 Run clang-tidy over the whole tree and write a Markdown report.
+
+**What clang-tidy is.** LLVM's linter for C++. It compiles each file for real — same parser as the
+compiler, so it sees types, overloads and template instantiations — then matches a library of
+named checks against the resulting AST (605 available in the LLVM 22 we run). That is the
+difference from a text linter: it knows
+`std::atoi(s)` is a call to the C library, not a word that looks like one. Checks come in
+families (`bugprone-*`, `performance-*`, `readability-*`, `cert-*`), each independently
+switchable, and many carry a machine-applicable fix.
+
+**What it does for us.** It is the per-statement layer: the bug that lives inside one function and
+needs type information to see. `bugprone-unchecked-string-to-number-conversion` is the shape —
+`atoi` cannot report a failure, which is invisible to grep and uninteresting to a complexity
+counter. Enabled checks live in [.clang-tidy](../.clang-tidy) at the repo root, so the editor and
+this report agree.
 
 ```bash
 uv run moondeck/check/check_clang_tidy.py                              # full run, report to stdout
@@ -250,6 +281,20 @@ report when more than ten files fail to compile.
 ### check_clang_query
 
 Our own AST rules — the checks we invent, that no off-the-shelf tool reports.
+
+**What clang-query is.** An interactive REPL over Clang's AST, shipped with LLVM. You write a
+matcher in the same domain-specific language clang-tidy checks are built from —
+`cxxRecordDecl(hasName("Foo"))`, `callExpr(hasAncestor(ifStmt()))` — and it prints or dumps every
+node that matches. It has no opinions and no built-in checks: it answers structural questions
+about the code, and what counts as a finding is left to the caller.
+
+**What it does for us.** It is how a project-specific rule gets written without building a
+clang-tidy plugin. A plugin is a compiled C++ target with its own build; a matcher is one line of
+text, editable in minutes. So the rules here are ours by definition — how much RAM the fixed
+arrays cost, where the heap is touched, whether every class carries a `///` — questions no
+off-the-shelf linter asks because they are about *this* codebase's constraints. The matchers
+match broadly and the filtering happens in Python, because the matcher language has no notion of
+"bigger than 64 bytes".
 
 ```bash
 uv run moondeck/check/check_clang_query.py               # every rule
@@ -289,8 +334,9 @@ prints everything, and `--min-bytes N` restores a size cutoff — both CLI-only,
 one button and the default plus the "N more not shown" line already answer the question from the
 browser.
 
-The per-module card runs with no cap: you scoped to one module precisely to see all of its
-findings, and `HttpServerModule` alone has 71 arrays.
+The per-module card keeps the 60-row cap, on every table including arrays: scoping to one module
+narrows WHICH findings, not how many fit on a screen — `HttpServerModule` alone reports 212
+declarations. Truncation is always announced, so the tail is one `--max-rows 0` away.
 
 **Rule `scratch` — `ScratchBuffer` members.** `ScratchBuffer` *is* the project's heap manager,
 so a module that uses one allocates without any `new` or `malloc` appearing in its own source —
@@ -337,10 +383,10 @@ comment at all (write one). `%DOC` is the share carrying a real doc comment.
 Then every declaration, ranked by how far it sits from the ideal:
 
 ```
-  DOC DEVIATION  DOC WORDS  DEV WORDS  DECL       NAME               FILE:LINE
-         +1135%       1606          0  class      MoonI80Peripheral  MoonLedDriver.h:10
-          +797%       1166          0  class      HttpServerModule   HttpServerModule.h:17
-          -100%          0         61  method     driversOn          Scheduler.h:138
+  DOC DEVIATION  DOC WORDS  DEV WORDS  VIS   DECL       NAME               FILE:LINE
+         +1135%       1606          0  pub   class      MoonI80Peripheral  MoonLedDriver.h:10
+          +797%       1166          0  pub   class      HttpServerModule   HttpServerModule.h:17
+          -100%          0         61  priv  method     driversOn          Scheduler.h:138
 ```
 
 **Sizes are WORDS, not lines.** A line is a formatting accident — the same paragraph is 5 lines at
@@ -392,7 +438,7 @@ whether the enclosing record is a lambda, rather than testing the method's name,
 Not reported: function PARAMETERS. C++ cannot attach a doc comment to one — 1054 probed, zero
 with a comment — they are documented via `@param` inside the method's own comment, and this tree
 uses `@param` 8 times, all in a `.js` file. Class ATTRIBUTES are the per-member scope that does
-exist, and they are the `field` row above. Declarations clang marks `implicit` (a lambda's
+exist, and they are the `attribute` row above. Declarations clang marks `implicit` (a lambda's
 closure class) or `invalid` (a parse that only succeeds in the TU that owns it) are skipped:
 both are anonymous, so their only "name" is the literal word `definition`.
 
@@ -403,6 +449,19 @@ across cores; serial would be ~11 minutes.
 ### check_nonblocking
 
 What the render path calls that can block or allocate — checked by the compiler.
+
+**What `-Wfunction-effects` is.** Not a separate tool: a Clang 20+ warning implementing the C++
+*function effects* proposal (P2698). Annotate a function `[[clang::nonblocking]]` and the compiler
+verifies, **transitively through the whole call graph**, that nothing it reaches allocates, locks,
+throws, or otherwise blocks. It is a compiler feature, so it sees exactly what the compiler sees —
+including through virtual dispatch and member-pointer calls, which is where a hand-written check
+gives up.
+
+**What it does for us.** The render tick has a hard real-time budget, and the failure mode is a
+`malloc` four calls deep in something that looks harmless. Nothing else in the stack can answer
+that: clang-tidy checks one statement, lizard counts branches, the Python checks read text. This
+script's own job is deduplication and framing — a raw build prints ~1350 warning lines for ~175
+unique sites, because a header is recompiled once per translation unit that includes it.
 
 ```bash
 uv run moondeck/check/check_nonblocking.py                # summary by callee, then every site
@@ -427,10 +486,24 @@ not be resolved from source.
 
 | Column | |
 |---|---|
+| **COND** | the branch guarding the call: `—` none (runs every time its tick does), `if`, `loop`, `switch`, `?:`, `&&`, and `ret` for a call reached only past an `if (…) return;` above it. `·rate` marks a rate limiter (`if (++n >= kEvery)`, `if (now - last < kIntervalMs) return;`) or a once-only latch (`if (!inited_)`). `?` means clang-query was unavailable, which is *unknown*, not unguarded |
 | **CALLS** | the function that blocks — or `(static local variable)`, a violation with no callee: a static local needs a guard variable and a one-time lock on first use |
 | **IN** | the method the call sits in, which is what places it in a tier. Clang names the call and the callee but *not* their enclosing function, so this is read back from the source |
 | **WHY IT BLOCKS** | clang's own root cause, e.g. `calls mm::platform::UdpSocket::sendTo`. `—` means a leaf the compiler could not look inside (external or unannotated) |
 | **FILE:LINE** | where to go |
+
+**Sorted unconditional-first** within each tier, then by file and line. A call that runs every
+time its tick does costs more than the same call behind a branch, and ties keep source order so
+findings in one file stay together and the list diffs cleanly between runs.
+
+**Two engines, each doing what it is good at.** The compiler finds the blocking calls, because
+`-Wfunction-effects` is transitive and a matcher would have to rebuild the call graph to match it.
+clang-query then annotates each site with its guard — a purely local AST question — joined on
+`file:line`. Measured ~1s per TU, against a report whose cost is the clean rebuild.
+
+**Guarded is not rare.** `if (enabled_)` is conditional and true every frame; only the `·rate`
+hint separates those, and it reads the condition's *spelling*, so it is a lead rather than a
+verdict. COND answers "is this reached every tick", never "is this acceptable".
 
 **Desktop-only, and that loses nothing.** On GCC `MM_NONBLOCKING` expands to `noexcept` — the
 exception contract still holds; only the clang attribute and the warning are absent. The ESP32 toolchain
@@ -445,11 +518,83 @@ carrying `MM_NONBLOCKING` is invisible. Closing that needs an xtensa clang — b
 "ESP32 clang/LLVM toolchain" in backlog-core.md.
 
 Not a gate yet: `-Wno-error=function-effects` keeps the build green while the findings are
-triaged. Each is a judgement — fix it, annotate the callee, or accept it with a scoped reason.
+triaged. Each is a judgment — fix it, annotate the callee, or accept it with a scoped reason.
+
+### check_codeql
+
+CodeQL's open alerts, read from GitHub — the Security tab as a card.
+
+**What CodeQL is.** GitHub's semantic analysis engine. It compiles the codebase into a *relational
+database* of every declaration, expression and control-flow edge, then runs queries written in QL,
+a logic language, against it. Because it is a database rather than a pass over one file, a query
+can follow data **across function and file boundaries** — the standard packs trace values from a
+`source` (something attacker-controlled) to a `sink` (somewhere dangerous) and report the path.
+That is *taint tracking*, and it is what nothing else in this stack can do.
+
+**What it does for us.** One question: we parse six network packet formats (ArtNet, DDP, E1.31,
+WLED audio sync, MQTT, WLED) plus HTTP, doing ~22 `memcpy` operations on bytes arriving from the
+LAN, on a device with **no MMU and no process isolation** — a bad length check is not a crash, it
+is arbitrary memory. CodeQL is the only layer that can trace a length field from the wire to the
+copy. It has already paid for itself once (3 thread-unsafe `localtime` findings, fixed), and its
+current answer on the packet parsers is *clean* — which is positive evidence, not silence.
+
+```bash
+uv run moondeck/check/check_codeql.py                  # open alerts, worst first
+uv run moondeck/check/check_codeql.py --state fixed    # what has been resolved
+uv run moondeck/check/check_codeql.py --all            # every state, including dismissed
+uv run moondeck/check/check_codeql.py --module HueDriver
+```
+
+CodeQL runs in CI ([codeql.yml](../.github/workflows/codeql.yml)), not locally: it is the one
+layer of the stack that sees whole-program taint, which is what the six network packet parsers
+justify. Its findings then live behind the Security tab — a report nobody opens.
+
+**Fetches, does not scan.** The CodeQL CLI would need a ~1 GB install and minutes per run to
+recompute what CI already has, and the alert lifecycle (open / fixed / dismissed, tracked across
+runs) is the valuable part — baselining we would otherwise build. The trade is stated in every
+run's output: alerts describe the last **analyzed pushed commit**, so local edits are not in them.
+
+Two severity scales are merged into one ordering, because the question is "what matters most", not
+"which query pack found it": `security_severity_level` on the security queries
+(critical/high/medium/low) and `severity` on the quality ones (error/warning/note/recommendation).
+
+**Split into `src/` and everything else**, because the two are read differently: a finding in
+shipping code reaches a device, one in a test does not. Measured at 855 open alerts, **783 sat in
+`test/`** — pooling them buried the three `high` findings in `src/` under doctest noise. The
+severity tally prints before either table so the counts survive row truncation.
+
+**All states** (`--all`) adds the `fixed` and `dismissed` alerts to the open ones — the lifecycle
+GitHub tracks and the reason this fetches rather than rescans. It answers "did that finding go
+away, or did someone dismiss it?", so the tables gain a STATE column and a per-state tally
+whenever more than one state is present. On a repo with nothing fixed or dismissed yet it reads
+the same as the default, which is correct, not a broken flag. Each state is queried **explicitly**:
+omitting `state` does not mean "any" — the endpoint defaults to `open`.
+
+`--module` scopes to one module's files from the command line. It is deliberately NOT wired to the
+tools-group module dropdown: that selector is promoted above the cards as soon as two cards in a
+group declare `needs_module`, which moves it out of *All Tools on Module* where it belongs.
+
+**Exit 2 when the answer is unknown** — no `gh`, not authenticated, code scanning disabled — with
+the reason on stderr. An empty list and an unreachable API look identical in a table, and only one
+of them means the code is clean.
 
 ### check_lizard
 
 Complexity gate: fail on **new** over-complex functions, not the ones already there.
+
+**What lizard is.** A small language-agnostic complexity counter (Python, ~20 languages). It does
+not parse C++ properly — it tokenizes, counts branch keywords, and reports cyclomatic complexity
+(CCN), line count (NLOC), parameter count and token count per function. That shallowness is the
+point: no build, no compile database, no toolchain, so it runs anywhere in about a second.
+
+**What it does for us.** It owns ONE number — how complex a function is — and it is the only tool
+here that produces a per-commit trend rather than a verdict. clang-tidy can tell you a function is
+complex today; only a series tells you the codebase is drifting, which is what
+[repo-health](../docs/metrics/repo-health.json) and `collect_kpi` plot. Its own
+`readability-function-*` checks stay off in clang-tidy for exactly that reason (one rule, one
+owner). The tokenizer's cost is real: on template- and macro-dense C++ it reports a mangled
+function name (`SolidEffect::static_cast<lengthType>` for a method called `tick`), and since the
+baseline matches on `file:name`, such an entry pins nothing — see the note below.
 
 ```bash
 uv run moondeck/check/check_lizard.py             # report NEW violations, exit 1 if any

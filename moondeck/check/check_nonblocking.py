@@ -10,8 +10,14 @@ Reports unique SITES. A header included by N translation units yields N copies o
 warning, so a raw build prints ~1350 lines for ~175 real findings; deduplicating on
 (file, line) is most of this script's value.
 
+Two engines, each doing what it is good at. The compiler finds the blocking calls, because
+`-Wfunction-effects` is transitive and a matcher would have to rebuild the call graph to match
+it. clang-query then annotates each site with the branch that guards it (the COND column) —
+a purely local AST question. Sites that run unconditionally sort first: they cost every tick,
+where a guarded one may not run at all.
+
 Not a gate. `-Wno-error=function-effects` in CMakeLists keeps the build green while these are
-triaged; each finding is a judgement — fix it, annotate the callee, or accept it with a scoped
+triaged; each finding is a judgment — fix it, annotate the callee, or accept it with a scoped
 reason — and the answer differs per site.
 
 Usage:
@@ -20,7 +26,6 @@ Usage:
 """
 
 import argparse
-import collections
 import re
 import subprocess
 import sys
@@ -110,9 +115,285 @@ _DEF = re.compile(r"^(?P<indent>\s*)(?:[\w:<>,&*\s]+?\s)?(?:(?P<cls>\w+)::)?(?P<
 # Which tick tier a function belongs to, once resolved through the enclosing method.
 TIERS = ("tick", "tick20ms", "tick1s")
 
+# ---------------------------------------------------------------- guard form (COND)
+#
+# Whether a flagged call actually runs every time its tick does. `-Wfunction-effects` answers
+# "can this block", never "is it reached" — so a report without this column ranks a call behind
+# `if (++n >= 50)` (fires twice a second) level with one that runs unconditionally every frame.
+#
+# Asked of clang-query rather than scanned from the text, because the branch forms in this tree
+# defeat a text scan: `if constexpr` (AudioService.h — a text scan reads it as a plain `if`),
+# conditions spanning lines, and macros. The ancestor of a call is exactly the kind of LOCAL AST
+# fact clang-query is for. Detection stays with the compiler: -Wfunction-effects is TRANSITIVE
+# through the call graph, which a matcher would have to rebuild by hand.
+#
+# GUARDED IS NOT RARE. `if (enabled_)` is conditional and true every frame; only the rate hint
+# below separates those, and it is a heuristic — read it as a lead, not a verdict.
 
-def enclosing_function(rel_path, line, _cache={}):
-    """The method a call site sits in, or "" when it cannot be determined."""
+# One matcher per branch kind, each naming the guard from the OUTSIDE in (`ifStmt(hasDescendant(
+# callExpr))`) rather than from the call outwards. `hasAncestor(...).bind()` is rejected outright
+# — "Matcher does not support binding" — so the kind cannot be read back from a combined query;
+# running them separately is what makes the answer unambiguous.
+#
+# Cheap enough to do this way: measured ~1s per TU (a narrow matcher, unlike the comments rule's
+# ~44s whole-subtree dump), so seven passes over the TUs holding findings add seconds to a report
+# whose cost is dominated by the clean rebuild.
+#
+# Ordered most-specific first: the first form to claim a site keeps it, so a call in a loop body
+# reads as `loop` even when an `if` also encloses it — the loop says more about how often it runs.
+# `forEachDescendant`, NOT `hasDescendant`: the latter binds only the FIRST matching descendant
+# per guard, so a branch containing several calls reported one and left the rest reading as
+# unconditional. Measured on the `for` at DevicesModule.h:274 — `hasDescendant` bound only
+# mergePacket (:277) while recvFrom (:275) in the same loop came back blank.
+#
+# Each matcher names the GUARDED REGION, never the whole statement. A call in an `if`'s CONDITION
+# runs every time the `if` is reached — `if (!listener_.open()) return;` (DevicesModule.h:385) is
+# an unconditional call to a blocking function — so matching the bare `ifStmt` labelled it `if`
+# and sorted it below the unconditional rows, i.e. wrong in the reassuring direction. Same for a
+# loop's condition, a `switch`'s subject, and the LHS of `&&`/`||`, which is always evaluated.
+_GUARD_MATCHERS = (
+    ("loop", "forStmt(hasBody(forEachDescendant(callExpr().bind(\"c\"))))"),
+    ("loop", "whileStmt(hasBody(forEachDescendant(callExpr().bind(\"c\"))))"),
+    ("loop", "cxxForRangeStmt(hasBody(forEachDescendant(callExpr().bind(\"c\"))))"),
+    ("if", "ifStmt(anyOf(hasThen(forEachDescendant(callExpr().bind(\"c\"))),"
+           "            hasElse(forEachDescendant(callExpr().bind(\"c\")))))"),
+    # `switchCase`, not `switchStmt`: the latter has no `hasBody` (clang-query rejects it), and
+    # matching the whole statement would claim calls in the SUBJECT expression, which always runs.
+    # `switchCase` covers `case` and `default` alike — the bodies, which is the guarded region.
+    ("switch", "switchCase(forEachDescendant(callExpr().bind(\"c\")))"),
+    # Only the branches, not the condition.
+    ("?:", "conditionalOperator(anyOf("
+           "  hasTrueExpression(forEachDescendant(callExpr().bind(\"c\"))),"
+           "  hasFalseExpression(forEachDescendant(callExpr().bind(\"c\")))))"),
+    # `a && blocking()` — the RHS runs only if the left side allows it; the LHS always runs.
+    ("&&", "binaryOperator(hasAnyOperatorName(\"&&\", \"||\"),"
+           " hasRHS(forEachDescendant(callExpr().bind(\"c\"))))"),
+)
+
+# A guarded early exit: `if (...) return;` / `continue` / `break`. These guard everything BELOW
+# them in the function, which no ancestor matcher can see — the call is genuinely unnested, so
+# every matcher above reports nothing and the site reads as "runs every time".
+#
+# That was actively wrong, not merely incomplete. HueDriver::tick calls pushOneChangedLight
+# unnested (HueDriver.h:112) but four early returns above it — including a `now - lastPutMs_ <
+# kPutIntervalMs` rate limit — mean it runs at most once per interval, not once per frame.
+#
+# `returnStmt` ONLY. `continue`/`break` leave the enclosing LOOP, not the function, so one above
+# a call — in a drain loop that has already closed, say — guards nothing about that call, and
+# counting it labelled an unconditional site as guarded. A call genuinely inside the loop body is
+# the `loop` matcher's to claim.
+_EXIT_MATCHER = ("functionDecl(forEachDescendant("
+                 "  returnStmt(hasAncestor(ifStmt())).bind(\"c\")))")
+
+# The bound call's own header line in a dump, whose start position is the join key onto a
+# warning: `CallExpr 0x7a0ee05e8 </abs/path/File.h:369:11, col:25> 'int'`. Three location spellings
+# appear — a full path, a bare `line:369:11` when the file is unchanged from the previous node,
+# and `col:11` when the line is too — so file and line are both optional and inherited when absent.
+_CALL_LOC = re.compile(r"^\w+ 0x\w+ <(?:(?P<file>(?!line:|col:)[^:<>]+):)?"
+                       r"(?:line:(?P<line>\d+)|(?P<full>\d+)|col:\d+)")
+
+# A rate-limiting guard: a counter compared against a constant or a `k`-prefixed limit, the
+# `if (++broadcastTick_ >= kBroadcastEverySec)` shape. Also a once-only latch (`if (!inited_)`),
+# which runs its body exactly once for the life of the process.
+#
+# `> 0` is deliberately NOT a rate limit: `if (pairTicksLeft_ > 0)` is a plain non-empty test, and
+# accepting any integer literal marked four unrelated guards in HueDriver::tick1s as throttled.
+# A threshold is a named `k` constant or a literal of 2 or more.
+_LIMIT = r"(?:k[A-Z]\w*|[2-9]\d*|\d{2,})"
+_RATE = re.compile(rf"(\+\+|--)\s*\w+\s*(>=|>|==)|"          # ++n >= limit
+                   rf"\w+\s*(>=|>)\s*{_LIMIT}\b|"            # n >= kLimit / n >= 50
+                   rf"[-+]\s*\w+\s*(<|<=)\s*{_LIMIT}\b|"     # now - last < kIntervalMs
+                   rf"%\s*{_LIMIT}\s*==")                    # n % kEvery == 0
+#
+# The latch word must END the identifier (`inited_`, `sawLights`, `isOpen`) rather than sit inside
+# it: a trailing `\w*` let `open` match `online`, so `if (!online) return;` — a plain connectivity
+# guard — marked DevicesModule's ageOut call as rate-limited.
+_LATCH_WORD = r"(?:inited|ready|open|opened|started|done|valid)"
+_LATCH = re.compile(rf"!\s*\w*{_LATCH_WORD}_?\b|"
+                    rf"\w*{_LATCH_WORD}_?\s*==\s*false")
+
+
+def _rate_on_line(rel_path, line, _cache={}):
+    """True when THIS one line spells a rate limiter or a once-only latch — no surrounding scan.
+
+    Used for early exits, where the condition and the `return` share a line and any wider window
+    would read a neighbouring block that does not guard the call at all.
+    """
+    src = _cache.get(rel_path)
+    if src is None:
+        f = ROOT / rel_path
+        src = _cache[rel_path] = (f.read_text(encoding="utf-8", errors="replace").split("\n")
+                                  if f.exists() else [])
+    if not 0 < line <= len(src):
+        return False
+    return bool(_RATE.search(src[line - 1]) or _LATCH.search(src[line - 1]))
+
+
+def _matcher_rejected(out):
+    """True when clang-query refused the matcher rather than finding nothing.
+
+    The two are indistinguishable by exit code — a rejected matcher still exits 0 with no matches.
+
+    Matched on clang-query's OWN diagnostic shapes, anchored to the start of the line. A substring
+    search for `error: ` finds one in the dumped source too: `snprintf(…, "error: apply failed")`
+    is a string literal in a matched node, and treating that as a rejection blanked the whole COND
+    column for a matcher that had in fact produced 255 matches.
+    """
+    # A rejection is reported as `<line>:<col>: <complaint>` against the QUERY text, before any
+    # matching happens, and never alongside a match. So: complaint present AND nothing matched.
+    rejected = ("Input value has unresolved overloaded type",
+                "Error parsing argument",
+                "Error building matcher",
+                "Matcher does not support binding",
+                "Invalid matcher")
+    if "Match #" in out:
+        return False                      # it ran and produced matches — not a rejection
+    return any(phrase in out for phrase in rejected)
+
+
+def guard_forms(rows, build_dir, tool):
+    """`(file, line) -> guard form` for every flagged site, from the AST.
+
+    Runs one clang-query pass per branch kind over only the TUs that actually contain findings,
+    then joins on the call's start position — the same key the warnings carry.
+
+    Returns None when the answer could not be obtained — no clang-query, or a matcher it refused.
+    The caller then renders the column as `?`, because a tool that could not look must never read
+    as "nothing is guarded", which is the comfortable answer and the wrong one.
+    """
+    if not tool:
+        return None
+    # Every TU that includes a file with findings. Headers have no TU of their own — they are
+    # analyzed through whichever .cpp includes them — so the set is resolved, not guessed.
+    tus = check_clang_query.including_tus({r["file"] for r in rows}, build_dir)
+    if not tus:
+        return None
+
+    def run(form, matcher):
+        """Bound sites for one matcher, or None when clang-query could not answer."""
+        try:
+            out = check_clang_query._run_rule(
+                {"output": "dump", "matcher": matcher}, tus, build_dir, tool)
+        except Exception as exc:
+            print(f"clang-query failed on the {form} matcher ({exc}); COND cannot be reported.",
+                  file=sys.stderr)
+            return None
+        # A matcher clang-query cannot resolve yields ZERO matches and exit 0 — indistinguishable
+        # from "no site is guarded". Same detection as check_clang_query.main; without it a single
+        # matcher-syntax drift silently blanks the column and every row reads as unconditional.
+        if _matcher_rejected(out):
+            print(f"clang-query rejected the {form} matcher; COND cannot be reported.",
+                  file=sys.stderr)
+            return None
+        return list(_bound_sites(out))
+
+    found = {}
+    for form, matcher in _GUARD_MATCHERS:
+        sites = run(form, matcher)
+        if sites is None:
+            return None
+        for rel, line in sites:
+            found.setdefault((rel, line), form)
+
+    # Early exits last: only a site that no enclosing branch claimed can be guarded this way,
+    # and being INSIDE an `if` says more about how often a call runs than sitting after one.
+    sites = run("ret", _EXIT_MATCHER)
+    if sites is None:
+        return None
+    exits = {}
+    for rel, line in sites:
+        exits.setdefault(rel, set()).add(line)
+    for r in rows:
+        if (r["file"], r["line"]) in found:
+            continue
+        # An exit guards this call only if it sits ABOVE it in the SAME function, so the search
+        # is bounded by the enclosing method's own first line.
+        start = function_start(r["file"], r["line"])
+        if not start:
+            continue
+        above = [ln for ln in exits.get(r["file"], ()) if start < ln < r["line"]]
+        if above:
+            # Test the EXIT lines themselves, not a window around them: an early exit's condition
+            # is on its own line (`if (now - last < kInterval) return;`), and walking up from it
+            # would pick up whatever unrelated block sits above — which marked ageOut (:286) as
+            # rate-limited from a `++n >= k` block that had already closed at :284.
+            found[(r["file"], r["line"])] = ("ret·rate" if any(
+                _rate_on_line(r["file"], ln) for ln in above) else "ret")
+    return found
+
+
+def _bound_sites(out):
+    """`(repo-relative file, line)` for every node bound as "c" in a clang-query dump.
+
+    `dump`, not `print`: print emits the SOURCE TEXT of a match with no location, and the join
+    onto a warning needs file:line. The bound node's own header line carries it.
+
+    The file is tracked across blocks because a dump states a path once and then spells later
+    positions `line:274:9` against it. Two traps that cost real coverage here:
+     - it must hold the RAW path, not `_rel()` of it. `_rel` returns None outside src/, so
+       filtering at assignment made one SDK match blank the file for every `line:`-only match
+       after it — silently dropping our own sites (DevicesModule.h:275 read as unconditional
+       while sitting inside a `for`).
+     - it must reset per TU. `_run_rule` concatenates every TU's output, so a path carried across
+       the seam labels one TU's matches with another's file.
+    """
+    for chunk in out.split("Match #1:"):
+        cur = None
+        for block in chunk.split('Binding for "c":')[1:]:
+            head = next((ln for ln in block.split("\n") if ln.strip()), "")
+            m = _CALL_LOC.search(head)
+            if not m:
+                continue
+            if m["file"]:
+                cur = m["file"]
+            # A bare `col:` form inherits BOTH file and line from the enclosing context, so it
+            # carries no line of its own and is skipped — guessing one would join the guard onto
+            # the wrong warning, worse than leaving the column blank.
+            line = m["line"] or m["full"]
+            rel = check_clang_query._rel(cur) if cur else None
+            if rel and line:
+                yield rel, int(line)
+
+
+def rate_hint(rel_path, line, _cache={}):
+    """True when the guard above `line` looks like a rate limiter or a once-only latch.
+
+    Read from the source text, not the AST: this asks what the condition MEANS, and a counter
+    compared to a constant is a spelling question, not a structural one. Heuristic by nature —
+    it can miss a rate limiter written another way, so it only ever ADDS a hint to a site the
+    AST already called conditional.
+    """
+    src = _cache.get(rel_path)
+    if src is None:
+        f = ROOT / rel_path
+        src = _cache[rel_path] = (f.read_text(encoding="utf-8", errors="replace").split("\n")
+                                  if f.exists() else [])
+    if not 0 < line <= len(src):
+        return False
+    # Walk UP out of the call's own block, stopping at the line that opened it — the guard.
+    # `if (++n >= k) {` / `n = 0;` / `send();` is a common shape, so a fixed one-line window misses
+    # the throttle (measured: DevicesModule.h:281 guards the call at :283, two lines down).
+    #
+    # Bounded by INDENTATION rather than a line count: only lines indented at least as far as the
+    # call belong to its block, so the scan cannot wander into a sibling guard above. A fixed wider
+    # window did exactly that — HueDriver::tick1s line 123's `++reportTick_ >= kReportEverySec`
+    # marked the four unrelated guards above it as rate-limited.
+    indent = len(src[line - 1]) - len(src[line - 1].lstrip())
+    scan = [line - 1]
+    for i in range(line - 2, max(-1, line - 12), -1):
+        if not src[i].strip():
+            continue
+        scan.append(i)
+        if len(src[i]) - len(src[i].lstrip()) < indent:
+            break            # this line opened the block — the guard itself; stop here
+    for i in scan:
+        if i >= 0 and (_RATE.search(src[i]) or _LATCH.search(src[i])):
+            return True
+    return False
+
+
+def _enclosing_def(rel_path, line, _cache={}):
+    """`(name, 1-based line)` of the definition a call site sits in, or `("", 0)`."""
     src = _cache.get(rel_path)
     if src is None:
         f = ROOT / rel_path
@@ -121,8 +402,20 @@ def enclosing_function(rel_path, line, _cache={}):
     for i in range(min(line, len(src)) - 1, -1, -1):
         m = _DEF.match(src[i])
         if m and len(m.group("indent")) <= 4 and m.group("name") not in _KEYWORDS:
-            return m.group("name")
-    return ""
+            return m.group("name"), i + 1
+    return "", 0
+
+
+def enclosing_function(rel_path, line):
+    """The method a call site sits in, or "" when it cannot be determined."""
+    return _enclosing_def(rel_path, line)[0]
+
+
+def function_start(rel_path, line):
+    """The line the enclosing definition opens on, or 0 — the lower bound when asking whether an
+    early exit sits above a call. Without it, a `return` from the function ABOVE this one would
+    read as guarding a call it cannot reach."""
+    return _enclosing_def(rel_path, line)[1]
 
 
 def build_output(build_dir, clean=True):
@@ -240,6 +533,26 @@ def main():
         print(f"Filtered to {args.module}: {', '.join(only)}\n")
         rows = [r for r in rows if r["file"] in only]
 
+    # Annotate each site with the branch that guards it. Separate pass, separate tool: the
+    # compiler says WHAT can block, the AST says WHETHER it is reached every tick.
+    tool = check_clang_tidy._find_tool("clang-query")
+    guards = guard_forms(rows, build_dir, tool)
+    for r in rows:
+        if guards is None:
+            # Unknown, NOT unconditional. A missing or refused tool is not an answer, and `—`
+            # would read as one.
+            r["cond"] = "?"
+        else:
+            form = guards.get((r["file"], r["line"]), "")
+            # `ret` is already final — guard_forms tested the exit lines themselves and appended
+            # `·rate` if one of THEM throttles. Re-testing here would scan upward from the call
+            # instead and pick up any unrelated block above it (measured: DevicesModule's ageOut
+            # read `ret·rate` from a `++n >= k` block that had already closed two lines earlier).
+            if not form or form.startswith("ret") or "·" in form:
+                r["cond"] = form or NO_CAUSE
+            else:
+                r["cond"] = f"{form}·rate" if rate_hint(r["file"], r["line"]) else form
+
     n_new = sum(1 for r in rows if r.get("new"))
     print(f"{len(rows)} call(s) from the render path that can block or allocate.")
     if has_baseline:
@@ -263,6 +576,14 @@ def main():
     def table(title, subset, note):
         if not subset:
             return
+        # Unconditional first: a call that runs every time its tick does is strictly worse than
+        # the same call behind a branch. (file, line) breaks ties, so the order stays stable
+        # between runs and findings in one file stay together — that is how they get fixed.
+        subset = sorted(subset, key=lambda r: (r["cond"] not in (NO_CAUSE, "?"),
+                                               r["file"], r["line"]))
+        # Never narrower than the header: a tier where every row is `—` is width 1, and the dashes
+        # then stop lining up under "COND".
+        cond_w = max(min(max(len(r["cond"]) for r in subset), 9), len("COND"))
         callee_w = min(max(len(r["callee"]) for r in subset), 36)
         fn_w = min(max(len(r["fn"] or "?") for r in subset), 18)
         why_w = min(max((len(r["why"]) for r in subset), default=0), 44) or 1
@@ -272,17 +593,31 @@ def main():
             return s if len(s) <= w else s[: w - 1] + "\u2026"
 
         print(f"\n{title} \u2014 {len(subset)}   ({note})")
-        print(f"      {'CALLS':<{callee_w}}  {'IN':<{fn_w}}  {'WHY IT BLOCKS':<{why_w}}  FILE:LINE")
-        print(f"      {'-' * callee_w}  {'-' * fn_w}  {'-' * why_w}  {'-' * loc_w}")
+        print(f"      {'COND':<{cond_w}}  {'CALLS':<{callee_w}}  {'IN':<{fn_w}}  "
+              f"{'WHY IT BLOCKS':<{why_w}}  FILE:LINE")
+        print(f"      {'-' * cond_w}  {'-' * callee_w}  {'-' * fn_w}  "
+              f"{'-' * why_w}  {'-' * loc_w}")
         for r in subset[:MAX_ROWS]:
             why = r["why"] or NO_CAUSE
             mark = "NEW " if r.get("new") else "    "
-            print(f"  {mark}{clip(r['callee'], callee_w):<{callee_w}}  "
+            print(f"  {mark}{clip(r['cond'], cond_w):<{cond_w}}  "
+                  f"{clip(r['callee'], callee_w):<{callee_w}}  "
                   f"{clip(r['fn'] or '?', fn_w):<{fn_w}}  "
                   f"{clip(why, why_w):<{why_w}}  "
                   f"{r['file']}:{r['line']}")
         if len(subset) > MAX_ROWS:
             print(f"  \u2026 {len(subset) - MAX_ROWS} more. Use --module <name> to scope.")
+
+    if guards is not None:
+        print(f"\nCOND = the branch guarding the call ({NO_CAUSE} = none, runs every time). "
+              f"`\u00b7rate` marks a\nrate limiter or once-only latch. Guarded is not rare: "
+              f"`if (enabled_)` still runs every frame.")
+    elif not tool:
+        print("\nCOND = ? \u2014 clang-query not found, so no site could be checked for a guard. "
+              "Install\nLLVM (brew install llvm) for the column. Unknown is not unconditional.")
+    else:
+        print("\nCOND = ? \u2014 the guard query did not complete (reason above), so no site could "
+              "be\nchecked. Unknown is not unconditional.")
 
     for tier, note in (("tick", "every frame \u2014 the hot path"),
                        ("tick20ms", "50x a second"),

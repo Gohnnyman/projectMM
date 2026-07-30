@@ -128,7 +128,7 @@ Published at [moonmodules.org/projectMM](https://moonmodules.org/projectMM/); so
 - [backlog/](https://moonmodules.org/projectMM/backlog/index.html) — forward-looking to-build lists (core / light / mixed)
 - [adr/](https://moonmodules.org/projectMM/adr/index.html) — immutable architecture decision records (Nygard format)
 - [history/](https://moonmodules.org/projectMM/history/index.html) — lessons, prior-project inventories, friend-repo digests
-- [moonmodules/](docs/moonmodules/) — module catalog pages + generated technical pages
+- [moonmodules/](https://github.com/MoonModules/projectMM/tree/main/docs/moonmodules) — module catalog pages + generated technical pages
 
 Docs describe the system as it is; git is the history; specs precede implementation. **Documentation model**: [coding-standards.md § Documentation model](docs/coding-standards.md#documentation-model).
 

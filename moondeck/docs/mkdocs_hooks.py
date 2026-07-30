@@ -15,6 +15,7 @@
    /install/ so the local preview mirrors production's single-origin layout.
 """
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -53,7 +54,8 @@ _API_MODULES: dict[str, str] = {}
 
 # Repo top-level dirs/files a doc may link into but the site doesn't host.
 _OUT_OF_DOCS = ("src/", "moondeck/", "test/", "esp32/", "web-installer/",
-                ".github/", "CLAUDE.md", "README.md", "library.json", "CMakeLists.txt")
+                ".github/", "CLAUDE.md", "README.md", "library.json", "CMakeLists.txt",
+                ".clang-tidy", ".clangd")
 
 # A markdown link into a repo file the site doesn't host. Two authored shapes, both
 # common in the transient history/plans + backlog notes:
@@ -247,7 +249,7 @@ def _render_catalog_table(markdown: str) -> str:
     passes through verbatim, so a table only ever contains genuine module blocks
     (a `##` heading closes the current table). Source .md stays authored as prose."""
     lines = markdown.split("\n")
-    details_names = {_DETAILS_RE.match(l).group("name") for l in lines if _DETAILS_RE.match(l)}
+    details_names = {_DETAILS_RE.match(ln).group("name") for ln in lines if _DETAILS_RE.match(ln)}
 
     out = []
     rows = []                # accumulated table rows for the current run
@@ -368,6 +370,13 @@ _EMBEDS_REPO_ROOT_FILE = {"principles-and-process.md"}
 # ride along untouched.
 _DOCS_PREFIXED_HREF_RE = re.compile(r'href="docs/([^"#]+?)(\.md)?(#[^"]*)?"')
 
+# The same borrowed text also links to files OUTSIDE docs/ (`moondeck/MoonDeck.md`), which
+# have no page on the site at all. `_rewrite_out_of_docs_links` already sends those to the
+# GitHub blob, but it runs at markdown stage where this page is still an unexpanded
+# `--8<--` directive — so the embedded ones need the same treatment here.
+_OUT_OF_DOCS_HREF_RE = re.compile(
+    rf'href="({"|".join(re.escape(p) for p in _OUT_OF_DOCS)})([^"#]*)(#[^"]*)?"')
+
 # The page's first `<h1 ...>text</h1>`, split so the tag and its attributes (the id the
 # table of contents anchors on) survive and only the text is replaced.
 _FIRST_H1_RE = re.compile(r"(<h1[^>]*>)(.*?)(</h1>)", re.S)
@@ -393,7 +402,32 @@ def _rebase_repo_root_doc_links(html):
     def _fix(m):
         path, _, anchor = m.group(1), m.group(2), m.group(3) or ""
         return f'href="{path}.html{anchor}"' if _ else f'href="{path}{anchor}"'
-    return _DOCS_PREFIXED_HREF_RE.sub(_fix, html)
+    html = _DOCS_PREFIXED_HREF_RE.sub(_fix, html)
+    return _OUT_OF_DOCS_HREF_RE.sub(
+        lambda m: f'href="{_BLOB_BASE}/{m.group(1)}{m.group(2)}{m.group(3) or ""}"', html)
+
+
+class _MuteRebasedLinkWarnings(logging.Filter):
+    """Drop the link warnings for the page whose links this hook rebases after validation.
+
+    `principles-and-process.md` embeds CLAUDE.md, whose links (`docs/architecture.md`,
+    `moondeck/MoonDeck.md`) are correct where that file is actually read — the repo root and
+    GitHub — and `_rebase_repo_root_doc_links` turns them into working site links. But
+    validation is a markdown treeprocessor inside `Page.render()`, so it judges the
+    pre-rebase text and reports 13 broken links the built site does not have.
+
+    Filtering the log is the narrow fix. `validation.links.not_found: ignore` in mkdocs.yml
+    would hide genuinely missing pages across every other doc, and MkDocs has no per-page
+    validation setting; the `inclusion` levels that do suppress warnings (`DRAFT` and below)
+    also drop the page from the built site.
+    """
+
+    def filter(self, record):
+        msg = record.getMessage()
+        return not any(f"Doc file '{p}' contains a link" in msg for p in _EMBEDS_REPO_ROOT_FILE)
+
+
+logging.getLogger("mkdocs.structure.pages").addFilter(_MuteRebasedLinkWarnings())
 
 
 def on_page_content(html, page, config, files):

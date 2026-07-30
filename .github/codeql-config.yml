@@ -1,11 +1,15 @@
 name: "projectMM CodeQL config"
 
 # Code we did not write and will not change is not a finding we can act on. doctest.h is the
-# vendored single-header test framework (test/doctest.h) and produced the only critical alert
-# in the tree that we do not own — excluding it here is the standard mechanism, rather than
-# dismissing the same alert by hand after every scan.
+# vendored single-header test framework (test/doctest.h) and the only third-party source in the
+# repo; everything else under src/ and test/ is ours. Add to this list only for genuinely
+# third-party code, never to quiet a finding in our own.
 #
-# This is the ONLY vendored source in the repo; everything else under src/ and test/ is ours.
-# Add to this list only for genuinely third-party code, never to quiet a finding in our own.
+# NB it does NOT suppress findings inside doctest.h. For C/C++ `paths-ignore` filters which files
+# are ANALYZED, not which are extracted through an `#include`: 143 test files include this header,
+# so its code reaches the database via them and alerts still land on it (measured — the critical
+# `cpp/use-after-free` at doctest.h:3705 stayed open across scans after this entry was added, and
+# was dismissed in the Security tab instead). Kept because it still drops the header as a
+# standalone analysis target; the dismissal is what actually silences it.
 paths-ignore:
   - test/doctest.h
