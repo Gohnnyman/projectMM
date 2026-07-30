@@ -358,7 +358,8 @@ public:
     nrOfLightsType lightsAt(uint8_t i) const { return destCounts_[i]; }
 
 private:
-    /// The send socket, opened once in setup() and reused for every destination.
+    /// The send socket: opened in prepare() (the sole resource gate), reused for every
+    /// destination, and closed in release() so a disabled driver holds no socket.
     platform::UdpSocket socket_;
     /// The shared frame this driver reads its window from; borrowed, not owned.
     Buffer* sourceBuffer_ = nullptr;

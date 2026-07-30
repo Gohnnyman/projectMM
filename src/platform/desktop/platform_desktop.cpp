@@ -786,11 +786,16 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
         dst.sll_ifindex = static_cast<int>(ethRawIfIndex_);
         dst.sll_halen = 6;
         std::memcpy(dst.sll_addr, frame, 6);   // destination MAC is the frame's first 6 bytes
-        return ::sendto(ethRawFd_, frame, len, 0,
-                        reinterpret_cast<sockaddr*>(&dst), sizeof(dst)) == static_cast<ssize_t>(len);
+        const ssize_t n = ::sendto(ethRawFd_, frame, len, 0,
+                                   reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
 #else
-        return ::write(ethRawFd_, frame, len) == static_cast<ssize_t>(len);
+        const ssize_t n = ::write(ethRawFd_, frame, len);
 #endif
+        // Track failures on the REAL send path too, not just the capture path: a bound host is
+        // where frames actually reach a wire, so a streak here is the one that matters.
+        if (n != static_cast<ssize_t>(len)) { ethSendFails_++; return false; }
+        ethSendFails_ = 0;
+        return true;
     }
 #endif
 
@@ -813,7 +818,6 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
 }
 
 uint32_t ethSendFailStreak() MM_NONBLOCKING { return ethSendFails_; }
-
 
 // See platform.h: a claim stated by the driver, reference-counted.
 void ethClaimRawL2(bool claim) {

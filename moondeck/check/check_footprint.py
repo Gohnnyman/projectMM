@@ -145,6 +145,15 @@ def render(per, only, firmware):
     L = [f"Footprint on {firmware} — {len(rows)} source file(s), "
          f"{sum(r['total'] for r in rows)} B attributed."]
     if not rows:
+        # A module scoped out of THIS firmware is the expected zero, not a failed run — say which,
+        # because "nothing attributed" reads as a broken tool and a real zero is indistinguishable
+        # from a tool that read nothing. A driver gated on a per-firmware flag (MM_PANEL_CARDS) is
+        # simply absent from a variant that does not set it, which is the gate working.
+        if only:
+            return L + [f"  Not linked into {firmware}: compiled out of this variant by a "
+                        f"per-firmware gate, so it costs nothing here.",
+                        f"  Measure it on a variant that includes it "
+                        f"(--firmware esp32s31 for the panel-card driver)."]
         return L + ["  Nothing attributed. Build the firmware, or the ELF carries no debug info."]
 
     # What the columns MEAN lives in MoonDeck.md, not in every run's output: it is reference text
@@ -324,15 +333,18 @@ def main():
         if not only:
             print(f"No source files for module '{args.module}'.", file=sys.stderr)
             return 2
-        print(f"Filtered to {args.module}: {', '.join(only)}\n")
+        print(f"Filtered to {args.module}: {', '.join(only)}")
+        # Resolved by FILENAME, so a module whose bytes partly live in a differently-named sibling
+        # (a *Packet.h wire format, say) reports only the files that share its name. Said out loud
+        # because a partial number that looks whole is worse than one that admits its scope.
+        print("  (files matching the module name; a differently-named sibling header is not "
+              "included)\n")
 
     print("\n".join(render(per, only, args.firmware)))
 
     # The string table rides along in the SAME run: both halves answer one question ("what does
     # this cost"), they read the same ELF, and the whole report is under a second. A separate mode
     # meant remembering to run it, which is how a report goes unread.
-    # The string half rides along in the SAME run: both answer "what does this cost", they read
-    # the same build, and a separate mode is one you forget to run.
     objdump = _tool("objdump", args.firmware)
     cxxfilt = _tool("c++filt", args.firmware)
     if objdump and cxxfilt:

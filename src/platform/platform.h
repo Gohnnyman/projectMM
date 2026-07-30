@@ -394,8 +394,8 @@ uint16_t ethLinkSpeedMbps() MM_NONBLOCKING;
 
 // Bind raw sending to a host network interface by name ("eth0", "en0"). ESP32 ignores this — it has
 // one MAC and ethSendRaw always uses it. On desktop it opens the raw socket (Linux AF_PACKET, macOS
-// BPF) that makes a host a real panel controller: the same driver on a Pi or a mini-PC does what an
-// FPP host does, which is worth having both as a product and as the way to test the wire format
+// BPF) that makes a host a real panel controller: the same driver on a Pi or a mini-PC drives the
+// same cards, which is worth having both as a product and as the way to test the wire format
 // without an ESP32 in the loop.
 //
 // Returns false when the interface is unknown or the process lacks the privilege (raw L2 is

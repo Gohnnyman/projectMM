@@ -51,7 +51,9 @@ import check_clang_query  # noqa: E402  — the module→files resolver, one own
 TOOLS = [
     ("clang-tidy", ["check_clang_tidy.py"], False),
     ("clang-query", ["check_clang_query.py"], False),
+    ("-Wfunction-effects", ["check_nonblocking.py"], False),
     ("lizard", ["check_lizard.py", "--all"], False),
+    ("CodeQL", ["check_codeql.py"], True),
     ("footprint", ["check_footprint.py"], True),
 ]
 

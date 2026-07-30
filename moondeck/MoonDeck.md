@@ -587,7 +587,6 @@ Where a module's bytes land on the device: flash, RAM, or strings.
 uv run moondeck/check/check_footprint.py                    # every file, biggest first
 uv run moondeck/check/check_footprint.py --module HueDriver
 uv run moondeck/check/check_footprint.py --firmware esp32   # another target
-uv run moondeck/check/check_footprint.py --strings          # the string table
 ```
 
 **What the tool is.** No tool of its own — it reads the ESP32 **ELF** the build already produced,
@@ -604,7 +603,7 @@ matters.
 | Column | |
 |---|---|
 | **CODE** | `.text` — flash (or IRAM). Costs space, not headroom |
-| **RODATA** | **named** constants only. String literals carry no symbol, so most of the ~427 KB in `.flash.rodata` cannot be credited to a file — `--strings` measures that half wholesale |
+| **RODATA** | **named** constants only. String literals carry no symbol, so most of the ~427 KB in `.flash.rodata` cannot be credited to a file — the string table below the main table measures that half wholesale |
 | **STATIC** | `.bss` + `.data` — RAM held from boot **whether the module is enabled or not**. This is the "an unused module should cost nothing" check: anything here is a standing tax. Not a synonym for *global*: it counts anything with static STORAGE DURATION, which includes a function-local `static` buffer and a file-local one in an anonymous namespace. Measured here, all 69 are file- or function-local; the codebase has no true globals |
 
 **Sorted STATIC-first**, then by size within each group: every file holding static RAM appears

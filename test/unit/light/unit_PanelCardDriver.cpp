@@ -359,3 +359,37 @@ TEST_CASE("PanelCardDriver reports a failing transmit path instead of a healthy 
     driver.tick();
     CHECK(mm::platform::ethSendFailStreak() == 0);   // a success clears it: back-pressure is not a fault
 }
+
+// A link that fails every send must not latch: the sync frame tells the cards to show what they
+// have, so emitting one after a frame where nothing arrived would blank a wall that was previously
+// showing a good image.
+TEST_CASE("PanelCardDriver does not latch a frame that never reached the wire") {
+    clearClaims();
+    mm::Buffer source;
+    mm::PanelCardDriver driver;
+    Wall wall(64, 1);
+    setUp(driver, source, wall, 64);
+
+    mm::platform::setTestEthSendFails(true);
+    mm::platform::setTestNowMs(1000);
+    driver.tick();
+    mm::platform::setTestEthSendFails(false);
+
+    // Nothing was recorded at all — in particular no sync frame slipped through after the failures.
+    CHECK(mm::platform::ethTestFrameCount() == 0);
+}
+
+// A window covering no whole row sends nothing, rather than putting the brightness pair on the wire
+// every tick for a wall it cannot fill.
+TEST_CASE("PanelCardDriver sends nothing when the buffer covers no row") {
+    clearClaims();
+    mm::Buffer source;
+    mm::PanelCardDriver driver;
+    Wall wall(64, 4);            // wall rows are 64 wide
+    setUp(driver, source, wall, 10);   // buffer holds 10 lights: less than one row
+
+    mm::platform::setTestNowMs(1000);
+    driver.tick();
+
+    CHECK(mm::platform::ethTestFrameCount() == 0);
+}

@@ -3,7 +3,7 @@
 ## Context
 
 [Issue #58](https://github.com/MoonModules/projectMM/issues/58) asks to drive ColorLight receiver
-cards from one of our boards. Today that rig is a Raspberry Pi running FPP.
+cards from one of our boards, replacing the Linux host that drives them today.
 
 **The board renders and sends.** Effects, layers, MoonLive and the preset system are already on the
 device, so the primary case is a self-contained panel controller: our own render output goes

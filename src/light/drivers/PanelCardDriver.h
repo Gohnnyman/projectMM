@@ -35,6 +35,7 @@ namespace mm {
 /// The deep dives are under *More info*, below the attribute/method lists:
 /// @xref{why-a-gigabit-link|why these cards need a gigabit link},
 /// @xref{running-this-on-a-host|running this on a desktop or a Pi}.
+/// @card PanelCardDriver.png
 ///
 /// @moreinfo
 ///
@@ -130,10 +131,12 @@ public:
         // across re-prepares via claimed_.
         if (!claimed_) { platform::ethClaimRawL2(true); claimed_ = true; }
 
-        // A host needs a named NIC to reach the wire; ESP32 accepts and ignores it. A bind failure
-        // is a Warning rather than an Error: the driver still runs and still records frames, which
-        // is exactly what a test or a dry run wants — it just is not driving panels.
-        if (interface[0] && !platform::ethBindRawInterface(interface)) {
+        // A host needs a named NIC to reach the wire; ESP32 accepts and ignores it. Every prepare
+        // re-syncs the binding, INCLUDING the blank case — clearing the field must return the host
+        // to capture-only rather than leaving the last interface bound until release(). A bind
+        // failure is a Warning rather than an Error: the driver still runs and still records frames,
+        // which is what a test or a dry run wants — it just is not driving panels.
+        if (!platform::ethBindRawInterface(interface[0] ? interface : nullptr)) {
             setStatus("cannot open interface (needs root?)", Severity::Warning);
             return;
         }
@@ -141,12 +144,8 @@ public:
         writeLinkStatus();
     }
 
-    /// Re-read the link every second. A cable is plugged in, unplugged, or renegotiates long after
-    /// prepare() ran, so a status written once at build time goes stale and reports "no ethernet
-    /// link" on a link that is up — which is exactly what a user is looking at the card to find out.
-    /// Runs once a second on the housekeeping path, not the render path, so the status snprintf
-    /// here costs nothing that matters (the same trade SystemModule/NetworkModule make in their
-    /// own tick1s — it is flagged by -Wfunction-effects and accepted for that reason).
+    /// Refresh the link status once a second: a cable plugged in after prepare() ran would
+    /// otherwise leave the card reporting "no ethernet link" on a link that is up.
     void tick1s() MM_NONBLOCKING override {
         writeLinkStatus();
         MoonModule::tick1s();
@@ -203,6 +202,10 @@ public:
             stride = srcCh;
         }
 
+        // Nothing to send if the buffer covers no row at all — bail before putting the brightness
+        // pair on the wire, so a misconfigured window is silent rather than emitting frames per tick.
+        if (nLights < static_cast<nrOfLightsType>(wallW)) return;
+
         // Brightness first, ahead of the rows — the order the cards expect. Advisory: older card
         // firmware ignores it, and the driver never depends on it having landed (our own Correction
         // has already applied brightness to the pixel data, so this only sets the card's own gain).
@@ -234,10 +237,12 @@ public:
                                            static_cast<uint16_t>(n), data + first * stride, stride);
                 // A failed frame is dropped, not retried: the cards have no acknowledgement to wait
                 // for, and stalling the render tick to retry would cost the next frame too.
-                if (platform::ethSendRaw(packet_, len)) framesSent_++;
+                // Set on a frame that actually reached the wire, not on reaching the row: a link
+                // that drops mid-frame fails every send, and latching then would blank the panels
+                // — which is the case the sync guard below exists to prevent.
+                if (platform::ethSendRaw(packet_, len)) { framesSent_++; anyRowSent = true; }
                 else framesDroppedTotal_++;
             }
-            anyRowSent = true;
         }
 
         // The sync frame latches everything above, so it goes LAST and only if something was sent —
@@ -250,19 +255,15 @@ public:
         }
     }
 
-    /// Report what the wire is actually doing: no link, a link too slow for the cards, or the
-    /// frames-per-second reaching it. The three cases are genuinely different and a user debugging
-    /// a dark panel needs to tell them apart. Sends regardless — see the class note on why a slow
-    /// link is reported rather than refused.
+    /// Report what the wire is doing: no link, a link too slow for the cards, or the packet rate
+    /// reaching it. A user debugging a dark panel needs to tell those apart. Sends regardless — the
+    /// class note says why a slow link is reported rather than refused. Runs on the 1 Hz path, so
+    /// the snprintf here is the same accepted trade SystemModule makes.
     void writeLinkStatus() MM_NONBLOCKING {
         if (!platform::ethLinkUp()) {
             setStatus("no ethernet link", Severity::Warning);
             return;
         }
-        // A wedged transmit path reads as a perfectly healthy link: esp_eth_transmit refuses every
-        // frame while the IDF driver's own link flag is down, and that flag can outlive the PHY event
-        // that set it. Reporting the failure streak is what tells "0 packets/s on a 1 Gbit link"
-        // apart from "the effect is idle" — the two looked identical before.
         // A short streak is ordinary back-pressure: the DMA ring fills while we push a whole frame
         // in one tick, the frame is dropped, the next one goes. Measured on a 128x128 wall at ~1900
         // packets/s, streaks of 1-4 come and go and always clear themselves — reporting those as an
@@ -359,6 +360,7 @@ private:
     /// Frames the MAC accepted since boot, and the value at the last status write — their
     /// difference is the per-second rate the card shows.
     uint32_t framesSent_ = 0;
+    /// framesSent_ at the last status write — subtracting gives the rate without a timer.
     uint32_t framesReported_ = 0;
     /// Frames the MAC refused since boot. Cumulative on purpose: the per-second rate hides a slow
     /// trickle of drops, and a rising total is the signal that the sender is outrunning the wire.

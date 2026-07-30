@@ -89,7 +89,9 @@ Detail: [technical](moxygen/NetworkSendDriver.md)
 
 <a id="panelcard"></a>
 
-### Panel Send 💫 · raw Ethernet
+### Panel Card 💫 · raw Ethernet
+
+<img src="../../assets/light/drivers/PanelCardDriver.png" width="300" alt="PanelCard controls">
 
 Streams the buffer to **LED panel cards** as raw Ethernet frames, compatible with **ColorLight 5A-75** cards. In vendor terms (ColorLight, NovaStar, Linsn) these are *receiving cards*, and this driver takes the place of the *sending card* that normally feeds them. These take a sender-card feed rather than a pixel protocol, so the driver sends row-addressed data followed by a sync frame that latches the image.
 

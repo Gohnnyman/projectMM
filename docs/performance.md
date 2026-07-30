@@ -257,6 +257,34 @@ Each parallel LED driver run on real hardware at a 128×128 = 16384-light grid, 
 
 The **acceptance floors** these establish for the parallel backends: RMT **8×256 = 2048** (verified above); the parallel-I2S (classic i80) driver **16×256 = 4096** (verified 2026-07-13); the virtual (shift-register) driver **48×256 = 12288** — each backend must clear its floor on real hardware.
 
+## Panel cards over raw Ethernet (`PanelCardDriver`, ESP32-S31)
+
+Measured on an S31 driving two 128×64 HUB75 panels through a ColorLight 5A-75 receiver card, gigabit
+RGMII link, 2026-07-30.
+
+| | µs/tick | note |
+|---|---:|---|
+| **PanelCardDriver** | **2 636** | 16 384 lights: correction + 130 frames handed to the MAC |
+| PreviewDriver | 5 687 | the browser preview, same buffer |
+| GameOfLifeEffect | 17 592 | the render, and the largest single cost |
+
+The wall runs at **~32 FPS**, which is `1 000 000 / (2 636 + 5 687 + 17 592 + overhead)` — the render
+dominates, and the panel driver is the cheapest of the three active modules despite pushing 130
+packets per frame (2 brightness + 128 rows + 2 sync, at 497 pixels per row packet).
+
+**The ceiling is packets, not pixels.** Each frame is sent synchronously from `tick()`, so a taller
+wall costs proportionally more rows; a 256-row wall would double the packet count. The card format's
+1 Gbit requirement is a wire-time constraint rather than a bandwidth one — at 100 Mbit the same bytes
+take ten times as long and overrun the inter-frame window the sync depends on
+([drivers.md](moonmodules/light/drivers.md#panelcard)).
+
+**Static RAM: 0 B.** The driver's 1 512 B packet buffer is a class member, so it costs nothing on a
+board that never adds the driver; `check_footprint --module PanelCardDriver --firmware esp32s31`
+reports 3 270 B of flash and no static RAM.
+
+No scenario contract yet: the driver needs a receiver card on the wire, so the numbers above are a
+bench record rather than an asserted ceiling.
+
 ## Multicore: the whole output stage on core 1 (`multicore`, Step 2)
 
 The `multicore` control on the Drivers container runs **every driver's per-frame work** — the LED encode, the ArtNet packet build, the preview frame build — on a **core-1 task**, while the render loop draws the next frame on core 0. A frame costs `max(render, output)` instead of `render + output`. It stacks with the driver's `doubleBuffer` (which hides the WS2812 *wire* behind DMA on one core); this hides the *encode* behind the *render* on the other.

@@ -240,26 +240,8 @@ def _rate_on_line(rel_path, line):
     return bool(_RATE.search(src[line - 1]) or _LATCH.search(src[line - 1]))
 
 
-def _matcher_rejected(out):
-    """True when clang-query refused the matcher rather than finding nothing.
-
-    The two are indistinguishable by exit code — a rejected matcher still exits 0 with no matches.
-
-    Matched on clang-query's OWN diagnostic shapes, anchored to the start of the line. A substring
-    search for `error: ` finds one in the dumped source too: `snprintf(…, "error: apply failed")`
-    is a string literal in a matched node, and treating that as a rejection blanked the whole COND
-    column for a matcher that had in fact produced 255 matches.
-    """
-    # A rejection is reported as `<line>:<col>: <complaint>` against the QUERY text, before any
-    # matching happens, and never alongside a match. So: complaint present AND nothing matched.
-    rejected = ("Input value has unresolved overloaded type",
-                "Error parsing argument",
-                "Error building matcher",
-                "Matcher does not support binding",
-                "Invalid matcher")
-    if "Match #" in out:
-        return False                      # it ran and produced matches — not a rejection
-    return any(phrase in out for phrase in rejected)
+# The matcher-rejection detector lives in check_clang_query: one home for the clang-query
+# plumbing both reports share (this module already imports it for the TU list and paths).
 
 
 def guard_forms(rows, build_dir, tool):
@@ -295,7 +277,7 @@ def guard_forms(rows, build_dir, tool):
         # A matcher clang-query cannot resolve yields ZERO matches and exit 0 — indistinguishable
         # from "no site is guarded". Same detection as check_clang_query.main; without it a single
         # matcher-syntax drift silently blanks the column and every row reads as unconditional.
-        if _matcher_rejected(out):
+        if check_clang_query._matcher_rejected(out):
             print(f"clang-query rejected the {form} matcher; COND cannot be reported.",
                   file=sys.stderr)
             return None
