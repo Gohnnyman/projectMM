@@ -43,6 +43,12 @@ TEST_CASE("a value too large to represent reads as the fallback instead of wrapp
     // The boundaries themselves still convert.
     CHECK(json::parseIntStr("2147483647") == INT_MAX);
     CHECK(json::parseIntStr("-2147483648") == INT_MIN);
+    // ONE past each boundary is the case that separates the two overflow checks, and the one that
+    // differs by target: where `long` is 64-bit (desktop) these fit `long` and only the INT_MAX
+    // compare rejects them; where it is 32-bit (ESP32, Windows) strtol saturates and sets ERANGE.
+    // Both must reach the fallback, or a Hue id of "2147483648" would land as INT_MAX.
+    CHECK(json::parseIntStr("2147483648", -1) == -1);
+    CHECK(json::parseIntStr("-2147483649", -1) == -1);
 }
 
 TEST_CASE("parseInt reads a key's integer value, and absent keys read as zero") {
@@ -50,6 +56,7 @@ TEST_CASE("parseInt reads a key's integer value, and absent keys read as zero") 
     CHECK(json::parseInt("{\"a\": 7}", "a") == 7);        // space after the colon (json.dumps)
     CHECK(json::parseInt("{\"a\":1}", "missing") == 0);
     CHECK(json::parseInt(nullptr, "a") == 0);
+    CHECK(json::parseInt("{\"a\":1}", nullptr) == 0);   // no key to look for = absent
     // A non-numeric value for a present key is not a number: 0, same as absent.
     CHECK(json::parseInt("{\"a\":\"text\"}", "a") == 0);
 }

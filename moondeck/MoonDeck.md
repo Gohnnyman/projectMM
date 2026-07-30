@@ -486,7 +486,7 @@ not be resolved from source.
 
 | Column | |
 |---|---|
-| **COND** | the branch guarding the call: `—` none (runs every time its tick does), `if`, `loop`, `switch`, `?:`, `&&`, and `ret` for a call reached only past an `if (…) return;` above it. `·rate` marks a rate limiter (`if (++n >= kEvery)`, `if (now - last < kIntervalMs) return;`) or a once-only latch (`if (!inited_)`). `?` means clang-query was unavailable, which is *unknown*, not unguarded |
+| **COND** | the branch guarding the call: `—` none (runs every time its tick does), `if`, `loop`, `switch`, `?:`, `&&`, and `ret` for a call reached only past an `if (…) return;` above it. `·rate` marks a rate limiter (`if (++n >= kEvery)`, `if (now - last < kIntervalMs) return;`) or a once-only latch (`if (!inited_)`). `?` means the guard analysis did not run — clang-query missing, a matcher it refused, or the query erroring — which is *unknown*, not unguarded |
 | **CALLS** | the function that blocks — or `(static local variable)`, a violation with no callee: a static local needs a guard variable and a one-time lock on first use |
 | **IN** | the method the call sits in, which is what places it in a tier. Clang names the call and the callee but *not* their enclosing function, so this is read back from the source |
 | **WHY IT BLOCKS** | clang's own root cause, e.g. `calls mm::platform::UdpSocket::sendTo`. `—` means a leaf the compiler could not look inside (external or unannotated) |

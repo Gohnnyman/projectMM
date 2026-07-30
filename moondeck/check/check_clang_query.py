@@ -982,7 +982,10 @@ def main():
             # first version appended `--extra-arg`, so every transitive header resolved to the
             # REAL unmarked file and `//` counts silently halved. If NOTHING carries a dev
             # comment, the rewrite did not reach the headers — say so instead of reporting it.
-            if rows and not any(r["dev_words"] for r in rows):
+            # NO `rows and` guard: an EMPTY result is the same false zero, only more so — the
+            # matcher found not one declaration in a tree of thousands. Skipping the check when
+            # rows was empty let the worst case through as a clean report.
+            if not any(r["dev_words"] for r in rows):
                 print("[comments] no `//` comment found anywhere — the shadow tree did not reach "
                       "the headers (include order?). Refusing to report a false zero.",
                       file=sys.stderr)

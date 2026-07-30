@@ -113,13 +113,15 @@ SCRIPTS = _scripts_data["scripts"]
 FIRMWARES = _load_firmwares()
 
 
-def _duration(seconds):
+def _duration(seconds: float) -> str:
     """A run's wall time, read at a glance: `4.2s`, `1m12s`, `1h04m`.
 
     Seconds alone stop being readable somewhere around a minute — `312s` has to be divided in
     your head — and a clean rebuild here runs into the minutes.
     """
-    s = int(seconds)
+    # Decide the sub-minute branch on the value AS DISPLAYED, not on int(): 59.96 truncates to 59
+    # but renders "60.0s", a reading that does not exist on this scale.
+    s = int(round(seconds, 1))
     if s < 60:
         return f"{seconds:.1f}s"
     if s < 3600:
@@ -140,9 +142,12 @@ def bump_run_count(script_id):
         if isinstance(loaded, dict):
             counts = loaded
     # A hand-edited or half-written file can hold anything; a bad value restarts the count for
-    # that script rather than raising in the middle of reporting a successful run.
+    # that script rather than raising in the middle of reporting a successful run. `bool` is
+    # excluded explicitly — it IS an int in Python, so `True` would count as run #2 — and a
+    # negative restarts rather than counting up from below zero.
     prev = counts.get(script_id, 0)
-    n = (prev if isinstance(prev, int) else 0) + 1
+    valid = type(prev) is int and prev >= 0     # noqa: E721 — bool must NOT satisfy this
+    n = (prev if valid else 0) + 1
     counts[script_id] = n
     with suppress(OSError):
         RUNS_FILE.parent.mkdir(parents=True, exist_ok=True)

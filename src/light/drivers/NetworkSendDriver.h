@@ -23,8 +23,10 @@ namespace mm {
 /// fanning out to N GPIO lanes. Unicast is the default, not an option among equals; broadcast
 /// survives only as legacy compatibility.
 ///
-/// **Synchronous send:** the whole frame goes out inline in tick() (~35 ms Ethernet / ~90 ms WiFi at
-/// 128×128 ArtNet; DDP less). A decoupling send task is a PSRAM-gated backlog item. Added per board
+/// **Synchronous send:** this driver's WINDOW (`start`/`count`, not necessarily the whole buffer)
+/// goes out inline in tick() — ~35 ms Ethernet / ~90 ms WiFi for a full-buffer window at 128×128
+/// ArtNet, less for DDP and proportionally less for a narrower window. A decoupling send task is a
+/// PSRAM-gated backlog item. Added per board
 /// via the catalog like the LED drivers; applies the same shared Correction, so network and wired
 /// outputs show identical colors.
 ///

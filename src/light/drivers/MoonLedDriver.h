@@ -271,7 +271,7 @@ public:
     /// Status text when the bus will not come up, so the cause is on screen rather than in a serial log.
     /// The two real causes are named: a pin the peripheral cannot route, or no DMA-reachable memory for
     /// the frame (or the ring's pool).
-    const char* initFailMsg() const override { return "MoonI80 bus init failed — check pins / memory"; }
+    const char* initFailMsg() const override { return "LCD-MM: bus init failed — check pins / memory"; }
     /// The expander needs a backend that can stream its ×8 frame; LCD_CAM is it, and this backend is
     /// LCD_CAM-only, so the answer is simply "wherever this backend runs at all".
     bool supportsPinExpander() const override { return platform::hasLcdCam; }
@@ -714,7 +714,11 @@ private:
 // Register the MoonI80 (own-GDMA below esp_lcd) backend into the peripheral registry once, at
 // static-init. Gated by this header's CONFIG_SOC include in main.cpp (LCD_CAM chips only). No separate
 // driver class — the one ParallelLedDriver drives it, chosen via the `peripheral` control.
+//
+// "LCD-MM": the same LCD peripheral the IDF backend uses, driven by our own GDMA layer instead of
+// esp_lcd — which is the whole difference a user is choosing between. No chip conditional here: this
+// backend only ever registers on LCD_CAM silicon, so the peripheral is always the LCD one.
 inline const bool kMoonI80PeripheralRegistered =
-    ParallelLedDriver::registerPeripheral("MoonI80", []() -> LedPeripheral* { return new MoonI80Peripheral(); });
+    ParallelLedDriver::registerPeripheral("LCD-MM", []() -> LedPeripheral* { return new MoonI80Peripheral(); });
 
 } // namespace mm

@@ -419,6 +419,11 @@ private:
     /// "not an id". The range bound is the point: an id too large would otherwise narrow into a
     /// DIFFERENT valid light (`"65537"` → light 1).
     static uint16_t parseId(const char* s) {
+        // Digits only. `strtol` skips leading whitespace and accepts a sign, so `" 7"` and `"+7"`
+        // would both read as light 7 — a key shape the bridge never emits, and accepting it means
+        // a malformed response silently addresses a REAL light. The scan hands us the character
+        // right after the opening quote, so the first one must already be a digit.
+        if (!s || *s < '0' || *s > '9') return 0;
         const int v = json::parseIntStr(s);
         return (v > 0 && v <= 0xFFFF) ? static_cast<uint16_t>(v) : 0;
     }

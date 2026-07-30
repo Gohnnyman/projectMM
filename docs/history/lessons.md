@@ -377,3 +377,25 @@ Both bugs presented identically ("output stalled, `wireUs=—`, reboot to fix"),
 - **A global hook keyed off a static "active" seat is invisible at its call sites.** `notifyQuiesceRender()` reads innocent — but it always hits whatever `Drivers::active()` currently points at, which is never the caller when the caller is a probe. A hook that reaches "the live one" needs an attached/owned check at the fire site, or it fires for instances that have no business touching the live system.
 - **"Board-specific" was a timing artifact, not a hardware fact.** The freeze was identical on every board; only the *visibility* differed with core speed. Chasing "what's different about the S31" (clock, IDF-beta SMP, RMT refill) burned days. The break came from a deterministic, board-agnostic trigger (`GET /api/types` alone kills the worker) captured with a `this`-pointer printf that showed the teardown hitting the *live* Drivers, not the probe. **When "only board X does it" resists every hardware theory, find the software action that reproduces it on demand and instrument identity (which instance), not just occurrence (that it happened).**
 - **The switch state is not the engaged state.** `multicore == true` while the split was actually disengaged sent the whole investigation sideways more than once. A control that can read ON while its mechanism is OFF is its own trap; the trustworthy signals were the FreeRTOS task list (`mmEncode` present?) and `renderWait` (a number vs `—`).
+
+## MoonI80 flickers below ~30 lights on a PSRAM frame buffer — OPEN, cause unproven
+
+Ten GRBW lights on an SE16 (S3, octal PSRAM, one strand, direct mode) flicker continuously and periodically report `no LED output — the driver is not sending frames`. Above ~30 lights it is clean. **i80 and RMT drive the same wiring perfectly**; only MoonI80 fails. Still open — recorded so the next attempt starts from the evidence rather than from scratch.
+
+**What is established.** Moving the direct-mode frame buffer from PSRAM to internal RAM makes the flicker stop outright (bench-verified: symptom gone, PSRAM in use dropped by exactly one frame). So the failure is tied to the buffer's memory pool, not to the encoder, the layout, the wire, or the strip. The give-up message means `busWait` timed out 8 times in a row: the transfer never signalled completion at all, which is a hard failure, not marginal timing.
+
+**What is NOT established: why only small frames.** Three explanations were checked against arithmetic and all three fail:
+- *Stall-to-frame ratio* — a ~20 µs PSRAM stall is 2.9% of a 10-light frame. Far too small to break it.
+- *Wait budget too tight* — the budget is **more** generous at small sizes (55x the wire time at 10 lights vs 2.8x at 1000). Backwards.
+- *PSRAM alignment padding* — zero at every size; the frame is already 64-byte aligned.
+
+The leading untested theory is that a short frame gives the DMA no runway to prefetch through a PSRAM/cache-contention stall, where a long frame's DMA runs far enough ahead of the wire to ride it out. The instrument that would settle it is `loopbackTest` with `loopbackIntrusive` — it captures what the peripheral actually emitted, separating a corrupt frame from a stalled transfer.
+
+**Why no workaround shipped.** An internal-RAM fallback for small frames was written, measured, and then deliberately reverted: internal RAM is the scarce pool (WiFi/HTTP/stacks share it), MoonI80 exists for large fixtures, and a short strand is the i80 backend's job anyway. A patch that spends scarce RAM to hide a cause nobody understands is worse than the open bug.
+
+**General lessons:**
+- **"Sustains the rate" and "completes a short transfer" are different claims.** The comment justifying PSRAM-primary is right about throughput at 2.67 MHz and says nothing about a latency-dominated short frame — the sort of authoritative-sounding comment that ends an investigation early.
+- **A backend that works everywhere except one path is a configuration difference, not silicon.** i80 clean + MoonI80 broken on identical wiring narrowed this to code the two do not share.
+- **Read a control's applicability before drawing conclusions from its value.** `doubleBuffer`, `useRing` and `ringSnapshot` all appear in `/api/state` while being inapplicable to this path (`supportsDoubleBuffer()` is hard `false` here; the ring controls are hidden unless `pinExpanderMode()`, and `wantsRing()` returns false in direct mode outright). Two hypotheses were built on those values and both were dead ends — the UI hides them for a reason, the API does not.
+- **A frame-time KPI that does not scale with the frame is measuring a timeout, not a wire.** `frameTime` read ~741 µs flat from 10 to 600 lights. Flat where it should scale is a signal in itself.
+- **A fix that works is not a cause that is understood.** The pool swap reliably removes the symptom, which is tempting to write up as a root cause; the arithmetic says the mechanism is still unknown.

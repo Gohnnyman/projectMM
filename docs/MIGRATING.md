@@ -20,14 +20,28 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### The `peripheral` options are renamed to name the peripheral, not the bus protocol (2026-07-30)
+
+The `peripheral` dropdown no longer says `i80` / `MoonI80`. "i80" is the Intel 8080 bus shape `esp_lcd` speaks — it is not a peripheral any ESP32 datasheet lists, and it matched nothing a user could look up: on the classic ESP32 that backend **is the I2S peripheral**, on the S3/P4/S31 it is the **LCD** peripheral. The new labels name the silicon block plus who drives it, which is the actual choice being made.
+
+| Old | New (classic ESP32) | New (S3 / P4 / S31) |
+|---|---|---|
+| `i80` | `I2S-IDF` | `LCD-IDF` |
+| `MoonI80` | — (not available) | `LCD-MM` |
+| `Parlio` | — | `Parlio` (unchanged — it *is* the peripheral's name) |
+
+`-IDF` = driven through ESP-IDF's `esp_lcd`; `-MM` = driven by our own GDMA layer below it, which is what buys the streaming ring and the 74HCT595 pin expander.
+
+**Action: re-set the `peripheral` control** — but only on a device that already holds a persisted parallel driver AND had a non-default peripheral selected. The stored string no longer matches any option, so the loader falls back to the board's default backend; if that was already your choice, nothing changes. The web installer's board catalog ships the new names, so a fresh install or catalog re-inject is correct without action.
+
 ### The three parallel LED drivers merge into one `ParallelLedDriver` with a `peripheral` selector (2026-07-23)
 
 `MultiPinLedDriver`, `MoonLedDriver`, and `ParlioLedDriver` are now one registered module, **`ParallelLedDriver`**, whose `peripheral` control picks which DMA peripheral drives the parallel WS2812 bus. They were always the same driver with a different bus backend; the merge makes that one card with a dropdown, offering only the peripherals the chip supports.
 
 | Old registered type | New |
 |---|---|
-| `MultiPinLedDriver` | `ParallelLedDriver` + `peripheral` = `i80` (esp_lcd: LCD_CAM on S3/P4, I2S on classic) |
-| `MoonLedDriver` | `ParallelLedDriver` + `peripheral` = `MoonI80` (own-GDMA below esp_lcd, LCD_CAM) |
+| `MultiPinLedDriver` | `ParallelLedDriver` + `peripheral` = `i80` (esp_lcd: LCD_CAM on S3/P4, I2S on classic) — renamed again below |
+| `MoonLedDriver` | `ParallelLedDriver` + `peripheral` = `MoonI80` (own-GDMA below esp_lcd, LCD_CAM) — renamed again below |
 | `ParlioLedDriver` | `ParallelLedDriver` + `peripheral` = `Parlio` (P4) |
 
 **Action: re-add the driver.** A persisted module whose type is one of the three old names no longer resolves (the type isn't registered), so the robust loader drops it on boot — the driver, and its pins/settings, vanish from the tree. Add a **Parallel LED** driver again, choose the `peripheral` your board uses (the same backend the old type named — see the table), and re-enter its `pins` / `ledsPerPin` plus whatever the chosen peripheral needs: `i80` has `clockPin`/`dcPin`, `MoonI80` has `clockPin` + the ring/expander controls, `Parlio` has no clock or DC pins at all. The web installer's board catalog already names the new type, so a fresh install or a catalog re-inject wires it correctly; only a device carrying an OLD persisted tree needs the manual re-add.

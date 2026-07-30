@@ -19,8 +19,6 @@
 //      Any malformed / truncated input fails cleanly (parse() returns false, accessors
 //      return safe defaults) and never reads OOB. Off the hot path (boot load, control writes).
 
-#include <cerrno>                   // ERANGE — parseIntStr's overflow signal on 32-bit `long`
-#include <climits>                  // INT_MIN/INT_MAX — parseIntStr's range check
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -128,16 +126,12 @@ inline bool hasKey(const char* json, const char* key) {
 ///
 /// Trailing text is deliberately allowed: these values are read out of a JSON body, so digits are
 /// followed by `,` or `}`. Only the LEADING characters decide.
-inline int parseIntStr(const char* s, int fallback = 0) {
-    if (!s) return fallback;
-    char* end = nullptr;
-    errno = 0;                                              // strtol only ever SETS it on error
-    const long v = std::strtol(s, &end, 10);
-    if (end == s) return fallback;                          // no digits — not a number at all
-    if (errno == ERANGE) return fallback;                   // saturated: outside `long`
-    if (v < INT_MIN || v > INT_MAX) return fallback;        // fits `long`, would not survive `int`
-    return static_cast<int>(v);
-}
+///
+/// OUT OF LINE, unlike its neighbours here. As an inline the three checks were duplicated into
+/// every caller and cost **1712 bytes of flash on the S3** — measured per symbol: parseLights +552,
+/// applyControlValue +560, parseGroups +249. One call instead is free in practice: every user is
+/// off the hot path (boot load, control writes, a 1 Hz bridge poll).
+int parseIntStr(const char* s, int fallback = 0);
 
 inline int parseInt(const char* json, const char* key) {
     if (!json || !key) return 0;

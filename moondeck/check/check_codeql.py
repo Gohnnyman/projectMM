@@ -92,19 +92,34 @@ def fetch(state):
             return None, (f"Could not read the alerts ({detail}). Code scanning may be disabled "
                           f"for {repo}, or `gh auth` may lack the `security_events` scope.")
         # --paginate concatenates one JSON array per page; load them all.
+        #
+        # FAIL CLOSED on anything that is not a clean run of arrays. Blank stdout, a truncated body
+        # or a malformed page all used to `break` out of the loop and return an empty list as
+        # SUCCESS — which renders as "No open alerts. ✓", the one reading this script exists to
+        # prevent (a tool that could not look must never report a clean answer).
         dec = json.JSONDecoder()
         text = p.stdout.strip()
-        i = 0
+        if not text:
+            return None, (f"`gh` returned nothing for the {st} alerts of {repo}. That is not an "
+                          f"empty result — the request produced no body at all.")
+        i, pages = 0, 0
         while i < len(text):
             try:
                 val, end = dec.raw_decode(text, i)
             except ValueError:
-                break
-            if isinstance(val, list):
-                out.extend(val)
+                return None, (f"Could not parse the {st} alerts of {repo}: the response is not "
+                              f"valid JSON from byte {i} on (truncated or interleaved output).")
+            if not isinstance(val, list):
+                return None, (f"Unexpected {st}-alert response from {repo}: a JSON "
+                              f"{type(val).__name__}, not the array of alerts the API returns.")
+            out.extend(val)
+            pages += 1
             i = end
             while i < len(text) and text[i] in " \t\r\n":
                 i += 1
+        if pages == 0:
+            return None, (f"No alert pages parsed for {st} on {repo} — the response held no JSON "
+                          f"array, so nothing could be read.")
     return out, None
 
 

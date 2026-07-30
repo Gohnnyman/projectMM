@@ -39,6 +39,7 @@ std::vector<CoordEntry> coordsOf(const mm::LayoutBase& layout) {
 TEST_CASE("SingleColumnLayout of height 10 emits ten consecutively indexed lights") {
     mm::SingleColumnLayout column;
     column.height = 10;
+    column.xposition = 3;   // non-zero: `x == 0` would pass on the default whatever the code did
 
     CHECK(column.lightCount() == 10);
 
@@ -46,7 +47,7 @@ TEST_CASE("SingleColumnLayout of height 10 emits ten consecutively indexed light
     REQUIRE(coords.size() == 10);
     for (mm::nrOfLightsType i = 0; i < 10; i++) {
         CHECK(coords[i].idx == i);                       // contiguous, no holes
-        CHECK(coords[i].x == 0);                         // the default X position
+        CHECK(coords[i].x == 3);                         // every light on the configured column
         CHECK(coords[i].y == static_cast<mm::lengthType>(i));
         CHECK(coords[i].z == 0);
     }
@@ -96,13 +97,17 @@ TEST_CASE("starting Y moves the column in space without renumbering its lights")
 // the indices still start at 0 and stay contiguous.
 TEST_CASE("reversed order walks the column from the far end while keeping indices contiguous") {
     mm::SingleColumnLayout column;
+    column.start_y = 5;     // reversal must compose with the offset, not ignore it
     column.height = 4;
     column.reversed_order = true;
 
+    // Assert EVERY entry, not just the ends: an interior swap or a repeat leaves the first and
+    // last correct while the middle of the strip is wrong.
     const auto coords = coordsOf(column);
     REQUIRE(coords.size() == 4);
-    CHECK(coords[0].idx == 0);
-    CHECK(coords[0].y == 3);
-    CHECK(coords[3].idx == 3);
-    CHECK(coords[3].y == 0);
+    const mm::lengthType expectY[4] = {8, 7, 6, 5};   // start_y + height - 1 down to start_y
+    for (mm::nrOfLightsType i = 0; i < 4; i++) {
+        CHECK(coords[i].idx == i);                    // indices still ascend from 0
+        CHECK(coords[i].y == expectY[i]);             // coordinates descend
+    }
 }

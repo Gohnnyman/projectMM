@@ -213,17 +213,28 @@ _LATCH = re.compile(rf"!\s*\w*{_LATCH_WORD}_?\b|"
                     rf"\w*{_LATCH_WORD}_?\s*==\s*false")
 
 
-def _rate_on_line(rel_path, line, _cache={}):
-    """True when THIS one line spells a rate limiter or a once-only latch — no surrounding scan.
+def _src_lines(rel_path, _cache={}):
+    """The file's lines, cached per path; `[]` when it does not exist.
 
-    Used for early exits, where the condition and the `return` share a line and any wider window
-    would read a neighbouring block that does not guard the call at all.
+    One reader for the three text heuristics (`_rate_on_line`, `rate_hint`, `_enclosing_def`) —
+    they each carried an identical read-and-memoize block, so a change to the caching rule had to
+    be made in three places to stay correct.
     """
     src = _cache.get(rel_path)
     if src is None:
         f = ROOT / rel_path
         src = _cache[rel_path] = (f.read_text(encoding="utf-8", errors="replace").split("\n")
                                   if f.exists() else [])
+    return src
+
+
+def _rate_on_line(rel_path, line):
+    """True when THIS one line spells a rate limiter or a once-only latch — no surrounding scan.
+
+    Used for early exits, where the condition and the `return` share a line and any wider window
+    would read a neighbouring block that does not guard the call at all.
+    """
+    src = _src_lines(rel_path)
     if not 0 < line <= len(src):
         return False
     return bool(_RATE.search(src[line - 1]) or _LATCH.search(src[line - 1]))
@@ -261,7 +272,10 @@ def guard_forms(rows, build_dir, tool):
     The caller then renders the column as `?`, because a tool that could not look must never read
     as "nothing is guarded", which is the comfortable answer and the wrong one.
     """
-    if not tool:
+    if not tool or not rows:
+        # No findings means nothing to annotate. Bail BEFORE resolving TUs: `including_tus` falls
+        # back to every TU when handed an empty set, so this would otherwise run the full matcher
+        # sweep to label a table with no rows in it.
         return None
     # Every TU that includes a file with findings. Headers have no TU of their own — they are
     # analyzed through whichever .cpp includes them — so the set is resolved, not guessed.
@@ -355,7 +369,7 @@ def _bound_sites(out):
                 yield rel, int(line)
 
 
-def rate_hint(rel_path, line, _cache={}):
+def rate_hint(rel_path, line):
     """True when the guard above `line` looks like a rate limiter or a once-only latch.
 
     Read from the source text, not the AST: this asks what the condition MEANS, and a counter
@@ -363,11 +377,7 @@ def rate_hint(rel_path, line, _cache={}):
     it can miss a rate limiter written another way, so it only ever ADDS a hint to a site the
     AST already called conditional.
     """
-    src = _cache.get(rel_path)
-    if src is None:
-        f = ROOT / rel_path
-        src = _cache[rel_path] = (f.read_text(encoding="utf-8", errors="replace").split("\n")
-                                  if f.exists() else [])
+    src = _src_lines(rel_path)
     if not 0 < line <= len(src):
         return False
     # Walk UP out of the call's own block, stopping at the line that opened it — the guard.
@@ -392,13 +402,9 @@ def rate_hint(rel_path, line, _cache={}):
     return False
 
 
-def _enclosing_def(rel_path, line, _cache={}):
+def _enclosing_def(rel_path, line):
     """`(name, 1-based line)` of the definition a call site sits in, or `("", 0)`."""
-    src = _cache.get(rel_path)
-    if src is None:
-        f = ROOT / rel_path
-        src = _cache[rel_path] = (f.read_text(encoding="utf-8", errors="replace").split("\n")
-                                  if f.exists() else [])
+    src = _src_lines(rel_path)
     for i in range(min(line, len(src)) - 1, -1, -1):
         m = _DEF.match(src[i])
         if m and len(m.group("indent")) <= 4 and m.group("name") not in _KEYWORDS:
