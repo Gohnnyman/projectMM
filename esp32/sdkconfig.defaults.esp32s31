@@ -46,11 +46,11 @@ CONFIG_ETH_USE_ESP32_EMAC=y
 # it synthesises 125 MHz precisely. Bench-proven on the S31 CoreBoard.
 CONFIG_ETH_EMAC_RGMII_TX_CLK_SRC_APLL=y
 # A panel-card frame is 1512 B. At the 512 B default every frame spanned THREE descriptors, so a
-# 10-descriptor ring held only ~3 frames while PanelCardDriver fires 132 back-to-back — and the ring
+# 10-descriptor ring held only ~3 frames while PanelCardDriver fires 132 back-to-back, and the ring
 # ran dry within minutes (bench: ~19 000 refused frames and two full transmit wedges in 20 minutes).
 # 1536 is the 64-byte-aligned size that fits one frame per descriptor.
 #
-# The COUNT stays at 10: bench-isolated on 2026-07-31 — buffer size and the transmit mutex below are
+# The COUNT stays at 10: bench-isolated on 2026-07-31. Buffer size and the transmit mutex below are
 # what fix it, and 30 descriptors ran no cleaner than 10 (a 30-deep TX ring totals ~46 KB against
 # ~15 KB at 10). The size bump itself is not free: 512→1536 applies to BOTH rings, so 20 buffers
 # cost ~20 KB more internal RAM than the default. Cheaper than the alternative, and measured.

@@ -259,28 +259,37 @@ The **acceptance floors** these establish for the parallel backends: RMT **8×25
 
 ## Panel cards over raw Ethernet (`PanelCardDriver`, ESP32-S31)
 
-Measured on an S31 driving two 128×64 HUB75 panels through a ColorLight 5A-75 receiver card, gigabit
-RGMII link, 2026-07-30.
+Measured on an S31 driving two 128x64 HUB75 panels through a ColorLight 5A-75 receiver card over a
+gigabit RGMII link, 2026-07-31.
 
-| | µs/tick | note |
+| | us/tick | note |
 |---|---:|---|
-| **PanelCardDriver** | **2 636** | 16 384 lights: correction + 130 frames handed to the MAC |
+| **PanelCardDriver** | **~2 500** | 16 384 lights: correction + 132 frames handed to the MAC |
 | PreviewDriver | 5 687 | the browser preview, same buffer |
-| GameOfLifeEffect | 17 592 | the render, and the largest single cost |
+| a heavy effect (GameOfLife) | 17 592 | the render, and the largest single cost |
 
-The wall runs at **~32 FPS**, which is `1 000 000 / (2 636 + 5 687 + 17 592 + overhead)` — the render
-dominates, and the panel driver is the cheapest of the three active modules despite pushing 130
-packets per frame (2 brightness + 128 rows + 2 sync, at 497 pixels per row packet).
+The panel driver is the cheapest active module despite pushing 132 packets per frame (2 brightness +
+128 rows + 2 sync, at 497 pixels per row packet). The wall's frame rate is set by the render, not by
+the output: a heavy effect at 17.6 ms dominates a 26 ms tick, giving ~32 FPS, while a lighter effect
+mix measures ~56 FPS on the same wall.
 
 **The ceiling is packets, not pixels.** Each frame is sent synchronously from `tick()`, so a taller
 wall costs proportionally more rows; a 256-row wall would double the packet count. The card format's
-1 Gbit requirement is a wire-time constraint rather than a bandwidth one — at 100 Mbit the same bytes
+1 Gbit requirement is a wire-time constraint rather than a bandwidth one: at 100 Mbit the same bytes
 take ten times as long and overrun the inter-frame window the sync depends on
 ([drivers.md](moonmodules/light/drivers.md#panelcard)).
 
+**The DMA ring is what makes it stable.** `CONFIG_ETH_DMA_BUFFER_SIZE` defaults to 512 B, so a
+1512 B frame spanned three descriptors and a 10-descriptor ring held ~3.3 frames while the driver
+fires 132 back-to-back. At that depth the S31 refused ~19 000 frames and wedged twice inside 20
+minutes; at 1536 B per buffer (one descriptor per frame) plus `CONFIG_ETH_TRANSMIT_MUTEX`, it runs
+clean. Both are bench-isolated, and ring COUNT is not the lever: 30 descriptors ran no cleaner than
+10. Cost: ~20 KB of internal DMA RAM, since the size applies to both rings
+([lessons.md](history/lessons.md)).
+
 **Static RAM: 0 B.** The driver's 1 512 B packet buffer is a class member, so it costs nothing on a
 board that never adds the driver; `check_footprint --module PanelCardDriver --firmware esp32s31`
-reports 3 270 B of flash and no static RAM.
+reports ~3 500 B of flash and no static RAM.
 
 No scenario contract yet: the driver needs a receiver card on the wire, so the numbers above are a
 bench record rather than an asserted ceiling.

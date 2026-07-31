@@ -937,14 +937,21 @@ bool ethRawL2Claimed() MM_NONBLOCKING {
 // Consecutive failures, so a caller can distinguish back-pressure from a wedged path (see
 // platform.h). Written on the render task, read by the driver's 1 Hz status tick.
 static std::atomic<uint32_t> ethSendFails_{0};
-// Split by cause — see platform.h. esp_eth_transmit checks the link BEFORE the MAC, so the two
+// Split by cause; see platform.h. esp_eth_transmit checks the link BEFORE the MAC, so the two
 // errors are genuinely distinct conditions rather than degrees of the same one.
 static std::atomic<uint32_t> ethFailLinkDown_{0};
 static std::atomic<uint32_t> ethFailRingFull_{0};
 
 bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     if (!ethHandle_ || !frame || len == 0) return false;
-    if (!ethLinkUp_.load(std::memory_order_relaxed)) return false;
+    if (!ethLinkUp_.load(std::memory_order_relaxed)) {
+        // Counted, not silent: the driver counts every false into its own total, so skipping this
+        // one would make `dropped` and the per-cause totals describe different sets of frames.
+        // Deliberately NOT part of the streak: the streak drives wedge detection and re-arming,
+        // and a link genuinely down is the case a restart cannot fix.
+        ethFailLinkDown_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
     const esp_err_t err = esp_eth_transmit(ethHandle_, const_cast<uint8_t*>(frame), len);
     if (err != ESP_OK) {
         ethSendFails_.fetch_add(1, std::memory_order_relaxed);
@@ -975,11 +982,14 @@ bool ethRestartTx() {
     // Clear our own flag first: the restart re-runs negotiation and the CONNECTED event sets it
     // again if the link really comes back. Leaving it true would keep ethSendRaw trying against a
     // driver that is mid-restart.
+    // A failed stop leaves the driver in a state we did not establish; starting on top of that
+    // would compound it. Report instead: the caller turns this into a "restart the device" status.
+    // Nothing is cleared BEFORE this point: clearing ethLinkUp_ first and then failing would leave
+    // transmit permanently refused behind a "no ethernet link" warning, with no event able to set
+    // the flag again.
+    if (esp_eth_stop(ethHandle_) != ESP_OK) return false;
     ethLinkUp_.store(false, std::memory_order_relaxed);
     ethSendFails_.store(0, std::memory_order_relaxed);
-    // A failed stop leaves the driver in a state we did not establish; starting on top of that
-    // would compound it. Report instead — the caller turns this into a "restart the device" status.
-    if (esp_eth_stop(ethHandle_) != ESP_OK) return false;
     return esp_eth_start(ethHandle_) == ESP_OK;
 }
 

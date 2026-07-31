@@ -720,8 +720,9 @@ bool    ethTestSendFails_ = false;
 uint16_t ethTestLinkSpeed_ = 1000;   // desktop reports gigabit unless a test says otherwise
 int      ethRawClaims_ = 0;          // drivers holding the link for direct L2 use
 uint32_t ethSendFails_ = 0;          // consecutive ethSendRaw failures (the streak)
-uint32_t ethFailTotal_ = 0;          // cumulative since boot — what ethSendFailCounts reports
+uint32_t ethFailTotal_ = 0;          // cumulative since boot; what ethSendFailCounts reports
 uint32_t ethRestarts_ = 0;           // ethRestartTx() calls, for the once-per-wedge test
+bool     ethRestartFails_ = false;   // simulated recovery failure
 // The bound raw socket, or -1 for capture mode (the default, and all any test sees).
 int      ethRawFd_ = -1;
 unsigned ethRawIfIndex_ = 0;         // Linux AF_PACKET needs the index; BPF binds by name
@@ -828,8 +829,15 @@ void ethSendFailCounts(uint32_t& linkDown, uint32_t& ringFull) MM_NONBLOCKING {
 }
 
 // A host raw socket has no driver-internal link state to desync, so there is nothing to
-// restart — clear the streak so a test can exercise the driver's recovery path.
-bool ethRestartTx() { ethSendFails_ = 0; ethRestarts_++; return true; }
+// restart, so clear the streak and let a test exercise the driver's recovery path.
+bool ethRestartTx() {
+    ethRestarts_++;
+    if (ethRestartFails_) return false;
+    ethSendFails_ = 0;
+    return true;
+}
+
+void setTestEthRestartFails(bool fail) { ethRestartFails_ = fail; }
 
 uint32_t ethRestartCountForTest() { return ethRestarts_; }
 

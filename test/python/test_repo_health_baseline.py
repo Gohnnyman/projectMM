@@ -2,7 +2,7 @@
 
 Two separate loaders read it: `load_previous` (the COMMITTED snapshot, what the delta compares
 against) and `load_working_tree` (the newest numbers, what carry-forward preserves). Both feed
-`merge_carry_forward`, which does `old.get(section, {})` — so a JSON list or scalar where an object
+`merge_carry_forward`, which does `old.get(section, {})`, so a JSON list or scalar where an object
 belongs would raise, and a section holding a list would corrupt the merge.
 
 A malformed file must also not read as "no previous numbers": that reports every metric as new,
@@ -37,7 +37,7 @@ def test_a_section_of_the_wrong_shape_is_rejected():
 
 
 def test_a_valid_snapshot_passes_through_unchanged():
-    """The guard must not damage the normal case — this is the control for the rejections above."""
+    """The guard must not damage the normal case; this is the control for the rejections above."""
     good = {"flash": {"esp32": 1}, "perf": {}, "complexity": {}, "other": 5}
     assert repo_health._valid_snapshot(good, "t") is good
 
@@ -55,7 +55,7 @@ def test_carry_forward_keeps_previous_values_for_unmeasured_sections():
     new = {"flash": {"esp32": 150}}
     merged = repo_health.merge_carry_forward(new, old)
     assert merged["flash"]["esp32"] == 150      # this run measured it
-    assert merged["flash"]["esp32s3"] == 200    # this run did not — the old value survives
+    assert merged["flash"]["esp32s3"] == 200    # this run did not, so the old value survives
     assert merged["perf"]["tick"] == 5
 
 
@@ -90,3 +90,46 @@ def test_a_good_file_on_disk_loads(tmp_path, monkeypatch):
     good.write_text(json.dumps({"flash": {"esp32": 1}}), encoding="utf-8")
     monkeypatch.setattr(repo_health, "HEALTH_FILE", good)
     assert repo_health.load_working_tree() == {"flash": {"esp32": 1}}
+
+
+# ---- the git baseline (the behaviour this branch adds) ----
+
+def test_the_baseline_comes_from_the_commit_not_the_working_tree(tmp_path, monkeypatch):
+    """Running the check twice must give the same delta.
+
+    Reading the working-tree file made every run after the first compare against the run BEFORE it,
+    so a second run inside one commit showed a delta of ~0 and the real change vanished. The
+    baseline has to be the committed snapshot.
+    """
+    import subprocess
+    repo = tmp_path / "repo"
+    (repo / "docs" / "metrics").mkdir(parents=True)
+    health = repo / "docs" / "metrics" / "repo-health.json"
+
+    run = lambda *a: subprocess.run(a, cwd=repo, check=True, capture_output=True)
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "t@t")
+    run("git", "config", "user.name", "t")
+    health.write_text(json.dumps({"flash": {"esp32": 100}}), encoding="utf-8")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "baseline")
+
+    # A later run overwrites the working tree; the COMMITTED value must still be the baseline.
+    health.write_text(json.dumps({"flash": {"esp32": 999}}), encoding="utf-8")
+
+    monkeypatch.setattr(repo_health, "ROOT", repo)
+    monkeypatch.setattr(repo_health, "HEALTH_FILE", health)
+    assert repo_health.load_previous() == {"flash": {"esp32": 100}}      # from the commit
+    assert repo_health.load_working_tree() == {"flash": {"esp32": 999}}  # from disk
+
+
+def test_the_baseline_falls_back_to_disk_when_git_cannot_answer(tmp_path, monkeypatch):
+    """A fresh checkout with no commit yet must still produce a first snapshot rather than erroring."""
+    repo = tmp_path / "norepo"
+    (repo / "docs" / "metrics").mkdir(parents=True)
+    health = repo / "docs" / "metrics" / "repo-health.json"
+    health.write_text(json.dumps({"flash": {"esp32": 7}}), encoding="utf-8")
+
+    monkeypatch.setattr(repo_health, "ROOT", repo)
+    monkeypatch.setattr(repo_health, "HEALTH_FILE", health)
+    assert repo_health.load_previous() == {"flash": {"esp32": 7}}
