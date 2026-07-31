@@ -616,6 +616,9 @@ function buildNavFooter() {
 }
 
 function selectModule(name) {
+    // Surface demo sweep (REMOVABLE): leaving a surface re-arms it, so re-opening demos again while
+    // a re-render of the SAME surface (a pad click) does not.
+    if (name !== selectedModule) surfaceDemoShownFor = null;
     selectedModule = name;
     localStorage.setItem(LS_SELECTED, name);
     document.querySelectorAll(".nav-item").forEach((el) => {
@@ -659,7 +662,94 @@ function renderCards() {
         selectedModule = root.name;
     }
     if (root) renderModuleTree(root, main, 0);
+    // Surface demo sweep (REMOVABLE): delete this line and the block above it to remove the feature.
+    // `main` is the root of the rendered subtree, so it holds the encoder strips, the pad grid and
+    // the fader strips wherever they sit in the card nesting.
+    if (root && main.querySelector(".list-pads-fixed")) startSurfaceDemo(main, root.name);
 }
+
+// ============================================================================
+// Surface demo sweep — REMOVABLE BLOCK
+//
+// A hardware control desk sweeps its motorised faders and rings when it powers up, both to show it
+// is alive and to show what it has. This does the same for three seconds after the surface appears.
+//
+// It is deliberately isolated so it can be deleted whole: this block, plus the single
+// `startSurfaceDemo()` call at the end of renderCards(). It is a VIEW-ONLY animation — it never
+// calls sendControl, so it cannot write a swept value to the device, and the first WebSocket patch
+// after it finishes restores whatever the device actually holds.
+// ============================================================================
+const SURFACE_DEMO_MS = 3000;
+let surfaceDemoUntil = 0;
+/// The module the sweep last ran for. renderCards() fires on every state push and every mutation (a
+/// pad click refetches and re-renders), so "the surface was rendered" is NOT "the surface was
+/// opened" — without this the sweep replayed on every button press.
+let surfaceDemoShownFor = null;
+
+function startSurfaceDemo(root, moduleName) {
+    if (surfaceDemoShownFor === moduleName) return;   // already demoed this surface
+    // Every bank is queried from the SAME root. The encoder and fader strips sit on the top-level
+    // card while the pad grid is inside a nested one, so scoping to the card that contains the pads
+    // found the pads and nothing else.
+    const q = (sel) => [...root.querySelectorAll(sel)];
+    // Every bank is re-queried each frame, for the same reason the pads are: a state push mid-sweep
+    // re-renders the card and replaces these nodes. A list captured once would keep writing values to
+    // detached elements while the visible controls sat frozen — which is what stopped the knobs and
+    // faders a few hundred ms into a refresh, while the (live-queried) pads ran the full period.
+    const liveInputs = () => [
+        ...q(".control-encoder .encoder-input"),
+        ...q(".control-fader .fader-input"),
+    ];
+    const knobs  = q(".control-encoder .encoder-input");
+    const faders = q(".control-fader .fader-input");
+    // Pads are looked up LIVE each frame rather than captured: a state push mid-sweep re-renders the
+    // card and replaces these nodes, and a captured list would spend the rest of the run toggling
+    // classes on detached elements — which is why the chase stopped partway through.
+    const livePads = () => q(".list-pad:not(.list-pad-empty)");
+    if (!knobs.length && !faders.length && !livePads().length) return;
+    surfaceDemoShownFor = moduleName;
+
+    // No snapshot: the demo starts on the first render, BEFORE the caller assigns input.value, so a
+    // snapshot here captures the browser's default (50) and restoring it would overwrite every real
+    // value. The device state is the truth, so the sweep ends by replaying it.
+    const start = performance.now();
+    surfaceDemoUntil = start + SURFACE_DEMO_MS;
+
+    const step = (now) => {
+        const t = (now - start) / SURFACE_DEMO_MS;
+        if (t >= 1) {
+            // Put the real values back by re-applying device state, which also repaints the knobs
+            // and readouts through the normal patch path.
+            surfaceDemoUntil = 0;
+            updateValues();
+            livePads().forEach(p => p.classList.remove("list-pad-demo"));
+            return;
+        }
+        // A travelling wave rather than every control moving together: the phase offset per column is
+        // what makes it read as a sweep across the desk.
+        liveInputs().forEach((el, i) => {
+            const lo = Number(el.min) || 0, hi = Number(el.max) || 255;
+            const phase = t * 3 * Math.PI * 2 - i * 0.5;
+            el.value = Math.round(lo + (hi - lo) * (0.5 + 0.45 * Math.sin(phase)));
+            redrawRangeDecorations(el);
+        });
+        // The pads chase in sequence, one lit at a time, so the grid shows its extent. Paced by TIME
+        // rather than by pad count, so the chase runs at the same speed and for the full duration
+        // whatever number of presets exist.
+        const pads = livePads();
+        if (pads.length) {
+            const lit = Math.floor(t * SURFACE_DEMO_MS / 120) % pads.length;
+            pads.forEach((p, i) => p.classList.toggle("list-pad-demo", i === lit));
+        }
+        requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+}
+
+/// True while the sweep is running: updateValues() skips patching the swept inputs, so a WebSocket
+/// push mid-demo does not fight the animation for the same DOM node.
+function surfaceDemoRunning() { return surfaceDemoUntil > performance.now(); }
+// ======================= end REMOVABLE BLOCK ================================
 
 function renderModuleTree(mod, parentEl, depth) {
     const { card, childrenEl } = createCard(mod, depth);
@@ -1405,11 +1495,53 @@ function createControl(moduleName, moduleType, ctrl) {
         case "uint8": {
             const input = document.createElement("input");
             input.type = "range";
+            // A fader is the same range input stood on end (CSS `writing-mode: vertical-lr`), so the
+            // value, the range and the WS live-update path are untouched — only the orientation and
+            // the row's layout change. Consecutive faders sit side by side as one bank.
+            // An encoder is the same range input drawn as a KNOB: the input itself is hidden and an
+            // SVG dial sits on top, so the value, the range, the WS update path and keyboard access
+            // are the range input's — only the appearance changes. Dragging vertically turns it,
+            // which is the gesture a real encoder takes.
+            if (ctrl.encoder) {
+                input.classList.add("encoder-input");
+                row.classList.add("control-encoder");
+                row.appendChild(buildKnob(input, ctrl));
+                row.appendChild(buildSevenSeg(input));
+                const showTarget = () => openSurfacePopup(input, ctrl.name, (body) => {
+                    const line = document.createElement("div");
+                    line.className = "surface-popup-row";
+                    line.textContent = ctrl.target ? `drives ${ctrl.target}`
+                                                   : "unassigned — no target yet";
+                    body.appendChild(line);
+                });
+                row.addEventListener("contextmenu", (e) => { e.preventDefault(); showTarget(); });
+                attachLongPress(row, showTarget);
+            }
+            if (ctrl.fader) {
+                input.classList.add("fader-input");
+                row.classList.add("control-fader");
+                row.appendChild(buildSevenSeg(input));
+                // Right-click a fader to see (and later choose) what it drives — the same
+                // configure-on-the-control rule the pads follow.
+                const showFaderTarget = () => openSurfacePopup(input, ctrl.name, (body) => {
+                    const line = document.createElement("div");
+                    line.className = "surface-popup-row";
+                    line.textContent = ctrl.target ? `drives ${ctrl.target}`
+                                                   : "unassigned — no target yet";
+                    body.appendChild(line);
+                });
+                row.addEventListener("contextmenu", (e) => { e.preventDefault(); showFaderTarget(); });
+                attachLongPress(row, showFaderTarget);
+            }
             input.min = ctrl.min ?? 0;
             input.max = ctrl.max ?? 255;
             input.value = ctrl.value ?? 0;
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
+            // The knob and the readout were built above, before these three lines ran, so they drew
+            // against an empty input (the source of the 880 readouts). Refresh now that the value and
+            // the bounds exist.
+            redrawRangeDecorations(input);
             const numInput = document.createElement("input");
             numInput.type = "number";
             numInput.className = "control-value-input";
@@ -1917,8 +2049,8 @@ function createControl(moduleName, moduleType, ctrl) {
             // to before). The flag flows through to both render paths via the opts object.
             if (ctrl.editable) list.dataset.editable = "true";
             buildListEntries(list, rows, details, new Set(),   // initial: nothing expanded
-                {editable: ctrl.editable, moduleName: moduleName, ctrlName: ctrl.name,
-                 optionSets: ctrl.optionSets || {}});
+                {editable: ctrl.editable, pads: ctrl.pads, gridCols: ctrl.gridCols, gridRows: ctrl.gridRows,
+                 moduleName: moduleName, ctrlName: ctrl.name, optionSets: ctrl.optionSets || {}});
             row.appendChild(list);
             break;
         }
@@ -1951,7 +2083,459 @@ function listRowKey(item, labelText) {
     return (item && item.id != null) ? "#" + item.id : labelText;
 }
 
+// A grid of uniform pads, one per row: the presentation a `pads` list asks for. Rows are unchanged
+// — this is the same data the stacked list renders, laid out for triggering rather than reading.
+// Uniform size on purpose: sizing each pad to its label (as MoonLight does) makes a ragged grid that
+// is harder to scan and to hit; a fixed pad with a truncated label is what a MIDI deck looks like.
+// Long-press as the touch equivalent of a right-click: a touch device has no second button, so the
+// configure gesture has to come from somewhere. 500ms, cancelled by movement so it never fires
+// during a drag.
+function attachLongPress(el, fn) {
+    let timer = 0;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } };
+    el.addEventListener("touchstart", () => {
+        cancel();
+        timer = setTimeout(() => { timer = 0; fn(); }, 500);
+    }, {passive: true});
+    el.addEventListener("touchmove", cancel, {passive: true});
+    el.addEventListener("touchend", cancel);
+    el.addEventListener("touchcancel", cancel);
+}
+
+// A small popup anchored to a surface control. Floating rather than appended to the anchor: a panel
+// inside the grid would reflow the pads underneath it, and a surface must not move while you are
+// working on it. Dismisses on click-away, Escape, or opening another.
+function openSurfacePopup(anchorEl, title, build) {
+    document.querySelectorAll(".surface-popup").forEach(p => p.remove());
+    const pop = document.createElement("div");
+    pop.className = "surface-popup";
+
+    const head = document.createElement("div");
+    head.className = "surface-popup-title";
+    head.textContent = title;
+    pop.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "surface-popup-body";
+    pop.appendChild(body);
+    const close = () => pop.remove();
+    build(body, close);
+
+    document.body.appendChild(pop);
+    // Anchor below-right of the control, then pull back inside the viewport if that would overflow.
+    const r = anchorEl.getBoundingClientRect();
+    pop.style.left = `${Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)}px`;
+    pop.style.top = `${Math.min(r.bottom + 4, window.innerHeight - pop.offsetHeight - 8)}px`;
+
+    // Defer so the click that opened it does not immediately close it.
+    setTimeout(() => {
+        const away = (e) => {
+            if (pop.contains(e.target)) return;
+            pop.remove();
+            document.removeEventListener("mousedown", away);
+            document.removeEventListener("keydown", esc);
+        };
+        const esc = (e) => { if (e.key === "Escape") away({target: document.body}); };
+        document.addEventListener("mousedown", away);
+        document.addEventListener("keydown", esc);
+    }, 0);
+    return pop;
+}
+
+// The edit form behind a right-click on a pad: rename, choose what it captures, save over it, or
+// delete. These are the SAME operations the card's bottom controls performed, moved onto the thing
+// they act on — a form at the bottom of the card cannot say which pad it means.
+// The capture toggles, shared by both popup modes: they decide what a preset carries, which is the
+// difference between a portable look and a device snapshot. Reads the live values from the module's
+// own (hidden) controls, so the popup is a view of them rather than a second source of truth.
+function buildCaptureToggles(body, moduleName) {
+    const mod = findModule(moduleName);
+    const names = ["Layouts", "Layers", "Drivers", "Services"];
+    const wrap = document.createElement("div");
+    wrap.className = "surface-popup-captures";
+    for (const n of names) {
+        const ctrl = mod && (mod.controls || []).find(c => c.name === n);
+        if (!ctrl) continue;
+        const lab = document.createElement("label");
+        lab.className = "surface-popup-capture";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !!ctrl.value;
+        cb.addEventListener("change", () => sendControl(moduleName, n, cb.checked ? 1 : 0));
+        lab.append(cb, document.createTextNode(n));
+        wrap.appendChild(lab);
+    }
+    if (wrap.childElementCount) {
+        const cap = document.createElement("div");
+        cap.className = "surface-popup-caption";
+        cap.textContent = "captures";
+        body.append(cap, wrap);
+    }
+}
+
+function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
+    const filled = item != null;
+    openSurfacePopup(anchorEl, filled ? `pad: ${item.name}` : `pad ${slot + 1} (empty)`, (body, close) => {
+        if (filled) {
+            const nameRow = document.createElement("div");
+            nameRow.className = "surface-popup-row";
+            const nameLbl = document.createElement("span");
+            nameLbl.textContent = "name";
+            const nameIn = document.createElement("input");
+            nameIn.type = "text";
+            nameIn.className = "list-field-input";
+            nameIn.value = item.name || "";
+            nameIn.addEventListener("change", async () => {
+                await listSetField(moduleName, ctrlName, item.id, "name", nameIn.value);
+                refetchState();
+            });
+            nameRow.append(nameLbl, nameIn);
+            body.appendChild(nameRow);
+
+            // What this preset carries, read from the file rather than the form.
+            if (item.captures) {
+                const cap = document.createElement("div");
+                cap.className = "surface-popup-row";
+                cap.textContent = `captures ${item.captures}`;
+                body.appendChild(cap);
+            }
+            // Re-saving over the pad: the toggles decide what the NEW contents carry.
+            buildCaptureToggles(body, moduleName);
+            const over = document.createElement("button");
+            over.className = "surface-popup-primary";
+            over.textContent = "save current state over it";
+            over.addEventListener("click", async () => {
+                await sendControl(moduleName, "name", item.name);
+                await sendControl(moduleName, "slot", slot);
+                await sendControl(moduleName, "save", 1);
+                close();
+                refetchState();
+            });
+            body.appendChild(over);
+
+            const del = document.createElement("button");
+            del.className = "surface-popup-danger";
+            del.textContent = "delete preset";
+            del.addEventListener("click", async () => {
+                await listDeleteRow(moduleName, ctrlName, item.id);
+                close();
+                refetchState();
+            });
+            body.appendChild(del);
+        } else {
+            // An empty pad's action is to fill it: name it and save the current state here.
+            const nameRow = document.createElement("div");
+            nameRow.className = "surface-popup-row";
+            const nameLbl = document.createElement("span");
+            nameLbl.textContent = "name";
+            const nameIn = document.createElement("input");
+            nameIn.type = "text";
+            nameIn.className = "list-field-input";
+            nameIn.placeholder = "new preset";
+            nameRow.append(nameLbl, nameIn);
+            body.appendChild(nameRow);
+            buildCaptureToggles(body, moduleName);
+
+            const saveBtn = document.createElement("button");
+            saveBtn.className = "surface-popup-primary";
+            saveBtn.textContent = "save current state here";
+            saveBtn.addEventListener("click", async () => {
+                if (!nameIn.value.trim()) { nameIn.focus(); return; }
+                // The module's own `name` + `slot` + `save` controls do the work; the popup is only
+                // the form that fills them, so the save path stays the one the tests cover.
+                await sendControl(moduleName, "name", nameIn.value.trim());
+                await sendControl(moduleName, "slot", slot);
+                await sendControl(moduleName, "save", 1);
+                close();
+                refetchState();
+            });
+            body.appendChild(saveBtn);
+            setTimeout(() => nameIn.focus(), 0);
+        }
+    });
+}
+
+// A rotary knob driving a range input. The input stays in the DOM (hidden) so every other path —
+// the WS live patch, defaults, keyboard — keeps working against it unchanged; this only draws the
+// value and turns drags into value changes.
+function buildKnob(input, ctrl) {
+    // Read the bounds LIVE rather than snapshotting them: the caller assigns input.min/max/value
+    // after this returns, so a snapshot here is NaN and the dial draws against nothing.
+    const bounds = () => {
+        const lo = Number(input.min), hi = Number(input.max);
+        return [Number.isFinite(lo) ? lo : 0, Number.isFinite(hi) ? hi : 255];
+    };
+    const wrap = document.createElement("div");
+    wrap.className = "knob";
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 40 40");
+    // The arc runs from 7 o'clock to 5 o'clock — the 270° sweep a real encoder cap shows, with the
+    // gap at the bottom so the pointer never sits in an ambiguous place.
+    const track = document.createElementNS(NS, "circle");
+    track.setAttribute("cx", "20"); track.setAttribute("cy", "20"); track.setAttribute("r", "15");
+    track.setAttribute("class", "knob-track");
+    const fill = document.createElementNS(NS, "circle");
+    fill.setAttribute("cx", "20"); fill.setAttribute("cy", "20"); fill.setAttribute("r", "15");
+    fill.setAttribute("class", "knob-fill");
+    const pointer = document.createElementNS(NS, "line");
+    pointer.setAttribute("class", "knob-pointer");
+    svg.append(track, fill, pointer);
+    wrap.appendChild(svg);
+
+    const CIRC = 2 * Math.PI * 15;
+    const SWEEP = 0.75;                       // 270° of the circle
+    // rotate() as an ATTRIBUTE, not CSS: a CSS transform on an SVG geometry element resolves against
+    // a different origin and drew a quarter arc instead of the intended 270°.
+    track.setAttribute("transform", "rotate(135 20 20)");
+    fill.setAttribute("transform", "rotate(135 20 20)");
+    track.setAttribute("stroke-dasharray", `${CIRC * SWEEP} ${CIRC}`);
+    const draw = () => {
+        const [min, max] = bounds();
+        const v = Number(input.value);
+        const frac = max > min ? Math.min(1, Math.max(0, (v - min) / (max - min))) : 0;
+        fill.style.strokeDasharray = `${CIRC * SWEEP * frac} ${CIRC}`;
+        // 135° is the 7 o'clock start; sweep clockwise from there.
+        const ang = (135 + frac * 270) * Math.PI / 180;
+        pointer.setAttribute("x1", String(20 + 6 * Math.cos(ang)));
+        pointer.setAttribute("y1", String(20 + 6 * Math.sin(ang)));
+        pointer.setAttribute("x2", String(20 + 13 * Math.cos(ang)));
+        pointer.setAttribute("y2", String(20 + 13 * Math.sin(ang)));
+    };
+    draw();
+    // Redraw when the value changes from anywhere — a drag here, or a WS push patching the input.
+    input.addEventListener("input", draw);
+    input.addEventListener("change", draw);
+    wrap._redraw = draw;
+
+    // Vertical drag turns the knob: up increases. 150px of travel covers the full range, which is
+    // fine for a coarse control and keeps the gesture inside a card.
+    // The gesture needs to be discoverable: without a hint the knob looks like a picture, and the
+    // range input underneath makes the browser offer a resize cursor that suggests the wrong action.
+    wrap.title = "drag up/down or scroll to turn";
+    wrap.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        wrap.setPointerCapture(e.pointerId);
+        wrap.classList.add("knob-turning");
+        const startY = e.clientY, startV = Number(input.value);
+        const [min, max] = bounds();
+        const move = (ev) => {
+            const delta = (startY - ev.clientY) / 150 * (max - min);
+            const next = Math.round(Math.min(max, Math.max(min, startV + delta)));
+            if (next === Number(input.value)) return;
+            input.value = String(next);
+            input.dispatchEvent(new Event("input", {bubbles: true}));
+        };
+        const up = (ev) => {
+            wrap.classList.remove("knob-turning");
+            wrap.releasePointerCapture(ev.pointerId);
+            wrap.removeEventListener("pointermove", move);
+            wrap.removeEventListener("pointerup", up);
+            input.dispatchEvent(new Event("change", {bubbles: true}));
+        };
+        wrap.addEventListener("pointermove", move);
+        wrap.addEventListener("pointerup", up);
+    });
+    // Scroll to turn: the gesture people try first on anything round, and the one that works without
+    // knowing the drag exists. `passive:false` so the page does not scroll underneath it.
+    wrap.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const [min, max] = bounds();
+        const step = Math.max(1, Math.round((max - min) / 100));
+        const next = Math.round(Math.min(max, Math.max(min,
+            Number(input.value) + (e.deltaY < 0 ? step : -step))));
+        if (next === Number(input.value)) return;
+        input.value = String(next);
+        input.dispatchEvent(new Event("input", {bubbles: true}));
+        input.dispatchEvent(new Event("change", {bubbles: true}));
+    }, {passive: false});
+    return wrap;
+}
+
+// A seven-segment readout, the way the hardware shows a value: three digits, lit segments over an
+// unlit ghost so the display reads like a real LED module rather than plain text.
+const SEG7 = {
+    "0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg",
+    "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg", " ": "",
+};
+function buildSevenSeg(input) {
+    const NS = "http://www.w3.org/2000/svg";
+    const wrap = document.createElement("div");
+    wrap.className = "seg7";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 42 20");
+    // Segment geometry per digit, in the standard a..g naming.
+    const seg = (x, y, horiz) => {
+        const p = document.createElementNS(NS, "rect");
+        p.setAttribute("x", String(x)); p.setAttribute("y", String(y));
+        p.setAttribute("width", horiz ? "7" : "2");
+        p.setAttribute("height", horiz ? "2" : "7");
+        p.setAttribute("rx", "1");
+        return p;
+    };
+    const digits = [];
+    for (let d = 0; d < 3; d++) {
+        const ox = d * 14 + 1;
+        const map = {
+            a: seg(ox + 2, 1, true),  b: seg(ox + 9, 2, false), c: seg(ox + 9, 11, false),
+            d: seg(ox + 2, 17, true), e: seg(ox, 11, false),    f: seg(ox, 2, false),
+            g: seg(ox + 2, 9, true),
+        };
+        for (const el of Object.values(map)) { el.setAttribute("class", "seg7-off"); svg.appendChild(el); }
+        digits.push(map);
+    }
+    wrap.appendChild(svg);
+    const draw = () => {
+        // Right-aligned, blank-padded: "  7", " 42", "255" — how a 3-digit module displays.
+        const txt = String(Math.round(Number(input.value))).padStart(3, " ").slice(-3);
+        digits.forEach((map, i) => {
+            const on = SEG7[txt[i]] ?? "";
+            for (const [name, el] of Object.entries(map))
+                el.setAttribute("class", on.includes(name) ? "seg7-on" : "seg7-off");
+        });
+    };
+    draw();
+    input.addEventListener("input", draw);
+    input.addEventListener("change", draw);
+    // Same hook the knob exposes, so redrawRangeDecorations refreshes both without knowing what
+    // either one is.
+    wrap._redraw = draw;
+    return wrap;
+}
+
+function buildListPads(container, rows, opts) {
+    const moduleName = opts && opts.moduleName;
+    const ctrlName = opts && opts.ctrlName;
+    const editable = !!(opts && opts.editable);
+    const cols = (opts && opts.gridCols) | 0;
+    const gridRows = (opts && opts.gridRows) | 0;
+    const fixed = cols > 0 && gridRows > 0;
+    container.replaceChildren();
+    const grid = document.createElement("div");
+    grid.className = "list-pads" + (fixed ? " list-pads-fixed" : "");
+    // Columns track --surface-col, the ONE width the knob strips and fader strips also use, so the
+    // three banks line up as columns of a single surface. It is a clamp() against the card, so the
+    // alignment survives the right pane being dragged narrower or wider.
+    if (fixed) grid.style.gridTemplateColumns = `repeat(${cols}, var(--surface-col))`;
+    container.appendChild(grid);
+    if (!fixed && rows.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "list-empty";
+        empty.textContent = "(none)";
+        container.appendChild(empty);
+        return;
+    }
+    // On a FIXED surface every cell is rendered, occupied or not: an empty cell is a position you
+    // can drop a pad onto, which is what makes the grid a surface rather than a wrapped list.
+    const cells = fixed ? new Array(cols * gridRows).fill(null) : rows.slice();
+    if (fixed) for (const r of rows) {
+        const s = (r && r.slot) | 0;
+        if (s >= 0 && s < cells.length) cells[s] = r;
+    }
+    cells.forEach((item, i) => {
+        if (fixed && item == null) {
+            // An empty cell: a drop target and nothing else. It carries the slot index so a drop
+            // knows where it landed.
+            const hole = document.createElement("div");
+            hole.className = "list-pad list-pad-empty";
+            hole.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                hole.classList.add("list-drop-target");
+            });
+            hole.addEventListener("dragleave", () => hole.classList.remove("list-drop-target"));
+            hole.addEventListener("contextmenu", (e) => {
+                e.preventDefault();
+                openPadEditor(hole, moduleName, ctrlName, null, i);
+            });
+            attachLongPress(hole, () => openPadEditor(hole, moduleName, ctrlName, null, i));
+            hole.addEventListener("drop", (e) => {
+                e.preventDefault();
+                hole.classList.remove("list-drop-target");
+                const draggedId = parseInt(e.dataTransfer.getData("text/plain"));
+                if (!Number.isNaN(draggedId)) listMoveRow(moduleName, ctrlName, draggedId, i);
+            });
+            grid.appendChild(hole);
+            return;
+        }
+        const pad = document.createElement("button");
+        pad.type = "button";
+        pad.className = "list-pad" + (item && item.active ? " list-pad-active" : "");
+        // A pad is tinted by the roles it carries, so what a preset covers reads as color as well as
+        // emoji. When it is lit, the tint comes from the roles it still HOLDS (activeRoles): a mixed
+        // preset whose layer was superseded but whose layout is still on stays lit in the layout hue.
+        const padRoles = Array.isArray(item && item.roles) ? item.roles : [];
+        const litRoles = Array.isArray(item && item.activeRoles) ? item.activeRoles : [];
+        const hue = roleHue(litRoles.length ? litRoles : padRoles);
+        if (hue) pad.style.setProperty("--pad-hue", hue);
+        const label = String((item && item.name) ?? "");
+        // Role emoji through the SAME table the module cards use, so 🥞 means the same thing on a pad
+        // as on a card. A row that carries no roles simply gets no emoji.
+        const roles = Array.isArray(item && item.roles) ? item.roles : [];
+        const emoji = roles.map(r => ROLE_EMOJI[r] || "").join("");
+        if (emoji) {
+            const em = document.createElement("span");
+            em.className = "list-pad-emoji";
+            em.textContent = emoji;
+            pad.appendChild(em);
+        }
+        const nameEl = document.createElement("span");
+        nameEl.className = "list-pad-name";
+        nameEl.textContent = label;
+        pad.appendChild(nameEl);
+        pad.title = emoji ? `${label} (${roles.join(", ")})` : label;   // the full name when truncated
+        pad.addEventListener("click", async () => {
+            if (item == null || item.id == null) return;
+            pad.disabled = true;
+            await listSetField(moduleName, ctrlName, item.id, "activate", "");
+            refetchState();
+            pad.disabled = false;
+        });
+        // Right-click edits the pad rather than triggering it: the controls belong on the thing they
+        // configure, not in a form at the bottom of the card that cannot say which pad it means.
+        pad.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            openPadEditor(pad, moduleName, ctrlName, item, (item && item.slot) | 0);
+        });
+        // Touch has no right button, so a long press opens the same editor. Cancelled by movement so
+        // a drag to reorder is not mistaken for a press-and-hold.
+        attachLongPress(pad, () => openPadEditor(pad, moduleName, ctrlName, item, (item && item.slot) | 0));
+        // Drag to reorder, so a grid can be arranged to match a physical control surface. Same
+        // mechanism the list rows use (listMoveRow by stable id), and the same reason the ids are
+        // stable: a reorder must not change what a pad refers to.
+        if (editable && item && item.id != null) {
+            pad.draggable = true;
+            pad.addEventListener("dragstart", (e) => {
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", String(item.id));
+                pad.classList.add("list-dragging");
+            });
+            pad.addEventListener("dragend", () => {
+                pad.classList.remove("list-dragging");
+                grid.querySelectorAll(".list-drop-target").forEach(el => el.classList.remove("list-drop-target"));
+            });
+            pad.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                pad.classList.add("list-drop-target");
+            });
+            pad.addEventListener("dragleave", () => pad.classList.remove("list-drop-target"));
+            pad.addEventListener("drop", (e) => {
+                e.preventDefault();
+                pad.classList.remove("list-drop-target");
+                const draggedId = parseInt(e.dataTransfer.getData("text/plain"));
+                if (!Number.isNaN(draggedId) && draggedId !== item.id) {
+                    // `i` is the SLOT on a fixed grid (the cell), or the row index on a flowing one.
+                    listMoveRow(moduleName, ctrlName, draggedId, i);
+                }
+            });
+        }
+        grid.appendChild(pad);
+    });
+}
+
 function buildListEntries(container, rows, details, openSet, opts) {
+    if (opts && opts.pads) { buildListPads(container, rows, opts); return; }
     const editable = !!(opts && opts.editable);
     const moduleName = opts && opts.moduleName;
     const ctrlName = opts && opts.ctrlName;
@@ -2118,6 +2702,22 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
         if (f.readonly) {
             vEl.textContent = String(f.value ?? "");
             vEl.classList.add("list-detail-muted");
+        } else if (f.type === "button") {
+            // A row ACTION rather than a value: the click PATCHes the field like any edit, and the
+            // source reads the arrival as "do this to this row" (ControlModule's preset `apply`).
+            // Generic on purpose — a row button is a primitive the list has lacked, not a
+            // preset-specific affordance. Refetches, because an action typically changes the row set
+            // or the wider tree, unlike a field edit which the WS push reconciles.
+            const btn = document.createElement("button");
+            btn.className = "list-field-btn";
+            btn.textContent = f.label || f.name;
+            btn.addEventListener("click", async () => {
+                btn.disabled = true;
+                await listSetField(moduleName, ctrlName, id, f.name, "");
+                refetchState();
+                btn.disabled = false;
+            });
+            vEl.appendChild(btn);
         } else if (f.type === "select") {
             const sel = document.createElement("select");
             sel.className = "list-field-input";
@@ -2416,6 +3016,19 @@ function applyStatePatch(patch) {
     }
 }
 
+/// Refresh the decorations drawn ON TOP of a range input (the knob dial, the seven-segment readout).
+///
+/// A WebSocket patch assigns `input.value` directly, which fires NEITHER `input` NOR `change` — those
+/// only fire for user gestures. Anything listening for them therefore keeps showing the value it was
+/// built with, which is why the readouts read 880/50 while the knobs pointed elsewhere. Call this
+/// wherever a range input's value is set programmatically.
+function redrawRangeDecorations(input) {
+    if (!input) return;
+    for (const el of input.parentElement ? input.parentElement.children : []) {
+        if (typeof el._redraw === "function") el._redraw();
+    }
+}
+
 function updateValues() {
     if (!state || !state.modules) return;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
@@ -2585,10 +3198,15 @@ function updateModuleControls(mod) {
             case "int16":
             case "pin": {   // pin is a plain number input (no slider sibling); patches the same way
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
+                // While the demo sweep animates a control, leave it alone: the sweep restores the
+                // real value when it ends, and the next patch after that lands normally.
+                if (input && surfaceDemoRunning() &&
+                    (input.classList.contains("encoder-input") || input.classList.contains("fader-input"))) break;
                 if (input && Number(input.value) !== Number(ctrl.value)) {
                     input.value = ctrl.value ?? 0;
                     const val = input.nextElementSibling;
                     if (val && val.classList.contains("control-value-input")) val.value = ctrl.value ?? 0;
+                    redrawRangeDecorations(input);
                 }
                 break;
             }
@@ -2728,8 +3346,8 @@ function updateModuleControls(mod) {
                 // would jump a long list back to the top mid-edit of a row further down.
                 const prevScroll = list.querySelector(".list-scroll")?.scrollTop ?? 0;
                 buildListEntries(list, rows, details, open,
-                    {editable: ctrl.editable, moduleName: mod.name, ctrlName: ctrl.name,
-                     optionSets: ctrl.optionSets || {}});
+                    {editable: ctrl.editable, pads: ctrl.pads, gridCols: ctrl.gridCols, gridRows: ctrl.gridRows,
+                     moduleName: mod.name, ctrlName: ctrl.name, optionSets: ctrl.optionSets || {}});
                 const newScroll = list.querySelector(".list-scroll");
                 if (newScroll) newScroll.scrollTop = prevScroll;
                 break;
@@ -2789,6 +3407,34 @@ const ROLE_EMOJI = {
     service:    "🛰️",
     generic:    "⚙️",
 };
+
+// Role → hue, the color half of the same vocabulary ROLE_EMOJI carries. Four capturable roles get a
+// distinct hue so a preset pad says what it covers before its name is read. Hues (not full colors) so
+// one value drives the face, the border and the glow at different mixes, and so several roles can be
+// averaged into one tint.
+const ROLE_HUE = {
+    layout:   210,   // blue
+    layer:    280,   // violet
+    driver:   150,   // green
+    service:   35,   // amber
+};
+
+/// The tint for a set of roles: one role gives its hue, several give the circular mean, so a preset
+/// carrying layout+layer lands between blue and violet rather than picking one and hiding the other.
+/// Circular rather than arithmetic because hue wraps: averaging 350 and 10 must give 0, not 180.
+function roleHue(roles) {
+    const hues = (roles || []).map(r => ROLE_HUE[r]).filter(h => h != null);
+    if (!hues.length) return null;
+    if (hues.length === 1) return String(hues[0]);
+    let x = 0, y = 0;
+    for (const h of hues) {
+        const rad = h * Math.PI / 180;
+        x += Math.cos(rad); y += Math.sin(rad);
+    }
+    if (Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9) return String(hues[0]);   // opposites cancel
+    const deg = Math.atan2(y, x) * 180 / Math.PI;
+    return String(Math.round((deg + 360) % 360));
+}
 
 // Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0
 // and contribute nothing here. Same MoonLight key. Keeps emojiTagsFor() the

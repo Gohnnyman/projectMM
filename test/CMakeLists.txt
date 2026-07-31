@@ -26,6 +26,8 @@ add_executable(mm_tests
     unit/core/unit_PinsModule.cpp
     unit/core/unit_WledPacket.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
+    unit/core/unit_ControlModule.cpp
+    unit/core/unit_FilesystemModule_subtree.cpp
     unit/core/unit_FirmwareUpdateModule.cpp
     unit/core/unit_HttpServerModule_apply.cpp
     unit/core/unit_ImprovFrame.cpp

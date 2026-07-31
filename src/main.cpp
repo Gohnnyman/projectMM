@@ -116,6 +116,7 @@
 #endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
+#include "core/ControlModule.h"
 #include "core/Services.h"
 #include "core/AudioService.h"
 #include "core/I2cScanModule.h"
@@ -249,6 +250,7 @@ static void registerModuleTypes() {
 #endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/system.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/system.md#system");
+    mm::ModuleFactory::registerType<mm::ControlModule>("ControlModule", "core/control.md#control");
     mm::ModuleFactory::registerType<mm::Services>("Services", "core/services.md#services");
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService", "core/services.md#audio");
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/system.md#i2c-scan");
@@ -337,6 +339,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // The core-domain twin of the light domain's Layers/Drivers: a grouping node
     // whose children the user adds/removes at runtime. Added as a root below.
     auto* servicesModule = static_cast<mm::Services*>(mm::ModuleFactory::create("Services"));
+
+    // ControlModule — puts the device into a named state. Top-level rather than a Services child
+    // because a preset reaches ACROSS Layouts/Layers/Drivers/Services, so it cannot live inside one
+    // of them. Boot-wired: presets are a device capability, not something a user adds.
+    auto* controlModule = static_cast<mm::ControlModule*>(mm::ModuleFactory::create("ControlModule"));
 
     // The deviceModel identity (e.g. "Olimex ESP32-Gateway Rev G") is now SystemModule's
     // `deviceModel` control — no separate module. SystemModule owns the device identity
@@ -515,6 +522,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     networkModule->addChild(devicesModule);
     scheduler.addModule(networkModule);
     scheduler.addModule(servicesModule);
+    scheduler.addModule(controlModule);
     scheduler.addModule(layouts);
     scheduler.addModule(layersContainer);
     scheduler.addModule(drivers);

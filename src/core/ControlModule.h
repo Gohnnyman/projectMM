@@ -1,0 +1,617 @@
+#pragma once
+
+#include "core/MoonModule.h"
+#include "core/FilesystemModule.h"
+#include "core/JsonSink.h"
+#include "core/Scheduler.h"
+#include "core/JsonUtil.h"
+#include "platform/platform.h"
+
+#include <cstdarg>   // setStatusf
+#include <cstdio>
+#include <algorithm>
+#include <cstring>
+
+namespace mm {
+
+/// Puts the device into a named state, and is where anything that wants to do that will live.
+///
+/// Its first capability is **presets**: a preset is a JSON file, saving one writes a file, selecting
+/// one reads it back. That is the whole model, taken from MoonLight's `ModuleLightsControl` and made
+/// generic — MoonLight's presets carry effects and modifiers only, ours carry whichever top-level
+/// subtrees the user chose to capture.
+///
+/// Top-level by necessity rather than convention: a preset reaches ACROSS Layouts, Layers, Drivers
+/// and Services, so this module cannot be a child of any of them.
+///
+/// **Not to be confused with `LightPresetsModule`**, which despite the name is a different thing: a
+/// library of named channel-role wirings (which channel of a light carries red, which carries pan)
+/// that drivers reference per fixture. That is a *fixture profile*; this is a device state.
+///
+/// The deep dives are under *More info*, below the attribute/method lists:
+/// @xref{what-a-preset-captures|what a preset captures, and portability},
+/// @xref{why-files|why files rather than slots}.
+///
+/// @moreinfo
+///
+/// ## What a preset captures
+///
+/// The `capture` controls choose which top-level subtrees a save includes, and the file records the
+/// choice, so applying one is never a surprise about what it will touch.
+///
+/// That choice is what decides **portability**. A preset capturing `Layers` alone is a look: effects,
+/// modifiers, their settings, and nothing about the hardware — it applies on any board and drives
+/// whatever that board has. Adding `Drivers` makes it a device snapshot that carries pin maps and
+/// lane counts, which is what you want for cloning a board and NOT what you want for sharing a look.
+///
+/// MoonLight avoided the question by only ever capturing effects. Making it selectable is the cost
+/// of being generic, and the file header is what keeps it honest.
+///
+/// ## Why files
+///
+/// `/.config/presets/<name>.json`, one file per preset, free-form names. Deleting a preset is
+/// deleting a file; a preset copied onto the device through the File Manager simply appears in the
+/// list; backing up presets is copying a folder. Numbered slots would have bought a fixed grid in
+/// the UI at the cost of every one of those.
+///
+/// The bytes inside are exactly what `FilesystemModule` writes for that subtree, so save and restore
+/// reuse the engine that already reconciles a live tree against JSON rather than a second serializer
+/// that could drift from it.
+class ControlModule : public MoonModule, public ListSource {
+public:
+    static constexpr const char* kPresetDir = "/.config/presets";
+    /// The surface is a fixed grid, so a pad has a POSITION rather than a place in a list: slot 14
+    /// is slot 14 whether or not anything is in it, and deleting slot 3 does not shuffle slot 4 into
+    /// its place. That is the whole difference between a control surface and a list of files, and it
+    /// is why the grid renders all 36 cells including the empty ones.
+    static constexpr uint8_t kGridCols = 8;
+    static constexpr uint8_t kGridRows = 8;
+    static constexpr uint8_t kMaxPresets = kGridCols * kGridRows;
+    static constexpr uint8_t kMaxNameLen = 32;
+    /// The top-level subtrees a preset can carry. Names are `typeName()`s, which is what the file
+    /// records and what `Scheduler` resolves them back to.
+    static constexpr const char* kCapturable[] = {"Layouts", "Layers", "Drivers", "Services"};
+    /// The role each capturable subtree holds, so a pad can show what a preset covers with the same
+    /// emoji the module cards use (ROLE_EMOJI in the UI): one vocabulary rather than a second set
+    /// invented here. Index-aligned with kCapturable.
+    static constexpr const char* kCaptureRole[] = {"layout", "layer", "driver", "service"};
+    static constexpr uint8_t kCaptureCount = 4;
+
+    /// How many faders the bank shows. Fixed for now; the surfaces we will map onto this have 8
+    /// (X-Touch) or 9 (nanoKONTROL), so the count becomes a control once a second surface needs it.
+    static constexpr uint8_t kFaderCount = 8;
+    /// A row of rotary encoders above the pads, mirroring where both the X-Touch and the QCon put
+    /// theirs. Unassigned for now: the binding UI is what gives them targets.
+    static constexpr uint8_t kEncoderCount = 8;
+
+    void defineControls() override {
+        // Encoders first: they sit ABOVE the pads on the surfaces this mirrors, and control order is
+        // render order.
+        for (uint8_t i = 0; i < kEncoderCount; i++) {
+            controls_.addUint8(kEncoderNames[i], encoders_[i]);
+            controls_.setEncoder(controls_.count() - 1, true, nullptr);
+        }
+        controls_.addList("presets", *this);
+        // The fader bank. Each fader is a plain uint8 control, so it persists, appears in /api/state,
+        // and is settable from anywhere the control system reaches — which is what a MIDI surface
+        // will bind to later. Rendered as a bank of vertical sliders by the UI.
+        for (uint8_t i = 0; i < kFaderCount; i++) {
+            controls_.addUint8(kFaderNames[i], faders_[i]);
+            controls_.setFader(controls_.count() - 1, true, faderTarget(i));
+        }
+        // The save form. All HIDDEN: these are what the pad popup drives, not controls a user reads
+        // off the card. Shown on the card they were ambiguous — `name` and the capture toggles look
+        // like they describe the selected preset, when they actually describe the NEXT save, and
+        // nothing on the card could say which pad they meant. Hidden keeps them settable from the
+        // popup, the API and persistence, without pretending to be a second way to do the job.
+        controls_.addText("name", name_, sizeof(name_), validPresetName);
+        controls_.setHidden(controls_.count() - 1, true);
+        controls_.addUint8("slot", saveSlot_, 0, kMaxPresets - 1);   // kNoSlot until a pad is picked
+        controls_.setHidden(controls_.count() - 1, true);
+        // One flag per capturable subtree rather than a single multi-select: the set is small and
+        // fixed, and a checkbox each is what makes "what will this preset contain" readable at a
+        // glance instead of hidden behind a dropdown.
+        for (uint8_t i = 0; i < kCaptureCount; i++) {
+            controls_.addBool(kCapturable[i], capture_[i]);
+            controls_.setHidden(controls_.count() - 1, true);
+        }
+        controls_.addButton("save");
+        controls_.setHidden(controls_.count() - 1, true);
+        MoonModule::defineControls();
+    }
+
+    void setup() override {
+        platform::fsMkdir(kPresetDir);
+        rescan();
+        MoonModule::setup();
+    }
+
+    /// `save` writes the current state; a fader drives whatever it targets; everything else is a
+    /// value edit the base handles.
+    void onControlChanged(const char* controlName) override {
+        if (std::strcmp(controlName, "save") == 0) { savePreset(); return; }
+        for (uint8_t i = 0; i < kFaderCount; i++) {
+            if (std::strcmp(controlName, kFaderNames[i]) != 0) continue;
+            driveFader(i);
+            return;
+        }
+    }
+
+    // ---- ListSource: one row per preset file ----
+
+    uint8_t listRowCount() const override { return presetCount_; }
+
+    void writeListRow(JsonSink& sink, uint8_t row) const override {
+        if (row >= presetCount_) return;
+        const Preset& p = presets_[row];
+        // The name is written through writeJsonString, not raw: a preset named with a quote would
+        // otherwise emit malformed JSON that fails to parse, and the list would come back empty.
+        sink.appendf("{\"id\":%lu,\"slot\":%u,\"name\":",
+                     static_cast<unsigned long>(p.id), static_cast<unsigned>(p.slot));
+        sink.writeJsonString(p.name);
+        sink.append(",\"captures\":");
+        sink.writeJsonString(p.captures);
+        // The roles this preset covers, as role NAMES: the UI maps them through the same ROLE_EMOJI
+        // table the module cards use, so a pad shows 🥞 for a look and 🥞☸️ for one that also
+        // carries the hardware — readable at a glance without opening the row.
+        sink.append(",\"roles\":[");
+        bool firstRole = true;
+        for (uint8_t i = 0; i < kCaptureCount; i++) {
+            if (!listHas(p.captures, kCapturable[i])) continue;
+            sink.appendf("%s\"%s\"", firstRole ? "" : ",", kCaptureRole[i]);
+            firstRole = false;
+        }
+        sink.append("]");
+        // Which pad is lit, and for WHICH roles. A pad is active when it still holds at least one
+        // role; `activeRoles` is the subset it holds right now, which is what the UI mixes into the
+        // lit color. A mixed preset partly superseded (its layer replaced, its layout still on) stays
+        // lit for the role it kept.
+        sink.append(",\"activeRoles\":[");
+        bool firstActive = true;
+        for (uint8_t i = 0; i < kCaptureCount; i++) {
+            if (!p.name[0] || std::strcmp(p.name, current_[i]) != 0) continue;
+            sink.appendf("%s\"%s\"", firstActive ? "" : ",", kCaptureRole[i]);
+            firstActive = false;
+        }
+        sink.append("]");
+        if (!firstActive) sink.append(",\"active\":true");
+        sink.append("}");
+    }
+
+    /// The expanded row: what the preset carries, its name, and the action that applies it.
+    ///
+    /// `apply` is a `button` field rather than a stored value — the click PATCHes it like an edit and
+    /// setListRowField reads the arrival as "put the device into this state". That reuses the list's
+    /// existing per-row edit path instead of inventing a second wire shape for actions.
+    void writeListRowDetail(JsonSink& sink, uint8_t row) const override {
+        if (row >= presetCount_) return;
+        const Preset& p = presets_[row];
+        sink.append("{\"fields\":[{\"name\":\"name\",\"type\":\"text\",\"value\":");
+        sink.writeJsonString(p.name);
+        sink.append("},{\"name\":\"captures\",\"type\":\"text\",\"readonly\":true,\"value\":");
+        sink.writeJsonString(p.captures[0] ? p.captures : "(unknown)");
+        sink.append("},{\"name\":\"apply\",\"type\":\"button\",\"label\":\"apply\"}]}");
+    }
+
+    bool isEditableList() const override { return true; }
+
+    /// The preset FOLDER is the state; rescan() rebuilds these rows at setup. Persisting the list
+    /// would write every row into /.config/ControlModule.json on each save and then discard it on
+    /// load, since nothing restores it.
+    bool persistsList() const override { return false; }
+
+    /// Presets are triggered far more than they are edited, so the rows render as a grid of pads:
+    /// one click applies, and the active one is highlighted. The list's edit/delete/rename ops are
+    /// unchanged underneath.
+    bool listAsPads() const override { return true; }
+
+    /// The surface's shape. The UI renders exactly this many cells, filling from the rows' `slot`
+    /// field, so the empty positions are as real as the occupied ones.
+    uint8_t listGridCols() const override { return kGridCols; }
+    uint8_t listGridRows() const override { return kGridRows; }
+
+    /// Deleting a row deletes the file. Nothing else holds preset state, so there is no second copy
+    /// to keep in step.
+    bool deleteListRow(uint32_t id) override {
+        for (uint8_t i = 0; i < presetCount_; i++) {
+            if (presets_[i].id != id) continue;
+            char path[128];
+            pathFor(presets_[i].name, path, sizeof(path));
+            const bool ok = platform::fsRemove(path);
+            setStatusf(ok ? Severity::Status : Severity::Error,
+                       ok ? "deleted %s" : "could not delete %s", presets_[i].name);
+            rescan();
+            return ok;
+        }
+        return false;
+    }
+
+    /// A fader drives its target through Scheduler::setControl, the same domain-neutral primitive IR
+    /// and the network bridges use: this module composes against that rather than reaching into
+    /// another module's members. Only fader 1 has a target today (the global brightness every driver
+    /// scales by); the rest are unassigned and do nothing until a target picker exists.
+    /// What a fader drives, as "Module.control", or null when it drives nothing yet. The UI shows
+    /// this in the fader's popup, so the answer comes from the module rather than the UI assuming.
+    static const char* faderTarget(uint8_t index) {
+        return index == 0 ? "Drivers.brightness" : nullptr;
+    }
+
+    /// Drives whatever `faderTarget` declares, so the binding is stated ONCE: the popup and the
+    /// action cannot disagree, and a fader starts working the moment it gains a target.
+    void driveFader(uint8_t index) {
+        const char* target = faderTarget(index);
+        if (!target) return;                          // unassigned
+        const char* dot = std::strchr(target, '.');
+        if (!dot) return;
+        auto* sched = Scheduler::instance();
+        if (!sched) return;
+        char module[24];
+        const size_t n = std::min(static_cast<size_t>(dot - target), sizeof(module) - 1);
+        std::memcpy(module, target, n);
+        module[n] = '\0';
+        char body[32];
+        std::snprintf(body, sizeof(body), "{\"value\":%u}", static_cast<unsigned>(faders_[index]));
+        sched->setControl(module, dot + 1, body);
+    }
+
+    /// Reorder: the grid can be arranged to match a physical control surface, so pad 3 here is
+    /// fader 3 there. The order is the row order, persisted as a `slot` field in each file, so it
+    /// survives a reboot and a rescan (which otherwise returns files in whatever order the
+    /// filesystem lists them).
+    /// Drop a pad onto a grid cell. `to` is the SLOT, not a list index — the UI sends the cell the
+    /// pad was dropped on. Dropping onto an occupied slot swaps the two, which is what a user
+    /// rearranging a surface expects and avoids a silent overwrite.
+    bool moveListRow(uint32_t id, uint8_t to) override {
+        if (to >= kMaxPresets) return false;
+        Preset* moving = nullptr;
+        for (uint8_t i = 0; i < presetCount_; i++) if (presets_[i].id == id) { moving = &presets_[i]; break; }
+        if (!moving) return false;
+        if (moving->slot == to) return true;
+
+        Preset* occupant = nullptr;
+        for (uint8_t i = 0; i < presetCount_; i++)
+            if (presets_[i].slot == to && presets_[i].id != id) { occupant = &presets_[i]; break; }
+
+        const uint8_t from = moving->slot;
+        moving->slot = to;
+        if (occupant) occupant->slot = from;    // swap rather than overwrite
+        writeSlots();
+        sortBySlot();
+        return true;
+    }
+
+    /// The row's editable fields carry the two actions a preset row needs. `apply` is a pseudo-field
+    /// rather than a stored value: the UI sends it like an edit, and this reads it as "put the device
+    /// into this state". That reuses the existing per-row edit path instead of adding a row-button
+    /// primitive to the control system for one caller.
+    bool setListRowField(uint32_t id, const char* field, const char* valueJson) override {
+        for (uint8_t i = 0; i < presetCount_; i++) {
+            if (presets_[i].id != id) continue;
+            // `activate` is the pad click, `apply` the row button — the same action from the two
+            // presentations the list can take.
+            if (std::strcmp(field, "activate") == 0 || std::strcmp(field, "apply") == 0)
+                return applyPreset(presets_[i].name);
+            if (std::strcmp(field, "name") == 0) {
+                char newName[kMaxNameLen] = {};
+                mm::json::parseString(valueJson, "value", newName, sizeof(newName));
+                return renamePreset(presets_[i].name, newName);
+            }
+            return false;
+        }
+        return false;
+    }
+
+private:
+    struct Preset {
+        uint32_t id = 0;
+        char name[kMaxNameLen] = {};
+        char captures[64] = {};   // what the file says it carries, shown per row
+        uint8_t slot = 0;         // position on the grid (0..kMaxPresets-1), persisted in the file
+        bool hasSlot = false;     // false for a file with no stored slot: assignFreeSlots places it
+    };
+
+    /// Re-read the folder. Cheap and cold-path: called at setup, and after any save/delete/rename,
+    /// so an upload through the File Manager shows up the next time one of those happens.
+    void rescan() {
+        presetCount_ = 0;
+        platform::fsList(kPresetDir, &onEntry, this);
+        for (uint8_t i = 0; i < presetCount_; i++) readCaptures(presets_[i]);
+        assignFreeSlots();
+        sortBySlot();
+    }
+
+    /// A preset with no stored slot (saved before slots existed, or copied in by hand) takes the
+    /// first free cell rather than colliding at 0, so a folder of hand-made files still lays out.
+    void assignFreeSlots() {
+        bool taken[kMaxPresets] = {};
+        for (uint8_t i = 0; i < presetCount_; i++)
+            if (presets_[i].hasSlot) taken[presets_[i].slot] = true;
+        for (uint8_t i = 0; i < presetCount_; i++) {
+            if (presets_[i].hasSlot) continue;
+            for (uint8_t s = 0; s < kMaxPresets; s++)
+                if (!taken[s]) { presets_[i].slot = s; taken[s] = true; break; }
+        }
+    }
+
+    void sortBySlot() {
+        for (uint8_t i = 1; i < presetCount_; i++) {
+            Preset key = presets_[i];
+            int j = i - 1;
+            while (j >= 0 && presets_[j].slot > key.slot) { presets_[j + 1] = presets_[j]; j--; }
+            presets_[j + 1] = key;
+        }
+    }
+
+    static void onEntry(const char* name, bool isDir, uint32_t /*size*/, void* user) {
+        auto* self = static_cast<ControlModule*>(user);
+        if (isDir || self->presetCount_ >= kMaxPresets) return;
+        const size_t len = std::strlen(name);
+        if (len < 6 || std::strcmp(name + len - 5, ".json") != 0) return;   // only our files
+        Preset& p = self->presets_[self->presetCount_];
+        // Strip the extension: the NAME is what the user typed, the file is an implementation detail.
+        const size_t stem = len - 5 < sizeof(p.name) - 1 ? len - 5 : sizeof(p.name) - 1;
+        std::memcpy(p.name, name, stem);
+        p.name[stem] = '\0';
+        p.id = ++self->nextId_;
+        self->presetCount_++;
+    }
+
+    /// A preset name becomes a FILE name, so it must not be able to steer the path. ESP32's
+    /// fsTranslate is a bare prefix concatenation with no normalization (unlike the desktop
+    /// filesystem, which rejects escapes), so `..` in a name would reach outside the preset folder
+    /// on device — and delete and rename write through the same path. Rejecting the separator and
+    /// the dot outright is the check the HTTP file routes already apply; this extends it to the
+    /// second write path rather than leaving that one guarded only on desktop.
+    /// Bound as the `name` control's validator, so EVERY write path runs it: HTTP, the persistence
+    /// load, and a scripted set.
+    static bool validPresetName(const char* value) {
+        if (!value) return false;
+        const size_t n = std::strlen(value);
+        if (n == 0 || n >= kMaxNameLen) return false;
+        for (size_t i = 0; i < n; i++) {
+            const unsigned char b = static_cast<unsigned char>(value[i]);
+            if (b < 0x20 || b > 0x7E) return false;          // printable ASCII only
+            if (b == '/' || b == '\\' || b == '.') return false;   // no separator, no dot-segment
+        }
+        return true;
+    }
+
+    /// Read just the `captures` header so a row can say what it carries without loading the body.
+    void readCaptures(Preset& p) {
+        char path[128];
+        pathFor(p.name, path, sizeof(path));
+        char head[192] = {};
+        const int n = platform::fsReadAt(path, 0, head, sizeof(head) - 1);
+        if (n <= 0) return;
+        head[n] = '\0';
+        mm::json::parseString(head, "captures", p.captures, sizeof(p.captures));
+        p.hasSlot = mm::json::hasKey(head, "slot");
+        const int slot = mm::json::parseInt(head, "slot");
+        p.slot = (p.hasSlot && slot >= 0 && slot < kMaxPresets) ? static_cast<uint8_t>(slot) : 0;
+    }
+
+    /// Persist the pad order by stamping each file with its position. Cheap (one small rewrite per
+    /// file) and it keeps the order where the presets themselves live, so a folder copied to another
+    /// device brings its layout with it rather than resetting to whatever order that filesystem
+    /// happens to list.
+    void writeSlots() {
+        for (uint8_t i = 0; i < presetCount_; i++) {
+            char path[128];
+            pathFor(presets_[i].name, path, sizeof(path));
+            const long size = platform::fsSize(path);
+            if (size <= 0) continue;
+            char* body = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+            if (!body) continue;
+            const int n = platform::fsRead(path, body, static_cast<size_t>(size) + 1);
+            if (n > 0) {
+                body[n] = '\0';
+                JsonSink sink;
+                // Replace the leading '{' with '{"slot":N,' — the slot is a header field like
+                // `captures`, and a rewrite is simpler than an in-place patch of a variable-width int.
+                sink.appendf("{\"slot\":%u,", static_cast<unsigned>(presets_[i].slot));
+                const char* rest = std::strchr(body, '{');
+                if (rest) {
+                    const char* after = rest + 1;
+                    // Drop any previous slot key so repeated reorders do not accumulate them.
+                    if (std::strncmp(after, "\"slot\":", 7) == 0) {
+                        const char* comma = std::strchr(after, ',');
+                        if (comma) after = comma + 1;
+                    }
+                    sink.append(after);
+                    if (!sink.overflowed())
+                        platform::fsWriteAtomic(path, sink.data(), sink.size());
+                }
+            }
+            platform::free(body);
+        }
+    }
+
+    static void pathFor(const char* name, char* out, size_t n) {
+        std::snprintf(out, n, "%s/%s.json", kPresetDir, name);
+    }
+
+    /// Capture the selected subtrees into one file.
+    void savePreset() {
+        if (name_[0] == 0) { setStatusf(Severity::Warning, "name the preset first"); return; }
+        // Flush first: the persistence engine debounces writes by 2 s, and a preset that captured the
+        // debounced-but-unwritten state would be a snapshot of a moment that never existed on disk.
+        FilesystemModule::flushPending();
+
+        auto* fs = FilesystemModule::instance();
+        auto* sched = Scheduler::instance();
+        if (!fs || !sched) { setStatusf(Severity::Error, "not ready"); return; }
+
+        JsonSink sink;
+        // A save aimed at a pad carries its slot in the file, exactly as writeSlots writes it, so
+        // rescan() places it on the pad the user clicked. Stamping it here rather than fixing it up
+        // afterwards avoids a second whole-folder rewrite and avoids displacing whichever preset
+        // happened to hold the first free cell. A save that named no pad omits the key, and
+        // assignFreeSlots gives it the first free cell instead.
+        sink.append("{");
+        if (saveSlot_ != kNoSlot)
+            sink.appendf("\"slot\":%u,", static_cast<unsigned>(saveSlot_));
+        sink.append("\"captures\":\"");
+        bool first = true;
+        for (uint8_t i = 0; i < kCaptureCount; i++) {
+            if (!capture_[i]) continue;
+            sink.appendf("%s%s", first ? "" : ",", kCapturable[i]);
+            first = false;
+        }
+        sink.append("\"");
+        if (first) { setStatusf(Severity::Warning, "select at least one thing to capture"); return; }
+
+        // Each captured subtree is written under a "<TypeName>." key prefix into ONE flat object —
+        // the same dotted form the persistence engine already writes, just namespaced. That is what
+        // lets applySubtree read it back with nothing more than the prefix it already accepts: no
+        // nested-object addressing, no second parser.
+        for (uint8_t i = 0; i < kCaptureCount; i++) {
+            if (!capture_[i]) continue;
+            MoonModule* m = findTopLevel(sched, kCapturable[i]);
+            if (!m) continue;                       // not on this build: simply not captured
+            char prefix[24];
+            std::snprintf(prefix, sizeof(prefix), "%s.", kCapturable[i]);
+            sink.append(",");
+            if (!fs->saveSubtreeTo(m, sink, prefix)) { setStatusf(Severity::Error, "out of memory saving"); return; }
+        }
+        sink.append("}");
+        if (sink.overflowed()) { setStatusf(Severity::Error, "out of memory saving"); return; }
+
+        char path[128];
+        pathFor(name_, path, sizeof(path));
+        const bool ok = platform::fsWriteAtomic(path, sink.data(), sink.size());
+        setStatusf(ok ? Severity::Status : Severity::Error,
+                   ok ? "saved %s" : "could not save %s", name_);
+        rescan();   // the file carries its slot, so this places it on the clicked pad
+    }
+
+    /// Put the device into a preset's state.
+    bool applyPreset(const char* presetName) {
+        auto* fs = FilesystemModule::instance();
+        auto* sched = Scheduler::instance();
+        if (!fs || !sched) return false;
+
+        char path[128];
+        pathFor(presetName, path, sizeof(path));
+        const long size = platform::fsSize(path);
+        if (size <= 0) { setStatusf(Severity::Error, "%s is missing", presetName); return false; }
+        char* body = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+        if (!body) { setStatusf(Severity::Error, "out of memory applying"); return false; }
+        const int n = platform::fsRead(path, body, static_cast<size_t>(size) + 1);
+        if (n <= 0) { platform::free(body); setStatusf(Severity::Error, "could not read %s", presetName); return false; }
+        body[n] = '\0';
+
+        char captures[64] = {};
+        mm::json::parseString(body, "captures", captures, sizeof(captures));
+
+        // Apply every captured subtree, THEN prepare once. Each applySubtree already builds the
+        // subtree it touched; a prepareTree() per capture would walk the whole tree N times, and this
+        // runs inline on the render tick.
+        uint8_t applied = 0, skipped = 0;
+        for (uint8_t i = 0; i < kCaptureCount; i++) {
+            const char* type = kCapturable[i];
+            if (!listHas(captures, type)) continue;
+            MoonModule* m = findTopLevel(sched, type);
+            if (!m) { skipped++; continue; }        // the preset carries something this build lacks
+            char prefix[24];
+            std::snprintf(prefix, sizeof(prefix), "%s.", type);
+            // Count only what actually applied: a body missing this prefix, or malformed, leaves the
+            // tree alone and must not be reported to the user as a successful apply.
+            if (fs->applySubtree(m, body, prefix)) applied++;
+            else skipped++;
+        }
+        platform::free(body);
+
+        sched->prepareTree();
+        // Claim each role this preset carries. A role a preset does not carry keeps its holder, so
+        // "layout preset, then layer preset" leaves both lit.
+        for (uint8_t i = 0; i < kCaptureCount; i++) {
+            if (!listHas(captures, kCapturable[i])) continue;
+            std::snprintf(current_[i], sizeof(current_[i]), "%s", presetName);
+        }
+        if (skipped) setStatusf(Severity::Warning, "applied %s (%u skipped)", presetName,
+                                static_cast<unsigned>(skipped));
+        else         setStatusf(Severity::Status, "applied %s", presetName);
+        return applied > 0;
+    }
+
+    bool renamePreset(const char* from, const char* to) {
+        if (!validPresetName(to)) return false;   // the new name becomes a file name (see validPresetName)
+        char src[128], dst[128];
+        pathFor(from, src, sizeof(src));
+        pathFor(to, dst, sizeof(dst));
+        const long size = platform::fsSize(src);
+        if (size <= 0) return false;
+        char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+        if (!buf) return false;
+        const int n = platform::fsRead(src, buf, static_cast<size_t>(size) + 1);
+        bool ok = false;
+        if (n > 0 && platform::fsWriteAtomic(dst, buf, static_cast<size_t>(n))) {
+            platform::fsRemove(src);
+            ok = true;
+        }
+        platform::free(buf);
+        rescan();
+        return ok;
+    }
+
+    /// Is `type` in the comma-separated `captures` header? Whole-token match, so "Layer" never
+    /// matches "Layers".
+    static bool listHas(const char* list, const char* type) {
+        const size_t tlen = std::strlen(type);
+        for (const char* p = list; *p;) {
+            const char* end = std::strchr(p, ',');
+            const size_t len = end ? static_cast<size_t>(end - p) : std::strlen(p);
+            if (len == tlen && std::strncmp(p, type, tlen) == 0) return true;
+            if (!end) break;
+            p = end + 1;
+        }
+        return false;
+    }
+
+    static MoonModule* findTopLevel(Scheduler* s, const char* typeName) {
+        for (uint8_t i = 0; i < s->moduleCount(); i++) {
+            MoonModule* m = s->module(i);
+            if (m && std::strcmp(m->typeName(), typeName) == 0) return m;
+        }
+        return nullptr;
+    }
+
+    /// Report through the base's status, the way every module does, so the UI shows it in the card's
+    /// status chip with the right severity emoji. setStatus takes a BORROWED pointer, so the text
+    /// lives in a member buffer rather than a temporary.
+    void setStatusf(Severity sev, const char* fmt, ...) {
+        va_list ap;
+        va_start(ap, fmt);
+        std::vsnprintf(statusBuf_, sizeof(statusBuf_), fmt, ap);
+        va_end(ap);
+        setStatus(statusBuf_, sev);
+    }
+
+    /// Fader names are their position, so a surface binds to "fader1" rather than to a label a user
+    /// might rename. Fixed strings because a control's name is a borrowed pointer.
+    static constexpr const char* kFaderNames[kFaderCount] =
+        {"fader1", "fader2", "fader3", "fader4", "fader5", "fader6", "fader7", "fader8"};
+    static constexpr const char* kEncoderNames[kEncoderCount] =
+        {"enc1", "enc2", "enc3", "enc4", "enc5", "enc6", "enc7", "enc8"};
+    uint8_t faders_[kFaderCount] = {};
+    uint8_t encoders_[kEncoderCount] = {};
+    /// Which pad the next save fills, set by the surface popup. kNoSlot means the save did not name
+    /// a pad (a scripted or API save), and assignFreeSlots then places it in the first free cell.
+    static constexpr uint8_t kNoSlot = 0xFF;
+    uint8_t saveSlot_ = kNoSlot;
+
+    Preset presets_[kMaxPresets];
+    uint8_t presetCount_ = 0;
+    uint32_t nextId_ = 0;
+    char name_[kMaxNameLen] = {};
+    bool capture_[kCaptureCount] = {false, true, false, false};   // a look, by default
+    /// Which preset currently holds each capturable role, index-aligned with kCapturable. A
+    /// preset that carries layout+layer claims both, so applying a layer-only preset afterwards
+    /// replaces the layer holder and leaves the layout one lit. That is what a mixed preset means
+    /// here: it owns more than one role, not a special kind of pad.
+    char current_[kCaptureCount][kMaxNameLen] = {};
+    /// Backing store for the status text: setStatus borrows the pointer, so it must outlive the call.
+    char statusBuf_[64] = {};
+};
+
+}  // namespace mm

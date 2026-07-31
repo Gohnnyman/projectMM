@@ -187,6 +187,13 @@ struct ListSource {
     // the control system stays generic. Returns true if it took.
     virtual bool restoreList(const char* /*json*/, const char* /*key*/) { return false; }
 
+    // Is this list's VALUE worth writing to flash? False for a list whose rows are re-derived at
+    // setup from a source that is itself already persistent — a folder of files, the live module
+    // tree, the pin map. Persisting such a list writes a large array on every save that the loader
+    // then discards (restoreList returns false), which is flash wear for nothing.
+    // Default true, so a list that genuinely owns its rows keeps persisting unchanged.
+    virtual bool persistsList() const { return true; }
+
     // --- Editable list (the CRUD extension) -----------------------------------------
     // A ListSource that supports adding / removing / reordering / editing rows. This is
     // the editable-data-grid primitive (the write half of the same data-source/adapter
@@ -201,6 +208,31 @@ struct ListSource {
     // a plain ListSource stays read-only. Each op returns whether it took, so the API layer
     // maps the result onto an HTTP status.
     virtual bool isEditableList() const { return false; }
+
+    // Render the rows as a GRID OF PADS rather than a stacked list: one uniform button per row,
+    // labelled with the row's `name`, clicking it fires the row's `activate` field.
+    //
+    // For rows that are TRIGGERED far more often than they are edited, a list is the wrong shape: it
+    // costs a click to expand before the action is even visible, and it hides which row is currently
+    // active. A pad grid is what a MIDI deck uses for the same job, and it is the same affordance
+    // whether the rows are a handful of named presets or a dense field of numbered channels.
+    //
+    // Deliberately domain-neutral, and a PRESENTATION hint only — the rows, their ids and the
+    // edit/delete/reorder ops are unchanged, so a pad list is still a list and still editable. A
+    // source that opts in should:
+    //   - emit `"name"` per row (the pad label; short — a number or a word, not a sentence),
+    //   - mark the current row `"active":true` so the UI can highlight it,
+    //   - accept an `activate` field in setListRowField (the click).
+    // Everything else about the row stays as it was.
+    virtual bool listAsPads() const { return false; }
+
+    // The pad grid's shape. Non-zero means a FIXED surface: the UI renders cols x rows cells and
+    // places each row at its own `slot`, so an empty cell is a real position rather than an absence.
+    // That is what separates a control surface from a list drawn in columns — pad 14 is pad 14
+    // whether or not anything is in it, and deleting pad 3 does not slide pad 4 into its place.
+    // Zero (the default) keeps the flowing layout: pads in row order, wrapping to the card width.
+    virtual uint8_t listGridCols() const { return 0; }
+    virtual uint8_t listGridRows() const { return 0; }
 
     // Append a new row with default values; write the new row's stable id into `outId`.
     // Returns false if the list is full or otherwise refuses (e.g. a read-only source).
@@ -260,6 +292,11 @@ struct ControlDescriptor {
                             // renders number-only for the same reason — a GPIO is an identity, not a
                             // magnitude; this extends that to non-Pin numerics without the Pin type's
                             // pin-ownership-map claim.)
+    // Appended AFTER the other flags and before `validate`: the two addText-family initializers
+    // below are positional, so this field's place in the order is load-bearing.
+    bool fader = false;     // Render as a vertical fader (see ControlList::setFader). Presentation only.
+    bool encoder = false;   // Render as a rotary encoder (see ControlList::setEncoder).
+    const char* faderTarget = nullptr;   // What the fader/encoder drives ("Drivers.brightness"), or null.
     // Optional per-control input validator (Text/Password only; nullptr = accept anything
     // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
     // write and returns ApplyResult::Malformed on reject, so the check covers EVERY write
@@ -361,7 +398,7 @@ public:
     void addText(const char* name, char* var, uint16_t bufSize = 16,
                  bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, false, false, false, nullptr, validate};
     }
 
     // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
@@ -369,7 +406,7 @@ public:
     void addTextArea(const char* name, char* var, uint16_t bufSize = 16,
                      bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, false, validate};
+        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, false, false, false, nullptr, validate};
     }
 
     // Like addText but the value is a secret: the API serializes it
@@ -472,6 +509,24 @@ public:
         if (i < count_) controls_[i].numberField = numberField;
     }
 
+    /// Render this numeric control as a VERTICAL fader rather than a horizontal slider. Presentation
+    /// only: the control, its range and its value are unchanged, and consecutive faders render as
+    /// one bank. For a value a user rides rather than sets once — a level — a fader is the physical
+    /// affordance, and it is what a hardware surface will map onto.
+    /// `target` names what the fader drives ("Drivers.brightness"), or null when nothing yet. A
+    /// borrowed pointer, like every other name here.
+    void setFader(uint8_t i, bool fader = true, const char* target = nullptr) {
+        if (i < count_) { controls_[i].fader = fader; controls_[i].faderTarget = target; }
+    }
+
+    /// Render this numeric control as a ROTARY ENCODER: a knob, dragged vertically to turn. The
+    /// third surface affordance beside pads and faders, and the one both the X-Touch and the QCon
+    /// put above their strips. Presentation only, same as setFader — value, range and persistence
+    /// are untouched. `target` names what it drives, or null when nothing yet.
+    void setEncoder(uint8_t i, bool encoder = true, const char* target = nullptr) {
+        if (i < count_) { controls_[i].encoder = encoder; controls_[i].faderTarget = target; }
+    }
+
 private:
     ControlDescriptor* controls_ = nullptr;
     uint8_t count_ = 0;
@@ -507,6 +562,9 @@ const char* controlTypeName(ControlType t);
 // for ReadOnly / ReadOnlyInt / Progress (device-derived display values that
 // would just get overwritten on the next tick1s).
 bool isPersistable(ControlType t);
+/// Whether THIS control's value is written to flash. Prefer this over the type-only form: it also
+/// honours a ListSource that derives its rows (see ListSource::persistsList).
+bool isPersistable(const ControlDescriptor& c);
 
 // Whether `/api/types`'s default-values block should emit a default for this
 // type. False for Password (defaults defeat the secret), false for the

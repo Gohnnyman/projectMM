@@ -42,6 +42,16 @@ const char* controlTypeName(ControlType t) {
     return "unknown";
 }
 
+bool isPersistable(const ControlDescriptor& c) {
+    // A List defers to its source: rows re-derived at setup are not worth writing (see
+    // ListSource::persistsList). Every other type answers from the type alone.
+    if (c.type == ControlType::List) {
+        auto* src = static_cast<ListSource*>(c.ptr);
+        if (src && !src->persistsList()) return false;
+    }
+    return isPersistable(c.type);
+}
+
 bool isPersistable(ControlType t) {
     // Display-only / device-derived types: no point saving — the next
     // tick1s overwrites them.

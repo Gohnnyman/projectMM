@@ -152,7 +152,7 @@ void FilesystemModule::overlayControls(MoonModule* m, const char* json, const ch
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (!isPersistable(c.type)) continue;
+        if (!isPersistable(c)) continue;
         std::snprintf(key, sizeof(key), "%s%s", prefix, c.name);
         applyValue(c, json, key);
     }
@@ -186,6 +186,34 @@ bool FilesystemModule::hasWiredChildOfType(const MoonModule* parent, const char*
         if (c && c->isWiredByCode() && std::strcmp(c->typeName(), typeName) == 0) return true;
     }
     return false;
+}
+
+// Runtime entry point over applyNode. See the header for the contract; the reason it exists is the
+// lifecycle gap: at boot, Scheduler phases 3 and 4 call setup() and applyState() across the whole
+// tree after the load, so applyNode only has to call defineControls() on a child it creates. A
+// runtime caller gets no such phases, and a module that never saw setup() comes back with its
+// buffers unbuilt and its hardware unclaimed — a preset that "sometimes does not work".
+bool FilesystemModule::applySubtree(MoonModule* m, const char* json, const char* prefix) {
+    if (!m || !json) return false;
+    // Refuse a body that is not credibly one of ours BEFORE touching the tree. applyNode's trim step
+    // reads "no children in the JSON" as "delete every live child", so a truncated file (an
+    // interrupted upload, a half-written preset) would not leave the current look alone — it would
+    // WIPE it. Every subtree we write emits `<prefix>enabled`, so its absence is the cheap,
+    // format-specific test for "this is not a subtree", and it costs one key lookup on a cold path.
+    char enabledKey[MAX_KEY];
+    std::snprintf(enabledKey, sizeof(enabledKey), "%senabled", prefix);
+    if (!mm::json::hasKey(json, enabledKey)) {
+        std::printf("FilesystemModule: ignoring malformed subtree for %s\n", m->typeName());
+        return false;
+    }
+    applyNode(m, json, prefix);
+    // Same order as the runtime add path (HttpServerModule::applyAddModule): setup() may read what
+    // defineControls() bound, and applyState() then builds or releases per effectively-enabled.
+    // Both recurse over children on their own (MoonModule::setup / applyState), so one call at the
+    // root covers every node applyNode just created.
+    m->setup();
+    m->applyState();
+    return true;
 }
 
 void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* prefix) {
@@ -316,6 +344,18 @@ void FilesystemModule::applyValue(const ControlDescriptor& c, const char* json, 
 // ---- Save ----
 // Returns true only when the file was written. On failure (path/overflow/write
 // error) the caller must keep the subtree dirty so the change isn't lost.
+// Serialize a subtree into a caller's sink. The write half of saveSubtree, split out so a caller
+// storing the bytes elsewhere (a named preset file) produces the SAME format the loader reads,
+// rather than a second serializer that could drift from this one. See the header.
+bool FilesystemModule::saveSubtreeTo(MoonModule* m, JsonSink& sink, const char* prefix) {
+    if (!m) return false;
+    const bool bare = (prefix == nullptr || prefix[0] == 0);
+    if (bare) sink.append("{");   // a namespaced subtree is a fragment of the caller's object
+    writeNode(m, sink, bare ? "" : prefix, /*firstField=*/bare);
+    if (bare) sink.append("}");
+    return !sink.overflowed();           // only trips on an allocation failure, not a size cap
+}
+
 bool FilesystemModule::saveSubtree(MoonModule* m) {
     char path[MAX_PATH];
     if (!pathFor(m, path, sizeof(path))) return false;
@@ -324,10 +364,7 @@ bool FilesystemModule::saveSubtree(MoonModule* m) {
     // presets, a wide fixture wiring) persists in full instead of silently truncating. Written
     // atomically once complete.
     JsonSink sink;                       // heap/buffer mode: grows as needed, no cap
-    sink.append("{");
-    writeNode(m, sink, "", /*firstField=*/true);
-    sink.append("}");
-    if (sink.overflowed()) {             // only trips on an allocation failure now, not a size cap
+    if (!saveSubtreeTo(m, sink)) {
         std::printf("FilesystemModule: out of memory serializing %s\n", path);
         return false;
     }
@@ -350,7 +387,7 @@ void FilesystemModule::writeNode(MoonModule* m, JsonSink& sink, const char* pref
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (!isPersistable(c.type)) continue;
+        if (!isPersistable(c)) continue;
         sink.appendf("%s\"%s%s\":", first ? "" : ",", prefix, c.name);
         writeControlValue(sink, c);      // the shared value serializer (same as /api/state)
         first = false;

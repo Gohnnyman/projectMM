@@ -131,6 +131,38 @@ public:
     /// 2s debounce starts. Cheap timestamp record; the actual walk happens in tick1s().
     static void noteDirty();
 
+    /// Serialize a subtree into a caller's sink instead of to `/.config/<TypeName>.json`.
+    ///
+    /// Same bytes `saveSubtree` writes — the flat dotted-key form `applySubtree` reads back — so a
+    /// caller that stores a subtree elsewhere (ControlModule's presets, one file per named preset)
+    /// gets the persistence format for free rather than growing a second serializer that could
+    /// drift from this one. Emits the enclosing `{}`; returns false only on allocation failure.
+    /// `prefix` namespaces every key ("Layers.0.type"), so several subtrees can share one flat
+    /// object and `applySubtree` reads each back with the same prefix. Empty for a bare subtree.
+    bool saveSubtreeTo(MoonModule* m, JsonSink& sink, const char* prefix = "");
+
+    /// Apply a serialized subtree to a LIVE module tree, creating, replacing and destroying children
+    /// to match, then driving the lifecycle a runtime rebuild needs.
+    ///
+    /// The reconciliation itself is the boot loader's (`applyNode`): type-at-position decides
+    /// whether a child is kept and overlaid, replaced, or appended; an unknown type is skipped so
+    /// the rest of the tree still applies; code-wired children are never replaced. What this adds is
+    /// the part boot gets from the Scheduler's later phases and a runtime caller does not:
+    /// `applyNode` calls only `defineControls()` on a child it creates, so `setup()` and
+    /// `applyState()` must follow or the module comes back half-initialized. Mirrors the tail of
+    /// HttpServerModule's runtime add path.
+    ///
+    /// Does NOT call `prepareTree()` or persist: a caller applying several subtrees should batch one
+    /// `prepareTree()` after the last, since each is a full walk and this runs inline on the render
+    /// tick. Structural mutation is safe here because `addChild`/`replaceChildAt` quiesce the render
+    /// worker themselves (MoonModule::quiesceForMutation).
+    ///
+    /// `prefix` is "" for a whole subtree; the dotted form addresses a node within one.
+    /// Returns whether the subtree was applied. False means the body was not credibly one of
+    /// ours (malformed, or missing this prefix entirely) and the live tree was left alone — a
+    /// caller reporting success to a user needs to tell that apart from a real apply.
+    bool applySubtree(MoonModule* m, const char* json, const char* prefix = "");
+
 private:
     static inline FilesystemModule* instance_ = nullptr;
     Scheduler* scheduler_ = nullptr;

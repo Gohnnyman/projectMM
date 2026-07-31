@@ -807,6 +807,292 @@ body.cards-resizing {
     border: 1px solid var(--border);
     border-radius: 4px;
 }
+/* A grid of uniform pads (the `pads` list presentation). auto-fill with a minimum track means the
+   same rule serves a handful of named preset pads and a dense field of numbered channel pads: the
+   grid simply fits more per row as the card widens, and wraps rather than scrolling sideways.
+   Uniform size is the point — a pad sized to its label gives a ragged grid that is harder to scan
+   and to hit, so a long name truncates instead of stretching its pad. */
+/* A ROTARY ENCODER: a range input drawn as a knob. Consecutive encoders form a row above the pads,
+   where both the X-Touch and the QCon put theirs. The input itself is a short horizontal range that
+   the knob face sits on — dragging it turns the value, which is the same gesture as a real encoder
+   without needing pointer-capture maths. */
+/* THE surface column. Knob strips, pads and fader strips all size against this one value, so the
+   three banks read as columns of a single control surface rather than three independently-wrapped
+   rows. clamp() rather than a fixed width so the columns follow the card when the right pane is
+   dragged narrower or wider, which is the behaviour the cards already have. The upper bound stops a
+   wide pane from inflating 8 columns into something that pushes the surface off-screen. */
+.card { --surface-col: clamp(26px, 5.2vw, 52px); }
+
+.control-encoder {
+    margin: 0;              /* strips sit in a row; the generic 6px row margin doubled the gaps */
+    /* Inline-flex siblings collapse whitespace differently per browser; box-sizing keeps the strip
+       exactly one --surface-col wide whatever padding lands on it. */
+    box-sizing: border-box;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    width: var(--surface-col);
+    vertical-align: top;
+    gap: 2px;
+}
+/* Order within a strip: knob, readout, then the name underneath — the way the hardware is laid out
+   and read. `order` does it without changing the DOM the generic control builder produces. */
+/* The generic .control-label is `flex: 0 0 100px` for the label column of a normal row. Inside a
+   52px strip that forced a 100px box, which is where the dead space between the knobs and the pads
+   came from. A strip's label is just its name under the control. */
+.control-encoder .control-label,
+.control-fader   .control-label { flex: 0 0 auto; text-align: center; }
+.control-encoder .control-label      { order: 3; font-size: 10px; }
+.control-encoder .knob               { order: 1; }
+.control-encoder .seg7               { order: 2; }
+.control-encoder .control-value-input,
+.control-fader   .control-value-input { display: none; }   /* the readout replaces the number box */
+/* The range input still exists and still owns the value, keyboard access and the WS patch path — the
+   knob is drawn on top of it, so it is hidden rather than removed. */
+/* Hidden but still focusable, so the value/keyboard/WS paths keep working. `position:absolute`
+   takes it out of flow — left in flow it added a phantom row between the knobs and the pads. */
+.encoder-input {
+    position: absolute; opacity: 0; pointer-events: none;
+    width: 1px; height: 1px; margin: 0; padding: 0;
+}
+
+.knob { width: 40px; height: 40px; cursor: ns-resize; touch-action: none; }
+/* The SVG is decoration: every pointer event belongs to the wrapper, which owns the drag and the
+   pointer capture. Without this the press lands on a <circle> and the capture never governs it,
+   so the knob looked interactive and did nothing. */
+.knob svg, .knob svg * { pointer-events: none; }
+.knob svg { display: block; width: 100%; height: 100%; }
+/* Both arcs are set from JS (dasharray + a rotate transform attribute), because the geometry
+   depends on the radius and the value. Only the colours live here. */
+.knob-track { fill: none; stroke: var(--border); stroke-width: 4; }
+.knob-fill  { fill: none; stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
+.knob-pointer { stroke: var(--fg); stroke-width: 2; stroke-linecap: round; }
+
+/* A seven-segment readout: lit segments over unlit ghosts, so it reads as a real LED module. */
+.seg7 { width: 42px; height: 20px; }
+.seg7 svg { display: block; width: 100%; height: 100%; }
+.seg7-on  { fill: #ff3b30; }
+.seg7-off { fill: #ff3b30; opacity: 0.12; }
+
+/* A floating popup anchored to a surface control: the place a pad or a fader is CONFIGURED, as
+   opposed to triggered. Floating rather than inline so opening one does not reflow the surface
+   underneath it. */
+.surface-popup {
+    position: fixed;
+    z-index: 40;
+    min-width: 200px;
+    background: var(--bg-1);
+    border: 1px solid var(--accent-soft);
+    border-radius: 6px;
+    padding: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.surface-popup-title { font-size: 12px; color: var(--accent); margin-bottom: 6px; }
+.surface-popup-body { display: flex; flex-direction: column; gap: 6px; }
+.surface-popup-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.surface-popup-row span { min-width: 44px; color: var(--fg-dim, var(--fg)); }
+.surface-popup-primary,
+.surface-popup-danger {
+    padding: 4px 8px;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.surface-popup-primary { background: var(--accent); color: var(--bg); border: 1px solid var(--accent); }
+.surface-popup-danger  { background: transparent; color: #f87171; border: 1px solid #f87171; }
+
+/* A FADER: the same range input stood on end. Consecutive fader rows collapse into one bank via
+   flex, so six faders read as a bank rather than six stacked rows. `writing-mode` is the modern
+   vertical-range mechanism (no transform hacks, so the hit area stays correct). */
+.control-fader {
+    margin: 0;
+    box-sizing: border-box;
+    width: var(--surface-col);
+    display: inline-flex;
+    flex-direction: column-reverse;   /* label under the fader, like a channel strip */
+    align-items: center;
+    vertical-align: top;
+    gap: 4px;
+}
+.control-fader .control-label { font-size: 11px; }
+.fader-input {
+    writing-mode: vertical-lr;
+    direction: rtl;                   /* max at the top, the way a physical fader reads */
+    width: 24px;
+    height: 120px;
+    accent-color: var(--accent);
+}
+
+.list-pads {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 3px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+/* A pad reads as a lit physical key rather than a flat button: a translucent face over the card,
+   a bright top edge where the light lands, and a soft glow that grows when it is the active preset.
+   `color-mix` keeps it one rule for both themes, since it tints the theme's own tokens rather than
+   hard-coding two palettes. */
+/* `--pad-hue` is set per pad from the roles it carries (roleHue in app.js). `--pad-tint` resolves to
+   that hue when present and to the theme foreground when not, so one set of rules serves a tinted pad
+   and an untinted one. */
+.list-pad {
+    --pad-tint: var(--fg);
+    padding: 6px 4px;
+    font-size: 12px;
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--pad-tint) 26%, transparent),
+            color-mix(in srgb, var(--pad-tint) 11%, transparent));
+    color: var(--fg);
+    border: 1px solid color-mix(in srgb, var(--pad-tint) 34%, transparent);
+    border-top-color: color-mix(in srgb, var(--pad-tint) 48%, transparent);
+    border-radius: 7px;
+    backdrop-filter: blur(6px);
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
+        0 1px 2px rgba(0, 0, 0, 0.18);
+    transition: background 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+    cursor: pointer;
+}
+/* A pad that carries roles: the tint becomes the mixed role hue. Full saturation is reserved for the
+   lit state, so an idle pad is a hint of color rather than a block of it. */
+.list-pad[style*="--pad-hue"] {
+    --pad-tint: hsl(var(--pad-hue) 70% 60%);
+    /* One line, ellipsised: the pad keeps its size whatever the name is; the full name is in the
+       title attribute for a hover. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Emoji above, name below: the roles read at a glance, the name is what identifies the pad. */
+/* A FIXED surface: every cell is rendered, so the grid keeps its shape as pads come and go. Square
+   cells, because a control surface is a grid of equal pads rather than a wrapped list. */
+/* Pad size is CLAMPED, not a plain fraction of the card. With `1fr` columns a wide card stretched
+   each cell to ~120px and pushed the faders off-screen; a fixed size instead leaves a wide card
+   cramped and unable to use the room. So: grow with the card, but stop — the surface stays visible
+   whole at any card width, which is the point of a surface. The columns are set in JS (the count is
+   the grid's, not the CSS's); this bounds what each one may become. */
+.list-pads-fixed {
+    grid-auto-rows: auto;
+    justify-content: start;
+    max-height: none;
+}
+/* A fixed surface is a field of keys on the card, not a list in a box: the enclosing border and the
+   scroll box that a flowing list needs would draw a frame around the grid. */
+.control-list-row:has(.list-pads-fixed) .list-control {
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+}
+.control-list-row:has(.list-pads-fixed) .list-scroll {
+    max-height: none;
+    overflow: visible;
+}
+/* The three banks share a column WIDTH; they must also share the spacing between columns, or the pads
+   drift out of line with the knobs after a few columns. The strips are inline-flex siblings (each IS
+   a .control-row), so their spacing is a margin rather than the grid's gap. */
+.list-pads-fixed { gap: 4px; }
+.control-encoder,
+.control-fader { margin-right: 4px; }
+.list-pads-fixed .list-pad {
+    aspect-ratio: 1 / 1;
+    padding: 2px;
+    font-size: 10px;
+}
+.list-pads-fixed .list-pad-emoji { font-size: 9px; }
+/* On a small pad a single ellipsised line loses too much ("grid la..."), so wrap to two lines and
+   clip there — two short lines identify a preset where one truncated line does not. The full name
+   is still on the pad's title for a hover. */
+.list-pads-fixed .list-pad-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+/* An empty cell is a real position: visible enough to aim a drop at, quiet enough not to read as a
+   button that does something. */
+/* An empty slot is an UNLIT key, not a dashed hole: the same glass puck in grey, so the surface reads
+   as a full grid of keys of which some are lit. Dashed outlines read as a form field, which is what
+   the grid is trying not to look like. */
+.list-pad-empty {
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--fg) 11%, transparent),
+            color-mix(in srgb, var(--fg) 4%, transparent));
+    border-color: color-mix(in srgb, var(--fg) 15%, transparent);
+    border-top-color: color-mix(in srgb, var(--fg) 22%, transparent);
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--fg) 10%, transparent),
+        0 1px 2px rgba(0, 0, 0, 0.12);
+    cursor: default;
+}
+.list-pad-empty:hover {
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--fg) 13%, transparent),
+            color-mix(in srgb, var(--fg) 5%, transparent));
+    border-color: color-mix(in srgb, var(--fg) 20%, transparent);
+}
+.list-pad-emoji { display: block; font-size: 11px; line-height: 1.2; }
+.list-pad-name  { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-pad:hover { border-color: var(--accent); }
+.list-pad.list-dragging { opacity: 0.4; }
+.list-pad.list-drop-target { border-color: var(--accent); border-style: dashed; }
+.list-pad:disabled { opacity: 0.5; cursor: default; }
+/* The row currently active, so the grid answers "what is on right now" without a click. */
+/* Hover lifts the face a little, so a pad answers the pointer before it is clicked. */
+.list-pad:hover {
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--pad-tint) 24%, transparent),
+            color-mix(in srgb, var(--pad-tint) 10%, transparent));
+    border-color: color-mix(in srgb, var(--pad-tint) 32%, transparent);
+}
+.list-pad:active { box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25); }
+
+/* The applied preset: the accent lights the face from within rather than filling it flat, so the
+   name stays readable and the pad still looks like the same key, lit. */
+.list-pad-active {
+    --pad-tint: var(--accent);
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--pad-tint) 62%, transparent),
+            color-mix(in srgb, var(--pad-tint) 34%, transparent));
+    border-color: color-mix(in srgb, var(--pad-tint) 78%, transparent);
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent),
+        0 0 10px color-mix(in srgb, var(--pad-tint) 50%, transparent);
+}
+/* A lit pad WITH roles glows in its own hue, which is what lets a layout preset and a layer preset
+   both stay lit and stay distinguishable. */
+.list-pad-active[style*="--pad-hue"] { --pad-tint: hsl(var(--pad-hue) 75% 58%); }
+.list-pad-active:hover {
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--pad-tint) 76%, transparent),
+            color-mix(in srgb, var(--pad-tint) 46%, transparent));
+}
+
+/* A row ACTION (the `button` field type): sized like the row's other inputs so a row of fields and
+   actions reads as one set, but styled as a button so it is obvious it does something rather than
+   holding a value. */
+.list-field-btn {
+    flex: 1; min-width: 0;
+    padding: 3px 6px;
+    font-size: 12px;
+    background: var(--accent);
+    color: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.list-field-btn:disabled { opacity: 0.5; cursor: default; }
+
 .list-add-btn {
     display: block;
     width: 100%;
@@ -1352,3 +1638,44 @@ body.cards-resizing {
     padding: 10px 14px; border-top: 1px solid var(--border);
 }
 .fm-editor-status { color: var(--fg-muted); font-size: 0.85rem; }
+
+/* The capture toggles inside a pad popup: what a preset carries. A compact two-column grid so the
+   four of them cost one popup row rather than four. */
+.surface-popup-caption {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    margin-top: 4px;
+}
+.surface-popup-captures {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 8px;
+}
+.surface-popup-capture {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.surface-popup-capture input { margin: 0; }
+
+/* The knob is turned by dragging or scrolling; without a cursor hint it reads as a picture, and the
+   range input underneath offers a resize cursor that suggests the wrong gesture. */
+.knob { cursor: grab; }
+.knob.knob-turning { cursor: grabbing; }
+.knob:hover .knob-track { stroke: color-mix(in srgb, var(--fg) 40%, transparent); }
+
+/* Surface demo sweep (REMOVABLE): the chasing pad during the power-on sweep. Delete with the
+   startSurfaceDemo block in app.js. */
+.list-pad-demo {
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--pad-tint) 70%, transparent),
+            color-mix(in srgb, var(--pad-tint) 40%, transparent));
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent),
+        0 0 12px color-mix(in srgb, var(--pad-tint) 55%, transparent);
+}
