@@ -260,10 +260,11 @@ public:
     /// class note says why a slow link is reported rather than refused. Runs on the 1 Hz path, so
     /// the snprintf here is the same accepted trade SystemModule makes.
     void writeLinkStatus() MM_NONBLOCKING {
-        if (!platform::ethLinkUp()) {
-            setStatus("no ethernet link", Severity::Warning);
-            return;
-        }
+        // The WEDGE is checked before the link, because a wedged transmit path is defined by sends
+        // failing — which is knowable whatever the link claims. Checking the link first hid this
+        // branch entirely on any platform reporting no link (the desktop stub among them), which is
+        // how the recovery path shipped unreachable by its own tests.
+        //
         // A short streak is ordinary back-pressure: the DMA ring fills while we push a whole frame
         // in one tick, the frame is dropped, the next one goes. Measured on a 128x128 wall at ~1900
         // packets/s, streaks of 1-4 come and go and always clear themselves — reporting those as an
@@ -276,13 +277,32 @@ public:
         static constexpr uint32_t kWedgedStreak = 500;
         const uint32_t failStreak = platform::ethSendFailStreak();
         if (failStreak >= kWedgedStreak) {
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "transmit wedged (%u refused)",
-                          static_cast<unsigned>(failStreak));
+            if (!restartTried_) {
+                restartTried_ = true;
+                // A failed restart leaves the driver STOPPED: no CONNECTED event can follow, so the
+                // link reads down forever and nothing else here can tell that apart from an unplugged
+                // cable. Report it as its own error rather than letting it masquerade as one.
+                if (platform::ethRestartTx()) {
+                    setStatus("transmit wedged - restarting ethernet", Severity::Warning);
+                } else {
+                    setStatus("ethernet restart failed - restart the device", Severity::Error);
+                }
+                framesReported_ = framesSent_;
+                return;
+            }
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "transmit wedged (%u refused, link %u Mbit)",
+                          static_cast<unsigned>(failStreak),
+                          static_cast<unsigned>(platform::ethLinkSpeedMbps()));
             setStatus(statusBuf_, Severity::Error);
             framesReported_ = framesSent_;
             return;
         }
 
+        if (!platform::ethLinkUp()) {
+            setStatus("no ethernet link", Severity::Warning);
+            framesReported_ = framesSent_;
+            return;
+        }
         const uint16_t mbps = platform::ethLinkSpeedMbps();
         // Total frames the MAC refused since boot. A dropped frame is tolerated (the cards have no
         // acknowledgement, so a retry would cost the next frame instead), but it is NOT invisible:
@@ -300,10 +320,22 @@ public:
             setStatus(statusBuf_, Severity::Warning);
             return;
         }
+        // Re-arm the one-shot only on evidence of FLOW: frames sent this second and no failure
+        // streak at all. Re-arming merely because the link reads healthy would fire again while a
+        // wedge is still rebuilding its streak, bouncing the interface every ~20 s — the loop the
+        // one-shot exists to prevent.
+        if (sent > 0 && failStreak == 0) restartTried_ = false;
+
         if (dropped) {
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "%u Mbit - %u packets/s, %u dropped",
+            // Split by cause: a flapping link and a full TX ring are different faults with
+            // different fixes, and one total cannot tell them apart.
+            uint32_t linkDown = 0, ringFull = 0;
+            platform::ethSendFailCounts(linkDown, ringFull);
+            std::snprintf(statusBuf_, sizeof(statusBuf_),
+                          "%u Mbit - %u pkt/s, %u lost (%u link, %u ring)",
                           static_cast<unsigned>(mbps), static_cast<unsigned>(sent),
-                          static_cast<unsigned>(dropped));
+                          static_cast<unsigned>(dropped),
+                          static_cast<unsigned>(linkDown), static_cast<unsigned>(ringFull));
         } else {
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u Mbit - %u packets/s",
                           static_cast<unsigned>(mbps), static_cast<unsigned>(sent));
@@ -365,8 +397,14 @@ private:
     /// Frames the MAC refused since boot. Cumulative on purpose: the per-second rate hides a slow
     /// trickle of drops, and a rising total is the signal that the sender is outrunning the wire.
     uint32_t framesDroppedTotal_ = 0;
-    /// Backing store for the status line (setStatus does not copy).
-    char statusBuf_[48] = {};
+    /// Backing store for the status line (setStatus does not copy). Sized for the longest one: the
+    /// split-drop report, which carries three cumulative counters and reaches ~63 chars at millions
+    /// of drops. Truncation would cut the RING count — the number the line exists to show.
+    char statusBuf_[96] = {};
+    /// Whether a restart has already been attempted for the CURRENT wedge. One attempt per wedge:
+    /// a restart cannot fix an unplugged cable, and retrying every second would bounce the interface
+    /// under the user. Cleared as soon as frames flow again.
+    bool restartTried_ = false;
     /// Whether this driver currently holds the raw-L2 claim, so prepare/release stay balanced
     /// however often the framework calls them.
     bool claimed_ = false;

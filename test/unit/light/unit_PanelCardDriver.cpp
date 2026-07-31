@@ -393,3 +393,86 @@ TEST_CASE("PanelCardDriver sends nothing when the buffer covers no row") {
 
     CHECK(mm::platform::ethTestFrameCount() == 0);
 }
+
+// A transmit path that refuses everything gets ONE recovery attempt, not one per second: a restart
+// cannot fix an unplugged cable, and retrying would tear the interface down repeatedly under a user
+// who is watching the card to find out what is wrong.
+TEST_CASE("PanelCardDriver attempts recovery once per wedge") {
+    clearClaims();
+    mm::Buffer source;
+    mm::PanelCardDriver driver;
+    Wall wall(64, 1);
+    setUp(driver, source, wall, 64);
+
+    // Drive the failure streak past the wedge threshold.
+    mm::platform::setTestEthSendFails(true);
+    for (int i = 0; i < 200; i++) {
+        mm::platform::setTestNowMs(1000 + i * 30);
+        driver.tick();
+    }
+    REQUIRE(mm::platform::ethSendFailStreak() >= 500);
+
+    const uint32_t before = mm::platform::ethRestartCountForTest();
+    driver.tick1s();
+    CHECK(mm::platform::ethRestartCountForTest() == before + 1);   // fired
+    driver.tick1s();
+    driver.tick1s();
+    CHECK(mm::platform::ethRestartCountForTest() == before + 1);   // and only once
+
+    mm::platform::setTestEthSendFails(false);
+}
+
+// A wedge that survives the restart is reported rather than retried: the second and third ticks
+// must NOT fire again, or a wedge the restart cannot fix (an unplugged cable) would bounce the
+// interface every tick under a user who is reading the card to find out what is wrong.
+//
+// Re-arming for a LATER wedge needs a live link, which the host stub does not have — that half is
+// bench-verified rather than pinned here, and the comment in writeLinkStatus says so.
+TEST_CASE("PanelCardDriver reports a surviving wedge instead of restarting again") {
+    clearClaims();
+    mm::Buffer source;
+    mm::PanelCardDriver driver;
+    Wall wall(64, 1);
+    setUp(driver, source, wall, 64);
+
+    mm::platform::setTestEthSendFails(true);
+    for (int i = 0; i < 200; i++) {
+        mm::platform::setTestNowMs(5000 + i * 30);
+        driver.tick();
+    }
+    driver.tick1s();                                       // fires
+    const uint32_t after = mm::platform::ethRestartCountForTest();
+
+    for (int i = 0; i < 5; i++) driver.tick1s();           // still wedged
+    CHECK(mm::platform::ethRestartCountForTest() == after);   // and still only one restart
+
+    mm::platform::setTestEthSendFails(false);
+}
+
+// Failures are counted by CAUSE, because a down link and a full TX ring are different faults with
+// different fixes — one total cannot tell them apart, which is what made a real bug unreadable.
+TEST_CASE("PanelCardDriver counts send failures by cause") {
+    clearClaims();
+    mm::platform::ethTestClearFrames();
+    mm::Buffer source;
+    mm::PanelCardDriver driver;
+    Wall wall(64, 1);
+    setUp(driver, source, wall, 64);
+
+    uint32_t linkDown = 0, ringFull = 0;
+    mm::platform::ethSendFailCounts(linkDown, ringFull);
+    CHECK(ringFull == 0);
+
+    mm::platform::setTestEthSendFails(true);
+    mm::platform::setTestNowMs(30000);
+    driver.tick();
+    mm::platform::setTestEthSendFails(false);
+
+    mm::platform::ethSendFailCounts(linkDown, ringFull);
+    CHECK(ringFull > 0);       // cumulative, not the streak — it survives a later success
+    mm::platform::setTestNowMs(30100);
+    driver.tick();
+    uint32_t after = 0;
+    mm::platform::ethSendFailCounts(linkDown, after);
+    CHECK(after == ringFull);  // a success does not erase the history
+}

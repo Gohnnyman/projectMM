@@ -399,3 +399,20 @@ The leading untested theory is that a short frame gives the DMA no runway to pre
 - **Read a control's applicability before drawing conclusions from its value.** `doubleBuffer`, `useRing` and `ringSnapshot` all appear in `/api/state` while being inapplicable to this path (`supportsDoubleBuffer()` is hard `false` here; the ring controls are hidden unless `pinExpanderMode()`, and `wantsRing()` returns false in direct mode outright). Two hypotheses were built on those values and both were dead ends — the UI hides them for a reason, the API does not.
 - **A frame-time KPI that does not scale with the frame is measuring a timeout, not a wire.** `frameTime` read ~741 µs flat from 10 to 600 lights. Flat where it should scale is a signal in itself.
 - **A fix that works is not a cause that is understood.** The pool swap reliably removes the symptom, which is tempting to write up as a root cause; the arithmetic says the mechanism is still unknown.
+
+## A DMA buffer smaller than the frame multiplies descriptor use — and the symptom looked exactly like a failing cable
+
+Streaming panel-card frames from an S31 at ~5 300 packets/s degraded with uptime: clean for minutes, then refused frames, then a total transmit wedge every ~11 minutes that only a reboot cleared. It read as a hardware fault the whole way — and it was two config lines.
+
+**The arithmetic that caused it.** `CONFIG_ETH_DMA_BUFFER_SIZE` defaults to 512 B. A panel-card frame is 1512 B, so every frame consumed **three** descriptors. A 10-descriptor TX ring therefore held ~3.3 frames while the driver fires 132 back-to-back. Setting the buffer to 1536 B (64-byte aligned) gives one descriptor per frame and the failures stop. **Check DMA buffer size against your actual frame size; the default is sized for IP MTU traffic, not for a burst sender.**
+
+**The second half is a race, not a size.** `CONFIG_ETH_TRANSMIT_MUTEX` defaults to off, and `mac->transmit` advances a shared descriptor pointer with no locking. With the eth netif up, lwIP and the render task both reach it. Bench-isolated: buffer fixed but mutex off → 3 000 refused frames in 4 minutes; mutex on with only 10 descriptors → none in 11. **Ring depth was never the fix** — 30 descriptors ran no cleaner than 10, and a 30-deep TX ring totals ~46 KB of internal RAM against ~15 KB at 10.
+
+**Why it cost hours: two wrong turns worth naming.**
+- *"It is not back-pressure."* Halving the send rate left the failure rate at ~13-15%, which reads as ruling out a full ring. It does not: at 3.3 frames of depth each 132-packet burst overruns the ring at any rate. The burst was the problem, never the rate. That misreading sent the investigation toward the cable and the PHY.
+- *One counter for two faults.* `esp_eth_transmit` returns `ESP_ERR_INVALID_STATE` for a down link **before** touching the MAC, and `ESP_ERR_NO_MEM` for a full ring. Collapsing both into one bool made "5 million drops" unreadable. Splitting them settled the cause in one build — every failure was `ring`, none was `link`. **When a counter can be incremented by two different faults, split it before theorising.**
+
+**What the physical evidence did and did not prove.** Both link LEDs going dark said the wire genuinely dropped — true, and it correctly killed the "stale software flag" theory. But it does not identify a cause: a wedged MAC stops driving the wire, so the dark LED was a *consequence*. A longer cable was the visible difference from the working setup and looked compelling; it was untouched throughout and is exonerated.
+
+**Recovery still earns its place.** `esp_eth_stop()` + `esp_eth_start()` re-runs negotiation and resets the descriptor rings — the only way back from a wedge short of a reboot, since no ioctl writes the driver's link flag. Bench-verified twice, recovering in ~17 s. Attempted once per wedge, never repeatedly: a restart cannot fix an unplugged cable, and retrying would bounce the interface under the user.
+

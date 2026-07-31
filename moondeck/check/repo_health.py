@@ -203,6 +203,39 @@ def snapshot(perf=None):
 
 
 def load_previous():
+    """The COMMITTED snapshot, read from git rather than from the working tree.
+
+    The delta is meant to answer "what did this commit change", so the baseline has to be the last
+    commit — not whatever a previous run left on disk. Reading the working-tree file made every run
+    after the first compare against the run before it, so a second run inside one commit showed a
+    delta of ~0 and the real change vanished. Running the check twice must give the same answer.
+
+    Falls back to the working-tree file when git cannot answer (a fresh clone with no commit yet, or
+    the file untracked), which keeps a first-ever run working.
+    """
+    try:
+        out = subprocess.run(["git", "show", f"HEAD:{HEALTH_FILE.relative_to(ROOT).as_posix()}"],
+                             cwd=ROOT, capture_output=True, text=True, timeout=10)
+        if out.returncode == 0:
+            return json.loads(out.stdout)
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+        pass
+    if not HEALTH_FILE.exists():
+        return {}
+    try:
+        return json.loads(_read(HEALTH_FILE))
+    except json.JSONDecodeError:
+        return {}
+
+
+def load_working_tree():
+    """The snapshot on disk, whatever produced it.
+
+    Carry-forward needs the NEWEST numbers, not the committed ones: a board-attached run writes fresh
+    perf figures here, and a later boardless run must preserve them rather than reverting to what the
+    last commit happened to hold. That is the opposite of what the delta baseline wants, which is why
+    the two read from different places.
+    """
     if not HEALTH_FILE.exists():
         return {}
     try:
@@ -349,8 +382,8 @@ def render_markdown(new, old):
 
 def write(perf=None, quiet=False):
     """Measure, print the delta, and rewrite both views. Called by the KPI gate."""
-    old = load_previous()
-    new = merge_carry_forward(snapshot(perf), old)
+    old = load_previous()                                  # committed → what the delta compares against
+    new = merge_carry_forward(snapshot(perf), load_working_tree())   # newest → what unmeasured metrics keep
     if not quiet:
         for line in format_delta(new, old):
             print(line)
@@ -366,7 +399,7 @@ def main():
     args = parser.parse_args()
 
     old = load_previous()
-    new = merge_carry_forward(snapshot(), old)
+    new = merge_carry_forward(snapshot(), load_working_tree())
     for line in format_delta(new, old):
         print(line)
     if args.write:

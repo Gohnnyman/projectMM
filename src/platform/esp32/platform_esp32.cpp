@@ -937,16 +937,28 @@ bool ethRawL2Claimed() MM_NONBLOCKING {
 // Consecutive failures, so a caller can distinguish back-pressure from a wedged path (see
 // platform.h). Written on the render task, read by the driver's 1 Hz status tick.
 static std::atomic<uint32_t> ethSendFails_{0};
+// Split by cause — see platform.h. esp_eth_transmit checks the link BEFORE the MAC, so the two
+// errors are genuinely distinct conditions rather than degrees of the same one.
+static std::atomic<uint32_t> ethFailLinkDown_{0};
+static std::atomic<uint32_t> ethFailRingFull_{0};
 
 bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     if (!ethHandle_ || !frame || len == 0) return false;
     if (!ethLinkUp_.load(std::memory_order_relaxed)) return false;
-    if (esp_eth_transmit(ethHandle_, const_cast<uint8_t*>(frame), len) != ESP_OK) {
+    const esp_err_t err = esp_eth_transmit(ethHandle_, const_cast<uint8_t*>(frame), len);
+    if (err != ESP_OK) {
         ethSendFails_.fetch_add(1, std::memory_order_relaxed);
+        if (err == ESP_ERR_INVALID_STATE) ethFailLinkDown_.fetch_add(1, std::memory_order_relaxed);
+        else if (err == ESP_ERR_NO_MEM)   ethFailRingFull_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     ethSendFails_.store(0, std::memory_order_relaxed);
     return true;
+}
+
+void ethSendFailCounts(uint32_t& linkDown, uint32_t& ringFull) MM_NONBLOCKING {
+    linkDown = ethFailLinkDown_.load(std::memory_order_relaxed);
+    ringFull = ethFailRingFull_.load(std::memory_order_relaxed);
 }
 
 uint32_t ethSendFailStreak() MM_NONBLOCKING {
@@ -957,6 +969,17 @@ uint32_t ethSendFailStreak() MM_NONBLOCKING {
 // call (rather than failing) keeps the driver's control identical on every target — the field is
 // simply ignored here, which is what the driver's own comment tells the user.
 bool ethBindRawInterface(const char*) { return true; }
+
+bool ethRestartTx() {
+    if (!ethHandle_) return false;
+    // Clear our own flag first: the restart re-runs negotiation and the CONNECTED event sets it
+    // again if the link really comes back. Leaving it true would keep ethSendRaw trying against a
+    // driver that is mid-restart.
+    ethLinkUp_.store(false, std::memory_order_relaxed);
+    ethSendFails_.store(0, std::memory_order_relaxed);
+    esp_eth_stop(ethHandle_);
+    return esp_eth_start(ethHandle_) == ESP_OK;
+}
 
 // Negotiated link speed, asked of the driver rather than assumed from the PHY type: a gigabit PHY
 // on a 100 Mbit switch (or a bad cable) negotiates down, and that is precisely the case worth
@@ -985,8 +1008,10 @@ void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING         { out[0] = out[1] = out[2
 bool ethSendRaw(const uint8_t*, size_t) MM_NONBLOCKING { return false; }   // no MAC to hand a frame to
 void ethClaimRawL2(bool)                               {}                  // no link to claim
 bool ethRawL2Claimed() MM_NONBLOCKING                  { return false; }
+bool ethRestartTx()                                    { return false; }   // no driver to restart
 uint16_t ethLinkSpeedMbps() MM_NONBLOCKING             { return 0; }       // no link to describe
 uint32_t ethSendFailStreak() MM_NONBLOCKING            { return 0; }       // nothing sends, nothing fails
+void ethSendFailCounts(uint32_t& a, uint32_t& b) MM_NONBLOCKING { a = b = 0; }
 bool ethBindRawInterface(const char*)                  { return true; }    // no MAC, nothing to bind
 
 #endif // MM_NO_ETH
