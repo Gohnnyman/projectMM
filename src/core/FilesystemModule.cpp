@@ -213,6 +213,12 @@ bool FilesystemModule::applySubtree(MoonModule* m, const char* json, const char*
     // root covers every node applyNode just created.
     m->setup();
     m->applyState();
+    // The tree just changed shape and values, so it has to be written back: without this an applied
+    // preset renders correctly and is then LOST on reboot, because the boot loader restores the
+    // config file that the apply never updated. Marked here rather than in each caller, so every
+    // applySubtree user persists by construction.
+    m->markDirty();
+    noteDirty();
     return true;
 }
 
@@ -351,7 +357,11 @@ bool FilesystemModule::saveSubtreeTo(MoonModule* m, JsonSink& sink, const char* 
     if (!m) return false;
     const bool bare = (prefix == nullptr || prefix[0] == 0);
     if (bare) sink.append("{");   // a namespaced subtree is a fragment of the caller's object
-    writeNode(m, sink, bare ? "" : prefix, /*firstField=*/bare);
+    // firstField=true in BOTH cases: this writes only its own fields, and the caller assembling a
+    // larger object owns the separator before each subtree. Emitting a leading comma here as well
+    // produced ",," in every preset carrying more than one capture — invalid JSON that our own
+    // first-match key reader happened to tolerate.
+    writeNode(m, sink, bare ? "" : prefix, /*firstField=*/true);
     if (bare) sink.append("}");
     return !sink.overflowed();           // only trips on an allocation failure, not a size cap
 }

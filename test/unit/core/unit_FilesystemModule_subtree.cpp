@@ -36,16 +36,18 @@ struct Tree {
     mm::Scheduler scheduler;
     mm::FilesystemModule* fs = nullptr;
     mm::MoonModule* layers = nullptr;
+    char root_[256] = {};
 
     Tree() {
         // Isolate the filesystem: without this the boot load reads the developer's real
         // /.config/Layers.json and the tree arrives with whatever that machine happened to have,
         // so the assertions below would depend on the box the tests run on.
-        char root[256];
-        std::snprintf(root, sizeof(root), "/tmp/mm_subtree_test_%u",
-                      static_cast<unsigned>(mm::platform::millis()));
-        std::filesystem::remove_all(root);
-        mm::platform::fsSetRoot(root);
+        // A monotonic counter, not millis(): two fixtures built in the same millisecond would share
+        // a root and read each other's files.
+        static unsigned seq = 0;
+        std::snprintf(root_, sizeof(root_), "/tmp/mm_subtree_test_%u", ++seq);
+        std::filesystem::remove_all(root_);
+        mm::platform::fsSetRoot(root_);
 
         mm::ModuleFactory::registerType<mm::Layers>("Layers");
         mm::ModuleFactory::registerType<mm::Layer>("Layer");
@@ -60,6 +62,8 @@ struct Tree {
         scheduler.addModule(layers);
         scheduler.setup();
     }
+
+    ~Tree() { std::filesystem::remove_all(root_); }   // don't leave a directory per test behind
 
     /// Add a child at runtime, driving the lifecycle the caller owns (MoonModule.h's contract).
     mm::MoonModule* add(mm::MoonModule* parent, const char* type) {
@@ -118,7 +122,7 @@ TEST_CASE("applySubtree restores a tree that changed since it was captured") {
     if (old) { old->release(); mm::Scheduler::deleteTree(old); }
     REQUIRE(std::strcmp(t.effectType(), "RainbowEffect") == 0);
 
-    t.fs->applySubtree(t.layers, preset.c_str());
+    CHECK(t.fs->applySubtree(t.layers, preset.c_str()));
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);   // the captured look is back
 }
 
@@ -139,7 +143,7 @@ TEST_CASE("applySubtree recreates children the live tree no longer has") {
     mm::Scheduler::deleteTree(gone);
     REQUIRE(t.layers->childCount() == 0);
 
-    t.fs->applySubtree(t.layers, preset.c_str());
+    CHECK(t.fs->applySubtree(t.layers, preset.c_str()));
     REQUIRE(t.layers->childCount() == 1);
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);
 }
@@ -155,7 +159,7 @@ TEST_CASE("applySubtree removes children the preset does not describe") {
     t.add(layer, "NoiseEffect");
     REQUIRE(layer->childCount() == 1);
 
-    t.fs->applySubtree(t.layers, preset.c_str());
+    CHECK(t.fs->applySubtree(t.layers, preset.c_str()));
     CHECK(layer->childCount() == 0);
 }
 
@@ -172,7 +176,7 @@ TEST_CASE("applySubtree skips an unknown module type and applies the rest") {
         "\"0.0.type\":\"NoSuchEffectXyz\",\"0.0.enabled\":true,"
         "\"0.1.type\":\"NoiseEffect\",\"0.1.enabled\":true}";
 
-    t.fs->applySubtree(t.layers, preset);
+    CHECK(t.fs->applySubtree(t.layers, preset));
 
     REQUIRE(t.layers->childCount() == 1);                       // the Layer applied
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);      // and so did the effect after it
@@ -186,11 +190,13 @@ TEST_CASE("applySubtree survives a corrupt preset") {
     auto* layer = t.add(t.layers, "Layer");
     t.add(layer, "NoiseEffect");
 
-    t.fs->applySubtree(t.layers, "{\"0.type\":\"Lay");   // truncated mid-key
+    // Rejected, and it SAYS so: a caller reporting success to a user must be able to tell a real
+    // apply from a body that was never credible.
+    CHECK_FALSE(t.fs->applySubtree(t.layers, "{\"0.type\":\"Lay"));   // truncated mid-key
     CHECK(t.layers->childCount() == 1);
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);
 
-    t.fs->applySubtree(t.layers, "");                    // and an empty body
+    CHECK_FALSE(t.fs->applySubtree(t.layers, ""));                    // and an empty body
     CHECK(t.layers->childCount() == 1);
 }
 
@@ -216,6 +222,6 @@ TEST_CASE("a prefixed subtree round-trips inside a larger object") {
     if (old) { old->release(); mm::Scheduler::deleteTree(old); }
     REQUIRE(std::strcmp(t.effectType(), "RainbowEffect") == 0);
 
-    t.fs->applySubtree(t.layers, preset.c_str(), "Layers.");
+    CHECK(t.fs->applySubtree(t.layers, preset.c_str(), "Layers."));
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);
 }

@@ -33,13 +33,15 @@ struct Device {
     mm::ControlModule* control = nullptr;
     mm::MoonModule* layers = nullptr;
     mm::MoonModule* drivers = nullptr;
+    char root_[256] = {};
 
     Device() {
-        char root[256];
-        std::snprintf(root, sizeof(root), "/tmp/mm_preset_test_%u",
-                      static_cast<unsigned>(mm::platform::millis()));
-        std::filesystem::remove_all(root);
-        mm::platform::fsSetRoot(root);
+        // A monotonic counter, not millis(): two fixtures constructed in the same millisecond would
+        // otherwise share a root and see each other's preset files.
+        static unsigned seq = 0;
+        std::snprintf(root_, sizeof(root_), "/tmp/mm_preset_test_%u", ++seq);
+        std::filesystem::remove_all(root_);
+        mm::platform::fsSetRoot(root_);
 
         mm::ModuleFactory::registerType<mm::Layers>("Layers");
         mm::ModuleFactory::registerType<mm::Layer>("Layer");
@@ -61,6 +63,8 @@ struct Device {
         scheduler.setup();
     }
 
+    ~Device() { std::filesystem::remove_all(root_); }   // don't leave a directory per test behind
+
     mm::MoonModule* add(mm::MoonModule* parent, const char* type) {
         auto* m = mm::ModuleFactory::create(type);
         REQUIRE(m != nullptr);
@@ -70,7 +74,8 @@ struct Device {
         return m;
     }
 
-    /// Drive the module the way the UI does: set a control, then fire its change hook.
+    /// Set a control's text value. The change hook is NOT fired here — a test that needs it calls
+    /// press() explicitly, which is what the UI does as a second step.
     void setText(const char* controlName, const char* value) {
         auto& cs = control->controls();
         for (uint8_t i = 0; i < cs.count(); i++) {
@@ -81,15 +86,19 @@ struct Device {
         FAIL("no control named ", controlName);
     }
 
-    /// A capture toggle (Layouts / Layers / Drivers / Services): which subtrees the next save writes.
-    void setCapture(const char* controlName, bool on) {
+    /// What the next save captures: exactly one of Layouts / Layers / Drivers / Services.
+    void setCapture(const char* typeName) {
         auto& cs = control->controls();
         for (uint8_t i = 0; i < cs.count(); i++) {
-            if (std::strcmp(cs[i].name, controlName) != 0) continue;
-            *static_cast<bool*>(cs[i].ptr) = on;
-            return;
+            if (std::strcmp(cs[i].name, "captures") != 0) continue;
+            for (uint8_t r = 0; r < mm::ControlModule::kCaptureCount; r++) {
+                if (std::strcmp(mm::ControlModule::kCapturable[r], typeName) != 0) continue;
+                *static_cast<uint8_t*>(cs[i].ptr) = r;
+                return;
+            }
+            FAIL("no capturable type named ", typeName);
         }
-        FAIL("no control named ", controlName);
+        FAIL("no captures control");
     }
 
     void press(const char* button) { control->onControlChanged(button); }
@@ -193,32 +202,41 @@ TEST_CASE("ControlModule refuses to save a preset with no name") {
     CHECK(std::string(d.status()).find("name") != std::string::npos);
 }
 
-// A preset must say what it carries. Capturing nothing would produce a file that changes nothing on
-// apply, which reads as a broken preset rather than an empty one.
-TEST_CASE("ControlModule refuses to save a preset that captures nothing") {
-    Device d;
-    d.add(d.layers, "Layer");
-    // Clear every capture flag.
-    auto& cs = d.control->controls();
-    for (uint8_t i = 0; i < cs.count(); i++)
-        if (cs[i].type == mm::ControlType::Bool) *static_cast<bool*>(cs[i].ptr) = false;
-
-    d.setText("name", "empty");
-    d.press("save");
-    CHECK(d.control->listRowCount() == 0);
-    CHECK(std::string(d.status()).find("capture") != std::string::npos);
-}
-
-// A preset carrying a module this build does not have applies what it can and says what it skipped:
-// a preset from another board must degrade rather than refuse or crash.
-TEST_CASE("ControlModule skips a capture this build does not have") {
+// A preset carries exactly ONE role, so a file written by an older build that names several is
+// listed but not applied: applying it would do something other than what its name suggests. It stays
+// on the grid (and on disk) so it can be seen and deleted, rather than silently disappearing.
+TEST_CASE("ControlModule refuses to apply a preset carrying several roles") {
     Device d;
     auto* layer = d.add(d.layers, "Layer");
     d.add(layer, "NoiseEffect");
 
-    // Hand-written: claims to carry Drivers, which this device does not have.
+    const char* body =
+        "{\"captures\":\"Layouts,Layers\","
+        "\"Layers.enabled\":true,"
+        "\"Layers.0.type\":\"Layer\",\"Layers.0.enabled\":true}";
+    mm::platform::fsMkdir(mm::ControlModule::kPresetDir);
+    char path[160];
+    std::snprintf(path, sizeof(path), "%s/legacy.json", mm::ControlModule::kPresetDir);
+    REQUIRE(mm::platform::fsWriteAtomic(path, body, std::strlen(body)));
+    d.control->setup();
+
+    REQUIRE(d.control->listRowCount() == 1);                 // visible, so it can be deleted
+    CHECK(d.control->roleOf(0) == mm::ControlModule::kCaptureCount);   // but it holds no single role
+    CHECK_FALSE(d.control->setListRowField(d.firstRowId(), "apply", "{}"));
+    CHECK(std::string(d.status()).find("several roles") != std::string::npos);
+}
+
+// A preset carrying a module this build does not have applies what it can and says what it skipped:
+// a preset from another board must degrade rather than refuse or crash.
+TEST_CASE("ControlModule refuses a preset whose subtree this build does not have") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    // Hand-written: names a single module type no build registers, so the apply must refuse with a
+    // reason rather than report success for a preset that changed nothing.
     const std::string body =
-        "{\"captures\":\"Layers,Drivers\","
+        "{\"captures\":\"NoSuchTopLevelXyz\","
         "\"Layers.enabled\":true,"
         "\"Layers.0.type\":\"Layer\",\"Layers.0.enabled\":true,"
         "\"Layers.0.0.type\":\"NoiseEffect\",\"Layers.0.0.enabled\":true}";
@@ -230,9 +248,8 @@ TEST_CASE("ControlModule skips a capture this build does not have") {
     d.control->setup();                      // rescan picks the file up
     REQUIRE(d.control->listRowCount() == 1);
 
-    d.control->setListRowField(d.firstRowId(), "apply", "{}");
-    CHECK(std::strcmp(d.effectType(), "NoiseEffect") == 0);          // the part it could apply
-    CHECK(std::string(d.status()).find("skipped") != std::string::npos);
+    CHECK_FALSE(d.control->setListRowField(d.firstRowId(), "apply", "{}"));
+    CHECK(std::string(d.status()).find("nothing this build knows") != std::string::npos);
 }
 
 // A truncated file (an interrupted upload) must leave the device with the look it already had.
@@ -479,13 +496,11 @@ TEST_CASE("ControlModule keeps one active preset per captured role") {
     d.add(layer, "NoiseEffect");
 
     // A driver-only preset and a layer-only preset: two roles, two pads.
-    d.setCapture("Drivers", true);
-    d.setCapture("Layers", false);
+    d.setCapture("Drivers");
     d.setText("name", "geometry");
     d.press("save");
 
-    d.setCapture("Drivers", false);
-    d.setCapture("Layers", true);
+    d.setCapture("Layers");
     d.setText("name", "look");
     d.press("save");
     REQUIRE(d.control->listRowCount() == 2);
@@ -503,30 +518,29 @@ TEST_CASE("ControlModule keeps one active preset per captured role") {
     CHECK(d.rowNamed("look").find("\"activeRoles\":[\"layer\"]") != std::string::npos);
 }
 
-// A preset carrying several roles supersedes each of them, so applying a mixed preset takes over from
-// the separate presets that held those roles rather than leaving stale pads lit.
-TEST_CASE("ControlModule lets a mixed preset take over every role it carries") {
+// Each role is held independently, so applying a look replaces the look and leaves the geometry
+// alone. With one role per preset this is the whole supersede rule.
+TEST_CASE("ControlModule replaces only the role a preset carries") {
     Device d;
     auto* layer = d.add(d.layers, "Layer");
     d.add(layer, "NoiseEffect");
 
-    d.setCapture("Drivers", true);
-    d.setCapture("Layers", false);
-    d.setText("name", "geometry");
-    d.press("save");
+    d.setCapture("Drivers");
+    d.setText("name", "hardware");  d.press("save");
+    d.setCapture("Layers");
+    d.setText("name", "lookA");     d.press("save");
+    d.setText("name", "lookB");     d.press("save");
 
-    d.setCapture("Drivers", true);
-    d.setCapture("Layers", true);
-    d.setText("name", "both");
-    d.press("save");
+    d.activate("hardware");
+    d.activate("lookA");
+    CHECK(d.rowNamed("hardware").find("\"active\":true") != std::string::npos);
+    CHECK(d.rowNamed("lookA").find("\"active\":true") != std::string::npos);
 
-    d.activate("geometry");
-    REQUIRE(d.rowNamed("geometry").find("\"active\":true") != std::string::npos);
-
-    // The mixed preset claims the driver role too, so the driver-only pad goes dark.
-    d.activate("both");
-    CHECK(d.rowNamed("both").find("\"active\":true") != std::string::npos);
-    CHECK(d.rowNamed("geometry").find("\"active\":true") == std::string::npos);
+    // A second look takes the layer role from the first; the driver preset is untouched.
+    d.activate("lookB");
+    CHECK(d.rowNamed("lookB").find("\"active\":true") != std::string::npos);
+    CHECK(d.rowNamed("lookA").find("\"active\":true") == std::string::npos);
+    CHECK(d.rowNamed("hardware").find("\"active\":true") != std::string::npos);
 }
 
 
@@ -562,7 +576,7 @@ TEST_CASE("ControlModule reports an apply that changed nothing") {
     Device d;
     d.add(d.layers, "Layer");
 
-    d.setCapture("Layers", true);
+    d.setCapture("Layers");
     d.setText("name", "look");
     d.press("save");
     REQUIRE(d.control->listRowCount() == 1);
@@ -617,4 +631,196 @@ TEST_CASE("ControlModule refuses a preset name that could escape its folder") {
     REQUIRE(d.control->listRowCount() == 1);
     CHECK_FALSE(d.control->setListRowField(d.firstRowId(), "name", "{\"value\":\"../escape\"}"));
     CHECK(!d.rowNamed("safe").empty());              // the preset is untouched
+}
+
+
+// Renaming onto a name that already exists must refuse rather than overwrite: the write would clobber
+// the other preset and the follow-up remove would delete the source, losing a preset the user never
+// named. Same refuse-on-collision stance the pad move takes.
+TEST_CASE("ControlModule refuses to rename a preset over an existing one") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    d.setText("name", "keep");
+    d.press("save");
+    d.setText("name", "other");
+    d.press("save");
+    REQUIRE(d.control->listRowCount() == 2);
+
+    const std::string row = d.rowNamed("other");
+    REQUIRE(!row.empty());
+    const uint32_t id = static_cast<uint32_t>(std::stoul(row.substr(row.find("\"id\":") + 5)));
+
+    CHECK_FALSE(d.control->setListRowField(id, "name", "{\"value\":\"keep\"}"));
+    CHECK(d.control->listRowCount() == 2);         // both survive
+    CHECK(!d.rowNamed("keep").empty());
+    CHECK(!d.rowNamed("other").empty());
+}
+
+
+// The saved file must be valid JSON, not merely readable by our own first-match key helpers: a
+// preset is downloaded, edited and re-uploaded by users and tools. The separator between the header
+// and each namespaced subtree is easy to get wrong in a way our lenient reader would not notice.
+TEST_CASE("ControlModule writes a preset that is well-formed JSON") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    d.setCapture("Layers");
+    d.setText("name", "wellformed");
+    d.press("save");
+
+    char path[160];
+    std::snprintf(path, sizeof(path), "%s/wellformed.json", mm::ControlModule::kPresetDir);
+    const long size = mm::platform::fsSize(path);
+    REQUIRE(size > 0);
+    std::string body(static_cast<size_t>(size) + 1, '\0');
+    REQUIRE(mm::platform::fsRead(path, body.data(), body.size()) > 0);
+    body.resize(std::strlen(body.c_str()));
+
+    // A minimal structural check: balanced braces, no empty pair, and no doubled separator -- the
+    // three ways a hand-assembled object breaks.
+    CHECK(body.front() == '{');
+    CHECK(body.back() == '}');
+    CHECK(body.find(",,") == std::string::npos);
+    CHECK(body.find("{,") == std::string::npos);
+    CHECK(body.find(",}") == std::string::npos);
+    int depth = 0;
+    for (char c : body) { if (c == '{') depth++; else if (c == '}') depth--; }
+    CHECK(depth == 0);
+}
+
+
+// An applied preset must SURVIVE a reboot. Applying rebuilds the live tree, but the boot loader
+// restores from the config file -- so without marking the tree dirty the device renders the preset
+// now and comes back to the previous look after a restart, which reads as "the preset did not save".
+TEST_CASE("ControlModule persists the look a preset applied") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    d.setCapture("Layers");
+    d.setText("name", "keeper");
+    d.press("save");
+
+    // Change the look, and let that change reach the config file.
+    auto* old = layer->replaceChildAt(0, mm::ModuleFactory::create("RainbowEffect"));
+    if (old) { old->release(); mm::Scheduler::deleteTree(old); }
+    d.fs->flush();
+    REQUIRE(std::strcmp(d.effectType(), "RainbowEffect") == 0);
+
+    d.activate("keeper");
+    REQUIRE(std::strcmp(d.effectType(), "NoiseEffect") == 0);   // applied to the LIVE tree
+
+    // The config file must now describe the applied look, not the one it replaced.
+    d.fs->flush();
+    char path[160];
+    std::snprintf(path, sizeof(path), "/.config/%s.json", d.layers->typeName());
+    const long size = mm::platform::fsSize(path);
+    REQUIRE(size > 0);
+    std::string body(static_cast<size_t>(size) + 1, '\0');
+    REQUIRE(mm::platform::fsRead(path, body.data(), body.size()) > 0);
+    body.resize(std::strlen(body.c_str()));
+    CHECK(body.find("NoiseEffect") != std::string::npos);
+    CHECK(body.find("RainbowEffect") == std::string::npos);
+}
+
+
+// Only a pure look may be reachable from outside. A preset that also carries Drivers or Layouts
+// rewires pins or geometry, and an external surface (a voice assistant, an automation) must not be
+// able to do that while it thinks it is picking a colour scheme.
+TEST_CASE("ControlModule exposes only look-only presets to external surfaces") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    d.setCapture("Layers");
+    d.setText("name", "purelook");  d.press("save");
+
+    d.setCapture("Drivers");
+    d.setText("name", "pinsonly");  d.press("save");
+    REQUIRE(d.control->presetCount() == 2);
+
+    auto lookOnlyNamed = [&](const char* n) {
+        for (uint8_t i = 0; i < d.control->presetCount(); i++)
+            if (std::strcmp(d.control->presetName(i), n) == 0) return d.control->isLookOnly(i);
+        FAIL("no preset named ", n);
+        return false;
+    };
+    CHECK(lookOnlyNamed("purelook"));
+    CHECK_FALSE(lookOnlyNamed("pinsonly"));    // hardware, not a look
+
+    // And the apply entry point enforces it, not just the listing: naming a hardware-carrying preset
+    // through the external path is refused outright.
+    CHECK(d.control->applyLookByName("purelook"));
+    CHECK_FALSE(d.control->applyLookByName("pinsonly"));
+    CHECK_FALSE(d.control->applyLookByName("nosuchpreset"));
+
+    CHECK(std::string(d.control->currentLook()) == "purelook");
+}
+
+
+// The Home Assistant effect list is sized from what the device actually has, not from a fixed cap: a
+// cap would either reserve RAM a small setup never uses, or silently publish nothing once the list
+// outgrew it (a truncated config is refused, never sent, so the entity would just vanish).
+TEST_CASE("ControlModule sizes the Home Assistant look list to the presets that exist") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    auto lookNames = [&]() {
+        size_t bytes = 0, count = 0;
+        for (uint8_t i = 0; i < d.control->presetCount(); i++) {
+            if (!d.control->isLookOnly(i)) continue;
+            bytes += std::strlen(d.control->presetName(i));
+            count++;
+        }
+        return std::make_pair(count, bytes);
+    };
+
+    // Nothing to publish yet.
+    CHECK(lookNames().first == 0);
+
+    d.setCapture("Layers");
+    d.setText("name", "one");       d.press("save");
+    const auto afterOne = lookNames();
+    CHECK(afterOne.first == 1);
+
+    d.setText("name", "twotwotwo"); d.press("save");
+    const auto afterTwo = lookNames();
+    CHECK(afterTwo.first == 2);
+    CHECK(afterTwo.second > afterOne.second);      // the requirement GREW with the longer name
+
+    // A hardware-carrying preset must not enlarge the list at all: it is never published.
+    d.setCapture("Drivers");
+    d.setText("name", "hardware");  d.press("save");
+    CHECK(lookNames().first == 2);
+    CHECK(lookNames().second == afterTwo.second);
+}
+
+
+// Home Assistant caches the preset list and only re-fetches when the device's presets-modified time
+// changes. A constant there means a preset saved, renamed or deleted after HA set the device up
+// never appears in its dropdown — the endpoint stays correct while HA shows a stale copy forever.
+TEST_CASE("ControlModule stamps a new revision whenever the preset set changes") {
+    Device d;
+    d.add(d.layers, "Layer");
+
+    d.setCapture("Layers");
+    d.setText("name", "first");
+    d.press("save");
+    const uint32_t afterFirst = d.control->presetsModifiedS();
+
+    // Saving another preset must move the stamp, or a consumer caching on it never re-reads.
+    mm::platform::delayMs(1100);            // the stamp has second resolution
+    d.setText("name", "second");
+    d.press("save");
+    CHECK(d.control->presetsModifiedS() > afterFirst);
+
+    // So must a delete: a removed preset has to disappear from a cached list too.
+    const uint32_t afterSecond = d.control->presetsModifiedS();
+    mm::platform::delayMs(1100);
+    REQUIRE(d.control->deleteListRow(d.firstRowId()));
+    CHECK(d.control->presetsModifiedS() > afterSecond);
 }

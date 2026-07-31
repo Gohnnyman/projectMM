@@ -679,7 +679,7 @@ function renderCards() {
 // calls sendControl, so it cannot write a swept value to the device, and the first WebSocket patch
 // after it finishes restores whatever the device actually holds.
 // ============================================================================
-const SURFACE_DEMO_MS = 3000;
+const SURFACE_DEMO_MS = 1000;
 let surfaceDemoUntil = 0;
 /// The module the sweep last ran for. renderCards() fires on every state push and every mutation (a
 /// pad click refetches and re-renders), so "the surface was rendered" is NOT "the surface was
@@ -687,6 +687,9 @@ let surfaceDemoUntil = 0;
 let surfaceDemoShownFor = null;
 
 function startSurfaceDemo(root, moduleName) {
+    // The sweep is pure decoration, so it is the first thing to drop for someone who asked for less
+    // motion. Checked before the once-per-surface flag, so the flag is not burned by a skipped run.
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     if (surfaceDemoShownFor === moduleName) return;   // already demoed this surface
     // Every bank is queried from the SAME root. The encoder and fader strips sit on the top-level
     // card while the pad grid is inside a nested one, so scoping to the card that contains the pads
@@ -729,7 +732,7 @@ function startSurfaceDemo(root, moduleName) {
         // what makes it read as a sweep across the desk.
         liveInputs().forEach((el, i) => {
             const lo = Number(el.min) || 0, hi = Number(el.max) || 255;
-            const phase = t * 3 * Math.PI * 2 - i * 0.5;
+            const phase = t * 1.5 * Math.PI * 2 - i * 0.5;
             el.value = Math.round(lo + (hi - lo) * (0.5 + 0.45 * Math.sin(phase)));
             redrawRangeDecorations(el);
         });
@@ -1507,15 +1510,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 row.classList.add("control-encoder");
                 row.appendChild(buildKnob(input, ctrl));
                 row.appendChild(buildSevenSeg(input));
-                const showTarget = () => openSurfacePopup(input, ctrl.name, (body) => {
-                    const line = document.createElement("div");
-                    line.className = "surface-popup-row";
-                    line.textContent = ctrl.target ? `drives ${ctrl.target}`
-                                                   : "unassigned — no target yet";
-                    body.appendChild(line);
-                });
-                row.addEventListener("contextmenu", (e) => { e.preventDefault(); showTarget(); });
-                attachLongPress(row, showTarget);
+                attachTargetPopup(row, input, ctrl);
             }
             if (ctrl.fader) {
                 input.classList.add("fader-input");
@@ -1523,15 +1518,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 row.appendChild(buildSevenSeg(input));
                 // Right-click a fader to see (and later choose) what it drives — the same
                 // configure-on-the-control rule the pads follow.
-                const showFaderTarget = () => openSurfacePopup(input, ctrl.name, (body) => {
-                    const line = document.createElement("div");
-                    line.className = "surface-popup-row";
-                    line.textContent = ctrl.target ? `drives ${ctrl.target}`
-                                                   : "unassigned — no target yet";
-                    body.appendChild(line);
-                });
-                row.addEventListener("contextmenu", (e) => { e.preventDefault(); showFaderTarget(); });
-                attachLongPress(row, showFaderTarget);
+                attachTargetPopup(row, input, ctrl);
             }
             input.min = ctrl.min ?? 0;
             input.max = ctrl.max ?? 255;
@@ -2118,7 +2105,14 @@ function openSurfacePopup(anchorEl, title, build) {
     const body = document.createElement("div");
     body.className = "surface-popup-body";
     pop.appendChild(body);
-    const close = () => pop.remove();
+    // One teardown for every exit path (click-away, Escape, or a button calling close()): removing
+    // the popup without detaching the document listeners leaked a pair per open.
+    let away = null, esc = null;
+    const close = () => {
+        pop.remove();
+        if (away) document.removeEventListener("mousedown", away);
+        if (esc) document.removeEventListener("keydown", esc);
+    };
     build(body, close);
 
     document.body.appendChild(pop);
@@ -2129,13 +2123,8 @@ function openSurfacePopup(anchorEl, title, build) {
 
     // Defer so the click that opened it does not immediately close it.
     setTimeout(() => {
-        const away = (e) => {
-            if (pop.contains(e.target)) return;
-            pop.remove();
-            document.removeEventListener("mousedown", away);
-            document.removeEventListener("keydown", esc);
-        };
-        const esc = (e) => { if (e.key === "Escape") away({target: document.body}); };
+        away = (e) => { if (!pop.contains(e.target)) close(); };
+        esc = (e) => { if (e.key === "Escape") close(); };
         document.addEventListener("mousedown", away);
         document.addEventListener("keydown", esc);
     }, 0);
@@ -2145,32 +2134,32 @@ function openSurfacePopup(anchorEl, title, build) {
 // The edit form behind a right-click on a pad: rename, choose what it captures, save over it, or
 // delete. These are the SAME operations the card's bottom controls performed, moved onto the thing
 // they act on — a form at the bottom of the card cannot say which pad it means.
-// The capture toggles, shared by both popup modes: they decide what a preset carries, which is the
-// difference between a portable look and a device snapshot. Reads the live values from the module's
-// own (hidden) controls, so the popup is a view of them rather than a second source of truth.
+// What a preset captures: exactly ONE of the four top-level subtrees. A radio group rather than four
+// checkboxes, so "a look" and "a geometry" are the only things expressible — the combinations that
+// used to be possible were the hard part to explain and the hard part to display.
 function buildCaptureToggles(body, moduleName) {
     const mod = findModule(moduleName);
-    const names = ["Layouts", "Layers", "Drivers", "Services"];
+    const ctrl = mod && (mod.controls || []).find(c => c.name === "captures");
+    if (!ctrl) return;
+    const names = Array.isArray(ctrl.options) && ctrl.options.length
+        ? ctrl.options : ["Layouts", "Layers", "Drivers", "Services"];
     const wrap = document.createElement("div");
     wrap.className = "surface-popup-captures";
-    for (const n of names) {
-        const ctrl = mod && (mod.controls || []).find(c => c.name === n);
-        if (!ctrl) continue;
+    names.forEach((n, i) => {
         const lab = document.createElement("label");
         lab.className = "surface-popup-capture";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = !!ctrl.value;
-        cb.addEventListener("change", () => sendControl(moduleName, n, cb.checked ? 1 : 0));
-        lab.append(cb, document.createTextNode(n));
+        const rb = document.createElement("input");
+        rb.type = "radio";
+        rb.name = `capture-${moduleName}`;
+        rb.checked = Number(ctrl.value) === i;
+        rb.addEventListener("change", () => { if (rb.checked) sendControl(moduleName, "captures", i); });
+        lab.append(rb, document.createTextNode(n));
         wrap.appendChild(lab);
-    }
-    if (wrap.childElementCount) {
-        const cap = document.createElement("div");
-        cap.className = "surface-popup-caption";
-        cap.textContent = "captures";
-        body.append(cap, wrap);
-    }
+    });
+    const cap = document.createElement("div");
+    cap.className = "surface-popup-caption";
+    cap.textContent = "captures";
+    body.append(cap, wrap);
 }
 
 function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
@@ -2258,6 +2247,19 @@ function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
 // A rotary knob driving a range input. The input stays in the DOM (hidden) so every other path —
 // the WS live patch, defaults, keyboard — keeps working against it unchanged; this only draws the
 // value and turns drags into value changes.
+/// "What does this strip drive?" — the same popup for an encoder and a fader, since the question and
+/// the answer are identical for both. Right-click on a pointer, long-press on touch.
+function attachTargetPopup(row, input, ctrl) {
+    const show = () => openSurfacePopup(input, ctrl.name, (body) => {
+        const line = document.createElement("div");
+        line.className = "surface-popup-row";
+        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned — no target yet";
+        body.appendChild(line);
+    });
+    row.addEventListener("contextmenu", (e) => { e.preventDefault(); show(); });
+    attachLongPress(row, show);
+}
+
 function buildKnob(input, ctrl) {
     // Read the bounds LIVE rather than snapshotting them: the caller assigns input.min/max/value
     // after this returns, so a snapshot here is NaN and the dial draws against nothing.
@@ -2326,15 +2328,26 @@ function buildKnob(input, ctrl) {
             input.value = String(next);
             input.dispatchEvent(new Event("input", {bubbles: true}));
         };
+        // Every termination path runs this once: pointerup, but also pointercancel and
+        // lostpointercapture, which fire when the browser takes the gesture over (scroll, a system
+        // gesture). Without them the move listener stayed attached and the knob kept turning.
+        let ended = false;
         const up = (ev) => {
+            if (ended) return;
+            ended = true;
             wrap.classList.remove("knob-turning");
-            wrap.releasePointerCapture(ev.pointerId);
+            if (ev && ev.pointerId != null && wrap.hasPointerCapture(ev.pointerId))
+                wrap.releasePointerCapture(ev.pointerId);
             wrap.removeEventListener("pointermove", move);
             wrap.removeEventListener("pointerup", up);
+            wrap.removeEventListener("pointercancel", up);
+            wrap.removeEventListener("lostpointercapture", up);
             input.dispatchEvent(new Event("change", {bubbles: true}));
         };
         wrap.addEventListener("pointermove", move);
         wrap.addEventListener("pointerup", up);
+        wrap.addEventListener("pointercancel", up);
+        wrap.addEventListener("lostpointercapture", up);
     });
     // Scroll to turn: the gesture people try first on anything round, and the one that works without
     // knowing the drag exists. `passive:false` so the page does not scroll underneath it.
@@ -2436,8 +2449,13 @@ function buildListPads(container, rows, opts) {
         if (fixed && item == null) {
             // An empty cell: a drop target and nothing else. It carries the slot index so a drop
             // knows where it landed.
-            const hole = document.createElement("div");
+            // A button, not a div: an empty cell is an ACTION (create a preset here), so it must be
+            // reachable and activatable from the keyboard like every other pad.
+            const hole = document.createElement("button");
+            hole.type = "button";
             hole.className = "list-pad list-pad-empty";
+            hole.title = `pad ${i + 1} (empty) — click to save the current state here`;
+            hole.addEventListener("click", () => openPadEditor(hole, moduleName, ctrlName, null, i));
             hole.addEventListener("dragover", (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
@@ -2487,6 +2505,8 @@ function buildListPads(container, rows, opts) {
         pad.addEventListener("click", async () => {
             if (item == null || item.id == null) return;
             pad.disabled = true;
+            // An ACTION field: the arrival is the whole message, so the value is unused. (The tests
+            // call setListRowField directly and pass the request BODY, which is why they read "{}".)
             await listSetField(moduleName, ctrlName, item.id, "activate", "");
             refetchState();
             pad.disabled = false;
@@ -3419,21 +3439,11 @@ const ROLE_HUE = {
     service:   35,   // amber
 };
 
-/// The tint for a set of roles: one role gives its hue, several give the circular mean, so a preset
-/// carrying layout+layer lands between blue and violet rather than picking one and hiding the other.
-/// Circular rather than arithmetic because hue wraps: averaging 350 and 10 must give 0, not 180.
+/// The tint for a preset's role. A preset carries exactly one role, so this is a lookup: a file
+/// naming several is one an older build wrote, and gets no tint because it cannot be applied.
 function roleHue(roles) {
     const hues = (roles || []).map(r => ROLE_HUE[r]).filter(h => h != null);
-    if (!hues.length) return null;
-    if (hues.length === 1) return String(hues[0]);
-    let x = 0, y = 0;
-    for (const h of hues) {
-        const rad = h * Math.PI / 180;
-        x += Math.cos(rad); y += Math.sin(rad);
-    }
-    if (Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9) return String(hues[0]);   // opposites cancel
-    const deg = Math.atan2(y, x) * 180 / Math.PI;
-    return String(Math.round((deg + 360) % 360));
+    return hues.length === 1 ? String(hues[0]) : null;
 }
 
 // Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0

@@ -72,7 +72,24 @@ static void atExitHandler() {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    // --port N: the HTTP port. Defaults to 8080 because ports below 1024 need root on POSIX, but
+    // Home Assistant's WLED integration hardcodes port 80 with no way to specify another, so testing
+    // that path on desktop needs `sudo projectMM --port 80`.
+    uint16_t httpPort = 8080;
+    for (int i = 1; i < argc; i++) {
+        const bool isPort = std::strcmp(argv[i], "--port") == 0;
+        if (isPort && i + 1 < argc) {
+            const long v = std::strtol(argv[++i], nullptr, 10);
+            if (v > 0 && v <= 65535) httpPort = static_cast<uint16_t>(v);
+            else { std::printf("--port must be 1..65535\n"); return 1; }
+        } else if (isPort) {
+            std::printf("--port needs a value\n"); return 1;
+        } else if (std::strcmp(argv[i], "--help") == 0) {
+            std::printf("usage: projectMM [--port N]   (default 8080; 80 needs root)\n");
+            return 0;
+        }
+    }
     // Unbuffer so every line lands in projectMM.log before a crash.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
@@ -116,9 +133,9 @@ int main() {
     char tbuf[32];
     isoTimestamp(tbuf, sizeof(tbuf));
     std::printf("projectMM started at %s\n", tbuf);
-    std::printf("Press Ctrl-C to stop.\n");
+    std::printf("Listening on port %u. Press Ctrl-C to stop.\n", static_cast<unsigned>(httpPort));
 
-    mm_main(running, 8080);
+    mm_main(running, httpPort);
 
     cleanExit = true;
     isoTimestamp(tbuf, sizeof(tbuf));

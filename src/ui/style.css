@@ -856,7 +856,7 @@ body.cards-resizing {
     width: 1px; height: 1px; margin: 0; padding: 0;
 }
 
-.knob { width: 40px; height: 40px; cursor: ns-resize; touch-action: none; }
+.knob { width: 40px; height: 40px; touch-action: none; }
 /* The SVG is decoration: every pointer event belongs to the wrapper, which owns the drag and the
    pointer capture. Without this the press lands on a <circle> and the capture never governs it,
    so the knob looked interactive and did nothing. */
@@ -939,6 +939,7 @@ body.cards-resizing {
    and an untinted one. */
 .list-pad {
     --pad-tint: var(--fg);
+
     padding: 6px 4px;
     font-size: 12px;
     background:
@@ -1031,7 +1032,9 @@ body.cards-resizing {
         0 1px 2px rgba(0, 0, 0, 0.12);
     cursor: default;
 }
-.list-pad-empty:hover {
+/* Two classes, so this outranks the generic .list-pad:hover declared further down: an empty cell
+   must stay quiet on hover rather than lighting like a real key. */
+.list-pad.list-pad-empty:hover {
     background:
         linear-gradient(to bottom,
             color-mix(in srgb, var(--fg) 13%, transparent),
@@ -1059,6 +1062,7 @@ body.cards-resizing {
    name stays readable and the pad still looks like the same key, lit. */
 .list-pad-active {
     --pad-tint: var(--accent);
+
     background:
         linear-gradient(to bottom,
             color-mix(in srgb, var(--pad-tint) 62%, transparent),
@@ -1665,6 +1669,10 @@ body.cards-resizing {
 /* The knob is turned by dragging or scrolling; without a cursor hint it reads as a picture, and the
    range input underneath offers a resize cursor that suggests the wrong gesture. */
 .knob { cursor: grab; }
+/* The range input is visually hidden, so a keyboard user had no focus feedback at all. The knob sits
+   BEFORE the input in the DOM, so a sibling combinator cannot reach it; scoping from the strip does. */
+.control-encoder:has(.encoder-input:focus-visible) .knob-track { stroke: var(--accent); }
+.control-encoder:has(.encoder-input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .knob.knob-turning { cursor: grabbing; }
 .knob:hover .knob-track { stroke: color-mix(in srgb, var(--fg) 40%, transparent); }
 

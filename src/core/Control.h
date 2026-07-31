@@ -398,7 +398,8 @@ public:
     void addText(const char* name, char* var, uint16_t bufSize = 16,
                  bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, false, false, false, false, nullptr, validate};
+        controls_[count_++] = {.ptr = var, .name = name, .type = ControlType::Text,
+                               .max = bufSize, .validate = validate};
     }
 
     // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
@@ -406,7 +407,8 @@ public:
     void addTextArea(const char* name, char* var, uint16_t bufSize = 16,
                      bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, false, false, false, false, nullptr, validate};
+        controls_[count_++] = {.ptr = var, .name = name, .type = ControlType::TextArea,
+                               .max = bufSize, .validate = validate};
     }
 
     // Like addText but the value is a secret: the API serializes it

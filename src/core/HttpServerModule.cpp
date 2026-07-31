@@ -12,6 +12,7 @@
 #include "core/JsonSink.h"
 #include "core/Sha1.h"
 #include "core/Base64.h"
+#include "core/ControlModule.h"   // look presets on /presets.json (HA WLED integration)
 #include "core/FilesystemModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/SystemModule.h"      // deviceName() for the WLED /json/info shim
@@ -275,8 +276,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         // (`{"0":{}}`): python-wled's __pre_deserialize__ maps it into `{0: Preset(0)}` then discards
         // 0 per its "Nobody cares about 0" rule — result is HA seeing zero presets. `{}` alone would
         // fail the `not presets` guard in wled.py; we need a non-empty dict.
-        else if (std::strcmp(path, "/presets.json") == 0)
-            sendResponse(conn, 200, "application/json", "{\"0\":{}}");
+        else if (std::strcmp(path, "/presets.json") == 0) serveWledPresets(conn);
         else sendResponse(conn, 404, "text/plain", "Not found");
     } else if (std::strcmp(method, "POST") == 0) {
         // POST /api/modules/<name>/move with body {"to":N}.
@@ -1244,6 +1244,40 @@ void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
 // See header. Extracts the deviceName / IP / MAC lookup the WLED shim needs at four
 // call sites (/json/info, /json/state /json/si, /json), so a future change to how identity
 // is discovered updates one place.
+// /presets.json — the device's LOOK presets in WLED's format, so Home Assistant's WLED integration
+// shows them in its preset dropdown (its native preset support, unlike the MQTT path where the same
+// presets ride as "effects").
+//
+// Format: an object keyed by preset SLOT, each holding at least a name `n`. Slot 0 is reserved
+// ("Nobody cares about 0" in python-wled, which discards it), so slots are emitted 1-based. The
+// object must be non-empty or python-wled's `not presets` guard treats the response as a failure —
+// hence the `{"0":{}}` floor when the device has no looks yet.
+//
+// Only look presets appear: a Drivers or Layouts preset rewires pins or geometry, which must not be
+// reachable from a Home Assistant automation that believes it is choosing a scene. Same restriction
+// the MQTT effect list applies, enforced from the same ControlModule predicate.
+void HttpServerModule::serveWledPresets(platform::TcpConnection& conn) {
+    auto* control = static_cast<ControlModule*>(findModuleByName("Control"));
+    if (!control) { sendResponse(conn, 200, "application/json", "{\"0\":{}}"); return; }
+
+    JsonSink sink;
+    sink.append("{");
+    bool any = false;
+    for (uint8_t i = 0; i < control->presetCount(); i++) {
+        if (!control->isLookOnly(i)) continue;
+        const char* name = control->presetName(i);
+        if (!name || !name[0]) continue;
+        // Slot+1: WLED slot 0 is reserved, and python-wled drops it.
+        sink.appendf("%s\"%u\":{\"n\":", any ? "," : "", static_cast<unsigned>(i + 1));
+        sink.writeJsonString(name);
+        sink.append("}");
+        any = true;
+    }
+    if (!any) sink.append("\"0\":{}");   // non-empty, or python-wled reads it as no response at all
+    sink.append("}");
+    sendResponse(conn, 200, "application/json", sink.data());
+}
+
 void HttpServerModule::resolveWledIdentity(const char*& name, uint8_t mac[6], uint8_t ip[4],
                                            const char* nameFallback) {
     name = nameFallback;
@@ -1317,7 +1351,21 @@ void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     // dropdown and color picker stay two views of one value: selecting a palette repaints the picker
     // on HA's next poll, and picking a color snaps to the nearest palette (applyWledState).
     const uint8_t pal = driversPalette(scheduler_);
-    sink.appendf("{\"on\":%s,\"bri\":%u,\"transition\":7,\"ps\":-1,\"pl\":-1,"
+    // The applied look as a WLED preset slot (1-based, matching /presets.json), or -1 for none.
+    // Without this HA's preset dropdown reads "unknown" even while a preset is active, and never
+    // reflects a look chosen on the device itself.
+    int currentPs = -1;
+    if (auto* control = static_cast<ControlModule*>(findModuleByName("Control"))) {
+        const char* look = control->currentLook();
+        if (look && look[0]) {
+            for (uint8_t i = 0; i < control->presetCount(); i++) {
+                if (!control->isLookOnly(i)) continue;
+                const char* n = control->presetName(i);
+                if (n && std::strcmp(n, look) == 0) { currentPs = i + 1; break; }
+            }
+        }
+    }
+    sink.appendf("{\"on\":%s,\"bri\":%u,\"transition\":7,\"ps\":%d,\"pl\":-1,"
                  "\"nl\":{},\"udpn\":{},\"lor\":0,\"mainseg\":0,"
                  // seg[0].bri MUST be present alongside seg[0].on (same reason): HA WLED reads brightness
                  // from state.segments[<seg>].brightness (light.py's _attr_brightness), NOT top-level
@@ -1336,7 +1384,7 @@ void HttpServerModule::writeWledStateBody(JsonSink& sink) {
                  // (the sensors still work — only the segment-derived light breaks). fx=0 = "Solid", the
                  // single effect this shim exposes (fxcount=1), so the pair is consistent.
                  "\"seg\":[{\"id\":0,\"on\":%s,\"bri\":255,\"fx\":0,\"pal\":%u,\"col\":[[%u,%u,%u]]}]}",
-                 onStr, bri, onStr, pal, pc.r, pc.g, pc.b);
+                 onStr, bri, currentPs, onStr, pal, pc.r, pc.g, pc.b);
 }
 
 void HttpServerModule::serveWledState(platform::TcpConnection& conn) {
@@ -1434,10 +1482,23 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
                      bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
                      rssi, channel, signal);
     }
-    sink.appendf("\"fs\":{\"t\":256,\"u\":32,\"pmt\":1},"
+    // freeheap must be NON-ZERO for the WLED integration: desktop's platform::freeHeap() reports 0
+    // ("unlimited"), and HA's parser rejects the device outright, which is why every ESP32 added
+    // successfully while the desktop build failed with "Unknown error occurred". Report a nominal
+    // figure when the platform has no meaningful number rather than lying about a real one.
+    // pmt is the presets-modified time, and it is how Home Assistant decides whether to re-fetch
+    // /presets.json. A CONSTANT here means HA keeps the copy it took at setup forever, so a preset
+    // saved, renamed or deleted afterwards never appears — the endpoint was already dynamic, but
+    // nothing ever asked it again. ControlModule stamps this whenever the preset set changes; 1 is
+    // the fallback for a build with no ControlModule, preserving the previous stable-since-boot
+    // behaviour rather than forcing a re-fetch on every state update.
+    unsigned pmt = 1;
+    if (auto* control = static_cast<ControlModule*>(findModuleByName("Control")))
+        pmt = static_cast<unsigned>(control->presetsModifiedS()) + 1;   // +1: never report 0
+    sink.appendf("\"fs\":{\"t\":256,\"u\":32,\"pmt\":%u},"
                  // uptime + pmt drive python-wled's presets change-detect: when both are non-zero and
                  // stable, HA computes a stable "boot_time" and stops refetching /presets.json every
-                 // state update. pmt=1 (stable-since-boot) + uptime in seconds gives it the anchor.
+                 // state update.
                  "\"freeheap\":%u,\"uptime\":%u,\"udpport\":21324,\"live\":false,"
                  // ws=-1 tells python-wled (HA's WLED integration lib) that WebSocket updates are
                  // unsupported in this build. Its __post_deserialize__ maps -1 to None, and its
@@ -1450,7 +1511,10 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
                  // palcount = the real built-in count (matches the palettes[] array below); fxcount
                  // stays 1 (this shim exposes one effect surface). cpal/umpal = 0 (no custom palettes).
                  "\"fxcount\":1,\"palcount\":%u,\"cpalcount\":0,\"umpalcount\":0,\"str\":false}",
-                 static_cast<unsigned>(platform::freeHeap()),
+                 // Non-zero or the WLED integration rejects the device: desktop's freeHeap() reports
+                 // 0 ("unlimited"), which is why every ESP32 added fine while desktop failed.
+                 pmt,
+                 static_cast<unsigned>(platform::freeHeap() ? platform::freeHeap() : 32768u),
                  static_cast<unsigned>(platform::millis() / 1000u),
                  static_cast<unsigned>(mm::palettes::kCount));
     // effects + palettes — python-wled's __pre_deserialize__ turns each array into an indexed dict.
@@ -1489,6 +1553,17 @@ void HttpServerModule::serveWledStateInfo(platform::TcpConnection& conn) {
 // the real master-power control (so toggling off preserves the brightness level), `bri` sets the
 // level. Shared by the HTTP POST /json/state handler and the inbound-WebSocket path.
 void HttpServerModule::applyWledState(const char* body) {
+    // ps = a preset slot chosen from Home Assistant's preset dropdown. Slots are 1-based and match
+    // /presets.json. applyLookByName re-checks look-only, so a crafted request naming a preset that
+    // carries Drivers or Layouts is refused at the entry point rather than merely hidden from the list.
+    if (mm::json::hasKey(body, "ps")) {
+        const int slot = mm::json::parseInt(body, "ps");
+        auto* control = static_cast<ControlModule*>(findModuleByName("Control"));
+        if (control && slot > 0 && slot <= control->presetCount()) {
+            const char* name = control->presetName(static_cast<uint8_t>(slot - 1));
+            if (name) control->applyLookByName(name);
+        }
+    }
     if (mm::json::hasKey(body, "on")) {
         applySetControl("Drivers", "on",
                         mm::json::parseBool(body, "on") ? "{\"value\":true}" : "{\"value\":false}");

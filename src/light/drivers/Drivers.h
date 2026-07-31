@@ -200,14 +200,17 @@ public:
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
         controls_.addBool("multicore", multicore);   // render↔encode split on/off (see the member's doc)
+        controls_.setAdvanced(controls_.count() - 1);   // a tuning knob, not a user setting
         // Read-only KPI, the multicore sibling of the driver's frameTime: how long core 0 waited at the
         // frame boundary for core 1's encode. ~0 = render and encode overlap perfectly (the split pays
         // off fully). A large value = the effect is far cheaper than the encode, so core 0 idles — the
         // measured signal that a second (ping-pong) handoff buffer would recover that time. Refreshed
         // in tick1s(). Hidden while `multicore` is off: with no split there is no boundary to wait at,
         // so the number is meaningless — the same add-then-setHidden shape the loopback fields use.
+        // Expert-only too, since it only reads on the control it reports for.
         controls_.addReadOnly("renderWait", renderWaitStr_, sizeof(renderWaitStr_));
         controls_.setHidden(controls_.count() - 1, !multicore);
+        controls_.setAdvanced(controls_.count() - 1);
         MoonModule::defineControls();  // cascade to driver children (each owns its lightPreset/whiteMode)
     }
 

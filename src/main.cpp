@@ -411,6 +411,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     if constexpr (mm::platform::hasNetwork) {
         mqttModule = static_cast<mm::MqttModule*>(mm::ModuleFactory::create("MqttModule"));
         mqttModule->setSystemModule(systemModule);
+        mqttModule->setControlModule(controlModule);   // look-only presets as the HA effect list
         mqttModule->markWiredByCode();
     }
 

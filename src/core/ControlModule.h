@@ -63,7 +63,7 @@ public:
     /// The surface is a fixed grid, so a pad has a POSITION rather than a place in a list: slot 14
     /// is slot 14 whether or not anything is in it, and deleting slot 3 does not shuffle slot 4 into
     /// its place. That is the whole difference between a control surface and a list of files, and it
-    /// is why the grid renders all 36 cells including the empty ones.
+    /// is why the grid renders all kGridCols * kGridRows cells including the empty ones.
     static constexpr uint8_t kGridCols = 8;
     static constexpr uint8_t kGridRows = 8;
     static constexpr uint8_t kMaxPresets = kGridCols * kGridRows;
@@ -76,6 +76,10 @@ public:
     /// invented here. Index-aligned with kCapturable.
     static constexpr const char* kCaptureRole[] = {"layout", "layer", "driver", "service"};
     static constexpr uint8_t kCaptureCount = 4;
+    /// Index of "Layers" within kCapturable — the role a pure look occupies.
+    static constexpr uint8_t kLayersRole = 1;
+    static_assert(kCapturable[kLayersRole][0] == 'L' && kCapturable[kLayersRole][1] == 'a' &&
+                  kCapturable[kLayersRole][5] == 's', "kLayersRole must index Layers");
 
     /// How many faders the bank shows. Fixed for now; the surfaces we will map onto this have 8
     /// (X-Touch) or 9 (nanoKONTROL), so the count becomes a control once a second surface needs it.
@@ -106,15 +110,17 @@ public:
         // popup, the API and persistence, without pretending to be a second way to do the job.
         controls_.addText("name", name_, sizeof(name_), validPresetName);
         controls_.setHidden(controls_.count() - 1, true);
-        controls_.addUint8("slot", saveSlot_, 0, kMaxPresets - 1);   // kNoSlot until a pad is picked
+        // The pad a save is aimed at: transient UI intent, reset at setup (see setup()), never a
+        // restored value. The declared max is kMaxPresets-1, so a persisted or API-supplied kNoSlot
+        // would clamp to the last pad; savePreset re-checks the range for the same reason.
+        controls_.addUint8("slot", saveSlot_, 0, kMaxPresets - 1);
         controls_.setHidden(controls_.count() - 1, true);
         // One flag per capturable subtree rather than a single multi-select: the set is small and
         // fixed, and a checkbox each is what makes "what will this preset contain" readable at a
         // glance instead of hidden behind a dropdown.
-        for (uint8_t i = 0; i < kCaptureCount; i++) {
-            controls_.addBool(kCapturable[i], capture_[i]);
-            controls_.setHidden(controls_.count() - 1, true);
-        }
+        // One choice, not four toggles: the UI renders it as a radio group in the pad popup.
+        controls_.addSelect("captures", captureRole_, kCapturable, kCaptureCount);
+        controls_.setHidden(controls_.count() - 1, true);
         controls_.addButton("save");
         controls_.setHidden(controls_.count() - 1, true);
         MoonModule::defineControls();
@@ -122,6 +128,9 @@ public:
 
     void setup() override {
         platform::fsMkdir(kPresetDir);
+        // A restored `slot` is meaningless: it is the popup's "save onto this pad" intent for one
+        // save, and the persistence load would clamp a stored kNoSlot to the last pad.
+        saveSlot_ = kNoSlot;
         rescan();
         MoonModule::setup();
     }
@@ -192,6 +201,57 @@ public:
         sink.writeJsonString(p.captures[0] ? p.captures : "(unknown)");
         sink.append("},{\"name\":\"apply\",\"type\":\"button\",\"label\":\"apply\"}]}");
     }
+
+    // ---- Presets as an external surface (Home Assistant, and any future consumer) --------------
+    //
+    // A preset carrying ONLY Layers is a look: it changes what the lights show and nothing else. One
+    // that also carries Drivers or Layouts rewires pins or geometry, which must not be reachable from
+    // a voice assistant or an automation that thinks it is picking a colour scheme. These two calls
+    // are the whole seam a publisher needs, so no consumer has to learn the file format or the
+    // capture rules to decide what is safe to expose.
+
+    /// The one role this preset carries, or kCaptureCount if the file names none or several. A
+    /// multi-capture file is one written by an older build: it is listed but not applied, so the
+    /// user can see it and delete it rather than have it silently vanish.
+    uint8_t roleOf(uint8_t row) const {
+        if (row >= presetCount_) return kCaptureCount;
+        uint8_t found = kCaptureCount, n = 0;
+        for (uint8_t i = 0; i < kCaptureCount; i++)
+            if (listHas(presets_[row].captures, kCapturable[i])) { found = i; n++; }
+        return n == 1 ? found : kCaptureCount;
+    }
+
+    /// Is this preset a pure look? With one role per preset this is simply "its role is Layers".
+    bool isLookOnly(uint8_t row) const { return roleOf(row) == kLayersRole; }
+
+    /// The preset's name, or null for an out-of-range row.
+    const char* presetName(uint8_t row) const {
+        return row < presetCount_ ? presets_[row].name : nullptr;
+    }
+
+    uint8_t presetCount() const { return presetCount_; }
+
+    /// Seconds-since-boot of the last change to the preset SET (a save, delete, rename or rescan).
+    /// The WLED shim reports this as `info.fs.pmt`, which is how Home Assistant decides whether to
+    /// re-fetch /presets.json: a constant there means HA keeps its first copy forever and never sees
+    /// a preset added or removed.
+    uint32_t presetsModifiedS() const { return presetsModifiedS_; }
+
+    /// Apply a LOOK by name. Refuses anything that is not look-only, so an external caller cannot
+    /// reconfigure the hardware through this entry point even if it names a preset that would.
+    bool applyLookByName(const char* name) {
+        if (!name || !name[0]) return false;
+        for (uint8_t i = 0; i < presetCount_; i++) {
+            if (std::strcmp(presets_[i].name, name) != 0) continue;
+            if (!isLookOnly(i)) return false;
+            return applyPreset(presets_[i].name);
+        }
+        return false;
+    }
+
+    /// The look applied most recently, or "" when none is. Reports the LAYER role's holder, since a
+    /// look is by definition what occupies that role.
+    const char* currentLook() const { return current_[kLayersRole]; }
 
     bool isEditableList() const override { return true; }
 
@@ -313,6 +373,9 @@ private:
     /// Re-read the folder. Cheap and cold-path: called at setup, and after any save/delete/rename,
     /// so an upload through the File Manager shows up the next time one of those happens.
     void rescan() {
+        // Every change to the preset SET funnels through here (save, delete, rename, boot), so this
+        // is the one place the "presets changed" stamp needs to move.
+        presetsModifiedS_ = platform::millis() / 1000u;
         presetCount_ = 0;
         platform::fsList(kPresetDir, &onEntry, this);
         for (uint8_t i = 0; i < presetCount_; i++) readCaptures(presets_[i]);
@@ -347,9 +410,13 @@ private:
         if (isDir || self->presetCount_ >= kMaxPresets) return;
         const size_t len = std::strlen(name);
         if (len < 6 || std::strcmp(name + len - 5, ".json") != 0) return;   // only our files
+        // Skip a name too long to hold, rather than truncating it: a truncated name reconstructs a
+        // DIFFERENT path in pathFor, so apply, rename and delete would all act on the wrong file (or
+        // silently fail). A preset uploaded through the File Manager can carry any name, so this is
+        // reachable without going through the validator.
+        const size_t stem = len - 5;
+        if (stem >= sizeof(Preset::name)) return;
         Preset& p = self->presets_[self->presetCount_];
-        // Strip the extension: the NAME is what the user typed, the file is an implementation detail.
-        const size_t stem = len - 5 < sizeof(p.name) - 1 ? len - 5 : sizeof(p.name) - 1;
         std::memcpy(p.name, name, stem);
         p.name[stem] = '\0';
         p.id = ++self->nextId_;
@@ -447,32 +514,23 @@ private:
         // afterwards avoids a second whole-folder rewrite and avoids displacing whichever preset
         // happened to hold the first free cell. A save that named no pad omits the key, and
         // assignFreeSlots gives it the first free cell instead.
+        if (captureRole_ >= kCaptureCount) { setStatusf(Severity::Warning, "choose what to capture"); return; }
+        const char* type = kCapturable[captureRole_];
         sink.append("{");
-        if (saveSlot_ != kNoSlot)
+        if (saveSlot_ < kMaxPresets)   // anything else (incl. kNoSlot) means "no pad was chosen"
             sink.appendf("\"slot\":%u,", static_cast<unsigned>(saveSlot_));
-        sink.append("\"captures\":\"");
-        bool first = true;
-        for (uint8_t i = 0; i < kCaptureCount; i++) {
-            if (!capture_[i]) continue;
-            sink.appendf("%s%s", first ? "" : ",", kCapturable[i]);
-            first = false;
-        }
-        sink.append("\"");
-        if (first) { setStatusf(Severity::Warning, "select at least one thing to capture"); return; }
+        sink.appendf("\"captures\":\"%s\"", type);
 
         // Each captured subtree is written under a "<TypeName>." key prefix into ONE flat object —
         // the same dotted form the persistence engine already writes, just namespaced. That is what
         // lets applySubtree read it back with nothing more than the prefix it already accepts: no
         // nested-object addressing, no second parser.
-        for (uint8_t i = 0; i < kCaptureCount; i++) {
-            if (!capture_[i]) continue;
-            MoonModule* m = findTopLevel(sched, kCapturable[i]);
-            if (!m) continue;                       // not on this build: simply not captured
-            char prefix[24];
-            std::snprintf(prefix, sizeof(prefix), "%s.", kCapturable[i]);
-            sink.append(",");
-            if (!fs->saveSubtreeTo(m, sink, prefix)) { setStatusf(Severity::Error, "out of memory saving"); return; }
-        }
+        MoonModule* m = findTopLevel(sched, type);
+        if (!m) { setStatusf(Severity::Error, "%s is not on this device", type); return; }
+        char prefix[24];
+        std::snprintf(prefix, sizeof(prefix), "%s.", type);
+        sink.append(",");
+        if (!fs->saveSubtreeTo(m, sink, prefix)) { setStatusf(Severity::Error, "out of memory saving"); return; }
         sink.append("}");
         if (sink.overflowed()) { setStatusf(Severity::Error, "out of memory saving"); return; }
 
@@ -506,39 +564,50 @@ private:
         // Apply every captured subtree, THEN prepare once. Each applySubtree already builds the
         // subtree it touched; a prepareTree() per capture would walk the whole tree N times, and this
         // runs inline on the render tick.
-        uint8_t applied = 0, skipped = 0;
-        for (uint8_t i = 0; i < kCaptureCount; i++) {
-            const char* type = kCapturable[i];
-            if (!listHas(captures, type)) continue;
-            MoonModule* m = findTopLevel(sched, type);
-            if (!m) { skipped++; continue; }        // the preset carries something this build lacks
-            char prefix[24];
-            std::snprintf(prefix, sizeof(prefix), "%s.", type);
-            // Count only what actually applied: a body missing this prefix, or malformed, leaves the
-            // tree alone and must not be reported to the user as a successful apply.
-            if (fs->applySubtree(m, body, prefix)) applied++;
-            else skipped++;
+        // Exactly one capture, or this file is not one we can apply.
+        uint8_t role = kCaptureCount, roleCount = 0;
+        for (uint8_t i = 0; i < kCaptureCount; i++)
+            if (listHas(captures, kCapturable[i])) { role = i; roleCount++; }
+        if (roleCount != 1) {
+            platform::free(body);
+            setStatusf(Severity::Warning, roleCount ? "%s carries several roles — re-save it"
+                                                    : "%s carries nothing this build knows", presetName);
+            return false;
         }
+        const char* type = kCapturable[role];
+        MoonModule* m = findTopLevel(sched, type);
+        if (!m) {
+            platform::free(body);
+            setStatusf(Severity::Warning, "%s needs %s, which this device does not have", presetName, type);
+            return false;
+        }
+        char prefix[24];
+        std::snprintf(prefix, sizeof(prefix), "%s.", type);
+        const bool applied = fs->applySubtree(m, body, prefix);
         platform::free(body);
+        if (!applied) { setStatusf(Severity::Error, "could not apply %s", presetName); return false; }
 
         sched->prepareTree();
-        // Claim each role this preset carries. A role a preset does not carry keeps its holder, so
-        // "layout preset, then layer preset" leaves both lit.
-        for (uint8_t i = 0; i < kCaptureCount; i++) {
-            if (!listHas(captures, kCapturable[i])) continue;
-            std::snprintf(current_[i], sizeof(current_[i]), "%s", presetName);
-        }
-        if (skipped) setStatusf(Severity::Warning, "applied %s (%u skipped)", presetName,
-                                static_cast<unsigned>(skipped));
-        else         setStatusf(Severity::Status, "applied %s", presetName);
-        return applied > 0;
+        // The preset now holds its role; the other three keep whoever held them, so a layout preset
+        // and a layer preset stay lit together.
+        std::snprintf(current_[role], sizeof(current_[role]), "%s", presetName);
+        setStatusf(Severity::Status, "applied %s", presetName);
+        return true;
     }
 
     bool renamePreset(const char* from, const char* to) {
         if (!validPresetName(to)) return false;   // the new name becomes a file name (see validPresetName)
+        if (std::strcmp(from, to) == 0) return true;   // renaming to itself is a no-op, not a failure
         char src[128], dst[128];
         pathFor(from, src, sizeof(src));
         pathFor(to, dst, sizeof(dst));
+        // Refuse a rename onto an existing preset: the write would overwrite it and the remove would
+        // then delete the source, destroying a preset the user never named. Same refuse-on-collision
+        // stance moveListRow takes.
+        if (platform::fsSize(dst) > 0) {
+            setStatusf(Severity::Warning, "%s already exists", to);
+            return false;
+        }
         const long size = platform::fsSize(src);
         if (size <= 0) return false;
         char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
@@ -602,9 +671,13 @@ private:
 
     Preset presets_[kMaxPresets];
     uint8_t presetCount_ = 0;
+    uint32_t presetsModifiedS_ = 0;   ///< see presetsModifiedS(): drives HA's preset re-fetch
     uint32_t nextId_ = 0;
     char name_[kMaxNameLen] = {};
-    bool capture_[kCaptureCount] = {false, true, false, false};   // a look, by default
+    /// Which ONE subtree the next save captures, as an index into kCapturable. A preset carries
+    /// exactly one role: "this preset is a look" is a thing a user can hold in their head, where
+    /// "a look and a geometry, lit for one and superseded for the other" is not.
+    uint8_t captureRole_ = kLayersRole;   // a look, by default
     /// Which preset currently holds each capturable role, index-aligned with kCapturable. A
     /// preset that carries layout+layer claims both, so applying a layer-only preset afterwards
     /// replaces the layer holder and leaves the layout one lit. That is what a mixed preset means
