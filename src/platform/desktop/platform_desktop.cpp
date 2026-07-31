@@ -719,7 +719,10 @@ size_t  ethTestCount_ = 0;
 bool    ethTestSendFails_ = false;
 uint16_t ethTestLinkSpeed_ = 1000;   // desktop reports gigabit unless a test says otherwise
 int      ethRawClaims_ = 0;          // drivers holding the link for direct L2 use
-uint32_t ethSendFails_ = 0;          // consecutive ethSendRaw failures
+uint32_t ethSendFails_ = 0;          // consecutive ethSendRaw failures (the streak)
+uint32_t ethFailTotal_ = 0;          // cumulative since boot; what ethSendFailCounts reports
+uint32_t ethRestarts_ = 0;           // ethRestartTx() calls, for the once-per-wedge test
+bool     ethRestartFails_ = false;   // simulated recovery failure
 // The bound raw socket, or -1 for capture mode (the default, and all any test sees).
 int      ethRawFd_ = -1;
 unsigned ethRawIfIndex_ = 0;         // Linux AF_PACKET needs the index; BPF binds by name
@@ -776,7 +779,7 @@ bool ethBindRawInterface(const char* ifName) {
 // what every unit test exercises; the raw branch is what makes a host a panel controller.
 bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     if (!frame || len == 0) return false;
-    if (ethTestSendFails_) { ethSendFails_++; return false; }   // simulated link-down / full TX ring
+    if (ethTestSendFails_) { ethSendFails_++; ethFailTotal_++; return false; }   // simulated link-down / full ring
 
 #ifndef _WIN32
     if (ethRawFd_ >= 0) {
@@ -793,7 +796,7 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
 #endif
         // Track failures on the REAL send path too, not just the capture path: a bound host is
         // where frames actually reach a wire, so a streak here is the one that matters.
-        if (n != static_cast<ssize_t>(len)) { ethSendFails_++; return false; }
+        if (n != static_cast<ssize_t>(len)) { ethSendFails_++; ethFailTotal_++; return false; }
         ethSendFails_ = 0;
         return true;
     }
@@ -819,6 +822,25 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
 
 uint32_t ethSendFailStreak() MM_NONBLOCKING { return ethSendFails_; }
 
+// A host socket has no driver link state to refuse against, so every failure is the
+// ring-full analogue (a full socket buffer).
+void ethSendFailCounts(uint32_t& linkDown, uint32_t& ringFull) MM_NONBLOCKING {
+    linkDown = 0; ringFull = ethFailTotal_;
+}
+
+// A host raw socket has no driver-internal link state to desync, so there is nothing to
+// restart, so clear the streak and let a test exercise the driver's recovery path.
+bool ethRestartTx() {
+    ethRestarts_++;
+    if (ethRestartFails_) return false;
+    ethSendFails_ = 0;
+    return true;
+}
+
+void setTestEthRestartFails(bool fail) { ethRestartFails_ = fail; }
+
+uint32_t ethRestartCountForTest() { return ethRestarts_; }
+
 // See platform.h: a claim stated by the driver, reference-counted.
 void ethClaimRawL2(bool claim) {
     if (claim) ethRawClaims_++;
@@ -837,7 +859,7 @@ size_t ethTestFrameLength(size_t i) { return i < kEthTestMaxFrames ? ethTestLens
 const uint8_t* ethTestFrameData(size_t i) {
     return (ethTestFrames_ && i < kEthTestMaxFrames) ? ethTestFrames_[i] : nullptr;
 }
-void ethTestClearFrames() { ethTestCount_ = 0; ethSendFails_ = 0; }
+void ethTestClearFrames() { ethTestCount_ = 0; ethSendFails_ = 0; ethFailTotal_ = 0; }
 void setTestEthSendFails(bool fail) { ethTestSendFails_ = fail; }
 void setTestEthLinkSpeed(uint16_t mbps) { ethTestLinkSpeed_ = mbps; }
 void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING {

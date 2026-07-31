@@ -381,11 +381,40 @@ void ethClaimRawL2(bool claim);
 // apart from "Ethernet carries no IP because something is driving it directly".
 bool ethRawL2Claimed() MM_NONBLOCKING;
 
+// Failures split by cause since boot, because the two are different faults with different fixes and
+// a single counter cannot tell them apart:
+//   linkDown: esp_eth_transmit refused before touching the MAC because the driver's link reads
+//              down. A flapping PHY shows up here, and each flap costs seconds of refusals.
+//   ringFull: the MAC had no free TX descriptor. That is back-pressure: our sender outrunning the
+//              wire, or the DMA draining slower than it should.
+void ethSendFailCounts(uint32_t& linkDown, uint32_t& ringFull) MM_NONBLOCKING;
+
 // Consecutive ethSendRaw() failures since the last success. A raw sender polls this to tell a
 // dropped frame (normal back-pressure, count returns to 0) from a wedged transmit path: the IDF
 // driver refuses every frame once ITS link flag reads down, which can outlive our own event-driven
 // flag and would otherwise look like a healthy link sending nothing.
 uint32_t ethSendFailStreak() MM_NONBLOCKING;
+
+// Restart the Ethernet driver after transmit has provably wedged: esp_eth_transmit refuses every
+// frame once the driver's internal link state reads down, and that state can diverge from both the
+// PHY and our own event-driven flag, observed on an S31 under sustained TX, with the link genuinely
+// lost, no DISCONNECTED event delivered, and nothing recovering short of a reboot.
+//
+// stop/start re-runs the driver's link negotiation, which is the only supported way back (no ioctl
+// writes the link flag). Heavier than a register poke, so a caller must gate it on a long failure
+// streak rather than on ordinary back-pressure. Returns true when the restart succeeded; the link
+// may still be down afterwards if the cable really is out, which is the honest outcome.
+//
+// BLOCKS FOR UP TO ~4 SECONDS, and the caller must treat that as the cost of the call. esp_eth_start
+// restarts autonegotiation, which polls the PHY status register with vTaskDelay(100 ms) up to
+// autonego_timeout_ms (4000 by default, and a wedged link is down so the loop runs to the timeout).
+// NOT MM_NONBLOCKING for that reason.
+//
+// The trade is deliberate: the tick that calls this is the 1 Hz housekeeping tick, and it only fires
+// in a wedged state where every frame is being refused anyway. A stalled render loop for one tick
+// costs nothing a user can see when the wall is already dark, and the alternative is a wall that
+// stays dark until someone power-cycles the board. Called at most once per wedge, never in a loop.
+bool ethRestartTx();
 
 // Negotiated link speed in Mbit/s (10 / 100 / 1000); 0 when no link or no driver. Reported rather
 // than enforced: panel cards want a gigabit link, and a driver that knows the actual speed can say
@@ -420,6 +449,12 @@ void ethTestClearFrames();
 void setTestEthSendFails(bool fail);
 // Override the reported link speed so a test can exercise the too-slow-link status.
 void setTestEthLinkSpeed(uint16_t mbps);
+// Make ethRestartTx() fail, so a test can exercise the recovery-failed path, the one case
+// that strands transmit and must stay visible rather than reading as an unplugged cable.
+void setTestEthRestartFails(bool fail);
+// How many times ethRestartTx() has run, so a test can pin the once-per-wedge bound (the driver's
+// own restartTried_ is private, and the count is what the bound is actually about).
+uint32_t ethRestartCountForTest();
 #endif
 
 bool wifiStaInit(const char* ssid, const char* password);

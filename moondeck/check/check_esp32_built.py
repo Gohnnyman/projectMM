@@ -20,6 +20,7 @@ Exit codes: 0 fresh · 1 missing or stale (the message says which, and what to r
 """
 
 import argparse
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -49,7 +50,7 @@ SKIP_FILES = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
 SKIP_PREFIXES = ("src/platform/desktop/",)
 
 
-def newest_source():
+def newest_source(only=None):
     """The most recently modified source file that feeds a firmware image."""
     newest_path, newest_mtime = None, 0.0
 
@@ -67,16 +68,53 @@ def newest_source():
                 continue
             if path.suffix not in SOURCE_SUFFIXES:
                 continue
+            if only is not None and rel_posix not in only:
+                continue   # this firmware does not compile it, so it cannot make it stale
             mtime = path.stat().st_mtime
             if mtime > newest_mtime:
                 newest_path, newest_mtime = path, mtime
 
     for rel in SOURCE_FILES:
+        if only is not None and rel not in only:
+            continue
         path = ROOT / rel
         if path.exists() and path.stat().st_mtime > newest_mtime:
             newest_path, newest_mtime = path, path.stat().st_mtime
 
     return newest_path, newest_mtime
+
+
+def compiled_sources(firmware):
+    """The files this firmware's build actually reads, from ninja's own dependency database.
+
+    A firmware compiles a SUBSET of src/: a driver gated behind a per-firmware flag (MM_PANEL_CARDS)
+    is not in the S3 build at all. Comparing every source against that binary flags it stale forever
+    over a file it cannot compile, and no rebuild can clear it — the build correctly does nothing, so
+    the binary's timestamp never moves. Asking ninja what it depends on is the authoritative answer.
+
+    Returns None when the database cannot be read, and the caller then falls back to scanning
+    everything: over-reporting staleness is the safe direction for a freshness gate.
+    """
+    build_dir = ROOT / "build" / f"esp32-{firmware}"
+    if not (build_dir / ".ninja_deps").exists():
+        return None
+    try:
+        out = subprocess.run(["ninja", "-t", "deps"], cwd=build_dir,
+                             capture_output=True, text=True, timeout=60)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    deps = set()
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith(("output", "deps")) and line:
+            path = (build_dir / line).resolve()
+            try:
+                deps.add(path.relative_to(ROOT).as_posix())
+            except ValueError:
+                pass   # outside the repo (IDF, toolchain) — not ours to watch
+    return deps or None
 
 
 def main():
@@ -100,7 +138,7 @@ def main():
         return 1
 
     built = binary.stat().st_mtime
-    newest_path, newest_mtime = newest_source()
+    newest_path, newest_mtime = newest_source(compiled_sources(args.firmware))
     age_h = (time.time() - built) / 3600
 
     if newest_path is not None and newest_mtime > built:

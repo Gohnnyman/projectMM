@@ -34,7 +34,8 @@ namespace mm {
 ///
 /// The deep dives are under *More info*, below the attribute/method lists:
 /// @xref{why-a-gigabit-link|why these cards need a gigabit link},
-/// @xref{running-this-on-a-host|running this on a desktop or a Pi}.
+/// @xref{running-this-on-a-host|running this on a desktop or a Pi},
+/// @xref{other-card-vendors|other card vendors, and how to add one}.
 /// @card PanelCardDriver.png
 ///
 /// @moreinfo
@@ -63,6 +64,35 @@ namespace mm {
 /// pin the wire format with no hardware and no privileges.
 ///
 /// On ESP32 `interface` is ignored: the chip has one MAC.
+///
+/// ## Other card vendors
+///
+/// ColorLight is one of several receiver-card makers, which is why this driver is named for the
+/// category and carries a `format` selector rather than being a ColorLight driver:
+///
+/// | vendor | position in the market |
+/// |---|---|
+/// | **[NovaStar](https://www.novastar.tech)** | the global leader; large-scale displays and stage events |
+/// | **[ColorLight](https://www.colorlightinside.com)** | cost-effective, strong outdoor and fine-pitch support (the format implemented here) |
+/// | **[Linsn](https://www.linsnled.com)** | affordable and stable, common on budget installations |
+/// | **[Mooncell](https://www.mooncell.com.cn)** | full-color high-refresh niche |
+/// | **[Huidu](https://www.huidu.cn)** | small and mid projects, storefront signage, mostly ASYNCHRONOUS |
+/// | **DBstar**, **Xixun** | also in the field |
+///
+/// **Contributions welcome.** Adding one is a `*Packet.h` beside ColorLight5A75Packet.h plus an
+/// entry in `kFormatOptions`: the window, the correction, the chunking and the platform seam are
+/// already shared, and the desktop capture path lets the byte layout be pinned by unit tests with no
+/// hardware. What it actually costs is the research, not the code.
+///
+/// Two things to know before starting. Each vendor speaks its **own proprietary L2 protocol**, so a
+/// ColorLight frame will not drive a NovaStar card and the byte layout has to be obtained per
+/// vendor. And whether another format fits this driver's row-plus-sync model is **unverified**: the
+/// shape is an invitation, not a promise, and a format that addresses panels differently may need
+/// the driver to grow rather than just gain a packet file.
+///
+/// Huidu is the one to approach with care: its controllers are largely asynchronous, playing from
+/// onboard storage rather than being fed live, which is a different product category from a
+/// real-time sender.
 class PanelCardDriver : public DriverBase {
 public:
     /// Panel cards are RGB, so this references the "RGB" preset rather than the strips' "GRB" —
@@ -214,8 +244,13 @@ public:
             // Sent TWICE, like the sync below. Card firmware v13+ acts on the second copy only;
             // older firmware ignores the duplicate, so sending both costs one frame and works on
             // every version rather than making the behaviour depend on a firmware probe we do not do.
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
+            //
+            // Counted like the rows: `dropped` and the platform's per-cause totals must describe the
+            // SAME set of frames, or comparing them tells you nothing.
+            for (int i = 0; i < 2; i++) {
+                if (platform::ethSendRaw(packet_, len)) framesSent_++;
+                else framesDroppedTotal_++;
+            }
         }
 
         // One card row per wall row, in order. The card's own row numbering runs across its outputs
@@ -250,8 +285,10 @@ public:
         if (anyRowSent) {
             const size_t len = buildColorLightSyncPacket(packet_, kCardGain);
             // Twice, for the same firmware reason as the brightness frame above.
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
+            for (int i = 0; i < 2; i++) {
+                if (platform::ethSendRaw(packet_, len)) framesSent_++;
+                else framesDroppedTotal_++;
+            }
         }
     }
 
@@ -260,10 +297,19 @@ public:
     /// class note says why a slow link is reported rather than refused. Runs on the 1 Hz path, so
     /// the snprintf here is the same accepted trade SystemModule makes.
     void writeLinkStatus() MM_NONBLOCKING {
-        if (!platform::ethLinkUp()) {
-            setStatus("no ethernet link", Severity::Warning);
+        // A failed restart outranks everything below: it is the one state a user cannot resolve by
+        // plugging a cable back in. Cleared only when frames flow again (see the re-arm below).
+        if (restartFailed_) {
+            setStatus("ethernet restart failed - restart the device", Severity::Error);
+            framesReported_ = framesSent_;
             return;
         }
+
+        // The WEDGE is checked before the link, because a wedged transmit path is defined by sends
+        // failing, which is knowable whatever the link claims. Checking the link first hid this
+        // branch entirely on any platform reporting no link (the desktop stub among them), which is
+        // how the recovery path shipped unreachable by its own tests.
+        //
         // A short streak is ordinary back-pressure: the DMA ring fills while we push a whole frame
         // in one tick, the frame is dropped, the next one goes. Measured on a 128x128 wall at ~1900
         // packets/s, streaks of 1-4 come and go and always clear themselves — reporting those as an
@@ -276,13 +322,37 @@ public:
         static constexpr uint32_t kWedgedStreak = 500;
         const uint32_t failStreak = platform::ethSendFailStreak();
         if (failStreak >= kWedgedStreak) {
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "transmit wedged (%u refused)",
-                          static_cast<unsigned>(failStreak));
+            if (!restartTried_) {
+                restartTried_ = true;
+                // A failed restart leaves the driver STOPPED: no CONNECTED event can follow, so the
+                // link reads down forever and nothing else here can tell that apart from an unplugged
+                // cable. Report it as its own error rather than letting it masquerade as one.
+                if (platform::ethRestartTx()) {
+                    setStatus("transmit wedged - restarting ethernet", Severity::Warning);
+                } else {
+                    // LATCHED: after a failed restart the driver is stopped, so no frame is sent, the
+                    // streak stops growing, and the next tick would otherwise fall through to the
+                    // link branch and report a plain "no ethernet link", indistinguishable from an
+                    // unplugged cable, for a board that needs a power cycle.
+                    restartFailed_ = true;
+                    setStatus("ethernet restart failed - restart the device", Severity::Error);
+                }
+                framesReported_ = framesSent_;
+                return;
+            }
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "transmit wedged (%u refused, link %u Mbit)",
+                          static_cast<unsigned>(failStreak),
+                          static_cast<unsigned>(platform::ethLinkSpeedMbps()));
             setStatus(statusBuf_, Severity::Error);
             framesReported_ = framesSent_;
             return;
         }
 
+        if (!platform::ethLinkUp()) {
+            setStatus("no ethernet link", Severity::Warning);
+            framesReported_ = framesSent_;
+            return;
+        }
         const uint16_t mbps = platform::ethLinkSpeedMbps();
         // Total frames the MAC refused since boot. A dropped frame is tolerated (the cards have no
         // acknowledgement, so a retry would cost the next frame instead), but it is NOT invisible:
@@ -300,10 +370,22 @@ public:
             setStatus(statusBuf_, Severity::Warning);
             return;
         }
+        // Re-arm the one-shot only on evidence of FLOW: frames sent this second and no failure
+        // streak at all. Re-arming merely because the link reads healthy would fire again while a
+        // wedge is still rebuilding its streak, bouncing the interface every ~20 s: the loop the
+        // one-shot exists to prevent.
+        if (sent > 0 && failStreak == 0) { restartTried_ = false; restartFailed_ = false; }
+
         if (dropped) {
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "%u Mbit - %u packets/s, %u dropped",
+            // Split by cause: a flapping link and a full TX ring are different faults with
+            // different fixes, and one total cannot tell them apart.
+            uint32_t linkDown = 0, ringFull = 0;
+            platform::ethSendFailCounts(linkDown, ringFull);
+            std::snprintf(statusBuf_, sizeof(statusBuf_),
+                          "%u Mbit - %u pkt/s, %u lost (%u link, %u ring)",
                           static_cast<unsigned>(mbps), static_cast<unsigned>(sent),
-                          static_cast<unsigned>(dropped));
+                          static_cast<unsigned>(dropped),
+                          static_cast<unsigned>(linkDown), static_cast<unsigned>(ringFull));
         } else {
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u Mbit - %u packets/s",
                           static_cast<unsigned>(mbps), static_cast<unsigned>(sent));
@@ -365,8 +447,17 @@ private:
     /// Frames the MAC refused since boot. Cumulative on purpose: the per-second rate hides a slow
     /// trickle of drops, and a rising total is the signal that the sender is outrunning the wire.
     uint32_t framesDroppedTotal_ = 0;
-    /// Backing store for the status line (setStatus does not copy).
-    char statusBuf_[48] = {};
+    /// Backing store for the status line (setStatus does not copy). Sized for the longest one: the
+    /// split-drop report, which carries three cumulative counters and reaches ~63 chars at millions
+    /// of drops. Truncation would cut the RING count, the number the line exists to show.
+    char statusBuf_[96] = {};
+    /// Whether a restart has already been attempted for the CURRENT wedge. One attempt per wedge:
+    /// a restart cannot fix an unplugged cable, and retrying every second would bounce the interface
+    /// under the user. Cleared as soon as frames flow again.
+    bool restartTried_ = false;
+    /// Set when a recovery attempt itself failed, which leaves the interface stopped. Latched so the
+    /// error cannot be overwritten by the softer link warning on the next tick.
+    bool restartFailed_ = false;
     /// Whether this driver currently holds the raw-L2 claim, so prepare/release stay balanced
     /// however often the framework calls them.
     bool claimed_ = false;

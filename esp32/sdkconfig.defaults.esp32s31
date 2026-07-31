@@ -45,9 +45,26 @@ CONFIG_ETH_USE_ESP32_EMAC=y
 # XTAL. The APLL is a *fractional* PLL built for exact frequencies (its reason to exist), so
 # it synthesises 125 MHz precisely. Bench-proven on the S31 CoreBoard.
 CONFIG_ETH_EMAC_RGMII_TX_CLK_SRC_APLL=y
-CONFIG_ETH_DMA_BUFFER_SIZE=512
+# A panel-card frame is 1512 B. At the 512 B default every frame spanned THREE descriptors, so a
+# 10-descriptor ring held only ~3 frames while PanelCardDriver fires 132 back-to-back, and the ring
+# ran dry within minutes (bench: ~19 000 refused frames and two full transmit wedges in 20 minutes).
+# 1536 is the 64-byte-aligned size that fits one frame per descriptor.
+#
+# The COUNT stays at 10: bench-isolated on 2026-07-31. Buffer size and the transmit mutex below are
+# what fix it, and 30 descriptors ran no cleaner than 10 (a 30-deep TX ring totals ~46 KB against
+# ~15 KB at 10). The size bump itself is not free: 512→1536 applies to BOTH rings, so 20 buffers
+# cost ~20 KB more internal RAM than the default. Cheaper than the alternative, and measured.
+CONFIG_ETH_DMA_BUFFER_SIZE=1536
 CONFIG_ETH_DMA_RX_BUFFER_NUM=10
 CONFIG_ETH_DMA_TX_BUFFER_NUM=10
+# The eth netif is up alongside the raw-L2 sender, so lwIP and the render task both reach
+# mac->transmit, which advances a shared descriptor pointer with no locking of its own. IDF's help
+# text names exactly this case: "Ethernet interface is used as shared resource and multiple
+# functionalities might try to access it at a time." Default is off.
+#
+# Load-bearing, not belt-and-braces: with it off (and 30 descriptors) the bench saw 3 000 refused
+# frames in 4 minutes; with it on and only 10 descriptors, none in 11.
+CONFIG_ETH_TRANSMIT_MUTEX=y
 
 # MoonLive native codegen needs an executable heap (allocExec → MALLOC_CAP_EXEC). Like the
 # S3 and P4, the S31 has hardware memory protection that IDF couples to disabling the exec
