@@ -977,7 +977,9 @@ bool ethRestartTx() {
     // driver that is mid-restart.
     ethLinkUp_.store(false, std::memory_order_relaxed);
     ethSendFails_.store(0, std::memory_order_relaxed);
-    esp_eth_stop(ethHandle_);
+    // A failed stop leaves the driver in a state we did not establish; starting on top of that
+    // would compound it. Report instead — the caller turns this into a "restart the device" status.
+    if (esp_eth_stop(ethHandle_) != ESP_OK) return false;
     return esp_eth_start(ethHandle_) == ESP_OK;
 }
 

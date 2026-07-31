@@ -4,7 +4,7 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 ![Web UI](docs/assets/ui/ui_theme.gif)
 
-👉 **Try it now:** flash an ESP32 straight from your browser → <https://moonmodules.org/projectMM/install/> — step-by-step in the [Getting started guide](docs/gettingstarted.md).
+👉 **Try it now:** flash an ESP32 straight from your browser → <https://moonmodules.org/projectMM/install/>. Step-by-step in the [Getting started guide](docs/gettingstarted.md).
 
 📦 **Release + downloads:** [latest release](https://github.com/MoonModules/projectMM/releases/latest)
 
@@ -22,21 +22,21 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🎛️ **Pluggable pipeline**: Layouts → Layers (effects + modifiers) → Drivers. Build it visually in the browser, and every change applies live (settings also persist to flash across power cycles).
 
-🔄 **No reboot to apply a configuration change**: edit a pin map, a strand length, an output protocol, or the mic on a running device and it takes effect on the very next frame — no init-at-boot step, no restart. Where most LED-controller firmware needs a reboot for a pin or protocol change, projectMM applies it live. (Flashing new *firmware* over OTA still needs the usual power cycle — that's a binary swap, not a config change.)
+🔄 **No reboot to apply a configuration change**: edit a pin map, a strand length, an output protocol, or the mic on a running device and it takes effect on the very next frame, with no init-at-boot step, no restart. Where most LED-controller firmware needs a reboot for a pin or protocol change, projectMM applies it live. (Flashing new *firmware* over OTA still needs the usual power cycle, since that's a binary swap rather than a config change.)
 
 💡 **DMX *and* addressable LEDs in one setup**: RGB strips, RGBW pixels, par lights, moving heads, all through the same pipeline.
 
-🔌 **Parallel WS2812 output**: drive many strands at once over three ESP32 peripherals — RMT (every chip), the S3's LCD_CAM i80 bus (8 lanes), and the P4's Parlio engine (up to 8 lanes) — each with an on-device loopback self-test that bit-verifies the wire signal.
+🔌 **Parallel WS2812 output**: drive many strands at once over three ESP32 peripherals: RMT (every chip), the S3's LCD_CAM i80 bus (8 lanes), and the P4's Parlio engine (up to 8 lanes), each with an on-device loopback self-test that bit-verifies the wire signal.
 
-🌐 **Industry protocols, both directions**: send *and* receive [Art-Net](https://art-net.org.uk/), [E1.31/sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/) over the network — interoperable with Falcon, Advatek, xLights, Resolume, LedFx and other industry gear.
+🌐 **Industry protocols, both directions**: send *and* receive [Art-Net](https://art-net.org.uk/), [E1.31/sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/) over the network, interoperable with Falcon, Advatek, xLights, Resolume, LedFx and other industry gear.
 
-🎵 **Audio-reactive**: an I²S microphone drives a 16-band FFT spectrum + sound level, consumed by audio-reactive effects — all built fresh from the mic datasheet and textbook DSP.
+🎵 **Audio-reactive**: an I²S microphone drives a 16-band FFT spectrum + sound level, consumed by audio-reactive effects, all built fresh from the mic datasheet and textbook DSP.
 
-🏠 **Home-automation control**: a device joins Homebridge (and any MQTT hub) over a dependency-free MQTT 3.1.1 client — on/off, brightness, and a HomeKit color wheel that picks the nearest palette. See [the MQTT module docs](docs/moonmodules/core/services.md#mqtt).
+🏠 **Home-automation control**: a device joins Homebridge (and any MQTT hub) over a dependency-free MQTT 3.1.1 client: on/off, brightness, and a HomeKit color wheel that picks the nearest palette. See [the MQTT module docs](docs/moonmodules/core/services.md#mqtt).
 
-📁 **On-device File Manager**: browse and edit the device filesystem from the browser — a lazy folder tree with an inline editor, drag-drop upload, and create/delete, plus [firmware upload OTA](docs/moonmodules/core/services.md#firmware-update) (flash a `.bin` over the LAN, no USB). See [the File Manager docs](docs/moonmodules/core/services.md#file-manager).
+📁 **On-device File Manager**: browse and edit the device filesystem from the browser: a lazy folder tree with an inline editor, drag-drop upload, and create/delete, plus [firmware upload OTA](docs/moonmodules/core/services.md#firmware-update) (flash a `.bin` over the LAN, no USB). See [the File Manager docs](docs/moonmodules/core/services.md#file-manager).
 
-🛡️ **Robust to any input**: add, delete, replace, or reconfigure any module in any order, at any grid size, and the device keeps running — degraded or idle, never crashed. Every crash that's ever found becomes a regression test, so it stays fixed.
+🛡️ **Robust to any input**: add, delete, replace, or reconfigure any module in any order, at any grid size, and the device keeps running, degraded or idle, but never crashed. Every crash that's ever found becomes a regression test, so it stays fixed.
 
 🖥️ **One source tree, many targets**: the same code runs on ESP32, Teensy, Raspberry Pi, and macOS / Windows / Linux.
 
@@ -50,7 +50,7 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 📦 **No third-party libraries**: no FastLED, no ESPAsyncWebServer, no ArduinoJson. The color math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
 
-🔬 **Industry standards, our own code**: we study the prior art hard — friend repos, peripheral datasheets, the Art-Net / E1.31 / WS2812 standards — carry its *ideas* forward, and credit it by name; but we write our own code rather than copying theirs or tracing their structure. Each feature is spec'd from the primary source, its behaviour pinned with unit + scenario tests, then written fresh against our own architecture, so the result is independent by construction, not a renamed fork. Textbook algorithm, textbook name, our implementation. The method: [CLAUDE.md § Principles](CLAUDE.md#principles).
+🔬 **Industry standards, our own code**: we study the prior art hard (friend repos, peripheral datasheets, the Art-Net / E1.31 / WS2812 standards), carry its *ideas* forward, and credit it by name; but we write our own code rather than copying theirs or tracing their structure. Each feature is spec'd from the primary source, its behaviour pinned with unit + scenario tests, then written fresh against our own architecture, so the result is independent by construction, not a renamed fork. Textbook algorithm, textbook name, our implementation. The method: [CLAUDE.md § Principles](CLAUDE.md#principles).
 
 🧱 **One module model**: every effect, modifier, layout, and driver is a `MoonModule`: one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
 
@@ -162,15 +162,17 @@ We built, maintained, and contributed to these projects, so projectMM is grounde
 
 ## Credits
 
-Specific people whose work directly shaped parts of projectMM. We study their thinking with respect and write our own code against our architecture rather than tracing theirs — these credits name the prior art behind a feature:
+Specific people whose work directly shaped parts of projectMM. We study their thinking with respect and write our own code against our architecture rather than tracing theirs. These credits name the prior art behind a feature:
 
-- **Frank ([softhack007](https://github.com/softhack007))** — main author of the WLED-MM audio-reactive usermod, the most-used open-source audio-reactive LED implementation. The ideas behind [AudioService](docs/moonmodules/core/moxygen/AudioService.md) (including the adaptive noise-gate concept, analysed with his permission) descend from years of collaboration on WLED-SR / WLED-MM.
-- **[troyhacks](https://github.com/troyhacks/WLED)** — reworked the WLED-MM audio-reactive DSP to run on Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT (a low-latency, "stupid fast" alternative to ArduinoFFT); the same esp-dsp FFT choice [AudioService](docs/moonmodules/core/moxygen/AudioService.md) makes. See its Prior art notes.
-- **[hpwit](https://github.com/hpwit) (Yves Bazin)** — the clockless I2S / RMT / Parlio LED-driver techniques and the [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) live-script engine behind the LED drivers and MoonLive.
-- **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))** — author of the native [WLED-Android](https://github.com/Moustachauve/WLED-Android) app. Its source let us reverse-engineer exactly what the WLED app reads, so projectMM devices appear in (and are controllable from) the native WLED apps.
-- **The [Improv Wi-Fi](https://github.com/improv-wifi) project** — the open Improv serial provisioning standard ([sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js)) that the projectMM web installer uses to provision a freshly-flashed device over USB.
-- **[FastLED](https://github.com/FastLED/FastLED)** — the canonical LED-effects library whose conventions the LED-effect world shares. projectMM links no part of FastLED, but it carries forward FastLED's recognisable *names and models* for the color/animation primitives — `scale8`, `sin8`, the gradient-palette model (`CRGBPalette16` / `colorFromPalette`), the `beatsin8` / `inoise8` / `qadd8` family — so a contributor recognises them on sight. The implementations are projectMM's own, integer-only and hot-path-tuned for our render loop; FastLED is the prior art behind the convention, credited here and in each primitive's notes.
-- **wladi ([myhome-control](https://shop.myhome-control.de))** — designer of the [MHC-WLED ESP32-P4 shield](https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027), and the source of the hardware and the pinout details that got its **line-in audio** working in [AudioService](docs/moonmodules/core/moxygen/AudioService.md): the onboard PCM1808 I2S ADC (WS 26 / SD 33 / SCK 32 / MCLK 36), the PCM1808's stereo wiring, and its `FMT` format-select jumper (open = I2S/Philips, our default; tie to 3V3 for left-justified) — which is what confirmed the standard-I2S path the ADC needs.
+- **[WLED](https://github.com/wled/WLED) and [WLED-MM](https://github.com/MoonModules/WLED)**: projectMM is born out of WLED, and takes the usermod idea to a new level. Here *everything* is a mod (a MoonModule): effects, drivers, networking, the file system, the system manager. It also integrates tightly with WLED: a projectMM device can act as a WLED device, and it talks to WLED devices (audio sync, discovery, and more).
+- **Frank ([softhack007](https://github.com/softhack007))**: main author of the WLED-MM audio-reactive usermod, the most-used open-source audio-reactive LED implementation. The ideas behind [AudioService](docs/moonmodules/core/moxygen/AudioService.md) (including the adaptive noise-gate concept, analysed with his permission) descend from years of collaboration on WLED-SR / WLED-MM.
+- **[troyhacks](https://github.com/troyhacks/WLED)**: reworked the WLED-MM audio-reactive DSP to run on Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT (a low-latency, "stupid fast" alternative to ArduinoFFT); the same esp-dsp FFT choice [AudioService](docs/moonmodules/core/moxygen/AudioService.md) makes. See its Prior art notes.
+- **[hpwit](https://github.com/hpwit) (Yves Bazin)**: the clockless I2S / RMT / Parlio LED-driver techniques and the [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) live-script engine behind the LED drivers and MoonLive.
+- **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))**: author of the native [WLED-Android](https://github.com/Moustachauve/WLED-Android) app. Its source let us reverse-engineer exactly what the WLED app reads, so projectMM devices appear in (and are controllable from) the native WLED apps.
+- **The [Improv Wi-Fi](https://github.com/improv-wifi) project**: the open Improv serial provisioning standard ([sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js)) that the projectMM web installer uses to provision a freshly-flashed device over USB.
+- **[FastLED](https://github.com/FastLED/FastLED)**: the canonical LED-effects library whose conventions the LED-effect world shares. projectMM links no part of FastLED, but it carries forward FastLED's recognisable *names and models* for the color/animation primitives (`scale8`, `sin8`, the gradient-palette model (`CRGBPalette16` / `colorFromPalette`), the `beatsin8` / `inoise8` / `qadd8` family), so a contributor recognises them on sight. The implementations are projectMM's own, integer-only and hot-path-tuned for our render loop; FastLED is the prior art behind the convention, credited here and in each primitive's notes.
+- **[FPP](https://github.com/FalconChristmas/fpp) (Falcon Player)**: the show player that drives LED panel receiver cards from a Raspberry Pi. Seeing an FPP rig feed a wall of HUB75 panels is what prompted [PanelCardDriver](docs/moonmodules/light/drivers.md#panelcard): if a Linux host can send those frames, so can a board that is already rendering them, which removes the host from the installation entirely. FPP is the inspiration, and the reference point for what good looks like here: it sustains 50 fps.
+- **wladi ([myhome-control](https://shop.myhome-control.de))**: designer of the [MHC-WLED ESP32-P4 shield](https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027), and the source of the hardware and the pinout details that got its **line-in audio** working in [AudioService](docs/moonmodules/core/moxygen/AudioService.md): the onboard PCM1808 I2S ADC (WS 26 / SD 33 / SCK 32 / MCLK 36), the PCM1808's stereo wiring, and its `FMT` format-select jumper (open = I2S/Philips, our default; tie to 3V3 for left-justified), which is what confirmed the standard-I2S path the ADC needs.
 
 ## Contributing
 

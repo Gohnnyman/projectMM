@@ -214,8 +214,13 @@ public:
             // Sent TWICE, like the sync below. Card firmware v13+ acts on the second copy only;
             // older firmware ignores the duplicate, so sending both costs one frame and works on
             // every version rather than making the behaviour depend on a firmware probe we do not do.
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
+            //
+            // Counted like the rows: `dropped` and the platform's per-cause totals must describe the
+            // SAME set of frames, or comparing them tells you nothing.
+            for (int i = 0; i < 2; i++) {
+                if (platform::ethSendRaw(packet_, len)) framesSent_++;
+                else framesDroppedTotal_++;
+            }
         }
 
         // One card row per wall row, in order. The card's own row numbering runs across its outputs
@@ -250,8 +255,10 @@ public:
         if (anyRowSent) {
             const size_t len = buildColorLightSyncPacket(packet_, kCardGain);
             // Twice, for the same firmware reason as the brightness frame above.
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
-            if (platform::ethSendRaw(packet_, len)) framesSent_++;
+            for (int i = 0; i < 2; i++) {
+                if (platform::ethSendRaw(packet_, len)) framesSent_++;
+                else framesDroppedTotal_++;
+            }
         }
     }
 

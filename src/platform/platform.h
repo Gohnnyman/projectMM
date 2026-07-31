@@ -404,6 +404,12 @@ uint32_t ethSendFailStreak() MM_NONBLOCKING;
 // writes the link flag). Heavier than a register poke, so a caller must gate it on a long failure
 // streak rather than on ordinary back-pressure. Returns true when the restart succeeded; the link
 // may still be down afterwards if the cable really is out, which is the honest outcome.
+//
+// NOT MM_NONBLOCKING, and called only from the 1 Hz status tick — never from the render path. Both
+// halves are register writes plus an esp_timer stop/start (no semaphore wait, no link poll), so the
+// cost is microseconds rather than the seconds negotiation itself takes; the link comes back later
+// via the CONNECTED event, not by blocking here. It runs only in a wedged state, where by
+// definition no frames are going out anyway.
 bool ethRestartTx();
 
 // Negotiated link speed in Mbit/s (10 / 100 / 1000); 0 when no link or no driver. Reported rather

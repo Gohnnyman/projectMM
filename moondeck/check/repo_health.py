@@ -202,6 +202,26 @@ def snapshot(perf=None):
     }
 
 
+def _valid_snapshot(data, source):
+    """A snapshot mapping, or {} — and say so out loud when it is neither.
+
+    merge_carry_forward does `old.get(section, {})`, so a JSON list or scalar would raise, and a
+    section holding a list would corrupt the merge. A malformed baseline must not read as "no
+    previous numbers" either: that silently reports every metric as new, which looks like a clean
+    slate rather than a broken file.
+    """
+    if not isinstance(data, dict):
+        print(f"repo-health: ignoring {source} — expected an object, got {type(data).__name__}",
+              file=sys.stderr)
+        return {}
+    for key in ("flash", "perf", "complexity"):
+        if key in data and not isinstance(data[key], dict):
+            print(f"repo-health: ignoring {source} — section '{key}' is "
+                  f"{type(data[key]).__name__}, expected an object", file=sys.stderr)
+            return {}
+    return data
+
+
 def load_previous():
     """The COMMITTED snapshot, read from git rather than from the working tree.
 
@@ -217,14 +237,19 @@ def load_previous():
         out = subprocess.run(["git", "show", f"HEAD:{HEALTH_FILE.relative_to(ROOT).as_posix()}"],
                              cwd=ROOT, capture_output=True, text=True, timeout=10)
         if out.returncode == 0:
-            return json.loads(out.stdout)
-    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+            return _valid_snapshot(json.loads(out.stdout), "the committed snapshot")
+    except json.JSONDecodeError:
+        print("repo-health: the committed snapshot is not valid JSON — "
+              "falling back to the working tree", file=sys.stderr)
+    except (subprocess.SubprocessError, OSError):
         pass
     if not HEALTH_FILE.exists():
         return {}
     try:
-        return json.loads(_read(HEALTH_FILE))
+        return _valid_snapshot(json.loads(_read(HEALTH_FILE)), str(HEALTH_FILE.name))
     except json.JSONDecodeError:
+        print(f"repo-health: {HEALTH_FILE.name} is not valid JSON — treating as empty",
+              file=sys.stderr)
         return {}
 
 
@@ -239,7 +264,7 @@ def load_working_tree():
     if not HEALTH_FILE.exists():
         return {}
     try:
-        return json.loads(_read(HEALTH_FILE))
+        return _valid_snapshot(json.loads(_read(HEALTH_FILE)), str(HEALTH_FILE.name))
     except json.JSONDecodeError:
         return {}
 

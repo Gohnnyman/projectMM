@@ -1,0 +1,92 @@
+"""repo-health's baseline must survive a malformed snapshot without corrupting a run.
+
+Two separate loaders read it: `load_previous` (the COMMITTED snapshot, what the delta compares
+against) and `load_working_tree` (the newest numbers, what carry-forward preserves). Both feed
+`merge_carry_forward`, which does `old.get(section, {})` — so a JSON list or scalar where an object
+belongs would raise, and a section holding a list would corrupt the merge.
+
+A malformed file must also not read as "no previous numbers": that reports every metric as new,
+which looks like a clean slate rather than a broken baseline. So the rule is reject-and-announce,
+never silently accept.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "moondeck" / "check"))
+
+import repo_health  # noqa: E402
+
+
+# ---- shape validation ----
+
+def test_a_snapshot_that_is_not_an_object_is_rejected():
+    """A list or scalar cannot be a snapshot; accepting one would raise inside the merge."""
+    assert repo_health._valid_snapshot([1, 2, 3], "t") == {}
+    assert repo_health._valid_snapshot("nope", "t") == {}
+    assert repo_health._valid_snapshot(42, "t") == {}
+
+
+def test_a_section_of_the_wrong_shape_is_rejected():
+    """`flash`/`perf`/`complexity` are merged key-by-key, so each must be an object."""
+    assert repo_health._valid_snapshot({"flash": []}, "t") == {}
+    assert repo_health._valid_snapshot({"perf": 7}, "t") == {}
+    assert repo_health._valid_snapshot({"complexity": "x"}, "t") == {}
+
+
+def test_a_valid_snapshot_passes_through_unchanged():
+    """The guard must not damage the normal case — this is the control for the rejections above."""
+    good = {"flash": {"esp32": 1}, "perf": {}, "complexity": {}, "other": 5}
+    assert repo_health._valid_snapshot(good, "t") is good
+
+
+def test_a_snapshot_with_no_sections_is_still_valid():
+    """Sections are optional: a first-ever snapshot has none, and that is not malformed."""
+    assert repo_health._valid_snapshot({"lines": {"src": 10}}, "t") == {"lines": {"src": 10}}
+
+
+# ---- the merge the validation protects ----
+
+def test_carry_forward_keeps_previous_values_for_unmeasured_sections():
+    """The reason the shapes matter: a run that measured nothing must not drop the old numbers."""
+    old = {"flash": {"esp32": 100, "esp32s3": 200}, "perf": {"tick": 5}, "complexity": {}}
+    new = {"flash": {"esp32": 150}}
+    merged = repo_health.merge_carry_forward(new, old)
+    assert merged["flash"]["esp32"] == 150      # this run measured it
+    assert merged["flash"]["esp32s3"] == 200    # this run did not — the old value survives
+    assert merged["perf"]["tick"] == 5
+
+
+def test_carry_forward_survives_a_rejected_baseline():
+    """A malformed baseline degrades to "nothing to carry", not to a crash."""
+    merged = repo_health.merge_carry_forward({"flash": {"esp32": 1}},
+                                             repo_health._valid_snapshot([1, 2], "t"))
+    assert merged["flash"] == {"esp32": 1}
+
+
+# ---- the loaders ----
+
+def test_malformed_json_on_disk_reads_as_empty(tmp_path, monkeypatch):
+    """Unparseable JSON is announced and treated as empty rather than raising mid-run."""
+    bad = tmp_path / "repo-health.json"
+    bad.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setattr(repo_health, "HEALTH_FILE", bad)
+    assert repo_health.load_working_tree() == {}
+
+
+def test_a_wrong_shape_on_disk_reads_as_empty(tmp_path, monkeypatch):
+    """Valid JSON of the wrong shape is rejected by the same rule as unparseable JSON."""
+    bad = tmp_path / "repo-health.json"
+    bad.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    monkeypatch.setattr(repo_health, "HEALTH_FILE", bad)
+    assert repo_health.load_working_tree() == {}
+
+
+def test_a_good_file_on_disk_loads(tmp_path, monkeypatch):
+    """The control: the loader must actually load a well-formed snapshot."""
+    good = tmp_path / "repo-health.json"
+    good.write_text(json.dumps({"flash": {"esp32": 1}}), encoding="utf-8")
+    monkeypatch.setattr(repo_health, "HEALTH_FILE", good)
+    assert repo_health.load_working_tree() == {"flash": {"esp32": 1}}
