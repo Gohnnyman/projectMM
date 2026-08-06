@@ -183,10 +183,13 @@ void MqttModule::publishDiscovery(bool announce) {
     // JSON-schema MQTT light. Abbreviated keys (HA's documented short forms). brightness at the
     // default 0-255 scale (no scale key needed). dev{} groups the entity under a device card in HA.
     // `name:null` (see comment above) collapses the entity slug so `light.<device>` isn't doubled.
-    // The looks this device offers, as HA's effect list. Built into a scratch region of the payload
-    // buffer first so its true length is known before the config is assembled around it.
-    char* fxScratch = discoveryPayload_ + kDiscoveryPayloadBase / 2;
-    const size_t fxLen = writeHaEffectList(fxScratch, discoveryPayloadLen_ - kDiscoveryPayloadBase / 2);
+    // The looks this device offers, as HA's effect list. Built into discoveryBuf_ as scratch: that
+    // buffer is untouched until buildMqttPublish below, by which time the list is already consumed
+    // into the payload. It must NOT be a region of discoveryPayload_ — snprintf writing the payload
+    // while reading the list from inside its own destination tramples the list once the fixed
+    // prefix (uniq_id plus three topics) grows past the scratch offset.
+    char* fxScratch = reinterpret_cast<char*>(discoveryBuf_);
+    const size_t fxLen = writeHaEffectList(fxScratch, discoveryBufLen_);
     char fxKey[24] = "";
     if (fxLen) std::snprintf(fxKey, sizeof(fxKey), "\"effect\":true,");
 
@@ -477,6 +480,18 @@ void MqttModule::tick1s() MM_NONBLOCKING {
         return;
     }
     if (!platform::networkReady()) { MoonModule::tick1s(); return; }
+
+    // Presets changed while connected: re-announce so the retained discovery config carries the
+    // current effect list (Home Assistant only re-reads it when the retained message changes).
+    // Revision-driven, so a save, rename or delete lands within a second; buffers resize inside
+    // publishDiscovery via ensureDiscoveryBuffers.
+    if (haDiscovery_ && state_ == Conn::Connected && controlModule_) {
+        const uint32_t rev = controlModule_->presetsRevision();
+        if (rev != lastPresetsRev_) {
+            lastPresetsRev_ = rev;
+            publishDiscovery(true);
+        }
+    }
 
     const uint32_t now = platform::millis();
     switch (state_) {
@@ -789,7 +804,12 @@ void MqttModule::publishState(bool force) {
     const bool on = driversOn(s);
     const uint8_t bri = driversBrightness(s);
     const uint8_t pal = driversPalette(s);
-    if (!force && havePublished_ && on == lastOn_ && bri == lastBri_ && pal == lastPalette_) return;
+    // The applied look is part of the published state (the ha/state `effect` field), so it is part
+    // of the change gate: applying a preset changes neither on, bri nor palette, and without this
+    // signature a look-only change would never publish.
+    const char* lookNow = controlModule_ ? controlModule_->currentLook() : "";
+    if (!force && havePublished_ && on == lastOn_ && bri == lastBri_ && pal == lastPalette_ &&
+        std::strncmp(lookNow, lastLook_, sizeof(lastLook_) - 1) == 0) return;
 
     char topic[128];
     uint8_t buf[kSendBufLen];
@@ -840,6 +860,7 @@ void MqttModule::publishState(bool force) {
     }
 
     lastOn_ = on; lastBri_ = bri; lastPalette_ = pal;
+    std::snprintf(lastLook_, sizeof(lastLook_), "%s", lookNow);   // committed only after every send succeeded
     havePublished_ = true;
 }
 

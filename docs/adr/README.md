@@ -2,7 +2,7 @@
 
 An [ADR](https://github.com/joelparkerhenderson/architecture-decision-record) captures one significant architectural decision: the context that forced a choice, the option taken, and the consequences that followed. Format is [Michael Nygard's classic](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions.html): **Title, Status, Context, Decision, Consequences**.
 
-These records are **immutable**. A decision that changes is not edited in place, a new ADR supersedes it and both link, so the reasoning trail stays honest. This is the difference from the [lessons log](../history/lessons.md): lessons are debugging war-stories, pruned as they are absorbed; ADRs are decisions, kept as an append-only record. The forward-looking counterpart, what we set out to build, is the [plan archive](../history/plans/README.md).
+These records are **immutable except the status line**: a decision that changes is not edited in place — a new ADR supersedes it, the old one's status gains a dated pointer to its successor (`Superseded by ADR-NNNN, YYYY-MM-DD`, or a dated `Amended:` note), and both link, so the reasoning trail stays honest while every reader lands on a signpost to current truth. This is the difference from the [lessons log](../history/lessons.md): lessons are debugging war-stories, pruned as they are absorbed; ADRs are decisions, kept as an append-only record. The forward-looking counterpart, what we set out to build, is the [plan archive](../history/plans/README.md).
 
 Agents do not read this directory automatically, only when a decision's rationale is in question (the same rule as `history/` and `backlog/`).
 

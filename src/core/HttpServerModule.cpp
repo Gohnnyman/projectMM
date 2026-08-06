@@ -1494,7 +1494,8 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
     // behaviour rather than forcing a re-fetch on every state update.
     unsigned pmt = 1;
     if (auto* control = static_cast<ControlModule*>(findModuleByName("Control")))
-        pmt = static_cast<unsigned>(control->presetsModifiedS()) + 1;   // +1: never report 0
+        pmt = static_cast<unsigned>(control->presetsRevision());   // >= 1 once setup's rescan ran
+    if (pmt == 0) pmt = 1;   // python-wled treats 0 as "no presets support"
     sink.appendf("\"fs\":{\"t\":256,\"u\":32,\"pmt\":%u},"
                  // uptime + pmt drive python-wled's presets change-detect: when both are non-zero and
                  // stable, HA computes a stable "boot_time" and stops refetching /presets.json every

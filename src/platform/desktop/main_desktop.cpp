@@ -80,14 +80,25 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         const bool isPort = std::strcmp(argv[i], "--port") == 0;
         if (isPort && i + 1 < argc) {
-            const long v = std::strtol(argv[++i], nullptr, 10);
-            if (v > 0 && v <= 65535) httpPort = static_cast<uint16_t>(v);
-            else { std::printf("--port must be 1..65535\n"); return 1; }
+            // endptr check: "80abc" must be an error, not port 80 — silently accepting a typo'd
+            // value binds the wrong port and the failure surfaces much later as "HA can't connect".
+            char* end = nullptr;
+            const long v = std::strtol(argv[++i], &end, 10);
+            if (end == argv[i] || *end != '\0' || v <= 0 || v > 65535) {
+                std::printf("--port must be a number 1..65535, got \"%s\"\n", argv[i]);
+                return 1;
+            }
+            httpPort = static_cast<uint16_t>(v);
         } else if (isPort) {
             std::printf("--port needs a value\n"); return 1;
         } else if (std::strcmp(argv[i], "--help") == 0) {
             std::printf("usage: projectMM [--port N]   (default 8080; 80 needs root)\n");
             return 0;
+        } else {
+            // An unknown argument is a user error, not noise to ignore: "--prot 80" silently
+            // running on 8080 is the same late-surfacing failure as the typo'd value.
+            std::printf("unknown argument \"%s\" — try --help\n", argv[i]);
+            return 1;
         }
     }
     // Unbuffer so every line lands in projectMM.log before a crash.

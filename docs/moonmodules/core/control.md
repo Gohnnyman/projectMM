@@ -66,7 +66,7 @@ Looks reach Home Assistant two ways, and only `Layers` presets travel either of 
 
 **MQTT discovery** publishes the same looks as the light entity's **effect list**. HA has no preset concept over MQTT, so they arrive as effects — the same result from the user's side, reached through a different mechanism.
 
-HA caches the preset list and re-fetches only when the device's presets-modified time (`info.fs.pmt`) changes, so that value moves whenever a preset is saved, renamed or deleted. A constant there leaves HA showing the list it read at setup forever.
+HA caches the preset list and re-fetches only when the device's `info.fs.pmt` value changes, so the device reports a revision counter there that bumps on every preset save, rename and delete — a counter rather than a timestamp, so two changes inside one second still read as two. A constant there leaves HA showing the list it read at setup forever; over MQTT the same revision re-announces the effect list mid-session.
 
 Only looks are exposed, on both paths. A `Drivers` or `Layouts` preset rewires pins or geometry, which must not be reachable from something that believes it is choosing a color scheme — the restriction is enforced at the apply entry point, not merely by omitting them from the list.
 

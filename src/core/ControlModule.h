@@ -75,7 +75,10 @@ public:
     /// emoji the module cards use (ROLE_EMOJI in the UI): one vocabulary rather than a second set
     /// invented here. Index-aligned with kCapturable.
     static constexpr const char* kCaptureRole[] = {"layout", "layer", "driver", "service"};
-    static constexpr uint8_t kCaptureCount = 4;
+    static constexpr uint8_t kCaptureCount = sizeof(kCapturable) / sizeof(kCapturable[0]);
+    static_assert(sizeof(kCapturable) / sizeof(kCapturable[0]) ==
+                  sizeof(kCaptureRole) / sizeof(kCaptureRole[0]),
+                  "kCapturable and kCaptureRole are index-aligned");
     /// Index of "Layers" within kCapturable — the role a pure look occupies.
     static constexpr uint8_t kLayersRole = 1;
     static_assert(kCapturable[kLayersRole][0] == 'L' && kCapturable[kLayersRole][1] == 'a' &&
@@ -231,11 +234,11 @@ public:
 
     uint8_t presetCount() const { return presetCount_; }
 
-    /// Seconds-since-boot of the last change to the preset SET (a save, delete, rename or rescan).
-    /// The WLED shim reports this as `info.fs.pmt`, which is how Home Assistant decides whether to
-    /// re-fetch /presets.json: a constant there means HA keeps its first copy forever and never sees
-    /// a preset added or removed.
-    uint32_t presetsModifiedS() const { return presetsModifiedS_; }
+    /// Monotonic revision of the preset SET, bumped by every save, delete, rename and rescan. The
+    /// WLED shim reports it as `info.fs.pmt` (Home Assistant re-fetches /presets.json only when that
+    /// value changes) and MqttModule re-announces its effect list on it. A COUNTER rather than a
+    /// timestamp: two mutations inside one second must still read as two changes.
+    uint32_t presetsRevision() const { return presetsRevision_; }
 
     /// Apply a LOOK by name. Refuses anything that is not look-only, so an external caller cannot
     /// reconfigure the hardware through this entry point even if it names a preset that would.
@@ -335,7 +338,11 @@ public:
         const uint8_t from = moving->slot;
         moving->slot = to;
         if (occupant) occupant->slot = from;    // swap rather than overwrite
-        writeSlots();
+        // Only the one or two presets whose slot changed get rewritten: a reorder used to rewrite
+        // EVERY file on the device, which is flash wear proportional to the collection for a
+        // two-preset change.
+        writeSlot(*moving);
+        if (occupant) writeSlot(*occupant);
         sortBySlot();
         return true;
     }
@@ -374,8 +381,8 @@ private:
     /// so an upload through the File Manager shows up the next time one of those happens.
     void rescan() {
         // Every change to the preset SET funnels through here (save, delete, rename, boot), so this
-        // is the one place the "presets changed" stamp needs to move.
-        presetsModifiedS_ = platform::millis() / 1000u;
+        // is the one place the revision needs to bump.
+        presetsRevision_++;
         presetCount_ = 0;
         platform::fsList(kPresetDir, &onEntry, this);
         for (uint8_t i = 0; i < presetCount_; i++) readCaptures(presets_[i]);
@@ -461,36 +468,36 @@ private:
     /// file) and it keeps the order where the presets themselves live, so a folder copied to another
     /// device brings its layout with it rather than resetting to whatever order that filesystem
     /// happens to list.
-    void writeSlots() {
-        for (uint8_t i = 0; i < presetCount_; i++) {
-            char path[128];
-            pathFor(presets_[i].name, path, sizeof(path));
-            const long size = platform::fsSize(path);
-            if (size <= 0) continue;
-            char* body = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
-            if (!body) continue;
-            const int n = platform::fsRead(path, body, static_cast<size_t>(size) + 1);
-            if (n > 0) {
-                body[n] = '\0';
-                JsonSink sink;
-                // Replace the leading '{' with '{"slot":N,' — the slot is a header field like
-                // `captures`, and a rewrite is simpler than an in-place patch of a variable-width int.
-                sink.appendf("{\"slot\":%u,", static_cast<unsigned>(presets_[i].slot));
-                const char* rest = std::strchr(body, '{');
-                if (rest) {
-                    const char* after = rest + 1;
-                    // Drop any previous slot key so repeated reorders do not accumulate them.
-                    if (std::strncmp(after, "\"slot\":", 7) == 0) {
-                        const char* comma = std::strchr(after, ',');
-                        if (comma) after = comma + 1;
-                    }
-                    sink.append(after);
-                    if (!sink.overflowed())
-                        platform::fsWriteAtomic(path, sink.data(), sink.size());
+    /// Rewrite ONE preset's file with its current slot in the header. Callers pass exactly the
+    /// presets a mutation touched; rewriting the whole folder for a two-preset swap is flash wear.
+    void writeSlot(const Preset& p) {
+        char path[128];
+        pathFor(p.name, path, sizeof(path));
+        const long size = platform::fsSize(path);
+        if (size <= 0) return;
+        char* body = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+        if (!body) return;
+        const int n = platform::fsRead(path, body, static_cast<size_t>(size) + 1);
+        if (n > 0) {
+            body[n] = '\0';
+            JsonSink sink;
+            // Replace the leading '{' with '{"slot":N,' — the slot is a header field like
+            // `captures`, and a rewrite is simpler than an in-place patch of a variable-width int.
+            sink.appendf("{\"slot\":%u,", static_cast<unsigned>(p.slot));
+            const char* rest = std::strchr(body, '{');
+            if (rest) {
+                const char* after = rest + 1;
+                // Drop any previous slot key so repeated reorders do not accumulate them.
+                if (std::strncmp(after, "\"slot\":", 7) == 0) {
+                    const char* comma = std::strchr(after, ',');
+                    if (comma) after = comma + 1;
                 }
+                sink.append(after);
+                if (!sink.overflowed())
+                    platform::fsWriteAtomic(path, sink.data(), sink.size());
             }
-            platform::free(body);
         }
+        platform::free(body);
     }
 
     static void pathFor(const char* name, char* out, size_t n) {
@@ -515,6 +522,20 @@ private:
         // happened to hold the first free cell. A save that named no pad omits the key, and
         // assignFreeSlots gives it the first free cell instead.
         if (captureRole_ >= kCaptureCount) { setStatusf(Severity::Warning, "choose what to capture"); return; }
+        // A pad can hold one preset: saving a DIFFERENT name onto an occupied slot would leave two
+        // files claiming the cell, and the grid can render only one of them. Overwriting the same
+        // name on its own pad is the normal save-over flow and passes.
+        if (saveSlot_ < kMaxPresets) {
+            for (uint8_t i = 0; i < presetCount_; i++) {
+                if (presets_[i].slot != saveSlot_) continue;
+                if (std::strcmp(presets_[i].name, name_) != 0) {
+                    setStatusf(Severity::Warning, "pad %u is taken by %s",
+                               static_cast<unsigned>(saveSlot_ + 1), presets_[i].name);
+                    return;
+                }
+                break;
+            }
+        }
         const char* type = kCapturable[captureRole_];
         sink.append("{");
         if (saveSlot_ < kMaxPresets)   // anything else (incl. kNoSlot) means "no pad was chosen"
@@ -603,8 +624,9 @@ private:
         pathFor(to, dst, sizeof(dst));
         // Refuse a rename onto an existing preset: the write would overwrite it and the remove would
         // then delete the source, destroying a preset the user never named. Same refuse-on-collision
-        // stance moveListRow takes.
-        if (platform::fsSize(dst) > 0) {
+        // stance moveListRow takes. >= 0, not > 0: fsSize returns 0 for an EXISTING empty file and
+        // -1 for a missing one, and an empty destination is still a preset we must not overwrite.
+        if (platform::fsSize(dst) >= 0) {
             setStatusf(Severity::Warning, "%s already exists", to);
             return false;
         }
@@ -671,7 +693,7 @@ private:
 
     Preset presets_[kMaxPresets];
     uint8_t presetCount_ = 0;
-    uint32_t presetsModifiedS_ = 0;   ///< see presetsModifiedS(): drives HA's preset re-fetch
+    uint32_t presetsRevision_ = 0;   ///< see presetsRevision(): drives HA's preset re-fetch
     uint32_t nextId_ = 0;
     char name_[kMaxNameLen] = {};
     /// Which ONE subtree the next save captures, as an index into kCapturable. A preset carries

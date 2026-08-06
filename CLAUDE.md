@@ -126,7 +126,7 @@ Published at [moonmodules.org/projectMM](https://moonmodules.org/projectMM/); so
 - [performance.md](https://moonmodules.org/projectMM/performance.html) — per-module timing/memory per platform
 - [MIGRATING.md](https://moonmodules.org/projectMM/MIGRATING.html) — breaking-change log
 - [backlog/](https://moonmodules.org/projectMM/backlog/index.html) — forward-looking to-build lists (core / light / mixed)
-- [adr/](https://moonmodules.org/projectMM/adr/index.html) — immutable architecture decision records (Nygard format)
+- [adr/](https://moonmodules.org/projectMM/adr/index.html) — immutable architecture decision records (Nygard format); immutable except the status line: superseded/amended ADRs get a dated pointer to their successor
 - [history/](https://moonmodules.org/projectMM/history/index.html) — lessons, prior-project inventories, friend-repo digests
 - [moonmodules/](https://github.com/MoonModules/projectMM/tree/main/docs/moonmodules) — module catalog pages + generated technical pages
 

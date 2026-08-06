@@ -46,6 +46,7 @@ def _resolve_executable() -> Path:
         # is often the NEWER binary. Both are considered and the freshest wins below: picking the
         # first that merely exists served a stale build whose changes appeared to be no-ops.
         ROOT / "build" / "projectMM",
+        ROOT / "build" / "projectMM.exe",   # the same root-build case on Windows
     ]
     existing = [c for c in candidates if c.exists()]
     if existing:

@@ -8,6 +8,7 @@ add_executable(mm_tests
     unit/core/unit_ActiveInstance.cpp
     unit/core/unit_Color.cpp
     unit/core/unit_math8.cpp
+    unit/core/unit_math16.cpp
     unit/core/unit_noise.cpp
     unit/core/unit_crc.cpp
     unit/core/unit_AudioService_sync.cpp
@@ -73,6 +74,7 @@ add_executable(mm_tests
     unit/light/unit_Coord3D.cpp
     unit/light/unit_effects_render.cpp
     unit/light/unit_Effects_gridsweep.cpp
+    unit/light/unit_Effects_golden.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp

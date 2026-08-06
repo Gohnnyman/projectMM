@@ -219,6 +219,11 @@ bool FilesystemModule::applySubtree(MoonModule* m, const char* json, const char*
     // applySubtree user persists by construction.
     m->markDirty();
     noteDirty();
+    // Structural change on a live tree: flip the WS full-resync flag through the existing schema
+    // hook, so an apply with no HTTP request in flight (Home Assistant picking a preset over MQTT
+    // or the WLED shim) still reaches every open browser. Same hook rebuildControls uses; no
+    // coupling to HttpServerModule.
+    MoonModule::notifySchemaChanged();
     return true;
 }
 
@@ -348,8 +353,6 @@ void FilesystemModule::applyValue(const ControlDescriptor& c, const char* json, 
 }
 
 // ---- Save ----
-// Returns true only when the file was written. On failure (path/overflow/write
-// error) the caller must keep the subtree dirty so the change isn't lost.
 // Serialize a subtree into a caller's sink. The write half of saveSubtree, split out so a caller
 // storing the bytes elsewhere (a named preset file) produces the SAME format the loader reads,
 // rather than a second serializer that could drift from this one. See the header.
@@ -366,6 +369,8 @@ bool FilesystemModule::saveSubtreeTo(MoonModule* m, JsonSink& sink, const char* 
     return !sink.overflowed();           // only trips on an allocation failure, not a size cap
 }
 
+// Returns true only when the file was written. On failure (path/overflow/write
+// error) the caller must keep the subtree dirty so the change isn't lost.
 bool FilesystemModule::saveSubtree(MoonModule* m) {
     char path[MAX_PATH];
     if (!pathFor(m, path, sizeof(path))) return false;

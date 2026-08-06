@@ -68,7 +68,7 @@ The system is two layers, separated as much as practical:
 
 When mixing is needed (for performance or simplicity), it must be an explicit decision: consciously choosing minimalism over separation, not accidentally blurring the boundary. Use domain-neutral naming in those cases ("producer buffer" not "LED buffer", "output driver" not "LED driver" in core interfaces) to keep the door open for future separation.
 
-**Core primitives, not one-offs.** Core earns growth only by adding a recognizable, reusable primitive many modules lean on (a streaming write, a positional read, a bounded arena, a recursive JSON reader); a core change that only one caller needs is the smell. When a complex system will need a capability, build the cleanest complete version rather than a crippled subset that pushes hacks outward (a JSON reader that can't read arrays is not "minimal"). And concrete first, abstract later: build one working feature end-to-end before extracting the shared abstraction.
+**Core primitives, not one-offs.** Core earns growth only by adding a recognizable, reusable primitive many modules lean on (a streaming write, a positional read, a bounded arena, a recursive JSON reader); a core change that only one caller needs is the smell. When a complex system will need a capability, build the cleanest complete version rather than a crippled subset that pushes hacks outward (a JSON reader that can't read arrays is not "minimal").
 
 # Core
 

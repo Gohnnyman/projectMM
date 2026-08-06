@@ -149,6 +149,8 @@ private:
 
     SystemModule* systemModule_ = nullptr;
     ControlModule* controlModule_ = nullptr;
+    uint32_t lastPresetsRev_ = 0;   ///< last preset revision announced to HA (tick1s re-announce)
+    char lastLook_[32] = "";        ///< the look last published in ha/state (part of the change gate)
 
     // The topic prefix is DERIVED from a STABLE hardware id: projectMM/<last6-of-MAC>. Not stored (no
     // buffer). The MAC is fixed for the chip's life, so a device rename never changes the topics —

@@ -800,27 +800,65 @@ TEST_CASE("ControlModule sizes the Home Assistant look list to the presets that 
 }
 
 
-// Home Assistant caches the preset list and only re-fetches when the device's presets-modified time
-// changes. A constant there means a preset saved, renamed or deleted after HA set the device up
-// never appears in its dropdown — the endpoint stays correct while HA shows a stale copy forever.
-TEST_CASE("ControlModule stamps a new revision whenever the preset set changes") {
+// Home Assistant caches the preset list and only re-fetches when the device's reported revision
+// changes. A value that can stand still across a mutation means a preset saved, renamed or deleted
+// after HA set the device up never appears in its dropdown — the endpoint stays correct while HA
+// shows a stale copy forever. The revision is a COUNTER, not a timestamp, precisely so two
+// mutations inside the same second still read as two changes — which also makes this test
+// deterministic, with no clock involved.
+TEST_CASE("ControlModule bumps its revision on every preset-set change") {
     Device d;
     d.add(d.layers, "Layer");
 
     d.setCapture("Layers");
     d.setText("name", "first");
     d.press("save");
-    const uint32_t afterFirst = d.control->presetsModifiedS();
+    const uint32_t afterFirst = d.control->presetsRevision();
+    CHECK(afterFirst > 0);                  // setup's rescan already counts as revision 1
 
-    // Saving another preset must move the stamp, or a consumer caching on it never re-reads.
-    mm::platform::delayMs(1100);            // the stamp has second resolution
+    // Two mutations back-to-back — same second, and each must still read as a change.
     d.setText("name", "second");
     d.press("save");
-    CHECK(d.control->presetsModifiedS() > afterFirst);
+    const uint32_t afterSecond = d.control->presetsRevision();
+    CHECK(afterSecond > afterFirst);
 
-    // So must a delete: a removed preset has to disappear from a cached list too.
-    const uint32_t afterSecond = d.control->presetsModifiedS();
-    mm::platform::delayMs(1100);
     REQUIRE(d.control->deleteListRow(d.firstRowId()));
-    CHECK(d.control->presetsModifiedS() > afterSecond);
+    CHECK(d.control->presetsRevision() > afterSecond);
+}
+
+
+// A pad holds one preset. Saving a DIFFERENT name onto an occupied pad would leave two files
+// claiming the same cell, of which the grid can render only one — so the save refuses and says who
+// holds the pad. Saving the SAME name on its own pad is the normal save-over flow and still works.
+TEST_CASE("ControlModule refuses to save a new preset onto an occupied pad") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    auto setU8 = [&](const char* name, uint8_t v) {
+        auto& cs = d.control->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, name) == 0) { *static_cast<uint8_t*>(cs[i].ptr) = v; return; }
+        FAIL("no control named ", name);
+    };
+
+    d.setCapture("Layers");
+    d.setText("name", "holder");
+    setU8("slot", 5);
+    d.press("save");
+    REQUIRE(d.control->listRowCount() == 1);
+
+    // A different name aimed at the same pad: refused, nothing new created.
+    d.setText("name", "intruder");
+    setU8("slot", 5);
+    d.press("save");
+    CHECK(d.control->listRowCount() == 1);
+    CHECK(std::string(d.status()).find("taken") != std::string::npos);
+
+    // The holder itself saving onto its own pad is the overwrite flow.
+    d.setText("name", "holder");
+    setU8("slot", 5);
+    d.press("save");
+    CHECK(d.control->listRowCount() == 1);
+    CHECK(!d.rowNamed("holder").empty());
 }

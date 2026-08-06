@@ -14,6 +14,15 @@
 #include "core/Scheduler.h"
 #include "core/MoonModule.h"
 #include "core/SystemModule.h"
+#include "core/ControlModule.h"
+#include "core/FilesystemModule.h"
+#include "core/ModuleFactory.h"
+#include "light/effects/NoiseEffect.h"
+#include "light/layers/Layer.h"
+#include "light/layers/Layers.h"
+#include "platform/platform.h"
+
+#include <filesystem>
 
 #include <cstdint>
 #include <cstring>
@@ -286,4 +295,106 @@ TEST_CASE("MqttModule: topic identity is MAC-stable, not affected by a device re
     r.drivers->on = true;
     r.publish("/projectMM/LivingRoom/on/set", "false");   // absolute, name-based
     CHECK(r.drivers->on == true);                 // ignored — not our (MAC) prefix
+}
+
+
+namespace {
+
+/// Rig + a real preset stack (FilesystemModule, ControlModule, a Layers tree), so the MQTT<->preset
+/// seams are exercised against the real modules rather than a stub. Filesystem isolated per fixture.
+struct PresetRig : Rig {
+    FilesystemModule* fs = nullptr;
+    ControlModule* control = nullptr;
+    MoonModule* layers = nullptr;
+    char root_[256] = {};
+
+    PresetRig() {
+        static unsigned seq = 0;
+        std::snprintf(root_, sizeof(root_), "/tmp/mm_mqtt_preset_%u", ++seq);
+        std::filesystem::remove_all(root_);
+        platform::fsSetRoot(root_);
+
+        ModuleFactory::registerType<Layers>("Layers");
+        ModuleFactory::registerType<Layer>("Layer");
+        ModuleFactory::registerType<NoiseEffect>("NoiseEffect");
+        ModuleFactory::registerType<ControlModule>("ControlModule");
+
+        fs = new FilesystemModule();
+        fs->setTypeName("FilesystemModule");
+        fs->setScheduler(&scheduler);
+        layers = ModuleFactory::create("Layers");
+        control = static_cast<ControlModule*>(ModuleFactory::create("ControlModule"));
+        scheduler.addModule(fs);
+        scheduler.addModule(layers);
+        scheduler.addModule(control);
+        fs->setup(); layers->setup(); control->defineControls(); control->setup();
+        mqtt->setControlModule(control);
+    }
+    ~PresetRig() { std::filesystem::remove_all(root_); }
+
+    /// Drop a valid Layers look into the preset folder and rescan, as a save or an upload would.
+    void addLook(const char* name) {
+        platform::fsMkdir(ControlModule::kPresetDir);
+        char path[160];
+        std::snprintf(path, sizeof(path), "%s/%s.json", ControlModule::kPresetDir, name);
+        const char* body = "{\"captures\":\"Layers\",\"Layers.enabled\":true}";
+        REQUIRE(platform::fsWriteAtomic(path, body, std::strlen(body)));
+        control->setup();   // rescan picks it up and bumps the revision
+    }
+
+    /// Bytes captured since `from`, as a string for content asserts.
+    std::string capturedSince(size_t from, const uint8_t* cap) const {
+        return std::string(reinterpret_cast<const char*>(cap) + from,
+                           mqtt->sentCaptureLenForTest() - from);
+    }
+};
+
+}  // namespace
+
+// A preset saved, renamed or deleted while the broker is CONNECTED must re-announce the retained
+// discovery config: Home Assistant only re-reads the effect list when that message changes, so
+// without this a mid-session preset never appears in the dropdown until the next reconnect. All
+// three mutations funnel through one revision (pinned in unit_ControlModule), so one path proves
+// the announce mechanism for all of them.
+TEST_CASE("MqttModule re-announces the effect list when a preset appears mid-session") {
+    PresetRig r;
+    static uint8_t cap[8192];
+    r.mqtt->enableSendCaptureForTest(cap, sizeof(cap));
+    // A broker must be configured or tick1s bails at its idle guard before reaching the
+    // Connected-state work this test exercises. TEST-NET address; capture mode never dials it.
+    Scheduler::instance()->setControl("Mqtt", "broker", "{\"value\":\"192.0.2.1\"}");
+    Scheduler::instance()->setControl("Mqtt", "haDiscovery", "{\"value\":true}");
+    const uint8_t connack[] = {0x20, 0x02, 0x00, 0x00};
+    r.mqtt->feedForTest(connack, sizeof(connack));
+    r.mqtt->tick1s();                                    // settle: revision seen, nothing new
+    const size_t before = r.mqtt->sentCaptureLenForTest();
+
+    r.addLook("nightlook");
+    r.mqtt->tick1s();                                    // the revision moved -> re-announce
+
+    const std::string sent = r.capturedSince(before, cap);
+    CHECK(sent.find("fx_list") != std::string::npos);
+    CHECK(sent.find("nightlook") != std::string::npos);
+}
+
+// Applying a look changes neither on, brightness nor palette, so the ha/state change gate must
+// include the look itself — without that signature Home Assistant keeps showing the previous
+// effect after a look-only change (including one made on the device's own pad grid).
+TEST_CASE("MqttModule publishes state when only the applied look changed") {
+    PresetRig r;
+    r.addLook("only-look");
+    static uint8_t cap[8192];
+    r.mqtt->enableSendCaptureForTest(cap, sizeof(cap));
+    Scheduler::instance()->setControl("Mqtt", "broker", "{\"value\":\"192.0.2.1\"}");   // see above
+    Scheduler::instance()->setControl("Mqtt", "haDiscovery", "{\"value\":true}");
+    const uint8_t connack[] = {0x20, 0x02, 0x00, 0x00};
+    r.mqtt->feedForTest(connack, sizeof(connack));
+    r.mqtt->tick1s();                                    // initial publishes committed
+    const size_t before = r.mqtt->sentCaptureLenForTest();
+
+    REQUIRE(r.control->applyLookByName("only-look"));    // drivers values untouched
+    r.mqtt->tick1s();                                    // gate must open on the look signature
+
+    const std::string sent = r.capturedSince(before, cap);
+    CHECK(sent.find("\"effect\":\"only-look\"") != std::string::npos);
 }
