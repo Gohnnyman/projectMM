@@ -41,7 +41,7 @@ Every function's doc block names its canonical source — the convention the eff
 
 ## 3. The particle kernel
 
-```
+```cpp
 particles::Pool pool;                    // POD view over ScratchBuffer arrays
 pool.init(scratch, count);               // at prepare(): SoA x/y/z, vx/vy/vz, ttl, hue — no allocation later
 pool.gravity(g);                         // one dv per frame, applied to all (branch costs more than work)
@@ -85,6 +85,13 @@ Order by leverage, cheapest risk first; every batch lands with its tests and the
 
 **Golden-frame harness (new, small):** render N frames at fixed seed/fixed `elapsed()` into a buffer, hash, compare against a checked-in golden. Only for effects claiming pixel-identical; a deliberate divergence replaces the golden in the same commit with the bench note. Lives beside the existing effect tests.
 
+Two things learned building it (2026-08-06), both by mutation-testing the harness rather than trusting it:
+
+- **A short render proves nothing.** At a typical default speed the phase advances a few units over 8 frames, moving nothing by a whole pixel on a 16-wide grid — the hash compared two near-identical frames and passed even with the animation perturbed 7x. The harness renders 200 frames (4 s) for that reason.
+- **A golden is only as strong as the effect's visible output, and it is NOT a statement that the effect looks good.** It pins what the code renders today so a "changes nothing" refactor can be checked. Several effects are awaiting a tuning pass (some generated rather than derived, with arbitrary parameters — two saturate their field to full brightness at default settings and render a nearly static frame). When tuning moves a golden deliberately, that is the system working. The only rule is that no hash moves *silently*.
+
+**Corollary for the migration: power-function work and effect tuning feed each other.** Migrating an effect surfaces what its parameters actually do (the saturation above was found by a phase mutation, not by looking), and tuning decisions then re-baseline the goldens. Neither waits for the other; the goldens simply record where each effect stands.
+
 ### Stage 2 — new showcase effects
 
 The goal is **beautiful effects, not conditioned ones** (PO decision): each showcase leans on the toolbox for its heavy lifting — the named power functions carry the effect's core mechanic — and is otherwise free to add any effect-local code that makes it better. That is the coverage proof (the library did the hard part) and the reference value (a writer sees the functions in real use), without a purity rule that would make an effect worse to keep a list clean. New showcases exist only where stage 1's migrations do not already exercise a family; everything else is proven by the rewrites themselves.
@@ -125,6 +132,41 @@ Verified against CLAUDE.md § Principles and [architecture.md § Hot path discip
 - **Complete construct, real consumer:** per architecture.md's surviving rule, each power function is built as the cleanest complete version (no crippled subsets) — and lands in the same PR as its first real consumer, so nothing ships speculatively: `beatPhase` is *extracted from* the nine effects that prove it.
 - **Subtraction closes the loop:** after stage 1, `math8.h` keeps only entries with remaining callers (palette/hue and internal fast paths); superseded 8-bit forms and the temporary `(Buffer&, dims)` overloads are removed, and the five converged effects' private state code is deleted, not deprecated.
 
+## 6b. Determinism (supersync-ready by construction)
+
+A planned capability — **supersync**, one effect rendered across several devices — constrains this API, and honoring it now is nearly free while retrofitting it later is not. The requirement: two devices given the same time and the same controls must produce the same frame, without exchanging pixels.
+
+**The rule: a power function is a pure function of (position, time, seed) unless it has a stated reason not to be.** Three consequences, each checkable:
+
+- **Time, never frame count.** `BeatPhase` already satisfies this — it integrates `elapsed()`, so a device that drops frames still arrives at the same phase. This is the property that makes the nine-accumulator migration *more* than tidying: each hand-rolled copy also added `now * bpm` on its first tick, so its phase depended on device uptime and two devices could never agree. That is removed by construction (verified: it is the sole cause of the one golden that moved).
+- **Position-addressable randomness beside the stream.** `Random8` advances per *call*, so a device that renders one extra frame — or a different light count — desynchronizes permanently and never recovers. `hashInt(x, y, t, seed)` (identified in the canon survey as the dissolve-transition primitive) is the supersync form: ask "what is this pixel's random value" rather than "what is next in the stream". Both ship; the hash form is the default for anything a synced effect uses, the stream stays for effects that are legitimately local.
+- **Stateful kernels declare a resync point.** Particles, ripple, fire and CA carry evolving state that cannot be recomputed from time alone; a lost or late device cannot silently drift. Each exposes a deterministic re-seed from (time, seed) so a joining device can be placed into the same state — the same "keyframe" idea lockstep networking uses. Their *inputs* (emitters, forces) stay pure so only the state needs syncing, not the physics.
+
+Two non-goals here: this does not specify the sync protocol (clock distribution, keyframe cadence, and which device is authoritative are supersync's design, not the power functions'), and it does not forbid local-only effects — it requires that an effect which *wants* to be synced can be, without rewriting the primitives underneath it.
+
+## 6c. Two questions answered by the migration so far (2026-08-06)
+
+**Does using power functions make an effect more 3D-compatible?** Indirectly yes, but it is not automatic and it is worth being precise about which half it solves. Measured today: 21 effects declare `D2`, 13 declare `D3`, and 12 never read `depth()` at all. The `draw::` primitives are already dimension-generic (`line` is 3D Bresenham, `blur` covers every axis with extent > 1), so an effect built from them inherits 3D addressing for free — `FixedRectangle` and `PaintBrush` are `D3` on 3-4 `draw::` calls, while `Plasma` hand-rolls a `for z` loop to reach the same place. So power functions **remove the mechanical barrier** (addressing, extents, clipping, the `depthDim()` guard) and the `Canvas` migration removes it for the remaining 22 preambles.
+
+What they do *not* remove is the conceptual one: an effect is 3D when its idea is 3D. `Metaballs` computes `dx² + dy²`; no primitive turns that into a sphere — someone must add `dz²`. The family that genuinely closes this is the one not yet built: the **SDF trio**, where `|p| − r` is a circle in 2D and a sphere in 3D from identical code (§ the dimension audit). Expect 3D coverage to move with family 3, not with the current batches.
+
+**Is all the power functionality out of the effects yet?** No — roughly a third. Extracted so far: the nine BPM accumulators and five `imap` copies (the two highest-count patterns). Still embedded, from the bottom-up inventory: **22 `Canvas` preambles and ~15 `depthDim()` copies** (only StarSky migrated), **14 effects hand-rolling flat-index pixel writes**, **5 different particle representations**, **4 different distance implementations**, **3 private scratch-plane fade-and-blit idioms**, `FreqMatrix`'s scroll, and **4 bar-fill implementations**. Each is already a named candidate in the catalog; the remainder lands with families 1-3 and 6.
+
+## 6d. Live performance ("DeeJaying") — reachable, and closer than expected
+
+A stretch goal worth recording because the infrastructure is largely built: **playing effects live from the control surface — pads, faders, encoders — with no code changes.** What already exists: control changes reach a running module without a rebuild (`MoonModule::onControlChanged`), the surface routes faders and encoders through `Scheduler::setControl` (the same domain-neutral primitive IR and MQTT use), Layers composite with blend modes and opacity, and presets snapshot and restore whole subtrees.
+
+Power functions sharpen this in a specific way: **the more of an effect's mechanics live in shared, control-driven primitives, the more of it is playable rather than fixed.** A hand-rolled accumulator is private state a surface cannot reach; a `BeatPhase` fed from a control is a tempo a performer can ride. The same holds for `particles` (gravity, drag, emission as live parameters) and the field family (warp amount, octaves).
+
+What is genuinely missing, so the gap is not overstated:
+
+- **Crossfade between states.** Presets apply instantly; a performer needs a transition (the `easeInOut` family plus Layer opacity is most of it, and applying a preset *into* a second layer rather than over the live one is the shape to consider).
+- **Beat lock.** The audio service's onset/PLL (G5) is what makes `beatPhase` follow the music rather than a number — the difference between "animated" and "on the beat".
+- **Per-control assignment.** `faderTarget` is currently hardcoded (`fader1` → `Drivers.brightness`); a performer needs to bind any control to any fader, which is a UI + persistence job on the existing seam, not new core.
+- **Latency budget.** Untested end to end: a physical surface's control change must reach the render within a frame or two to feel live.
+
+Deliberately not designed here — this is a capability the power functions and the ControlModule surface *enable*, recorded so neither is built in a way that closes the door on it. It also sets a direction for MoonLive: a script whose parameters are surface-bound is a live instrument, not just a compact effect.
+
 ## 7. Testing and budgets
 
 - **Unit**: every power function gets behavior-named tests (bounds, wrap, saturation, the fencepost cases the effects documented); the particle kernel gets the WLED-PS-derived edge list (tunneling lookahead, zero-distance pairs, sticky pile-up) implemented as behaviors, not ported assertions.
@@ -141,7 +183,8 @@ Verified against CLAUDE.md § Principles and [architecture.md § Hot path discip
 4. Noise: widen value noise to `noise16` now; gradient noise is a swap-in later (§ TL;DR).
 5. Migration order and the golden-frame harness (§5, §7).
 6. MoonLive requirement list handed to the livescripts work; stages 1–2 do not block on it (§4).
-7. The resource accounting and its gates: flash read per batch, PolarLut 8-bit default, goldens as hashes, complete-construct-with-real-consumer, the math8 subtraction pass (§6).
+7. Determinism: pure-function-of-(position,time,seed) as the default, `hashInt` beside `Random8`, resync points on stateful kernels (§6b).
+8. The resource accounting and its gates: flash read per batch, PolarLut 8-bit default, goldens as hashes, complete-construct-with-real-consumer, the math8 subtraction pass (§6).
 
 Carried unchanged from the bottom-up: dimension-generic; one set everywhere without capping desktop; demo effects/pixel-identical-by-default; effects-vs-modifiers; Petrick coverage target; one codebase; `particles` naming; PS-replaces-twin; the 16-bit contract. Added on review (PO, 2026-08-06): **particle blending and fixed point are defaults, not per-effect decisions** — additive+splat rendering out of the box with a single opt-out, and the fixed-point vocabulary invisible to the writer (§2, §3).
 

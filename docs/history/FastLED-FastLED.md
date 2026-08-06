@@ -2,6 +2,38 @@
 
 What landed on [FastLED](https://github.com/FastLED/FastLED)'s main branch, month by month. External-context reference (like the v1/v2/MoonLight inventories) — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these digests lives in [README.md](README.md).
 
+## July 2026
+
+No release cut this month (3.10.4, 2026-06-16, remains the latest), so the month is not split. Two big threads: finishing the Raspberry Pi Pico driver family, and cutting the ESP32 platform loose from the Arduino core.
+
+**New**
+- Raspberry Pi Pico / RP2040: automatic parallel PIO output finally works for real — 2/4/8 strips driven from one PIO program, with a single-lane fallback for mixed layouts.
+- Raspberry Pi Pico gains fixed-function SPI+DMA drivers, a UART DMA driver, and a public hardware-SPI routing API.
+- WS2814 RGBW strips are now a first-class chipset with datasheet timing.
+- Classic ESP32 gains a second I2S bank — up to 32 parallel strip outputs — plus a second UART output lane.
+- FastLED can be built as a plain ESP-IDF project with no Arduino core at all: IDF's own time, serial, SPI, LEDC and heap calls are now the default on ESP32, with Arduino only as an opt-in fallback.
+- Classic ESP32 also gains an I2S-based signal capture backend (reading WS2812 data in), alongside the existing RMT and LPC845 capture paths.
+- LPC845 now defaults to its UART DMA output path.
+- Screenmaps can describe EL wire and EL panel shapes; a new HydroPack example drives two EL panels from a microphone beat detector.
+- `fl::printf`/`snprintf` accept a generic `{}` placeholder.
+
+**Fixed**
+- ESP8266: `addLeds()` no longer watchdog-resets when GPIO12 (D6) is used with P9813.
+- `rgb2hsv_approximate()` no longer turns orange into green; CHSV values now compare by field instead of by their RGB rendering.
+- TM1829 timing (FLIP + wait time) restored after a refactor dropped it.
+- SK9822/APA102 on the classic `addLeds` path now emit correct all-ones end clocks.
+- ESP32 I2S clock divider no longer silently truncates, which could produce wrong strip timing.
+- `m0clockless` brightness scaling was broken and always output zero.
+- Teensy 4.x SPI drivers no longer depend on the Arduino `SPI` library; Renesas boards no longer pull in an I2S header they don't have.
+- WASM/browser preview: microphone capture recovers after the user cancels access, and the default renderer works again.
+
+**Watching**
+- Report that RGBW output has been broken since 3.10.3 (#3622, closed) fed the month's RGBW colorimetry cleanups.
+- An open thread (#3762) blames an unconditional deep yield in `show()`'s refresh throttle for a long-standing frame-timing regression — no fix shipped yet.
+- A port to the WCH CH32V003 (48 MHz, 2 KB RAM) is proposed (#3755).
+
+_Auditability: 212 first-parent commits on `master` with author-date 2026-07-01..2026-07-31. Issues via `search/issues` for `repo:FastLED/FastLED+is:issue+created:2026-07-01..2026-07-31` (110 opened) and `closed:2026-07-01..2026-07-31` (106 closed); the great majority are the project's own phase/meta bring-up trackers for RP2040, LPC845 and the classic-ESP32 I2S driver, plus CI and linter work — only the user-facing ones are surfaced above. No versioned release published in July, so no month split._
+
 ## June 2026 (up to 3.10.4)
 
 Released **3.10.4** (2026-06-16), cut from `master`.

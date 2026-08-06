@@ -2428,7 +2428,12 @@ void HttpServerModule::pollWledStateFromWebSockets() {
                 char body[200];
                 for (size_t i = 0; i < len; i++) body[i] = static_cast<char>(fr[hdr + 4 + i] ^ mask[i & 3]);
                 body[len] = 0;
-                if (mm::json::hasKey(body, "on") || mm::json::hasKey(body, "bri"))
+                // `ps` belongs here alongside on/bri: applyWledState handles a preset selection,
+                // but a WebSocket frame carrying ONLY ps was dropped by this gate, so choosing a
+                // preset from a WLED-native client did nothing over the socket while the same
+                // command worked over HTTP.
+                if (mm::json::hasKey(body, "on") || mm::json::hasKey(body, "bri") ||
+                    mm::json::hasKey(body, "ps"))
                     applyWledState(body);
             }
             off += frameLen;

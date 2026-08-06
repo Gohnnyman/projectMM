@@ -306,7 +306,7 @@ struct PresetRig : Rig {
     FilesystemModule* fs = nullptr;
     ControlModule* control = nullptr;
     MoonModule* layers = nullptr;
-    char root_[256] = {};
+    char root_[256] = {};   // fixture-private fs root; restored in the destructor
 
     PresetRig() {
         static unsigned seq = 0;
@@ -330,7 +330,12 @@ struct PresetRig : Rig {
         fs->setup(); layers->setup(); control->defineControls(); control->setup();
         mqtt->setControlModule(control);
     }
-    ~PresetRig() { std::filesystem::remove_all(root_); }
+    ~PresetRig() {
+        // Restore the default root BEFORE the directory goes: fsSetRoot is global, so leaving it
+        // pointed at a deleted fixture directory would follow every later test in the run.
+        platform::fsSetRoot("build");
+        std::filesystem::remove_all(root_);
+    }
 
     /// Drop a valid Layers look into the preset folder and rescan, as a save or an upload would.
     void addLook(const char* name) {

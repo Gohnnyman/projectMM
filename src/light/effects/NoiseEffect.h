@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -33,14 +34,11 @@ public:
         // numerator (dt·bpm·w·64) and the /60000 divide runs only at the sampling point below; dividing
         // per tick would truncate sub-unit progress to zero on a fast board (short dt) or small grid,
         // stalling the field. Factor 64 tuned so 60 BPM at 128-wide gives smooth motion.
-        uint32_t now = elapsed();
-        // First tick: seed lastElapsed_ to now so the field starts at phase 0 instead of jumping by
-        // the whole device uptime (lastElapsed_ is 0 until the first loop) — the WaveEffect pattern.
-        if (!started_) { lastElapsed_ = now; started_ = true; }
-        uint32_t dt = now - lastElapsed_;
-        lastElapsed_ = now;
-        phase_ += static_cast<uint64_t>(dt) * bpm * w * 64;
-        uint32_t t = static_cast<uint32_t>(phase_ / 60000);
+        // The rate carries the grid width, so it is fed pre-scaled: advanceScaled takes the whole
+        // dt multiplicand rather than a plain BPM. BeatPhase owns the first-tick seed (the field
+        // starts at phase 0 rather than jumping by the device uptime) and the divide-late rule.
+        phase_.advanceScaled(elapsed(), static_cast<uint64_t>(bpm) * w * 64);
+        uint32_t t = phase_.phase(1);
 
         // Buffer layout is (z * h * w + y * w + x). For a 2D grid (d == 1) z
         // is always 0 and we sample 2D noise — no perf cost vs. the old 2D-only
@@ -70,9 +68,7 @@ public:
     }
 
 private:
-    uint64_t phase_ = 0;
-    uint32_t lastElapsed_ = 0;
-    bool     started_ = false;   // first-tick guard: seed lastElapsed_ before the first delta
+    BeatPhase phase_;
     // The value-noise field itself (hash + smoothstep + bi/trilinear interp) is the shared
     // inoise8 in core/noise.h — this effect just scales coordinates into it and colors the
     // result through the palette.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -108,7 +109,7 @@ public:
             const int lowerLimit = 80 + 3 * static_cast<int>(lowBin);
             int idx;
             if (lowerLimit != upperLimit)
-                idx = imap(static_cast<int>(f->peakHz), lowerLimit, upperLimit, 0, 255);
+                idx = map32(static_cast<int>(f->peakHz), lowerLimit, upperLimit, 0, 255);
             else
                 idx = static_cast<int>(f->peakHz);
             if (idx < 0) idx = -idx;                     // WLED: abs(i)
@@ -127,12 +128,6 @@ public:
     }
 
 private:
-    // Standard integer map (FastLED/WLED ::map), used for the frequency→hue index rescale.
-    static int imap(int x, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (x - inLo) * (outHi - outLo) / den + outLo;
-    }
     // depth>0 ? depth : 1 — the dims z-extent, so draw clipping/indexing is correct on a 3D layer.
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 

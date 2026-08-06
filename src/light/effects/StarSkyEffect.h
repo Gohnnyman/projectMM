@@ -66,12 +66,11 @@ public:
 
     void tick() MM_NONBLOCKING override {
         if (!indexes_ || !fadeDir_ || !brightness_ || !colors_ || nbStars_ == 0) return;
-        const lengthType w = width(), h = height(), d = depthDim();
+        const lengthType w = width(), h = height();
         const nrOfLightsType count = nrOfLights();
         if (count == 0) return;
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, d};
+        const draw::Canvas cv = canvas();
 
         layer()->fadeToBlackBy(50);
 
@@ -96,13 +95,13 @@ public:
                 // Fading up toward full brightness.
                 const uint16_t nb = static_cast<uint16_t>(b) + speed;
                 brightness_[i] = nb > 255 ? 255 : static_cast<uint8_t>(nb);
-                draw::pixel(buf, dims, p, color);
+                draw::pixel(cv, p, color);
                 if (brightness_[i] == 255) fadeDir_[i] = 0;
                 if (rng_.next8() < 10) fadeDir_[i] = 0;
             } else {
                 // Fading down toward black; respawn at a fresh cell when it reaches zero.
                 brightness_[i] = b > speed ? static_cast<uint8_t>(b - speed) : 0;
-                draw::pixel(buf, dims, p, color);
+                draw::pixel(cv, p, color);
                 if (brightness_[i] == 0) {
                     indexes_[i] = randomIndex(count);
                     fadeDir_[i] = 1;
@@ -123,7 +122,6 @@ private:
     nrOfLightsType lightCount_ = 0;
     Random8   rng_{0x57A55C1Eu};
 
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     // A uniform cell pick over 0..count-1. nrOfLightsType is uint32_t on PSRAM builds (>65535 lights),
     // so a single next16() draw can't reach the top of a large grid — compose a full-width draw from

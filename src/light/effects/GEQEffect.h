@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -86,7 +87,7 @@ public:
             // Map this column onto one of the 16 GEQ bands (band = map(x, 0, cols-1, 0, 15)). The
             // 0..cols-1 / 0..15 form (vs the spec's literal map(x,0,size.x,0,16)) is the real WLED
             // mode_2DGEQ shape and keeps the last column on band 15 rather than an out-of-range 16.
-            int band = imap(x, 0, cols - 1, 0, NUM_GEQ_CHANNELS - 1);
+            int band = map32(x, 0, cols - 1, 0, NUM_GEQ_CHANNELS - 1);
             if (band < 0) band = 0;
             if (band > NUM_GEQ_CHANNELS - 1) band = NUM_GEQ_CHANNELS - 1;
 
@@ -105,7 +106,7 @@ public:
             }
 
             // Bar height in rows: map the 0..255 band magnitude onto 0..rows.
-            int barHeight = imap(bandHeight, 0, 255, 0, rows);
+            int barHeight = map32(bandHeight, 0, 255, 0, rows);
             if (barHeight < 0)    barHeight = 0;
             if (barHeight > rows) barHeight = rows;
 
@@ -123,8 +124,8 @@ public:
                 if (y < 0) break;
                 // colorBars: one hue per column. else: the gradient runs up the bar by row height.
                 const uint8_t colorIndex = colorBars
-                    ? static_cast<uint8_t>(imap(x, 0, cols - 1, 0, 255))
-                    : static_cast<uint8_t>(imap(h, 0, rows - 1, 0, 255));
+                    ? static_cast<uint8_t>(map32(x, 0, cols - 1, 0, 255))
+                    : static_cast<uint8_t>(map32(h, 0, rows - 1, 0, 255));
                 const RGB col = colorFromPalette(*Palettes::active(), colorIndex);
                 draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, col);
             }
@@ -145,13 +146,6 @@ public:
 private:
     static constexpr int NUM_GEQ_CHANNELS = 16;
 
-    // Standard integer map (WLED/MoonLight's ::map), used for the band/color/height remaps. Guards a
-    // zero input span so a degenerate grid (cols/rows <= 1) can't divide by zero.
-    static int imap(int v, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (v - inLo) * (outHi - outLo) / den + outLo;
-    }
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 

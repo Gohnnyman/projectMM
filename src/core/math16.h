@@ -49,7 +49,7 @@ inline constexpr int16_t sin16_quarter[65] = {
 /// Quarter-wave lookup with linear interpolation: the top 2 bits of the angle pick the quadrant,
 /// the next 6 the table entry, the low 8 the position between entries. Mirroring the index in odd
 /// quadrants and negating in the upper half reconstructs the full wave from a quarter of the table.
-inline uint16_t sin16(angle16 theta) {
+constexpr uint16_t sin16(angle16 theta) {
     const uint8_t quadrant = static_cast<uint8_t>(theta >> 14);       // 0..3
     const uint16_t pos     = static_cast<uint16_t>(theta & 0x3FFF);   // position within the quadrant
     // Odd quadrants run the quarter wave backwards (sin descends from the peak).
@@ -69,7 +69,7 @@ inline uint16_t sin16(angle16 theta) {
 }
 
 /// Cosine: a quarter turn ahead of sine.
-inline uint16_t cos16(angle16 theta) { return sin16(static_cast<angle16>(theta + 16384)); }
+constexpr uint16_t cos16(angle16 theta) { return sin16(static_cast<angle16>(theta + 16384)); }
 
 // ---- Range mapping ---------------------------------------------------------
 
@@ -79,12 +79,17 @@ inline uint16_t cos16(angle16 theta) { return sin16(static_cast<angle16>(theta +
 /// about the off-by-one (mapping to `n-1` vs `n` when the output is a grid extent). Callers map to
 /// the extent (`0..w`) and the result is clamped to `w-1` by the pixel writer, which is the form
 /// that does not lose the last column.
-inline int32_t map32(int32_t v, int32_t inLo, int32_t inHi, int32_t outLo, int32_t outHi) {
+constexpr int32_t map32(int32_t v, int32_t inLo, int32_t inHi, int32_t outLo, int32_t outHi) {
     if (inHi == inLo) return outLo;                       // zero span: no meaningful ratio
     if (inHi > inLo) { if (v <= inLo) return outLo; if (v >= inHi) return outHi; }
     else             { if (v >= inLo) return outLo; if (v <= inHi) return outHi; }
-    const int64_t num = static_cast<int64_t>(v - inLo) * (outHi - outLo);
-    return static_cast<int32_t>(outLo + num / (inHi - inLo));
+    // Every operand widens BEFORE arithmetic: a full-width span (INT32_MIN..INT32_MAX) does not fit
+    // in an int32 subtraction, so computing the spans in 32 bits overflows at the extremes. The
+    // product of two 32-bit spans fits comfortably in int64.
+    const int64_t inSpan  = static_cast<int64_t>(inHi)  - static_cast<int64_t>(inLo);
+    const int64_t outSpan = static_cast<int64_t>(outHi) - static_cast<int64_t>(outLo);
+    const int64_t num     = (static_cast<int64_t>(v) - static_cast<int64_t>(inLo)) * outSpan;
+    return static_cast<int32_t>(static_cast<int64_t>(outLo) + num / inSpan);
 }
 
 // ---- Beat phase ------------------------------------------------------------

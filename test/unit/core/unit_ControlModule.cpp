@@ -862,3 +862,39 @@ TEST_CASE("ControlModule refuses to save a new preset onto an occupied pad") {
     CHECK(d.control->listRowCount() == 1);
     CHECK(!d.rowNamed("holder").empty());
 }
+
+
+// A pad must go dark when its preset is deleted. The active-role slots refer to a preset BY NAME, so
+// without clearing them the grid keeps lighting a pad for a file that no longer exists — and a new
+// preset saved under the reused name would inherit the lit state.
+TEST_CASE("ControlModule stops showing a deleted preset as active") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    d.setCapture("Layers");
+    d.setText("name", "doomed");
+    d.press("save");
+    d.activate("doomed");
+    REQUIRE(std::string(d.control->currentLook()) == "doomed");
+
+    REQUIRE(d.control->deleteListRow(d.firstRowId()));
+    CHECK(std::string(d.control->currentLook()).empty());
+}
+
+// A renamed preset keeps its lit pad: the active-role slot follows the new name rather than pointing
+// at a name that no longer exists.
+TEST_CASE("ControlModule keeps a renamed preset active under its new name") {
+    Device d;
+    auto* layer = d.add(d.layers, "Layer");
+    d.add(layer, "NoiseEffect");
+
+    d.setCapture("Layers");
+    d.setText("name", "before");
+    d.press("save");
+    d.activate("before");
+    REQUIRE(std::string(d.control->currentLook()) == "before");
+
+    REQUIRE(d.control->setListRowField(d.firstRowId(), "name", "{\"value\":\"after\"}"));
+    CHECK(std::string(d.control->currentLook()) == "after");
+}

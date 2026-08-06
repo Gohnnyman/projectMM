@@ -10,7 +10,9 @@
 #include "doctest.h"
 #include "core/math16.h"
 
+#include <algorithm>
 #include <cmath>
+#include <numbers>
 
 using namespace mm;
 
@@ -40,7 +42,7 @@ TEST_CASE("sin16 is smooth between LUT entries, where sin8 would step") {
 TEST_CASE("sin16 stays within 0.5% of a true sine") {
     double worst = 0.0;
     for (uint32_t t = 0; t < 65536; t += 7) {       // 7: a stride that hits varied LUT positions
-        const double ideal = (std::sin(t * 2.0 * M_PI / 65536.0) * 32767.0) + 32768.0;
+        const double ideal = (std::sin(t * 2.0 * std::numbers::pi_v<double> / 65536.0) * 32767.0) + 32768.0;
         worst = std::max(worst, std::abs(ideal - sin16(static_cast<angle16>(t))));
     }
     CHECK(worst < 65535 * 0.005);
@@ -63,6 +65,30 @@ TEST_CASE("map32 can reach the last column of a grid") {
     const int32_t width = 16;
     CHECK(map32(255, 0, 255, 0, width) == width);   // full input reaches the extent
     CHECK(map32(254, 0, 255, 0, width) == 15);      // just under still lands inside
+}
+
+// Full-width ranges: an int32 subtraction of INT32_MIN from INT32_MAX overflows, so every operand
+// widens before the arithmetic. A mapping engine that corrupts at the extremes would misplace pixels
+// silently rather than crash, which is the worst failure mode.
+TEST_CASE("map32 survives full-width 32-bit ranges") {
+    constexpr int32_t lo = INT32_MIN, hi = INT32_MAX;
+    CHECK(map32(lo, lo, hi, 0, 100) == 0);            // the extremes still clamp correctly
+    CHECK(map32(hi, lo, hi, 0, 100) == 100);
+    CHECK(map32(0, lo, hi, 0, 100) == 50);            // and the midpoint is still the midpoint
+    // A full-width OUTPUT range: the product of two full spans must not overflow the intermediate.
+    CHECK(map32(lo, lo, hi, lo, hi) == lo);
+    CHECK(map32(hi, lo, hi, lo, hi) == hi);
+    // Full-width input mapped to a tiny output, and the reverse.
+    CHECK(map32(0, lo, hi, 0, 1) == 0);
+    CHECK(map32(1, 0, 1, lo, hi) == hi);
+}
+
+// constexpr: the contract is compile-time evaluable, so a table or a control default can be built
+// from it without runtime cost.
+TEST_CASE("sin16 and map32 evaluate at compile time") {
+    static_assert(sin16(0) == 32768, "sin16 is constexpr");
+    static_assert(map32(5, 0, 10, 0, 100) == 50, "map32 is constexpr");
+    CHECK(true);
 }
 
 TEST_CASE("BeatPhase keeps animating when frames are under a millisecond") {

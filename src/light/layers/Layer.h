@@ -629,5 +629,9 @@ inline lengthType EffectBase::depth() const { return layer()->depth(); }
 inline uint8_t EffectBase::channelsPerLight() const { return layer()->channelsPerLight(); }
 inline nrOfLightsType EffectBase::nrOfLights() const { return layer()->buffer().count(); }
 inline uint32_t EffectBase::elapsed() const { return layer()->elapsed(); }
+inline draw::Canvas EffectBase::canvas() {
+    Layer* l = layer();
+    return draw::Canvas::of(l->buffer(), l->width(), l->height(), l->depth());
+}
 
 } // namespace mm

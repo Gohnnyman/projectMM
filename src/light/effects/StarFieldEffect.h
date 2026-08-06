@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -108,12 +109,12 @@ public:
                 RGB col;
                 if (usePalette) {
                     // Nearer (smaller z) = brighter: depth 0..sizeX maps brightness 255..150.
-                    const uint8_t bri = static_cast<uint8_t>(imap(static_cast<int>(s.z), 0, sizeX, 255, 150));
+                    const uint8_t bri = static_cast<uint8_t>(map32(static_cast<int>(s.z), 0, sizeX, 255, 150));
                     col = colorFromPalette(*Palettes::active(), s.colorIndex, bri);
                 } else {
                     // Greyscale: base intensity from colorIndex (120..255), scaled by depth (7..10)/10.
-                    int color = imap(s.colorIndex, 0, 255, 120, 255);
-                    const int brightness = imap(static_cast<int>(s.z), 0, sizeX, 7, 10);
+                    int color = map32(s.colorIndex, 0, 255, 120, 255);
+                    const int brightness = map32(static_cast<int>(s.z), 0, sizeX, 7, 10);
                     color = static_cast<int>(color * (brightness / 10.0f));
                     if (color < 0) color = 0;
                     if (color > 255) color = 255;
@@ -139,12 +140,6 @@ private:
     };
     static constexpr uint16_t kMaxStars = 255;  // the numStars control maximum
 
-    // Standard integer map (FastLED ::map), guarded against a zero input span.
-    static int imap(int v, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (v - inLo) * (outHi - outLo) / den + outLo;
-    }
 
     // Spawn a star at a random x/y far position with a fresh color index. `far` selects the depth:
     //   far=false  → initial seed: z in [0, w)  (MoonLight init: z = random(size.x))

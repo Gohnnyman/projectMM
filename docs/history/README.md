@@ -20,6 +20,7 @@ Monthly logs of what shipped on related open-source LED projects — the live la
 - [hpwit-I2SClocklessLedDriver.md](hpwit-I2SClocklessLedDriver.md) — hpwit's I2S/LCD DMA clockless LED driver (parallel multi-strip output).
 - [hpwit-I2SClocklessVirtualLedDriver.md](hpwit-I2SClocklessVirtualLedDriver.md) — the shift-register "virtual pins" variant of the above (dormant since 2024).
 - [hpwit-ESPLiveScript.md](hpwit-ESPLiveScript.md) — hpwit's live C-like script compiler for the ESP32 (main quiet; work moved to version branches).
+- [hpwit-new-parser.md](hpwit-new-parser.md) — **ESPLiveScript2**, hpwit's from-scratch rewrite of the above (repo is named `new-parser`; the library lives in `asmparser2/`). Dormant May 2025 → August 2026, then an active rewrite whose stated goal is a *verifiable* compiler: host builds plus QEMU running the actual compiled Xtensa bytes.
 
 ### Prior-project inventories
 

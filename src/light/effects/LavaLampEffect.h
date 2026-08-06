@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -41,14 +42,10 @@ public:
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
 
-        uint32_t now = elapsed();
-        uint32_t dt = now - lastElapsed_;
-        lastElapsed_ = now;
-        // Accumulate the raw (dt * bpm) product; divide only at the read site.
-        // Per-tick `dt*bpm*256/60000` rounds to 0 on desktop (dt ≈ 0..1ms) and
-        // freezes the animation; see MetaballsEffect for the same fix.
-        phase_num_ += static_cast<uint64_t>(dt) * bpm;
-        uint8_t t = static_cast<uint8_t>((phase_num_ * 256) / 60000);
+        // Shared accumulator: raw dt·bpm in 64 bits, divided only at the read, so a sub-millisecond
+        // frame does not round to zero and freeze the animation (mm::BeatPhase owns that rule now).
+        phase_.advance(elapsed(), bpm);
+        const uint8_t t = static_cast<uint8_t>(phase_.phase(256));
 
         int16_t bx[NUM_BLOBS] = {};
         int16_t by[NUM_BLOBS] = {};
@@ -85,8 +82,7 @@ public:
 
 private:
     // Numerator-only accumulator (units of dt*bpm). See tick() for why.
-    uint64_t phase_num_ = 0;
-    uint32_t lastElapsed_ = 0;
+    BeatPhase phase_;
 };
 
 } // namespace mm

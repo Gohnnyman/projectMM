@@ -22,6 +22,64 @@
 
 namespace mm::draw {
 
+/// The surface a draw call writes to: a buffer plus the grid dimensions that address it.
+///
+/// Today every draw call takes `(Buffer&, Coord3D dims)` as two independent arguments that nothing
+/// checks for agreement — pass dims from one layer with a buffer from another, or (far likelier) a
+/// dims computed with the depth guard and one without, and the result is silent misaddressing.
+/// Binding them into one value makes the mismatch unrepresentable rather than merely detected.
+///
+/// It also owns the depth guard: `depth()` is 0 on a 2D layer, which would zero the z stride, so
+/// SIXTEEN effects each carry a private `depthDim()` helper. Constructing a Canvas applies it once.
+///
+/// **Passed BY VALUE, deliberately.** It is a small POD (pointer + 3 int16 + 2 small ints) and
+/// measured 62 instructions in a per-pixel fill loop against 67 for today's separate arguments and
+/// 69 for a `const Canvas&` — a reference member forces the extents to be re-read from memory
+/// because the compiler must assume they alias the buffer being written, while a by-value POD stays
+/// in registers. So the abstraction is not a cost here; it is a small win.
+struct Canvas {
+    uint8_t* data = nullptr;   ///< first byte of the light array
+    size_t   bytes = 0;        ///< total writable bytes (the bound every write is clipped to)
+    Coord3D  dims{0, 0, 0};    ///< logical extents; z is >= 1 (see the depth guard above)
+    uint8_t  cpl = 3;          ///< channels per light
+
+    /// Build from a Buffer + the layer's logical extents, applying the depth guard.
+    static Canvas of(Buffer& buf, lengthType w, lengthType h, lengthType d) {
+        return Canvas{buf.data(), buf.bytes(),
+                      Coord3D{w, h, static_cast<lengthType>(d > 0 ? d : 1)},
+                      buf.channelsPerLight()};
+    }
+
+    /// Byte offset of a coordinate, or `bytes` when it is outside the grid — the one address
+    /// computation every draw call shares, so the addressing rule (x fastest, then y, then z) has a
+    /// single home.
+    size_t offsetOf(Coord3D p) const {
+        if (p.x < 0 || p.y < 0 || p.z < 0 || p.x >= dims.x || p.y >= dims.y || p.z >= dims.z) return bytes;
+        return (static_cast<size_t>(p.z) * dims.y * dims.x
+                + static_cast<size_t>(p.y) * dims.x + p.x) * cpl;
+    }
+};
+
+/// One pixel, clipped to the grid — the Canvas form. Same semantics as the (Buffer&, dims) overload
+/// below, which remains until the migration completes and is then removed (a permanent two-API
+/// window would be worse than either shape alone).
+inline void pixel(const Canvas& cv, Coord3D p, RGB c) {
+    const size_t off = cv.offsetOf(p);
+    if (off + (cv.cpl < 3 ? cv.cpl : 3) > cv.bytes) return;
+    if (cv.cpl >= 1) cv.data[off + 0] = c.r;
+    if (cv.cpl >= 2) cv.data[off + 1] = c.g;
+    if (cv.cpl >= 3) cv.data[off + 2] = c.b;
+}
+
+/// Read one pixel; black when outside the grid. The Canvas form of `get`.
+inline RGB get(const Canvas& cv, Coord3D p) {
+    const size_t off = cv.offsetOf(p);
+    if (off + (cv.cpl < 3 ? cv.cpl : 3) > cv.bytes) return RGB{0, 0, 0};
+    return RGB{cv.cpl >= 1 ? cv.data[off + 0] : uint8_t{0},
+               cv.cpl >= 2 ? cv.data[off + 1] : uint8_t{0},
+               cv.cpl >= 3 ? cv.data[off + 2] : uint8_t{0}};
+}
+
 // One pixel, clipped to the grid. Writes R/G/B where channels fit (cpl may be 1..N); extra
 // channels (e.g. a W in RGBW) are left as-is — the driver derives white, same as effects do.
 inline void pixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c) {

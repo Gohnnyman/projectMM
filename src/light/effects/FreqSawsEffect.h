@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -106,11 +107,11 @@ public:
             if (bandSpeed[band] > 1 || keepOn) {
                 bandActive[band] = true;
                 // Current speed → a BPM in 0..bpmMax.
-                const uint8_t bpm = static_cast<uint8_t>(imap(bandSpeed[band], 0, 65535, 0, bpmMax));
+                const uint8_t bpm = static_cast<uint8_t>(map32(bandSpeed[band], 0, 65535, 0, bpmMax));
 
                 if (method == 0) {
                     // Chaos: y straight off the beat — jumps as the BPM changes.
-                    bandY[band] = static_cast<uint8_t>(imap(beat8(bpm, now), 0, 255, 0, sizeY - 1));
+                    bandY[band] = static_cast<uint8_t>(map32(beat8(bpm, now), 0, 255, 0, sizeY - 1));
                 } else if (method == 1) {
                     // Chaos fix: carry a per-band phase offset so a BPM change continues from the
                     // current sawtooth position instead of snapping.
@@ -120,7 +121,7 @@ public:
                         phaseOffset[band] = static_cast<uint8_t>(currentPos - newPos);
                         lastBpm[band] = bpm;
                     }
-                    bandY[band] = static_cast<uint8_t>(imap(static_cast<uint8_t>(beat8(bpm, now) + phaseOffset[band]),
+                    bandY[band] = static_cast<uint8_t>(map32(static_cast<uint8_t>(beat8(bpm, now) + phaseOffset[band]),
                                                             0, 255, 0, sizeY - 1));
                 } else {
                     // BandPhases: integrate a per-band phase accumulator from the BPM each frame
@@ -130,7 +131,7 @@ public:
                                         (60u * 1000u);
                     phaseInc /= 2u;
                     bandPhase[band] = static_cast<uint16_t>(bandPhase[band] + phaseInc);
-                    bandY[band] = static_cast<uint8_t>(imap(bandPhase[band] >> 8, 0, 255, 0, sizeY - 1));
+                    bandY[band] = static_cast<uint8_t>(map32(bandPhase[band] >> 8, 0, 255, 0, sizeY - 1));
                 }
             }
         }
@@ -139,7 +140,7 @@ public:
         // (invert mirroring, palette color) stay here; the band physics already ran above.
         for (int x = 0; x < sizeX; x++) {
             // Map this column onto one of the 16 GEQ bands (band = map(x, 0, sizeX, 0, 16)).
-            int band = imap(x, 0, sizeX, 0, NUM_GEQ_CHANNELS);
+            int band = map32(x, 0, sizeX, 0, NUM_GEQ_CHANNELS);
             if (band < 0) band = 0;
             if (band > NUM_GEQ_CHANNELS - 1) band = NUM_GEQ_CHANNELS - 1;
 
@@ -148,7 +149,7 @@ public:
             const uint8_t y = bandY[band];
             // invert mirrors every even column (x % 2 == 0) top-to-bottom.
             const int drawY = (invert && (x % 2 == 0)) ? (sizeY - 1 - y) : y;
-            const uint8_t colorIndex = static_cast<uint8_t>(imap(x, 0, sizeX - 1, 0, 255));
+            const uint8_t colorIndex = static_cast<uint8_t>(map32(x, 0, sizeX - 1, 0, 255));
             const RGB col = colorFromPalette(*Palettes::active(), colorIndex);
             draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(drawY), 0}, col);
         }
@@ -157,13 +158,6 @@ public:
 private:
     static constexpr int NUM_GEQ_CHANNELS = 16;
 
-    // Standard integer map (MoonLight's ::map), used for the band/color/position remaps. Guards a
-    // zero input span so a degenerate grid (sizeX/sizeY <= 1) can't divide by zero.
-    static int imap(int v, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (v - inLo) * (outHi - outLo) / den + outLo;
-    }
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 

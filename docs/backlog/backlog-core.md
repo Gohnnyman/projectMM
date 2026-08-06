@@ -168,6 +168,14 @@ Related: this is the render/output-buffer face of the same non-PSRAM fragmentati
 
 ## Architecture
 
+### Filesystem-change notification (live preset refresh) — undesigned
+
+ControlModule rebuilds its preset list by rescanning `/.config/presets`, and that rescan runs at startup and after every save, rename, delete and reorder. So a preset file **uploaded or deleted through the File Manager** appears only once the module next rescans (a reboot, or any preset action on the surface), not the instant the file lands. Documented as the actual behaviour in [control.md](../moonmodules/core/control.md).
+
+The fix is a **core-neutral filesystem-change notification**: FileManagerModule (or the `platform::fs*` write paths) signals "this path changed", and a module with a folder it cares about re-reads. Deliberately not built yet — it is a new core seam serving one caller today, which is the shape [architecture.md § Core primitives, not one-offs](../architecture.md#core-and-light-domain) warns about. **Build trigger**: a second consumer appears (a scripted-effect folder for MoonLive is the likely one, since live scripts uploaded as files have exactly the same staleness), or the manual-refresh step proves annoying in real use.
+
+Whatever the design, it stays domain-neutral (a path + a change kind, no preset/light vocabulary in core) and off the hot path — the notification marks a flag, the rescan happens on the owning module's next tick, never inside the writer. (CodeRabbit flagged the staleness; deferred here rather than growing the seam for one caller.)
+
 ### WiFi runtime disable — open design question (undesigned)
 
 Today the eth-only build profile compiles WiFi out (`MM_NO_WIFI`). Turning WiFi off *at runtime* instead is undesigned: whether the gate should key off detected hardware presence, an explicit control, or a deviceModel-catalog field isn't decided. The eth-only build covers the need until a concrete case forces the choice. (Moved from architecture.md § What we leave undesigned; it's a deferred design decision, not a settled 🚧 one.)

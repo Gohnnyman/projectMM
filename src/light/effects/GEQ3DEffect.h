@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -77,7 +78,7 @@ public:
         const int projector = static_cast<int>(static_cast<uint32_t>(sweep) * cols / 255u);
         // horizon is a Y row used as the vanishing point's y; clamp the 0..255 control to the grid.
         const int hzn = horizon < rows ? horizon : rows - 1;
-        const int split = imap(projector, 0, cols, 0, NUM_BANDS - 1);
+        const int split = map32(projector, 0, cols, 0, NUM_BANDS - 1);
 
         const AudioFrame* f = AudioService::latestFrame();
 
@@ -86,7 +87,7 @@ public:
         const int maxHeight = lroundf(float(rows) * ((rows < 18) ? 0.75f : 0.85f));
         for (int i = 0; i < NUM_BANDS; i++) {
             int band = i;
-            if (NUM_BANDS < 16) band = imap(band, 0, NUM_BANDS, 0, 16);  // always use the full 16-band range
+            if (NUM_BANDS < 16) band = map32(band, 0, NUM_BANDS, 0, 16);  // always use the full 16-band range
             if (band > 15) band = 15;
             heights[i] = map8(f->bands[band], 0, static_cast<uint8_t>(maxHeight));
         }
@@ -95,7 +96,7 @@ public:
 
         // Right vertical faces + top — bands at/left of the split, painted LEFT to RIGHT.
         for (int i = 0; i <= split; i++) {
-            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols, 0, 256);
+            const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols, 0, 256);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
             const int linex = i * (cols / NUM_BANDS);
 
@@ -123,7 +124,7 @@ public:
 
         // Left vertical faces + top — bands right of the split, painted RIGHT to LEFT.
         for (int i = NUM_BANDS - 1; i > split; i--) {
-            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
+            const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
             const int linex = i * (cols / NUM_BANDS);
             const int pPos = MAXi(0, linex + (cols / NUM_BANDS) - 1);
@@ -150,7 +151,7 @@ public:
 
         // Projector special-case top + front fill + borders, all bands left to right.
         for (int i = 0; i < NUM_BANDS; i++) {
-            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
+            const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
             const int linex = i * (cols / NUM_BANDS);
             const int pPos  = linex + (cols / NUM_BANDS) - 1;
@@ -196,12 +197,6 @@ public:
     }
 
 private:
-    // Standard integer map (MoonLight's ::map), used for the color index / split / band remaps.
-    static int imap(int x, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (x - inLo) * (outHi - outLo) / den + outLo;
-    }
     static int MAXi(int a, int b) { return a > b ? a : b; }
     // The member `depth` (control) hides the inherited grid-depth accessor name; qualify it.
     lengthType depthDim() const { return EffectBase::depth() > 0 ? EffectBase::depth() : 1; }

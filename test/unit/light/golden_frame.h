@@ -22,6 +22,18 @@
 // When a migration INTENTIONALLY diverges (the bench-judged cases: an analytic float trajectory
 // folded onto the particle kernel), the golden is updated in the SAME commit with the reason in the
 // message. An updated golden with no reason is the smell this harness exists to make visible.
+//
+// WHAT A GOLDEN IS NOT: a statement that the effect looks good. It pins what the code renders TODAY,
+// so a refactor that claims to change nothing can be checked. Several effects are awaiting a tuning
+// pass (some were generated rather than derived, and their parameters are arbitrary); when tuning
+// changes one deliberately, the golden moves with it and that is the system working, not a
+// regression. The rule is only: no hash moves SILENTLY.
+//
+// A golden is also only as strong as the effect's visible output. Two effects here saturate their
+// field to full brightness at their default settings, so their frames barely vary and their hashes
+// cannot detect a phase error — verified by mutation-testing (a 7x phase-rate change moved no
+// bytes). Those goldens still guard the pixel-addressing path, and nothing more; do not read a
+// passing hash as "the animation is correct".
 
 #include "doctest.h"
 #include "light/layers/Layer.h"
@@ -55,8 +67,14 @@ inline uint64_t hashBuffer(const uint8_t* data, size_t bytes) {
 /// 20 ms/frame is deliberate: it is the real tick20ms cadence, so the phase accumulators under test
 /// see the same dt production gives them, and a sub-millisecond desktop dt (which rounds to zero in
 /// a naive accumulator) cannot mask a bug.
+///
+/// The frame count is 200 (4 s of animation), NOT a handful: at a typical default speed the phase
+/// advances only a few units over 8 frames, which on a 16-wide grid moves nothing by a whole pixel —
+/// so a short render hashes two nearly-static frames and passes even when the animation is wrong.
+/// This was found by mutation-testing the harness itself (perturbing an effect's bpm and watching
+/// the golden still pass). 200 frames is still a millisecond-scale test.
 template <typename EffectT>
-uint64_t renderHash(EffectT& effect, lengthType w, lengthType h, lengthType d, uint16_t frames = 8) {
+uint64_t renderHash(EffectT& effect, lengthType w, lengthType h, lengthType d, uint16_t frames = 200) {
     ScopedTestClock clock(1000);   // start away from 0 so a first-tick guard is exercised
 
     Layouts layouts;

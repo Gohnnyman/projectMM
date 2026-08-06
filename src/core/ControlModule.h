@@ -280,7 +280,12 @@ public:
             if (presets_[i].id != id) continue;
             char path[128];
             pathFor(presets_[i].name, path, sizeof(path));
+            // Remember the name before the row goes: the active-role slots refer to it by name, and
+            // a deleted preset must not keep a pad lit for a file that no longer exists.
+            char goneName[kMaxNameLen];
+            std::snprintf(goneName, sizeof(goneName), "%s", presets_[i].name);
             const bool ok = platform::fsRemove(path);
+            if (ok) clearCurrentIfNamed(goneName);
             setStatusf(ok ? Severity::Status : Severity::Error,
                        ok ? "deleted %s" : "could not delete %s", presets_[i].name);
             rescan();
@@ -341,8 +346,20 @@ public:
         // Only the one or two presets whose slot changed get rewritten: a reorder used to rewrite
         // EVERY file on the device, which is flash wear proportional to the collection for a
         // two-preset change.
-        writeSlot(*moving);
-        if (occupant) writeSlot(*occupant);
+        // Both files must land, or the pair would both claim one cell after the next rescan. On a
+        // partial write the in-memory slots go back to where they were, so the surface still matches
+        // what is on disk and the user can retry.
+        const bool movedOk = writeSlot(*moving);
+        const bool occupantOk = !occupant || writeSlot(*occupant);
+        if (!movedOk || !occupantOk) {
+            moving->slot = from;
+            if (occupant) occupant->slot = to;
+            if (movedOk) writeSlot(*moving);            // undo the half that did land
+            setStatusf(Severity::Error, "could not save the new pad order");
+            sortBySlot();
+            return false;
+        }
+        presetsRevision_++;   // the surface changed: consumers caching the list must re-read
         sortBySlot();
         return true;
     }
@@ -430,6 +447,19 @@ private:
         self->presetCount_++;
     }
 
+    /// Drop any active-role claim held by `name` — called when its file goes away.
+    void clearCurrentIfNamed(const char* name) {
+        for (uint8_t i = 0; i < kCaptureCount; i++)
+            if (std::strcmp(current_[i], name) == 0) current_[i][0] = '\0';
+    }
+
+    /// Move an active-role claim to a preset's new name, so a rename does not silently unlight it.
+    void renameCurrent(const char* from, const char* to) {
+        for (uint8_t i = 0; i < kCaptureCount; i++)
+            if (std::strcmp(current_[i], from) == 0)
+                std::snprintf(current_[i], sizeof(current_[i]), "%s", to);
+    }
+
     /// A preset name becomes a FILE name, so it must not be able to steer the path. ESP32's
     /// fsTranslate is a bare prefix concatenation with no normalization (unlike the desktop
     /// filesystem, which rejects escapes), so `..` in a name would reach outside the preset folder
@@ -470,13 +500,16 @@ private:
     /// happens to list.
     /// Rewrite ONE preset's file with its current slot in the header. Callers pass exactly the
     /// presets a mutation touched; rewriting the whole folder for a two-preset swap is flash wear.
-    void writeSlot(const Preset& p) {
+    /// Returns whether the file was written — a caller swapping two slots must not report success
+    /// when only one landed, or the pair would both claim the same cell after a rescan.
+    bool writeSlot(const Preset& p) {
         char path[128];
         pathFor(p.name, path, sizeof(path));
         const long size = platform::fsSize(path);
-        if (size <= 0) return;
+        if (size <= 0) return false;
         char* body = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
-        if (!body) return;
+        if (!body) return false;
+        bool ok = false;
         const int n = platform::fsRead(path, body, static_cast<size_t>(size) + 1);
         if (n > 0) {
             body[n] = '\0';
@@ -494,10 +527,11 @@ private:
                 }
                 sink.append(after);
                 if (!sink.overflowed())
-                    platform::fsWriteAtomic(path, sink.data(), sink.size());
+                    ok = platform::fsWriteAtomic(path, sink.data(), sink.size());
             }
         }
         platform::free(body);
+        return ok;
     }
 
     static void pathFor(const char* name, char* out, size_t n) {
@@ -637,8 +671,15 @@ private:
         const int n = platform::fsRead(src, buf, static_cast<size_t>(size) + 1);
         bool ok = false;
         if (n > 0 && platform::fsWriteAtomic(dst, buf, static_cast<size_t>(n))) {
-            platform::fsRemove(src);
-            ok = true;
+            // The destination now exists; the rename is only complete once the source is gone.
+            // Leaving a failed removal unchecked would show the preset TWICE after the rescan, both
+            // claiming the same slot.
+            if (platform::fsRemove(src)) {
+                renameCurrent(from, to);   // the active look follows its new name
+                ok = true;
+            } else {
+                platform::fsRemove(dst);   // roll back, so a half-rename never ships
+            }
         }
         platform::free(buf);
         rescan();

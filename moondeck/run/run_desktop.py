@@ -48,7 +48,11 @@ def _resolve_executable() -> Path:
         ROOT / "build" / "projectMM",
         ROOT / "build" / "projectMM.exe",   # the same root-build case on Windows
     ]
-    existing = [c for c in candidates if c.exists()]
+    # Only this host's artefact shape is a candidate: a stale projectMM.exe left in a shared
+    # checkout must never be picked on macOS/Linux (and vice versa), however new it is.
+    want_exe = platform.system() == "Windows"
+    existing = [c for c in candidates
+                if c.exists() and ((c.suffix == ".exe") == want_exe)]
     if existing:
         return max(existing, key=lambda c: c.stat().st_mtime)
     # Return the most-likely candidate so the error message points somewhere
