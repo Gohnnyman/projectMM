@@ -31,10 +31,9 @@ public:
     }
 
     void tick() MM_NONBLOCKING override {
-        Buffer& buf = layer()->buffer();
+        const draw::Canvas cv = canvas();
         const nrOfLightsType n = nrOfLights();
-        const uint8_t cpl = buf.channelsPerLight();
-        if (n == 0 || cpl < 1) return;
+        const uint8_t cpl = cv.cpl;
 
         // Dim the whole buffer (source: layer->fadeToBlackBy(fade)).
         layer()->fadeToBlackBy(fade);
@@ -48,8 +47,8 @@ public:
         const RGB c = colorFromPalette(*Palettes::active(), rng_.next8());
 
         const size_t off = static_cast<size_t>(idx) * cpl;
-        if (off + (cpl < 3 ? cpl : 3) > buf.bytes()) return;
-        uint8_t* d = buf.data();
+        if (off + (cpl < 3 ? cpl : 3) > cv.bytes) return;
+        uint8_t* d = cv.data;
         d[off + 0] = c.r;
         if (cpl >= 2) d[off + 1] = c.g;
         if (cpl >= 3) d[off + 2] = c.b;

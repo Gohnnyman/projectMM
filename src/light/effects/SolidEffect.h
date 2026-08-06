@@ -66,9 +66,8 @@ public:
         const int h = height();
         const int d = depth();
 
-        Buffer& buf = layer()->buffer();
+        const draw::Canvas cv = canvas();
         const lengthType dz = d > 0 ? static_cast<lengthType>(d) : 1;
-        const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), dz};
         const Palette& pal = *Palettes::active();
         const uint8_t cpl = channelsPerLight();
         const nrOfLightsType nLights = nrOfLights();
@@ -78,15 +77,15 @@ public:
                 const RGB c{static_cast<uint8_t>(red   * brightness / 255),
                             static_cast<uint8_t>(green * brightness / 255),
                             static_cast<uint8_t>(blue  * brightness / 255)};
-                draw::fill(buf, c);
+                draw::fill(cv, c);
                 // Write W every frame (white may be 0) so a stale W from a prior frame/effect is cleared.
                 // Scale W by brightness like RGB, so the whole RGBW color dims together.
-                if (cpl >= 4) writeWhite(buf, nLights, cpl, static_cast<uint8_t>(white * brightness / 255));
+                if (cpl >= 4) writeWhite(cv, nLights, cpl, static_cast<uint8_t>(white * brightness / 255));
                 break;
             }
             case 1: {  // Palette spread across the lights: light i → wheel index map(i,0,nLights,0,256).
-                uint8_t* data = buf.data();
-                const size_t bytes = buf.bytes();
+                uint8_t* data = cv.data;
+                const size_t bytes = cv.bytes;
                 for (nrOfLightsType i = 0; i < nLights; i++) {
                     const uint8_t idx = static_cast<uint8_t>(mapI(static_cast<int>(i), 0, static_cast<int>(nLights), 0, 256));
                     const RGB c = colorFromPalette(pal, idx, brightness);
@@ -95,7 +94,7 @@ public:
                     data[off + 0] = c.r; data[off + 1] = c.g; data[off + 2] = c.b;
                 }
                 // Palette modes carry no white source: clear W so an RGBW buffer doesn't keep stale white.
-                if (cpl >= 4) writeWhite(buf, nLights, cpl, 0);
+                if (cpl >= 4) writeWhite(cv, nLights, cpl, 0);
                 break;
             }
             case 2: {  // RMS average of the (non-black) palette colors, filled solid (no brightness — source).
@@ -115,8 +114,8 @@ public:
                     avg.g = static_cast<uint8_t>(sqrtf(static_cast<float>(sumG) / n));
                     avg.b = static_cast<uint8_t>(sqrtf(static_cast<float>(sumB) / n));
                 }
-                draw::fill(buf, avg);
-                if (cpl >= 4) writeWhite(buf, nLights, cpl, 0);   // no white source: clear stale W
+                draw::fill(cv, avg);
+                if (cpl >= 4) writeWhite(cv, nLights, cpl, 0);   // no white source: clear stale W
                 break;
             }
             default: {  // 3 rows / 4 cols: band the (filtered, optionally shuffled) palette along an axis.
@@ -159,13 +158,13 @@ public:
                                     : static_cast<uint8_t>(mapI(axisValue, 0, axisSize - 1, 0, 255));
                             }
                             const RGB c = colorFromPalette(pal, idx, brightness);
-                            draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y),
+                            draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y),
                                                     static_cast<lengthType>(z)}, c);
                         }
                     }
                 }
                 // Band modes carry no white source: clear W so an RGBW buffer doesn't keep stale white.
-                if (cpl >= 4) writeWhite(buf, nLights, cpl, 0);
+                if (cpl >= 4) writeWhite(cv, nLights, cpl, 0);
                 break;
             }
         }
@@ -177,9 +176,9 @@ private:
 
     // Write the white channel (4th) on every light. RGB stays as already filled. `w` may be 0 to
     // clear a stale white the palette modes never overwrite (draw::pixel/draw::fill touch RGB only).
-    static void writeWhite(Buffer& buf, nrOfLightsType n, uint8_t cpl, uint8_t w) {
-        uint8_t* data = buf.data();
-        const size_t bytes = buf.bytes();
+    static void writeWhite(const draw::Canvas& cv, nrOfLightsType n, uint8_t cpl, uint8_t w) {
+        uint8_t* data = cv.data;
+        const size_t bytes = cv.bytes;
         for (nrOfLightsType i = 0; i < n; i++) {
             const size_t off = static_cast<size_t>(i) * cpl + 3;
             if (off >= bytes) break;

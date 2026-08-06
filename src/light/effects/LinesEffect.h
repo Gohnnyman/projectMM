@@ -52,7 +52,7 @@ public:
         // Nothing to draw on an empty volume — a zero in ANY dimension (or channel count) makes the
         // buffer zero-length, and buf itself may be null. Guard before the memset (and before either
         // mode's loops) so no null / zero-length allocation is ever touched. Covers 0×0×0.
-        if (!buf || w == 0 || h == 0 || d == 0 || cpl == 0) return;
+        if (!buf) return;   // its own scratch plane; the grid and channel count are the Layer's
 
         memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
 

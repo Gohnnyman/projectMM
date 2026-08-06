@@ -41,8 +41,7 @@ public:
         const int w = width();
         const int h = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion trail: dim the whole buffer each frame (source: layer->fadeToBlackBy(fadeRate)).
         layer()->fadeToBlackBy(fadeRate);
@@ -68,7 +67,7 @@ public:
             const int ly = (h < 2) ? 0 : (((2 * sy) * (2 * (h - 1))) / 511 + 1) / 2;
 
             const uint8_t colorIndex = static_cast<uint8_t>(ms / 100 + i);
-            draw::pixel(buf, dims, {static_cast<lengthType>(lx), static_cast<lengthType>(ly), 0},
+            draw::pixel(cv, {static_cast<lengthType>(lx), static_cast<lengthType>(ly), 0},
                         colorFromPalette(*Palettes::active(), colorIndex, 255));
         }
     }
@@ -76,7 +75,6 @@ public:
 private:
     // depth() (the inherited grid-depth accessor) isn't shadowed here — this effect has no `depth`
     // member — but mirror the GEQ3D helper shape for the z extent the draw primitives expect.
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 };
 
 } // namespace mm

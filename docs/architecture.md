@@ -429,7 +429,17 @@ The `dim` int is also emitted in `/api/types` so the UI derives the dimensional 
 
 ### Robustness rules
 
-**Effects must run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `tick()` must produce a correct result for any `(width, height, depth)`: no crashes, no divide-by-zero, no out-of-bounds writes. On a zero grid the loop is a clean no-op. Effects either gate at the top (`if (w <= 0 || h <= 0) return;`) or write their loops so an empty range is naturally a no-op (`for (y = 0; y < h; ...)`).
+**Effects run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `tick()` produces a correct result for any `(width, height, depth)`, with an empty range naturally a no-op (`for (y = 0; y < h; ...)`).
+
+**The Layer decides whether a frame runs; the effect decides what it paints.** `Layer::tick()` returns before running any child when an extent is 0 or the buffer holds no lights, so that decision lives in one place for all 39 effects. An effect owns the checks about *itself*, and returns early for:
+
+- **Its own resources**: `if (!heat_) return;` — a ScratchBuffer it allocated.
+- **Its own controls and timing**: `if (speed == 0) return;`, a rate limiter, a divide-by-zero guard on a control value.
+- **Producer input**: `if (!f) return;` — no audio frame to react to.
+
+The test: *would the Layer know to skip this?* If yes (an empty grid, a disabled module), it belongs to the Layer. If no (this effect's buffer, this effect's control), it belongs to the effect.
+
+**Effects render at every channel count.** An effect writes per channel, the way `draw::pixel` does (`if (write >= 1) …r; if (write >= 2) …g;`), so a light carries as much of the color as it has channels — RGB on three, R+G on two, R on one. Channels the effect doesn't set belong to the driver. Every light has at least one channel: `Layer::setChannelsPerLight` enforces that at the setter.
 
 **Effects must animate at every tick rate.** Per-tick phase math computed as `dt * bpm * K / 60000` truncates to 0 on devices where `dt < 234/bpm` ms: desktop ticks every 0–1 ms, so even bpm=60 freezes. The fix is to keep the raw `dt * bpm` numerator in the phase accumulator and divide only at the read site:
 

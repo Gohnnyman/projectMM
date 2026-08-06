@@ -152,8 +152,6 @@ public:
     void tick() MM_NONBLOCKING override {
         if (!cells_ || !future_ || !colors_ || cellCount_ == 0) return;
         const lengthType w = width(), h = height(), d = depth();
-        const uint8_t cpl = channelsPerLight();
-        if (w == 0 || h == 0 || d == 0 || cpl == 0) return;
 
         parseRuleset();
 
@@ -166,8 +164,7 @@ public:
             return;
         }
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, d};
+        const draw::Canvas cv = canvas();
         const RGB bg{backgroundColorR, backgroundColorG, backgroundColorB};
 
         // blur>220 (&& !colorByAge) keeps a faded background instead of fully clearing dead cells:
@@ -191,15 +188,15 @@ public:
                         const bool recolor = alive && generation_ == 1 && colors_[i] == 0 && !rng_.below(16);
                         if (alive && recolor) {
                             colors_[i] = rng_.below(1, 255);
-                            draw::pixel(buf, dims, p, liveColor(colors_[i]));
+                            draw::pixel(cv, p, liveColor(colors_[i]));
                         } else if (alive && colorByAge && generation_ == 0) {
-                            draw::blendPixel(buf, dims, p, RGB{255, 0, 0}, 248);  // age while paused
+                            draw::blendPixel(cv, p, RGB{255, 0, 0}, 248);  // age while paused
                         } else if (alive && colors_[i] != 0) {
-                            draw::pixel(buf, dims, p, liveColor(colors_[i]));
+                            draw::pixel(cv, p, liveColor(colors_[i]));
                         } else if (!alive && blurDead) {
-                            draw::blendPixel(buf, dims, p, bg, frameBlur);   // blur dead while paused
+                            draw::blendPixel(cv, p, bg, frameBlur);   // blur dead while paused
                         } else if (!alive && generation_ == 1) {
-                            draw::blendPixel(buf, dims, p, bg, 248);         // fade dead on new game
+                            draw::blendPixel(cv, p, bg, 248);         // fade dead on new game
                         }
                     }
         }
@@ -207,7 +204,7 @@ public:
         // Speed throttle: 100 runs uncapped; otherwise advance only once 1000/speed ms have passed.
         if (!speed || step_ > now() || (speed != 100 && now() - step_ < 1000u / speed)) return;
 
-        evolveAutomaton(w, h, d, false, &buf, dims, bg, frameBlur, fadedBackground);
+        evolveAutomaton(w, h, d, false, &cv, bg, frameBlur, fadedBackground);
     }
 
 private:
@@ -285,8 +282,7 @@ private:
         std::memset(cells_.data(), 0, planeBytes_);
         std::memset(colors_.data(), 0, cellCount_);
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, d};
+        const draw::Canvas cv = canvas();
         for (lengthType z = 0; z < d; z++)
             for (lengthType y = 0; y < h; y++)
                 for (lengthType x = 0; x < w; x++) {
@@ -294,7 +290,7 @@ private:
                         const nrOfLightsType i = idx(x, y, z, w, h);
                         setBit(cells_.data(), i, true);
                         colors_[i] = rng_.below(1, 255);  // never 0 (0 = dead marker)
-                        draw::pixel(buf, dims, {x, y, z}, liveColor(colors_[i]));
+                        draw::pixel(cv, {x, y, z}, liveColor(colors_[i]));
                     }
                 }
         std::memcpy(future_.data(), cells_.data(), planeBytes_);
@@ -310,20 +306,19 @@ private:
     // settle timer runs. (MoonLight relies on the redraw loop; here the cells/colors are already
     // set by startNewGame, so painting them is a straight pass.)
     void renderInitial(lengthType w, lengthType h, lengthType d) {
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, d};
+        const draw::Canvas cv = canvas();
         for (lengthType z = 0; z < d; z++)
             for (lengthType y = 0; y < h; y++)
                 for (lengthType x = 0; x < w; x++) {
                     const nrOfLightsType i = idx(x, y, z, w, h);
                     if (getBit(cells_.data(), i) && colors_[i] != 0)
-                        draw::pixel(buf, dims, {x, y, z}, liveColor(colors_[i]));
+                        draw::pixel(cv, {x, y, z}, liveColor(colors_[i]));
                 }
     }
 
     // Place an R-pentomino (1/5 chance a glider), up to 100 attempts avoiding overlap; bounds and the
     // z-plane pick match MoonLight's placePentomino. Writes both future_ and the buffer.
-    void placePentomino(lengthType w, lengthType h, lengthType d, Buffer* buf, Coord3D dims) {
+    void placePentomino(lengthType w, lengthType h, lengthType d, const draw::Canvas* cv) {
         // R-pentomino offsets; pattern[0][1] becomes 3 for the glider variant.
         uint8_t pattern[5][2] = {{1, 0}, {0, 1}, {1, 1}, {2, 1}, {2, 2}};
         if (!rng_.below(5)) pattern[0][1] = 3;
@@ -356,7 +351,7 @@ private:
                     // live (non-zero marker) color for these injected cells, not 0 (dead). Drawn
                     // green under colorByAge, but colors_ still carries the palette index it ages from.
                     colors_[i2] = colorIndex;
-                    if (buf) draw::pixel(*buf, dims, {nx, ny, z}, colorByAge ? RGB{0, 255, 0} : color);
+                    if (cv) draw::pixel(*cv, {nx, ny, z}, colorByAge ? RGB{0, 255, 0} : color);
                 }
                 return;
             }
@@ -368,7 +363,7 @@ private:
     // `testMode` skips rendering and the timing/respawn rendering side-effects (test seam path);
     // buf/dims/bg/frameBlur/fadedBackground are only read off the test path.
     void evolveAutomaton(lengthType w, lengthType h, lengthType d, bool testMode,
-                         Buffer* buf = nullptr, Coord3D dims = {}, RGB bg = {},
+                         const draw::Canvas* cv = nullptr, RGB bg = {},
                          uint8_t frameBlur = 0, int fadedBackground = 0) {
         int aliveCount = 0, deadCount = 0;
         const int zAxis = (d > 1) ? 1 : 0;
@@ -419,7 +414,7 @@ private:
                     if (cellValue && !survives) {
                         // Loneliness / overpopulation: dies, blur toward background.
                         setBit(future_.data(), cIndex, false);
-                        if (!testMode && buf) draw::blendPixel(*buf, dims, p, bg, frameBlur);
+                        if (!testMode && cv) draw::blendPixel(*cv, p, bg, frameBlur);
                     } else if (!cellValue && born) {
                         // Reproduction: inherit a living neighbour's color, mutate sometimes. Both
                         // fallbacks use rng_.below(1, 255) (1..254) so a live cell never gets 0, the
@@ -428,26 +423,26 @@ private:
                         uint8_t colorIndex = (colorCount > 0) ? nColors[rng_.below(colorCount)] : rng_.below(1, 255);
                         if (rng_.below(100) < mutation) colorIndex = rng_.below(1, 255);
                         colors_[cIndex] = colorIndex;
-                        if (!testMode && buf) draw::pixel(*buf, dims, p, liveColor(colorIndex));
+                        if (!testMode && cv) draw::pixel(*cv, p, liveColor(colorIndex));
                     } else {
                         // Unchanged cell: dead → blur (honour the faded-background floor); live →
                         // age toward red, or repaint its palette color.
                         if (!cellValue) {
                             setBit(future_.data(), cIndex, false);
-                            if (!testMode && buf) {
+                            if (!testMode && cv) {
                                 if (fadedBackground) {
-                                    const RGB val = draw::get(*buf, dims, p);
+                                    const RGB val = draw::get(*cv, p);
                                     if (fadedBackground < val.r + val.g + val.b)
-                                        draw::blendPixel(*buf, dims, p, bg, frameBlur);
+                                        draw::blendPixel(*cv, p, bg, frameBlur);
                                 } else {
-                                    draw::blendPixel(*buf, dims, p, bg, frameBlur);
+                                    draw::blendPixel(*cv, p, bg, frameBlur);
                                 }
                             }
                         } else {
                             setBit(future_.data(), cIndex, true);
-                            if (!testMode && buf) {
-                                if (colorByAge) draw::blendPixel(*buf, dims, p, RGB{255, 0, 0}, 248);
-                                else            draw::pixel(*buf, dims, p, liveColor(colors_[cIndex]));
+                            if (!testMode && cv) {
+                                if (colorByAge) draw::blendPixel(*cv, p, RGB{255, 0, 0}, 248);
+                                else            draw::pixel(*cv, p, liveColor(colors_[cIndex]));
                             }
                         }
                     }
@@ -471,7 +466,7 @@ private:
         const int total = aliveCount + deadCount;
         const bool densityFloor = total > 0 && aliveCount * 20 < total;
         if ((repetition && infinite) || (infinite && !rng_.below(50)) || (infinite && densityFloor)) {
-            placePentomino(w, h, d, testMode ? nullptr : buf, dims);
+            placePentomino(w, h, d, testMode ? nullptr : cv);
             std::memcpy(cells_.data(), future_.data(), planeBytes_);
             repetition = false;
         }

@@ -24,7 +24,7 @@ Detail: [technical](moxygen/ControlModule.md)
 
 ## Presets
 
-A preset is a file: `/.config/presets/<name>.json`. Saving writes one, applying reads one, deleting removes one. Nothing else holds preset state, so there is no second copy to keep in step: the list is rebuilt from the folder rather than persisted alongside it. That rescan runs at startup and after every save, rename, delete and reorder — so a preset added or removed through the File Manager appears once the module next rescans (a reboot, or any preset action on the surface), not the instant the file lands.
+A preset is a file: `/.config/presets/<name>.json`. Saving writes one, applying reads one, deleting removes one. Nothing else holds preset state, so there is no second copy to keep in step: the list is rebuilt from the folder rather than persisted alongside it. That rescan runs at startup and after every save, rename and delete — a reorder only rewrites the affected files and re-sorts the rows in place, since the folder's contents have not changed. So a preset added or removed through the File Manager appears once the module next rescans (a reboot, or a save, rename or delete on the surface), not the instant the file lands.
 
 The name becomes the file name, so it is restricted to printable ASCII without `/`, `\` or `.` — a validator on the control, which every write path runs. `slot` records which pad the preset occupies, so a surface arranged to match a physical desk survives a reboot.
 

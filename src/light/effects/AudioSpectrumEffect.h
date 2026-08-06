@@ -40,7 +40,6 @@ public:
         const lengthType h = height();
         const lengthType d = depth();
         const uint8_t cpl = channelsPerLight();
-        if (w == 0 || h == 0 || d == 0 || cpl == 0) return;
 
         std::memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
 

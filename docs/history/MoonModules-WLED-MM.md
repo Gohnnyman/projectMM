@@ -10,7 +10,7 @@ Near-dormant month — a single small change and a build-number bump.
 
 - The instance list now shows which repo (WLED-MM or upstream WLED) each discovered instance runs, and reports the right release for upstream WLED instances.
 
-*Auditability: 2 commits on `mdev`, author-date 2026-07-01..2026-07-31 (range 12b0238 … 7c55f91; 7c55f91 is a build-number bump, omitted as not user-facing). Issues checked: `repo:MoonModules/WLED-MM is:issue created:2026-07-01..2026-07-31` (0) and `closed:2026-07-01..2026-07-31` (0) — no issues opened, closed, or commented on all month.*
+*Auditability: 2 commits on `mdev`, author-date 2026-07-01..2026-07-31 (range 12b0238 … 7c55f91; 7c55f91 is a build-number bump, omitted as not user-facing). Issues checked: `repo:MoonModules/WLED-MM is:issue created:2026-07-01..2026-07-31` (0) and `closed:2026-07-01..2026-07-31` (0), and `updated:2026-07-01..2026-07-31` (0) — no issues opened, closed, or even commented on all month. (The June window returns 2 on the same query form, so the zeros are real rather than a mistyped repo name: the search API needs `MoonModules/WLED-MM`, not `MoonModules/WLED`.)*
 
 ## June 2026
 

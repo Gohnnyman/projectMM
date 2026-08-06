@@ -40,8 +40,7 @@ public:
         const int cols = width();
         const int rows = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Time coordinate on the noise Z axis: millis() / (16 - speed). speed <= 15 keeps the
         // divisor >= 1 (no divide-by-zero). uint32_t throughout — matches inoise8's coordinate type.
@@ -52,13 +51,12 @@ public:
                 const uint8_t pixelHue8 = inoise8(static_cast<uint32_t>(x) * scale,
                                                   static_cast<uint32_t>(y) * scale, t);
                 const RGB c = colorFromPalette(*Palettes::active(), pixelHue8);
-                draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, c);
+                draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, c);
             }
         }
     }
 
 private:
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 };
 
 }  // namespace mm

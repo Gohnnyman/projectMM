@@ -72,8 +72,7 @@ public:
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(sizeX), static_cast<lengthType>(sizeY), depthDim()};
+        const draw::Canvas cv = canvas();
 
         layer()->fadeToBlackBy(fade);
 
@@ -151,15 +150,12 @@ public:
             const int drawY = (invert && (x % 2 == 0)) ? (sizeY - 1 - y) : y;
             const uint8_t colorIndex = static_cast<uint8_t>(map32(x, 0, sizeX - 1, 0, 255));
             const RGB col = colorFromPalette(*Palettes::active(), colorIndex);
-            draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(drawY), 0}, col);
+            draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(drawY), 0}, col);
         }
     }
 
 private:
     static constexpr int NUM_GEQ_CHANNELS = 16;
-
-
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     void clearState() {
         std::memset(bandSpeed, 0, sizeof(bandSpeed));

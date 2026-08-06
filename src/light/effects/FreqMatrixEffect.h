@@ -62,11 +62,9 @@ public:
 
     void tick() MM_NONBLOCKING override {
         // D1: read the live grid each frame; the scroll runs down the x=0 column, length = height().
-        const int cols = width();
         const int len  = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(len), depthDim()};
+        const draw::Canvas cv = canvas();
 
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // static silence frame is non-null in practice; guard for safety
@@ -121,15 +119,14 @@ public:
         // setPixelColor(i, getPixelColor(i-1))), then paint the new color at y=0. The effect writes
         // only x=0; Layer::extrude duplicates this column across x (and z) on wider layers.
         for (int y = len - 1; y > 0; y--) {
-            const RGB c = draw::get(buf, dims, {0, static_cast<lengthType>(y - 1), 0});
-            draw::pixel(buf, dims, {0, static_cast<lengthType>(y), 0}, c);
+            const RGB c = draw::get(cv, {0, static_cast<lengthType>(y - 1), 0});
+            draw::pixel(cv, {0, static_cast<lengthType>(y), 0}, c);
         }
-        draw::pixel(buf, dims, {0, 0, 0}, newColor);
+        draw::pixel(cv, {0, 0, 0}, newColor);
     }
 
 private:
     // depth>0 ? depth : 1 — the dims z-extent, so draw clipping/indexing is correct on a 3D layer.
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     uint32_t lastScrollMs_ = 0;   // last elapsed() ms the column scrolled (throttle state)
 };

@@ -68,7 +68,6 @@ public:
         if (!indexes_ || !fadeDir_ || !brightness_ || !colors_ || nbStars_ == 0) return;
         const lengthType w = width(), h = height();
         const nrOfLightsType count = nrOfLights();
-        if (count == 0) return;
 
         const draw::Canvas cv = canvas();
 
@@ -121,7 +120,6 @@ private:
     size_t         nbStars_    = 0;
     nrOfLightsType lightCount_ = 0;
     Random8   rng_{0x57A55C1Eu};
-
 
     // A uniform cell pick over 0..count-1. nrOfLightsType is uint32_t on PSRAM builds (>65535 lights),
     // so a single next16() draw can't reach the top of a large grid — compose a full-width draw from

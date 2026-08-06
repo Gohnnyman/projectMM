@@ -2,7 +2,7 @@
 
 What landed on [NightDriverStrip](https://github.com/PlummersSoftwareLLC/NightDriverStrip)'s `main` branch, month by month. External-context reference — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md).
 
-Summarised via the GitHub commits API (no local clone), so counts are all commits on `main`, not first-parent merges — the bullets filter out dependency bumps, whitespace, and pure refactors. The one release in the window, **v1.3.0**, was published 2026-01-10 but tagged from a late-November commit; it isn't a clean month boundary, so months are kept whole with the release noted as context.
+Summarised via the GitHub commits API (no local clone), so counts are all commits on `main`, not first-parent merges — the bullets filter out dependency bumps, whitespace, and pure refactors. Releases are noted as context rather than used as month boundaries: **v1.3.0** (published 2026-01-10) was tagged from a late-November commit, and the latest are **v2.0.0** and **v2.0.1**, both published 2026-06-14. Neither is a clean month boundary, so months are kept whole.
 
 ## July 2026
 

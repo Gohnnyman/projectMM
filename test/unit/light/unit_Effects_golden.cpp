@@ -1,4 +1,13 @@
 // @module EffectBase
+// DemoReelEffect is deliberately ABSENT too, for a different reason: it hosts whichever effects the
+// ModuleFactory registry happens to contain, and that registry is global and populated by whatever
+// tests ran before — so its frame depends on test ORDER, not on its own code. A hash there would
+// flap. Its behaviour test (unit_DemoReelEffect) covers it with an explicit registry.
+//
+// Audio-driven effects (Blurz, GEQ, GEQ3D, FreqMatrix, FreqSaws, NoiseMeter, PaintBrush,
+// AudioSpectrum) are deliberately ABSENT: their output depends on whatever the audio service holds,
+// so a hash over their frames would pin the test rig's audio state rather than the effect. Their
+// migrations rely on their behaviour tests plus the Canvas equivalence test in unit_Canvas.
 // @also SineEffect, PlasmaEffect, NoiseEffect, DistortionWavesEffect, LavaLampEffect, MetaballsEffect, SpiralEffect, RingsEffect, WaveEffect, RainbowEffect
 
 // Pins the EXACT rendered output of the time-driven effects, so the power-function migration's
@@ -27,6 +36,18 @@
 
 #include "golden_frame.h"
 
+#include "light/effects/BouncingBallsEffect.h"
+#include "light/effects/FixedRectangleEffect.h"
+#include "light/effects/LissajousEffect.h"
+#include "light/effects/Noise2DEffect.h"
+#include "light/effects/PraxisEffect.h"
+#include "light/effects/SolidEffect.h"
+#include "light/effects/SphereMoveEffect.h"
+#include "light/effects/TetrixEffect.h"
+#include "light/effects/TextEffect.h"
+#include "light/effects/GameOfLifeEffect.h"
+#include "light/effects/RubiksCubeEffect.h"
+#include "light/effects/StarFieldEffect.h"
 #include "light/effects/DistortionWavesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/MetaballsEffect.h"
@@ -55,4 +76,16 @@ TEST_CASE("time-driven effects render byte-identical frames (migration guard)") 
     SUBCASE("WaveEffect")            { WaveEffect e;            golden::checkGolden("WaveEffect",            golden::renderHash(e, 16, 16, 1), 0xa1150376dd23bea1ull); }
     SUBCASE("StarSkyEffect")         { StarSkyEffect e;         golden::checkGolden("StarSkyEffect",         golden::renderHash(e, 16, 16, 1), 0xa7ff8aab806be9ffull); }
     SUBCASE("RainbowEffect")         { RainbowEffect e;         golden::checkGolden("RainbowEffect",         golden::renderHash(e, 16, 16, 1), 0x75a2b1be1db07979ull); }
+    SUBCASE("BouncingBallsEffect")    { BouncingBallsEffect e;       golden::checkGolden("BouncingBallsEffect", golden::renderHash(e, 16, 16, 1), 0xbfc9de4aabc3c3b2ull); }
+    SUBCASE("FixedRectangleEffect")   { FixedRectangleEffect e;      golden::checkGolden("FixedRectangleEffect", golden::renderHash(e, 16, 16, 1), 0x22b828f908e9ce1cull); }
+    SUBCASE("LissajousEffect")        { LissajousEffect e;           golden::checkGolden("LissajousEffect", golden::renderHash(e, 16, 16, 1), 0x6f680693a1a90d78ull); }
+    SUBCASE("Noise2DEffect")          { Noise2DEffect e;             golden::checkGolden("Noise2DEffect", golden::renderHash(e, 16, 16, 1), 0xefbc5485de148631ull); }
+    SUBCASE("PraxisEffect")           { PraxisEffect e;              golden::checkGolden("PraxisEffect", golden::renderHash(e, 16, 16, 1), 0x0420f0404b3f12c5ull); }
+    SUBCASE("SolidEffect")            { SolidEffect e;               golden::checkGolden("SolidEffect", golden::renderHash(e, 16, 16, 1), 0x56711c1cf0c8ae83ull); }
+    SUBCASE("SphereMoveEffect")       { SphereMoveEffect e;          golden::checkGolden("SphereMoveEffect", golden::renderHash(e, 16, 16, 1), 0xb3f3d7c75fe49fdbull); }
+    SUBCASE("TetrixEffect")           { TetrixEffect e;              golden::checkGolden("TetrixEffect", golden::renderHash(e, 16, 16, 1), 0x048d66b3ecf2b377ull); }
+    SUBCASE("TextEffect")             { TextEffect e;                golden::checkGolden("TextEffect", golden::renderHash(e, 16, 16, 1), 0xc7c4faf87d12c099ull); }
+    SUBCASE("GameOfLifeEffect")       { GameOfLifeEffect e;          golden::checkGolden("GameOfLifeEffect", golden::renderHash(e, 16, 16, 1), 0xb2fb46cdf32ddd8bull); }
+    SUBCASE("RubiksCubeEffect")       { RubiksCubeEffect e;          golden::checkGolden("RubiksCubeEffect", golden::renderHash(e, 16, 16, 1), 0xecd4da66adc09f5dull); }
+    SUBCASE("StarFieldEffect")        { StarFieldEffect e;           golden::checkGolden("StarFieldEffect", golden::renderHash(e, 16, 16, 1), 0xeaea6687bd3e4676ull); }
 }

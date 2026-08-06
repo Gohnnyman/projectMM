@@ -321,4 +321,137 @@ inline lengthType text(Buffer& buf, Coord3D dims, const fonts::Font& font, const
     return onFirstLine ? static_cast<lengthType>(cx - x) : firstLineWidth;
 }
 
+// ---- Canvas overloads --------------------------------------------------------------------------
+// The Canvas forms of the primitives above. Each forwards to the (Buffer&, dims) implementation
+// rather than duplicating its logic — one algorithm, two call shapes — so the pair cannot drift
+// while the migration is in progress. When the last caller of the older form is gone, these become
+// the implementations and the pair collapses to one (§ the subtraction pass in the top-down spec).
+//
+// `Canvas` carries a raw pointer rather than a Buffer&, so these rebuild the light Buffer view the
+// legacy signatures expect. That view is a non-owning wrapper: constructing it copies three fields
+// and allocates nothing.
+
+/// Fade every channel toward black. Canvas form; the Buffer form forwards here.
+inline void fade(const Canvas& cv, uint8_t amt) {
+    const uint8_t keep = static_cast<uint8_t>(255 - amt);
+    for (size_t i = 0; i < cv.bytes; i++) cv.data[i] = scale8(cv.data[i], keep);
+}
+
+/// Fill every light with one color, leaving any channel beyond RGB untouched.
+inline void fill(const Canvas& cv, RGB c) {
+    if (cv.cpl == 0) return;   // a 0-channel buffer has no color to write
+    for (size_t off = 0; off + cv.cpl <= cv.bytes; off += cv.cpl) {
+        if (cv.cpl >= 1) cv.data[off + 0] = c.r;
+        if (cv.cpl >= 2) cv.data[off + 1] = c.g;
+        if (cv.cpl >= 3) cv.data[off + 2] = c.b;
+    }
+}
+
+/// Read-modify-write lerp of one pixel toward `c` by `amt`.
+inline void blendPixel(const Canvas& cv, Coord3D p, RGB c, uint8_t amt) {
+    const RGB cur = get(cv, p);
+    pixel(cv, p, blend(cur, c, amt));
+}
+
+/// Saturating additive pixel — light adds, so this never wraps to black.
+inline void addPixel(const Canvas& cv, Coord3D p, RGB c) {
+    const RGB cur = get(cv, p);
+    pixel(cv, p, RGB{qadd8(cur.r, c.r), qadd8(cur.g, c.g), qadd8(cur.b, c.b)});
+}
+
+/// Separable box blur over every axis with extent > 1 — one call covers 1D/2D/3D.
+inline void blur(const Canvas& cv, uint8_t amt) {
+    if (amt == 0 || cv.cpl == 0) return;
+    const size_t w = static_cast<size_t>(cv.dims.x), h = static_cast<size_t>(cv.dims.y),
+                 d = static_cast<size_t>(cv.dims.z);
+    if (w > 1) blurAxis(cv.data, cv.cpl, w, cv.cpl, h * d, w * cv.cpl, amt);
+    if (h > 1) blurAxis(cv.data, cv.cpl, h, w * cv.cpl, d, w * h * cv.cpl, amt);
+    if (d > 1) blurAxis(cv.data, cv.cpl, d, w * h * cv.cpl, 1, 0, amt);
+}
+
+/// A straight line a→b on a Canvas. The geometry is `line`'s (3D Bresenham with the same `shorten`
+/// lever); only the pixel writer differs, so this walks the same steps and writes through the
+/// Canvas form of `pixel`. Kept as a small forwarder rather than a second Bresenham: two copies of
+/// an error-term loop is exactly the drift this migration exists to remove.
+inline void line(const Canvas& cv, Coord3D a, Coord3D b, RGB c, uint8_t shorten = 255) {
+    if (shorten == 0) return;
+    if (shorten < 255) {
+        const int bx = ((2 * int(b.x) - 2 * int(a.x)) * int(shorten)) / 255 + 2 * int(a.x);
+        const int by = ((2 * int(b.y) - 2 * int(a.y)) * int(shorten)) / 255 + 2 * int(a.y);
+        const int bz = ((2 * int(b.z) - 2 * int(a.z)) * int(shorten)) / 255 + 2 * int(a.z);
+        b = {static_cast<lengthType>((bx + 1) / 2),
+             static_cast<lengthType>((by + 1) / 2),
+             static_cast<lengthType>((bz + 1) / 2)};
+    }
+    Coord3D p = a;
+    const lengthType dx = b.x > a.x ? static_cast<lengthType>(b.x - a.x) : static_cast<lengthType>(a.x - b.x);
+    const lengthType dy = b.y > a.y ? static_cast<lengthType>(b.y - a.y) : static_cast<lengthType>(a.y - b.y);
+    const lengthType dz = b.z > a.z ? static_cast<lengthType>(b.z - a.z) : static_cast<lengthType>(a.z - b.z);
+    const lengthType sx = a.x < b.x ? 1 : -1, sy = a.y < b.y ? 1 : -1, sz = a.z < b.z ? 1 : -1;
+
+    if (dx >= dy && dx >= dz) {
+        lengthType ey = 2 * dy - dx, ez = 2 * dz - dx;
+        for (lengthType i = 0; i <= dx; i++) {
+            pixel(cv, p, c);
+            if (ey >= 0) { p.y = static_cast<lengthType>(p.y + sy); ey -= 2 * dx; }
+            if (ez >= 0) { p.z = static_cast<lengthType>(p.z + sz); ez -= 2 * dx; }
+            ey += 2 * dy; ez += 2 * dz; p.x = static_cast<lengthType>(p.x + sx);
+        }
+    } else if (dy >= dx && dy >= dz) {
+        lengthType ex = 2 * dx - dy, ez = 2 * dz - dy;
+        for (lengthType i = 0; i <= dy; i++) {
+            pixel(cv, p, c);
+            if (ex >= 0) { p.x = static_cast<lengthType>(p.x + sx); ex -= 2 * dy; }
+            if (ez >= 0) { p.z = static_cast<lengthType>(p.z + sz); ez -= 2 * dy; }
+            ex += 2 * dx; ez += 2 * dz; p.y = static_cast<lengthType>(p.y + sy);
+        }
+    } else {
+        lengthType ex = 2 * dx - dz, ey = 2 * dy - dz;
+        for (lengthType i = 0; i <= dz; i++) {
+            pixel(cv, p, c);
+            if (ex >= 0) { p.x = static_cast<lengthType>(p.x + sx); ex -= 2 * dz; }
+            if (ey >= 0) { p.y = static_cast<lengthType>(p.y + sy); ey -= 2 * dz; }
+            ex += 2 * dx; ey += 2 * dy; p.z = static_cast<lengthType>(p.z + sz);
+        }
+    }
+}
+
+/// Blit one glyph on a Canvas — the Canvas form of `glyph`. Same MSB-first column order and the
+/// same clipping; only the pixel writer differs.
+inline void glyph(const Canvas& cv, const fonts::Font& font, char ch, lengthType x, lengthType y, RGB c) {
+    if (ch < 32 || ch > 126) return;
+    const uint8_t idx = static_cast<uint8_t>(ch - 32);
+    const uint8_t* rows = font.rows + static_cast<size_t>(idx) * font.height;
+    for (uint8_t ry = 0; ry < font.height; ry++) {
+        const uint8_t bits = rows[ry];
+        for (uint8_t rx = 0; rx < font.width; rx++)
+            if ((bits >> (7 - rx)) & 0x01)
+                pixel(cv, {static_cast<lengthType>(x + rx), static_cast<lengthType>(y + ry), 0}, c);
+    }
+}
+
+/// Draw a NUL-terminated string on a Canvas — the Canvas form of `text`. Returns the first line's
+/// pixel width, as the Buffer form does.
+inline lengthType text(const Canvas& cv, const fonts::Font& font, const char* str,
+                       lengthType x, lengthType y, RGB c) {
+    if (!str) return 0;
+    lengthType cx = x, cy = y;
+    lengthType firstLineWidth = 0;
+    bool onFirstLine = true;
+    for (const char* p = str; *p; p++) {
+        if (*p == '\n') {
+            if (onFirstLine) { firstLineWidth = static_cast<lengthType>(cx - x); onFirstLine = false; }
+            cx = x; cy = static_cast<lengthType>(cy + font.height); continue;
+        }
+        glyph(cv, font, *p, cx, cy, c);
+        cx = static_cast<lengthType>(cx + font.width);
+    }
+    return onFirstLine ? static_cast<lengthType>(cx - x) : firstLineWidth;
+}
+
+/// Byte offset of a coordinate on a Canvas, or `bytes` when it is outside the grid. The Canvas form
+/// of `offsetOf` — for effects that need the raw index (e.g. to touch a W channel `pixel` leaves
+/// alone). Delegates to Canvas::offsetOf so the addressing rule keeps one home.
+inline size_t offsetOf(const Canvas& cv, Coord3D p) { return cv.offsetOf(p); }
+
 }  // namespace mm::draw

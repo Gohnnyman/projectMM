@@ -2,7 +2,6 @@
 
 #include "light/effects/EffectBase.h"
 
-
 namespace mm {
 
 // Fixed Rectangle: paints a solid axis-aligned RGB box at a fixed grid position and extent,
@@ -62,10 +61,8 @@ public:
         const int h = height();
         const int d = depth();
 
-        Buffer& buf = layer()->buffer();
+        const draw::Canvas cv = canvas();
         const uint8_t cpl = channelsPerLight();
-        if (cpl < 3) return;
-        const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};
 
         // Motion trail: dim the whole buffer each frame (source: layer->fadeToBlackBy(10)).
         layer()->fadeToBlackBy(10);
@@ -90,13 +87,13 @@ public:
                     const Coord3D p{static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)};
                     // Always write RGB: a white tile paints {255,255,255} even when the color is all
                     // zero, and a colored tile writes rgb (clearing any stale pixel from a prior frame).
-                    draw::pixel(buf, dims, p, isWhiteTile ? RGB{255, 255, 255} : rgb);
+                    draw::pixel(cv, p, isWhiteTile ? RGB{255, 255, 255} : rgb);
                     // White channel (4th) only on RGBW grids. Follow the chequerboard branch: the
                     // white tile carries `white`, a colored tile clears W so it never tints the
                     // color and no stale W persists in the RGBW buffer. draw::pixel writes RGB only.
                     if (cpl >= 4) {
-                        const size_t off = draw::offsetOf(buf, dims, p);
-                        if (off + 3 < buf.bytes()) buf.data()[off + 3] = isWhiteTile ? white : 0;
+                        const size_t off = draw::offsetOf(cv, p);
+                        if (off + 3 < cv.bytes) cv.data[off + 3] = isWhiteTile ? white : 0;
                     }
                     // Box wider than tall: flip the white/color toggle every cell along X.
                     if (rectH < rectW) alternate = !alternate;
@@ -111,7 +108,6 @@ private:
     static int MINi(int a, int b) { return a < b ? a : b; }
     // Mirror GEQ3D's helper so the dims build reads the same across effects: a degenerate (0)
     // grid depth still yields a 1-deep extent. (rectD is a member but does not shadow depth().)
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 };
 
 } // namespace mm

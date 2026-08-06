@@ -78,8 +78,7 @@ public:
         const uint32_t now = elapsed();
         if (now - step_ < 1000u / speed) return;
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion streaks: fade the previous frame rather than clearing it.
         layer()->fadeToBlackBy(blur);
@@ -121,7 +120,7 @@ public:
                     const uint8_t c = static_cast<uint8_t>(color);
                     col = RGB{c, c, c};
                 }
-                draw::pixel(buf, dims, {static_cast<lengthType>(sx), static_cast<lengthType>(sy), 0}, col);
+                draw::pixel(cv, {static_cast<lengthType>(sx), static_cast<lengthType>(sy), 0}, col);
             }
 
             // Advance toward the viewer; respawn at the far plane when it passes the camera or flies
@@ -140,7 +139,6 @@ private:
     };
     static constexpr uint16_t kMaxStars = 255;  // the numStars control maximum
 
-
     // Spawn a star at a random x/y far position with a fresh color index. `far` selects the depth:
     //   far=false  → initial seed: z in [0, w)  (MoonLight init: z = random(size.x))
     //   far=true   → respawn:      z = w        (MoonLight respawn: z = size.x)
@@ -158,8 +156,6 @@ private:
         const uint32_t span = static_cast<uint32_t>(hi - lo);
         return lo + static_cast<int>(rng_.next16() % span);
     }
-
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     // Fixed kMaxStars table. Self-sizing, self-freeing, self-reporting. seedW_/seedH_ track the
     // geometry the stars were spawned for, so prepare() re-spawns only on a grid change.

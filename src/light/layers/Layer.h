@@ -75,7 +75,11 @@ public:
     // The active Layouts, for consumers that need per-light coordinates (e.g.
     // PreviewDriver builds its coordinate table from layouts()->forEachCoord).
     Layouts* layouts() const { return layouts_; }
-    void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
+    /// Channels per light (3 = RGB, 4 = RGBW, more for fixture profiles). Zero is not a valid
+    /// light: it would allocate a zero-byte buffer and make every effect's per-light stride 0, so
+    /// it is rejected here rather than defended against downstream. Enforcing the invariant at the
+    /// one entry point is what lets effects and draw primitives assume `cpl >= 1`.
+    void setChannelsPerLight(uint8_t cpl) { if (cpl > 0) channelsPerLight_ = cpl; }
 
     void prepare() override {
         // Treat "no layouts wired" the same as "every layout child disabled" —
@@ -149,6 +153,14 @@ public:
         // Scheduler already gates the Layer itself by enabled() via respectsEnabled().
         // We still gate per-effect-child explicitly because Layer iterates its own
         // children rather than going through the Scheduler.
+        //
+        // A degenerate grid (any extent 0, so no lights) is gated HERE, once, for every effect:
+        // there is nothing to render into, and geometry derived from a zero extent is meaningless
+        // (a band split or horizon computed from 0 columns goes negative). Orchestration is the
+        // Layer's job — an effect must never carry its own "is my grid empty" check, or the rule
+        // ends up re-implemented 39 times and drifts. See architecture.md § Effects.
+        if (width_ <= 0 || height_ <= 0 || buffer_.count() == 0) return;
+
         elapsed_ = platform::millis();
         // The buffer PERSISTS frame-to-frame — the Layer does NOT clear it. This is the FastLED /
         // WLED / MoonLight convention: the buffer holds the previous frame so an effect can fade it

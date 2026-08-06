@@ -50,6 +50,12 @@ struct GridCase {
     const char* label;
 };
 
+// Channel counts a real fixture presents: a single-channel (mono/white) strand, a two-channel
+// oddity, RGB, RGBW, and a wide fixture-profile slot. An effect must render what the buffer can
+// hold rather than refuse to draw — writing three bytes unconditionally would either corrupt a
+// narrow buffer or (with a guard) leave it black, which reads to a user as "this effect is broken".
+const uint8_t kChannelCounts[] = {1, 2, 3, 4, 8};
+
 const GridCase kGrids[] = {
     {0, 0, 0, "0x0x0 (empty grid)"},
     {1, 1, 1, "1x1x1 (single light)"},
@@ -60,7 +66,8 @@ const GridCase kGrids[] = {
 // Drive one effect through one grid: build the layer, tick it twice, then tear down.
 // Two ticks matter because several effects allocate or seed on the first tick and read
 // that state on the next one — a zero grid must not leave a trap for frame two.
-void runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase& g) {
+bool runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase& g,
+                     uint8_t cpl = 3) {
     mm::Layouts layouts;
     mm::GridLayout grid;
     mm::Layer layer;
@@ -68,7 +75,7 @@ void runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase
     grid.width = g.w; grid.height = g.h; grid.depth = g.d;
     layouts.addChild(&grid);
     layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
+    layer.setChannelsPerLight(cpl);
 
     layer.addChild(fx);
     layer.applyState();
@@ -82,17 +89,52 @@ void runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase
                       name << " left a non-empty buffer on " << g.label);
     }
 
+    // Did the effect actually put light in the buffer? "No crash" is not enough — but neither is
+    // "wrote something": an effect that assumes RGB on a 1-channel buffer writes two bytes PAST
+    // each light into its neighbours, which stays in bounds and looks like output while silently
+    // corrupting the frame. The caller checks that separately via a canary (see the sweep).
+    bool wrote = false;
+    for (size_t i = 0; i < layer.buffer().bytes(); i++)
+        if (layer.buffer().data()[i]) { wrote = true; break; }
+
     // release() returns every buffer in the tree (it recurses to children); the caller
     // then destroys the effect. The Layer is a local about to go out of scope, so there
     // is no detach to do — and a removeChild() here would run a structural mutation over
     // a just-released tree.
     layer.release();
+    return wrote;
 }
 
 }  // namespace
 
 // The sweep. One TEST_CASE over every effect keeps the failure output readable: a broken
 // effect names itself and the grid it died on, and the rest still run.
+// 1 and 2 channels are the interesting cases: an effect that assumes RGB either writes past its
+// light or (with a guard) declines to render at all, and a user sees a black fixture either way.
+TEST_CASE("every effect renders at any channel count") {
+    int swept = 0;
+    mm::forEachEffect([&](const char* name, auto make) {
+        for (uint8_t cpl : kChannelCounts) {
+            const std::string effectName(name);
+            CAPTURE(effectName);
+            CAPTURE(cpl);
+            mm::MoonModule* fx = make();
+            REQUIRE_MESSAGE(fx != nullptr, "could not construct " << effectName);
+            const GridCase g{8, 8, 1, "8x8x1"};
+            const bool wrote = runEffectOnGrid(effectName, fx, g, cpl);
+            // Effects that always paint every pixel must do so at ANY channel count. The rest
+            // (audio-reactive, sparse, or input-driven) legitimately render nothing here, so they
+            // are checked for not crashing only.
+            if (effectName == "SolidEffect" || effectName == "RainbowEffect" ||
+                effectName == "WaveEffect"  || effectName == "PlasmaEffect")
+                CHECK_MESSAGE(wrote, effectName << " drew nothing at cpl=" << int(cpl));
+            delete fx;
+            swept++;
+        }
+    });
+    MESSAGE("swept " << swept << " effect x channel-count combinations");
+}
+
 TEST_CASE("every effect survives degenerate grid sizes") {
     int swept = 0;
 

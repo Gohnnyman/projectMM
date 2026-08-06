@@ -51,10 +51,19 @@ def _resolve_executable() -> Path:
     # Only this host's artefact shape is a candidate: a stale projectMM.exe left in a shared
     # checkout must never be picked on macOS/Linux (and vice versa), however new it is.
     want_exe = platform.system() == "Windows"
-    existing = [c for c in candidates
-                if c.exists() and ((c.suffix == ".exe") == want_exe)]
-    if existing:
-        return max(existing, key=lambda c: c.stat().st_mtime)
+    # Read each candidate's mtime in the SAME step that proves it exists: a rebuild running
+    # alongside this script can replace a binary between an exists() check and a later stat(),
+    # which would raise FileNotFoundError from inside max().
+    stamped = []
+    for c in candidates:
+        if (c.suffix == ".exe") != want_exe:
+            continue
+        try:
+            stamped.append((c.stat().st_mtime, c))
+        except (FileNotFoundError, OSError):
+            continue   # vanished or unreadable: simply not a candidate
+    if stamped:
+        return max(stamped)[1]
     # Return the most-likely candidate so the error message points somewhere
     # informative if the binary genuinely isn't there.
     return bdir / ("projectMM.exe" if sys.platform == "win32" else "projectMM")

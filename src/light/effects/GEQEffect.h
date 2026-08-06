@@ -70,8 +70,7 @@ public:
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion trail: dim the whole buffer each frame (WLED: fadeToBlackBy(fadeOut)).
         layer()->fadeToBlackBy(fadeOut);
@@ -127,7 +126,7 @@ public:
                     ? static_cast<uint8_t>(map32(x, 0, cols - 1, 0, 255))
                     : static_cast<uint8_t>(map32(h, 0, rows - 1, 0, 255));
                 const RGB col = colorFromPalette(*Palettes::active(), colorIndex);
-                draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, col);
+                draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, col);
             }
 
             // Falling peak dot, drawn at the remembered peak row if it stands above the live bar.
@@ -137,7 +136,7 @@ public:
                 if (y >= 0 && y < rows) {
                     // Peak color: top of the palette (index 255) so the dot reads as the crest.
                     const RGB peakCol = colorFromPalette(*Palettes::active(), 255);
-                    draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, peakCol);
+                    draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, peakCol);
                 }
             }
         }
@@ -145,9 +144,6 @@ public:
 
 private:
     static constexpr int NUM_GEQ_CHANNELS = 16;
-
-
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     // previousBarHeight[width]: per-column peak-dot row (0..rows from floor). The buffer sizes
     // itself in prepare(), frees itself on disable/teardown, and reports its own bytes.

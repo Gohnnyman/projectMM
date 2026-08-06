@@ -72,8 +72,7 @@ public:
         const lengthType w = width();
         const lengthType h = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, depthDim()};
+        const draw::Canvas cv = canvas();
 
         const uint32_t now = platform::millis();
         const RGB black{0, 0, 0};
@@ -115,7 +114,7 @@ public:
                         const RGB c = (i < static_cast<lengthType>(d.pos) + static_cast<lengthType>(d.brick))
                                           ? colorFromPalette(*Palettes::active(), d.col)
                                           : black;
-                        draw::pixel(buf, dims, {static_cast<lengthType>(x),
+                        draw::pixel(cv, {static_cast<lengthType>(x),
                                                 static_cast<lengthType>(h - 1 - i), 0}, c);
                     }
                 } else {
@@ -134,7 +133,7 @@ public:
                 d.brick = 0;
                 if (static_cast<int32_t>(d.step - now) > 0) {
                     for (lengthType i = 0; i < h; i++)
-                        draw::blendPixel(buf, dims, {static_cast<lengthType>(x), i, 0}, black, 25);
+                        draw::blendPixel(cv, {static_cast<lengthType>(x), i, 0}, black, 25);
                 } else {
                     d.stack = 0;
                     d.step  = 0;
@@ -159,7 +158,6 @@ private:
 
     // The grid depth accessor needs the >0 guard for the dims z extent; the width/oneColor control
     // members are named *Control so they don't shadow the inherited width()/depth() accessors.
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     // One drop per X column. Self-sizing, self-freeing, self-reporting.
     ScratchBuffer<Tetris> drops_{*this};

@@ -67,7 +67,6 @@ public:
         const lengthType h = height();
         const uint8_t cpl = channelsPerLight();
         uint8_t* buf = buffer();
-        if (w == 0 || h == 0 || cpl < 3) return;
 
         // 1. Fade the trail (scale8 toward black) — a smaller `fade` = shorter tail.
         for (size_t i = 0; i < trail_.bytes(); i++) trail_[i] = scale8(trail_[i], fade);
@@ -150,13 +149,18 @@ private:
     }
 
     // Write one pixel into the trail plane (bounds-checked; the join loop can reach any y).
+    /// Write one pixel into the private trail plane, one channel at a time — the same shape
+    /// draw::pixel uses. Writing three bytes unconditionally would mean a 1- or 2-channel buffer
+    /// could not be drawn into at all; per-channel writes let it render what it can hold (R, or R+G)
+    /// instead of the effect refusing to run. Channels beyond RGB are left alone for the driver.
     void plot(lengthType x, lengthType y, const RGB& c, uint8_t cpl, lengthType w) {
         if (x < 0 || y < 0 || x >= w) return;
         const size_t off = (static_cast<size_t>(y) * w + x) * cpl;
-        if (off + 2 >= trail_.bytes()) return;
-        trail_[off + 0] = c.r;
-        trail_[off + 1] = c.g;
-        trail_[off + 2] = c.b;
+        const uint8_t write = cpl < 3 ? cpl : 3;
+        if (off + write > trail_.bytes()) return;
+        if (write >= 1) trail_[off + 0] = c.r;
+        if (write >= 2) trail_[off + 1] = c.g;
+        if (write >= 3) trail_[off + 2] = c.b;
     }
 };
 

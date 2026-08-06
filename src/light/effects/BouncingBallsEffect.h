@@ -52,8 +52,7 @@ public:
         const int cols = width();
         const int rows = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion trail: dim the whole buffer each frame (MoonLight: fadeToBlackBy(100)).
         layer()->fadeToBlackBy(100);
@@ -113,7 +112,7 @@ public:
                 const uint8_t index = static_cast<uint8_t>(i * (256 / paletteDiv));
                 const RGB color = colorFromPalette(*Palettes::active(), index);
 
-                draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(pos), 0}, color);
+                draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(pos), 0}, color);
             }
         }
     }
@@ -126,8 +125,6 @@ private:
         float impactVelocity = 0.0f;
         uint32_t lastBounceTime = 0;
     };
-
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     // balls[width][maxNumBalls], flattened; column x = balls_.data() + x*maxNumBalls. Self-sizing,
     // self-freeing, self-reporting.
