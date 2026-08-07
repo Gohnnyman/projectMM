@@ -40,8 +40,12 @@ public:
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
 
-        // Visible radius limit (octagonal distance to far corner)
-        uint8_t maxR = dist8(static_cast<int16_t>(w), static_cast<int16_t>(h));
+        // Visible radius limit: a TRUE distance to the far corner (dist16), where the 8-bit form
+        // approximated an octagon and saturated at 255 — so on a panel wider than ~255 lights the
+        // limit stopped growing and the rings stalled short of the edge. Clamped to a byte because
+        // the per-ripple radius state is 8-bit.
+        const uint32_t maxR32 = dist16(static_cast<int32_t>(w), static_cast<int32_t>(h));
+        uint8_t maxR = static_cast<uint8_t>(maxR32 > 255 ? 255 : (maxR32 < 1 ? 1 : maxR32));
 
         if (!initialized_) {
             for (uint8_t i = 0; i < MAX_RIPPLES; i++) {
@@ -75,7 +79,8 @@ public:
                 for (uint8_t i = 0; i < count && i < MAX_RIPPLES; i++) {
                     int16_t dx = static_cast<int16_t>(x - cx_[i]);
                     int16_t dy = static_cast<int16_t>(y - cy_[i]);
-                    uint8_t d = dist8(dx, dy);
+                    const uint32_t d32 = dist16(dx, dy);
+                    const uint8_t d = static_cast<uint8_t>(d32 > 255 ? 255 : d32);
                     int16_t diff = static_cast<int16_t>(d) - static_cast<int16_t>(radius_[i]);
                     if (diff < 0) diff = static_cast<int16_t>(-diff);
                     if (diff < thickness) {

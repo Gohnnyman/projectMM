@@ -82,4 +82,80 @@ constexpr uint8_t inoise8(uint32_t x, uint32_t y, uint32_t z) {
     return noise::lerp8(z0, z1, fz);
 }
 
+// --- Field composition ------------------------------------------------------------------------
+//
+// One noise sample is a smooth blur; the looks people actually recognise come from COMPOSING
+// samples. Three standard compositions cover most of it, and each is a few lines over `inoise8`
+// rather than a new field generator:
+//
+//   fbm      — sum octaves at doubling frequency and halving amplitude. Turns the blur into
+//              cloud/terrain/smoke structure: large shapes with fine detail on them.
+//   turbulence — the same sum over |noise|, whose creases read as billows and flame.
+//   warp     — sample noise at a coordinate that noise itself displaced (domain warping). This
+//              is the one that produces the flowing, marbled, liquid look; Iñigo Quilez's
+//              "warping" article is the canonical description.
+//
+// Cost is stated per call because it is the thing that decides whether an effect fits: each
+// octave is one `inoise8`, so fbm(3) costs three samples, and warp costs its own samples PLUS the
+// field it then samples. On a large fixture that multiplies by pixel count — see the per-target
+// budget in the power-function docs before reaching for octaves on a 128x128 wall.
+
+/// Fractal Brownian motion: `octaves` samples at doubling frequency, halving amplitude, returned
+/// normalised to 0..255. octaves=1 is plain noise; 3-4 is the usual cloud look.
+inline uint8_t fbm8(uint32_t x, uint32_t y, uint8_t octaves) {
+    if (octaves == 0) return 128;                       // no octaves: flat mid-field
+    uint32_t sum = 0, norm = 0, amp = 128;
+    for (uint8_t o = 0; o < octaves && amp > 0; o++) {
+        sum  += static_cast<uint32_t>(inoise8(x, y)) * amp;
+        norm += amp;
+        x <<= 1; y <<= 1;                               // double the frequency
+        amp >>= 1;                                      // halve the contribution
+    }
+    return static_cast<uint8_t>(norm ? sum / norm : 128);
+}
+
+/// 3D fbm — the same sum with a z axis, so a 2D effect can use z as time for a field that evolves
+/// in place rather than scrolling past.
+inline uint8_t fbm8(uint32_t x, uint32_t y, uint32_t z, uint8_t octaves) {
+    if (octaves == 0) return 128;
+    uint32_t sum = 0, norm = 0, amp = 128;
+    for (uint8_t o = 0; o < octaves && amp > 0; o++) {
+        sum  += static_cast<uint32_t>(inoise8(x, y, z)) * amp;
+        norm += amp;
+        x <<= 1; y <<= 1; z <<= 1;
+        amp >>= 1;
+    }
+    return static_cast<uint8_t>(norm ? sum / norm : 128);
+}
+
+/// Turbulence: fbm over |noise - 128|, which creases the field where it crosses the midpoint. The
+/// creases are what read as billowing smoke and flame rather than soft cloud.
+inline uint8_t turbulence8(uint32_t x, uint32_t y, uint8_t octaves) {
+    if (octaves == 0) return 0;
+    uint32_t sum = 0, norm = 0, amp = 128;
+    for (uint8_t o = 0; o < octaves && amp > 0; o++) {
+        const int16_t v = static_cast<int16_t>(inoise8(x, y)) - 128;
+        sum  += static_cast<uint32_t>(v < 0 ? -v : v) * 2u * amp;
+        norm += amp;
+        x <<= 1; y <<= 1;
+        amp >>= 1;
+    }
+    const uint32_t r = norm ? sum / norm : 0;
+    return static_cast<uint8_t>(r > 255 ? 255 : r);
+}
+
+/// Domain warp: displace the sample coordinate by a noise field, then sample there. `strength` is
+/// how far the displacement reaches, in the same fixed-point units as the coordinates.
+///
+/// This is the primitive behind the flowing/marbled look: the field stops looking like a texture
+/// laid on the grid and starts looking like something moving through it. Two extra samples.
+inline uint8_t warp8(uint32_t x, uint32_t y, uint16_t strength, uint8_t octaves = 1) {
+    // Offset the two probe fields so the x and y displacements are independent rather than equal
+    // (sampling the same field twice would displace everything along one diagonal).
+    const int32_t dx = (static_cast<int32_t>(inoise8(x, y)) - 128) * strength / 128;
+    const int32_t dy = (static_cast<int32_t>(inoise8(x + 0x9E37u, y + 0x7C15u)) - 128) * strength / 128;
+    return fbm8(static_cast<uint32_t>(static_cast<int32_t>(x) + dx),
+                static_cast<uint32_t>(static_cast<int32_t>(y) + dy), octaves);
+}
+
 }  // namespace mm

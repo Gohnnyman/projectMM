@@ -90,8 +90,13 @@ public:
                     const uint8_t idx = static_cast<uint8_t>(mapI(static_cast<int>(i), 0, static_cast<int>(nLights), 0, 256));
                     const RGB c = colorFromPalette(pal, idx, brightness);
                     const size_t off = static_cast<size_t>(i) * cpl;
-                    if (off + 3 > bytes) break;
-                    data[off + 0] = c.r; data[off + 1] = c.g; data[off + 2] = c.b;
+                    // Write only the channels this light HAS: three bytes into a 1- or 2-channel
+                    // buffer would spill into the next light (same class of overrun WaveEffect had).
+                    const uint8_t write = cpl < 3 ? cpl : 3;
+                    if (off + write > bytes) break;
+                    if (write >= 1) data[off + 0] = c.r;
+                    if (write >= 2) data[off + 1] = c.g;
+                    if (write >= 3) data[off + 2] = c.b;
                 }
                 // Palette modes carry no white source: clear W so an RGBW buffer doesn't keep stale white.
                 if (cpl >= 4) writeWhite(cv, nLights, cpl, 0);

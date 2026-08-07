@@ -117,17 +117,17 @@ public:
                 peaks_[x] = static_cast<lengthType>(peaks_[x] - 1);   // RECONSTRUCTED: WLED's peak decays one row per ripple tick
             }
 
-            // Fill the bar from the floor (row rows-1) up to barHeight rows.
-            for (int h = 0; h < barHeight; h++) {
-                const int y = rows - 1 - h;          // row 0 = top, so the bar grows upward from the floor
-                if (y < 0) break;
-                // colorBars: one hue per column. else: the gradient runs up the bar by row height.
-                const uint8_t colorIndex = colorBars
-                    ? static_cast<uint8_t>(map32(x, 0, cols - 1, 0, 255))
-                    : static_cast<uint8_t>(map32(h, 0, rows - 1, 0, 255));
-                const RGB col = colorFromPalette(*Palettes::active(), colorIndex);
-                draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, col);
-            }
+            // Fill the bar from the floor (row rows-1) upward. colorBars: one hue per column. Else
+            // the gradient runs up the bar, so the color is a function of the height along it —
+            // which is the index draw::bar hands the callback.
+            const uint8_t columnIndex = static_cast<uint8_t>(map32(x, 0, cols - 1, 0, 255));
+            draw::bar(cv, static_cast<lengthType>(x), static_cast<lengthType>(rows - 1),
+                      static_cast<lengthType>(barHeight), draw::Grow::Up, [&](lengthType h) {
+                          const uint8_t colorIndex = colorBars
+                              ? columnIndex
+                              : static_cast<uint8_t>(map32(h, 0, rows - 1, 0, 255));
+                          return colorFromPalette(*Palettes::active(), colorIndex);
+                      });
 
             // Falling peak dot, drawn at the remembered peak row if it stands above the live bar.
             // RECONSTRUCTED: WLED draws a single peak pixel (white-ish / palette top) at previousBarHeight.

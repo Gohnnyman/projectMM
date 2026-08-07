@@ -431,7 +431,7 @@ The `dim` int is also emitted in `/api/types` so the UI derives the dimensional 
 
 **Effects run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `tick()` produces a correct result for any `(width, height, depth)`, with an empty range naturally a no-op (`for (y = 0; y < h; ...)`).
 
-**The Layer decides whether a frame runs; the effect decides what it paints.** `Layer::tick()` returns before running any child when an extent is 0 or the buffer holds no lights, so that decision lives in one place for all 39 effects. An effect owns the checks about *itself*, and returns early for:
+**The Layer decides whether a frame runs; the effect decides what it paints.** `Layer::tick()` skips the effect pass and the live pass when an extent is 0 or the buffer holds no lights, so that decision lives in one place for all 39 effects. The modifier pass still runs: a beat-driven modifier advances its per-frame state through the empty interval, so the chain is in the right phase when the grid returns. An effect owns the checks about *itself*, and returns early for:
 
 - **Its own resources**: `if (!heat_) return;` — a ScratchBuffer it allocated.
 - **Its own controls and timing**: `if (speed == 0) return;`, a rate limiter, a divide-by-zero guard on a control value.

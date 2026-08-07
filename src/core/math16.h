@@ -145,4 +145,173 @@ private:
     bool     started_ = false;
 };
 
+/// Integer square root of a 32-bit value, rounded down. Binary restoring method: no divide, no
+/// float, ~16 iterations worst case — which matters because the ESP32 has no fast divide and effects
+/// call this per pixel when they need a true distance.
+///
+/// PaintBrushEffect hand-rolled this; it lives here so a caller reaching for a distance gets the
+/// same one. Where a comparison against a threshold will do (is this point inside a circle?), prefer
+/// comparing SQUARED values and skip this entirely — measured on hardware, the squared form is ~14
+/// cycles/pixel against ~108 for the sqrt.
+constexpr uint32_t isqrt(uint32_t v) {
+    uint32_t rem = v, root = 0, bit = 1u << 30;
+    while (bit > rem) bit >>= 2;
+    while (bit) {
+        if (rem >= root + bit) { rem -= root + bit; root = (root >> 1) + bit; }
+        else                   { root >>= 1; }
+        bit >>= 2;
+    }
+    return root;
+}
+
+// --- Polar ---------------------------------------------------------------------------------
+//
+// `atan2_8`/`dist8` in math8.h are the 8-bit forms: an octant atan2 and an OCTAGONAL distance
+// (max + half-min), which is up to ~12% off a true radius and saturates at 255. On a small panel
+// neither shows; on a large one the octagon reads as visible corners on what should be a circle,
+// and the saturation flattens everything past 255 lights from the centre.
+//
+// These are the 16-bit forms for addressing a grid in polar coordinates — the vocabulary behind
+// every radial look: rings, spirals, rotation, kaleidoscopes, tunnels, radial wipes, a spectrum
+// bent around a circle. `atan16` returns an angle16 (65536 = one turn) so it feeds sin16 and the
+// palette directly; `dist16` returns a true Euclidean radius via isqrt. Both are general grid
+// arithmetic, not helpers for the handful of effects that happen to call them first.
+
+/// Arctangent over one octant: atan(i/32)/atan(1) · 8192, so entry 32 closes the octant exactly at
+/// an eighth turn. 33 entries, 66 bytes in flash; the other seven octants come from symmetry.
+inline constexpr int16_t atan16_octant[33] = {
+        0,   326,   651,   975,  1297,  1617,  1933,  2246,
+     2555,  2860,  3159,  3453,  3742,  4025,  4302,  4572,
+     4836,  5094,  5344,  5589,  5826,  6058,  6282,  6500,
+     6712,  6917,  7117,  7310,  7498,  7679,  7856,  8026,
+     8192
+};
+
+/// Angle of (x, y) as an angle16, measured counter-clockwise from +x. Full 16-bit resolution, so a
+/// gradient swept around the circle has no visible steps on a large fixture.
+inline angle16 atan16(int32_t y, int32_t x) {
+    if (x == 0 && y == 0) return 0;                       // the centre has no direction
+    // Fold into the first octant, remembering which one, then interpolate the arctangent there.
+    int32_t ax = x < 0 ? -x : x;
+    int32_t ay = y < 0 ? -y : y;
+    const bool swap = ay > ax;
+    if (swap) { const int32_t t = ax; ax = ay; ay = t; }
+    // ratio = ay/ax in 0..65535; within one octant arctan is near-linear, so a linear read with a
+    // small cubic correction is well inside a pixel of error at any grid size we drive.
+    const uint32_t ratio = static_cast<uint32_t>((static_cast<uint64_t>(ay) << 16) / (ax ? ax : 1));
+    // Table lookup with linear interpolation, the same shape as sin16 above and for the same reason:
+    // a fitted polynomial was tried first and measured 9.6 degrees of error at the octant boundary,
+    // where a 66-byte table is exact at every entry and closes precisely at 8192.
+    const uint16_t idx  = static_cast<uint16_t>(ratio >> 11);           // 0..32
+    const uint16_t frac = static_cast<uint16_t>((ratio >> 3) & 0xFF);
+    const int32_t lo = atan16_octant[idx];
+    const int32_t hi = atan16_octant[idx < 32 ? idx + 1 : 32];
+    uint32_t oct = static_cast<uint32_t>(lo + (((hi - lo) * frac) >> 8));
+    uint16_t a = swap ? static_cast<uint16_t>(16384 - oct) : static_cast<uint16_t>(oct);
+    if (x < 0) a = static_cast<uint16_t>(32768 - a);                    // reflect into quadrant 2/3
+    if (y < 0) a = static_cast<uint16_t>(65536 - a);                    // and below the axis
+    return static_cast<angle16>(a);
+}
+
+/// True Euclidean distance from the origin to (dx, dy) — a real radius, not the octagon `dist8`
+/// approximates, and it does not saturate at 255.
+inline uint32_t dist16(int32_t dx, int32_t dy) {
+    const int64_t d2 = static_cast<int64_t>(dx) * dx + static_cast<int64_t>(dy) * dy;
+    return isqrt(static_cast<uint32_t>(d2 > 0xFFFFFFFFLL ? 0xFFFFFFFFLL : d2));
+}
+
+// --- Easing --------------------------------------------------------------------------------
+//
+// Robert Penner's easing curves, the industry-standard names. An easing takes a 0..65535 progress
+// and bends it, so motion accelerates and settles instead of running at constant speed. Anything
+// that travels, grows, fades or transitions reads better through one; a linear ramp is the thing
+// that makes an animation look mechanical.
+
+/// Quadratic ease in-out: accelerate from rest, decelerate to rest. The default choice.
+constexpr frac16 easeInOutQuad(frac16 t) {
+    const uint32_t v = t;
+    if (v < 32768) return static_cast<frac16>((2u * v * v) >> 16);
+    const uint32_t u = 65535u - v;
+    return static_cast<frac16>(65535u - ((2u * u * u) >> 16));
+}
+
+/// Cubic ease in-out: the same shape with a longer, softer settle.
+constexpr frac16 easeInOutCubic(frac16 t) {
+    const uint64_t v = t;
+    if (v < 32768) return static_cast<frac16>((4ull * v * v * v) >> 32);
+    const uint64_t u = 65535ull - v;
+    return static_cast<frac16>(65535ull - ((4ull * u * u * u) >> 32));
+}
+
+/// Quadratic ease out: fast start, gentle settle — the "arrives and rests" curve.
+///
+/// The squared term divides by 65535 rather than shifting by 16: `(65535·65535) >> 16` is 65534,
+/// which would leave the curve one unit short at t=0 and start a fade barely lit.
+constexpr frac16 easeOutQuad(frac16 t) {
+    const uint32_t u = 65535u - t;
+    return static_cast<frac16>(65535u - ((u * u) / 65535u));
+}
+
+// --- Followers and meters ---------------------------------------------------------------------
+
+/// A one-pole low-pass follower: `current` moves a fraction of the way toward `target` each frame.
+/// This is how a value stops jittering — a meter, a control, a beat-driven size. `rate` is 0..255,
+/// where 255 snaps instantly and small values glide.
+///
+/// Deliberately frame-rate dependent in its simple form, which is what every LED codebase uses; a
+/// caller needing true time-independence scales `rate` by its own dt.
+constexpr uint8_t smoothFollow(uint8_t current, uint8_t target, uint8_t rate) {
+    const int32_t delta = static_cast<int32_t>(target) - current;
+    return static_cast<uint8_t>(current + ((delta * rate) >> 8));
+}
+
+/// The falling-peak meter: rise INSTANTLY to a new high, then decay slowly. The asymmetry is the
+/// whole point — a peak that eased upward would miss transients, and one that dropped instantly
+/// would show nothing to read. Every VU meter with a floating peak dot is this function.
+constexpr uint8_t peakHold(uint8_t peak, uint8_t value, uint8_t decay) {
+    if (value > peak) return value;                    // instant attack
+    return peak > decay ? static_cast<uint8_t>(peak - decay) : 0;
+}
+
+// --- Position-addressable randomness -----------------------------------------------------------
+
+/// A hash of up to four integers to 0..65535 — random-LOOKING but a pure function of its inputs, so
+/// the same pixel gets the same value on every device and every frame.
+///
+/// This is what a stream RNG cannot do: `Random8` advances per CALL, so a device that renders one
+/// extra frame or has a different light count diverges forever. Addressing randomness by position
+/// instead keeps a dissolve, a starfield or a per-pixel offset identical across devices, which is
+/// the supersync requirement (see the determinism section in the power-function docs).
+constexpr uint16_t hashInt(uint32_t a, uint32_t b = 0, uint32_t c = 0, uint32_t seed = 0) {
+    uint32_t h = a * 0x9E3779B1u;                      // the golden-ratio constant, standard mixer
+    h ^= (b + 0x85EBCA6Bu + (h << 6) + (h >> 2));
+    h ^= (c + 0xC2B2AE35u + (h << 6) + (h >> 2));
+    h ^= (seed + 0x27D4EB2Fu + (h << 6) + (h >> 2));
+    h ^= h >> 15; h *= 0x2545F491u; h ^= h >> 13;      // avalanche
+    return static_cast<uint16_t>(h >> 16);
+}
+
+/// Fold an angle into `segments` mirrored wedges — the kaleidoscope. Any field sampled through
+/// this gains n-fold symmetry, which is why a mediocre noise field becomes a mandala for the cost
+/// of one modulo: the fold is applied to the ANGLE, and everything downstream is unchanged.
+///
+/// Mirroring alternate wedges (rather than merely repeating them) is what makes the seams join;
+/// a plain repeat leaves a visible discontinuity at every wedge boundary.
+inline angle16 kaleido(angle16 a, uint8_t segments) {
+    if (segments < 2) return a;                        // one segment is the identity
+    const uint32_t wedge = 65536u / segments;
+    uint32_t within = a % wedge;                       // position inside this wedge
+    const uint32_t index = a / wedge;
+    // Reflect alternate wedges and return the FOLDED coordinate — deliberately one wedge wide, not
+    // the original angle. That is what a kaleidoscope is: every wedge maps onto the same range, so a
+    // field sampled through it repeats n times around the circle, and mirroring every other wedge is
+    // what makes the seams join rather than showing a hard edge. A caller that wants the full turn
+    // simply does not fold.
+    //
+    // The `- 1` matters: `wedge - within` maps 0 to `wedge`, one past the end, which puts a
+    // one-unit discontinuity at every seam.
+    if (index & 1) within = wedge - 1 - within;
+    return static_cast<angle16>(within);
+}
+
 }  // namespace mm

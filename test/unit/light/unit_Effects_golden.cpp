@@ -55,6 +55,12 @@
 #include "light/effects/PlasmaEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/RingsEffect.h"
+#include "light/effects/SdfShapesEffect.h"
+#include "light/effects/PolarNoiseEffect.h"
+#include "light/effects/WaterRippleEffect.h"
+#include "light/effects/TunnelEffect.h"
+#include "light/effects/EchoEffect.h"
+#include "light/effects/DissolveEffect.h"
 #include "light/effects/SineEffect.h"
 #include "light/effects/StarSkyEffect.h"
 #include "light/effects/SpiralEffect.h"
@@ -65,14 +71,20 @@ using namespace mm;
 // A 2D grid wide enough that a phase error shows as a visible column shift, small enough to stay a
 // fast unit test. Eight frames at the real 20 ms cadence exercise the accumulator's carry.
 TEST_CASE("time-driven effects render byte-identical frames (migration guard)") {
+    SUBCASE("SdfShapesEffect")       { SdfShapesEffect e;       golden::checkGolden("SdfShapesEffect", golden::renderHash(e, 16, 16, 1), 0xbcfb74b4836606a3ull); }
+    SUBCASE("PolarNoiseEffect")      { PolarNoiseEffect e;      golden::checkGolden("PolarNoiseEffect", golden::renderHash(e, 16, 16, 1), 0x5e888644938f8851ull); }
+    SUBCASE("WaterRippleEffect")     { WaterRippleEffect e;     golden::checkGolden("WaterRippleEffect", golden::renderHash(e, 16, 16, 1), 0xa11f9c4f27cba8d5ull); }
+    SUBCASE("TunnelEffect")          { TunnelEffect e;          golden::checkGolden("TunnelEffect", golden::renderHash(e, 16, 16, 1), 0xa2f6752d82436fc1ull); }
+    SUBCASE("EchoEffect")            { EchoEffect e;            golden::checkGolden("EchoEffect", golden::renderHash(e, 16, 16, 1), 0x27141166d74860c0ull); }
+    SUBCASE("DissolveEffect")        { DissolveEffect e;        golden::checkGolden("DissolveEffect", golden::renderHash(e, 16, 16, 1), 0xeb7810ca874152bcull); }
     SUBCASE("SineEffect")            { SineEffect e;            golden::checkGolden("SineEffect",            golden::renderHash(e, 16, 16, 1), 0xe96c6fd2da1b264bull); }
     SUBCASE("PlasmaEffect")          { PlasmaEffect e;          golden::checkGolden("PlasmaEffect",          golden::renderHash(e, 16, 16, 1), 0xfe821e9102099b93ull); }
     SUBCASE("NoiseEffect")           { NoiseEffect e;           golden::checkGolden("NoiseEffect",           golden::renderHash(e, 16, 16, 1), 0xdeb42f569f324cebull); }
     SUBCASE("DistortionWavesEffect") { DistortionWavesEffect e; golden::checkGolden("DistortionWavesEffect", golden::renderHash(e, 16, 16, 1), 0xe4cd8111e8159133ull); }
     SUBCASE("LavaLampEffect")        { LavaLampEffect e;        golden::checkGolden("LavaLampEffect",        golden::renderHash(e, 16, 16, 1), 0x3c312e8a75b9ac83ull); }
     SUBCASE("MetaballsEffect")       { MetaballsEffect e;       golden::checkGolden("MetaballsEffect",       golden::renderHash(e, 16, 16, 1), 0x96a26bf931ad8341ull); }
-    SUBCASE("SpiralEffect")          { SpiralEffect e;          golden::checkGolden("SpiralEffect",          golden::renderHash(e, 16, 16, 1), 0xe12038a7e327b81dull); }
-    SUBCASE("RingsEffect")           { RingsEffect e;           golden::checkGolden("RingsEffect",           golden::renderHash(e, 16, 16, 1), 0x302e3697c01f41f0ull); }
+    SUBCASE("SpiralEffect")          { SpiralEffect e;          golden::checkGolden("SpiralEffect",          golden::renderHash(e, 16, 16, 1), 0xfb0fb3b138dde70full); }
+    SUBCASE("RingsEffect")           { RingsEffect e;           golden::checkGolden("RingsEffect",           golden::renderHash(e, 16, 16, 1), 0xf3b1ea7162afcf6bull); }
     SUBCASE("WaveEffect")            { WaveEffect e;            golden::checkGolden("WaveEffect",            golden::renderHash(e, 16, 16, 1), 0xa1150376dd23bea1ull); }
     SUBCASE("StarSkyEffect")         { StarSkyEffect e;         golden::checkGolden("StarSkyEffect",         golden::renderHash(e, 16, 16, 1), 0xa7ff8aab806be9ffull); }
     SUBCASE("RainbowEffect")         { RainbowEffect e;         golden::checkGolden("RainbowEffect",         golden::renderHash(e, 16, 16, 1), 0x75a2b1be1db07979ull); }

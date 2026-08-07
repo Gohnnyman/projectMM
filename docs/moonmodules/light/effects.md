@@ -2,6 +2,8 @@
 
 Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md).)
 
+Effects are built from the shared [power functions](power-functions.md) — the drawing, field and motion routines every effect composes; that page lists each one with its callers.
+
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
 **Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, color mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
@@ -248,6 +250,117 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 Detail: [technical](moxygen/RubiksCubeEffect.md)
 
 [Tests](../../tests/unit-tests.md#rubikscubeeffect)
+
+<a id="dissolve"></a>
+
+### Dissolve 🔬 · 2D
+
+Two color fields trade places pixel by pixel in an order that looks random but is computed, so the transition needs no per-pixel state and no shuffled index list. Two devices rendering the same frame dissolve identically without exchanging anything.
+
+- `bpm` — how fast one transition completes.
+- `spread` — how much of the transition pixels spend mid-flight; 0 gives a hard edge.
+- `eased` — ease the progress instead of sweeping linearly.
+- `scatter` — random order; off gives a positional wipe from the same code.
+
+Origin: projectMM original, on the classic dissolve transition in its position-addressed (shader) form
+
+<a id="echo"></a>
+
+### Echo 🔬 · 2D
+
+The previous frame fed back through a zoom and rotation, dimmed, with a bright source drawn on top — trails that spiral away from themselves, like a camera pointed at its own monitor.
+
+- `bpm` — how fast the source orbits.
+- `zoom` — how much the feedback grows each frame.
+- `rotate` — rotation per frame, which turns the trail into a spiral.
+- `decay` — how fast the echo fades; higher is a shorter trail.
+- `size` — radius of the bright source.
+
+Shows that feedback is not a primitive: once the grid can be read as a texture (`sampleWrap`), the whole family of trails, zoom blur and smear is a few lines.
+
+Origin: projectMM original, on video feedback and the standard texture-feedback shader shape
+
+<a id="spectrum"></a>
+
+### Spectrum 🔬📊 · 2D
+
+An audio analyser with real meter ballistics: bars rise fast enough to catch a transient and fall slowly enough to read, and a peak dot marks the recent maximum and drifts down.
+
+- `attack` — how fast a bar rises toward a new level.
+- `release` — how fast it falls back.
+- `peakDecay` — how fast the peak dot drifts down.
+- `showPeaks` — draw the floating peak dots.
+- `colorByColumn` — color per band instead of by height.
+
+The asymmetry is the whole point; a symmetric follower either misses the hit or flickers.
+
+Origin: projectMM original, on standard VU/PPM meter ballistics and WLED's GEQ band mapping
+
+<a id="tunnel"></a>
+
+### Tunnel 🔬 · 2D
+
+A texture mapped onto the inside of an infinite tube, so the viewer appears to fly down it forever. Nothing is 3D: the angle around the centre is one texture coordinate and the reciprocal of the distance is the other, which is perspective for the price of a divide.
+
+- `bpm` — how fast the tunnel flies past.
+- `depth` — texture scale along the tunnel; higher is finer rings.
+- `twist` — rotation per unit depth, so the tunnel corkscrews.
+- `segments` — kaleidoscope the wall; 1 leaves it plain.
+- `octaves` — wall texture detail, and the cost knob.
+- `vignette` — darken toward the vanishing point so it reads as receding.
+
+Origin: projectMM original, on the standard demoscene tunnel
+
+<a id="waterripple"></a>
+
+### WaterRipple 🔬 · 2D
+
+A propagating wave simulation: drops land, their rings spread outward, reflect off the edges and interfere where they cross. The crossing is what a closed-form ripple cannot fake, because two rings meeting have to add and cancel.
+
+- `speed` — simulation steps per second: how fast the water itself moves, independent of the framerate.
+- `dropRate` — how often drops land, in time rather than per frame.
+- `damping` — how fast waves lose energy; higher is calmer water.
+- `strength` — how hard a drop hits.
+- `colorByHeight` — color the surface by height so crests and troughs read differently.
+- `hueBase` / `hueSpread` — where in the palette the still surface sits, and how far a crest and a trough reach from it.
+
+Distinct from [Ripples](#ripples), which draws expanding rings from a closed-form radius: that one is cheaper and always looks like clean concentric circles, this one behaves like water. Costs two int16 buffers sized to the grid.
+
+Origin: projectMM original, on Hugo Elias's water surface algorithm
+
+<a id="polarnoise"></a>
+
+### PolarNoise 🔬 · 2D
+
+A warped noise field addressed by angle and radius, folded into a kaleidoscope. The field turns and breathes around the centre rather than scrolling past it.
+
+- `bpm` — how fast the field drifts.
+- `scale` — noise cells across the grid: low is broad shapes, high is fine detail.
+- `segments` — kaleidoscope wedges; 1 disables the fold.
+- `warp` — domain-warp strength; 0 gives a plain field.
+- `octaves` — fbm octaves, and the main cost knob.
+- `twist` — how much the radius shears the angle, setting the spiral.
+
+Cost scales with `octaves` and `warp`: at `warp` > 0 and `octaves` 2 it is roughly 4 noise samples per pixel. On a large wall set `octaves` to 1 or `warp` to 0, which degrades to a plain polar noise that still reads well.
+
+Origin: projectMM original, after Stefan Petrick's polar/noise vocabulary and Iñigo Quilez's domain warping
+
+<a id="sdfshapes"></a>
+
+### SdfShapes 🔬 · 2D
+
+A circle and a box orbit and melt into each other, drawn as signed distance fields rather than rasterized outlines. One distance per pixel yields three looks at once: an anti-aliased fill, an outline (`|d| - width`), and a glow that falls off into the surrounding field.
+
+- `bpm` — orbit speed.
+- `radius` — circle radius, as a fraction of the short side.
+- `boxSize` — box half-extent, same scale.
+- `blend` — melt radius; 0 unions the shapes hard.
+- `outline` — 0 fills the shape; higher draws an outline of that width.
+- `glow` — tint the field around the shape by distance.
+
+Measured on an ESP32-S3 at 128×128: 20 fps, 728 cycles/pixel using the true-distance form, alongside StarSky (692) and Metaballs (647) at the same size.
+
+Origin: projectMM original, after Iñigo Quilez's distance-function catalogue and polynomial smooth-minimum (iquilezles.org)
 
 <a id="solid"></a>
 
@@ -692,4 +805,3 @@ Origin: MoonLight (Sinus, AI-generated) · via [MoonLight](https://github.com/Mo
 Detail: [technical](moxygen/SineEffect.md)
 
 [Tests](../../tests/unit-tests.md#sineeffect)
-

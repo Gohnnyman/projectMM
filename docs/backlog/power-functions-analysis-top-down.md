@@ -13,6 +13,7 @@
 - **Noise: keep value noise, widen it — gradient noise is a swap-in upgrade, not a blocker.** `noise16(x,y,z)` returns full-range 16-bit (our existing value noise rescaled and interpolated up); the name promises the *field*, not the algorithm, so Perlin gradient noise can replace the core later without touching any caller **(proposal)**.
 - **Migration order is by leverage, cheapest risk first:** ① `beatPhase` + `map16` + `Canvas` (mechanical, pixel-identical, kills the three biggest hand-roll counts) → ② geometry + bars (4 audio effects) → ③ `splat` + `particles`, converging the five particle-shaped effects (bench-judged, the PS-replaces-twin decision) → ④ fields + polar (LavaLamp/Metaballs/Rings/Spiral) → ⑤ hidden-modifier extraction as encountered (FreqSaws `invert` first). Each pixel-identical claim is pinned by a **golden-frame test** (fixed seed, fixed time, byte-compare) — a new, small test harness capability.
 - **MoonLive exposure is stage 3 and states only its requirements here:** a builtin table of ≥ 64 entries, typed multi-arg host calls (up to 6 args + return), the symbols `x/y/z/w/h/d/time` (already threaded to the runtime, unexposed), and a per-frame entry point alongside the per-pixel one — the bottom-up's feasibility math says scripts *compose* kernels per frame; they do not interpret per pixel on large surfaces. The calling convention itself belongs to the livescripts engine work.
+- **Measured on hardware (ESP32-S3, 240 MHz, 128×128, 2026-08-06)** — the theoretical budget below was an upper bound; these are the real numbers, and they reframe it. Today's *existing* effects already cost **305–692 cycles/pixel** and run at **21–48 fps** on a 128×128 panel, so "292 cycles/pixel at 50 fps" describes a frame rate this fixture size does not reach in the first place, with or without power functions. What the budget genuinely constrains is *added* cost per pixel, and the measured SDF forms are small against that: `sdBox` ≈ 6, squared-distance `sdCircle` ≈ 14, and the full `isqrt` form ≈ 108 cycles/pixel (desktop instruction counts; the ESP32 divide penalty makes the last one worse, the first two barely move). A squared-form SDF plus `smin` plus a palette lookup is a fraction of what Plasma already spends. **Design consequence:** the squared forms are the default path and the sqrt form is opt-in for true distance (outline width, linear glow).
 - **Budgets are stated per family and gated:** the render loop's ceiling stays the bottom-up's 293 cycles/pixel at 128×128@50; the particle budget is ~40 cycles/particle/frame (2048 particles ≈ 0.34 ms at 240 MHz); every function gets a host micro-benchmark and the migrations ride the existing `collect_kpi` gate. Zero static RAM for everything unused (`check_footprint`).
 
 ## 1. Homes and style (proposal)
@@ -77,13 +78,34 @@ Until the ABI lands, stages 1–2 proceed compiled-side; nothing here blocks on 
 
 ## 5. Migration plan (stage 1) and example effects (stage 2)
 
-Order by leverage, cheapest risk first; every batch lands with its tests and the branch stays under ~100 files:
+Order by leverage, cheapest risk first; every batch lands with its tests and the branch stays under ~100 files. **These five phases are the project's one numbering for this work** — the bottom-up document's nine *families* group functions by algorithm, while the phases below group them by what lands in the repo together, so each phase names the families it carries.
 
-1. **Foundations** — `math16.h`, `Canvas`, `BeatPhase`, `map16`: mechanical replacement in the 9 phase-accumulator effects, the 6 `imap` copies, the 22 preambles, the 16 `depthDim()`s. Pixel-identical (same arithmetic, one home) → golden-frame pinned.
-2. **Geometry** — `bar/rect` into the 4 audio meters; `scroll` into FreqMatrix; `splat` lands with its unit tests.
-3. **`particles`** — the kernel + the five convergences, one effect per commit, bench-judged (PS-replaces-twin decision); the old private representations deleted.
-4. **Fields + polar** — the shared blob oscillator (LavaLamp ≡ Metaballs) onto `sin16`+`splat`; Rings/Spiral onto `PolarLut`; `noise16` under Noise2D with a rescale note.
-5. **Hidden-modifier extraction** — FreqSaws `invert` → MirrorModifier; audit the rest as they migrate (the effects-vs-modifiers decision).
+1. **Foundations** — `math16.h`, `Canvas`, `BeatPhase`, `map16`: mechanical replacement in the 9 phase-accumulator effects, the 6 `imap` copies, the 22 preambles, the 16 `depthDim()`s. Pixel-identical (same arithmetic, one home) → golden-frame pinned. *(families 5 Time & motion, Support)*
+2. **Geometry** — `bar/rect` into the 4 audio meters; `scroll` into FreqMatrix; `splat` lands with its unit tests; the SDF trio + `smin` + `coverage`. *(families 1 Frame ops, 2 Pixel ops, 3 Geometry)*
+3. **`particles`** — the kernel + the five convergences, one effect per commit, bench-judged (PS-replaces-twin decision); the old private representations deleted. *(family 6)*
+4. **Fields + polar** — the shared blob oscillator (LavaLamp ≡ Metaballs) onto `sin16`+`splat`; Rings/Spiral onto `PolarLut`; `noise16` under Noise2D with a rescale note. *(family 4 Fields)*
+5. **Hidden-modifier extraction** — audit each effect for a transform that belongs to the modifier chain as it migrates (the effects-vs-modifiers decision). *(no family: an orthogonal cleanup the migration surfaces)*
+
+   **Audited 2026-08-06, and nothing was extracted.** The named candidate was "FreqSaws `invert` →
+   MirrorModifier". Two findings, in order:
+
+   - That mapping does not hold. `MirrorModifier` folds an axis onto itself, HALVING the logical
+     extent; FreqSaws flips alternate columns end-to-end at full extent. Different transforms.
+   - A general `WeaveModifier` was then built and **reverted**. The right test is "does this add
+     value to every effect?", and on the grid it looked like it did. But the control exists for
+     FreqSaws columns mapped onto RINGS, where flipping alternate columns makes adjacent wheels
+     appear to counter-rotate. Measured against `WheelLayout`: a spoke spans many grid columns
+     (spoke 0 covers columns 6-11, spoke 3 runs 5 down to 1), so a column flip cuts across spokes
+     and cannot reproduce that look. The modifier would have carried the name of an effect it does
+     not achieve. `invert` stays in FreqSaws, where the geometry it depends on is known.
+
+   The lesson worth keeping: "would this help every effect?" is the right question, but answering it
+   requires knowing what the control is FOR. Here the intent lived in the product owner's head, not
+   in the code or its comment.
+
+Families 7 Color, 8 Random and 9 Projection carry no phase of their own: they land inside whichever phase first needs them (`cosPalette`/`gamma8` with the showcases, `hashInt` with Dissolve, `project` with VectorBalls).
+
+**Commit split (PO decision, 2026-08-06).** The remaining work ships in two commits: **everything except particles and shaders now** — the rest of phase 2, then phases 4 and 5, with their showcase effects — and **particles plus the shader tier next** (phase 3, `FireworksEffect`, `BallpitEffect`, `RaymarchEffect`). The split keeps each commit reviewable line-by-line and well under the ~100-file CodeRabbit ceiling; it also puts the two items needing bench judgement (the PS-replaces-twin decision, the `hasHeavyCompute` float exception) together in one commit rather than spread across both.
 
 **Golden-frame harness (new, small):** render N frames at fixed seed/fixed `elapsed()` into a buffer, hash, compare against a checked-in golden. Only for effects claiming pixel-identical; a deliberate divergence replaces the golden in the same commit with the bench note. Lives beside the existing effect tests.
 
@@ -140,7 +162,13 @@ Verified against CLAUDE.md § Principles and [architecture.md § Hot path discip
 
 A planned capability — **supersync**, one effect rendered across several devices — constrains this API, and honoring it now is nearly free while retrofitting it later is not. The requirement: two devices given the same time and the same controls must produce the same frame, without exchanging pixels.
 
-**The rule: a power function is a pure function of (position, time, seed) unless it has a stated reason not to be.** Three consequences, each checkable:
+**The rule: a power function is a pure function of (position, time, seed) unless it has a stated reason not to be.** "Time" means a **shared origin**, not each device's own `elapsed()` — that is the part the rule stands or falls on, so it is stated first:
+
+- **A shared epoch, distributed once.** Devices agree on a common `t0` and derive `syncTime = now - t0` from it; `elapsed()` (milliseconds since *this* device's render start) differs per device by however long each has been powered, so two devices reading their own clocks agree on nothing. Which device is authoritative, and how the epoch is distributed and corrected for drift, belongs to supersync's own design, not here. What belongs here is the seam: every time-driven power function reads **one** time source, so pointing that source at a synced clock is a wiring change rather than a rewrite of nine effects.
+- **Quantised, so rounding cannot split the group.** `hashInt(x, y, t, seed)` and any other time-seeded randomness take a **quantised** time — a frame index derived from `syncTime / frameMs`, not raw milliseconds — because two devices sampling a continuous clock a millisecond apart would otherwise hash to different values and render different pixels. Quantising makes "close enough in time" mean "identical output".
+- **Stateful kernels resync by replay or keyframe.** Particles, ripple, fire and CA evolve state that no formula reconstructs from time alone, so a device that joins late or drops a frame cannot catch up by computing harder. Two mechanisms, both standard in lockstep networking: **deterministic replay** (same seed + same input sequence from the epoch → same state, which works when the input is small and the history short) or an explicit **keyframe** (the authoritative device ships the pool/grid state periodically). Which one per kernel is a supersync decision; what this document fixes is that each kernel exposes a deterministic re-seed entry point so either is possible.
+
+Three further consequences, each checkable:
 
 - **Time, never frame count.** `BeatPhase` already satisfies this — it integrates `elapsed()`, so a device that drops frames still arrives at the same phase. This is the property that makes the nine-accumulator migration *more* than tidying: each hand-rolled copy also added `now * bpm` on its first tick, so its phase depended on device uptime and two devices could never agree. That is removed by construction (verified: it is the sole cause of the one golden that moved).
 - **Position-addressable randomness beside the stream.** `Random8` advances per *call*, so a device that renders one extra frame — or a different light count — desynchronizes permanently and never recovers. `hashInt(x, y, t, seed)` (identified in the canon survey as the dissolve-transition primitive) is the supersync form: ask "what is this pixel's random value" rather than "what is next in the stream". Both ship; the hash form is the default for anything a synced effect uses, the stream stays for effects that are legitimately local.

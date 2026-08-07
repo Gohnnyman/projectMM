@@ -32,9 +32,13 @@ public:
     // Class scope, not function-local: -Wfunction-effects flags ANY static local in a
     // nonblocking function, including a constexpr that needs no guard variable. Same
     // storage and value here, and these are per-effect constants anyway.
-    static constexpr uint8_t SPEED_MUL[NUM_BLOBS] = { 1, 2, 1 };
-    static constexpr uint8_t PHASE_X[NUM_BLOBS]   = { 0, 80, 160 };
-    static constexpr uint8_t PHASE_Y[NUM_BLOBS]   = { 64, 200, 100 };
+    // The orbit constants are this effect's own: they are what makes it read as a lava lamp rather
+    // than as the other field effects, so they stay here and the shared kernel takes them.
+    static constexpr draw::BlobPath BLOB_PATHS[NUM_BLOBS] = {
+        {1,   0,  64},
+        {2,  80, 200},
+        {1, 160, 100},
+    };
 
     void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
@@ -49,23 +53,13 @@ public:
 
         int16_t bx[NUM_BLOBS] = {};
         int16_t by[NUM_BLOBS] = {};
-        for (uint8_t b = 0; b < NUM_BLOBS; b++) {
-            uint8_t tb = static_cast<uint8_t>(t * SPEED_MUL[b]);
-            bx[b] = static_cast<int16_t>((sin8(static_cast<uint8_t>(tb + PHASE_X[b])) * w) >> 8);
-            by[b] = static_cast<int16_t>((sin8(static_cast<uint8_t>(tb + PHASE_Y[b])) * h) >> 8);
-        }
+        draw::blobCentres(BLOB_PATHS, NUM_BLOBS, t, w, h, bx, by);
         int32_t r2 = static_cast<int32_t>(radius) * radius;
 
         for (lengthType y = 0; y < h; y++) {
             uint8_t* row = buf + static_cast<size_t>(y) * static_cast<size_t>(w) * cpl;
             for (lengthType x = 0; x < w; x++) {
-                uint32_t field = 0;
-                for (uint8_t b = 0; b < NUM_BLOBS; b++) {
-                    int32_t dx = static_cast<int32_t>(x) - bx[b];
-                    int32_t dy = static_cast<int32_t>(y) - by[b];
-                    int32_t d2 = dx * dx + dy * dy + 1;
-                    field += static_cast<uint32_t>((r2 * 64) / d2);
-                }
+                const uint32_t field = draw::blobField(x, y, bx, by, NUM_BLOBS, r2);
                 uint32_t scaled = (field * intensity) >> 8;
                 uint8_t idx = scaled > 255 ? 255 : static_cast<uint8_t>(scaled);
                 // The metaball field value (0 = between blobs, 255 = blob core) is the palette index,

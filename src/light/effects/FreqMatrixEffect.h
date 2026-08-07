@@ -61,8 +61,7 @@ public:
     }
 
     void tick() MM_NONBLOCKING override {
-        // D1: read the live grid each frame; the scroll runs down the x=0 column, length = height().
-        const int len  = height();
+        // D1: the scroll runs down the x=0 column; draw::scroll reads the length from the Canvas.
 
         const draw::Canvas cv = canvas();
 
@@ -118,10 +117,7 @@ public:
         // --- Shift the column one pixel away from the source end (WLED: for i = SEGLEN-1 .. 1,
         // setPixelColor(i, getPixelColor(i-1))), then paint the new color at y=0. The effect writes
         // only x=0; Layer::extrude duplicates this column across x (and z) on wider layers.
-        for (int y = len - 1; y > 0; y--) {
-            const RGB c = draw::get(cv, {0, static_cast<lengthType>(y - 1), 0});
-            draw::pixel(cv, {0, static_cast<lengthType>(y), 0}, c);
-        }
+        draw::scroll(cv, /*axis=*/1, 1);
         draw::pixel(cv, {0, 0, 0}, newColor);
     }
 

@@ -141,3 +141,178 @@ TEST_CASE("BeatPhase survives the millis wrap") {
     q.advance(1100, 120);                            // the same 100 ms, no wrap
     CHECK(afterWrap == q.numerator());
 }
+
+// --- Polar ---------------------------------------------------------------------------------
+// The 16-bit polar pair. What matters is not any single value but that a full sweep around the
+// circle is monotone and accurate enough that a gradient shows no steps and no corners — the two
+// artifacts the 8-bit forms produce on a large fixture.
+
+TEST_CASE("atan16 spans the circle in the right quadrants") {
+    CHECK(atan16(0, 100) == 0);                              // +x axis
+    // Each axis lands on its quarter turn (within a hair of rounding).
+    CHECK(atan16(100, 0) > 16384 - 200);
+    CHECK(atan16(100, 0) < 16384 + 200);                     // +y
+    CHECK(atan16(0, -100) > 32768 - 200);
+    CHECK(atan16(0, -100) < 32768 + 200);                    // -x
+    CHECK(atan16(-100, 0) > 49152 - 200);
+    CHECK(atan16(-100, 0) < 49152 + 200);                    // -y
+    CHECK(atan16(0, 0) == 0);                                // the centre has no direction
+}
+
+TEST_CASE("atan16 puts the diagonals halfway between the axes") {
+    CHECK(atan16(100, 100) > 8192 - 200);
+    CHECK(atan16(100, 100) < 8192 + 200);                    // 45 degrees
+    CHECK(atan16(100, -100) > 24576 - 200);
+    CHECK(atan16(100, -100) < 24576 + 200);                  // 135 degrees
+}
+
+// The reason for the 16-bit form: a sweep must be smooth. Sampling finer than the 8-bit atan2 can
+// resolve has to produce distinct, increasing angles rather than a staircase.
+TEST_CASE("atan16 is monotone around a full sweep") {
+    uint16_t prev = 0;
+    int wraps = 0;
+    for (int deg = 0; deg < 360; deg += 3) {
+        const double rad = deg * 3.14159265358979 / 180.0;
+        const int32_t x = static_cast<int32_t>(10000 * std::cos(rad));
+        const int32_t y = static_cast<int32_t>(10000 * std::sin(rad));
+        const uint16_t a = atan16(y, x);
+        if (deg > 0 && a < prev) wraps++;                    // exactly one wrap, at the end
+        prev = a;
+    }
+    CHECK(wraps <= 1);
+}
+
+// A fitted polynomial was tried here first and measured 9.6 degrees of error at the octant
+// boundary; the table form measures 0.015. The bound below is tight enough to catch a return to the
+// polynomial, which is the regression worth pinning.
+TEST_CASE("atan16 stays within a fraction of a degree of the true angle") {
+    double worst = 0.0;
+    for (int deg = 0; deg < 360; deg++) {
+        const double rad = deg * 3.14159265358979 / 180.0;
+        const int32_t x = static_cast<int32_t>(30000 * std::cos(rad));
+        const int32_t y = static_cast<int32_t>(30000 * std::sin(rad));
+        const double got = atan16(y, x) * 360.0 / 65536.0;
+        double err = std::abs(got - deg);
+        if (err > 180.0) err = 360.0 - err;                  // across the wrap
+        worst = std::max(worst, err);
+    }
+    CHECK(worst < 0.05);                                     // measured 0.015; no visible seam
+}
+
+TEST_CASE("dist16 is a true radius, where dist8 approximates an octagon") {
+    CHECK(dist16(3, 4) == 5);                                // the exact 3-4-5 triangle
+    CHECK(dist16(0, 0) == 0);
+    CHECK(dist16(-3, -4) == 5);                              // sign does not matter
+    // A circle of constant radius reads as constant — the octagonal form bulges at the diagonal.
+    const uint32_t axis = dist16(1000, 0);
+    const uint32_t diag = dist16(707, 707);
+    CHECK(diag > axis - 10);
+    CHECK(diag < axis + 10);
+}
+
+TEST_CASE("dist16 does not saturate past the 8-bit ceiling") {
+    CHECK(dist16(5000, 0) == 5000);                          // dist8 would clamp to 255
+    CHECK(dist16(0, 12000) == 12000);
+}
+
+// --- Easing, followers, position-addressable randomness --------------------------------------
+
+TEST_CASE("easing curves start at zero and finish at full") {
+    CHECK(easeInOutQuad(0) == 0);
+    CHECK(easeInOutQuad(65535) > 65400);
+    CHECK(easeInOutCubic(0) == 0);
+    CHECK(easeInOutCubic(65535) > 65400);
+    CHECK(easeOutQuad(0) == 0);
+    CHECK(easeOutQuad(65535) > 65400);
+}
+
+// The property that makes an easing an easing: it never runs backwards, so motion through it
+// cannot stutter or reverse.
+TEST_CASE("easing curves are monotone") {
+    uint16_t prevQ = 0, prevC = 0, prevO = 0;
+    for (uint32_t t = 0; t <= 65535; t += 251) {
+        const frac16 f = static_cast<frac16>(t);
+        CHECK(easeInOutQuad(f) >= prevQ);
+        CHECK(easeInOutCubic(f) >= prevC);
+        CHECK(easeOutQuad(f) >= prevO);
+        prevQ = easeInOutQuad(f); prevC = easeInOutCubic(f); prevO = easeOutQuad(f);
+    }
+}
+
+// In-out easings are slow at the ends and fast in the middle — the difference from a linear ramp,
+// and the reason motion through them looks deliberate rather than mechanical.
+TEST_CASE("an in-out easing moves slowly at the ends and quickly in the middle") {
+    const int nearStart = easeInOutQuad(6553) - easeInOutQuad(0);        // first 10%
+    const int nearMid   = easeInOutQuad(36044) - easeInOutQuad(29491);   // middle 10%
+    CHECK(nearMid > nearStart * 2);
+    CHECK(easeInOutQuad(32768) > 32000);                                 // passes through the centre
+    CHECK(easeInOutQuad(32768) < 33500);
+}
+
+TEST_CASE("ease out starts fast and settles") {
+    const int nearStart = easeOutQuad(6553) - easeOutQuad(0);
+    const int nearEnd   = easeOutQuad(65535) - easeOutQuad(58982);
+    CHECK(nearStart > nearEnd);
+}
+
+TEST_CASE("smoothFollow moves toward its target without overshooting") {
+    uint8_t v = 0;
+    for (int i = 0; i < 60; i++) v = smoothFollow(v, 200, 40);
+    CHECK(v > 190);
+    CHECK(v <= 200);                        // approaches, never passes
+    CHECK(smoothFollow(100, 100, 128) == 100);   // already there: no drift
+}
+
+TEST_CASE("smoothFollow rate sets how quickly it converges") {
+    uint8_t slow = 0, fast = 0;
+    for (int i = 0; i < 5; i++) { slow = smoothFollow(slow, 255, 20); fast = smoothFollow(fast, 255, 200); }
+    CHECK(fast > slow);
+}
+
+TEST_CASE("smoothFollow falls toward a lower target too") {
+    uint8_t v = 255;
+    for (int i = 0; i < 60; i++) v = smoothFollow(v, 10, 40);
+    CHECK(v < 20);
+}
+
+// The asymmetry IS the meter: instant attack catches the transient, slow decay leaves something to
+// read. A symmetric follower would show neither.
+TEST_CASE("peakHold rises instantly and falls slowly") {
+    CHECK(peakHold(10, 200, 5) == 200);     // a new high is taken at once
+    CHECK(peakHold(200, 10, 5) == 195);     // below the peak, it decays by one step
+    CHECK(peakHold(3, 0, 5) == 0);          // and stops at zero rather than wrapping
+}
+
+TEST_CASE("peakHold holds a peak for many frames after a transient") {
+    uint8_t peak = peakHold(0, 255, 2);
+    for (int i = 0; i < 10; i++) peak = peakHold(peak, 0, 2);
+    CHECK(peak > 200);                      // still clearly visible ten frames later
+}
+
+// The supersync property: randomness addressed by POSITION, not drawn from a stream. Two devices
+// computing the same pixel must get the same value regardless of frame count or light count.
+TEST_CASE("hashInt is a pure function of its inputs") {
+    CHECK(hashInt(5, 9) == hashInt(5, 9));
+    CHECK(hashInt(5, 9, 0, 42) == hashInt(5, 9, 0, 42));
+}
+
+TEST_CASE("hashInt gives neighbouring pixels unrelated values") {
+    // Adjacent inputs must not produce adjacent outputs, or a dissolve would appear in stripes.
+    int differing = 0;
+    for (uint32_t x = 0; x < 64; x++)
+        if (std::abs(static_cast<int>(hashInt(x, 7)) - static_cast<int>(hashInt(x + 1, 7))) > 2000)
+            differing++;
+    CHECK(differing > 50);
+}
+
+TEST_CASE("hashInt spreads across its range") {
+    int buckets[8] = {0};
+    for (uint32_t x = 0; x < 512; x++) buckets[hashInt(x, x / 3) >> 13]++;
+    for (int i = 0; i < 8; i++) CHECK(buckets[i] > 20);   // every eighth of the range is used
+}
+
+TEST_CASE("hashInt separates its axes, so x and y are not interchangeable") {
+    CHECK(hashInt(3, 8) != hashInt(8, 3));
+    CHECK(hashInt(1, 1, 1) != hashInt(1, 1, 2));
+    CHECK(hashInt(4, 4, 4, 1) != hashInt(4, 4, 4, 2));    // the seed changes the whole field
+}

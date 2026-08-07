@@ -47,8 +47,11 @@ public:
             uint8_t* row = buf + static_cast<size_t>(y) * static_cast<size_t>(w) * cpl;
             for (lengthType x = 0; x < w; x++) {
                 int16_t dx = static_cast<int16_t>(x) - cx;
-                uint8_t angle = atan2_8(dy, dx);
-                uint8_t dist = dist8(dx, dy);
+                // 16-bit polar: atan16 resolves the sweep smoothly where the 8-bit form stepped, and
+                // dist16 is a TRUE radius where dist8 approximated an octagon (visible corners on a
+                // large panel). Both are taken down to 8 bits here because hue is mod-256 by design.
+                const uint8_t angle = static_cast<uint8_t>(atan16(dy, dx) >> 8);
+                const uint8_t dist = static_cast<uint8_t>(dist16(dx, dy));
                 uint8_t hue = static_cast<uint8_t>(
                     angle + static_cast<uint8_t>(dist * twist) - t + hue_shift);
                 RGB c = colorFromPalette(*Palettes::active(), hue);

@@ -39,6 +39,13 @@
 #include "light/effects/PaintBrushEffect.h"
 #include "light/effects/SolidEffect.h"
 #include "light/effects/StarSkyEffect.h"
+#include "light/effects/SdfShapesEffect.h"
+#include "light/effects/PolarNoiseEffect.h"
+#include "light/effects/WaterRippleEffect.h"
+#include "light/effects/TunnelEffect.h"
+#include "light/effects/EchoEffect.h"
+#include "light/effects/DissolveEffect.h"
+#include "light/effects/SpectrumEffect.h"
 #include "light/effects/SphereMoveEffect.h"
 #include "light/effects/StarFieldEffect.h"
 #include "light/effects/PraxisEffect.h"
@@ -208,6 +215,13 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RubiksCubeEffect>("RubiksCubeEffect", "light/effects.md#rubikscube");
     mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects.md#sine");
     mm::ModuleFactory::registerType<mm::SolidEffect>("SolidEffect", "light/effects.md#solid");
+    mm::ModuleFactory::registerType<mm::SdfShapesEffect>("SdfShapesEffect", "light/effects.md#sdfshapes");
+    mm::ModuleFactory::registerType<mm::PolarNoiseEffect>("PolarNoiseEffect", "light/effects.md#polarnoise");
+    mm::ModuleFactory::registerType<mm::WaterRippleEffect>("WaterRippleEffect", "light/effects.md#waterripple");
+    mm::ModuleFactory::registerType<mm::TunnelEffect>("TunnelEffect", "light/effects.md#tunnel");
+    mm::ModuleFactory::registerType<mm::EchoEffect>("EchoEffect", "light/effects.md#echo");
+    mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");
+    mm::ModuleFactory::registerType<mm::SpectrumEffect>("SpectrumEffect", "light/effects.md#spectrum");
     mm::ModuleFactory::registerType<mm::SphereMoveEffect>("SphereMoveEffect", "light/effects.md#spheremove");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect", "light/effects.md#spiral");
     mm::ModuleFactory::registerType<mm::StarFieldEffect>("StarFieldEffect", "light/effects.md#starfield");

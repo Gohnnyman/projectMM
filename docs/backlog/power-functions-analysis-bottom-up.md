@@ -129,6 +129,8 @@ Also worth knowing when reading either codebase: mainline 0.16 replaced FastLED 
 
 ## The candidate set (synthesis)
 
+These families group functions by *algorithm*, which is how they were discovered. The build order is the five **phases** in [the top-down plan](power-functions-analysis-top-down.md#5-migration-plan-stage-1-and-example-effects-stage-2), which group the same functions by what lands in the repo together and name the families each phase carries; "what are we building next" is answered there, not here.
+
 Merging in-repo demand, WLED's usage counts, and the canon's coverage-per-byte ranking — nine families, ~34 functions (family 9, Projection, was added on review; the gather group below came from the canon survey). Dimension-generic per the PO decision; every entry is integer/fixed-point; *(have)* = exists for compiled effects today, so the work is exposure + adoption, not invention.
 
 | # | Family | Functions | Grounding |
