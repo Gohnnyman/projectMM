@@ -57,7 +57,7 @@ public:
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height();
-        if (!levels_ || !peaks_) return;
+        if (!levels_ || !peaks_) return;   // this effect's own buffers; the grid is the Layer's
 
         draw::fill(cv, RGB{0, 0, 0});
 

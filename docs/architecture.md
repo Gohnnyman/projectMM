@@ -429,7 +429,7 @@ The `dim` int is also emitted in `/api/types` so the UI derives the dimensional 
 
 ### Robustness rules
 
-**Effects run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `tick()` produces a correct result for any `(width, height, depth)`, with an empty range naturally a no-op (`for (y = 0; y < h; ...)`).
+**Effects run at every non-empty grid shape.** Modifiers can reshape the logical grid to any size, so an effect's `tick()` produces a correct result for any `(width, height, depth)` of at least one light — a 1×1, a strip, a tall column, a cube. The empty case is the Layer's: `Layer::tick()` skips the effect pass entirely when an extent is 0 or the buffer holds no lights, so that check lives in one place for all effects rather than at the top of each.
 
 **The Layer decides whether a frame runs; the effect decides what it paints.** `Layer::tick()` skips the effect pass and the live pass when an extent is 0 or the buffer holds no lights, so that decision lives in one place for all 39 effects. The modifier pass still runs: a beat-driven modifier advances its per-frame state through the empty interval, so the chain is in the right phase when the grid returns. An effect owns the checks about *itself*, and returns early for:
 
@@ -449,6 +449,12 @@ uint8_t t = static_cast<uint8_t>((phase_num_ * 256) / 60000);
 ```
 
 See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed must depend only on `bpm` and wallclock, not on tick rate or grid size.
+
+**Everything that changes over time is driven by elapsed time, never by the frame count.** The rule above is one half of it — a phase that truncates to zero and freezes. The other half is the mirror image and just as wrong: state advanced by a fixed amount *per frame* runs at whatever speed the hardware happens to render. The same gravity setting is an explosion on a desktop at 5,000 fps and a drift on an ESP32 at 470. This applies to every per-frame quantity, not just phase: a force, a velocity, a trail fade, a decay, a drop rate, a simulation step. The user sets a speed; the hardware must not get a vote.
+
+**A faster device renders the same motion more smoothly, not more motion.** The tempting fix — quantise to a fixed 60 Hz and skip the frames in between — is wrong here, because it discards exactly the smoothness the extra frames were rendered for. Instead scale the work by the fraction of a reference frame that actually elapsed, so a device rendering ten times as fast takes ten steps a tenth the size: the same trajectory at ten times the resolution. `particles::FrameTime` is the shared implementation (8.8 fixed point, 256 = one 60 Hz frame), and it carries the sub-millisecond remainder for the same reason `BeatPhase` divides late.
+
+The check is mechanical: **run the effect at two very different framerates over the same span of simulated time and compare.** If the result differs, something is counting frames.
 
 **An effect renders a pattern; it does not transform geometry.** When migrating or adding an effect, strip out anything that is really a *modifier* — mirroring, tiling, rotation, scrolling/offset, a kaleidoscope fold, masking, any remap of *where* pixels land — and add it as a separate [modifier](#modifiers) instead. WLED (and other sources we port from) routinely fold these into the effect's own loop (a "mirror" checkbox, a "2D" rotation, a built-in pinwheel), because WLED has no modifier concept; we do. Keeping them out of the effect is what lets any effect compose with any modifier (the same RotateModifier rotates Fire, Noise, or a network-received frame) instead of every effect re-implementing its own half-baked mirror. The test: an effect's `tick()` should only *write colors into the logical buffer for its own coordinates*; if it's reading or rewriting positions to move/fold/duplicate the image, that behaviour belongs in a modifier. (This is the light-domain face of *Complexity lives in core; domain modules stay simple* — geometry transforms are the modifier's job, shared once, not duplicated into every effect.)
 

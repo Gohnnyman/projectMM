@@ -161,3 +161,34 @@ TEST_CASE("scrolling a 1-channel fixture moves whole lights") {
     CHECK(s.buf.data()[1] == 10);
     CHECK(s.buf.data()[3] == 30);
 }
+
+// A wrapping scroll on a STRIDED axis (a column, not a row) rotates cells that are not adjacent in
+// memory, and must move a light's whole channel set whatever that count is — a DMX moving head can
+// carry far more than RGBW. The rotation swaps cells in place rather than copying through a
+// temporary, so there is no fixed-size buffer to overflow and no channel ceiling to pick; this case
+// pins that a wide fixture rotates intact.
+TEST_CASE("a wrapping column scroll moves every channel of a wide fixture") {
+    constexpr uint8_t kWide = 32;                // a moving head's worth of channels
+    Surface s(1, 4, 1, kWide);
+    // Give each light a recognisable pattern across ALL its channels.
+    for (lengthType y = 0; y < 4; y++)
+        for (uint8_t c = 0; c < kWide; c++)
+            s.buf.data()[y * kWide + c] = static_cast<uint8_t>(y * 40 + c);
+
+    draw::scroll(s.cv, /*axis=*/1, 1, /*wrap=*/true);
+
+    // Row 0 now holds what row 3 held — every channel, not just the first few.
+    for (uint8_t c = 0; c < kWide; c++) {
+        CAPTURE(c);
+        CHECK(s.buf.data()[0 * kWide + c] == static_cast<uint8_t>(3 * 40 + c));
+        CHECK(s.buf.data()[1 * kWide + c] == static_cast<uint8_t>(0 * 40 + c));
+    }
+}
+
+TEST_CASE("a strided wrap conserves every light, whatever the rotation") {
+    Surface s(1, 5, 1, 3);
+    for (lengthType y = 0; y < 5; y++) s.set(0, y, static_cast<uint8_t>(10 * (y + 1)));
+    const uint32_t before = s.total();
+    for (int i = 0; i < 3; i++) draw::scroll(s.cv, 1, 2, /*wrap=*/true);
+    CHECK(s.total() == before);                  // a rotation loses nothing
+}

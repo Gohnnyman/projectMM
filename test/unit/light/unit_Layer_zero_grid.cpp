@@ -101,3 +101,35 @@ TEST_CASE("modifiers keep ticking while the grid is empty") {
     for (int i = 0; i < 5; i++) layer.tick();
     CHECK(mod.ticks == 5);            // every frame reached the modifier
 }
+
+// A zero channel count is rejected at the setter rather than defended against downstream: it would
+// allocate a zero-byte buffer and make every effect's per-light stride 0. Enforcing it at the one
+// entry point is what lets effects and draw primitives assume `cpl >= 1`.
+TEST_CASE("a layer refuses a zero channel count") {
+    mm::Layouts layouts;
+    mm::Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    const uint8_t before = layer.channelsPerLight();
+    layer.setChannelsPerLight(0);
+    CHECK(layer.channelsPerLight() == before);   // unchanged, not zeroed
+    layer.setChannelsPerLight(4);
+    CHECK(layer.channelsPerLight() == 4);        // a valid value still applies
+}
+
+// The live pass walks the modifier mapping into the buffer, so an empty layout has nothing for it
+// to remap. It is gated on hasGrid alongside the effect pass; the modifier ticks still run.
+TEST_CASE("a live modifier is skipped on an empty grid without crashing") {
+    mm::Layouts layouts;                 // no children -> 0 lights
+    mm::Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    CountingModifier mod;
+    layer.addChild(&mod);
+    layouts.applyState();
+    layer.applyState();
+
+    REQUIRE(layer.width() == 0);
+    for (int i = 0; i < 5; i++) layer.tick();
+    CHECK(mod.ticks == 5);               // modifiers still advance; the live REMAP is what is skipped
+}

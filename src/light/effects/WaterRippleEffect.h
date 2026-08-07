@@ -130,6 +130,11 @@ public:
                                              + field()[up] + field()[down];
                     int32_t next = (neighbours >> 1) - lastField()[i];
                     next -= next * damping >> 10;        // damping: the surface settles
+                    // Clamp before narrowing: two drops interfering constructively can exceed
+                    // int16, and a wrap flips the wave's sign — the surface turns inside out at the
+                    // exact moment it should be brightest.
+                    if (next > 32767) next = 32767;
+                    if (next < -32768) next = -32768;
                     lastField()[i] = static_cast<int16_t>(next);
                 }
             }

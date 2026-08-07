@@ -251,6 +251,41 @@ Detail: [technical](moxygen/RubiksCubeEffect.md)
 
 [Tests](../../tests/unit-tests.md#rubikscubeeffect)
 
+<a id="fireworks"></a>
+
+### Fireworks 🔬 · 2D
+
+Shells rise, stall, and burst into sparks that arc over and fall. Every stage is a particle-kernel call: spawn, gravity, angleEmit, drag, age. Nothing schedules the apex — the shell decelerates under gravity and bursts when its vertical velocity crosses zero, so a faster launch bursts higher without a second control.
+
+- `launchRate` — how often a new shell goes up.
+- `launchSpeed` — how hard it is thrown, and so how high it bursts.
+- `gravity` — how fast everything falls, per 60 Hz of simulated time.
+- `sparks` — sparks per burst.
+- `sparkLife` — how long a spark survives.
+- `drag` — air resistance flattening the arc.
+- `fade` — trail length (the Layer's decay, not the pool's).
+
+Physics is driven by elapsed time, not frame count, so the same settings behave identically on a desktop at thousands of fps and an ESP32 at a few hundred ([architecture § tick rate](../../architecture.md#effects)).
+
+Origin: projectMM original, on the WLED Particle System's firework family (@Brandon502 / WildCats08)
+
+<a id="ballpit"></a>
+
+### Ballpit 🔬 · 2D
+
+Falling balls that pile up and shove each other aside. The heap is emergent: gravity pulls, the floor stops, and contact between neighbours produces the shape. `tilt` turns the pit into a slope and the whole pile slides and re-settles.
+
+- `balls` — how many share the pit.
+- `gravity` — how hard they fall.
+- `size` — contact radius in pixels: how far apart balls sit when touching.
+- `bounce` — restitution: how much speed a contact keeps.
+- `tilt` — sideways force, turning the pit into a slope.
+- `drag` — damping, so the heap settles instead of sloshing.
+
+Exercises the half of the particle kernel [Fireworks](#fireworks) leaves untouched: sparks never notice each other, these do. Collisions are the one non-linear part of the kernel, so the pool is deliberately small.
+
+Origin: projectMM original, on the WLED Particle System's ballpit family (@Brandon502 / WildCats08)
+
 <a id="dissolve"></a>
 
 ### Dissolve 🔬 · 2D
@@ -296,6 +331,23 @@ The asymmetry is the whole point; a symmetric follower either misses the hit or 
 
 Origin: projectMM original, on standard VU/PPM meter ballistics and WLED's GEQ band mapping
 
+<a id="truchet"></a>
+
+### Truchet 🔬 · 2D
+
+A maze of interlocking arcs that never repeats, drawn without storing a single tile. Randomly-turned tiles with arcs at their edges join into continuous winding paths across the whole surface — the pattern looks designed, and nothing designed it.
+
+- `bpm` — how fast the pattern drifts.
+- `scale` — tiles across the short side.
+- `thickness` — how fat the arcs are.
+- `softness` — edge softness: the anti-aliasing width.
+- `shuffle` — reshuffles which way the tiles face.
+- `drift` — slide the pattern instead of holding still.
+
+**The representative 2D shader**, and a better introduction to the form than [Raymarch](#raymarch): no 3D, no rays, no float, cheap on any target. It shows the three moves most shader effects are built from — folding space so one tile becomes hundreds (`repeat`), deciding each tile's orientation from its position alone (`hashInt`, so no array remembers it and two devices agree without exchanging anything), and turning a distance into a soft edge (`smoothstep`).
+
+Origin: projectMM original, on Sébastien Truchet's 1704 tiling and the standard shader fract/hash/smoothstep idiom
+
 <a id="tunnel"></a>
 
 ### Tunnel 🔬 · 2D
@@ -327,6 +379,22 @@ A propagating wave simulation: drops land, their rings spread outward, reflect o
 Distinct from [Ripples](#ripples), which draws expanding rings from a closed-form radius: that one is cheaper and always looks like clean concentric circles, this one behaves like water. Costs two int16 buffers sized to the grid.
 
 Origin: projectMM original, on Hugo Elias's water surface algorithm
+
+<a id="raymarch"></a>
+
+### Raymarch 🔬 · 2D
+
+A lit 3D scene rendered by marching a ray through a distance field, one ray per pixel. Nothing draws a sphere: the scene is a function returning the distance to the nearest surface, and the spheres emerge because each ray stops where that function says a surface is. The lighting is derived too — the surface normal is the gradient of the distance field.
+
+- `bpm` — how fast the scene animates.
+- `steps` — ray marching steps: the quality and cost knob.
+- `blend` — how much the two spheres melt into each other.
+- `cameraY` — camera height above the floor.
+- `showFloor` — include the ground plane.
+
+**Compiled only where the SoC declares a hardware FPU** (`SOC_CPU_HAS_FPU`, which every ESP32 variant and the desktop satisfy). This is the one stated exception to the integer-only render-path rule, and it is gated rather than assumed. The cost is per *pixel*, not per chip — measured at 0.30 ms/frame for 32×32 on desktop, and 1.64 ms for 4096 lights on an ESP32-S3 while still holding 409 fps. What limits it is pixel count; `steps` trades quality for cost. Frames also stream over NetworkSend, so a desktop can drive a fixture that could never compute this locally.
+
+Origin: projectMM original, on Iñigo Quilez's raymarching and distance-function articles
 
 <a id="polarnoise"></a>
 

@@ -26,6 +26,7 @@
 
 namespace mm::draw {
 
+
 /// The surface a draw call writes to: a buffer plus the grid dimensions that address it.
 ///
 /// Today every draw call takes `(Buffer&, Coord3D dims)` as two independent arguments that nothing
@@ -330,14 +331,15 @@ inline lengthType text(Buffer& buf, Coord3D dims, const fonts::Font& font, const
 }
 
 // ---- Canvas overloads --------------------------------------------------------------------------
-// The Canvas forms of the primitives above. Each forwards to the (Buffer&, dims) implementation
-// rather than duplicating its logic — one algorithm, two call shapes — so the pair cannot drift
-// while the migration is in progress. When the last caller of the older form is gone, these become
-// the implementations and the pair collapses to one (§ the subtraction pass in the top-down spec).
+// The Canvas forms of the primitives above. Most carry their OWN implementation rather than
+// forwarding to the (Buffer&, dims) form, because `Canvas` holds a raw pointer where the older
+// signatures take a Buffer&. That means a pair CAN drift, and one already did — the Canvas `blur`
+// looped its y-pass differently from the Buffer form until a reviewer caught it. `line` is the
+// exception: both forms share `detail::walkLine`, so its error-carry loop has exactly one home.
 //
-// `Canvas` carries a raw pointer rather than a Buffer&, so these rebuild the light Buffer view the
-// legacy signatures expect. That view is a non-owning wrapper: constructing it copies three fields
-// and allocates nothing.
+// When the last caller of the older form is gone these become the implementations and the pair
+// collapses to one (§ the subtraction pass in the top-down spec), which is what removes the drift
+// risk for good.
 
 /// Fade every channel toward black. Canvas form; the Buffer form forwards here.
 inline void fade(const Canvas& cv, uint8_t amt) {
@@ -517,15 +519,22 @@ inline void scroll(const Canvas& cv, uint8_t axis, int delta, bool wrap = false)
             // Strided run (a column, or a z-line): move cell by cell, far end first so a forward
             // shift does not overwrite a source it has yet to read.
             if (wrap) {
-                for (int i = 0; i < shift; i++) {            // rotate one step, `shift` times
-                    uint8_t last[4] = {0, 0, 0, 0};
-                    const size_t keep = cpl < 4 ? cpl : 4;
-                    std::memcpy(last, base + static_cast<size_t>(extent - 1) * step, keep);
-                    for (int c = extent - 1; c > 0; c--)
-                        std::memcpy(base + static_cast<size_t>(c) * step,
-                                    base + static_cast<size_t>(c - 1) * step, cpl);
-                    std::memcpy(base, last, keep);
-                }
+                // Rotate by three reversals, the same trick the contiguous path above uses. No
+                // scratch buffer, so a light of ANY channel count rotates whole — a fixed-size
+                // temporary silently truncated the extra channels of a wide fixture, and there is
+                // no ceiling worth guessing at here. It is also O(extent) instead of
+                // O(shift x extent): a 64-row column scrolled by 30 was doing 1920 cell copies.
+                const auto swapCells = [&](int i, int j) {
+                    uint8_t* a = base + static_cast<size_t>(i) * step;
+                    uint8_t* b = base + static_cast<size_t>(j) * step;
+                    for (size_t k = 0; k < cpl; k++) { const uint8_t tmp = a[k]; a[k] = b[k]; b[k] = tmp; }
+                };
+                const auto reverseRange = [&](int lo, int hi) {
+                    while (lo < hi) { swapCells(lo, hi); lo++; hi--; }
+                };
+                reverseRange(0, extent - 1 - shift);
+                reverseRange(extent - shift, extent - 1);
+                reverseRange(0, extent - 1);
             } else if (shift > 0) {
                 // Far end first, so a source cell is read before the shift overwrites it.
                 for (int c = extent - 1; c >= 0; c--) {
@@ -718,16 +727,16 @@ inline void lineAA(const Canvas& cv, Coord3D a, Coord3D b, RGB c) {
     for (int x = x0; x <= x1; x++) {
         const int32_t whole = inter >> 16;
         const uint8_t frac = static_cast<uint8_t>((inter >> 8) & 0xFF);
-        const uint8_t near = static_cast<uint8_t>(255 - frac);
+        const uint8_t weightNear = static_cast<uint8_t>(255 - frac);   // `near` is a Windows macro
         // The two cells straddling the true line, weighted by how close it passes to each.
         if (steep) {
             addPixel(cv, {static_cast<lengthType>(whole), static_cast<lengthType>(x), a.z},
-                     RGB{scale8(c.r, near), scale8(c.g, near), scale8(c.b, near)});
+                     RGB{scale8(c.r, weightNear), scale8(c.g, weightNear), scale8(c.b, weightNear)});
             addPixel(cv, {static_cast<lengthType>(whole + 1), static_cast<lengthType>(x), a.z},
                      RGB{scale8(c.r, frac), scale8(c.g, frac), scale8(c.b, frac)});
         } else {
             addPixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(whole), a.z},
-                     RGB{scale8(c.r, near), scale8(c.g, near), scale8(c.b, near)});
+                     RGB{scale8(c.r, weightNear), scale8(c.g, weightNear), scale8(c.b, weightNear)});
             addPixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(whole + 1), a.z},
                      RGB{scale8(c.r, frac), scale8(c.g, frac), scale8(c.b, frac)});
         }

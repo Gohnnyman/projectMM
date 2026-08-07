@@ -214,6 +214,10 @@ class Palettes {
 public:
     static const Palette* active() { return &active_; }
 
+    /// Restore a previously captured palette verbatim. For tests that must hand back the global
+    /// they disturbed; `setActive` cannot express this because the index is not stored.
+    static void setActiveDirect(const Palette& p) { active_ = p; }
+
     // Expand built-in `index` into the active palette (off the hot path — on selection).
     static void setActive(uint8_t index) {
         active_ = fromBuiltin(index);

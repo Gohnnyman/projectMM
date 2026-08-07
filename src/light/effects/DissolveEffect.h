@@ -60,8 +60,7 @@ public:
 
         // The two fields being traded. They are palette reads a generation apart, so the effect
         // cycles through the palette as it dissolves.
-        const uint8_t hueA = static_cast<uint8_t>(generation * 40);
-        const uint8_t hueB = static_cast<uint8_t>((generation + 1) * 40);
+        const uint8_t hueA = static_cast<uint8_t>(generation * kHueStep);
 
         for (lengthType y = 0; y < h; y++) {
             for (lengthType x = 0; x < w; x++) {
@@ -83,7 +82,10 @@ public:
                         : static_cast<uint8_t>(((d + band) * 255) / (2 * band)));
                 }
 
-                const uint8_t idx = static_cast<uint8_t>(hueA + (((hueB - hueA) * mix) >> 8));
+                // Interpolate the KNOWN 40-step delta, not the difference of the truncated bytes:
+                // when hueA and hueB straddle the 256 wrap, `hueB - hueA` is -216 rather than +40
+                // and the transition runs backwards through the whole palette.
+                const uint8_t idx = static_cast<uint8_t>(hueA + ((kHueStep * mix) >> 8));
                 // Brightness dips where a pixel is mid-flight, so the transition reads as a
                 // shimmer crossing the panel rather than a flat crossfade.
                 const uint8_t bri = static_cast<uint8_t>(255 - (mix > 128 ? 255 - mix : mix) / 2);
@@ -93,6 +95,8 @@ public:
     }
 
 private:
+    static constexpr int32_t kHueStep = 40;   // palette advance per generation
+
     BeatPhase phase_;
 };
 

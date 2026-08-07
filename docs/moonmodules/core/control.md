@@ -56,7 +56,7 @@ A pad is tinted by its role: layout blue, layer violet, driver green, service am
 
 Applying a preset creates, replaces and destroys modules to match what the file describes — it is a restore, not a value overlay: a preset carrying more than the device has adds it, and one describing less removes what it omits.
 
-Structural mutation quiesces the render worker, and mutations run inline on the render tick, so a large restore stalls rendering for its duration. Every captured subtree is applied first and `prepareTree()` runs once at the end, rather than once per capture. Presets are a cold-path feature; the tick path is untouched.
+Structural mutation quiesces the render worker, and mutations run inline on the render tick, so a large restore stalls rendering for its duration. The captured subtree is applied and `prepareTree()` runs once at the end. Presets are a cold-path feature; the tick path is untouched.
 
 ## Home Assistant
 

@@ -8,9 +8,13 @@
 // grid for clouds/plasma/fire-like fields; scroll a coordinate (or pass a time offset) to
 // animate. 1D, 2D and 3D variants share one hash + a smoothstep interpolation.
 //
-// Prior art: FastLED's inoise8 (Perlin/value noise; Mark Kriegsman / Ken Perlin's method).
-// Same recognisable name + 0..255 contract; the hash + smoothstep + lerp here are ours,
-// promoted from NoiseEffect's own implementation so every effect shares one field generator.
+// **This is VALUE noise, and FastLED's `inoise8` is GRADIENT noise.** The name is kept because it is
+// the one every LED effect author reaches for and the 0..255 contract matches, but the character
+// differs: value noise reads blockier and more axis-aligned, and uses the full output range where
+// FastLED's compresses toward the middle. A ported effect will therefore LOOK slightly different for
+// a reason its author cannot see from the call site, which is why it is stated here rather than left
+// to be discovered. Prior art: Ken Perlin's method by way of FastLED; the hash + smoothstep + lerp
+// are ours, promoted from NoiseEffect so every effect shares one field generator.
 //
 // Coordinates are 16.0 fixed scaled however the caller likes — the high byte selects the
 // noise CELL, the low byte the interpolation position within it. So a larger coordinate step

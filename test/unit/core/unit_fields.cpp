@@ -34,13 +34,23 @@ double fineDetail(uint8_t octaves) {
 }
 }  // namespace
 
-TEST_CASE("fbm stays inside the 0..255 field range") {
-    for (uint32_t x = 0; x < 3000; x += 137)
+// Summing octaves must NORMALISE, not accumulate: without dividing by the total amplitude the sum
+// would run past the field's range and clip. `v <= 255` cannot show this — a uint8_t satisfies it by
+// construction — so the check is that adding octaves never pushes the result outside the span its
+// own samples occupy.
+TEST_CASE("fbm normalises its octave sum rather than accumulating") {
+    for (uint32_t x = 0; x < 3000; x += 137) {
+        int lo = 255, hi = 0;
         for (uint8_t oct = 1; oct <= 5; oct++) {
-            const uint8_t v = fbm8(x, x / 2, oct);
-            CHECK(v <= 255);           // the type guarantees the ceiling; this pins the normalisation
-            CAPTURE(x); CAPTURE(oct);
+            const int v = fbm8(x, x / 2, oct);
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
         }
+        CAPTURE(x);
+        // Every octave count lands in the same neighbourhood; an unnormalised sum would climb
+        // toward saturation as octaves were added.
+        CHECK(hi - lo < 120);
+    }
 }
 
 TEST_CASE("one octave of fbm is plain noise") {

@@ -21,6 +21,8 @@ rather than what it intends.
 
 ## Used by nearly everything
 
+Not a category so much as the floor: three things almost every effect touches whatever else it does. If you read only one row of this page, read these — an effect that uses none of them is doing something unusual.
+
 <div class="mm-pf" markdown="1">
 
 | Power function | What it does | Effects | Modifiers |
@@ -32,6 +34,10 @@ rather than what it intends.
 </div>
 
 ## Frame and pixel operations
+
+**Whole-buffer work: writing, reading, and moving what is already there.**
+
+These act on the grid as a surface rather than on a shape. Between them they cover the four things an effect does to a frame before it draws anything: clear it, dim what was there (the trail), blur it, or shift it bodily. Most effects open with one of these and close with per-pixel writes.
 
 <div class="mm-pf" markdown="1">
 
@@ -50,6 +56,12 @@ rather than what it intends.
 
 ## Geometry
 
+**Drawing a shape by walking the pixels it covers.**
+
+The classical rasteriser: given endpoints, a centre and a radius, or a run length, light exactly the cells the shape passes through. Integer-only and exact, with no distance computed anywhere — which makes these the cheap way to draw when the shape sits on the grid and does not need to move smoothly between pixels.
+
+Contrast with signed distance fields below: same shapes, opposite approach, different trade-off.
+
 <div class="mm-pf" markdown="1">
 
 | Power function | What it does | Effects | Modifiers |
@@ -66,6 +78,12 @@ rather than what it intends.
 
 ## Signed distance fields
 
+**Describing a shape as "how far away is it", then reading a picture out of that number.**
+
+Instead of drawing a circle, an SDF answers *how far is this pixel from the circle's edge* — negative inside, zero on it, positive outside. That one number does far more work than a rasteriser's yes/no: the sign fills the shape, its magnitude gives an anti-aliased edge for free, taking the absolute value turns it into an outline, and two distances combine into a third shape with a single `min` or `smin`.
+
+This is what makes shapes composable and smooth-moving. It costs a distance per pixel, so it is the right tool when a shape moves sub-pixel or merges with another, and the wrong one for a static bar.
+
 <div class="mm-pf" markdown="1">
 
 | Power function | What it does | Effects | Modifiers |
@@ -81,6 +99,12 @@ rather than what it intends.
 
 ## Fields
 
+**Smooth pseudo-random values across space: everything organic.**
+
+Noise is the source of anything that should look natural rather than drawn — clouds, fire, smoke, water, marbling, drifting colour. The defining property is that nearby points get similar values (unlike a raw hash), so the result flows instead of flickering.
+
+One sample is a soft blur; the character comes from composing them. Summing octaves adds structure at every scale, folding the field creases it into flame, and displacing the sample coordinate by another field is what produces the flowing, liquid look.
+
 <div class="mm-pf" markdown="1">
 
 | Power function | What it does | Effects | Modifiers |
@@ -94,6 +118,12 @@ rather than what it intends.
 </div>
 
 ## Polar and geometry math
+
+**Addressing the grid by angle and radius instead of by x and y.**
+
+Swapping coordinate systems is the cheapest way to change what an effect looks like. Anything radial — rings, spirals, rotation, kaleidoscopes, tunnels, radial wipes, a spectrum bent around a circle — is an ordinary pattern read through polar coordinates rather than a special algorithm.
+
+The 16-bit forms matter here: the 8-bit versions step visibly on a large fixture and their distance is an octagon rather than a circle.
 
 <div class="mm-pf" markdown="1">
 
@@ -109,6 +139,12 @@ rather than what it intends.
 
 ## Time, motion and randomness
 
+**How a value changes between frames, and how to get randomness that behaves.**
+
+Two related problems. First, motion: raw linear movement reads as mechanical, so easings shape it, followers smooth it, and peak-hold gives a meter its characteristic instant-rise slow-fall. Second, randomness that is *reproducible* — addressed by position rather than drawn from a stream, so the same pixel gets the same value on every device and every frame.
+
+The framerate rule lives here too: everything in this group is driven by elapsed time, never by frame count ([architecture](../../architecture.md#effects)).
+
 <div class="mm-pf" markdown="1">
 
 | Power function | What it does | Effects | Modifiers |
@@ -123,7 +159,68 @@ rather than what it intends.
 
 </div>
 
+## Particles
+
+**Things that move under forces: sparks, rain, snow, smoke, confetti, debris, a swarm.**
+
+Anything that behaves like matter is the same handful of forces over the same state, and the part that differs between one look and another is *which* forces are applied and how particles are emitted — not the physics. So the state and the integrator live in [particles.h](../../../src/light/particles.h) and the character stays with the effect.
+
+Storage is structure-of-arrays over the caller's own buffers, so a pass that touches only velocity walks only velocity, and the pool never allocates after `prepare()`. Positions are the same sub-pixel type `splat` takes, so a particle at x=3.5 lands half on each pixel instead of snapping.
+
+Frame order matters and is the caller's to get right: forces, then `collide()`, then `step()`, then walls, then `age()`, then `render()`. Collisions run *before* the move because resolving an overlap afterwards can shove a particle through a wall the bounce pass already checked.
+
+| Power function | What it does | Effects | Modifiers |
+|---|---|---|---|
+| `Pool` | The state: SoA positions, velocities, life, hue and optional size over caller-owned buffers. Owns nothing, allocates nothing | Fireworks, Ballpit | — |
+| `gravity`, `force`, `drag`, `attract` | The forces. Each is one pass over one array, so an effect pays only for the ones it uses | Fireworks, Ballpit | — |
+| `forceSmall` | A force too weak to move an integer velocity, accumulated until it does — what makes a light breeze read as inertia rather than as nothing | *(no caller yet)* | — |
+| `step` | Semi-implicit Euler: position integrates the already-updated velocity, which is what stays stable under a constant force | Fireworks, Ballpit | — |
+| `bounce`, `wrap`, `killOutside` | What happens at the walls: reflect with restitution, re-enter the opposite edge (snow, rain, marquee), or simply stop existing | Fireworks, Ballpit | — |
+| `collide` | Particles notice each other. The one non-linear part of the kernel, so it is opt-in | Ballpit | — |
+| `spawn`, `angleEmit`, `spray` | Emitters: one particle, a directed cone, or an undirected scatter | Fireworks, Ballpit | — |
+| `age`, `render` | Life counts down and brightness rides it, so a particle fades as it dies | Fireworks, Ballpit | — |
+| `FrameTime` | Converts elapsed time into a per-frame scale, so the same settings behave identically at 60 fps and at 5000 | Fireworks, Ballpit, Echo, BouncingBalls, Lissajous, Tetrix | — |
+
+## Shaders
+
+**One function of (position, time) evaluated per pixel — the other way to write an effect.**
+
+Everything above draws *into* a grid: set this pixel, walk this line, move this row. A shader inverts that — it never draws anything, it answers a question. Given where a pixel is and what time it is, what colour is it? The framework runs that function everywhere.
+
+That inversion is why shaders compose so freely. There is no state to keep in step and no order of operations to get right, so an effect is built by transforming the *coordinate* before answering: fold space and one shape becomes a thousand, rotate it and the whole design turns, displace it by a noise field and everything flows.
+
+[shader.h](../../../src/light/shader.h) is the standard GLSL vocabulary in fixed point, deliberately using the familiar names so anyone who has read shader code needs no translation. It runs on every target.
+
+| Power function | What it does | Effects | Modifiers |
+|---|---|---|---|
+| `each` | The runner: supply one function of position and time, and it handles the loop, the coordinate mapping and the write | Truchet, Raymarch | — |
+| `uv` | Pixel to shader space, centred and scaled by the SHORT side — which is what keeps a circle circular on a non-square panel | Truchet, Raymarch | — |
+| `clamp`, `mix`, `fract`, `step`, `smoothstep` | The five built-ins in essentially every shader. `fract` is the one that tiles a pattern; `smoothstep` is the one that anti-aliases an edge | Truchet | — |
+| `length`, `rotate` | Vector basics. Rotating the coordinate spins the entire design for one operation | Truchet | — |
+| `repeat`, `mirror` | Domain operators: fold space so one shape becomes a lattice. The objects do not multiply — the coordinate does the work | Truchet | — |
+| `opUnion`, `opIntersect`, `opSubtract`, `opShell`, `opRound` | Combine two shapes into a third, which is how an SDF scene is composed rather than drawn | Truchet | — |
+| `sdRoundBox`, `sdPolygon` | Shapes beyond the circle/box/segment trio in [Signed distance fields](#signed-distance-fields) | *(no caller yet)* | — |
+| `cosPalette`, `mixColor` | A whole colour ramp as twelve numbers instead of a table | *(no caller yet)* | — |
+
+#### Raymarching — one technique inside a shader
+
+Raymarching is one technique a shader can use, for rendering 3D. A scene is described as a *function*: say how far the nearest surface is from any point, and the renderer walks a ray outward until it arrives. The world is arithmetic — geometry emerges from the distance function rather than being stored.
+
+[raymarch.h](../../../src/light/raymarch.h) is compiled only where the SoC declares a hardware FPU, because a raymarch is per-pixel float by nature. That gate is the one bounded exception to the integer-only render path, and it is a whole-header switch rather than a rule weakened in place. Everything in `shader.h` stays fixed point and runs everywhere.
+
+| Power function | What it does | Effects | Modifiers |
+|---|---|---|---|
+| `march` | Sphere tracing: walk a ray until it hits. Takes the scene as a callable, so that function *is* the world | Raymarch | — |
+| `normalAt` | The surface normal as the gradient of the distance field — which is why lighting works on a shape that was never modelled | Raymarch | — |
+| `sdSphere`, `sdBox`, `sdPlane`, `sdTorus` | 3D distance primitives, same sign contract as the 2D family | Raymarch | — |
+| `smin`, `opUnion`, `opIntersect`, `opSubtract`, `opRepeat` | The 3D operators. `smin` melts surfaces together; `opRepeat` tiles space into an endless lattice | Raymarch | — |
+| `Camera`, `diffuse` | Where the viewer stands and how a surface is lit — the parts every raymarch effect would otherwise re-derive | Raymarch | — |
+
 ## Gather
+
+**Reading the grid back as a texture.**
+
+Everything else writes; this reads. Once a frame can be sampled at an arbitrary sub-pixel coordinate, a whole family follows from a few lines each: feedback and motion trails, zoom, rotation, tunnels, plasma warping. Without it every one of those needs its own bespoke loop.
 
 <div class="mm-pf" markdown="1">
 

@@ -46,6 +46,10 @@
 #include "light/effects/EchoEffect.h"
 #include "light/effects/DissolveEffect.h"
 #include "light/effects/SpectrumEffect.h"
+#include "light/effects/FireworksEffect.h"
+#include "light/effects/BallpitEffect.h"
+#include "light/effects/TruchetEffect.h"
+#include "light/effects/RaymarchEffect.h"
 #include "light/effects/SphereMoveEffect.h"
 #include "light/effects/StarFieldEffect.h"
 #include "light/effects/PraxisEffect.h"
@@ -222,6 +226,13 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::EchoEffect>("EchoEffect", "light/effects.md#echo");
     mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");
     mm::ModuleFactory::registerType<mm::SpectrumEffect>("SpectrumEffect", "light/effects.md#spectrum");
+    mm::ModuleFactory::registerType<mm::FireworksEffect>("FireworksEffect", "light/effects.md#fireworks");
+    mm::ModuleFactory::registerType<mm::BallpitEffect>("BallpitEffect", "light/effects.md#ballpit");
+    mm::ModuleFactory::registerType<mm::TruchetEffect>("TruchetEffect", "light/effects.md#truchet");
+#if MM_HEAVY_COMPUTE
+    // Only where the platform declares per-pixel float headroom; absent entirely elsewhere.
+    mm::ModuleFactory::registerType<mm::RaymarchEffect>("RaymarchEffect", "light/effects.md#raymarch");
+#endif
     mm::ModuleFactory::registerType<mm::SphereMoveEffect>("SphereMoveEffect", "light/effects.md#spheremove");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect", "light/effects.md#spiral");
     mm::ModuleFactory::registerType<mm::StarFieldEffect>("StarFieldEffect", "light/effects.md#starfield");

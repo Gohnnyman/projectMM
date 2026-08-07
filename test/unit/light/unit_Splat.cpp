@@ -55,10 +55,10 @@ TEST_CASE("splat weights follow the distance to each neighbour") {
     Surface s(8, 8);
     // A quarter of the way from x=2 toward x=3: the nearer pixel gets ~3x the light.
     draw::splat(s.cv, draw::toSub(2) + 64, draw::toSub(4), RGB{240, 0, 0});
-    const uint8_t near = s.at(2, 4), far = s.at(3, 4);
-    CHECK(near > far);
-    CHECK(far > 0);
-    CHECK(near > 2 * far);       // 3:1 by coverage, allowing for rounding
+    const uint8_t nearer = s.at(2, 4), further = s.at(3, 4);   // `near`/`far` are Windows macros
+    CHECK(nearer > further);
+    CHECK(further > 0);
+    CHECK(nearer > 2 * further);       // 3:1 by coverage, allowing for rounding
 }
 
 // Conservation, the property that keeps motion smooth: total light is the same wherever the point
@@ -155,6 +155,7 @@ TEST_CASE("a per-channel write never spills into the next light") {
 
         // Light 1 took the colour it could hold...
         CHECK(s.buf.data()[1 * cpl] == 10);
+        if (cpl >= 2) CHECK(s.buf.data()[1 * cpl + 1] == 20);   // green, where the light has one
         // ...and light 2 is untouched.
         CHECK(s.buf.data()[2 * cpl] == 0x5A);
     }

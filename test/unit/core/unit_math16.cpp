@@ -17,13 +17,14 @@
 using namespace mm;
 
 TEST_CASE("sin16 traces a full sine over one turn") {
-    CHECK(sin16(0) == 32768);                      // zero crossing, rising
-    CHECK(sin16(16384) > 65000);                   // peak
-    CHECK(sin16(32768) == 32768);                  // zero crossing, falling
-    CHECK(sin16(49152) < 600);                     // trough
+    // SIGNED, matching lib8tion: 0 at the crossings, +/-32767 at the peaks.
+    CHECK(sin16(0) == 0);                          // zero crossing, rising
+    CHECK(sin16(16384) > 32700);                   // peak
+    CHECK(sin16(32768) == 0);                      // zero crossing, falling
+    CHECK(sin16(49152) < -32700);                  // trough
     // The angle wraps for free: one full turn later is the same value.
     CHECK(sin16(1234) == sin16(static_cast<angle16>(1234 + 65536)));
-    CHECK(cos16(0) > 65000);                       // cosine peaks where sine crosses
+    CHECK(cos16(0) > 32700);                       // cosine peaks where sine crosses
 }
 
 // The reason the 16-bit tier exists: on a large fixture an 8-bit sine steps visibly. Sampling finer
@@ -42,7 +43,7 @@ TEST_CASE("sin16 is smooth between LUT entries, where sin8 would step") {
 TEST_CASE("sin16 stays within 0.5% of a true sine") {
     double worst = 0.0;
     for (uint32_t t = 0; t < 65536; t += 7) {       // 7: a stride that hits varied LUT positions
-        const double ideal = (std::sin(t * 2.0 * std::numbers::pi_v<double> / 65536.0) * 32767.0) + 32768.0;
+        const double ideal = std::sin(t * 2.0 * std::numbers::pi_v<double> / 65536.0) * 32767.0;
         worst = std::max(worst, std::abs(ideal - sin16(static_cast<angle16>(t))));
     }
     CHECK(worst < 65535 * 0.005);
@@ -86,7 +87,7 @@ TEST_CASE("map32 survives full-width 32-bit ranges") {
 // constexpr: the contract is compile-time evaluable, so a table or a control default can be built
 // from it without runtime cost.
 TEST_CASE("sin16 and map32 evaluate at compile time") {
-    static_assert(sin16(0) == 32768, "sin16 is constexpr");
+    static_assert(sin16(0) == 0, "sin16 is constexpr");
     static_assert(map32(5, 0, 10, 0, 100) == 50, "map32 is constexpr");
     CHECK(true);
 }
@@ -315,4 +316,75 @@ TEST_CASE("hashInt separates its axes, so x and y are not interchangeable") {
     CHECK(hashInt(3, 8) != hashInt(8, 3));
     CHECK(hashInt(1, 1, 1) != hashInt(1, 1, 2));
     CHECK(hashInt(4, 4, 4, 1) != hashInt(4, 4, 4, 2));    // the seed changes the whole field
+}
+
+// --- Review findings (2026-08-07) ---------------------------------------------------------------
+
+// A follower must converge from either direction. The shift form truncated toward zero, so a small
+// rate moved DOWN by one but stalled going UP — a meter that could fall and never rise.
+TEST_CASE("smoothFollow makes progress at every nonzero rate, in both directions") {
+    CHECK(smoothFollow(0, 100, 1) > 0);          // the case that used to stall
+    CHECK(smoothFollow(100, 0, 1) < 100);
+    CHECK(smoothFollow(0, 255, 255) == 255);     // full rate arrives rather than stopping short
+    CHECK(smoothFollow(255, 0, 255) == 0);
+    CHECK(smoothFollow(50, 50, 200) == 50);      // already there: no drift
+    CHECK(smoothFollow(50, 200, 0) == 50);       // rate 0 holds
+}
+
+TEST_CASE("smoothFollow never overshoots its target") {
+    for (uint8_t rate : {uint8_t{1}, uint8_t{7}, uint8_t{128}, uint8_t{254}, uint8_t{255}}) {
+        CAPTURE(rate);
+        uint8_t up = 0, down = 255;
+        for (int i = 0; i < 600; i++) {
+            up = smoothFollow(up, 200, rate);
+            down = smoothFollow(down, 40, rate);
+            CHECK(up <= 200);
+            CHECK(down >= 40);
+        }
+        CHECK(up == 200);                        // and it does arrive
+        CHECK(down == 40);
+    }
+}
+
+// dist16 saturated at 65535 far inside normal range: two coordinates of 70000 square-and-sum past
+// UINT32_MAX, so the 32-bit root reported 65535 for a distance of 70000.
+TEST_CASE("dist16 is exact for distances beyond 16 bits") {
+    CHECK(dist16(70000, 0) == 70000);
+    CHECK(dist16(0, 100000) == 100000);
+    const uint32_t diag = dist16(65535, 65535);  // 65535 * sqrt(2)
+    CHECK(diag > 92670);
+    CHECK(diag < 92690);
+}
+
+TEST_CASE("dist16 handles the full int32 range without wrapping") {
+    CHECK(dist16(INT32_MAX, 0) == 2147483647u);
+    CHECK(dist16(INT32_MIN, 0) == 2147483648u);  // negating INT32_MIN in place would overflow
+    CHECK(dist16(0, INT32_MIN) == 2147483648u);
+}
+
+TEST_CASE("isqrt64 roots values a 32-bit root cannot hold") {
+    CHECK(isqrt64(0) == 0);
+    CHECK(isqrt64(144) == 12);
+    CHECK(isqrt64(0xFFFFFFFFULL) == 65535);
+    CHECK(isqrt64(1ULL << 62) == (1ULL << 31));  // exact at the top of the range
+}
+
+// kaleido: the review asked for coverage of non-divisor segment counts, where 65536/segments has a
+// remainder and the last wedge is a different width.
+TEST_CASE("kaleido folds correctly for segment counts that do not divide the circle") {
+    for (uint8_t segments : {uint8_t{3}, uint8_t{7}, uint8_t{255}}) {
+        CAPTURE(segments);
+        const uint32_t wedge = 65536u / segments;
+        for (uint32_t a = 0; a < 65536; a += 313) {
+            const uint16_t folded = kaleido(static_cast<angle16>(a), segments);
+            CHECK(folded < wedge);               // always lands inside one wedge
+        }
+    }
+}
+
+TEST_CASE("kaleido is the identity below two segments") {
+    for (uint32_t a = 0; a < 65536; a += 4099) {
+        CHECK(kaleido(static_cast<angle16>(a), 0) == a);
+        CHECK(kaleido(static_cast<angle16>(a), 1) == a);
+    }
 }

@@ -2,6 +2,7 @@
 
 #include "core/math16.h"              // sin16, BeatPhase, easeInOutQuad
 #include "light/effects/EffectBase.h"
+#include "light/particles.h"   // FrameTime — the shared time scale
 
 namespace mm {
 
@@ -52,6 +53,7 @@ public:
         const size_t n = static_cast<size_t>(width() > 0 ? width() : 0) *
                          static_cast<size_t>(height() > 0 ? height() : 0) * 3u;
         history_.resize(n);
+        time_.reset();
     }
 
     void tick() MM_NONBLOCKING override {
@@ -61,6 +63,25 @@ public:
 
         phase_.advance(elapsed(), bpm);
         const angle16 t = static_cast<angle16>(phase_.phase(65536));
+
+        // Feedback is per-frame work driving a per-second look, so every amount below scales by how
+        // much of a reference frame actually elapsed. Without this the trail length, the zoom rate
+        // and the rotation are all properties of the framerate: a fast device erases the echo before
+        // the eye sees it, a slow one smears it (architecture.md, tick-rate rule).
+        // Only the FEEDBACK is paced; the source and its motion still draw every frame, so a fast
+        // device shows smoother orbiting even though the trail compounds at a fixed rate. Returning
+        // early here instead would skip the draw too and leave most frames blank.
+        const uint32_t sc = time_.advance(elapsed());
+        const bool feedbackDue = sc >= particles::FrameTime::kOne;
+        // Feedback COMPOUNDS: this frame re-reads the frame before it, so a decay applied twice as
+        // often fades twice as fast even if each application is half as strong. Scaling the amount
+        // linearly is therefore not enough — what has to be constant per unit time is the SURVIVING
+        // fraction, `keep^framesPerSecond`. Solving that exactly needs a logarithm; a cheap and
+        // accurate-enough equivalent is to skip the feedback pass entirely on frames that have not
+        // yet accumulated a reference frame's worth of time, so the compounding happens at 60 Hz
+        // whatever the render rate. The source and the palette still move every frame, so the motion
+        // stays smooth — only the re-sampling is paced.
+        const uint8_t decayNow = decay;
 
         // Wrap the history in its own Canvas so the gather primitives can read it exactly as they
         // read any grid — the previous frame is just another texture.
@@ -74,9 +95,10 @@ public:
         // makes the image appear to grow outward.
         const int32_t s = 65536 - (static_cast<int32_t>(zoom) * 64);       // 16.16 inverse scale
         const angle16 a = static_cast<angle16>(-(static_cast<int32_t>(rotate) * 64));
-        const int32_t cosA = static_cast<int32_t>(cos16(a)) - 32768;       // -32768..32767
-        const int32_t sinA = static_cast<int32_t>(sin16(a)) - 32768;
+        const int32_t cosA = static_cast<int32_t>(cos16(a));       // -32768..32767
+        const int32_t sinA = static_cast<int32_t>(sin16(a));
 
+        if (feedbackDue)
         for (lengthType y = 0; y < h; y++) {
             for (lengthType x = 0; x < w; x++) {
                 const int32_t px = draw::toSub(x) - cx;
@@ -89,9 +111,9 @@ public:
 
                 RGB c = draw::sampleWrap(hist, sx, sy);
                 // Fade what came back, so a trail dies out instead of accumulating to white.
-                c.r = scale8(c.r, static_cast<uint8_t>(255 - decay));
-                c.g = scale8(c.g, static_cast<uint8_t>(255 - decay));
-                c.b = scale8(c.b, static_cast<uint8_t>(255 - decay));
+                c.r = scale8(c.r, static_cast<uint8_t>(255 - decayNow));
+                c.g = scale8(c.g, static_cast<uint8_t>(255 - decayNow));
+                c.b = scale8(c.b, static_cast<uint8_t>(255 - decayNow));
                 draw::pixel(cv, {x, y, 0}, c);
             }
         }
@@ -99,8 +121,8 @@ public:
         // The source: a small bright disc orbiting the centre. Its position is what the echo trail
         // is a record of, so it moves on the beat.
         const int32_t orbit = (w < h ? w : h) * 3 / 8;
-        const int32_t ox = w / 2 + ((static_cast<int32_t>(sin16(t)) - 32768) * orbit) / 32768;
-        const int32_t oy = h / 2 + ((static_cast<int32_t>(cos16(t)) - 32768) * orbit) / 32768;
+        const int32_t ox = w / 2 + ((static_cast<int32_t>(sin16(t))) * orbit) / 32768;
+        const int32_t oy = h / 2 + ((static_cast<int32_t>(cos16(t))) * orbit) / 32768;
         const RGB src = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(t >> 8), 255);
         if (size == 0) {
             draw::pixel(cv, {static_cast<lengthType>(ox), static_cast<lengthType>(oy), 0}, src);
@@ -109,8 +131,11 @@ public:
                              static_cast<lengthType>(size), src);
         }
 
-        // Keep this frame as the history the next one reads.
-        const size_t bytes = static_cast<size_t>(w) * h * 3u;
+        // Keep this frame as the history the next one reads — only when the feedback advanced, or
+        // an unpaced frame would overwrite the trail with a copy of itself.
+        if (!feedbackDue) return;
+        const size_t bytes = history_.bytes();   // the ALLOCATION, not what this grid implies:
+                                                 // a live resize can outrun prepare() by a frame
         for (lengthType y = 0; y < h; y++)
             for (lengthType x = 0; x < w; x++) {
                 const RGB c = draw::get(cv, {x, y, 0});
@@ -121,6 +146,7 @@ public:
 
 private:
     ScratchBuffer<uint8_t> history_{*this};   // the previous frame, read as a texture
+    particles::FrameTime time_{60};           // controls are written against 60 fps
     BeatPhase phase_;
 };
 

@@ -43,13 +43,19 @@ inline constexpr int16_t sin16_quarter[65] = {
     32767
 };
 
-/// Sine over a 16-bit angle, returning 0..65535 with 32768 at the zero crossing (unsigned, matching
-/// sin8's convention so a caller ports by widening rather than re-reasoning about sign).
+/// Sine over a 16-bit angle, returning SIGNED -32767..32767 — FastLED's `lib8tion` sin16 contract.
+///
+/// The unsigned 0..65535 form (32768 at the zero crossing) was tried first, to match `sin8`. It is
+/// the wrong call: `sin16` is the most-ported symbol in the LED world, so any FastLED or WLED
+/// snippet doing arithmetic on it breaks SILENTLY, everything offset by half scale. Eleven of our
+/// own call sites were already subtracting 32768 to undo the convention, which is the same signal
+/// from the inside. A standard name must carry the standard contract; `sin8` keeps its own because
+/// 8-bit palette/hue domains are genuinely unsigned.
 ///
 /// Quarter-wave lookup with linear interpolation: the top 2 bits of the angle pick the quadrant,
 /// the next 6 the table entry, the low 8 the position between entries. Mirroring the index in odd
 /// quadrants and negating in the upper half reconstructs the full wave from a quarter of the table.
-constexpr uint16_t sin16(angle16 theta) {
+constexpr int16_t sin16(angle16 theta) {
     const uint8_t quadrant = static_cast<uint8_t>(theta >> 14);       // 0..3
     const uint16_t pos     = static_cast<uint16_t>(theta & 0x3FFF);   // position within the quadrant
     // Odd quadrants run the quarter wave backwards (sin descends from the peak).
@@ -65,11 +71,11 @@ constexpr uint16_t sin16(angle16 theta) {
     const int32_t b = sin16_quarter[idx < 64 ? idx + 1 : 64];
     int32_t v = a + (((b - a) * frac) >> 8);
     if (quadrant >= 2) v = -v;                                        // lower half of the circle
-    return static_cast<uint16_t>(v + 32768);
+    return static_cast<int16_t>(v);
 }
 
-/// Cosine: a quarter turn ahead of sine.
-constexpr uint16_t cos16(angle16 theta) { return sin16(static_cast<angle16>(theta + 16384)); }
+/// Cosine: a quarter turn ahead of sine. Signed, like `sin16`.
+constexpr int16_t cos16(angle16 theta) { return sin16(static_cast<angle16>(theta + 16384)); }
 
 // ---- Range mapping ---------------------------------------------------------
 
@@ -153,6 +159,22 @@ private:
 /// same one. Where a comparison against a threshold will do (is this point inside a circle?), prefer
 /// comparing SQUARED values and skip this entirely — measured on hardware, the squared form is ~14
 /// cycles/pixel against ~108 for the sqrt.
+/// Integer square root of a 64-bit value — the wide form, for values whose square exceeds 32 bits.
+/// `dist16` needs it: two coordinates of only 70000 already square-and-sum past UINT32_MAX, so the
+/// 32-bit form saturated at 65535 and reported the wrong distance well inside normal range.
+///
+/// Newton's method, which converges in a handful of steps over this range. Promoted here from
+/// AudioLevel.h (its RMS path is the other caller) so the integer roots have one home.
+constexpr uint64_t isqrt64(uint64_t x) {
+    if (x == 0) return 0;
+    uint64_t r = x, last;
+    do {
+        last = r;
+        r = (r + x / r) >> 1;
+    } while (r < last);
+    return last;
+}
+
 constexpr uint32_t isqrt(uint32_t v) {
     uint32_t rem = v, root = 0, bit = 1u << 30;
     while (bit > rem) bit >>= 2;
@@ -216,8 +238,15 @@ inline angle16 atan16(int32_t y, int32_t x) {
 /// True Euclidean distance from the origin to (dx, dy) — a real radius, not the octagon `dist8`
 /// approximates, and it does not saturate at 255.
 inline uint32_t dist16(int32_t dx, int32_t dy) {
-    const int64_t d2 = static_cast<int64_t>(dx) * dx + static_cast<int64_t>(dy) * dy;
-    return isqrt(static_cast<uint32_t>(d2 > 0xFFFFFFFFLL ? 0xFFFFFFFFLL : d2));
+    // Squared in UNSIGNED 64-bit and rooted with the 64-bit isqrt. The obvious 32-bit form is wrong
+    // far inside normal range, not just at the extremes: two coordinates of 70000 already square-
+    // and-sum past UINT32_MAX, so it saturated and reported 65535 for a distance of 70000. Taking
+    // the magnitude first also keeps INT32_MIN representable, which negating in place does not.
+    const uint64_t ax = static_cast<uint64_t>(dx < 0 ? -static_cast<int64_t>(dx) : dx);
+    const uint64_t ay = static_cast<uint64_t>(dy < 0 ? -static_cast<int64_t>(dy) : dy);
+    const uint64_t d2 = ax * ax + ay * ay;
+    const uint64_t d = isqrt64(d2);
+    return static_cast<uint32_t>(d > 0xFFFFFFFFULL ? 0xFFFFFFFFULL : d);
 }
 
 // --- Easing --------------------------------------------------------------------------------
@@ -261,8 +290,16 @@ constexpr frac16 easeOutQuad(frac16 t) {
 /// Deliberately frame-rate dependent in its simple form, which is what every LED codebase uses; a
 /// caller needing true time-independence scales `rate` by its own dt.
 constexpr uint8_t smoothFollow(uint8_t current, uint8_t target, uint8_t rate) {
+    if (rate == 0 || current == target) return current;
+    if (rate == 255) return target;                   // full rate arrives, rather than stopping one short
     const int32_t delta = static_cast<int32_t>(target) - current;
-    return static_cast<uint8_t>(current + ((delta * rate) >> 8));
+    // Round the step AWAY from zero so every nonzero rate makes progress. A plain shift truncates
+    // toward zero, which for a small rate means an upward step rounds to 0 and the value never
+    // rises, while a downward step of the same size rounds to -1 and does move — a follower that
+    // could fall but not climb (measured: rate 1 moved 100->99 but left 0 at 0).
+    const int32_t step = (delta * rate) / 256;
+    if (step != 0) return static_cast<uint8_t>(current + step);
+    return static_cast<uint8_t>(current + (delta > 0 ? 1 : -1));
 }
 
 /// The falling-peak meter: rise INSTANTLY to a new high, then decay slowly. The asymmetry is the

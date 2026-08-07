@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "core/math16.h"   // isqrt64 — the shared integer root
+
 namespace mm {
 
 // Shared magnitude → 0..255 mapping on a LOGARITHMIC (decibel) scale — used by
@@ -81,18 +83,8 @@ struct DcBlocker {
 // 24-bit value in an int32, then accumulate in 64-bit so a full block can't
 // overflow.
 
-// 64-bit integer square root (Newton's method, converges in a handful of steps
-// for our range). Free function so AudioBands.h can reuse it; the level path
-// stays free of <cmath> (it is otherwise all integer), so this is the one root.
-inline uint64_t isqrt64(uint64_t x) {
-    if (x == 0) return 0;
-    uint64_t r = x, last;
-    do {
-        last = r;
-        r = (r + x / r) >> 1;
-    } while (r < last);
-    return last;
-}
+// The 64-bit integer square root this RMS path needs lives in core/math16.h beside the other
+// integer roots (isqrt), so there is one implementation rather than two.
 
 // Analyse `n` samples into `frame.level` — the overall RMS loudness mapped
 // through the same log/dB window the bands use (magToByte), so the VU meter and

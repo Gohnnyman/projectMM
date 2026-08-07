@@ -82,6 +82,9 @@ add_executable(mm_tests
     unit/light/unit_Bar.cpp
     unit/light/unit_Scroll.cpp
     unit/light/unit_Circle.cpp
+    unit/light/unit_Particles.cpp
+    unit/light/unit_Shader.cpp
+    unit/light/unit_Effects_framerate.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp

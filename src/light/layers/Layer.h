@@ -208,7 +208,9 @@ public:
         // Live pass: remap the logical buffer per frame for dynamic modifiers (Rotate).
         // Skipped entirely when no modifier is live — a static-only chain pays nothing,
         // the buffer goes straight to the driver scatter (the pay-for-what-you-use rule).
-        if (hasLive_) applyLivePass();
+        // hasGrid too: applyLivePass walks the mapping into the buffer, and an empty layout has
+        // neither. The effect pass above is already gated the same way.
+        if (hasGrid && hasLive_) applyLivePass();
     }
 
     // COLD path (called from prepare after rebuildLUT): (re)size the live-pass
