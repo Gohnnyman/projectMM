@@ -68,7 +68,7 @@ namespace mm {
 /// **Prior art:** MoonLight's PhysicalLayer — owns `channelsD` (display buffer),
 /// `compositeLayers()` maps virtualChannels → channelsD, parallelism via a semaphore
 /// (driver signals completion, compositor writes)
-/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Effects/PhysicalLayer.h).
+/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h).
 /// @card Drivers.png
 class Drivers : public MoonModule {
 public:

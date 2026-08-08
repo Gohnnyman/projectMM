@@ -66,7 +66,7 @@ class Layer; // forward declaration (defined in light/layers/Layer.h, included a
 /// `layer->width()/height()/depth()` directly via the VirtualLayer pointer (no separate
 /// EffectBase), buffer access via `layer->virtualChannels`, time via `timeMicros()`
 /// (https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Nodes.h,
-/// https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Effects/VirtualLayer.h).
+/// https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
 class EffectBase : public MoonModule {
 public:
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Effect; }

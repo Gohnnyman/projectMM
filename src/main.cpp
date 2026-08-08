@@ -25,6 +25,7 @@
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
 #include "light/moonlive/MoonLiveEffect.h"
+#include "light/moonlive/MoonLiveModifier.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
@@ -155,7 +156,7 @@ static void registerModuleTypes() {
     // core modules keep a per-module page named for the type.
     // Containers
     mm::ModuleFactory::registerType<mm::Layouts>("Layouts", "light/supporting.md#layouts");
-    mm::ModuleFactory::registerType<mm::Effects>("Effects", "light/supporting.md#layers");
+    mm::ModuleFactory::registerType<mm::Effects>("Effects", "light/supporting.md#effects");
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/supporting.md#layer");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/supporting.md#drivers");
     mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule", "light/supporting.md#lightpresets");
@@ -245,6 +246,7 @@ static void registerModuleTypes() {
     // Modifiers — alphabetical by display name.
     mm::ModuleFactory::registerType<mm::BlockModifier>("BlockModifier", "light/modifiers.md#block");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers.md#checkerboard");
+    mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier", "light/MoonLiveModifier.md");
     mm::ModuleFactory::registerType<mm::CircleModifier>("CircleModifier", "light/modifiers.md#circle");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers.md#mirror");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers.md#multiply");

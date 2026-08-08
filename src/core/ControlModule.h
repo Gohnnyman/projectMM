@@ -71,10 +71,11 @@ public:
     /// The top-level subtrees a preset can carry. Names are `typeName()`s, which is what the file
     /// records and what `Scheduler` resolves them back to.
     static constexpr const char* kCapturable[] = {"Layouts", "Effects", "Drivers", "Services"};
-    /// The role each capturable subtree holds, so a pad can show what a preset covers with the same
-    /// emoji the module cards use (ROLE_EMOJI in the UI): one vocabulary rather than a second set
-    /// invented here. Index-aligned with kCapturable.
-    static constexpr const char* kCaptureRole[] = {"layout", "layer", "driver", "service"};
+    /// What each capturable subtree covers, named after the CONTAINER rather than after a module
+    /// inside it: a preset that captures `Effects` reports "effects". Calling it "layer" named the
+    /// container's child type, which reads as though the preset held a single Layer. Index-aligned
+    /// with kCapturable; the UI maps these to the same emoji the module cards use (ROLE_EMOJI).
+    static constexpr const char* kCaptureRole[] = {"layout", "effects", "driver", "service"};
     static constexpr uint8_t kCaptureCount = sizeof(kCapturable) / sizeof(kCapturable[0]);
     static_assert(sizeof(kCapturable) / sizeof(kCapturable[0]) ==
                   sizeof(kCaptureRole) / sizeof(kCaptureRole[0]),

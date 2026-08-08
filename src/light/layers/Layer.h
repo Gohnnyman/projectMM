@@ -30,7 +30,7 @@ namespace mm {
 ///
 /// **Status:** the status slot shows the LOGICAL box the effects render into (`` `<w>×<h>×<d>` ``), which can differ from the physical box shown on `Layouts` (a Mirror-XY modifier folds a 128×128 physical layout into a 64×64 logical box). The same slot carries memory-degradation warnings when a build can't fit (`modifier mapping skipped`, `buffer reduced`, `buffer allocation failed`, all `— not enough memory`), and a warning wins over the neutral box line.
 ///
-/// **Prior art:** MoonLight's `VirtualLayer` — `oneToOneMapping` fast-path flag, `virtualChannels` per-layer buffer, `effectDimension`, a `nodes` vector for effects/modifiers, and `forEachLight` per-logical-light iteration that asks the modifier for physical destinations (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Effects/VirtualLayer.h).
+/// **Prior art:** MoonLight's `VirtualLayer` — `oneToOneMapping` fast-path flag, `virtualChannels` per-layer buffer, `effectDimension`, a `nodes` vector for effects/modifiers, and `forEachLight` per-logical-light iteration that asks the modifier for physical destinations (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
 /// @card Layer.png
 class Layer : public MoonModule {
 public:

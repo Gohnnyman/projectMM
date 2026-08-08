@@ -154,7 +154,7 @@ void Scheduler::deleteTree(MoonModule* mod) {
 
 // Why this exists: ModuleFactory::create gives every freshly-created module
 // a display name derived from its type ("NoiseEffect" → "Noise", "Layer"
-// stays "Layer"). When the user adds two Effects, both factory-default to
+// stays "Layer"). When the user adds two Layers, both factory-default to
 // "Layer"; the HTTP API uses names as parent_id, and findModuleByName does
 // a first-match DFS, so the second Layer becomes unreachable. Same problem
 // happens when persistence rebuilds the tree positionally on boot.

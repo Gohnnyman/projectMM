@@ -48,9 +48,9 @@ A preset naming a subtree this build does not have is refused with a reason rath
 
 ### One active preset per role
 
-Each subtree is a **role**: layout, layer, driver, service. A preset holds its own role and leaves the other three alone, so a layout preset and a look can be active at the same time, and applying a new look replaces only the look.
+Each subtree is a **role**: layout, effects, driver, service. A preset holds its own role and leaves the other three alone, so a layout preset and a look can be active at the same time, and applying a new look replaces only the look.
 
-A pad is tinted by its role: layout blue, layer violet, driver green, service amber.
+A pad is tinted by its role: layout blue, effects violet, driver green, service amber.
 
 ### Applying is a rebuild
 

@@ -30,7 +30,7 @@ Coding conventions live in [coding-standards.md](coding-standards.md); how to bu
   - [The pipeline](#the-pipeline)
   - [3D from the start](#3d-from-the-start)
   - [Layouts and Layout](#layouts-and-layout)
-  - [Effects and Layer](#layers-and-layer)
+  - [Effects and Layer](#effects-and-layer)
   - [Effects](#effects)
     - [Dimensionality](#dimensionality)
     - [Robustness rules](#robustness-rules)
@@ -472,7 +472,7 @@ A recompile is the normal cold-path rebuild: editing the `source` control routes
 
 ## Modifiers
 
-A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`). A layer applies **all** its enabled modifiers as a chain, in child order — each a coordinate fold composed into one mapping (see [§ Effects and Layer](#layers-and-layer)).
+A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`). A layer applies **all** its enabled modifiers as a chain, in child order — each a coordinate fold composed into one mapping (see [§ Effects and Layer](#effects-and-layer)).
 
 A modifier is a coordinate transform, applied in one of two ways (the fold contract is in [ModifierBase](moonmodules/light/moxygen/ModifierBase.md)):
 

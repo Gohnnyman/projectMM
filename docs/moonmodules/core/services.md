@@ -4,7 +4,7 @@ The user-added **Service** modules — capability bridges the device provides or
 
 <a id="services"></a>
 
-### Services
+## Services
 
 The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Effects`/`Drivers` in the light domain. Adds/removes its children (Audio, IR) at runtime via the generic module machinery.
 

@@ -389,7 +389,7 @@ TEST_CASE("ControlModule reports the roles a preset covers") {
     mm::JsonSink sink;
     d.control->writeListRow(sink, 0);
     const std::string row(sink.data(), sink.size());
-    CHECK(row.find("\"roles\":[\"layer\"]") != std::string::npos);   // Effects is captured by default
+    CHECK(row.find("\"roles\":[\"effects\"]") != std::string::npos);   // Effects is captured by default
 }
 
 // Fader 1 rides the global brightness every driver scales by, through the same setControl primitive
@@ -515,7 +515,7 @@ TEST_CASE("ControlModule keeps one active preset per captured role") {
 
     // And each reports WHICH role it holds, which is what the pad colors itself by.
     CHECK(d.rowNamed("geometry").find("\"activeRoles\":[\"driver\"]") != std::string::npos);
-    CHECK(d.rowNamed("look").find("\"activeRoles\":[\"layer\"]") != std::string::npos);
+    CHECK(d.rowNamed("look").find("\"activeRoles\":[\"effects\"]") != std::string::npos);
 }
 
 // Each role is held independently, so applying a look replaces the look and leaves the geometry

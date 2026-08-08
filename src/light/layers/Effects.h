@@ -42,8 +42,8 @@ public:
         setLayouts(layouts_);
     }
 
-    /// Role-filtered loop propagation: only tick children that are Effects.
-    /// The factory / UI shouldn't allow non-Layer children of a Effects
+    /// Role-filtered loop propagation: only tick children that are Layers.
+    /// The factory / UI shouldn't allow non-Layer children of an Effects
     /// container, but if one slips in (test fixture, hand-crafted config),
     /// ticking it through Effects would run its loop at the wrong tree
     /// depth (an Effect that should be ticked inside a Layer). Matches
@@ -100,7 +100,7 @@ public:
         return n;
     }
 
-    /// Walk enabled Effects in container (composition) order — the order Drivers
+    /// Walk enabled Layers in container (composition) order — the order Drivers
     /// blends them, bottom (first) to top (last). `` `cb(layer, isFirst)` ``: isFirst
     /// marks the bottom layer (clears the buffer; the rest blend onto it).
     template <typename Fn>

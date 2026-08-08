@@ -3424,6 +3424,7 @@ const ROLE_EMOJI = {
     modifier:   "💎",
     layout:     "🚥",
     layer:      "🥞",
+    effects:    "🥞",   // the container a preset captures; same pancake as the Layers it holds
     service:    "🛰️",
     generic:    "⚙️",
 };
@@ -3434,7 +3435,7 @@ const ROLE_EMOJI = {
 // averaged into one tint.
 const ROLE_HUE = {
     layout:   210,   // blue
-    layer:    280,   // violet
+    effects:  280,   // violet
     driver:   150,   // green
     service:   35,   // amber
 };
