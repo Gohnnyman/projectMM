@@ -416,3 +416,39 @@ Streaming panel-card frames from an S31 at ~5 300 packets/s degraded with uptime
 
 **Recovery still earns its place.** `esp_eth_stop()` + `esp_eth_start()` re-runs negotiation and resets the descriptor rings: the only way back from a wedge short of a reboot, since no ioctl writes the driver's link flag. Bench-verified twice, recovering in ~17 s. Attempted once per wedge, never repeatedly: a restart cannot fix an unplugged cable, and retrying would bounce the interface under the user.
 
+
+## Lessons from the power-function branch (shared toolbox, particles, shaders)
+
+A branch that built a shared library and migrated existing effects onto it. The gotchas all
+share a shape: a green build, plausible-looking output, and a defect only counting could see.
+
+- **A ported function's SIGN is part of its contract, and getting it wrong is silent.** Our
+  `sin16`/`cos16` returned unsigned 0..65535; FastLED master (`i16 sin16lut`) and WLED main
+  (`int16_t sin16_t`) both return signed. WLED effects write `sin16_t(x) + 32768` when they
+  want an unsigned value — arithmetic that is exactly half a scale wrong against an unsigned
+  return, with no compile error and no crash. A ported effect just looks subtly off. **When
+  adopting a function that exists upstream, verify its range and sign against upstream's
+  `master`/`main`, not against a release and not against memory** — the contract to bind to is
+  the one users will have. Local checkouts of both live beside this repo for exactly this.
+
+- **"It looks like noise" is not evidence that it IS noise.** `fbm16` summed its octaves after
+  shifting each sample down by 8 — which fits a 32-bit accumulator and produces output that
+  passes every visual check, while being an 8-bit field wearing a 16-bit type: 195 distinct
+  values over 20,000 samples, low byte never set. That is precisely the banding the 16-bit tier
+  exists to remove, shipped inside the fix for it. **For a function whose value IS its
+  distribution, assert on the distribution — count distinct values, check the range is
+  reached.** An eyeball, and a test that only checks bounds, both pass.
+
+- **Two framerate bugs can cancel, and fixing one alone looks like a regression.** Fireworks
+  counts frames for its launch roll (20x the shells at 1200 fps) *and* floors its trail fade at
+  1 per render (erasing the trail 20x faster). Together they roughly cancel, so the effect
+  looked fine and the audit passed. Fixing only the launch made the measured ratio worse —
+  three times, before the second bug was found. **When a targeted fix makes a metric worse,
+  stop patching and look for the compensating bug** rather than tuning the fix.
+
+- **A "no-op" rewrite of a shared primitive needs a differential test, not a review.**
+  Replacing `wrap()`'s per-span loops with modulo changed its endpoint behaviour: the loops are
+  asymmetric (reducing from above stops *at* `span`, climbing from below stops at `0`), which
+  no amount of reading the new code reveals. Diffing old against new across every span and
+  2.8M inputs found it in seconds. **For a hot-path primitive whose replacement is meant to be
+  behaviour-identical, prove it by exhaustive comparison against the original.**

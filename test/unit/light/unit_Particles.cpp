@@ -279,8 +279,10 @@ TEST_CASE("an attractor does not fling a particle sitting on top of it") {
     t.pool.attract(toSub(8), toSub(8), 100000);
     // MAGNITUDE, not just the upper side: an unclamped inverse-square blows up in whichever
     // direction the rounding sends it, and a one-sided check passes on a large negative.
-    CHECK(std::abs(t.vx[0]) < toSub(100));   // finite, not a divide-by-zero blowup
-    CHECK(std::abs(t.vy[0]) < toSub(100));
+    // Widen before taking the magnitude: draw::pos_t is int32, and std::abs of its minimum has no
+    // representation in the same type.
+    CHECK(std::llabs(static_cast<int64_t>(t.vx[0])) < toSub(100));   // finite, not a blowup
+    CHECK(std::llabs(static_cast<int64_t>(t.vy[0])) < toSub(100));
 }
 
 // --- Rendering -------------------------------------------------------------------------------
@@ -645,4 +647,23 @@ TEST_CASE("a pool without size storage still renders every particle") {
     t.pool.render(cv, 255, RenderStyle::Hard);
     const size_t at = (4 * 8 + 4) * 3;
     CHECK((buf.data()[at] || buf.data()[at + 1] || buf.data()[at + 2]));   // drawn, not skipped
+}
+
+// FrameTime is the branch's shared answer to "how much of a reference frame did this frame cover".
+// Its reference PERIOD has to be exact: deriving it as `1000 / referenceHz` truncates to 16 ms for
+// 60 Hz, which is a 62.5 Hz reference, and every 60-fps-calibrated setting in the codebase then runs
+// about 4% fast — invisible per frame, a drift of seconds over a minute.
+TEST_CASE("a second of elapsed time is 60 reference frames, at any render rate") {
+    for (int fps : {30, 60, 240, 1200}) {
+        CAPTURE(fps);
+        particles::FrameTime t{60};
+        uint64_t total = 0;
+        for (int f = 0; f < fps; f++)
+            total += t.advance(static_cast<uint32_t>(static_cast<uint64_t>(f) * 1000 / fps));
+        // 60 reference frames of 256 units. The band absorbs the sub-millisecond carry at the end
+        // of the second; it does not absorb a wrong reference period, which is a flat 4%.
+        const double refFrames = static_cast<double>(total) / particles::FrameTime::kOne;
+        CHECK(refFrames > 58.0);
+        CHECK(refFrames < 61.0);
+    }
 }

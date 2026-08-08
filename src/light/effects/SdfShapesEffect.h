@@ -88,14 +88,17 @@ public:
                 if (outlineW > 0) d = (d < 0 ? -d : d) - outlineW;
 
                 const uint8_t cov = draw::coverage(d);
-                if (cov == 0 && !glow) continue;
+                // Write black rather than skipping: the Layer does not clear between frames, so a
+                // pixel this effect never touches keeps whatever was there — the shape's own path
+                // from earlier frames, or the previous effect's whole picture.
+                if (cov == 0 && !glow) { draw::pixel(cv, {x, y, 0}, RGB{0, 0, 0}); continue; }
 
                 // Palette index rides the distance, so the shape reads as a lit body with the field
                 // falling away around it; time offsets the whole ramp so the colour drifts.
                 const int32_t dPix = d >> draw::kSubShift;
                 const uint8_t idx = static_cast<uint8_t>((t >> 8) + static_cast<uint8_t>(dPix * 4));
                 const uint8_t bri = glow ? (cov > 0 ? cov : glowFalloff(dPix)) : cov;
-                if (bri == 0) continue;
+                if (bri == 0) { draw::pixel(cv, {x, y, 0}, RGB{0, 0, 0}); continue; }
 
                 const RGB c = colorFromPalette(*Palettes::active(), idx, bri);
                 draw::pixel(cv, {x, y, 0}, c);

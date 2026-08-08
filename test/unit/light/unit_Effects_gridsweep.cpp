@@ -35,6 +35,7 @@
 // Generated at build time from src/light/effects/*.h — see test/CMakeLists.txt. Supplies
 // forEachEffect(), so this file names no individual effect and cannot drift.
 #include "effect_sweep.h"
+#include "platform/platform.h"
 #include <string>
 
 namespace {
@@ -155,4 +156,65 @@ TEST_CASE("every effect survives degenerate grid sizes") {
     // of passing test. The generator refuses to emit an empty list; this is the second lock.
     CHECK_MESSAGE(swept > 0, "no effects swept — the test would pass without testing anything");
     MESSAGE("swept " << swept << " effects x " << (sizeof(kGrids) / sizeof(kGrids[0])) << " grids");
+}
+
+// The Layer does NOT clear the buffer between frames (ADR-0003: an effect can fade its own last
+// frame for trails, or read prior pixels for a scroll). The corollary is a contract every effect
+// owes: it owns its background. An effect that only writes the pixels it lights, and skips the
+// rest, inherits whatever was on screen — its own path from earlier frames as permanent ghosts,
+// and the entire picture of whatever effect ran before it.
+//
+// A golden-frame test cannot see this: it renders into a buffer that starts zeroed, so the pixels
+// an effect never writes are black by luck and hash correctly. This starts from a DIRTY buffer,
+// which is what a real device hands an effect on every frame after the first.
+TEST_CASE("every effect owns its background rather than inheriting the last frame") {
+    int audited = 0;
+    mm::forEachEffect([&](const char* name, auto make) {
+        // Two effects do not own a background in the sense this audits:
+        //   DemoReel hosts a child effect and delegates the frame to it, so its background is
+        //     whatever that child paints; with no child registered there is nothing to draw.
+        //   NetworkReceive displays frames another device sends, and its tick BLOCKS in recvfrom
+        //     until a packet arrives — ticking it 90 times here hangs the whole suite.
+        const std::string effectName(name);
+        if (effectName == "DemoReelEffect" || effectName == "NetworkReceiveEffect") { audited++; return; }
+
+        mm::Layouts layouts;
+        auto* grid = new mm::GridLayout();
+        grid->width = 16; grid->height = 16; grid->depth = 1;
+        layouts.addChild(grid);
+
+        mm::Layer layer;
+        layer.setLayouts(&layouts);
+        layer.setChannelsPerLight(3);
+        mm::MoonModule* effect = make();
+        effect->defineControls();
+        layer.addChild(effect);
+        layouts.applyState();
+        layer.applyState();
+
+        // A recognisable value no palette produces, standing in for the previous effect's frame.
+        constexpr uint8_t kStale = 0xA7;
+        uint8_t* buf = const_cast<uint8_t*>(layer.buffer().data());
+        const mm::nrOfLightsType lights = layer.buffer().count();
+        for (mm::nrOfLightsType i = 0; i < lights * 3; i++) buf[i] = kStale;
+
+        for (int f = 0; f < 90; f++) {
+            mm::platform::setTestNowMs(100000u + static_cast<uint32_t>(f) * 16u);
+            layer.tick();
+        }
+        mm::platform::setTestNowMs(0);
+
+        int untouched = 0;
+        for (mm::nrOfLightsType i = 0; i < lights; i++)
+            if (buf[i * 3] == kStale && buf[i * 3 + 1] == kStale && buf[i * 3 + 2] == kStale)
+                untouched++;
+
+        INFO("effect: " << effectName);
+        CAPTURE(untouched);
+        // A few stale pixels are possible where an effect legitimately paints a static subset;
+        // a whole inherited frame is not. Half the grid is the line between the two.
+        CHECK(untouched < static_cast<int>(lights) / 2);
+        audited++;
+    });
+    MESSAGE("audited " << audited << " effects against a dirty buffer");
 }

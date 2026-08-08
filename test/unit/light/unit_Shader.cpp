@@ -272,3 +272,19 @@ TEST_CASE("depth fade dims with distance and stops at the far plane") {
     const uint8_t near = depthFade(100, 1000), far = depthFade(900, 1000);
     CHECK(near > far);                       // monotone
 }
+
+// A point near the near plane projects arbitrarily far out. The divide is exact in 64 bits, but the
+// result need not fit the int32 the caller gets back — and truncating it wraps a point off one edge
+// of the screen to the other, which reads as geometry tearing across the panel.
+TEST_CASE("projecting a point that lands outside the coordinate range is rejected") {
+    int32_t x = 0, y = 0;
+    CHECK(project(2000000000, 2000000000, 1, 65536, x, y) == false);
+    CHECK(project(0, 0, 0, 65536, x, y) == false);           // at the viewer
+    CHECK(project(0, 0, -10, 65536, x, y) == false);         // behind the viewer
+
+    // The ordinary case still projects, and halving the distance doubles the screen offset.
+    REQUIRE(project(65536, 0, 65536, 65536, x, y) == true);
+    CHECK(x == 65536);
+    REQUIRE(project(65536, 0, 32768, 65536, x, y) == true);
+    CHECK(x == 131072);
+}

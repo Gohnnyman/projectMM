@@ -128,7 +128,11 @@ private:
     /// needed; a negative `b` returns 0 rather than a plausible-looking wrong index.
     static int32_t floorDiv(int32_t a, int32_t b) {
         if (b <= 0) return 0;
-        return (a >= 0) ? (a / b) : -((-a + b - 1) / b);
+        // Adjust the truncated quotient rather than negating `a`: -INT32_MIN has no int32
+        // representation, so the negate-and-round form is undefined behaviour at the bottom of the
+        // range — reachable from an unclamped coordinate.
+        const int32_t q = a / b;
+        return (a % b != 0 && a < 0) ? q - 1 : q;
     }
 
     BeatPhase phase_;

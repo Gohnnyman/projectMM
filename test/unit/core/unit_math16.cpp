@@ -412,3 +412,16 @@ TEST_CASE("isqrt64 finds a root across the whole 64-bit range") {
         CHECK(isqrt64(r * r - 1) == r - 1);
     }
 }
+
+// atan16 folds into the first octant by taking the magnitude of each axis. INT32_MIN is the one
+// value whose negation has no int32 representation, so the obvious fold is undefined behaviour at
+// exactly one input per axis — and a coordinate reaches it whenever a caller passes an unclamped
+// difference. The angles below are the correct quadrants: due-left, straight-down, and the diagonal
+// between them.
+TEST_CASE("atan16 handles the extremes of its input range") {
+    CHECK(atan16(INT32_MIN, 0) == 49152);            // straight down (three quarter turns)
+    CHECK(atan16(0, INT32_MIN) == 32768);            // due left (half a turn)
+    CHECK(atan16(INT32_MIN, INT32_MIN) == 40960);    // the diagonal between them
+    CHECK(atan16(INT32_MAX, INT32_MAX) == 8192);     // and the opposite diagonal
+    CHECK(atan16(0, 0) == 0);                        // the centre has no direction
+}

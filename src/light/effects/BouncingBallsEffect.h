@@ -60,11 +60,16 @@ public:
         // property of the framerate (erased before the eye sees it on a fast device, smeared on a
         // slow one). See architecture.md, the tick-rate rule.
         {
-            const uint32_t sc = trailTime_.advance(elapsed());
-            uint32_t amt = (static_cast<uint32_t>(100) * sc) / particles::FrameTime::kOne;
-            if (amt == 0 && sc > 0) amt = 1;
-            if (amt > 255) amt = 255;
-            if (amt) layer()->fadeToBlackBy(static_cast<uint8_t>(amt));
+            // Carry the fraction rather than rounding it up to 1: `fadeToBlackBy` runs once per
+            // RENDER, so a floor of 1 at high fps applies many times the intended decay and the
+            // trail is visibly shorter on a fast device than on a slow one.
+            fadeCarry_ += 100u * trailTime_.advance(elapsed());
+            uint32_t amt = fadeCarry_ / particles::FrameTime::kOne;
+            if (amt > 0) {
+                fadeCarry_ -= amt * particles::FrameTime::kOne;
+                if (amt > 255) amt = 255;
+                layer()->fadeToBlackBy(static_cast<uint8_t>(amt));
+            }
         }
 
         constexpr float gravity = -9.81f;
@@ -145,7 +150,8 @@ private:
     ScratchBuffer<Ball> balls_{*this};
     Random8 rng_;               // relaunch-kick randomness (FastLED random8(5,11) → below(5,11))
 
-    particles::FrameTime trailTime_{60};   // trail decay is per second, not per frame
+    particles::FrameTime trailTime_{60};
+    uint32_t fadeCarry_ = 0;   // sub-frame trail fade not yet applied   // trail decay is per second, not per frame
 };
 
 } // namespace mm

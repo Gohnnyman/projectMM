@@ -79,8 +79,8 @@ public:
             for (lengthType x = 0; x < w; x++) {
                 uint16_t r_acc = 0, g_acc = 0, b_acc = 0;
                 for (uint8_t i = 0; i < count && i < MAX_RIPPLES; i++) {
-                    int16_t dx = static_cast<int16_t>(x - cx_[i]);
-                    int16_t dy = static_cast<int16_t>(y - cy_[i]);
+                    const int32_t dx = static_cast<int32_t>(x) - cx_[i];
+                    const int32_t dy = static_cast<int32_t>(y) - cy_[i];
                     // Kept wide for the same reason as maxR: clamping the per-pixel distance to a
                     // byte made every light past 255 from a ripple's centre read as exactly 255, so
                     // the ring never appeared out there at all.

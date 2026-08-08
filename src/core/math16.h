@@ -231,13 +231,16 @@ inline constexpr int16_t atan16_octant[33] = {
 inline angle16 atan16(int32_t y, int32_t x) {
     if (x == 0 && y == 0) return 0;                       // the centre has no direction
     // Fold into the first octant, remembering which one, then interpolate the arctangent there.
-    int32_t ax = x < 0 ? -x : x;
-    int32_t ay = y < 0 ? -y : y;
+    // Unsigned magnitudes: negating INT32_MIN has no int32 representation, so the obvious
+    // `x < 0 ? -x : x` is undefined behaviour at exactly one input per axis. Widening first keeps
+    // the fold exact across the whole range.
+    uint32_t ax = x < 0 ? -static_cast<uint32_t>(x) : static_cast<uint32_t>(x);
+    uint32_t ay = y < 0 ? -static_cast<uint32_t>(y) : static_cast<uint32_t>(y);
     const bool swap = ay > ax;
-    if (swap) { const int32_t t = ax; ax = ay; ay = t; }
+    if (swap) { const uint32_t t = ax; ax = ay; ay = t; }
     // ratio = ay/ax in 0..65535; within one octant arctan is near-linear, so a linear read with a
     // small cubic correction is well inside a pixel of error at any grid size we drive.
-    const uint32_t ratio = static_cast<uint32_t>((static_cast<uint64_t>(ay) << 16) / (ax ? ax : 1));
+    const uint32_t ratio = static_cast<uint32_t>((static_cast<uint64_t>(ay) << 16) / (ax ? ax : 1u));
     // Table lookup with linear interpolation, the same shape as sin16 above and for the same reason:
     // a fitted polynomial was tried first and measured 9.6 degrees of error at the octant boundary,
     // where a 66-byte table is exact at every entry and closes precisely at 8192.

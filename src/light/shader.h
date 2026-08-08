@@ -200,8 +200,14 @@ inline int32_t sdPolygon(draw::pos_t px, draw::pos_t py, draw::pos_t cx, draw::p
 inline bool project(int32_t x, int32_t y, int32_t z, int32_t fov,
                     int32_t& outX, int32_t& outY) {
     if (z <= 0) return false;                       // at or behind the viewer: nothing to draw
-    outX = static_cast<int32_t>((static_cast<int64_t>(x) * fov) / z);
-    outY = static_cast<int32_t>((static_cast<int64_t>(y) * fov) / z);
+    // A point very close to the near plane projects arbitrarily far out: the quotient is exact in
+    // int64 but need not fit int32, and truncating it wraps a point off one edge to the other.
+    // Out of range is treated like behind the viewer — there is nothing on screen to draw.
+    const int64_t px = (static_cast<int64_t>(x) * fov) / z;
+    const int64_t py = (static_cast<int64_t>(y) * fov) / z;
+    if (px < INT32_MIN || px > INT32_MAX || py < INT32_MIN || py > INT32_MAX) return false;
+    outX = static_cast<int32_t>(px);
+    outY = static_cast<int32_t>(py);
     return true;
 }
 

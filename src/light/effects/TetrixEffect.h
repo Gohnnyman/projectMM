@@ -80,6 +80,10 @@ public:
 
         const uint32_t now = platform::millis();
         const RGB black{0, 0, 0};
+        // Own the background before painting columns. The Layer does not clear between frames, and
+        // this effect writes only inside its own columns — and nothing at all during the start
+        // delay — so without this it shows the previous effect's frame around and behind the game.
+        draw::fill(cv, black);
 
         // Process exactly the live column count (never the allocated max — robust to a shrink
         // before prepare reruns).

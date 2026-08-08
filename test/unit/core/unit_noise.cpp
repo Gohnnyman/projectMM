@@ -77,8 +77,8 @@ TEST_CASE("16-bit interpolation stays exact across the full range") {
     CHECK(noise::lerp16(0, 65535, 65535) == 65534);       // t is a fraction of 65536, not of 65535
     CHECK(noise::lerp16(1000, 1000, 40000) == 1000);      // equal endpoints never move
     // The worst case for the product, from both directions — a wrapped intermediate lands far away.
-    CHECK(noise::lerp16(0, 65535, 49152) == doctest::Approx(49151).epsilon(0.001));
-    CHECK(noise::lerp16(65535, 0, 49152) == doctest::Approx(16383).epsilon(0.001));
+    CHECK(noise::lerp16(0, 65535, 49152) == 49151);      // exact: integer arithmetic
+    CHECK(noise::lerp16(65535, 0, 49152) == 16383);
     // Monotonic: interpolating further along never goes backwards.
     uint16_t prev = 0;
     for (uint32_t t = 0; t <= 65535u; t += 251) {

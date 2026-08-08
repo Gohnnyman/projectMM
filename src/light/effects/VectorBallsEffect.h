@@ -75,8 +75,8 @@ public:
 
             // Two rotations, both through the shared helper: yaw about y (x and z move), then
             // pitch about x (y and z move).
-            rotatePair(px, pz, yaw);
-            rotatePair(py, pz, pitch);
+            shader::rotate(px, pz, yaw);
+            shader::rotate(py, pz, pitch);
 
             int32_t sx, sy;
             if (!shader::project(px, py, pz + camZ, 65536, sx, sy)) continue;   // behind the viewer
@@ -128,16 +128,6 @@ private:
         { 0,  0, -2}, { 0,  0,  2}, { 0, -2,  0}, { 0,  2,  0}, {-2,  0,  0}, { 2,  0,  0},
     };
 
-    /// Rotate one coordinate pair about the origin. `shader::rotate` takes `pos_t`, so this is the
-    /// int32 form the projection pipeline works in.
-    static void rotatePair(int32_t& a, int32_t& b, angle16 angle) {
-        const int32_t c = cos16(angle);           // signed, per lib8tion
-        const int32_t s = sin16(angle);
-        const int32_t na = (static_cast<int64_t>(a) * c - static_cast<int64_t>(b) * s) >> 15;
-        const int32_t nb = (static_cast<int64_t>(a) * s + static_cast<int64_t>(b) * c) >> 15;
-        a = na;
-        b = nb;
-    }
 
     BeatPhase phase_;
 };

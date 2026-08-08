@@ -71,7 +71,7 @@ namespace mm::particles {
 class FrameTime {
 public:
     /// `referenceHz` is the rate the effect's numbers are written against; 60 is the convention.
-    explicit FrameTime(uint16_t referenceHz = 60) : refMs_(referenceHz > 0 ? 1000u / referenceHz : 16u) {}
+    explicit FrameTime(uint16_t referenceHz = 60) : refHz_(referenceHz > 0 ? referenceHz : 60) {}
 
     /// Call once per frame. Returns the scale in 8.8 fixed point (256 == one reference frame).
     uint32_t advance(uint32_t nowMs) {
@@ -81,22 +81,29 @@ public:
         // A frame faster than the timer can resolve reports dt == 0. Carrying the remainder means
         // those frames still add up rather than freezing the animation — the same sub-millisecond
         // trap BeatPhase solves by dividing late.
-        carryMs_ += dt;
-        uint32_t s = (carryMs_ * kOne) / (refMs_ ? refMs_ : 1);
-        if (s == 0) return 0;                     // not enough time yet; the carry keeps it
-        carryMs_ = 0;
+        // Carry the NUMERATOR, not milliseconds, and divide late — the rule BeatPhase follows. One
+        // unit is 1000/(256*60) = 0.065 ms, so a millisecond carry cannot represent the remainder at
+        // all: it gets truncated away, and because the truncation differs by render rate (11 units a
+        // frame at 60 fps, under 1 at 200) the discarded time IS a framerate dependency, the exact
+        // fault this class removes. Deriving the period as `1000 / refHz` has the same shape of bug:
+        // it truncates to 16 ms, a 62.5 Hz reference that runs every 60-fps setting ~4% fast.
+        num_ += static_cast<uint64_t>(dt) * kOne * refHz_;
+        const uint64_t units = num_ / 1000u;
+        if (units == 0) return 0;                 // not enough time yet; the numerator keeps it
+        num_ -= units * 1000u;
+        uint32_t s = static_cast<uint32_t>(units > kMaxScale ? kMaxScale : units);
         // Cap a long stall (WiFi reconnect, reflash) so one frame cannot teleport every particle.
         return s > kMaxScale ? kMaxScale : s;
     }
 
-    void reset() { started_ = false; carryMs_ = 0; }
+    void reset() { started_ = false; num_ = 0; }
 
     static constexpr uint32_t kOne = 256;         ///< one reference frame
     static constexpr uint32_t kMaxScale = 256 * 8;
 
 private:
-    uint32_t refMs_;
-    uint32_t carryMs_ = 0;
+    uint16_t refHz_;
+    uint64_t num_ = 0;   // undivided time: dt * kOne * refHz_, spent in whole units
     uint32_t lastMs_ = 0;
     bool started_ = false;
 };

@@ -124,7 +124,10 @@ private:
                                 65535, sparks, sparkLife, shellHue_, frame_);
                 shellLive_ = false;
             }
-        } else if ((hashInt(frame_, 0, 0, kSeed) % 256u) < launchRate / 4u) {
+        // Compare against the full 0..1023 range rather than dividing the rate by 4: the divide
+        // truncated launchRate 1-3 (its own minimum is 1) to zero, so the slowest settings the
+        // control offers never launched anything at all.
+        } else if ((hashInt(frame_, 0, 0, kSeed) % 1024u) < launchRate) {
             // Launch from a point along the floor, thrown up and slightly sideways.
             shellX_  = static_cast<draw::pos_t>(hashInt(frame_, 1, 0, kSeed) % static_cast<uint32_t>(wSub ? wSub : 1));
             shellY_  = hSub;

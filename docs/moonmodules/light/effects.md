@@ -373,7 +373,7 @@ A rotating 3D object drawn as shaded spheres — the demoscene classic that name
 - `distance` — how far the object is from the viewer.
 - `fade` — dim the far balls, which is what reads as depth.
 
-Painter's ordering matters more than it sounds: without it a far ball can paint over a near one and the object reads as turning inside out. Costs 3 µs a frame — 14 points rather than a per-pixel loop, so it is the cheapest of the showcases.
+Painter's ordering matters more than it sounds: without it a far ball can paint over a near one and the object reads as turning inside out. Costs a few microseconds a frame at default settings — 14 points rather than a per-pixel loop, so it is the cheapest of the showcases.
 
 Origin: projectMM original, on the Amiga-era demoscene vector-ball effect
 
