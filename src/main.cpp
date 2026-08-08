@@ -49,6 +49,7 @@
 #include "light/effects/FireworksEffect.h"
 #include "light/effects/BallpitEffect.h"
 #include "light/effects/TruchetEffect.h"
+#include "light/effects/VectorBallsEffect.h"
 #include "light/effects/RaymarchEffect.h"
 #include "light/effects/SphereMoveEffect.h"
 #include "light/effects/StarFieldEffect.h"
@@ -229,6 +230,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::FireworksEffect>("FireworksEffect", "light/effects.md#fireworks");
     mm::ModuleFactory::registerType<mm::BallpitEffect>("BallpitEffect", "light/effects.md#ballpit");
     mm::ModuleFactory::registerType<mm::TruchetEffect>("TruchetEffect", "light/effects.md#truchet");
+    mm::ModuleFactory::registerType<mm::VectorBallsEffect>("VectorBallsEffect", "light/effects.md#vectorballs");
 #if MM_HEAVY_COMPUTE
     // Only where the platform declares per-pixel float headroom; absent entirely elsewhere.
     mm::ModuleFactory::registerType<mm::RaymarchEffect>("RaymarchEffect", "light/effects.md#raymarch");

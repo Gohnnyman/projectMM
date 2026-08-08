@@ -58,9 +58,11 @@ public:
             pool_.ttl = ttl_.data(); pool_.hue = hue_.data(); pool_.acc = acc_.data();
             pool_.count = kPool;
             pool_.clear();
+        } else {
+            pool_ = particles::Pool{};   // a failed resize must leave valid() false, not a stale pool
         }
         time_.reset();
-        filled_ = false;
+        filledCount_ = 0;
     }
 
     void tick() MM_NONBLOCKING override {
@@ -71,14 +73,17 @@ public:
         const draw::pos_t wSub = draw::toSub(w - 1);
         const draw::pos_t hSub = draw::toSub(h - 1);
 
-        // Fill the pit once, spread across the top so the balls fall in rather than starting stacked.
-        if (!filled_) {
-            const uint8_t n = balls < kPool ? balls : kPool;
+        // Fill the pit when the count changes, spread across the top so the balls fall in rather
+        // than starting stacked. Tracking the count rather than a one-shot flag means turning
+        // `balls` up mid-run actually adds balls instead of silently doing nothing.
+        const uint8_t n = balls < kPool ? balls : kPool;
+        if (n != filledCount_) {
+            pool_.clear();
             for (uint8_t i = 0; i < n; i++)
                 pool_.spawn(static_cast<draw::pos_t>(hashInt(i, 1, 0, kSeed) % static_cast<uint32_t>(wSub ? wSub : 1)),
                             static_cast<draw::pos_t>(hashInt(i, 2, 0, kSeed) % static_cast<uint32_t>(hSub ? hSub : 1)),
                             0, 0, 255, static_cast<uint8_t>(hashInt(i, 3, 0, kSeed)));
-            filled_ = true;
+            filledCount_ = n;
         }
 
         draw::fill(cv, RGB{0, 0, 0});
@@ -118,7 +123,7 @@ private:
     particles::Pool pool_;
     particles::FrameTime time_{60};
     uint32_t frame_ = 0;
-    bool filled_ = false;
+    uint8_t filledCount_ = 0;   // the `balls` value the pit currently holds
 };
 
 }  // namespace mm

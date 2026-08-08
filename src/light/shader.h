@@ -124,7 +124,6 @@ constexpr int32_t opUnion(int32_t a, int32_t b) { return a < b ? a : b; }
 /// Only where the shapes overlap.
 constexpr int32_t opIntersect(int32_t a, int32_t b) { return a > b ? a : b; }
 
-/// Shape `a` with shape `b` cut out of it.
 /// Shape `b` with shape `a` cut out of it — Quilez's `opSubtraction(d1, d2) = max(-d1, d2)`, whose
 /// operand order this follows deliberately. Reversing it (cutting b from a, which reads more
 /// naturally) silently inverts every scene transcribed from Shadertoy, so the standard order wins.
@@ -180,6 +179,39 @@ inline int32_t sdPolygon(draw::pos_t px, draw::pos_t py, draw::pos_t cx, draw::p
     // Distance to the edge is the radius divided by cos(angle from the wedge centre).
     const int32_t edge = static_cast<int32_t>((static_cast<int64_t>(r) * 32768) / c);
     return dist - edge;
+}
+
+// --- Projection ------------------------------------------------------------------------------
+//
+// Putting a 3D point on a 2D panel. Three effects hand-roll this today — StarField's 1/z pinhole,
+// GEQ3D's converging foreshortening, RubiksCube's voxel-to-face classification — which is the same
+// repeated-pattern evidence that justified pulling out `BeatPhase`.
+//
+// The whole of perspective is one divide: things further away move less and appear smaller, in
+// exact proportion to their distance. Everything else (a camera, a rotation, a depth sort) is
+// arrangement around that divide.
+
+/// Project a 3D point onto the screen. `z` is depth from the viewer; `fov` scales the result, so a
+/// larger value is a longer lens. Returns 16.16 shader-space coordinates via `outX`/`outY`, and the
+/// depth for sorting or fading.
+///
+/// A point at or behind the viewer has no projection — `z <= 0` returns false rather than dividing
+/// by zero or wrapping a point behind the camera round to the front, which is the classic artifact.
+inline bool project(int32_t x, int32_t y, int32_t z, int32_t fov,
+                    int32_t& outX, int32_t& outY) {
+    if (z <= 0) return false;                       // at or behind the viewer: nothing to draw
+    outX = static_cast<int32_t>((static_cast<int64_t>(x) * fov) / z);
+    outY = static_cast<int32_t>((static_cast<int64_t>(y) * fov) / z);
+    return true;
+}
+
+/// How bright something at depth `z` should be, given the distance where it fades out entirely.
+/// Nearer is brighter — the depth cue that makes a projected scene read as having space in it
+/// rather than being a flat scatter.
+constexpr uint8_t depthFade(int32_t z, int32_t far) {
+    if (z <= 0 || far <= 0) return 255;
+    if (z >= far) return 0;
+    return static_cast<uint8_t>(((far - z) * 255) / far);
 }
 
 // --- Colour ---------------------------------------------------------------------------------------

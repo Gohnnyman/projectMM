@@ -284,6 +284,15 @@ struct Pool {
     /// Semi-implicit Euler means the caller applies forces (which update velocity) and then calls
     /// this, so position always integrates the already-updated velocity. That ordering is what makes
     /// it stable under a constant force where explicit Euler drifts.
+    /// Advance every live particle. Velocities are in SUB-PIXEL units per reference frame, so a
+    /// caller wanting fine motion expresses it in the velocity rather than relying on the step to
+    /// keep a fraction: a velocity of 256 is one pixel per frame, and 1 is 1/256th of a pixel.
+    ///
+    /// That is why no carry is needed here where `gravity` has one. Gravity accumulates a force
+    /// whose per-frame slice can round to nothing; a position already carries 8 bits of fraction, so
+    /// the same slice lands in those bits instead of being lost. A caller passing whole-pixel
+    /// velocities on a fast device is the case that stalls, and the fix is to scale the velocity —
+    /// `draw::toSub(1)` per frame, not 1.
     void step(uint32_t scale = FrameTime::kOne) {
         for (uint16_t i = 0; i < count; i++)
             if (ttl[i]) {
@@ -330,6 +339,24 @@ struct Pool {
         }
     }
 
+    /// Reduce one coordinate into 0..span, in constant time.
+    ///
+    /// A while-loop reduction costs one iteration per span crossed, so a particle given a large
+    /// velocity (or a long stall) walks the loop thousands of times on the render tick. Modulo is
+    /// one divide whatever the distance. Exactly `span` stays put rather than folding to 0, which
+    /// is the far edge being inclusive — matching `bounce`, where `> span` is also the test.
+    static draw::pos_t wrapCoord(draw::pos_t v, draw::pos_t span) {
+        if (v >= 0 && v <= span) return v;                       // the common case, no divide
+        // The two edges are NOT symmetric, and the loops this replaced are why: reducing from above
+        // stops at `span` (`while (v > span)`), while climbing from below stops at 0 (`while
+        // (v < 0)`). So an exact multiple lands on `span` coming down and on 0 coming up. Both name
+        // the same point on a wrapped axis; keeping each side where it was is what makes this a
+        // speed change and nothing more.
+        const draw::pos_t m = static_cast<draw::pos_t>(v % span);
+        if (v > span) return static_cast<draw::pos_t>(m == 0 ? span : m);
+        return static_cast<draw::pos_t>(m == 0 ? 0 : m + span);
+    }
+
     /// Wrap particles around the grid edges: a particle leaving one side re-enters the other.
     ///
     /// The third wall behaviour, alongside `bounce` and `killOutside`, and the one snow, rain and
@@ -338,14 +365,8 @@ struct Pool {
     void wrap(draw::pos_t w, draw::pos_t h, bool wrapX = true, bool wrapY = true) {
         for (uint16_t i = 0; i < count; i++) {
             if (!ttl[i]) continue;
-            if (wrapX && w > 0) {
-                while (x[i] < 0) x[i] = static_cast<draw::pos_t>(x[i] + w);
-                while (x[i] > w) x[i] = static_cast<draw::pos_t>(x[i] - w);
-            }
-            if (wrapY && h > 0) {
-                while (y[i] < 0) y[i] = static_cast<draw::pos_t>(y[i] + h);
-                while (y[i] > h) y[i] = static_cast<draw::pos_t>(y[i] - h);
-            }
+            if (wrapX && w > 0) x[i] = wrapCoord(x[i], w);
+            if (wrapY && h > 0) y[i] = wrapCoord(y[i], h);
         }
     }
 
@@ -416,7 +437,7 @@ struct Pool {
     /// grid that the wall pass has already checked (the frame order at the top of this file).
     void collide(draw::pos_t radius, uint16_t e = 200, uint32_t seed = 0) {
         if (radius <= 0) return;
-        const int32_t r2 = static_cast<int32_t>(radius) * radius;
+        const int64_t r2 = static_cast<int64_t>(radius) * radius;
         for (uint16_t i = 0; i < count; i++) {
             if (!ttl[i]) continue;
             for (uint16_t j = static_cast<uint16_t>(i + 1); j < count; j++) {
@@ -427,13 +448,14 @@ struct Pool {
                 if (dx > radius || dx < -radius) continue;
                 const int32_t dy = y[j] - y[i];
                 if (dy > radius || dy < -radius) continue;
-                const int32_t d2 = dx * dx + dy * dy;
+                // 64-bit: a large contact radius squares past int32 (dx and dy are sub-pixel).
+                const int64_t d2 = static_cast<int64_t>(dx) * dx + static_cast<int64_t>(dy) * dy;
                 if (d2 > r2 || d2 == 0) continue;               // not touching, or exactly coincident
 
                 // Elastic response along the line of centres, equal masses: the pair swaps the
                 // component of velocity that points at the other particle and keeps the tangential
                 // part. Scaled by `e` so contacts can lose energy.
-                const int32_t d = static_cast<int32_t>(isqrt(static_cast<uint32_t>(d2)));
+                const int32_t d = static_cast<int32_t>(isqrt64(static_cast<uint64_t>(d2)));
                 if (d == 0) continue;
                 const int32_t nx = (dx * 256) / d;              // unit normal, 8.8
                 const int32_t ny = (dy * 256) / d;

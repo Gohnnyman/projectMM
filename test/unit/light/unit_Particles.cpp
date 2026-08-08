@@ -277,8 +277,10 @@ TEST_CASE("an attractor does not fling a particle sitting on top of it") {
     TestPool<2> t;
     t.pool.spawn(toSub(8), toSub(8), 0, 0, 200, 0);
     t.pool.attract(toSub(8), toSub(8), 100000);
-    CHECK(t.vx[0] < toSub(100));            // finite, not a divide-by-zero blowup
-    CHECK(t.vy[0] < toSub(100));
+    // MAGNITUDE, not just the upper side: an unclamped inverse-square blows up in whichever
+    // direction the rounding sends it, and a one-sided check passes on a large negative.
+    CHECK(std::abs(t.vx[0]) < toSub(100));   // finite, not a divide-by-zero blowup
+    CHECK(std::abs(t.vy[0]) < toSub(100));
 }
 
 // --- Rendering -------------------------------------------------------------------------------
@@ -568,6 +570,34 @@ TEST_CASE("wrapping can be enabled per axis") {
     t.pool.wrap(w, h, /*wrapX=*/true, /*wrapY=*/false);
     CHECK(t.x[0] > 0);                            // x wrapped...
     CHECK(t.y[0] < 0);                            // ...y was left alone, so a snowfall still lands
+}
+
+// Wrapping reduces by modulo rather than by repeated subtraction, so a particle thrown a long way
+// out costs the same as one just over the line. These pin the exact landing points, including the
+// two edges, because "somewhere back inside" would pass for an implementation that is off by a span.
+TEST_CASE("wrapping puts a particle at an exact position, however far out it started") {
+    TestPool<4> t;
+    const draw::pos_t w = toSub(16), h = toSub(16);
+    t.pool.spawn(w + toSub(3), toSub(8), 0, 0, 500, 0);         // 3 past the right edge
+    t.pool.spawn(toSub(-3), toSub(8), 0, 0, 500, 0);            // 3 before the left edge
+    t.pool.spawn(w * 50 + toSub(5), toSub(8), 0, 0, 500, 0);    // fifty grids out: one modulo, not 50 loops
+    t.pool.wrap(w, h);
+    CHECK(t.x[0] == toSub(3));
+    CHECK(t.x[1] == w - toSub(3));
+    CHECK(t.x[2] == toSub(5));
+}
+
+// The two edges are deliberately not symmetric: coming down from above stops AT the far edge, while
+// climbing from below stops at 0. Both name the same point on a wrapped axis, and the wall passes
+// agree with this, so it is pinned rather than left to drift.
+TEST_CASE("an exact multiple of the axis lands on the edge it approached from") {
+    TestPool<4> t;
+    const draw::pos_t w = toSub(16), h = toSub(16);
+    t.pool.spawn(w * 2, toSub(8), 0, 0, 500, 0);       // exactly two grids to the right
+    t.pool.spawn(-w, toSub(8), 0, 0, 500, 0);          // exactly one grid to the left
+    t.pool.wrap(w, h);
+    CHECK(t.x[0] == w);                               // reduced from above: rests on the far edge
+    CHECK(t.x[1] == 0);                               // climbed from below: rests on zero
 }
 
 TEST_CASE("wrapping leaves a particle already inside the grid untouched") {

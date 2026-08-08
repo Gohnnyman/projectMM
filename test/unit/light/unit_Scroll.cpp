@@ -191,4 +191,13 @@ TEST_CASE("a strided wrap conserves every light, whatever the rotation") {
     const uint32_t before = s.total();
     for (int i = 0; i < 3; i++) draw::scroll(s.cv, 1, 2, /*wrap=*/true);
     CHECK(s.total() == before);                  // a rotation loses nothing
+
+    // Three steps of 2 on a 5-element axis is a net rotation of one (6 mod 5), so every light has
+    // moved exactly one position down and the last has come around to the front. Conservation alone
+    // would still hold if the content were scrambled; the positions are what pin the rotation.
+    CHECK(s.at(0, 0) == 50);
+    CHECK(s.at(0, 1) == 10);
+    CHECK(s.at(0, 2) == 20);
+    CHECK(s.at(0, 3) == 30);
+    CHECK(s.at(0, 4) == 40);
 }

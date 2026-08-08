@@ -173,8 +173,8 @@ private:
         return (x - inMin) * (outMax - outMin) / den + outMin;
     }
 
-    // The grid depth accessor needs the >0 guard for the dims z extent; the width/oneColor control
-    // members are named *Control so they don't shadow the inherited width()/depth() accessors.
+    // The width/oneColor control members are named *Control so they don't shadow the inherited
+    // width()/depth() accessors.
 
     // One drop per X column. Self-sizing, self-freeing, self-reporting.
     ScratchBuffer<Tetris> drops_{*this};

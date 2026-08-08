@@ -52,6 +52,17 @@ public:
     uint32_t ticks = 0;
 };
 
+/// A modifier that declares per-frame work, so the Layer's live REMAP pass is actually reached.
+/// CountingModifier leaves hasModifyLive() false, which means it never exercises that gate at all.
+class LiveCountingModifier : public mm::ModifierBase {
+public:
+    void tick() MM_NONBLOCKING override { ticks++; }
+    bool hasModifyLive() const override { return true; }
+    void modifyLive(mm::Coord3D& pos, const mm::Coord3D& /*logical*/) const override { remaps++; (void)pos; }
+    uint32_t ticks = 0;
+    mutable uint32_t remaps = 0;
+};
+
 } // namespace
 
 // Each per-effect case runs the same probe: build a Layer over an empty Layouts (no children → 0 lights),
@@ -124,12 +135,13 @@ TEST_CASE("a live modifier is skipped on an empty grid without crashing") {
     mm::Layer layer;
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
-    CountingModifier mod;
+    LiveCountingModifier mod;            // declares live work, so the REMAP gate is reached
     layer.addChild(&mod);
     layouts.applyState();
     layer.applyState();
 
     REQUIRE(layer.width() == 0);
     for (int i = 0; i < 5; i++) layer.tick();
-    CHECK(mod.ticks == 5);               // modifiers still advance; the live REMAP is what is skipped
+    CHECK(mod.ticks == 5);               // modifiers still advance...
+    CHECK(mod.remaps == 0);              // ...but with no lights there is nothing to remap
 }

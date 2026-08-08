@@ -33,6 +33,10 @@
 // either the migration changed the arithmetic (a bug — the accumulators are meant to be identical)
 // or the change was intentional and reviewed, in which case the golden is updated in the same commit
 // with the reason in the message.
+//
+// Echo, BouncingBalls, Lissajous and Tetrix carry hashes captured AFTER their motion moved onto
+// elapsed time (architecture.md, tick-rate rule): what they draw on a given frame changed while the
+// motion per SECOND did not. unit_Effects_framerate.cpp pins the behaviour these hashes stand for.
 
 #include "golden_frame.h"
 
@@ -78,7 +82,7 @@ TEST_CASE("time-driven effects render byte-identical frames (migration guard)") 
     SUBCASE("a warped noise field folded into a kaleidoscope")      { PolarNoiseEffect e;      golden::checkGolden("PolarNoiseEffect", golden::renderHash(e, 16, 16, 1), 0x5e888644938f8851ull); }
     SUBCASE("drops ripple, reflect off the edges and interfere")     { WaterRippleEffect e;     golden::checkGolden("WaterRippleEffect", golden::renderHash(e, 16, 16, 1), 0xa11f9c4f27cba8d5ull); }
     SUBCASE("a texture-mapped tunnel flying toward a vanishing point")          { TunnelEffect e;          golden::checkGolden("TunnelEffect", golden::renderHash(e, 16, 16, 1), 0xa2f6752d82436fc1ull); }
-    SUBCASE("the previous frame fed back zoomed and rotated, leaving trails")            { EchoEffect e;            golden::checkGolden("EchoEffect", golden::renderHash(e, 16, 16, 1), 0x27141166d74860c0ull); }
+    SUBCASE("the previous frame fed back zoomed and rotated, leaving trails")            { EchoEffect e;            golden::checkGolden("EchoEffect", golden::renderHash(e, 16, 16, 1), 0xb32372362ca42d2full); }
     SUBCASE("two colour fields trade places pixel by pixel")        { DissolveEffect e;        golden::checkGolden("DissolveEffect", golden::renderHash(e, 16, 16, 1), 0xeb7810ca874152bcull); }
     SUBCASE("shells rise, stall at their apex and burst into falling sparks")       { FireworksEffect e;       golden::checkGolden("FireworksEffect", golden::renderHash(e, 16, 16, 1), 0xf76a40a372582783ull); }
     SUBCASE("balls fall, pile up and shove each other aside")         { BallpitEffect e;         golden::checkGolden("BallpitEffect", golden::renderHash(e, 16, 16, 1), 0xfce7d8cf68e91fddull); }

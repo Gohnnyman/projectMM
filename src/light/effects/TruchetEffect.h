@@ -122,10 +122,12 @@ private:
         return d - r < 0 ? r - d : d - r;
     }
 
-    /// Divide flooring toward negative infinity. C++ truncates toward zero, which would make the
-    /// cell index jump by one either side of the origin and put a visible seam through the middle.
+    /// Divide flooring toward negative infinity, for a POSITIVE divisor. C++ truncates toward zero,
+    /// which would make the cell index jump by one either side of the origin and put a visible seam
+    /// through the middle. `b` is always a tile size here, so the positive-only form is the one
+    /// needed; a negative `b` returns 0 rather than a plausible-looking wrong index.
     static int32_t floorDiv(int32_t a, int32_t b) {
-        if (b == 0) return 0;
+        if (b <= 0) return 0;
         return (a >= 0) ? (a / b) : -((-a + b - 1) / b);
     }
 

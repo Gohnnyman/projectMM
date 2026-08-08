@@ -86,7 +86,7 @@ public:
                     // the ring never appeared out there at all.
                     const uint32_t d = dist16(dx, dy);
                     int32_t diff = static_cast<int32_t>(d) - static_cast<int32_t>(radius_[i]);
-                    if (diff < 0) diff = static_cast<int16_t>(-diff);
+                    if (diff < 0) diff = -diff;   // stays int32: narrowing truncated large distances
                     if (diff < thickness) {
                         // Brightness peaks at ring centre, falls off with distance from ring.
                         uint8_t falloff = static_cast<uint8_t>(((thickness - diff) * 255) / thickness);

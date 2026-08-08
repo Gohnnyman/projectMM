@@ -31,7 +31,8 @@ TEST_CASE("sin16 traces a full sine over one turn") {
 // than the 8-bit LUT's resolution must produce intermediate values, not a staircase.
 TEST_CASE("sin16 is smooth between LUT entries, where sin8 would step") {
     // Four samples inside ONE 8-bit step (angle 0x1000..0x10C0 all share sin8 index 0x10).
-    const uint16_t a = sin16(0x1000), b = sin16(0x1040), c = sin16(0x1080), d = sin16(0x10C0);
+    // int16_t, matching sin16's signed return: unsigned samples would compare wrong once negative.
+    const int16_t a = sin16(0x1000), b = sin16(0x1040), c = sin16(0x1080), d = sin16(0x10C0);
     CHECK(a < b);
     CHECK(b < c);
     CHECK(c < d);                                   // strictly rising — a staircase would tie
@@ -386,5 +387,28 @@ TEST_CASE("kaleido is the identity below two segments") {
     for (uint32_t a = 0; a < 65536; a += 4099) {
         CHECK(kaleido(static_cast<angle16>(a), 0) == a);
         CHECK(kaleido(static_cast<angle16>(a), 1) == a);
+    }
+}
+
+// isqrt64 exists so a squared distance wider than 32 bits still has a root — a large contact radius
+// in sub-pixel units squares past int32. The Newton iteration has to reach that top of range without
+// its own arithmetic overflowing on the way.
+TEST_CASE("isqrt64 finds a root across the whole 64-bit range") {
+    CHECK(isqrt64(0) == 0);
+    CHECK(isqrt64(1) == 1);
+    CHECK(isqrt64(2) == 1);          // floor, not rounded
+    CHECK(isqrt64(3) == 1);
+    CHECK(isqrt64(4) == 2);
+    CHECK(isqrt64(9) == 3);
+    CHECK(isqrt64(10) == 3);
+    // The top of the range: seeding Newton from x itself overflowed on the first step and returned
+    // 0 here, which would have read as "zero distance" at exactly the point the widening was for.
+    CHECK(isqrt64(UINT64_MAX) == 4294967295ull);
+    CHECK(isqrt64(1ull << 62) == (1ull << 31));
+    // Exact squares and the value just below them, across the width.
+    for (uint64_t r : {3ull, 1000ull, 65535ull, 1ull << 20, 1ull << 31}) {
+        CAPTURE(r);
+        CHECK(isqrt64(r * r) == r);
+        CHECK(isqrt64(r * r - 1) == r - 1);
     }
 }

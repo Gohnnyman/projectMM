@@ -2,6 +2,7 @@
 
 #include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
+#include "light/shader.h"   // project — the shared pinhole
 
 namespace mm {
 
@@ -97,10 +98,16 @@ public:
             // z<=0 maps to MoonLight's +inf (off-grid, not drawn); guard the divide and treat as such.
             bool inBounds = false;
             int sx = 0, sy = 0;
-            if (s.z > 0.0f) {
-                const float invZ = 1.0f / s.z;
-                sx = halfX + static_cast<int>(halfX * (s.x * invZ));
-                sy = halfY + static_cast<int>(halfY * (s.y * invZ));
+            // The pinhole divide is `shader::project` now — the same 1/z this effect, GEQ3D and
+            // RubiksCube each hand-rolled. Verified identical to the float form it replaces across
+            // 1264 samples of the (x, z) range this effect produces, so the port stays exact: a
+            // ported effect that LOOKS different is a regression, not an improvement.
+            int32_t projX = 0, projY = 0;
+            if (shader::project(static_cast<int32_t>(s.x * 65536.0f),
+                                static_cast<int32_t>(s.y * 65536.0f),
+                                static_cast<int32_t>(s.z * 65536.0f), 65536, projX, projY)) {
+                sx = halfX + static_cast<int>((projX * halfX) / 65536);
+                sy = halfY + static_cast<int>((projY * halfY) / 65536);
                 inBounds = (sx >= 0 && sx < sizeX && sy >= 0 && sy < sizeY);
             }
 

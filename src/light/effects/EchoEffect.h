@@ -71,17 +71,27 @@ public:
         // Only the FEEDBACK is paced; the source and its motion still draw every frame, so a fast
         // device shows smoother orbiting even though the trail compounds at a fixed rate. Returning
         // early here instead would skip the draw too and leave most frames blank.
-        const uint32_t sc = time_.advance(elapsed());
-        const bool feedbackDue = sc >= particles::FrameTime::kOne;
+        // Accumulate rather than test-and-discard: `advance` returns this frame's SHARE of a
+        // reference frame, so at 240 fps each frame returns a quarter unit. Comparing that share
+        // directly against a whole unit meant the gate almost never fired and the trail froze —
+        // measured at 1 feedback pass per second instead of 60. Adding to a running accumulator and
+        // consuming one whole unit keeps the remainder, so the compounding stays at 60 Hz whatever
+        // the render rate.
+        feedbackAcc_ += time_.advance(elapsed());
+        // Below 60 fps a single frame covers MORE than one reference frame, so spending only one
+        // unit per tick would leave the rest to pile up forever and compound at the render rate
+        // instead of at 60 Hz. Take every whole unit now and keep the fraction; `passes` is how many
+        // 60 Hz steps this frame stands in for, which is what the decay is raised to.
+        const uint32_t passes = feedbackAcc_ / particles::FrameTime::kOne;
+        feedbackAcc_ -= passes * particles::FrameTime::kOne;
+        const bool feedbackDue = passes > 0;
         // Feedback COMPOUNDS: this frame re-reads the frame before it, so a decay applied twice as
         // often fades twice as fast even if each application is half as strong. Scaling the amount
         // linearly is therefore not enough — what has to be constant per unit time is the SURVIVING
         // fraction, `keep^framesPerSecond`. Solving that exactly needs a logarithm; a cheap and
-        // accurate-enough equivalent is to skip the feedback pass entirely on frames that have not
-        // yet accumulated a reference frame's worth of time, so the compounding happens at 60 Hz
-        // whatever the render rate. The source and the palette still move every frame, so the motion
-        // stays smooth — only the re-sampling is paced.
-        const uint8_t decayNow = decay;
+        // accurate-enough equivalent is to run the feedback pass once per accumulated reference
+        // frame, so the compounding happens at 60 Hz whatever the render rate. The source and the
+        // palette still move every frame, so the motion stays smooth — only the re-sampling is paced.
 
         // Wrap the history in its own Canvas so the gather primitives can read it exactly as they
         // read any grid — the previous frame is just another texture.
@@ -98,23 +108,30 @@ public:
         const int32_t cosA = static_cast<int32_t>(cos16(a));       // -32768..32767
         const int32_t sinA = static_cast<int32_t>(sin16(a));
 
-        if (feedbackDue)
-        for (lengthType y = 0; y < h; y++) {
-            for (lengthType x = 0; x < w; x++) {
-                const int32_t px = draw::toSub(x) - cx;
-                const int32_t py = draw::toSub(y) - cy;
-                // Rotate then scale, all in fixed point.
-                const int32_t rx = (px * cosA - py * sinA) >> 15;
-                const int32_t ry = (px * sinA + py * cosA) >> 15;
-                const draw::pos_t sx = static_cast<draw::pos_t>(((static_cast<int64_t>(rx) * s) >> 16) + cx);
-                const draw::pos_t sy = static_cast<draw::pos_t>(((static_cast<int64_t>(ry) * s) >> 16) + cy);
+        if (feedbackDue) {
+            // The surviving fraction for this frame: keep^passes, so N reference frames of decay are
+            // applied in the one pass that stands in for them.
+            uint8_t keep = static_cast<uint8_t>(255 - decay);
+            for (uint32_t n = 1; n < passes; n++) keep = scale8(keep, static_cast<uint8_t>(255 - decay));
+            for (lengthType y = 0; y < h; y++) {
+                for (lengthType x = 0; x < w; x++) {
+                    const int32_t px = draw::toSub(x) - cx;
+                    const int32_t py = draw::toSub(y) - cy;
+                    // Rotate then scale, all in fixed point.
+                    const int32_t rx = (px * cosA - py * sinA) >> 15;
+                    const int32_t ry = (px * sinA + py * cosA) >> 15;
+                    const draw::pos_t sx = static_cast<draw::pos_t>(((static_cast<int64_t>(rx) * s) >> 16) + cx);
+                    const draw::pos_t sy = static_cast<draw::pos_t>(((static_cast<int64_t>(ry) * s) >> 16) + cy);
 
-                RGB c = draw::sampleWrap(hist, sx, sy);
-                // Fade what came back, so a trail dies out instead of accumulating to white.
-                c.r = scale8(c.r, static_cast<uint8_t>(255 - decayNow));
-                c.g = scale8(c.g, static_cast<uint8_t>(255 - decayNow));
-                c.b = scale8(c.b, static_cast<uint8_t>(255 - decayNow));
-                draw::pixel(cv, {x, y, 0}, c);
+                    RGB c = draw::sampleWrap(hist, sx, sy);
+                    // Fade what came back, so a trail dies out instead of accumulating to white. `keep`
+                    // already carries however many 60 Hz steps this frame covers, so a 30 fps device
+                    // fades by the same amount per SECOND as a 600 fps one.
+                    c.r = scale8(c.r, keep);
+                    c.g = scale8(c.g, keep);
+                    c.b = scale8(c.b, keep);
+                    draw::pixel(cv, {x, y, 0}, c);
+                }
             }
         }
 
@@ -147,6 +164,7 @@ public:
 private:
     ScratchBuffer<uint8_t> history_{*this};   // the previous frame, read as a texture
     particles::FrameTime time_{60};           // controls are written against 60 fps
+    uint32_t feedbackAcc_ = 0;   // fractional reference frames not yet spent on a feedback pass
     BeatPhase phase_;
 };
 

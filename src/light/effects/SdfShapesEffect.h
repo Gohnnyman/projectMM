@@ -104,7 +104,7 @@ public:
     }
 
 private:
-    /// A signed swing of ±`amp` around zero, from the shared 16-bit sine (32768 is its zero point).
+    /// A signed swing of ±`amp` around zero, from the shared 16-bit sine (-32767..32767).
     static draw::pos_t oscillate(angle16 a, draw::pos_t amp) {
         const int32_t s = static_cast<int32_t>(sin16(a));   // -32768..32767
         return static_cast<draw::pos_t>((static_cast<int64_t>(s) * amp) / 32768);

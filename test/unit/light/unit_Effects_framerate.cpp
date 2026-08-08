@@ -21,6 +21,8 @@
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/Layouts.h"
 #include "light/Palette.h"
+#include "light/effects/EchoEffect.h"
+#include "light/effects/FireworksEffect.h"
 #include "platform/platform.h"
 
 #include <cmath>
@@ -100,4 +102,31 @@ TEST_CASE("every effect behaves the same at any framerate") {
         audited++;
     });
     MESSAGE("audited " << audited << " effects at 60 vs 1200 fps");
+}
+
+// The sweep above measures how much light is on screen, which catches a runaway frame counter but
+// not its opposite: a gate that fires too RARELY still leaves the mean plausible. These pin the two
+// mechanisms directly, at the rate each one was measured broken.
+
+TEST_CASE("a feedback trail compounds at the same rate however fast the device renders") {
+    // Echo re-samples its own previous frame, so the pass must run once per elapsed reference frame.
+    // Testing it against a whole unit instead of accumulating made the gate fire once per SECOND at
+    // 240 fps rather than 60 times, which froze the trail while the source kept orbiting.
+    const double slow = meanLit([] { return new EchoEffect(); }, 60, 3);
+    const double mid  = meanLit([] { return new EchoEffect(); }, 240, 3);
+    const double fast = meanLit([] { return new EchoEffect(); }, 1200, 3);
+    CAPTURE(slow); CAPTURE(mid); CAPTURE(fast);
+    CHECK(slow > 1.0);                       // a trail exists at the reference rate
+    CHECK(mid  > slow * 0.7);                // ...and at 4x, where the gate used to stall
+    CHECK(fast > slow * 0.7);                // ...and at 20x
+}
+
+TEST_CASE("fireworks launch the same number of shells per second at any framerate") {
+    // The launch roll is a hash of the frame counter, so without a time gate a 20x faster device
+    // rolls the dice 20x as often and fills the sky.
+    const double slow = meanLit([] { return new FireworksEffect(); }, 60, 3);
+    const double fast = meanLit([] { return new FireworksEffect(); }, 1200, 3);
+    CAPTURE(slow); CAPTURE(fast);
+    CHECK(slow > 0.5);
+    CHECK(fast < slow * 2.0);                // not a sky full of shells
 }

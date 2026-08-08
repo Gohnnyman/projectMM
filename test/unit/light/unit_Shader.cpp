@@ -35,6 +35,15 @@ TEST_CASE("fract keeps only the fractional part, and wraps") {
     CHECK(fract(65536) == 0);                // exactly one wraps back to zero
     CHECK(fract(65536 + 32768) == 32768);    // one and a half
     CHECK(fract(65536 * 5) == 0);            // any whole number
+
+    // Negatives matter because shader space is centred: uv() puts the origin in the middle, so half
+    // of every tiled pattern is at a negative coordinate. This is the UNSIGNED wrap (a mask of the
+    // low bits), not a signed remainder — -1 is just below zero, so its fraction is just below one,
+    // which is what keeps a tiling continuous across the origin instead of mirroring there.
+    CHECK(fract(-1) == 65535);
+    CHECK(fract(-65536) == 0);               // a whole negative number wraps to zero
+    CHECK(fract(-32768) == 32768);           // half below zero is half of the previous tile
+    CHECK(fract(-65536 - 32768) == 32768);
 }
 
 TEST_CASE("step is a hard threshold at the edge") {
@@ -220,4 +229,46 @@ TEST_CASE("the shader runner gives each pixel a different coordinate") {
         return RGB{1, 1, 1};
     });
     CHECK(firstX < lastX);                   // coordinates advance across the grid
+}
+
+// --- Projection ---------------------------------------------------------------------------
+
+// The whole of perspective is one divide: distance shrinks things in exact proportion. Three effects
+// hand-rolled this before it was shared.
+TEST_CASE("projection shrinks a point in proportion to its depth") {
+    int32_t nx, ny, fx, fy;
+    CHECK(project(65536, 0, 65536, 65536, nx, ny) == true);      // one unit out, one unit deep
+    CHECK(project(65536, 0, 131072, 65536, fx, fy) == true);     // same point, twice as far
+    CHECK(fx * 2 == nx);                                          // exactly half the offset
+}
+
+TEST_CASE("a point on the view axis projects to the centre") {
+    int32_t x, y;
+    project(0, 0, 65536, 65536, x, y);
+    CHECK(x == 0);
+    CHECK(y == 0);
+}
+
+// A point at or behind the viewer has no projection. Dividing anyway wraps it round to the front —
+// the classic artifact of a missing near-plane check.
+TEST_CASE("a point at or behind the viewer does not project") {
+    int32_t x = 999, y = 999;
+    CHECK(project(65536, 65536, 0, 65536, x, y) == false);
+    CHECK(project(65536, 65536, -65536, 65536, x, y) == false);
+    CHECK(x == 999);                                              // outputs left untouched
+}
+
+TEST_CASE("a longer lens magnifies") {
+    int32_t wideX, wideY, teleX, teleY;
+    project(65536, 0, 131072, 32768, wideX, wideY);
+    project(65536, 0, 131072, 131072, teleX, teleY);
+    CHECK(teleX > wideX);
+}
+
+TEST_CASE("depth fade dims with distance and stops at the far plane") {
+    CHECK(depthFade(0, 1000) == 255);        // at the viewer: full
+    CHECK(depthFade(1000, 1000) == 0);       // at the far plane: gone
+    CHECK(depthFade(2000, 1000) == 0);       // and beyond it, still gone
+    const uint8_t near = depthFade(100, 1000), far = depthFade(900, 1000);
+    CHECK(near > far);                       // monotone
 }

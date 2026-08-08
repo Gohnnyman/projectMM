@@ -6,8 +6,6 @@ Effects are built from the shared [power functions](power-functions.md) — the 
 
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
-**Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, color mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
-
 > Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../assets/…` gif show our own output.
 
 ## MoonLight effects
@@ -362,6 +360,22 @@ A texture mapped onto the inside of an infinite tube, so the viewer appears to f
 - `vignette` — darken toward the vanishing point so it reads as receding.
 
 Origin: projectMM original, on the standard demoscene tunnel
+
+<a id="vectorballs"></a>
+
+### VectorBalls 🔬 · 2D
+
+A rotating 3D object drawn as shaded spheres — the demoscene classic that named the technique. The smallest complete demonstration of putting 3D on a panel: rotate, project, sort back-to-front, shade by distance, draw.
+
+- `bpm` — rotation speed.
+- `size` — ball radius at the object's centre, in pixels.
+- `spread` — how far apart the balls sit.
+- `distance` — how far the object is from the viewer.
+- `fade` — dim the far balls, which is what reads as depth.
+
+Painter's ordering matters more than it sounds: without it a far ball can paint over a near one and the object reads as turning inside out. Costs 3 µs a frame — 14 points rather than a per-pixel loop, so it is the cheapest of the showcases.
+
+Origin: projectMM original, on the Amiga-era demoscene vector-ball effect
 
 <a id="waterripple"></a>
 

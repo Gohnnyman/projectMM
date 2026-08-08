@@ -43,7 +43,15 @@ inline constexpr int16_t sin16_quarter[65] = {
     32767
 };
 
-/// Sine over a 16-bit angle, returning SIGNED -32767..32767 — FastLED's `lib8tion` sin16 contract.
+/// Sine over a 16-bit angle, returning SIGNED -32767..32767 — FastLED's sin16 contract.
+///
+/// Verified against the two codebases users port FROM, at master rather than at a release, because
+/// FastLED 4.0 is close and the contract we bind to should be the one users will have:
+///   - FastLED master (6a120dedc9, 2026-08-07): `fl/math/sin32.h` declares `i16 sin16lut(u16)`,
+///     commented "output is between -32767 and 32767".
+///   - WLED main (c1838ed4, 2026-08-05): `constexpr int16_t (*sinFunction)(uint16_t) = &sin16_t`,
+///     and its effects write `sin16_t(x) + 32768` when they want an unsigned value — precisely the
+///     arithmetic that broke silently against our old unsigned return.
 ///
 /// The unsigned 0..65535 form (32768 at the zero crossing) was tried first, to match `sin8`. It is
 /// the wrong call: `sin16` is the most-ported symbol in the LED world, so any FastLED or WLED
@@ -91,7 +99,10 @@ constexpr int32_t map32(int32_t v, int32_t inLo, int32_t inHi, int32_t outLo, in
     else             { if (v >= inLo) return outLo; if (v <= inHi) return outHi; }
     // Every operand widens BEFORE arithmetic: a full-width span (INT32_MIN..INT32_MAX) does not fit
     // in an int32 subtraction, so computing the spans in 32 bits overflows at the extremes. The
-    // product of two 32-bit spans fits comfortably in int64.
+    // product of two 32-bit spans fits in int64 for every range this maps between: an extent, a
+    // byte, a band count, a frequency. Mapping a FULL int32 range onto another full int32 range
+    // would exceed it (offset and outSpan both approach 2^32), which no caller does — the widest
+    // real case is a 16-bit phase onto a grid extent, five orders of magnitude short of it.
     const int64_t inSpan  = static_cast<int64_t>(inHi)  - static_cast<int64_t>(inLo);
     const int64_t outSpan = static_cast<int64_t>(outHi) - static_cast<int64_t>(outLo);
     const int64_t num     = (static_cast<int64_t>(v) - static_cast<int64_t>(inLo)) * outSpan;
@@ -166,8 +177,14 @@ private:
 /// Newton's method, which converges in a handful of steps over this range. Promoted here from
 /// AudioLevel.h (its RMS path is the other caller) so the integer roots have one home.
 constexpr uint64_t isqrt64(uint64_t x) {
-    if (x == 0) return 0;
-    uint64_t r = x, last;
+    if (x < 2) return x;                      // 0 and 1 are their own roots
+    // Start from a power-of-two bound rather than from x itself: the Newton step `r + x/r`
+    // OVERFLOWS when r starts at x, which for UINT64_MAX made the first iteration wrap and the
+    // function return 0. Halving the bit width gives a starting point above the true root and
+    // inside the range, so every iteration stays representable.
+    uint64_t r = 1;
+    for (uint64_t v = x; v > 0; v >>= 2) r <<= 1;
+    uint64_t last;
     do {
         last = r;
         r = (r + x / r) >> 1;

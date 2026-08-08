@@ -82,10 +82,11 @@ public:
         }
     }
 
-private:
-    // depth() (the inherited grid-depth accessor) isn't shadowed here — this effect has no `depth`
-    // member — but mirror the GEQ3D helper shape for the z extent the draw primitives expect.
+    /// Restart discards the elapsed gap: without this the first tick after a re-prepare sees the
+    /// whole idle interval as one step and jumps the trail forward.
+    void prepare() override { trailTime_.reset(); }
 
+private:
     particles::FrameTime trailTime_{60};   // trail decay is per second, not per frame
 };
 
