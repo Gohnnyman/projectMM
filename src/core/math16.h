@@ -234,8 +234,13 @@ inline angle16 atan16(int32_t y, int32_t x) {
     // Unsigned magnitudes: negating INT32_MIN has no int32 representation, so the obvious
     // `x < 0 ? -x : x` is undefined behaviour at exactly one input per axis. Widening first keeps
     // the fold exact across the whole range.
-    uint32_t ax = x < 0 ? -static_cast<uint32_t>(x) : static_cast<uint32_t>(x);
-    uint32_t ay = y < 0 ? -static_cast<uint32_t>(y) : static_cast<uint32_t>(y);
+    //
+    // `0u - v` rather than `-v`: the unary form is well-defined on an unsigned (it is modular
+    // arithmetic, which is exactly what is wanted here), but MSVC reports it as C4146 and the
+    // Windows build treats warnings as errors. Subtracting from zero is the same operation with no
+    // diagnostic on any compiler.
+    uint32_t ax = x < 0 ? 0u - static_cast<uint32_t>(x) : static_cast<uint32_t>(x);
+    uint32_t ay = y < 0 ? 0u - static_cast<uint32_t>(y) : static_cast<uint32_t>(y);
     const bool swap = ay > ax;
     if (swap) { const uint32_t t = ax; ax = ay; ay = t; }
     // ratio = ay/ax in 0..65535; within one octant arctan is near-linear, so a linear read with a
