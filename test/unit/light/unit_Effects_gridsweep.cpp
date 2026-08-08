@@ -32,6 +32,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layers/Layer.h"
+#include "light/Palette.h"
 // Generated at build time from src/light/effects/*.h — see test/CMakeLists.txt. Supplies
 // forEachEffect(), so this file names no individual effect and cannot drift.
 #include "effect_sweep.h"
@@ -80,8 +81,16 @@ bool runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase
 
     layer.addChild(fx);
     layer.applyState();
+    // Pin the clock. Several effects derive their palette index from elapsed(), and the
+    // "wrote something" probe below can only see the RED channel at cpl=1 — so an effect that
+    // happens to land on one of the 66 palette entries with red == 0 writes a real pixel that
+    // this probe cannot detect. Left on the wall clock that is a 26% chance of a spurious
+    // failure, which is exactly how it showed up: green locally, red on CI.
+    mm::platform::setTestNowMs(100000u);
     layer.tick();
+    mm::platform::setTestNowMs(100016u);
     layer.tick();
+    mm::platform::setTestNowMs(0);
 
     // The buffer contract holds even at zero size: a zero-light layer reports zero bytes
     // rather than a stale non-zero span a driver would then read past.
@@ -113,12 +122,31 @@ bool runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase
 // 1 and 2 channels are the interesting cases: an effect that assumes RGB either writes past its
 // light or (with a guard) declines to render at all, and a user sees a black fixture either way.
 TEST_CASE("every effect renders at any channel count") {
+    // The active palette is PROCESS-WIDE, and this sweep ticks DemoReelEffect, which reassigns it
+    // when its randomPalette control fires. Left unrestored it changes what every LATER effect in
+    // this same sweep paints — which is how WaveEffect came to "draw nothing" at cpl=1: the probe
+    // can only see the red channel there, and 66 of 256 palette entries have red == 0. Isolated the
+    // test passed; in suite order it failed every time. Same guard as the framerate sweep.
+    struct RestorePalette {
+        mm::Palette palette = *mm::Palettes::active();
+        ~RestorePalette() { mm::Palettes::setActiveDirect(palette); }
+    } restore;
+    // SELECT a known palette, do not merely restore afterwards: the probe below can only see the
+    // red channel at cpl=1, and whichever palette an earlier test left active decides whether the
+    // colour an effect picks has any red in it at all. Palette 9 is red-free at the index WaveEffect
+    // lands on, which is exactly the combination that failed on CI and passed locally.
+    mm::Palettes::setActive(0);
+
     int swept = 0;
     mm::forEachEffect([&](const char* name, auto make) {
         for (uint8_t cpl : kChannelCounts) {
             const std::string effectName(name);
             CAPTURE(effectName);
             CAPTURE(cpl);
+            // Per effect, not once for the sweep: DemoReelEffect reassigns the global palette while
+            // this loop is running, so every effect ticked after it inherits DemoReel's choice —
+            // which is how WaveEffect ended up drawing a red-free colour into a red-only buffer.
+            mm::Palettes::setActive(0);
             mm::MoonModule* fx = make();
             REQUIRE_MESSAGE(fx != nullptr, "could not construct " << effectName);
             const GridCase g{8, 8, 1, "8x8x1"};
@@ -198,22 +226,43 @@ TEST_CASE("every effect owns its background rather than inheriting the last fram
         const mm::nrOfLightsType lights = layer.buffer().count();
         for (mm::nrOfLightsType i = 0; i < lights * 3; i++) buf[i] = kStale;
 
-        for (int f = 0; f < 90; f++) {
+        const auto staleCount = [&] {
+            int n = 0;
+            for (mm::nrOfLightsType i = 0; i < lights; i++)
+                if (buf[i * 3] == kStale && buf[i * 3 + 1] == kStale && buf[i * 3 + 2] == kStale) n++;
+            return n;
+        };
+
+        // The FIRST frame is the one the user sees when they switch to this effect, and it is the
+        // frame that has to replace what was on screen. Checking only after a long run would let an
+        // effect that slowly paints over the old picture pass, when what the user actually sees is
+        // the previous effect fading out underneath the new one.
+        mm::platform::setTestNowMs(100000u);
+        layer.tick();
+        const int afterFirst = staleCount();
+
+        // Then run on, so an effect that clears once and later stops writing is still caught.
+        for (int f = 1; f < 90; f++) {
             mm::platform::setTestNowMs(100000u + static_cast<uint32_t>(f) * 16u);
             layer.tick();
         }
+        const int afterMany = staleCount();
         mm::platform::setTestNowMs(0);
 
-        int untouched = 0;
-        for (mm::nrOfLightsType i = 0; i < lights; i++)
-            if (buf[i * 3] == kStale && buf[i * 3 + 1] == kStale && buf[i * 3 + 2] == kStale)
-                untouched++;
-
         INFO("effect: " << effectName);
-        CAPTURE(untouched);
+        CAPTURE(afterFirst);
+        CAPTURE(afterMany);
         // A few stale pixels are possible where an effect legitimately paints a static subset;
         // a whole inherited frame is not. Half the grid is the line between the two.
-        CHECK(untouched < static_cast<int>(lights) / 2);
+        //
+        // Only the SETTLED frame is asserted. Fourteen effects still show the previous picture on
+        // their first frame — audio-reactive ones with no input (GEQ, FreqSaws, NoiseMeter), and
+        // simulations that seed on tick one (GameOfLife, Fireworks, BouncingBalls). Most predate
+        // this branch. Clearing on frame one is the right behaviour and worth doing, but it is
+        // fourteen effects' worth of change, so it is tracked in the backlog rather than folded
+        // into an unrelated commit. `afterFirst` is captured so the number is visible in any
+        // failure output rather than silently dropped.
+        CHECK(afterMany < static_cast<int>(lights) / 2);
         audited++;
     });
     MESSAGE("audited " << audited << " effects against a dirty buffer");

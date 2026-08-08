@@ -653,17 +653,24 @@ TEST_CASE("a pool without size storage still renders every particle") {
 // Its reference PERIOD has to be exact: deriving it as `1000 / referenceHz` truncates to 16 ms for
 // 60 Hz, which is a 62.5 Hz reference, and every 60-fps-calibrated setting in the codebase then runs
 // about 4% fast — invisible per frame, a drift of seconds over a minute.
-TEST_CASE("a second of elapsed time is 60 reference frames, at any render rate") {
+TEST_CASE("one second of motion is the same amount of motion however fast the device renders") {
+    // A setting written against 60 fps has to mean the same thing everywhere: one second of real
+    // time is 60 reference frames of movement, whether the device drew 30 frames or 1200. Deriving
+    // the reference period as `1000 / 60` gives 16 ms — a 62.5 Hz clock — and every calibrated
+    // setting in the codebase then runs about 4% fast, which is a drift of seconds over a minute.
     for (int fps : {30, 60, 240, 1200}) {
         CAPTURE(fps);
         particles::FrameTime t{60};
         uint64_t total = 0;
-        for (int f = 0; f < fps; f++)
+        // Inclusive of f == fps, so the timeline really covers 0..1000 ms; stopping one frame short
+        // measures slightly less than a second and hides a small rate error in the shortfall.
+        for (int f = 0; f <= fps; f++)
             total += t.advance(static_cast<uint32_t>(static_cast<uint64_t>(f) * 1000 / fps));
-        // 60 reference frames of 256 units. The band absorbs the sub-millisecond carry at the end
-        // of the second; it does not absorb a wrong reference period, which is a flat 4%.
         const double refFrames = static_cast<double>(total) / particles::FrameTime::kOne;
-        CHECK(refFrames > 58.0);
-        CHECK(refFrames < 61.0);
+        // One reference frame of tolerance: the first advance() seeds the time base and returns a
+        // whole unit, and the last partial unit stays in the carry. A wrong reference period is a
+        // flat 4% (2.4 frames), so it does not fit inside this band.
+        CHECK(refFrames > 59.0);
+        CHECK(refFrames < 62.0);
     }
 }

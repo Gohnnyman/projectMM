@@ -278,4 +278,10 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
   **What is still open.** It is VALUE noise, like the 8-bit tier: cell corners are hashed and interpolated. Gradient (Perlin) noise hashes a gradient per corner and takes a dot product, which removes the faint axis-aligned grid value noise leaves — visible on a large smooth field, which is the case this tier exists for. Also unbuilt: a 3D `fbm16`, and `warp16` / `turbulence16` to match the 8-bit compositions. The trigger is an effect that wants a large smooth field; it lands with that effect and its measurements, the way the 8-bit compositions landed with theirs.
 
+- **Clear the grid on an effect's FIRST frame** (2026-08-08). Fourteen effects still show the previous effect's picture on the frame right after a switch: BouncingBalls, Fireworks, FreqMatrix, FreqSaws, GEQ, GEQ3D, GameOfLife, Lissajous, NoiseMeter, PaintBrush, Random and three more. Most predate the power-function branch.
+
+  **What the user sees.** Switching to one of these leaves the old frame underneath for a moment — an audio effect with no signal yet, or a simulation still seeding, paints nothing and inherits whatever was there. `Layer::tick` deliberately does not clear (ADR-0003: an effect may fade its own last frame for trails), so owning the background is each effect's job.
+
+  **Why it waits.** It is fourteen effects' worth of change across audio-reactive and simulation families, each needing its own judgement about whether to clear, fade, or seed differently — not a mechanical sweep. `unit_Effects_gridsweep.cpp` already measures it (`afterFirst`) and asserts only the settled frame, so the number is visible without blocking.
+
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)
