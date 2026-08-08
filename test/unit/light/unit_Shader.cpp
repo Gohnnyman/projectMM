@@ -236,15 +236,17 @@ TEST_CASE("the shader runner gives each pixel a different coordinate") {
 // The whole of perspective is one divide: distance shrinks things in exact proportion. Three effects
 // hand-rolled this before it was shared.
 TEST_CASE("projection shrinks a point in proportion to its depth") {
-    int32_t nx, ny, fx, fy;
-    CHECK(project(65536, 0, 65536, 65536, nx, ny) == true);      // one unit out, one unit deep
-    CHECK(project(65536, 0, 131072, 65536, fx, fy) == true);     // same point, twice as far
+    // Seeded: project leaves its out-params untouched when it returns false, and a stack value
+    // read back would be undefined (MSVC rejects it outright).
+    int32_t nx = 0, ny = 0, fx = 0, fy = 0;
+    REQUIRE(project(65536, 0, 65536, 65536, nx, ny) == true);      // one unit out, one unit deep
+    REQUIRE(project(65536, 0, 131072, 65536, fx, fy) == true);   // same point, twice as far
     CHECK(fx * 2 == nx);                                          // exactly half the offset
 }
 
 TEST_CASE("a point on the view axis projects to the centre") {
-    int32_t x, y;
-    project(0, 0, 65536, 65536, x, y);
+    int32_t x = 0, y = 0;
+    REQUIRE(project(0, 0, 65536, 65536, x, y) == true);
     CHECK(x == 0);
     CHECK(y == 0);
 }
@@ -259,9 +261,9 @@ TEST_CASE("a point at or behind the viewer does not project") {
 }
 
 TEST_CASE("a longer lens magnifies") {
-    int32_t wideX, wideY, teleX, teleY;
-    project(65536, 0, 131072, 32768, wideX, wideY);
-    project(65536, 0, 131072, 131072, teleX, teleY);
+    int32_t wideX = 0, wideY = 0, teleX = 0, teleY = 0;
+    REQUIRE(project(65536, 0, 131072, 32768, wideX, wideY) == true);
+    REQUIRE(project(65536, 0, 131072, 131072, teleX, teleY) == true);
     CHECK(teleX > wideX);
 }
 
