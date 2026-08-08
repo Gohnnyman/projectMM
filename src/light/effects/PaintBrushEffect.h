@@ -41,10 +41,8 @@ public:
 
     void tick() MM_NONBLOCKING override {
         const lengthType cols = width(), rows = height(), depth = this->depth();
-        const uint8_t cpl = channelsPerLight();
-        if (cols == 0 || rows == 0 || cpl < 3) return;   // 0×0×0 and short-channel guard
 
-        Buffer& buf = layer()->buffer();
+        const draw::Canvas cv = canvas();
 
         // Per-frame: advance the hue, then fade the whole field toward black (a decaying trail).
         aux0Hue++;
@@ -53,7 +51,6 @@ public:
         // Optional per-frame phase jitter shared by every endpoint this frame.
         aux1Chaos = phase_chaos ? rng_.next8() : 0;
 
-        const Coord3D dims{cols, rows, depth};
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // silence frame is non-null in practice; guard before dereferencing bands[]
         const uint32_t ms = elapsed();
@@ -100,7 +97,7 @@ public:
                     ? static_cast<uint8_t>(i * 255 / numLines + (aux0Hue & 0xFF))
                     : static_cast<uint8_t>(map(static_cast<int>(i), 0, lineHi, 0, 255));
                 const RGB color = colorFromPalette(*Palettes::active(), index, 255);
-                draw::line(buf, dims, {x1, y1, z1}, {x2, y2, z2}, color, static_cast<uint8_t>(length));
+                draw::line(cv, {x1, y1, z1}, {x2, y2, z2}, color, static_cast<uint8_t>(length));
             }
         }
     }

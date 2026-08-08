@@ -22,7 +22,12 @@ TEST_CASE("ParticlesEffect allocates trail buffer when enabled") {
     layer.addChild(&particles);
 
     layer.applyState();
-    CHECK(particles.dynamicBytes() == 16 * 16 * 3);
+    // The trail plane (w*h*cpl) PLUS the shared particle pool. The pool moved from a fixed member
+    // array into ScratchBuffers when this effect converged onto the kernel, so it is reported here
+    // where it used to be invisible: 64 particles x (4 int32 + uint16 + uint8) = 1216 bytes.
+    constexpr size_t kTrail = 16 * 16 * 3;
+    constexpr size_t kPool  = 64 * (4 * sizeof(int32_t) + sizeof(uint16_t) + sizeof(uint8_t));
+    CHECK(particles.dynamicBytes() == kTrail + kPool);
 }
 
 // A single tick is enough to paint particles into the buffer.

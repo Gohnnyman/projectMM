@@ -132,9 +132,11 @@ nav:
       - Modifiers: moonmodules/light/modifiers.md
       - Drivers: moonmodules/light/drivers.md
       - Live scripting: moonmodules/light/MoonLiveEffect.md
+      - Power functions: moonmodules/light/power-functions.md
       - Supporting: moonmodules/light/supporting.md
   - Core:
       - System: moonmodules/core/system.md
+      - Control: moonmodules/core/control.md
       - Services: moonmodules/core/services.md
       - Supporting: moonmodules/core/supporting.md
       - Web UI: moonmodules/core/ui.md

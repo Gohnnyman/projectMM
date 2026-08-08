@@ -35,6 +35,12 @@ public:
     template<typename T>
     static bool registerType(const char* typeName, const char* docPath = "") {
         if (!typeName) return false;
+        // Idempotent: registering an already-known name is a no-op success. Production registers
+        // each type once at boot, but test fixtures register per CONSTRUCTION — without this the
+        // registry accumulated a duplicate entry set per test case until the uint8_t capacity
+        // saturated and every later registration in the run failed.
+        for (uint8_t i = 0; i < count_; i++)
+            if (std::strcmp(types_[i].name, typeName) == 0) return true;
         if (!grow()) return false;
         T probe;
         uint8_t dim = 0;
@@ -59,6 +65,8 @@ public:
                              ModuleRole role = ModuleRole::Generic, const char* docPath = "",
                              const char* tags = "") {
         if (!typeName || !fn) return false;
+        for (uint8_t i = 0; i < count_; i++)
+            if (std::strcmp(types_[i].name, typeName) == 0) return true;
         if (!grow()) return false;
         // Hand-built entries can't probe an instance for acceptsChildRoles, so
         // they default to "" (accepts no children). No hand-built type is a

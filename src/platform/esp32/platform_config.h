@@ -206,6 +206,26 @@ constexpr bool hasEthernet = true;
 // hasWiFi — an Ethernet-only board (the MHC-WLED P4 shield) still has UDP.
 constexpr bool hasNetwork = hasWiFi || hasEthernet;
 
+// Enough compute headroom for a per-pixel FLOAT algorithm — a raymarcher, a fractal, a feedback
+// loop that iterates per light. This is the ONE exception to the integer-only render-path rule in
+// coding-standards, and it is gated rather than assumed: an effect behind this constant is not
+// compiled at all where it is false, so no ESP32 firmware carries the float code and the rule is
+// not weakened on the targets it protects.
+//
+// The cost is per PIXEL, not per chip, so this is a statement about the FPU rather than about
+// fixture size: a target with hardware float can run such an effect on a small panel and cannot on
+// a large one, and the effect's own controls are what trade quality for cost. The classic ESP32 has
+// no FPU at all, so it stays out; the S3 and P4 have single-precision hardware.
+// Derived from the SoC capability, not a hand-kept chip list: every ESP32 variant IDF supports
+// declares SOC_CPU_HAS_FPU (checked S3, P4, S31 and the classic ESP32 — all 1), so a new target
+// inherits the right answer without an edit here. What separates them is SPEED and clock, which
+// the effect's own `steps` control and the fixture size decide — not whether the code exists.
+constexpr bool hasHeavyCompute = SOC_CPU_HAS_FPU;
+
+// Preprocessor mirror of the flag above: a whole effect can be compiled out only by
+// `#if`, which `constexpr bool` cannot drive. Keep the two in step.
+#define MM_HEAVY_COMPUTE SOC_CPU_HAS_FPU
+
 // Which Ethernet PHY *drivers* this firmware actually carries. The W5500 SPI
 // driver is compiled in only on chips with no internal EMAC and the SPI-eth
 // fragment (the S3 — CONFIG_ETH_USE_SPI_ETHERNET set, CONFIG_ETH_USE_ESP32_EMAC

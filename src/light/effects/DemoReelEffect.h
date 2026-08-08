@@ -78,9 +78,8 @@ public:
         // no system/pipeline reach-in. draw::text clips to the grid, so a tiny grid just shows what
         // fits (or nothing).
         if (showName && current_) {
-            Buffer& buf = layer()->buffer();
-            const Coord3D dims{width(), height(), depthDim()};
-            draw::text(buf, dims, fonts::kFont4x6, current_->name(), 0, 0, {255, 255, 255});
+            const draw::Canvas cv = canvas();
+            draw::text(cv, fonts::kFont4x6, current_->name(), 0, 0, {255, 255, 255});
         }
     }
 
@@ -175,8 +174,6 @@ private:
         delete current_;              // release-then-delete, the Scheduler's ownership pattern
         current_ = nullptr;
     }
-
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     void refreshStatus() {
         // Show which effect is playing (its display name), e.g. "playing: Plasma (3/19)".

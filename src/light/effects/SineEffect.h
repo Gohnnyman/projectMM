@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -41,12 +42,12 @@ public:
         const uint8_t cpl = channelsPerLight();
 
         const uint32_t now = elapsed();
-        const uint32_t dt = now - lastElapsed_;
-        lastElapsed_ = now;
+        // Shared accumulator: raw dt·rate in 64 bits, divided only at the read, so a sub-millisecond
+        // frame does not round to zero and freeze the animation (mm::BeatPhase owns that rule now).
+        phase_.advance(now, bpm);
         // Accumulate dt*bpm and read the high bits as the scroll phase (uint8 angle) —
         // the same integer accumulator the other effects use so a sub-ms dt isn't lost.
-        phase_ += static_cast<uint64_t>(dt) * bpm;
-        const uint8_t t = static_cast<uint8_t>((phase_ * 256) / 60000);
+        const uint8_t t = static_cast<uint8_t>(phase_.phase(256));
 
         for (lengthType z = 0; z < d; z++) {
             const uint8_t bz = chan(static_cast<uint8_t>(z), t, 170);   // B: z axis, +240°
@@ -76,8 +77,7 @@ private:
         return static_cast<uint8_t>((s * amplitude + 255) >> 8);
     }
 
-    uint64_t phase_ = 0;
-    uint32_t lastElapsed_ = 0;
+    BeatPhase phase_;
 };
 
 } // namespace mm

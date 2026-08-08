@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
+#include "light/particles.h"   // FrameTime — the shared time scale
 
 namespace mm {
 
@@ -41,11 +42,19 @@ public:
         const int w = width();
         const int h = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion trail: dim the whole buffer each frame (source: layer->fadeToBlackBy(fadeRate)).
-        layer()->fadeToBlackBy(fadeRate);
+        // The trail fades per unit TIME, not per frame: fading once per frame makes the tail length a
+        // property of the framerate (erased before the eye sees it on a fast device, smeared on a
+        // slow one). See architecture.md, the tick-rate rule.
+        {
+            const uint32_t sc = trailTime_.advance(elapsed());
+            uint32_t amt = (static_cast<uint32_t>(fadeRate) * sc) / particles::FrameTime::kOne;
+            if (amt == 0 && sc > 0) amt = 1;
+            if (amt > 255) amt = 255;
+            if (amt) layer()->fadeToBlackBy(static_cast<uint8_t>(amt));
+        }
 
         // Shared phase, advancing with elapsed time. Kept wide (16-bit) like the source; only the
         // sin8/cos8 LUT argument below is truncated to uint8_t (the mod-256 wrap), so the high bits
@@ -68,15 +77,17 @@ public:
             const int ly = (h < 2) ? 0 : (((2 * sy) * (2 * (h - 1))) / 511 + 1) / 2;
 
             const uint8_t colorIndex = static_cast<uint8_t>(ms / 100 + i);
-            draw::pixel(buf, dims, {static_cast<lengthType>(lx), static_cast<lengthType>(ly), 0},
+            draw::pixel(cv, {static_cast<lengthType>(lx), static_cast<lengthType>(ly), 0},
                         colorFromPalette(*Palettes::active(), colorIndex, 255));
         }
     }
 
+    /// Restart discards the elapsed gap: without this the first tick after a re-prepare sees the
+    /// whole idle interval as one step and jumps the trail forward.
+    void prepare() override { trailTime_.reset(); }
+
 private:
-    // depth() (the inherited grid-depth accessor) isn't shadowed here — this effect has no `depth`
-    // member — but mirror the GEQ3D helper shape for the z extent the draw primitives expect.
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
+    particles::FrameTime trailTime_{60};   // trail decay is per second, not per frame
 };
 
 } // namespace mm

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
+#include "light/particles.h"   // FrameTime — the shared time scale
 
 namespace mm {
 
@@ -52,11 +53,24 @@ public:
         const int cols = width();
         const int rows = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion trail: dim the whole buffer each frame (MoonLight: fadeToBlackBy(100)).
-        layer()->fadeToBlackBy(100);
+        // The trail fades per unit TIME, not per frame: fading once per frame makes the tail length a
+        // property of the framerate (erased before the eye sees it on a fast device, smeared on a
+        // slow one). See architecture.md, the tick-rate rule.
+        {
+            // Carry the fraction rather than rounding it up to 1: `fadeToBlackBy` runs once per
+            // RENDER, so a floor of 1 at high fps applies many times the intended decay and the
+            // trail is visibly shorter on a fast device than on a slow one.
+            fadeCarry_ += 100u * trailTime_.advance(elapsed());
+            uint32_t amt = fadeCarry_ / particles::FrameTime::kOne;
+            if (amt > 0) {
+                fadeCarry_ -= amt * particles::FrameTime::kOne;
+                if (amt > 255) amt = 255;
+                layer()->fadeToBlackBy(static_cast<uint8_t>(amt));
+            }
+        }
 
         constexpr float gravity = -9.81f;
         const uint32_t time = elapsed();
@@ -75,12 +89,16 @@ public:
             for (int i = 0; i < nBalls; i++) {
                 Ball& ball = column[i];
 
-                // Integer ms-division then float — matches MoonLight's `(unsigned long) / (int)`
-                // (truncating) assigned to a float, NOT a full-float divide (which would keep
-                // sub-millisecond precision the source discards). Fidelity: the truncation shifts
-                // every trajectory identically to the original.
-                // NOLINTNEXTLINE(bugprone-integer-division) — the truncation is the point; see above.
-                const float timeSinceLastBounce = static_cast<float>((time - ball.lastBounceTime) / timeScale);
+                // Divide in FLOAT, not integer. MoonLight truncates here, which is harmless at its
+                // fixed ~40 fps because the elapsed delta always exceeds `timeScale`. On a device
+                // rendering hundreds or thousands of frames a second the delta is often SMALLER, so
+                // the integer form truncates to zero and the ball's own clock never advances: the
+                // balls freeze on the floor and the effect dies (measured: 270 lit pixels at 60 fps
+                // against 24 at 1200). Keeping the fraction makes the trajectory identical at every
+                // framerate, which is the system rule in architecture.md; the visible behaviour at
+                // 40 fps is unchanged to within a rounding step.
+                const float timeSinceLastBounce =
+                    static_cast<float>(time - ball.lastBounceTime) / static_cast<float>(timeScale);
                 const float timeSec = timeSinceLastBounce / 1000.0f;
                 float height = (0.5f * gravity * timeSec + ball.impactVelocity) * timeSec;
 
@@ -113,7 +131,7 @@ public:
                 const uint8_t index = static_cast<uint8_t>(i * (256 / paletteDiv));
                 const RGB color = colorFromPalette(*Palettes::active(), index);
 
-                draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(pos), 0}, color);
+                draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(pos), 0}, color);
             }
         }
     }
@@ -127,12 +145,13 @@ private:
         uint32_t lastBounceTime = 0;
     };
 
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
-
     // balls[width][maxNumBalls], flattened; column x = balls_.data() + x*maxNumBalls. Self-sizing,
     // self-freeing, self-reporting.
     ScratchBuffer<Ball> balls_{*this};
     Random8 rng_;               // relaunch-kick randomness (FastLED random8(5,11) → below(5,11))
+
+    particles::FrameTime trailTime_{60};
+    uint32_t fadeCarry_ = 0;   // sub-frame trail fade not yet applied   // trail decay is per second, not per frame
 };
 
 } // namespace mm

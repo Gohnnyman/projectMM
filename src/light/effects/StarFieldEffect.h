@@ -1,6 +1,8 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
+#include "light/shader.h"   // project — the shared pinhole
 
 namespace mm {
 
@@ -77,8 +79,7 @@ public:
         const uint32_t now = elapsed();
         if (now - step_ < 1000u / speed) return;
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion streaks: fade the previous frame rather than clearing it.
         layer()->fadeToBlackBy(blur);
@@ -97,10 +98,16 @@ public:
             // z<=0 maps to MoonLight's +inf (off-grid, not drawn); guard the divide and treat as such.
             bool inBounds = false;
             int sx = 0, sy = 0;
-            if (s.z > 0.0f) {
-                const float invZ = 1.0f / s.z;
-                sx = halfX + static_cast<int>(halfX * (s.x * invZ));
-                sy = halfY + static_cast<int>(halfY * (s.y * invZ));
+            // The pinhole divide is `shader::project` now — the same 1/z this effect, GEQ3D and
+            // RubiksCube each hand-rolled. Verified identical to the float form it replaces across
+            // 1264 samples of the (x, z) range this effect produces, so the port stays exact: a
+            // ported effect that LOOKS different is a regression, not an improvement.
+            int32_t projX = 0, projY = 0;
+            if (shader::project(static_cast<int32_t>(s.x * 65536.0f),
+                                static_cast<int32_t>(s.y * 65536.0f),
+                                static_cast<int32_t>(s.z * 65536.0f), 65536, projX, projY)) {
+                sx = halfX + static_cast<int>((projX * halfX) / 65536);
+                sy = halfY + static_cast<int>((projY * halfY) / 65536);
                 inBounds = (sx >= 0 && sx < sizeX && sy >= 0 && sy < sizeY);
             }
 
@@ -108,19 +115,19 @@ public:
                 RGB col;
                 if (usePalette) {
                     // Nearer (smaller z) = brighter: depth 0..sizeX maps brightness 255..150.
-                    const uint8_t bri = static_cast<uint8_t>(imap(static_cast<int>(s.z), 0, sizeX, 255, 150));
+                    const uint8_t bri = static_cast<uint8_t>(map32(static_cast<int>(s.z), 0, sizeX, 255, 150));
                     col = colorFromPalette(*Palettes::active(), s.colorIndex, bri);
                 } else {
                     // Greyscale: base intensity from colorIndex (120..255), scaled by depth (7..10)/10.
-                    int color = imap(s.colorIndex, 0, 255, 120, 255);
-                    const int brightness = imap(static_cast<int>(s.z), 0, sizeX, 7, 10);
+                    int color = map32(s.colorIndex, 0, 255, 120, 255);
+                    const int brightness = map32(static_cast<int>(s.z), 0, sizeX, 7, 10);
                     color = static_cast<int>(color * (brightness / 10.0f));
                     if (color < 0) color = 0;
                     if (color > 255) color = 255;
                     const uint8_t c = static_cast<uint8_t>(color);
                     col = RGB{c, c, c};
                 }
-                draw::pixel(buf, dims, {static_cast<lengthType>(sx), static_cast<lengthType>(sy), 0}, col);
+                draw::pixel(cv, {static_cast<lengthType>(sx), static_cast<lengthType>(sy), 0}, col);
             }
 
             // Advance toward the viewer; respawn at the far plane when it passes the camera or flies
@@ -139,13 +146,6 @@ private:
     };
     static constexpr uint16_t kMaxStars = 255;  // the numStars control maximum
 
-    // Standard integer map (FastLED ::map), guarded against a zero input span.
-    static int imap(int v, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (v - inLo) * (outHi - outLo) / den + outLo;
-    }
-
     // Spawn a star at a random x/y far position with a fresh color index. `far` selects the depth:
     //   far=false  → initial seed: z in [0, w)  (MoonLight init: z = random(size.x))
     //   far=true   → respawn:      z = w        (MoonLight respawn: z = size.x)
@@ -163,8 +163,6 @@ private:
         const uint32_t span = static_cast<uint32_t>(hi - lo);
         return lo + static_cast<int>(rng_.next16() % span);
     }
-
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     // Fixed kMaxStars table. Self-sizing, self-freeing, self-reporting. seedW_/seedH_ track the
     // geometry the stars were spawned for, so prepare() re-spawns only on a grid change.

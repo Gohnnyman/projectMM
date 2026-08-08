@@ -39,6 +39,18 @@
 #include "light/effects/PaintBrushEffect.h"
 #include "light/effects/SolidEffect.h"
 #include "light/effects/StarSkyEffect.h"
+#include "light/effects/SdfShapesEffect.h"
+#include "light/effects/PolarNoiseEffect.h"
+#include "light/effects/WaterRippleEffect.h"
+#include "light/effects/TunnelEffect.h"
+#include "light/effects/EchoEffect.h"
+#include "light/effects/DissolveEffect.h"
+#include "light/effects/SpectrumEffect.h"
+#include "light/effects/FireworksEffect.h"
+#include "light/effects/BallpitEffect.h"
+#include "light/effects/TruchetEffect.h"
+#include "light/effects/VectorBallsEffect.h"
+#include "light/effects/RaymarchEffect.h"
 #include "light/effects/SphereMoveEffect.h"
 #include "light/effects/StarFieldEffect.h"
 #include "light/effects/PraxisEffect.h"
@@ -116,6 +128,7 @@
 #endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
+#include "core/ControlModule.h"
 #include "core/Services.h"
 #include "core/AudioService.h"
 #include "core/I2cScanModule.h"
@@ -207,6 +220,21 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RubiksCubeEffect>("RubiksCubeEffect", "light/effects.md#rubikscube");
     mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects.md#sine");
     mm::ModuleFactory::registerType<mm::SolidEffect>("SolidEffect", "light/effects.md#solid");
+    mm::ModuleFactory::registerType<mm::SdfShapesEffect>("SdfShapesEffect", "light/effects.md#sdfshapes");
+    mm::ModuleFactory::registerType<mm::PolarNoiseEffect>("PolarNoiseEffect", "light/effects.md#polarnoise");
+    mm::ModuleFactory::registerType<mm::WaterRippleEffect>("WaterRippleEffect", "light/effects.md#waterripple");
+    mm::ModuleFactory::registerType<mm::TunnelEffect>("TunnelEffect", "light/effects.md#tunnel");
+    mm::ModuleFactory::registerType<mm::EchoEffect>("EchoEffect", "light/effects.md#echo");
+    mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");
+    mm::ModuleFactory::registerType<mm::SpectrumEffect>("SpectrumEffect", "light/effects.md#spectrum");
+    mm::ModuleFactory::registerType<mm::FireworksEffect>("FireworksEffect", "light/effects.md#fireworks");
+    mm::ModuleFactory::registerType<mm::BallpitEffect>("BallpitEffect", "light/effects.md#ballpit");
+    mm::ModuleFactory::registerType<mm::TruchetEffect>("TruchetEffect", "light/effects.md#truchet");
+    mm::ModuleFactory::registerType<mm::VectorBallsEffect>("VectorBallsEffect", "light/effects.md#vectorballs");
+#if MM_HEAVY_COMPUTE
+    // Only where the platform declares per-pixel float headroom; absent entirely elsewhere.
+    mm::ModuleFactory::registerType<mm::RaymarchEffect>("RaymarchEffect", "light/effects.md#raymarch");
+#endif
     mm::ModuleFactory::registerType<mm::SphereMoveEffect>("SphereMoveEffect", "light/effects.md#spheremove");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect", "light/effects.md#spiral");
     mm::ModuleFactory::registerType<mm::StarFieldEffect>("StarFieldEffect", "light/effects.md#starfield");
@@ -249,6 +277,7 @@ static void registerModuleTypes() {
 #endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/system.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/system.md#system");
+    mm::ModuleFactory::registerType<mm::ControlModule>("ControlModule", "core/control.md#control");
     mm::ModuleFactory::registerType<mm::Services>("Services", "core/services.md#services");
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService", "core/services.md#audio");
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/system.md#i2c-scan");
@@ -338,6 +367,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // whose children the user adds/removes at runtime. Added as a root below.
     auto* servicesModule = static_cast<mm::Services*>(mm::ModuleFactory::create("Services"));
 
+    // ControlModule — puts the device into a named state. Top-level rather than a Services child
+    // because a preset reaches ACROSS Layouts/Layers/Drivers/Services, so it cannot live inside one
+    // of them. Boot-wired: presets are a device capability, not something a user adds.
+    auto* controlModule = static_cast<mm::ControlModule*>(mm::ModuleFactory::create("ControlModule"));
+
     // The deviceModel identity (e.g. "Olimex ESP32-Gateway Rev G") is now SystemModule's
     // `deviceModel` control — no separate module. SystemModule owns the device identity
     // (deviceName + deviceModel) directly; tooling injects deviceModel like any catalog
@@ -404,6 +438,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     if constexpr (mm::platform::hasNetwork) {
         mqttModule = static_cast<mm::MqttModule*>(mm::ModuleFactory::create("MqttModule"));
         mqttModule->setSystemModule(systemModule);
+        mqttModule->setControlModule(controlModule);   // look-only presets as the HA effect list
         mqttModule->markWiredByCode();
     }
 
@@ -515,6 +550,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     networkModule->addChild(devicesModule);
     scheduler.addModule(networkModule);
     scheduler.addModule(servicesModule);
+    scheduler.addModule(controlModule);
     scheduler.addModule(layouts);
     scheduler.addModule(layersContainer);
     scheduler.addModule(drivers);

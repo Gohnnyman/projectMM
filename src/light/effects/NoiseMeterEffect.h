@@ -36,16 +36,12 @@ public:
     }
 
     void tick() MM_NONBLOCKING override {
-        const int sizeX = width_();
         const int sizeY = height();
-        const int sizeZ = depthDim();
 
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(sizeX), static_cast<lengthType>(sizeY),
-                           static_cast<lengthType>(sizeZ)};
+        const draw::Canvas cv = canvas();
 
         layer()->fadeToBlackBy(fadeRate);
 
@@ -76,7 +72,7 @@ public:
 
             // D1: write only the x=0 column; Layer::extrude fans this row across every x and z.
             const lengthType drawY = static_cast<lengthType>(sizeY - 1 - y);
-            draw::pixel(buf, dims, {0, drawY, 0}, col);
+            draw::pixel(cv, {0, drawY, 0}, col);
         }
 
         // Scroll the noise field each frame. aux0 and aux1 are advanced by two slow, slightly-detuned
@@ -86,7 +82,6 @@ public:
     }
 
 private:
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
     // The inherited EffectBase::width() (grid width) is shadowed by the `width` control member, so
     // reach the grid width through a thin alias.
     lengthType width_() const { return EffectBase::width(); }

@@ -75,7 +75,11 @@ public:
     // The active Layouts, for consumers that need per-light coordinates (e.g.
     // PreviewDriver builds its coordinate table from layouts()->forEachCoord).
     Layouts* layouts() const { return layouts_; }
-    void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
+    /// Channels per light (3 = RGB, 4 = RGBW, more for fixture profiles). Zero is not a valid
+    /// light: it would allocate a zero-byte buffer and make every effect's per-light stride 0, so
+    /// it is rejected here rather than defended against downstream. Enforcing the invariant at the
+    /// one entry point is what lets effects and draw primitives assume `cpl >= 1`.
+    void setChannelsPerLight(uint8_t cpl) { if (cpl > 0) channelsPerLight_ = cpl; }
 
     void prepare() override {
         // Treat "no layouts wired" the same as "every layout child disabled" —
@@ -149,6 +153,7 @@ public:
         // Scheduler already gates the Layer itself by enabled() via respectsEnabled().
         // We still gate per-effect-child explicitly because Layer iterates its own
         // children rather than going through the Scheduler.
+        //
         elapsed_ = platform::millis();
         // The buffer PERSISTS frame-to-frame — the Layer does NOT clear it. This is the FastLED /
         // WLED / MoonLight convention: the buffer holds the previous frame so an effect can fade it
@@ -170,7 +175,7 @@ public:
         // It gates only the EFFECT pass, not the whole tick: the modifier pass below advances
         // per-frame state (a beat-driven RandomMap) that must keep running so the chain is in
         // the right phase when the grid comes back.
-        const bool hasGrid = width_ > 0 && height_ > 0 && depth_ > 0;
+        const bool hasGrid = width_ > 0 && height_ > 0 && depth_ > 0 && buffer_.count() > 0;
         for (uint8_t i = 0; hasGrid && i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Effect) continue;
             if (!child(i)->enabled()) continue;
@@ -203,7 +208,9 @@ public:
         // Live pass: remap the logical buffer per frame for dynamic modifiers (Rotate).
         // Skipped entirely when no modifier is live — a static-only chain pays nothing,
         // the buffer goes straight to the driver scatter (the pay-for-what-you-use rule).
-        if (hasLive_) applyLivePass();
+        // hasGrid too: applyLivePass walks the mapping into the buffer, and an empty layout has
+        // neither. The effect pass above is already gated the same way.
+        if (hasGrid && hasLive_) applyLivePass();
     }
 
     // COLD path (called from prepare after rebuildLUT): (re)size the live-pass
@@ -629,5 +636,9 @@ inline lengthType EffectBase::depth() const { return layer()->depth(); }
 inline uint8_t EffectBase::channelsPerLight() const { return layer()->channelsPerLight(); }
 inline nrOfLightsType EffectBase::nrOfLights() const { return layer()->buffer().count(); }
 inline uint32_t EffectBase::elapsed() const { return layer()->elapsed(); }
+inline draw::Canvas EffectBase::canvas() {
+    Layer* l = layer();
+    return draw::Canvas::of(l->buffer(), l->width(), l->height(), l->depth());
+}
 
 } // namespace mm

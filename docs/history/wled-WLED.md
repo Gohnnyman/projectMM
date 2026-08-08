@@ -4,6 +4,30 @@ What landed on [wled/WLED](https://github.com/wled/WLED)'s `main` branch, month 
 
 Months are **not** split at release dates: upstream WLED cuts releases from separate release branches (`0_15`, `16_x`), so the version tags aren't on `main` — `main` is the development trunk that feeds future releases. Each month notes which release shipped, as context.
 
+## July 2026
+
+The month `main` switched to the **V5** platform: WLED's trunk moved from the ESP-IDF 4.4 / arduino-esp32 v2 build to ESP-IDF 5.3 / arduino-esp32 v3, and the long-running `V5` branch became the development trunk (merged July 19). Maintainers warned publicly that `main` would be unstable for a while, and the web UI now shows a "development build" banner. v16.0.1 shipped July 7 from a release branch, so the month is not split.
+
+**New**
+- Trunk builds move to ESP-IDF 5.3 / arduino-esp32 v3, opening the door to the newer chips (ESP32-C5, C6 and P4 build targets ride along).
+- ESP-NOW now uses WLED's own code instead of the QuickESPNow library — faster, and roughly 10 KB more free memory on ESP32 (1.5 KB on ESP8266).
+- New `esp32_eth_V4` build for Ethernet boards; ESP32-C6 boards get 4 MB and 8 MB builds.
+- Nightly builds renamed, and the web UI warns when you're running a development build.
+- Audio-reactive now compiles on all the newer chips.
+
+**Fixed**
+- ESP32-C3 and S3 no longer boot-loop on the new platform (device-ID and audio-reactive builds rescued).
+- Usermod settings: non-pin dropdowns no longer reserve GPIO pins, which was blocking pin choices elsewhere.
+- Several DMX-input crashes and a robustness fix in its configuration; a possible array overrun in the Improv response.
+- ESP8266 minimum build shrank by 1.5 KB; the unmaintained `WLED_SAVE_RAM` build option was removed.
+
+**Watching**
+- The loudest thread of the month is #5746, asking the project to do unstable work on a `dev` branch rather than breaking `main`.
+- Ethernet users want the WiFi access point to switch off entirely once the wired link is up (#5762).
+- Open v16 field reports: Animated Staircase segments switching instead of fading (#5731), APA102 on GPIO19 misbehaving (#5728), HUB75 colour-order options hidden and mostly unimplemented (#5723), and a request for current-limited LED support in the brightness limiter (#5715).
+
+_Auditability: 40 first-parent commits on `main` with author-date 2026-07-01..2026-07-31 (56 including merged sub-commits). Issues via `search/issues` for `repo:wled/WLED+is:issue+created:2026-07-01..2026-07-31` (20 opened) and `closed:2026-07-01..2026-07-31` (15 closed); only user-facing ones surfaced. v16.0.1 (2026-07-07) is not an ancestor of `main` (GitHub compare reports `main` and `v16.0.1` diverged), so no month split._
+
 ## June 2026
 
 Post-16.0 stabilisation month: no new version tag (v16.0.0 shipped 2026-05-03 off a release branch, so the month is not split), just a steady stream of bugfixes and small additions landing on `main`.

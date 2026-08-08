@@ -124,3 +124,27 @@
   color: var(--md-accent-fg-color);           /* the declared name: accent + bold */
   font-weight: 700;
 }
+
+/* Power-functions tables: the first column holds a function NAME, which must never
+   break mid-token (`draw::fill` wrapping to "draw::fil / l" is unreadable — the reader
+   is scanning for an identifier, not prose). Material sizes table columns by content
+   and lets long inline code wrap anywhere: right for prose, wrong for a symbol.
+   Applied via an explicit {.mm-pf} class on each table (attr_list), so no other table
+   on the site is reshaped. */
+.md-typeset .mm-pf table,
+.md-typeset table.mm-pf {
+  table-layout: fixed;
+  width: 100%;
+}
+.md-typeset .mm-pf table th:nth-child(1), .md-typeset .mm-pf table td:nth-child(1),
+.md-typeset table.mm-pf th:nth-child(1), .md-typeset table.mm-pf td:nth-child(1) { width: 17%; }
+.md-typeset .mm-pf table th:nth-child(2), .md-typeset .mm-pf table td:nth-child(2),
+.md-typeset table.mm-pf th:nth-child(2), .md-typeset table.mm-pf td:nth-child(2) { width: 35%; }
+.md-typeset .mm-pf table th:nth-child(3), .md-typeset .mm-pf table td:nth-child(3),
+.md-typeset table.mm-pf th:nth-child(3), .md-typeset table.mm-pf td:nth-child(3) { width: 38%; }
+.md-typeset .mm-pf table th:nth-child(4), .md-typeset .mm-pf table td:nth-child(4),
+.md-typeset table.mm-pf th:nth-child(4), .md-typeset table.mm-pf td:nth-child(4) { width: 10%; }
+/* The identifier column: keep each symbol whole rather than breaking it mid-token. */
+.md-typeset .mm-pf table td:nth-child(1) code,
+.md-typeset table.mm-pf td:nth-child(1) code { white-space: nowrap; }
+.md-typeset .mm-pf table td, .md-typeset table.mm-pf td { vertical-align: top; }

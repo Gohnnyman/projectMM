@@ -88,6 +88,22 @@ constexpr bool hasNamedNetInterfaces = true;
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).
 constexpr bool hasNetwork = hasWiFi || hasEthernet;
+
+// Enough compute headroom for a per-pixel FLOAT algorithm — a raymarcher, a fractal, a feedback
+// loop that iterates per light. This is the ONE exception to the integer-only render-path rule in
+// coding-standards, and it is gated rather than assumed: an effect behind this constant is not
+// compiled at all where it is false, so no ESP32 firmware carries the float code and the rule is
+// not weakened on the targets it protects.
+//
+// The cost is per PIXEL, not per chip, so this is a statement about the FPU rather than about
+// fixture size: a target with hardware float can run such an effect on a small panel and cannot on
+// a large one, and the effect's own controls are what trade quality for cost. The classic ESP32 has
+// no FPU at all, so it stays out; the S3 and P4 have single-precision hardware.
+constexpr bool hasHeavyCompute = true;    // a desktop CPU has the headroom to spare
+
+// Preprocessor mirror of the flag above: a whole effect can be compiled out only by
+// `#if`, which `constexpr bool` cannot drive. Keep the two in step.
+#define MM_HEAVY_COMPUTE 1
 // No SPI-Ethernet (W5500) driver on desktop either — NetworkModule's live-reconfigure
 // path gates on this, so it must exist on every platform (mirrors the esp32 flag).
 constexpr bool hasEthW5500 = false;

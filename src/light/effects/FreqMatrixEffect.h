@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -60,12 +61,9 @@ public:
     }
 
     void tick() MM_NONBLOCKING override {
-        // D1: read the live grid each frame; the scroll runs down the x=0 column, length = height().
-        const int cols = width();
-        const int len  = height();
+        // D1: the scroll runs down the x=0 column; draw::scroll reads the length from the Canvas.
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(len), depthDim()};
+        const draw::Canvas cv = canvas();
 
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // static silence frame is non-null in practice; guard for safety
@@ -108,7 +106,7 @@ public:
             const int lowerLimit = 80 + 3 * static_cast<int>(lowBin);
             int idx;
             if (lowerLimit != upperLimit)
-                idx = imap(static_cast<int>(f->peakHz), lowerLimit, upperLimit, 0, 255);
+                idx = map32(static_cast<int>(f->peakHz), lowerLimit, upperLimit, 0, 255);
             else
                 idx = static_cast<int>(f->peakHz);
             if (idx < 0) idx = -idx;                     // WLED: abs(i)
@@ -119,22 +117,12 @@ public:
         // --- Shift the column one pixel away from the source end (WLED: for i = SEGLEN-1 .. 1,
         // setPixelColor(i, getPixelColor(i-1))), then paint the new color at y=0. The effect writes
         // only x=0; Layer::extrude duplicates this column across x (and z) on wider layers.
-        for (int y = len - 1; y > 0; y--) {
-            const RGB c = draw::get(buf, dims, {0, static_cast<lengthType>(y - 1), 0});
-            draw::pixel(buf, dims, {0, static_cast<lengthType>(y), 0}, c);
-        }
-        draw::pixel(buf, dims, {0, 0, 0}, newColor);
+        draw::scroll(cv, /*axis=*/1, 1);
+        draw::pixel(cv, {0, 0, 0}, newColor);
     }
 
 private:
-    // Standard integer map (FastLED/WLED ::map), used for the frequency→hue index rescale.
-    static int imap(int x, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (x - inLo) * (outHi - outLo) / den + outLo;
-    }
     // depth>0 ? depth : 1 — the dims z-extent, so draw clipping/indexing is correct on a 3D layer.
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     uint32_t lastScrollMs_ = 0;   // last elapsed() ms the column scrolled (throttle state)
 };

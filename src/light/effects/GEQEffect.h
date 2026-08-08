@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -69,8 +70,7 @@ public:
         const AudioFrame* f = AudioService::latestFrame();
         if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion trail: dim the whole buffer each frame (WLED: fadeToBlackBy(fadeOut)).
         layer()->fadeToBlackBy(fadeOut);
@@ -86,7 +86,7 @@ public:
             // Map this column onto one of the 16 GEQ bands (band = map(x, 0, cols-1, 0, 15)). The
             // 0..cols-1 / 0..15 form (vs the spec's literal map(x,0,size.x,0,16)) is the real WLED
             // mode_2DGEQ shape and keeps the last column on band 15 rather than an out-of-range 16.
-            int band = imap(x, 0, cols - 1, 0, NUM_GEQ_CHANNELS - 1);
+            int band = map32(x, 0, cols - 1, 0, NUM_GEQ_CHANNELS - 1);
             if (band < 0) band = 0;
             if (band > NUM_GEQ_CHANNELS - 1) band = NUM_GEQ_CHANNELS - 1;
 
@@ -105,7 +105,7 @@ public:
             }
 
             // Bar height in rows: map the 0..255 band magnitude onto 0..rows.
-            int barHeight = imap(bandHeight, 0, 255, 0, rows);
+            int barHeight = map32(bandHeight, 0, 255, 0, rows);
             if (barHeight < 0)    barHeight = 0;
             if (barHeight > rows) barHeight = rows;
 
@@ -117,17 +117,17 @@ public:
                 peaks_[x] = static_cast<lengthType>(peaks_[x] - 1);   // RECONSTRUCTED: WLED's peak decays one row per ripple tick
             }
 
-            // Fill the bar from the floor (row rows-1) up to barHeight rows.
-            for (int h = 0; h < barHeight; h++) {
-                const int y = rows - 1 - h;          // row 0 = top, so the bar grows upward from the floor
-                if (y < 0) break;
-                // colorBars: one hue per column. else: the gradient runs up the bar by row height.
-                const uint8_t colorIndex = colorBars
-                    ? static_cast<uint8_t>(imap(x, 0, cols - 1, 0, 255))
-                    : static_cast<uint8_t>(imap(h, 0, rows - 1, 0, 255));
-                const RGB col = colorFromPalette(*Palettes::active(), colorIndex);
-                draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, col);
-            }
+            // Fill the bar from the floor (row rows-1) upward. colorBars: one hue per column. Else
+            // the gradient runs up the bar, so the color is a function of the height along it —
+            // which is the index draw::bar hands the callback.
+            const uint8_t columnIndex = static_cast<uint8_t>(map32(x, 0, cols - 1, 0, 255));
+            draw::bar(cv, static_cast<lengthType>(x), static_cast<lengthType>(rows - 1),
+                      static_cast<lengthType>(barHeight), draw::Grow::Up, [&](lengthType h) {
+                          const uint8_t colorIndex = colorBars
+                              ? columnIndex
+                              : static_cast<uint8_t>(map32(h, 0, rows - 1, 0, 255));
+                          return colorFromPalette(*Palettes::active(), colorIndex);
+                      });
 
             // Falling peak dot, drawn at the remembered peak row if it stands above the live bar.
             // RECONSTRUCTED: WLED draws a single peak pixel (white-ish / palette top) at previousBarHeight.
@@ -136,7 +136,7 @@ public:
                 if (y >= 0 && y < rows) {
                     // Peak color: top of the palette (index 255) so the dot reads as the crest.
                     const RGB peakCol = colorFromPalette(*Palettes::active(), 255);
-                    draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, peakCol);
+                    draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, peakCol);
                 }
             }
         }
@@ -144,16 +144,6 @@ public:
 
 private:
     static constexpr int NUM_GEQ_CHANNELS = 16;
-
-    // Standard integer map (WLED/MoonLight's ::map), used for the band/color/height remaps. Guards a
-    // zero input span so a degenerate grid (cols/rows <= 1) can't divide by zero.
-    static int imap(int v, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (v - inLo) * (outHi - outLo) / den + outLo;
-    }
-
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     // previousBarHeight[width]: per-column peak-dot row (0..rows from floor). The buffer sizes
     // itself in prepare(), frees itself on disable/teardown, and reports its own bytes.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -34,15 +35,12 @@ public:
         lengthType d = depth();
         uint8_t cpl = channelsPerLight();
 
-        uint32_t now = elapsed();
-        uint32_t dt = now - lastElapsed_;
-        lastElapsed_ = now;
         // Phase advances purely with time and bpm — NOT with grid width, so the speed is the same on
-        // every fixture. phase_ accumulates the RAW numerator (dt·bpm·256) and the /60000 divide runs
-        // only at the sampling point below — dividing per tick would truncate the sub-unit progress to
-        // zero on a fast board (short dt), stalling the animation. 256 phase units = one beat's wrap.
-        phase_ += static_cast<uint64_t>(dt) * bpm * 256;
-        const uint32_t phase = static_cast<uint32_t>(phase_ / 60000);
+        // every fixture. The x256 that used to sit in the accumulate is the read scale here: same
+        // product, and BeatPhase keeps the numerator in 64 bits so a short dt cannot truncate the
+        // sub-unit progress to zero and stall the animation. 256 phase units = one beat's wrap.
+        phase_.advance(elapsed(), bpm);
+        const uint32_t phase = phase_.phase(256);
 
         uint8_t step_x = static_cast<uint8_t>(256 / scale_x);
         uint8_t step_y = static_cast<uint8_t>(256 / scale_y);
@@ -95,8 +93,7 @@ public:
     }
 
 private:
-    uint64_t phase_ = 0;
-    uint32_t lastElapsed_ = 0;
+    BeatPhase phase_;
 };
 
 } // namespace mm

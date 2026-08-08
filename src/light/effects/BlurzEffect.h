@@ -57,15 +57,13 @@ public:
         const int cols = width();
         const int rows = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // The strip is the flat run of all pixels; the dot is addressed by a single linear index.
         const int maxLen = static_cast<int>(nrOfLights());
-        if (maxLen <= 0) return;
 
         // One-shot clear on the first frame after (re)build — WLED's SEGENV.call == 0 fadeToBlackBy(255).
-        if (firstFrame_) { draw::fill(buf, RGB{0, 0, 0}); firstFrame_ = false; }
+        if (firstFrame_) { draw::fill(cv, RGB{0, 0, 0}); firstFrame_ = false; }
 
         // Per-frame fade gives the blurred dot its decaying trail (WLED fadeToBlackBy(fadeRate)).
         layer()->fadeToBlackBy(fadeRate);
@@ -124,21 +122,20 @@ public:
         const int r = minDim > 32 ? minDim / 32 : 0;   // ≤32 → one pixel (WLED look); larger → scaled blob
         for (int oy = -r; oy <= r; oy++)
             for (int ox = -r; ox <= r; ox++)
-                draw::pixel(buf, dims, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);
+                draw::pixel(cv, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);
 
         // Blur the whole buffer — the defining smear (WLED SEGMENT.blur(custom1)).
-        draw::blur(buf, dims, blur);
+        draw::blur(cv, blur);
 
         // Re-stamp the dot core ON TOP of the blur (WLED's addRGB after blur2d). The blur spreads the
         // dot into its halo but also dilutes its centre — a blurred dot fades to near-nothing without
         // this. Re-adding the color keeps the core bright so the smear reads as a glowing dot.
         for (int oy = -r; oy <= r; oy++)
             for (int ox = -r; ox <= r; ox++)
-                draw::addPixel(buf, dims, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);
+                draw::addPixel(cv, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);
     }
 
 private:
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     bool    firstFrame_ = true;   // WLED SEGENV.call == 0 one-shot clear
     uint8_t freqBand_   = 0;      // band cursor, 0..15, ++ each frame

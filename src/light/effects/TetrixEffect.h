@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
+#include "light/particles.h"   // FrameTime — the shared time scale
 
 #include "platform/platform.h"      // platform::millis (the per-drop start-delay clock)
 
@@ -47,6 +48,7 @@ public:
         uint16_t brick = 0;     // brick height in LEDs
         uint16_t stack = 0;     // current stacked height at the bottom
         uint32_t step  = 0;     // state machine / timestamp (see above)
+        float    roll  = 0.0f;  // start-roll carry, paced at the reference frame rate
     };
 
     void prepare() override {
@@ -67,16 +69,21 @@ public:
     }
 
     void tick() MM_NONBLOCKING override {
+        frameScale_ = static_cast<float>(fallTime_.advance(elapsed())) /
+                      static_cast<float>(particles::FrameTime::kOne);
         if (!drops_) return;
 
         const lengthType w = width();
         const lengthType h = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, depthDim()};
+        const draw::Canvas cv = canvas();
 
         const uint32_t now = platform::millis();
         const RGB black{0, 0, 0};
+        // Own the background before painting columns. The Layer does not clear between frames, and
+        // this effect writes only inside its own columns — and nothing at all during the start
+        // delay — so without this it shows the previous effect's frame around and behind the game.
+        draw::fill(cv, black);
 
         // Process exactly the live column count (never the allocated max — robust to a shrink
         // before prepare reruns).
@@ -98,24 +105,37 @@ public:
                 d.pos   = static_cast<float>(h);             // start above the top, fall downward
                 if (!oneColor) d.col = static_cast<uint8_t>(rng_.below(0, 15) << 4);
                 d.step  = 1;
+                d.roll  = 0.0f;
                 // Brick height: from the width control (if set) or random 1..4, scaled up on tall grids.
                 d.brick = static_cast<uint16_t>((widthControl ? ((widthControl >> 5) + 1)
                                                               : rng_.below(1, 5))
                                                 * (1 + (h >> 6)));
             } else if (d.step == 1) {
-                // Start-roll: ~75% chance each frame to begin falling (random8() >> 6 is 0 ~1/4 of the time).
-                if (rng_.next8() >> 6) d.step = 2;
+                // Start-roll: MoonLight rolls a ~75% chance per frame, which at its fixed 40 fps means a
+                // brick waits a frame or two before dropping. Rolling per FRAME makes that pause a
+                // property of the framerate — at thousands of frames a second every brick starts
+                // instantly and the effect has no rhythm left. Roll once per reference frame instead,
+                // so the wait is the same fraction of a second everywhere.
+                d.roll += frameScale_;
+                while (d.roll >= 1.0f && d.step == 1) {
+                    d.roll -= 1.0f;
+                    if (rng_.next8() >> 6) d.step = 2;
+                }
             } else if (d.step == 2) {
                 // Falling: descend until the brick head reaches the top of the stack.
                 if (d.pos > static_cast<float>(d.stack)) {
-                    d.pos -= d.speed;
+                    // `speed` is calibrated against MoonLight's fixed 25 ms frame, so stepping by it
+                    // once per frame makes the fall rate a property of the framerate — bricks that
+                    // drift at 40 fps slam down at 1200. Scaling by the elapsed fraction of a
+                    // reference frame keeps the descent identical everywhere (architecture.md).
+                    d.pos -= d.speed * frameScale_;
                     if (d.pos < static_cast<float>(d.stack)) d.pos = static_cast<float>(d.stack);
                     // Render the brick: rows [pos, pos+brick) lit in the column color, above it black.
                     for (lengthType i = static_cast<lengthType>(d.pos); i < h; i++) {
                         const RGB c = (i < static_cast<lengthType>(d.pos) + static_cast<lengthType>(d.brick))
                                           ? colorFromPalette(*Palettes::active(), d.col)
                                           : black;
-                        draw::pixel(buf, dims, {static_cast<lengthType>(x),
+                        draw::pixel(cv, {static_cast<lengthType>(x),
                                                 static_cast<lengthType>(h - 1 - i), 0}, c);
                     }
                 } else {
@@ -134,7 +154,7 @@ public:
                 d.brick = 0;
                 if (static_cast<int32_t>(d.step - now) > 0) {
                     for (lengthType i = 0; i < h; i++)
-                        draw::blendPixel(buf, dims, {static_cast<lengthType>(x), i, 0}, black, 25);
+                        draw::blendPixel(cv, {static_cast<lengthType>(x), i, 0}, black, 25);
                 } else {
                     d.stack = 0;
                     d.step  = 0;
@@ -157,13 +177,15 @@ private:
         return (x - inMin) * (outMax - outMin) / den + outMin;
     }
 
-    // The grid depth accessor needs the >0 guard for the dims z extent; the width/oneColor control
-    // members are named *Control so they don't shadow the inherited width()/depth() accessors.
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
+    // The width/oneColor control members are named *Control so they don't shadow the inherited
+    // width()/depth() accessors.
 
     // One drop per X column. Self-sizing, self-freeing, self-reporting.
     ScratchBuffer<Tetris> drops_{*this};
     Random8        rng_;
+
+    particles::FrameTime fallTime_{40};   // MoonLight's reference rate
+    float frameScale_ = 1.0f;             // this frame's share of a reference frame
 };
 
 } // namespace mm

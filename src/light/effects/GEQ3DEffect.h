@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -52,8 +53,7 @@ public:
         const int cols = width();
         const int rows = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+        const draw::Canvas cv = canvas();
 
         // Motion trail: dim the whole buffer each frame instead of clearing it (source:
         // layer->fadeToBlackBy(16) per frame).
@@ -77,7 +77,7 @@ public:
         const int projector = static_cast<int>(static_cast<uint32_t>(sweep) * cols / 255u);
         // horizon is a Y row used as the vanishing point's y; clamp the 0..255 control to the grid.
         const int hzn = horizon < rows ? horizon : rows - 1;
-        const int split = imap(projector, 0, cols, 0, NUM_BANDS - 1);
+        const int split = map32(projector, 0, cols, 0, NUM_BANDS - 1);
 
         const AudioFrame* f = AudioService::latestFrame();
 
@@ -86,7 +86,7 @@ public:
         const int maxHeight = lroundf(float(rows) * ((rows < 18) ? 0.75f : 0.85f));
         for (int i = 0; i < NUM_BANDS; i++) {
             int band = i;
-            if (NUM_BANDS < 16) band = imap(band, 0, NUM_BANDS, 0, 16);  // always use the full 16-band range
+            if (NUM_BANDS < 16) band = map32(band, 0, NUM_BANDS, 0, 16);  // always use the full 16-band range
             if (band > 15) band = 15;
             heights[i] = map8(f->bands[band], 0, static_cast<uint8_t>(maxHeight));
         }
@@ -95,7 +95,7 @@ public:
 
         // Right vertical faces + top — bands at/left of the split, painted LEFT to RIGHT.
         for (int i = 0; i <= split; i++) {
-            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols, 0, 256);
+            const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols, 0, 256);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
             const int linex = i * (cols / NUM_BANDS);
 
@@ -105,7 +105,7 @@ public:
                 // Right side face: stacked perspective lines from the bar's right edge toward the projector.
                 for (int y = (i < NUM_BANDS - 1) ? heights[i + 1] : 0; y <= heights[i]; y++) {
                     if (rows - y > 0)
-                        draw::line(buf, dims, {static_cast<lengthType>(pPos), static_cast<lengthType>(rows - y - 1), 0},
+                        draw::line(cv, {static_cast<lengthType>(pPos), static_cast<lengthType>(rows - y - 1), 0},
                                    {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, sideColor, depth);
                 }
 
@@ -114,7 +114,7 @@ public:
                 if (heights[i] < rows - hzn && (projector <= linex || projector >= pPos)) {
                     if (rows - heights[i] > 1) {
                         for (int x = linex; x <= pPos; x++)
-                            draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
+                            draw::line(cv, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
                                        {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, topColor, depth);
                     }
                 }
@@ -123,7 +123,7 @@ public:
 
         // Left vertical faces + top — bands right of the split, painted RIGHT to LEFT.
         for (int i = NUM_BANDS - 1; i > split; i--) {
-            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
+            const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
             const int linex = i * (cols / NUM_BANDS);
             const int pPos = MAXi(0, linex + (cols / NUM_BANDS) - 1);
@@ -133,7 +133,7 @@ public:
                 // Left side face: stacked perspective lines from the bar's left edge toward the projector.
                 for (int y = (i > 0) ? heights[i - 1] : 0; y <= heights[i]; y++) {
                     if (rows - y > 0)
-                        draw::line(buf, dims, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - y - 1), 0},
+                        draw::line(cv, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - y - 1), 0},
                                    {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, sideColor, depth);
                 }
 
@@ -141,7 +141,7 @@ public:
                 if (heights[i] < rows - hzn && (projector <= linex || projector >= pPos)) {
                     if (rows - heights[i] > 1) {
                         for (int x = linex; x <= pPos; x++)
-                            draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
+                            draw::line(cv, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
                                        {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, topColor, depth);
                     }
                 }
@@ -150,7 +150,7 @@ public:
 
         // Projector special-case top + front fill + borders, all bands left to right.
         for (int i = 0; i < NUM_BANDS; i++) {
-            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
+            const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
             const int linex = i * (cols / NUM_BANDS);
             const int pPos  = linex + (cols / NUM_BANDS) - 1;
@@ -161,7 +161,7 @@ public:
                 if ((heights[i] > 1) && (heights[i] < rows - hzn) && (rows - heights[i] > 1)) {
                     const RGB topColor = blend(ledColor, black, static_cast<uint8_t>(255 - 128));
                     for (int x = linex; x <= pPos; x++)
-                        draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
+                        draw::line(cv, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
                                    {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, topColor, depth);
                 }
             }
@@ -170,13 +170,13 @@ public:
                 RGB frontColor = blend(ledColor, black, static_cast<uint8_t>(255 - frontFill));
                 // Front fill: vertical lines across the bar face from the floor up to its height.
                 for (int x = linex; x < pPos1; x++)
-                    draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - 1), 0},
+                    draw::line(cv, {static_cast<lengthType>(x), static_cast<lengthType>(rows - 1), 0},
                                {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 1), 0}, frontColor);
 
                 if (!borders && heights[i] > rows - hzn) {
                     // Match the side fill in blackout mode, then draw a top line to simulate hidden top fill.
                     if (frontFill == 0) frontColor = blend(ledColor, black, static_cast<uint8_t>(255 - 32));
-                    draw::line(buf, dims, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - heights[i] - 1), 0},
+                    draw::line(cv, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - heights[i] - 1), 0},
                                {static_cast<lengthType>(linex + (cols / NUM_BANDS) - 1), static_cast<lengthType>(rows - heights[i] - 1), 0}, frontColor);
                 }
 
@@ -186,25 +186,18 @@ public:
                     const lengthType topY2  = static_cast<lengthType>(rows - heights[i] - 2);
                     const lengthType lx     = static_cast<lengthType>(linex);
                     const lengthType rx     = static_cast<lengthType>(linex + (cols / NUM_BANDS) - 1);
-                    draw::line(buf, dims, {lx, bottom, 0}, {lx, topY, 0}, ledColor);   // left side line
-                    draw::line(buf, dims, {rx, bottom, 0}, {rx, topY, 0}, ledColor);   // right side line
-                    draw::line(buf, dims, {lx, topY2, 0}, {rx, topY2, 0}, ledColor);   // top line
-                    draw::line(buf, dims, {lx, bottom, 0}, {rx, bottom, 0}, ledColor); // bottom line
+                    draw::line(cv, {lx, bottom, 0}, {lx, topY, 0}, ledColor);   // left side line
+                    draw::line(cv, {rx, bottom, 0}, {rx, topY, 0}, ledColor);   // right side line
+                    draw::line(cv, {lx, topY2, 0}, {rx, topY2, 0}, ledColor);   // top line
+                    draw::line(cv, {lx, bottom, 0}, {rx, bottom, 0}, ledColor); // bottom line
                 }
             }
         }
     }
 
 private:
-    // Standard integer map (MoonLight's ::map), used for the color index / split / band remaps.
-    static int imap(int x, int inLo, int inHi, int outLo, int outHi) {
-        const int den = inHi - inLo;
-        if (den == 0) return outLo;
-        return (x - inLo) * (outHi - outLo) / den + outLo;
-    }
     static int MAXi(int a, int b) { return a > b ? a : b; }
     // The member `depth` (control) hides the inherited grid-depth accessor name; qualify it.
-    lengthType depthDim() const { return EffectBase::depth() > 0 ? EffectBase::depth() : 1; }
 };
 
 } // namespace mm

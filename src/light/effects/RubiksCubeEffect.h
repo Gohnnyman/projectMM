@@ -64,8 +64,7 @@ public:
     void tick() MM_NONBLOCKING override {
         const lengthType w = width(), h = height(), d = depth();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{w, h, d};
+        const draw::Canvas cv = canvas();
 
         const uint32_t now = elapsed();
 
@@ -80,7 +79,7 @@ public:
         if ((doInit_ && now > step_) || ahead > 3100) {
             step_ = now + 1000;
             doInit_ = false;
-            init(buf, dims, w, h, d);
+            init(cv, w, h, d);
         }
 
         // Turn pacing: nothing to do until 1000/turnsPerSecond ms have passed since the last turn.
@@ -90,7 +89,7 @@ public:
                                         : unpackMove(moveList_[moveIndex_]);
         // Playback applies the inverse direction so the scramble unwinds toward solved.
         (cube_.*kRotateFuncs[move.face])(!move.direction, static_cast<uint8_t>(move.width + 1));
-        cube_.drawCube(buf, dims, w, h, d, faceColors());
+        cube_.drawCube(cv, w, h, d, faceColors());
 
         if (!randomTurning && moveIndex_ == 0) {
             step_ = now + 3000;   // solved: hold for 3 s, then re-scramble
@@ -216,13 +215,13 @@ private:
         // Project the cube onto the LED volume: every in-bounds voxel is colored by the outer face
         // it sits nearest. (MoonLight's drawCube, with the isMapped()-skip and sizeX++/etc dropped.)
         // The 6 face colors are supplied by the caller (classic Rubik's set, or palette samples).
-        void drawCube(Buffer& buf, Coord3D dims, lengthType sx, lengthType sy, lengthType sz,
+        void drawCube(const draw::Canvas& cv, lengthType sx, lengthType sy, lengthType sz,
                       const std::array<RGB, 6>& COLOR_MAP) const {
             // This effect owns its background: drawCube writes only the SURFACE voxels (the loop has
             // no else for the interior), and a turn moves stickers to new positions, so without a
             // wipe the old pose's stickers linger and the cube accretes garbage — it never settles.
             // One fill per draw (drawCube runs once per turn, not per frame), the sparse-effect idiom.
-            draw::fill(buf, {0, 0, 0});
+            draw::fill(cv, {0, 0, 0});
             const int sizeX = MAXi(sx - 1, 1), sizeY = MAXi(sy - 1, 1), sizeZ = MAXi(sz - 1, 1);
             // Integer form of round(coord * (SIZE+1) / size): for non-negative operands round(a/b) is
             // (2a + b) / (2b), which reproduces round(coord*scale) exactly at these magnitudes — no
@@ -242,12 +241,12 @@ private:
                         const int distX = MINi(x, sizeX - x), distY = MINi(y, sizeY - y), distZ = MINi(z, sizeZ - z);
                         const int dist = MINi(distX, MINi(distY, distZ));
 
-                        if      (dist == distZ && z < halfZ)  draw::pixel(buf, dims, led, COLOR_MAP[front[nY][nX]]);
-                        else if (dist == distX && x < halfX)  draw::pixel(buf, dims, led, COLOR_MAP[left[nY][SIZE - 1 - nZ]]);
-                        else if (dist == distY && y < halfY)  draw::pixel(buf, dims, led, COLOR_MAP[top[SIZE - 1 - nZ][nX]]);
-                        else if (dist == distZ && z >= halfZ) draw::pixel(buf, dims, led, COLOR_MAP[back[nY][SIZE - 1 - nX]]);
-                        else if (dist == distX && x >= halfX) draw::pixel(buf, dims, led, COLOR_MAP[right[nY][nZ]]);
-                        else if (dist == distY && y >= halfY) draw::pixel(buf, dims, led, COLOR_MAP[bottom[nZ][nX]]);
+                        if      (dist == distZ && z < halfZ)  draw::pixel(cv, led, COLOR_MAP[front[nY][nX]]);
+                        else if (dist == distX && x < halfX)  draw::pixel(cv, led, COLOR_MAP[left[nY][SIZE - 1 - nZ]]);
+                        else if (dist == distY && y < halfY)  draw::pixel(cv, led, COLOR_MAP[top[SIZE - 1 - nZ][nX]]);
+                        else if (dist == distZ && z >= halfZ) draw::pixel(cv, led, COLOR_MAP[back[nY][SIZE - 1 - nX]]);
+                        else if (dist == distX && x >= halfX) draw::pixel(cv, led, COLOR_MAP[right[nY][nZ]]);
+                        else if (dist == distY && y >= halfY) draw::pixel(cv, led, COLOR_MAP[bottom[nZ][nX]]);
                     }
         }
     };
@@ -281,7 +280,7 @@ private:
 
     // Build a fresh solved cube, give it a few random whole-cube turns, then scramble it with a
     // stored move list (so playback can reverse it), and draw the scrambled state.
-    void init(Buffer& buf, Coord3D dims, lengthType w, lengthType h, lengthType d) {
+    void init(const draw::Canvas& cv, lengthType w, lengthType h, lengthType d) {
         cube_.init(cubeSize);
         const int moveCount = cubeSize * 10 + rng_.below(20);
 
@@ -299,7 +298,7 @@ private:
             (cube_.*kRotateFuncs[move.face])(move.direction, static_cast<uint8_t>(move.width + 1));
         }
         moveIndex_ = static_cast<uint8_t>(cappedMoves - 1);
-        cube_.drawCube(buf, dims, w, h, d, faceColors());
+        cube_.drawCube(cv, w, h, d, faceColors());
     }
 
     // Inline integer helpers (MoonLight's MIN/MAX/constrain).

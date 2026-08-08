@@ -3,6 +3,8 @@
 #include "doctest.h"
 #include "core/noise.h"
 
+#include <set>
+
 using namespace mm;
 
 // Determinism: the same coordinate always gives the same value (a pure function of position),
@@ -43,4 +45,53 @@ TEST_CASE("noise: inoise8 spans a wide range across a field") {
             if (v > hi) hi = v;
         }
     CHECK(hi - lo >= 128);                  // a real field, not a flat plane
+}
+
+// --- The 16-bit tier ---------------------------------------------------------------------------
+//
+// The reason it exists: 256 levels band visibly on a large fixture, so a field an effect draws
+// against carries 16. Both tests below pin a property that was WRONG when the tier was first
+// written, and neither failure was visible from reading the output — only from counting it.
+
+TEST_CASE("16-bit noise fills the range instead of stepping through 256 levels") {
+    // fbm16 summed its octaves after shifting each sample down by 8, which fits a 32-bit
+    // accumulator but throws away the low byte — the result was an 8-bit field in a uint16_t,
+    // exactly the banding this tier removes. Counting distinct values is what catches that: the
+    // output LOOKS like plausible noise either way.
+    std::set<uint16_t> values;
+    int lowByteSet = 0;
+    for (uint32_t i = 0; i < 20000; i++) {
+        const uint16_t v = fbm16(i * 137u, i * 911u, 4);
+        values.insert(v);
+        if (v & 0xFF) lowByteSet++;
+    }
+    CHECK(values.size() > 5000);      // a byte-quantised field tops out at 256
+    CHECK(lowByteSet > 1000);         // and never sets the low byte at all
+}
+
+TEST_CASE("16-bit interpolation stays exact across the full range") {
+    // lerp16's delta*t reaches 4.29e9 against an INT32_MAX of 2.15e9: signed overflow, undefined
+    // behaviour, on roughly a quarter of samples. It happened to produce the right low bits on
+    // wrap-around hardware, so only the endpoints and the midpoint reveal it.
+    CHECK(noise::lerp16(0, 65535, 0) == 0);
+    CHECK(noise::lerp16(0, 65535, 65535) == 65534);       // t is a fraction of 65536, not of 65535
+    CHECK(noise::lerp16(1000, 1000, 40000) == 1000);      // equal endpoints never move
+    // The worst case for the product, from both directions — a wrapped intermediate lands far away.
+    CHECK(noise::lerp16(0, 65535, 49152) == 49151);      // exact: integer arithmetic
+    CHECK(noise::lerp16(65535, 0, 49152) == 16383);
+    // Monotonic: interpolating further along never goes backwards.
+    uint16_t prev = 0;
+    for (uint32_t t = 0; t <= 65535u; t += 251) {
+        const uint16_t v = noise::lerp16(0, 65535, static_cast<uint16_t>(t));
+        CHECK(v >= prev);
+        prev = v;
+    }
+}
+
+TEST_CASE("16-bit noise is smooth where the 8-bit form would step") {
+    // The whole point of the tier: sampling finer than the 8-bit LUT resolves must produce
+    // intermediate values rather than a staircase.
+    std::set<uint16_t> values;
+    for (uint32_t f = 0; f < 256; f++) values.insert(inoise16(0x10000u + f * 16u));
+    CHECK(values.size() > 150);       // a stepped field repeats a handful; rounding costs a few
 }

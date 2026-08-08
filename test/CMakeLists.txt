@@ -8,7 +8,9 @@ add_executable(mm_tests
     unit/core/unit_ActiveInstance.cpp
     unit/core/unit_Color.cpp
     unit/core/unit_math8.cpp
+    unit/core/unit_math16.cpp
     unit/core/unit_noise.cpp
+    unit/core/unit_fields.cpp
     unit/core/unit_crc.cpp
     unit/core/unit_AudioService_sync.cpp
     unit/core/unit_IrService.cpp
@@ -26,6 +28,8 @@ add_executable(mm_tests
     unit/core/unit_PinsModule.cpp
     unit/core/unit_WledPacket.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
+    unit/core/unit_ControlModule.cpp
+    unit/core/unit_FilesystemModule_subtree.cpp
     unit/core/unit_FirmwareUpdateModule.cpp
     unit/core/unit_HttpServerModule_apply.cpp
     unit/core/unit_ImprovFrame.cpp
@@ -71,6 +75,16 @@ add_executable(mm_tests
     unit/light/unit_Coord3D.cpp
     unit/light/unit_effects_render.cpp
     unit/light/unit_Effects_gridsweep.cpp
+    unit/light/unit_Effects_golden.cpp
+    unit/light/unit_Canvas.cpp
+    unit/light/unit_Splat.cpp
+    unit/light/unit_Sdf.cpp
+    unit/light/unit_Bar.cpp
+    unit/light/unit_Scroll.cpp
+    unit/light/unit_Circle.cpp
+    unit/light/unit_Particles.cpp
+    unit/light/unit_Shader.cpp
+    unit/light/unit_Effects_framerate.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp

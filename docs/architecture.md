@@ -68,7 +68,7 @@ The system is two layers, separated as much as practical:
 
 When mixing is needed (for performance or simplicity), it must be an explicit decision: consciously choosing minimalism over separation, not accidentally blurring the boundary. Use domain-neutral naming in those cases ("producer buffer" not "LED buffer", "output driver" not "LED driver" in core interfaces) to keep the door open for future separation.
 
-**Core primitives, not one-offs.** Core earns growth only by adding a recognizable, reusable primitive many modules lean on (a streaming write, a positional read, a bounded arena, a recursive JSON reader); a core change that only one caller needs is the smell. When a complex system will need a capability, build the cleanest complete version rather than a crippled subset that pushes hacks outward (a JSON reader that can't read arrays is not "minimal"). And concrete first, abstract later: build one working feature end-to-end before extracting the shared abstraction.
+**Core primitives, not one-offs.** Core earns growth only by adding a recognizable, reusable primitive many modules lean on (a streaming write, a positional read, a bounded arena, a recursive JSON reader); a core change that only one caller needs is the smell. When a complex system will need a capability, build the cleanest complete version rather than a crippled subset that pushes hacks outward (a JSON reader that can't read arrays is not "minimal").
 
 # Core
 
@@ -429,7 +429,17 @@ The `dim` int is also emitted in `/api/types` so the UI derives the dimensional 
 
 ### Robustness rules
 
-**Effects must run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `tick()` must produce a correct result for any `(width, height, depth)`: no crashes, no divide-by-zero, no out-of-bounds writes. On a zero grid the loop is a clean no-op. Effects either gate at the top (`if (w <= 0 || h <= 0) return;`) or write their loops so an empty range is naturally a no-op (`for (y = 0; y < h; ...)`).
+**Effects run at every non-empty grid shape.** Modifiers can reshape the logical grid to any size, so an effect's `tick()` produces a correct result for any `(width, height, depth)` of at least one light — a 1×1, a strip, a tall column, a cube. The empty case is the Layer's: `Layer::tick()` skips the effect pass entirely when an extent is 0 or the buffer holds no lights, so that check lives in one place for all effects rather than at the top of each.
+
+**The Layer decides whether a frame runs; the effect decides what it paints.** The modifier pass still runs when the effect pass is skipped: a beat-driven modifier advances its per-frame state through the empty interval, so the chain is in the right phase when the grid returns. An effect owns the checks about *itself*, and returns early for:
+
+- **Its own resources**: `if (!heat_) return;` — a ScratchBuffer it allocated.
+- **Its own controls and timing**: `if (speed == 0) return;`, a rate limiter, a divide-by-zero guard on a control value.
+- **Producer input**: `if (!f) return;` — no audio frame to react to.
+
+The test: *would the Layer know to skip this?* If yes (an empty grid, a disabled module), it belongs to the Layer. If no (this effect's buffer, this effect's control), it belongs to the effect.
+
+**Effects render at every channel count.** An effect writes per channel, the way `draw::pixel` does (`if (write >= 1) …r; if (write >= 2) …g;`), so a light carries as much of the color as it has channels — RGB on three, R+G on two, R on one. Channels the effect doesn't set belong to the driver. Every light has at least one channel: `Layer::setChannelsPerLight` enforces that at the setter.
 
 **Effects must animate at every tick rate.** Per-tick phase math computed as `dt * bpm * K / 60000` truncates to 0 on devices where `dt < 234/bpm` ms: desktop ticks every 0–1 ms, so even bpm=60 freezes. The fix is to keep the raw `dt * bpm` numerator in the phase accumulator and divide only at the read site:
 
@@ -439,6 +449,12 @@ uint8_t t = static_cast<uint8_t>((phase_num_ * 256) / 60000);
 ```
 
 See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed must depend only on `bpm` and wallclock, not on tick rate or grid size.
+
+**Everything that changes over time is driven by elapsed time, never by the frame count.** The rule above is one half of it — a phase that truncates to zero and freezes. The other half is the mirror image and just as wrong: state advanced by a fixed amount *per frame* runs at whatever speed the hardware happens to render. The same gravity setting is an explosion on a desktop at 5,000 fps and a drift on an ESP32 at 470. This applies to every per-frame quantity, not just phase: a force, a velocity, a trail fade, a decay, a drop rate, a simulation step. The user sets a speed; the hardware must not get a vote.
+
+**A faster device renders the same motion more smoothly, not more motion.** The tempting fix — quantise to a fixed 60 Hz and skip the frames in between — is wrong here, because it discards exactly the smoothness the extra frames were rendered for. Instead scale the work by the fraction of a reference frame that actually elapsed, so a device rendering ten times as fast takes ten steps a tenth the size: the same trajectory at ten times the resolution. `particles::FrameTime` is the shared implementation (8.8 fixed point, 256 = one reference frame, whose rate is the constructor's `referenceHz` — 60 by default). It carries the undivided numerator and divides late, for the same reason `BeatPhase` does: one unit is a fraction of a millisecond, so a remainder held in whole milliseconds cannot represent it and the truncated time — which differs by render rate — becomes a framerate dependency of its own.
+
+The check is mechanical: **run the effect at two very different framerates over the same span of simulated time and compare.** If the result differs, something is counting frames.
 
 **An effect renders a pattern; it does not transform geometry.** When migrating or adding an effect, strip out anything that is really a *modifier* — mirroring, tiling, rotation, scrolling/offset, a kaleidoscope fold, masking, any remap of *where* pixels land — and add it as a separate [modifier](#modifiers) instead. WLED (and other sources we port from) routinely fold these into the effect's own loop (a "mirror" checkbox, a "2D" rotation, a built-in pinwheel), because WLED has no modifier concept; we do. Keeping them out of the effect is what lets any effect compose with any modifier (the same RotateModifier rotates Fire, Noise, or a network-received frame) instead of every effect re-implementing its own half-baked mirror. The test: an effect's `tick()` should only *write colors into the logical buffer for its own coordinates*; if it's reading or rewriting positions to move/fold/duplicate the image, that behaviour belongs in a modifier. (This is the light-domain face of *Complexity lives in core; domain modules stay simple* — geometry transforms are the modifier's job, shared once, not duplicated into every effect.)
 

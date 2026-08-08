@@ -2,7 +2,19 @@
 
 What landed on [NightDriverStrip](https://github.com/PlummersSoftwareLLC/NightDriverStrip)'s `main` branch, month by month. External-context reference — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md).
 
-Summarised via the GitHub commits API (no local clone), so counts are all commits on `main`, not first-parent merges — the bullets filter out dependency bumps, whitespace, and pure refactors. The one release in the window, **v1.3.0**, was published 2026-01-10 but tagged from a late-November commit; it isn't a clean month boundary, so months are kept whole with the release noted as context.
+Summarised via the GitHub commits API (no local clone), so counts are all commits on `main`, not first-parent merges — the bullets filter out dependency bumps, whitespace, and pure refactors. Releases are noted as context rather than used as month boundaries: **v1.3.0** (published 2026-01-10) was tagged from a late-November commit, and the latest are **v2.0.0** and **v2.0.1**, both published 2026-06-14. Neither is a clean month boundary, so months are kept whole.
+
+## July 2026
+
+A quiet month: one feature merge, no release, no issues.
+
+- **Mesmerizer matrix panels switched to the HUB75-DMA backend** (replacing SmartMatrix), so the LED-matrix output path is now shared across all Mesmerizer boards.
+- Two new supported boards: **ESP32-DevKitC V4** (local effects only, no PSRAM) and **ESP32-S3-DevKitC-1 N16R8** (16 MB flash, 8 MB PSRAM, USB serial logging). On both, the BOOT button steps through effects.
+- The startup splash screen now renders immediately instead of waiting for WiFi.
+- Better behaviour on low-memory boards: the firmware degrades gracefully instead of failing when memory runs short.
+- Fixed the JPEG decoder not being ready in time for the startup splash, and corrected serial status output on S3 boards.
+
+_Auditability: 3 commits on `main` author-dated 2026-07-01..2026-07-31 (1 first-parent merge — PR #901, merged July 18 — plus a whitespace commit); `commits?sha=main&since=…&until=…`. Issues checked via `search/issues` for `created:2026-07-01..2026-07-31` (0), `closed:` (0) and `updated:` (0) in the same range. No versioned release published in July (latest are v2.0.0/v2.0.1, both June 14), so the month is kept whole._
 
 ## June 2026 (up to v2.0.0)
 

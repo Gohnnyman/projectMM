@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -66,19 +67,17 @@ public:
         const lengthType h = height();
         const uint8_t cpl = channelsPerLight();
         uint8_t* buf = buffer();
-        if (w == 0 || h == 0 || cpl < 3) return;
 
         // 1. Fade the trail (scale8 toward black) — a smaller `fade` = shorter tail.
         for (size_t i = 0; i < trail_.bytes(); i++) trail_[i] = scale8(trail_[i], fade);
 
-        // 2. Advance the travel phase from bpm. First tick: seed lastElapsed_ to now so the wave
-        //    starts from phase 0 instead of jumping by the whole device uptime (lastElapsed_ is 0
-        //    until the first loop). Afterwards advance by the real per-tick delta.
+        // 2. Advance the travel phase from bpm. BeatPhase owns the two rules this used to spell out:
+        //    the first tick only seeds the time base (so the wave starts at phase 0 rather than
+        //    jumping by the whole device uptime), and the dt·bpm numerator stays in 64 bits until the
+        //    read (so a sub-millisecond frame does not round to zero and freeze).
         const uint32_t now = elapsed();
-        if (!started_) { lastElapsed_ = now; started_ = true; }
-        phase_ += static_cast<uint64_t>(now - lastElapsed_) * bpm;
-        lastElapsed_ = now;
-        const uint8_t t = static_cast<uint8_t>((phase_ * 256) / 60000);    // uint8 angle (256 = full turn)
+        phase_.advance(now, bpm);
+        const uint8_t t = static_cast<uint8_t>(phase_.phase(256));         // uint8 angle (256 = full turn)
         // Color cycles slowly over time: now/50 indexes the active palette via waveColor.
         const uint8_t colorIndex = static_cast<uint8_t>(now / 50);
 
@@ -118,9 +117,7 @@ private:
     ScratchBuffer<uint8_t> trail_{*this};
     lengthType trailW_ = 0, trailH_ = 0;   // geometry the trail bytes are laid out for (clear on change)
     uint8_t  trailCpl_ = 0;
-    uint64_t phase_ = 0;
-    uint32_t lastElapsed_ = 0;
-    bool     started_ = false;   // first-tick guard: seed lastElapsed_ before the first delta
+    BeatPhase phase_;
 
     // The color for the wave this frame — one place: a lookup into the global active palette,
     // so the wave recolors when the palette changes.
@@ -152,13 +149,18 @@ private:
     }
 
     // Write one pixel into the trail plane (bounds-checked; the join loop can reach any y).
+    /// Write one pixel into the private trail plane, one channel at a time — the same shape
+    /// draw::pixel uses. Writing three bytes unconditionally would mean a 1- or 2-channel buffer
+    /// could not be drawn into at all; per-channel writes let it render what it can hold (R, or R+G)
+    /// instead of the effect refusing to run. Channels beyond RGB are left alone for the driver.
     void plot(lengthType x, lengthType y, const RGB& c, uint8_t cpl, lengthType w) {
         if (x < 0 || y < 0 || x >= w) return;
         const size_t off = (static_cast<size_t>(y) * w + x) * cpl;
-        if (off + 2 >= trail_.bytes()) return;
-        trail_[off + 0] = c.r;
-        trail_[off + 1] = c.g;
-        trail_[off + 2] = c.b;
+        const uint8_t write = cpl < 3 ? cpl : 3;
+        if (off + write > trail_.bytes()) return;
+        if (write >= 1) trail_[off + 0] = c.r;
+        if (write >= 2) trail_[off + 1] = c.g;
+        if (write >= 3) trail_[off + 2] = c.b;
     }
 };
 

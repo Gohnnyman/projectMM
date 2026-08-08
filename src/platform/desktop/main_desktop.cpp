@@ -72,7 +72,35 @@ static void atExitHandler() {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    // --port N: the HTTP port. Defaults to 8080 because ports below 1024 need root on POSIX, but
+    // Home Assistant's WLED integration hardcodes port 80 with no way to specify another, so testing
+    // that path on desktop needs `sudo projectMM --port 80`.
+    uint16_t httpPort = 8080;
+    for (int i = 1; i < argc; i++) {
+        const bool isPort = std::strcmp(argv[i], "--port") == 0;
+        if (isPort && i + 1 < argc) {
+            // endptr check: "80abc" must be an error, not port 80 — silently accepting a typo'd
+            // value binds the wrong port and the failure surfaces much later as "HA can't connect".
+            char* end = nullptr;
+            const long v = std::strtol(argv[++i], &end, 10);
+            if (end == argv[i] || *end != '\0' || v <= 0 || v > 65535) {
+                std::printf("--port must be a number 1..65535, got \"%s\"\n", argv[i]);
+                return 1;
+            }
+            httpPort = static_cast<uint16_t>(v);
+        } else if (isPort) {
+            std::printf("--port needs a value\n"); return 1;
+        } else if (std::strcmp(argv[i], "--help") == 0) {
+            std::printf("usage: projectMM [--port N]   (default 8080; 80 needs root)\n");
+            return 0;
+        } else {
+            // An unknown argument is a user error, not noise to ignore: "--prot 80" silently
+            // running on 8080 is the same late-surfacing failure as the typo'd value.
+            std::printf("unknown argument \"%s\" — try --help\n", argv[i]);
+            return 1;
+        }
+    }
     // Unbuffer so every line lands in projectMM.log before a crash.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
@@ -116,9 +144,9 @@ int main() {
     char tbuf[32];
     isoTimestamp(tbuf, sizeof(tbuf));
     std::printf("projectMM started at %s\n", tbuf);
-    std::printf("Press Ctrl-C to stop.\n");
+    std::printf("Listening on port %u. Press Ctrl-C to stop.\n", static_cast<unsigned>(httpPort));
 
-    mm_main(running, 8080);
+    mm_main(running, httpPort);
 
     cleanExit = true;
     isoTimestamp(tbuf, sizeof(tbuf));

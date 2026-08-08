@@ -54,8 +54,7 @@ public:
         const int w = width();
         const int h = height();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};
+        const draw::Canvas cv = canvas();
 
         const uint32_t now = elapsed();
 
@@ -84,14 +83,13 @@ public:
                                       + static_cast<int64_t>(y) * static_cast<int64_t>(macro) * static_cast<int64_t>(x);
                 const uint32_t hue = huebase + static_cast<uint32_t>(spatial / microDiv);
                 const RGB c = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(hue), 255);
-                draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, c);
+                draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y), 0}, c);
             }
         }
     }
 
 private:
     // depth() is the grid's z extent; guard a zero so dims stays valid on a 2D layer.
-    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 };
 
 } // namespace mm

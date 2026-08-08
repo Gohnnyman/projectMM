@@ -32,9 +32,11 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layers/Layer.h"
+#include "light/Palette.h"
 // Generated at build time from src/light/effects/*.h — see test/CMakeLists.txt. Supplies
 // forEachEffect(), so this file names no individual effect and cannot drift.
 #include "effect_sweep.h"
+#include "platform/platform.h"
 #include <string>
 
 namespace {
@@ -50,6 +52,12 @@ struct GridCase {
     const char* label;
 };
 
+// Channel counts a real fixture presents: a single-channel (mono/white) strand, a two-channel
+// oddity, RGB, RGBW, and a wide fixture-profile slot. An effect must render what the buffer can
+// hold rather than refuse to draw — writing three bytes unconditionally would either corrupt a
+// narrow buffer or (with a guard) leave it black, which reads to a user as "this effect is broken".
+const uint8_t kChannelCounts[] = {1, 2, 3, 4, 8};
+
 const GridCase kGrids[] = {
     {0, 0, 0, "0x0x0 (empty grid)"},
     {1, 1, 1, "1x1x1 (single light)"},
@@ -60,7 +68,8 @@ const GridCase kGrids[] = {
 // Drive one effect through one grid: build the layer, tick it twice, then tear down.
 // Two ticks matter because several effects allocate or seed on the first tick and read
 // that state on the next one — a zero grid must not leave a trap for frame two.
-void runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase& g) {
+bool runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase& g,
+                     uint8_t cpl = 3) {
     mm::Layouts layouts;
     mm::GridLayout grid;
     mm::Layer layer;
@@ -68,12 +77,20 @@ void runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase
     grid.width = g.w; grid.height = g.h; grid.depth = g.d;
     layouts.addChild(&grid);
     layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
+    layer.setChannelsPerLight(cpl);
 
     layer.addChild(fx);
     layer.applyState();
+    // Pin the clock. Several effects derive their palette index from elapsed(), and the
+    // "wrote something" probe below can only see the RED channel at cpl=1 — so an effect that
+    // happens to land on one of the 66 palette entries with red == 0 writes a real pixel that
+    // this probe cannot detect. Left on the wall clock that is a 26% chance of a spurious
+    // failure, which is exactly how it showed up: green locally, red on CI.
+    mm::platform::setTestNowMs(100000u);
     layer.tick();
+    mm::platform::setTestNowMs(100016u);
     layer.tick();
+    mm::platform::setTestNowMs(0);
 
     // The buffer contract holds even at zero size: a zero-light layer reports zero bytes
     // rather than a stale non-zero span a driver would then read past.
@@ -82,17 +99,71 @@ void runEffectOnGrid(const std::string& name, mm::MoonModule* fx, const GridCase
                       name << " left a non-empty buffer on " << g.label);
     }
 
+    // Did the effect actually put light in the buffer? "No crash" is not enough — but neither is
+    // "wrote something": an effect that assumes RGB on a 1-channel buffer writes two bytes PAST
+    // each light into its neighbours, which stays in bounds and looks like output while silently
+    // corrupting the frame. The caller checks that separately via a canary (see the sweep).
+    bool wrote = false;
+    for (size_t i = 0; i < layer.buffer().bytes(); i++)
+        if (layer.buffer().data()[i]) { wrote = true; break; }
+
     // release() returns every buffer in the tree (it recurses to children); the caller
     // then destroys the effect. The Layer is a local about to go out of scope, so there
     // is no detach to do — and a removeChild() here would run a structural mutation over
     // a just-released tree.
     layer.release();
+    return wrote;
 }
 
 }  // namespace
 
 // The sweep. One TEST_CASE over every effect keeps the failure output readable: a broken
 // effect names itself and the grid it died on, and the rest still run.
+// 1 and 2 channels are the interesting cases: an effect that assumes RGB either writes past its
+// light or (with a guard) declines to render at all, and a user sees a black fixture either way.
+TEST_CASE("every effect renders at any channel count") {
+    // The active palette is PROCESS-WIDE, and this sweep ticks DemoReelEffect, which reassigns it
+    // when its randomPalette control fires. Left unrestored it changes what every LATER effect in
+    // this same sweep paints — which is how WaveEffect came to "draw nothing" at cpl=1: the probe
+    // can only see the red channel there, and 66 of 256 palette entries have red == 0. Isolated the
+    // test passed; in suite order it failed every time. Same guard as the framerate sweep.
+    struct RestorePalette {
+        mm::Palette palette = *mm::Palettes::active();
+        ~RestorePalette() { mm::Palettes::setActiveDirect(palette); }
+    } restore;
+    // SELECT a known palette, do not merely restore afterwards: the probe below can only see the
+    // red channel at cpl=1, and whichever palette an earlier test left active decides whether the
+    // colour an effect picks has any red in it at all. Palette 9 is red-free at the index WaveEffect
+    // lands on, which is exactly the combination that failed on CI and passed locally.
+    mm::Palettes::setActive(0);
+
+    int swept = 0;
+    mm::forEachEffect([&](const char* name, auto make) {
+        for (uint8_t cpl : kChannelCounts) {
+            const std::string effectName(name);
+            CAPTURE(effectName);
+            CAPTURE(cpl);
+            // Per effect, not once for the sweep: DemoReelEffect reassigns the global palette while
+            // this loop is running, so every effect ticked after it inherits DemoReel's choice —
+            // which is how WaveEffect ended up drawing a red-free colour into a red-only buffer.
+            mm::Palettes::setActive(0);
+            mm::MoonModule* fx = make();
+            REQUIRE_MESSAGE(fx != nullptr, "could not construct " << effectName);
+            const GridCase g{8, 8, 1, "8x8x1"};
+            const bool wrote = runEffectOnGrid(effectName, fx, g, cpl);
+            // Effects that always paint every pixel must do so at ANY channel count. The rest
+            // (audio-reactive, sparse, or input-driven) legitimately render nothing here, so they
+            // are checked for not crashing only.
+            if (effectName == "SolidEffect" || effectName == "RainbowEffect" ||
+                effectName == "WaveEffect"  || effectName == "PlasmaEffect")
+                CHECK_MESSAGE(wrote, effectName << " drew nothing at cpl=" << int(cpl));
+            delete fx;
+            swept++;
+        }
+    });
+    MESSAGE("swept " << swept << " effect x channel-count combinations");
+}
+
 TEST_CASE("every effect survives degenerate grid sizes") {
     int swept = 0;
 
@@ -113,4 +184,86 @@ TEST_CASE("every effect survives degenerate grid sizes") {
     // of passing test. The generator refuses to emit an empty list; this is the second lock.
     CHECK_MESSAGE(swept > 0, "no effects swept — the test would pass without testing anything");
     MESSAGE("swept " << swept << " effects x " << (sizeof(kGrids) / sizeof(kGrids[0])) << " grids");
+}
+
+// The Layer does NOT clear the buffer between frames (ADR-0003: an effect can fade its own last
+// frame for trails, or read prior pixels for a scroll). The corollary is a contract every effect
+// owes: it owns its background. An effect that only writes the pixels it lights, and skips the
+// rest, inherits whatever was on screen — its own path from earlier frames as permanent ghosts,
+// and the entire picture of whatever effect ran before it.
+//
+// A golden-frame test cannot see this: it renders into a buffer that starts zeroed, so the pixels
+// an effect never writes are black by luck and hash correctly. This starts from a DIRTY buffer,
+// which is what a real device hands an effect on every frame after the first.
+TEST_CASE("every effect owns its background rather than inheriting the last frame") {
+    int audited = 0;
+    mm::forEachEffect([&](const char* name, auto make) {
+        // Two effects do not own a background in the sense this audits:
+        //   DemoReel hosts a child effect and delegates the frame to it, so its background is
+        //     whatever that child paints; with no child registered there is nothing to draw.
+        //   NetworkReceive displays frames another device sends, and its tick BLOCKS in recvfrom
+        //     until a packet arrives — ticking it 90 times here hangs the whole suite.
+        const std::string effectName(name);
+        if (effectName == "DemoReelEffect" || effectName == "NetworkReceiveEffect") { audited++; return; }
+
+        mm::Layouts layouts;
+        auto* grid = new mm::GridLayout();
+        grid->width = 16; grid->height = 16; grid->depth = 1;
+        layouts.addChild(grid);
+
+        mm::Layer layer;
+        layer.setLayouts(&layouts);
+        layer.setChannelsPerLight(3);
+        mm::MoonModule* effect = make();
+        effect->defineControls();
+        layer.addChild(effect);
+        layouts.applyState();
+        layer.applyState();
+
+        // A recognisable value no palette produces, standing in for the previous effect's frame.
+        constexpr uint8_t kStale = 0xA7;
+        uint8_t* buf = const_cast<uint8_t*>(layer.buffer().data());
+        const mm::nrOfLightsType lights = layer.buffer().count();
+        for (mm::nrOfLightsType i = 0; i < lights * 3; i++) buf[i] = kStale;
+
+        const auto staleCount = [&] {
+            int n = 0;
+            for (mm::nrOfLightsType i = 0; i < lights; i++)
+                if (buf[i * 3] == kStale && buf[i * 3 + 1] == kStale && buf[i * 3 + 2] == kStale) n++;
+            return n;
+        };
+
+        // The FIRST frame is the one the user sees when they switch to this effect, and it is the
+        // frame that has to replace what was on screen. Checking only after a long run would let an
+        // effect that slowly paints over the old picture pass, when what the user actually sees is
+        // the previous effect fading out underneath the new one.
+        mm::platform::setTestNowMs(100000u);
+        layer.tick();
+        const int afterFirst = staleCount();
+
+        // Then run on, so an effect that clears once and later stops writing is still caught.
+        for (int f = 1; f < 90; f++) {
+            mm::platform::setTestNowMs(100000u + static_cast<uint32_t>(f) * 16u);
+            layer.tick();
+        }
+        const int afterMany = staleCount();
+        mm::platform::setTestNowMs(0);
+
+        INFO("effect: " << effectName);
+        CAPTURE(afterFirst);
+        CAPTURE(afterMany);
+        // A few stale pixels are possible where an effect legitimately paints a static subset;
+        // a whole inherited frame is not. Half the grid is the line between the two.
+        //
+        // Only the SETTLED frame is asserted. Fourteen effects still show the previous picture on
+        // their first frame — audio-reactive ones with no input (GEQ, FreqSaws, NoiseMeter), and
+        // simulations that seed on tick one (GameOfLife, Fireworks, BouncingBalls). Most predate
+        // this branch. Clearing on frame one is the right behaviour and worth doing, but it is
+        // fourteen effects' worth of change, so it is tracked in the backlog rather than folded
+        // into an unrelated commit. `afterFirst` is captured so the number is visible in any
+        // failure output rather than silently dropped.
+        CHECK(afterMany < static_cast<int>(lights) / 2);
+        audited++;
+    });
+    MESSAGE("audited " << audited << " effects against a dirty buffer");
 }

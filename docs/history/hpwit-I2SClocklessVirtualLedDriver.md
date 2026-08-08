@@ -2,7 +2,13 @@
 
 What landed on [hpwit/I2SClocklessVirtualLedDriver](https://github.com/hpwit/I2SClocklessVirtualLedDriver), month by month. External-context reference — a factual log of a friend repo's activity, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md).
 
-The library: Yves Bazin's (hpwit) "virtual pins" variant of the I2S clockless driver — drives far more strips than the chip has usable pins by fanning the I2S output through external shift registers. This multiplex technique is the load-bearing idea projectMM's LED-driver analysis singles out (factoring the shift-register multiplex out of the I2S/LCD peripheral code). Summarised via the GitHub commits API, read across all branches (`main`, `integration`, `int2`, `variable`, `hpwit-patch-1`), not just `main`.
+The library: Yves Bazin's (hpwit) "virtual pins" variant of the I2S clockless driver — drives far more strips than the chip has usable pins by fanning the I2S output through external shift registers. This multiplex technique is the load-bearing idea projectMM's LED-driver analysis singles out (factoring the shift-register multiplex out of the I2S/LCD peripheral code). Summarised via the GitHub commits API, read across all branches (`main`, `integration`, `int2`, `variable`, `hpwit-patch-1`, `dev`, `optomize`), not just `main`.
+
+## July 2026
+
+No user-facing activity this month: no commits merged to `main` (latest commit on `main` dates to November 2024), no commits on any other branch (newest anywhere is `variable`, December 2024), no releases published, and no issues opened, closed, or updated.
+
+_Checked: commits with author-date 2026-07-01..2026-07-31 on `main` and every branch (`integration`, `int2`, `variable`, `hpwit-patch-1`, `dev`, `optomize`) — 0 on each; issues created 2026-07-01..2026-07-31 (0), closed in that range (0), and updated in that range (0); PRs created (0); releases (none in July — latest versioned tag is 2.1, Jan 2024)._
 
 ## June 2026
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -39,18 +40,16 @@ public:
         const lengthType h = height();
         const uint8_t cpl = channelsPerLight();
 
-        const uint32_t now = elapsed();
-        const uint32_t dt = now - lastElapsed_;
-        lastElapsed_ = now;
-        // speed 0 freezes (no time advance). Otherwise accumulate dt*speed and read the
-        // high byte as the time phase (uint8 angle), same accumulator idiom as elsewhere.
-        if (speed) phase_ += static_cast<uint64_t>(dt) * speed;
-        const uint8_t t = static_cast<uint8_t>((phase_ * 256) / 60000);
-        // ty is the y-axis time phase, running ~1.3× t. Deriving it from the raw phase_ accumulator
-        // (not from the already-wrapped uint8 t) keeps it CONTINUOUS: computing ty as (t*333)>>8 made
-        // ty jump by ~76 every time t wrapped 255→0 (~once a second), because 1.3 isn't an integer
-        // multiple of 256 — a visible shift. From phase_ the wrap is seamless (both are smooth uint8s).
-        const uint8_t ty = static_cast<uint8_t>((phase_ * 333) / 60000);   // ~1.3·t, continuous across wraps
+        // speed 0 freezes: BeatPhase still tracks the time base, so resuming does not jump by the
+        // pause. Two scales are read from the ONE accumulator (see ty below) — the reason phase()
+        // takes the scale at the read rather than baking it into the accumulate.
+        phase_.advance(elapsed(), speed);
+        const uint8_t t = static_cast<uint8_t>(phase_.phase(256));
+        // ty is the y-axis time phase, running ~1.3× t. Reading the SAME accumulator at a different
+        // scale (not deriving it from the already-wrapped uint8 t) keeps it CONTINUOUS: computing ty
+        // as (t*333)>>8 made ty jump by ~76 every time t wrapped 255→0 (~once a second), because 1.3
+        // isn't an integer multiple of 256 — a visible shift. From the raw phase the wrap is seamless.
+        const uint8_t ty = static_cast<uint8_t>(phase_.phase(333));   // ~1.3·t, continuous across wraps
 
         for (lengthType y = 0; y < h; y++) {
             const uint8_t sy = sin8(static_cast<uint8_t>(static_cast<uint8_t>(y) * freq_y + ty));
@@ -70,8 +69,7 @@ public:
     }
 
 private:
-    uint64_t phase_ = 0;
-    uint32_t lastElapsed_ = 0;
+    BeatPhase phase_;
 };
 
 } // namespace mm

@@ -2,6 +2,16 @@
 
 What landed on [WLED-MM](https://github.com/MoonModules/WLED-MM)'s `mdev` (default) branch, month by month. External-context reference — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md). Months are split at versioned-release boundaries (the rolling `nightly` tag is not a release).
 
+## July 2026
+
+*Summarised from 2 commits on `mdev`, both 2026-07-01 (no versioned release cut this month; the `nightly` prerelease republished on 2026-07-02 packages June's work).*
+
+Near-dormant month — a single small change and a build-number bump.
+
+- The instance list now shows which repo (WLED-MM or upstream WLED) each discovered instance runs, and reports the right release for upstream WLED instances.
+
+*Auditability: 2 commits on `mdev`, author-date 2026-07-01..2026-07-31 (range 12b0238 … 7c55f91; 7c55f91 is a build-number bump, omitted as not user-facing). Issues checked: `repo:MoonModules/WLED-MM is:issue created:2026-07-01..2026-07-31` (0) and `closed:2026-07-01..2026-07-31` (0), and `updated:2026-07-01..2026-07-31` (0) — no issues opened, closed, or even commented on all month. (The June window returns 2 on the same query form, so the zeros are real rather than a mistyped repo name: the search API needs `MoonModules/WLED-MM`, not `MoonModules/WLED`.)*
+
 ## June 2026
 
 *Summarised from 38 commits on `mdev`, 2026-06-01 … 2026-06-25 (no versioned release cut this month, so the month is not split; the `nightly` prerelease is not a release).*

@@ -2,6 +2,7 @@
 
 #include "core/Scheduler.h"     // setControl — the shared apply-core
 #include "core/JsonUtil.h"      // json::hasKey/parseBool/parseInt/parseString — the inbound ha/set parse
+#include "core/ControlModule.h"  // look-only presets -> the HA effect list
 #include "core/JsonSink.h"      // jsonEscape — escape the editable deviceName into the discovery JSON
                                 // (same flat helpers HttpServerModule::applyWledState uses; no arena)
 #include "core/build_info.h"    // kVersion / kFirmwareName — reported to HA's update entity
@@ -68,13 +69,59 @@ void MqttModule::buildStatusTopic(char* out, size_t cap) const {
 // and report them via setDynamicBytes so the UI's per-module memory line accounts for them. A device
 // that never enables HA discovery never calls this → zero bytes. Returns false on OOM (the caller then
 // skips the publish rather than deref a null — the module keeps running, discovery just doesn't announce).
+// Sized to what THIS device actually publishes: the fixed config plus the measured effect list. No
+// cap on the preset count -- a cap would either reserve RAM a three-preset device never uses, or
+// silently publish nothing once the list outgrew it (a truncated config is refused, not sent).
+// Saving or deleting a preset changes the required size, so the buffers are reallocated when it
+// moves rather than held at whatever the first announce needed.
 bool MqttModule::ensureDiscoveryBuffers() {
-    if (discoveryBuf_ && discoveryPayload_) return true;
-    if (!discoveryBuf_)     discoveryBuf_     = static_cast<uint8_t*>(platform::alloc(kDiscoveryBufLen));
-    if (!discoveryPayload_) discoveryPayload_ = static_cast<char*>(platform::alloc(kDiscoveryPayloadLen));
+    const size_t effects = haEffectListBytes();
+    const size_t wantPayload = kDiscoveryPayloadBase + effects;
+    const size_t wantBuf     = kDiscoveryBufBase + effects;
+    if (discoveryBuf_ && discoveryPayload_ &&
+        discoveryPayloadLen_ == wantPayload && discoveryBufLen_ == wantBuf) return true;
+    freeDiscoveryBuffers();
+    discoveryBuf_     = static_cast<uint8_t*>(platform::alloc(wantBuf));
+    discoveryPayload_ = static_cast<char*>(platform::alloc(wantPayload));
     if (!discoveryBuf_ || !discoveryPayload_) { freeDiscoveryBuffers(); return false; }
-    setDynamicBytes(kDiscoveryBufLen + kDiscoveryPayloadLen);
+    discoveryPayloadLen_ = wantPayload;
+    discoveryBufLen_     = wantBuf;
+    setDynamicBytes(wantBuf + wantPayload);
     return true;
+}
+
+// The effect_list is the light's menu of LOOKS. Only look-only presets appear: one that also carries
+// Drivers or Layouts would rewire pins or geometry, which must not be reachable from an automation
+// or a voice command that believes it is choosing a colour scheme (ControlModule::isLookOnly).
+size_t MqttModule::haEffectListBytes() const {
+    if (!controlModule_) return 0;
+    size_t n = 0, count = 0;
+    for (uint8_t i = 0; i < controlModule_->presetCount(); i++) {
+        if (!controlModule_->isLookOnly(i)) continue;
+        const char* nm = controlModule_->presetName(i);
+        if (!nm) continue;
+        n += std::strlen(nm) * 2 + 3;   // worst-case escaping, plus two quotes and a comma
+        count++;
+    }
+    return count ? n + 20 : 0;          // ,"effect":true,"fx_list":[]
+}
+
+size_t MqttModule::writeHaEffectList(char* out, size_t cap) const {
+    if (!controlModule_ || cap == 0) return 0;
+    size_t n = 0;
+    bool first = true;
+    for (uint8_t i = 0; i < controlModule_->presetCount(); i++) {
+        if (!controlModule_->isLookOnly(i)) continue;
+        const char* nm = controlModule_->presetName(i);
+        if (!nm) continue;
+        char esc[72];
+        jsonEscape(nm, esc, sizeof(esc));
+        const int w = std::snprintf(out + n, cap - n, "%s\"%s\"", first ? "" : ",", esc);
+        if (w <= 0 || static_cast<size_t>(w) >= cap - n) return 0;   // refuse a partial list
+        n += static_cast<size_t>(w);
+        first = false;
+    }
+    return first ? 0 : n;
 }
 
 void MqttModule::freeDiscoveryBuffers() {
@@ -136,15 +183,28 @@ void MqttModule::publishDiscovery(bool announce) {
     // JSON-schema MQTT light. Abbreviated keys (HA's documented short forms). brightness at the
     // default 0-255 scale (no scale key needed). dev{} groups the entity under a device card in HA.
     // `name:null` (see comment above) collapses the entity slug so `light.<device>` isn't doubled.
-    const int pn = std::snprintf(discoveryPayload_, kDiscoveryPayloadLen,
+    // The looks this device offers, as HA's effect list. Built into discoveryBuf_ as scratch: that
+    // buffer is untouched until buildMqttPublish below, by which time the list is already consumed
+    // into the payload. It must NOT be a region of discoveryPayload_ — snprintf writing the payload
+    // while reading the list from inside its own destination tramples the list once the fixed
+    // prefix (uniq_id plus three topics) grows past the scratch offset.
+    char* fxScratch = reinterpret_cast<char*>(discoveryBuf_);
+    const size_t fxLen = writeHaEffectList(fxScratch, discoveryBufLen_);
+    char fxKey[24] = "";
+    if (fxLen) std::snprintf(fxKey, sizeof(fxKey), "\"effect\":true,");
+
+    const int pn = std::snprintf(discoveryPayload_, discoveryPayloadLen_,
         "{\"schema\":\"json\",\"name\":null,\"uniq_id\":\"%s\",\"cmd_t\":\"%s\","
-        "\"stat_t\":\"%s\",\"avty_t\":\"%s\",\"brightness\":true,"
+        "\"stat_t\":\"%s\",\"avty_t\":\"%s\",\"brightness\":true,%s%s%s%s"
         "\"dev\":{\"ids\":[\"%s\"],\"name\":\"%s\",\"mf\":\"MoonModules\",\"mdl\":\"projectMM\"}}",
-        id, cmd, stat, avty, id, dnEsc);
-    if (pn <= 0 || static_cast<size_t>(pn) >= kDiscoveryPayloadLen) return;   // truncated → don't send a broken config
+        id, cmd, stat, avty,
+        fxKey,
+        fxLen ? "\"fx_list\":[" : "", fxLen ? fxScratch : "", fxLen ? "]," : "",
+        id, dnEsc);
+    if (pn <= 0 || static_cast<size_t>(pn) >= discoveryPayloadLen_) return;   // truncated → don't send a broken config
 
     const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(discoveryPayload_),
-                                      static_cast<size_t>(pn), discoveryBuf_, kDiscoveryBufLen,
+                                      static_cast<size_t>(pn), discoveryBuf_, discoveryBufLen_,
                                       /*retain=*/true);
     if (n == 0) { setStatusLine("error: discovery config too large"); return; }
     // Same "reset on a failed send" contract as the ping / subscribe / state paths: a partial write
@@ -229,15 +289,15 @@ void MqttModule::publishUpdateDiscovery(bool announce) {
     // it in HA's diagnostic section of the device card, matching how ESPHome and Tasmota surface
     // firmware info. `name:null` still applies — with device_class set, HA composes the label
     // itself (`<device_name> Firmware`), which is exactly what we want.
-    const int pn = std::snprintf(discoveryPayload_, kDiscoveryPayloadLen,
+    const int pn = std::snprintf(discoveryPayload_, discoveryPayloadLen_,
         "{\"name\":null,\"uniq_id\":\"%s_update\",\"stat_t\":\"%s\",\"cmd_t\":\"%s\","
         "\"avty_t\":\"%s\",\"entity_category\":\"diagnostic\",\"device_class\":\"firmware\","
         "\"dev\":{\"ids\":[\"%s\"],\"name\":\"%s\",\"mf\":\"MoonModules\",\"mdl\":\"projectMM\"}}",
         id, stat, cmd, avty, id, dnEsc);
-    if (pn <= 0 || static_cast<size_t>(pn) >= kDiscoveryPayloadLen) return;   // truncated → don't send
+    if (pn <= 0 || static_cast<size_t>(pn) >= discoveryPayloadLen_) return;   // truncated → don't send
 
     const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(discoveryPayload_),
-                                      static_cast<size_t>(pn), discoveryBuf_, kDiscoveryBufLen,
+                                      static_cast<size_t>(pn), discoveryBuf_, discoveryBufLen_,
                                       /*retain=*/true);
     if (n == 0) { setStatusLine("error: update discovery too large"); return; }
     if (!sendPacket(discoveryBuf_, n)) resetConnection("error: update discovery publish failed");
@@ -420,6 +480,18 @@ void MqttModule::tick1s() MM_NONBLOCKING {
         return;
     }
     if (!platform::networkReady()) { MoonModule::tick1s(); return; }
+
+    // Presets changed while connected: re-announce so the retained discovery config carries the
+    // current effect list (Home Assistant only re-reads it when the retained message changes).
+    // Revision-driven, so a save, rename or delete lands within a second; buffers resize inside
+    // publishDiscovery via ensureDiscoveryBuffers.
+    if (haDiscovery_ && state_ == Conn::Connected && controlModule_) {
+        const uint32_t rev = controlModule_->presetsRevision();
+        if (rev != lastPresetsRev_) {
+            lastPresetsRev_ = rev;
+            publishDiscovery(true);
+        }
+    }
 
     const uint32_t now = platform::millis();
     switch (state_) {
@@ -645,8 +717,14 @@ void MqttModule::routePublish(const char* topic, const uint8_t* payload, size_t 
             std::snprintf(json, sizeof(json), "{\"value\":%d}", bri);
             setControlValue("brightness", json);
         }
-        // The JSON schema carries every field in one message, so a new control is another key here
-        // (e.g. an "effect" key routing to setControlValue) rather than another topic.
+        // A look chosen from the effect dropdown. applyLookByName re-checks look-only, so a crafted
+        // message naming a hardware-carrying preset is refused at the entry point, not just hidden
+        // from the list.
+        if (controlModule_ && json::hasKey(body, "effect")) {
+            char fx[40] = {};
+            json::parseString(body, "effect", fx, sizeof(fx));
+            if (fx[0]) controlModule_->applyLookByName(fx);
+        }
         return;
     }
 
@@ -726,7 +804,12 @@ void MqttModule::publishState(bool force) {
     const bool on = driversOn(s);
     const uint8_t bri = driversBrightness(s);
     const uint8_t pal = driversPalette(s);
-    if (!force && havePublished_ && on == lastOn_ && bri == lastBri_ && pal == lastPalette_) return;
+    // The applied look is part of the published state (the ha/state `effect` field), so it is part
+    // of the change gate: applying a preset changes neither on, bri nor palette, and without this
+    // signature a look-only change would never publish.
+    const char* lookNow = controlModule_ ? controlModule_->currentLook() : "";
+    if (!force && havePublished_ && on == lastOn_ && bri == lastBri_ && pal == lastPalette_ &&
+        std::strncmp(lookNow, lastLook_, sizeof(lastLook_) - 1) == 0) return;
 
     char topic[128];
     uint8_t buf[kSendBufLen];
@@ -760,9 +843,15 @@ void MqttModule::publishState(bool force) {
     // JSON message with 0-255 brightness (no rescale, unlike brightness/get's 0-100). Only when
     // discovery is on, and inside this change-gated block so it emits once per change, not per tick.
     if (haDiscovery_) {
-        char haState[48];
-        std::snprintf(haState, sizeof(haState), "{\"state\":\"%s\",\"brightness\":%u}",
-                      on ? "ON" : "OFF", static_cast<unsigned>(bri));
+        // The applied look rides along, so HA's dropdown shows what is actually on -- including when
+        // the change came from the device's own pad grid rather than from HA.
+        char fxEsc[72] = "";
+        const char* look = controlModule_ ? controlModule_->currentLook() : nullptr;
+        if (look && look[0]) jsonEscape(look, fxEsc, sizeof(fxEsc));
+        char haState[136];
+        std::snprintf(haState, sizeof(haState), "{\"state\":\"%s\",\"brightness\":%u%s%s%s}",
+                      on ? "ON" : "OFF", static_cast<unsigned>(bri),
+                      fxEsc[0] ? ",\"effect\":\"" : "", fxEsc, fxEsc[0] ? "\"" : "");
         char haTopic[128];
         buildTopic(haTopic, sizeof(haTopic), "ha/state");
         const size_t n = buildMqttPublish(haTopic, reinterpret_cast<const uint8_t*>(haState),
@@ -771,6 +860,7 @@ void MqttModule::publishState(bool force) {
     }
 
     lastOn_ = on; lastBri_ = bri; lastPalette_ = pal;
+    std::snprintf(lastLook_, sizeof(lastLook_), "%s", lookNow);   // committed only after every send succeeded
     havePublished_ = true;
 }
 

@@ -29,6 +29,10 @@
 
 #include <cstdint>
 
+// draw.h is included at the BOTTOM of this header (it needs Layer, which needs EffectBase), so the
+// Canvas type is forward-declared here for the canvas() accessor's return type.
+namespace mm::draw { struct Canvas; }
+
 namespace mm {
 
 class Layer; // forward declaration (defined in light/layers/Layer.h, included at the bottom)
@@ -107,6 +111,15 @@ public:
     uint8_t channelsPerLight() const;
     nrOfLightsType nrOfLights() const;
     uint32_t elapsed() const;         ///< Milliseconds since render start — drive animation off this, not frame count.
+
+    /// The layer's surface as one value: buffer, extents and channels bound together, with the
+    /// depth guard applied. Replaces the `Coord3D dims{...}` + `Buffer& buf = layer()->buffer()`
+    /// preamble 22 effects open with, and the private `depthDim()` helper 16 of them carry.
+    ///
+    /// Call it once per frame and pass the result to draw calls — the extents are read from the
+    /// layer at that moment, which is the contract effects already follow (dimensions can change
+    /// between frames, so nothing may cache them across ticks).
+    mm::draw::Canvas canvas();
 };
 
 } // namespace mm

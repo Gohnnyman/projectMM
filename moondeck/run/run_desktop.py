@@ -13,6 +13,7 @@ PID and lets the app outlive this script (mirroring how flashing an ESP32
 leaves the device running independently).
 """
 
+import argparse
 import os
 import platform
 import subprocess
@@ -41,10 +42,28 @@ def _resolve_executable() -> Path:
         bdir / "projectMM.exe",
         bdir / "Release" / "projectMM.exe",
         bdir / "projectMM",
+        # A plain `cmake --build build` writes here rather than into the per-host dir, so this path
+        # is often the NEWER binary. Both are considered and the freshest wins below: picking the
+        # first that merely exists served a stale build whose changes appeared to be no-ops.
+        ROOT / "build" / "projectMM",
+        ROOT / "build" / "projectMM.exe",   # the same root-build case on Windows
     ]
+    # Only this host's artefact shape is a candidate: a stale projectMM.exe left in a shared
+    # checkout must never be picked on macOS/Linux (and vice versa), however new it is.
+    want_exe = platform.system() == "Windows"
+    # Read each candidate's mtime in the SAME step that proves it exists: a rebuild running
+    # alongside this script can replace a binary between an exists() check and a later stat(),
+    # which would raise FileNotFoundError from inside max().
+    stamped = []
     for c in candidates:
-        if c.exists():
-            return c
+        if (c.suffix == ".exe") != want_exe:
+            continue
+        try:
+            stamped.append((c.stat().st_mtime, c))
+        except (FileNotFoundError, OSError):
+            continue   # vanished or unreadable: simply not a candidate
+    if stamped:
+        return max(stamped)[1]
     # Return the most-likely candidate so the error message points somewhere
     # informative if the binary genuinely isn't there.
     return bdir / ("projectMM.exe" if sys.platform == "win32" else "projectMM")
@@ -79,6 +98,17 @@ def _kill_running():
 
 
 def main():
+    ap = argparse.ArgumentParser(description="Run the desktop build in the background.")
+    # Ports below 1024 need root, so the default stays 8080. Port 80 exists for Home Assistant's
+    # WLED integration, which hardcodes port 80 and offers no way to specify another
+    # (`sudo uv run moondeck/run/run_desktop.py --port 80`).
+    ap.add_argument("--port", type=int, default=None,
+                    help="HTTP port (default 8080; 80 needs root, for the Home Assistant WLED integration)")
+    args = ap.parse_args()
+    if args.port is not None and not (1 <= args.port <= 65535):
+        print(f"--port must be 1..65535, got {args.port}")
+        sys.exit(1)
+
     if not EXECUTABLE.exists():
         print(f"Executable not found: {EXECUTABLE}")
         print("Run build_desktop.py first.")
@@ -116,7 +146,10 @@ def main():
     else:
         popen_kwargs["start_new_session"] = True  # own session, immune to our SIGTERM
 
-    proc = subprocess.Popen([str(EXECUTABLE)], **popen_kwargs)
+    cmd = [str(EXECUTABLE)]
+    if args.port is not None:
+        cmd += ["--port", str(args.port)]
+    proc = subprocess.Popen(cmd, **popen_kwargs)
     print(f"PID {proc.pid} — log: {log_path}")
     print("Press the Run button again to restart; the app keeps running otherwise.")
 

@@ -2,9 +2,9 @@
 
 Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md).)
 
-**Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
+Effects are built from the shared [power functions](power-functions.md) — the drawing, field and motion routines every effect composes; that page lists each one with its callers.
 
-**Migrating an effect — behaviour is the spec.** A ported effect must reproduce the original's **exact** visual behaviour: end users have relied on these for years, so a port that looks different is a regression, not an improvement. Don't get creative with defaults, oscillator math, color mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result; pin it with unit + scenario tests; then write our **own** implementation against `EffectBase`/our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
+**Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
 > Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../assets/…` gif show our own output.
 
@@ -248,6 +248,201 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 Detail: [technical](moxygen/RubiksCubeEffect.md)
 
 [Tests](../../tests/unit-tests.md#rubikscubeeffect)
+
+<a id="fireworks"></a>
+
+### Fireworks 🔬 · 2D
+
+Shells rise, stall, and burst into sparks that arc over and fall. Every stage is a particle-kernel call: spawn, gravity, angleEmit, drag, age. Nothing schedules the apex — the shell decelerates under gravity and bursts when its vertical velocity crosses zero, so a faster launch bursts higher without a second control.
+
+- `launchRate` — how often a new shell goes up.
+- `launchSpeed` — how hard it is thrown, and so how high it bursts.
+- `gravity` — how fast everything falls, per 60 Hz of simulated time.
+- `sparks` — sparks per burst.
+- `sparkLife` — how long a spark survives.
+- `drag` — air resistance flattening the arc.
+- `fade` — trail length (the Layer's decay, not the pool's).
+
+Physics is driven by elapsed time, not frame count, so the same settings behave identically on a desktop at thousands of fps and an ESP32 at a few hundred ([architecture § tick rate](../../architecture.md#effects)).
+
+Origin: projectMM original, on the WLED Particle System's firework family (@Brandon502 / WildCats08)
+
+<a id="ballpit"></a>
+
+### Ballpit 🔬 · 2D
+
+Falling balls that pile up and shove each other aside. The heap is emergent: gravity pulls, the floor stops, and contact between neighbours produces the shape. `tilt` turns the pit into a slope and the whole pile slides and re-settles.
+
+- `balls` — how many share the pit.
+- `gravity` — how hard they fall.
+- `size` — contact radius in pixels: how far apart balls sit when touching.
+- `bounce` — restitution: how much speed a contact keeps.
+- `tilt` — sideways force, turning the pit into a slope.
+- `drag` — damping, so the heap settles instead of sloshing.
+
+Exercises the half of the particle kernel [Fireworks](#fireworks) leaves untouched: sparks never notice each other, these do. Collisions are the one non-linear part of the kernel, so the pool is deliberately small.
+
+Origin: projectMM original, on the WLED Particle System's ballpit family (@Brandon502 / WildCats08)
+
+<a id="dissolve"></a>
+
+### Dissolve 🔬 · 2D
+
+Two color fields trade places pixel by pixel in an order that looks random but is computed, so the transition needs no per-pixel state and no shuffled index list. Two devices rendering the same frame dissolve identically without exchanging anything.
+
+- `bpm` — how fast one transition completes.
+- `spread` — how much of the transition pixels spend mid-flight; 0 gives a hard edge.
+- `eased` — ease the progress instead of sweeping linearly.
+- `scatter` — random order; off gives a positional wipe from the same code.
+
+Origin: projectMM original, on the classic dissolve transition in its position-addressed (shader) form
+
+<a id="echo"></a>
+
+### Echo 🔬 · 2D
+
+The previous frame fed back through a zoom and rotation, dimmed, with a bright source drawn on top — trails that spiral away from themselves, like a camera pointed at its own monitor.
+
+- `bpm` — how fast the source orbits.
+- `zoom` — how much the feedback grows each frame.
+- `rotate` — rotation per frame, which turns the trail into a spiral.
+- `decay` — how fast the echo fades; higher is a shorter trail.
+- `size` — radius of the bright source.
+
+Shows that feedback is not a primitive: once the grid can be read as a texture (`sampleWrap`), the whole family of trails, zoom blur and smear is a few lines.
+
+Origin: projectMM original, on video feedback and the standard texture-feedback shader shape
+
+<a id="spectrum"></a>
+
+### Spectrum 🔬📊 · 2D
+
+An audio analyser with real meter ballistics: bars rise fast enough to catch a transient and fall slowly enough to read, and a peak dot marks the recent maximum and drifts down.
+
+- `attack` — how fast a bar rises toward a new level.
+- `release` — how fast it falls back.
+- `peakDecay` — how fast the peak dot drifts down.
+- `showPeaks` — draw the floating peak dots.
+- `colorByColumn` — color per band instead of by height.
+
+The asymmetry is the whole point; a symmetric follower either misses the hit or flickers.
+
+Origin: projectMM original, on standard VU/PPM meter ballistics and WLED's GEQ band mapping
+
+<a id="truchet"></a>
+
+### Truchet 🔬 · 2D
+
+A maze of interlocking arcs that never repeats, drawn without storing a single tile. Randomly-turned tiles with arcs at their edges join into continuous winding paths across the whole surface — the pattern looks designed, and nothing designed it.
+
+- `bpm` — how fast the pattern drifts.
+- `scale` — tiles across the short side.
+- `thickness` — how fat the arcs are.
+- `softness` — edge softness: the anti-aliasing width.
+- `shuffle` — reshuffles which way the tiles face.
+- `drift` — slide the pattern instead of holding still.
+
+**The representative 2D shader**, and a better introduction to the form than [Raymarch](#raymarch): no 3D, no rays, no float, cheap on any target. It shows the three moves most shader effects are built from — folding space so one tile becomes hundreds (`repeat`), deciding each tile's orientation from its position alone (`hashInt`, so no array remembers it and two devices agree without exchanging anything), and turning a distance into a soft edge (`smoothstep`).
+
+Origin: projectMM original, on Sébastien Truchet's 1704 tiling and the standard shader fract/hash/smoothstep idiom
+
+<a id="tunnel"></a>
+
+### Tunnel 🔬 · 2D
+
+A texture mapped onto the inside of an infinite tube, so the viewer appears to fly down it forever. Nothing is 3D: the angle around the centre is one texture coordinate and the reciprocal of the distance is the other, which is perspective for the price of a divide.
+
+- `bpm` — how fast the tunnel flies past.
+- `depth` — texture scale along the tunnel; higher is finer rings.
+- `twist` — rotation per unit depth, so the tunnel corkscrews.
+- `segments` — kaleidoscope the wall; 1 leaves it plain.
+- `octaves` — wall texture detail, and the cost knob.
+- `vignette` — darken toward the vanishing point so it reads as receding.
+
+Origin: projectMM original, on the standard demoscene tunnel
+
+<a id="vectorballs"></a>
+
+### VectorBalls 🔬 · 2D
+
+A rotating 3D object drawn as shaded spheres — the demoscene classic that named the technique. The smallest complete demonstration of putting 3D on a panel: rotate, project, sort back-to-front, shade by distance, draw.
+
+- `bpm` — rotation speed.
+- `size` — ball radius at the object's centre, in pixels.
+- `spread` — how far apart the balls sit.
+- `distance` — how far the object is from the viewer.
+- `fade` — dim the far balls, which is what reads as depth.
+
+Painter's ordering matters more than it sounds: without it a far ball can paint over a near one and the object reads as turning inside out. Costs a few microseconds a frame at default settings — 14 points rather than a per-pixel loop, so it is the cheapest of the showcases.
+
+Origin: projectMM original, on the Amiga-era demoscene vector-ball effect
+
+<a id="waterripple"></a>
+
+### WaterRipple 🔬 · 2D
+
+A propagating wave simulation: drops land, their rings spread outward, reflect off the edges and interfere where they cross. The crossing is what a closed-form ripple cannot fake, because two rings meeting have to add and cancel.
+
+- `speed` — simulation steps per second: how fast the water itself moves, independent of the framerate.
+- `dropRate` — how often drops land, in time rather than per frame.
+- `damping` — how fast waves lose energy; higher is calmer water.
+- `strength` — how hard a drop hits.
+- `colorByHeight` — color the surface by height so crests and troughs read differently.
+- `hueBase` / `hueSpread` — where in the palette the still surface sits, and how far a crest and a trough reach from it.
+
+Distinct from [Ripples](#ripples), which draws expanding rings from a closed-form radius: that one is cheaper and always looks like clean concentric circles, this one behaves like water. Costs two int16 buffers sized to the grid.
+
+Origin: projectMM original, on Hugo Elias's water surface algorithm
+
+<a id="raymarch"></a>
+
+### Raymarch 🔬 · 2D
+
+A lit 3D scene rendered by marching a ray through a distance field, one ray per pixel. Nothing draws a sphere: the scene is a function returning the distance to the nearest surface, and the spheres emerge because each ray stops where that function says a surface is. The lighting is derived too — the surface normal is the gradient of the distance field.
+
+- `bpm` — how fast the scene animates.
+- `steps` — ray marching steps: the quality and cost knob.
+- `blend` — how much the two spheres melt into each other.
+- `cameraY` — camera height above the floor.
+- `showFloor` — include the ground plane.
+
+**Compiled only where the SoC declares a hardware FPU** (`SOC_CPU_HAS_FPU`, which every ESP32 variant and the desktop satisfy). This is the one stated exception to the integer-only render-path rule, and it is gated rather than assumed. The cost is per *pixel*, not per chip — measured at 0.30 ms/frame for 32×32 on desktop, and 1.64 ms for 4096 lights on an ESP32-S3 while still holding 409 fps. What limits it is pixel count; `steps` trades quality for cost. Frames also stream over NetworkSend, so a desktop can drive a fixture that could never compute this locally.
+
+Origin: projectMM original, on Iñigo Quilez's raymarching and distance-function articles
+
+<a id="polarnoise"></a>
+
+### PolarNoise 🔬 · 2D
+
+A warped noise field addressed by angle and radius, folded into a kaleidoscope. The field turns and breathes around the centre rather than scrolling past it.
+
+- `bpm` — how fast the field drifts.
+- `scale` — noise cells across the grid: low is broad shapes, high is fine detail.
+- `segments` — kaleidoscope wedges; 1 disables the fold.
+- `warp` — domain-warp strength; 0 gives a plain field.
+- `octaves` — fbm octaves, and the main cost knob.
+- `twist` — how much the radius shears the angle, setting the spiral.
+
+Cost scales with `octaves` and `warp`: at `warp` > 0 and `octaves` 2 it is roughly 4 noise samples per pixel. On a large wall set `octaves` to 1 or `warp` to 0, which degrades to a plain polar noise that still reads well.
+
+Origin: projectMM original, after Stefan Petrick's polar/noise vocabulary and Iñigo Quilez's domain warping
+
+<a id="sdfshapes"></a>
+
+### SdfShapes 🔬 · 2D
+
+A circle and a box orbit and melt into each other, drawn as signed distance fields rather than rasterized outlines. One distance per pixel yields three looks at once: an anti-aliased fill, an outline (`|d| - width`), and a glow that falls off into the surrounding field.
+
+- `bpm` — orbit speed.
+- `radius` — circle radius, as a fraction of the short side.
+- `boxSize` — box half-extent, same scale.
+- `blend` — melt radius; 0 unions the shapes hard.
+- `outline` — 0 fills the shape; higher draws an outline of that width.
+- `glow` — tint the field around the shape by distance.
+
+Measured on an ESP32-S3 at 128×128: 20 fps, 728 cycles/pixel using the true-distance form, alongside StarSky (692) and Metaballs (647) at the same size.
+
+Origin: projectMM original, after Iñigo Quilez's distance-function catalogue and polynomial smooth-minimum (iquilezles.org)
 
 <a id="solid"></a>
 
@@ -692,4 +887,3 @@ Origin: MoonLight (Sinus, AI-generated) · via [MoonLight](https://github.com/Mo
 Detail: [technical](moxygen/SineEffect.md)
 
 [Tests](../../tests/unit-tests.md#sineeffect)
-

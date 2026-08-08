@@ -38,8 +38,7 @@ public:
         const int h = height();
         const int d = depth();
 
-        Buffer& buf = layer()->buffer();
-        const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), static_cast<lengthType>(d)};
+        const draw::Canvas cv = canvas();
 
         // Full clear each frame (source: fadeToBlackBy(255)).
         layer()->fadeToBlackBy(255);
@@ -70,7 +69,7 @@ public:
                     const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
                     if (dist > diameter && dist < diameter + 1.0f) {
                         const uint8_t index = static_cast<uint8_t>(indexBase + rng_.below(64));
-                        draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)},
+                        draw::pixel(cv, {static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)},
                                     colorFromPalette(*Palettes::active(), index));
                     }
                 }

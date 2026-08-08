@@ -35,25 +35,13 @@ public:
     }
 
     void tick() MM_NONBLOCKING override {
-        uint8_t* buf = buffer();
+        const draw::Canvas cv = canvas();
         const lengthType w = width();
         const lengthType h = height();
-        const lengthType d = depth();
-        const uint8_t cpl = channelsPerLight();
-        if (w == 0 || h == 0 || d == 0 || cpl == 0) return;
 
-        std::memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
+        draw::fill(cv, RGB{0, 0, 0});
 
         const AudioFrame* f = AudioService::latestFrame();
-
-        auto setRGB = [&](lengthType x, lengthType y, lengthType z,
-                          uint8_t r, uint8_t g, uint8_t b) {
-            size_t off = (static_cast<size_t>(z) * h * w
-                         + static_cast<size_t>(y) * w + x) * cpl;
-            if (cpl >= 1) buf[off + 0] = r;
-            if (cpl >= 2) buf[off + 1] = g;
-            if (cpl >= 3) buf[off + 2] = b;
-        };
 
         // On a grid tall enough (h >= 3), reserve the BOTTOM row for an overall
         // level/volume meter — a horizontal bar lit left-to-right in proportion to
@@ -70,13 +58,13 @@ public:
             const uint16_t vu = f->levelSmoothed;
             const lengthType litW = static_cast<lengthType>(
                 static_cast<uint32_t>(vu > 255 ? 255 : vu) * w / 255u);
-            for (lengthType x = 0; x < litW; x++) {
-                // Green → red across the width, the VU-meter look. D2: write the z=0 slice only;
-                // Layer::extrude fans it across z (the framework's job, not the effect's).
+            // Green → red across the width, the VU-meter look. D2: write the z=0 slice only;
+            // Layer::extrude fans it across z (the framework's job, not the effect's).
+            draw::bar(cv, 0, y, litW, draw::Grow::Right, [w](lengthType x) {
                 const uint8_t frac = static_cast<uint8_t>(
                     static_cast<uint32_t>(x) * 255u / (w > 1 ? w : 1));
-                setRGB(x, y, 0, frac, static_cast<uint8_t>(255 - frac), 0);
-            }
+                return RGB{frac, static_cast<uint8_t>(255 - frac), 0};
+            });
         }
 
         for (lengthType x = 0; x < w; x++) {
@@ -98,9 +86,7 @@ public:
             // Spectrum bars sit ABOVE the level row: their bottom is row h-2 when a
             // level row is reserved, else h-1 (the grid bottom).
             const lengthType specBottom = static_cast<lengthType>(levelRow ? h - 2 : h - 1);
-            for (lengthType row = 0; row < lit; row++) {
-                const lengthType y = static_cast<lengthType>(specBottom - row);
-
+            draw::bar(cv, x, specBottom, lit, draw::Grow::Up, [&](lengthType row) {
                 uint8_t r, g, b;
                 if (colorMode == 1) {
                     // Per-band: the column's hue at full brightness (a strip dims
@@ -124,8 +110,8 @@ public:
                                     : static_cast<uint8_t>(static_cast<uint32_t>(255 - frac) * mag / 255u);
                     b = 0;
                 }
-                setRGB(x, y, 0, r, g, b);   // D2: z=0 only; extrude fans across z
-            }
+                return RGB{r, g, b};        // D2: z=0 only; extrude fans across z
+            });
         }
     }
 };

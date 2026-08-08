@@ -3,6 +3,8 @@
 #include "core/MoonModule.h"
 #include "core/MqttPacket.h"
 #include "core/SystemModule.h"
+
+namespace mm { class ControlModule; }   // presets published as the HA effect list; .cpp includes it
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -74,6 +76,10 @@ namespace mm {
 class MqttModule : public MoonModule {
 public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
+    /// Optional: presets are published to Home Assistant as the light's effect list when set. Only
+    /// look-only presets are exposed (ControlModule::isLookOnly), so an automation cannot rewire
+    /// hardware through the effect dropdown.
+    void setControlModule(ControlModule* c) { controlModule_ = c; }
 
     void setup() override;
     void release() override;                          // free the lazily-allocated discovery buffers
@@ -95,6 +101,8 @@ public:
 
     /// The heap footprint dynamicBytes() reports while HA discovery is announcing — the sum of the two
     /// discovery scratch regions. Exposed so a test asserts against this instead of a magic literal.
+    /// The no-presets footprint. With looks published the buffers grow by the measured effect-list
+    /// size, so the live figure is dynamicBytes(); this constant is the floor.
     static constexpr size_t kDiscoveryDynamicBytes = 320 + 448;
 
 private:
@@ -140,6 +148,9 @@ private:
     void handleUpdateInstall(const char* payload, size_t payloadLen);
 
     SystemModule* systemModule_ = nullptr;
+    ControlModule* controlModule_ = nullptr;
+    uint32_t lastPresetsRev_ = 0;   ///< last preset revision announced to HA (tick1s re-announce)
+    char lastLook_[32] = "";        ///< the look last published in ha/state (part of the change gate)
 
     // The topic prefix is DERIVED from a STABLE hardware id: projectMM/<last6-of-MAC>. Not stored (no
     // buffer). The MAC is fixed for the chip's life, so a device rename never changes the topics —
@@ -188,10 +199,20 @@ private:
     // config frame off the shared 8 KB main-task stack (the P4 registerType-stack lesson). Two regions
     // because buildMqttPublish needs payload + output separate: the JSON builds into discoveryPayload_,
     // the framed packet into discoveryBuf_.
-    static constexpr size_t kDiscoveryPayloadLen = 320;
-    static constexpr size_t kDiscoveryBufLen     = 448;
-    static_assert(kDiscoveryDynamicBytes == kDiscoveryPayloadLen + kDiscoveryBufLen,
+    // The fixed part of the config; the effect_list adds to it and is measured, not capped (see
+    // haEffectListBytes / ensureDiscoveryBuffers). A cap would either waste RAM on a device with
+    // three presets or silently publish nothing on a device with many.
+    static constexpr size_t kDiscoveryPayloadBase = 320;
+    static constexpr size_t kDiscoveryBufBase     = 448;
+    static_assert(kDiscoveryDynamicBytes == kDiscoveryPayloadBase + kDiscoveryBufBase,
                   "public test constant must track the actual buffer sizes");
+    /// Bytes the effect_list needs for the CURRENT look-only presets, including the JSON key,
+    /// quotes and separators. 0 when there is nothing to publish.
+    size_t haEffectListBytes() const;
+    /// Serialize the effect_list key into `out`; returns the bytes written (0 if there are no looks).
+    size_t writeHaEffectList(char* out, size_t cap) const;
+    size_t discoveryPayloadLen_ = 0;   ///< size the buffers were allocated at, so a change can resize
+    size_t discoveryBufLen_     = 0;
     char*    discoveryPayload_ = nullptr;
     uint8_t* discoveryBuf_     = nullptr;
     bool ensureDiscoveryBuffers();   // lazily alloc both; false on OOM. Sets dynamicBytes.

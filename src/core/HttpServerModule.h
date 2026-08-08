@@ -413,6 +413,7 @@ private:
     void serveWledState(platform::TcpConnection& conn);
     void serveWledStateInfo(platform::TcpConnection& conn);
     void serveWledDeviceJson(platform::TcpConnection& conn);   ///< /json — HA WLED integration surface
+    void serveWledPresets(platform::TcpConnection& conn);      ///< /presets.json — look presets for HA
     void handleWledState(platform::TcpConnection& conn, const char* body);
     void pollWledStateFromWebSockets();             ///< read app's slider/toggle sent over /ws
     void writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]);

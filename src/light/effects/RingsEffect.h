@@ -40,14 +40,20 @@ public:
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
 
-        // Visible radius limit (octagonal distance to far corner)
-        uint8_t maxR = dist8(static_cast<int16_t>(w), static_cast<int16_t>(h));
+        // Visible radius limit: a TRUE distance to the far corner (dist16), where the 8-bit form
+        // approximated an octagon and saturated at 255 — so on a panel wider than ~255 lights the
+        // limit stopped growing and the rings stalled short of the edge. Clamped to a byte because
+        // the per-ripple radius state is 8-bit.
+        // Kept WIDE, not clamped to a byte: on a panel whose far corner is more than 255 lights
+        // away the ceiling stopped growing, so every ripple died before reaching the edge.
+        const uint32_t maxR32 = dist16(static_cast<int32_t>(w), static_cast<int32_t>(h));
+        const uint16_t maxR = static_cast<uint16_t>(maxR32 < 1 ? 1 : (maxR32 > 65535 ? 65535 : maxR32));
 
         if (!initialized_) {
             for (uint8_t i = 0; i < MAX_RIPPLES; i++) {
                 spawn(i, w, h);
                 // Stagger initial radii so ripples are spread across all sizes
-                radius_[i] = static_cast<uint8_t>((i * maxR) / MAX_RIPPLES);
+                radius_[i] = static_cast<uint16_t>((i * maxR) / MAX_RIPPLES);
             }
             initialized_ = true;
         }
@@ -60,11 +66,11 @@ public:
         if (growth == 0) growth = 1;
 
         for (uint8_t i = 0; i < count && i < MAX_RIPPLES; i++) {
-            uint16_t next = static_cast<uint16_t>(radius_[i]) + growth;
+            uint32_t next = static_cast<uint32_t>(radius_[i]) + growth;
             if (next > maxR) {
                 spawn(i, w, h);
             } else {
-                radius_[i] = static_cast<uint8_t>(next);
+                radius_[i] = static_cast<uint16_t>(next);
             }
         }
 
@@ -73,11 +79,14 @@ public:
             for (lengthType x = 0; x < w; x++) {
                 uint16_t r_acc = 0, g_acc = 0, b_acc = 0;
                 for (uint8_t i = 0; i < count && i < MAX_RIPPLES; i++) {
-                    int16_t dx = static_cast<int16_t>(x - cx_[i]);
-                    int16_t dy = static_cast<int16_t>(y - cy_[i]);
-                    uint8_t d = dist8(dx, dy);
-                    int16_t diff = static_cast<int16_t>(d) - static_cast<int16_t>(radius_[i]);
-                    if (diff < 0) diff = static_cast<int16_t>(-diff);
+                    const int32_t dx = static_cast<int32_t>(x) - cx_[i];
+                    const int32_t dy = static_cast<int32_t>(y) - cy_[i];
+                    // Kept wide for the same reason as maxR: clamping the per-pixel distance to a
+                    // byte made every light past 255 from a ripple's centre read as exactly 255, so
+                    // the ring never appeared out there at all.
+                    const uint32_t d = dist16(dx, dy);
+                    int32_t diff = static_cast<int32_t>(d) - static_cast<int32_t>(radius_[i]);
+                    if (diff < 0) diff = -diff;   // stays int32: narrowing truncated large distances
                     if (diff < thickness) {
                         // Brightness peaks at ring centre, falls off with distance from ring.
                         uint8_t falloff = static_cast<uint8_t>(((thickness - diff) * 255) / thickness);
@@ -101,7 +110,7 @@ public:
 private:
     lengthType cx_[MAX_RIPPLES] = {};
     lengthType cy_[MAX_RIPPLES] = {};
-    uint8_t radius_[MAX_RIPPLES] = {};
+    uint16_t radius_[MAX_RIPPLES] = {};   // wide: a large panel's far corner exceeds 255
     uint8_t hue_[MAX_RIPPLES] = {};
     bool initialized_ = false;
     uint32_t lastElapsed_ = 0;
