@@ -21,6 +21,12 @@ on:
       - main
     paths:
       - 'src/**'
+      # The desktop jobs compile the whole tree, tests included (CMakeLists adds test/
+      # unconditionally), so MSVC and Apple clang see the test suite too — and both have
+      # rejected code here that the local clang build accepts. Without this line a test-only
+      # fix cannot trigger the job that flagged it, which left main red twice: the C4146 and
+      # C4701 fixes each shipped unverified because they touched only test/.
+      - 'test/**'
       - 'esp32/**'
       - 'moondeck/build/**'
       - 'CMakeLists.txt'
