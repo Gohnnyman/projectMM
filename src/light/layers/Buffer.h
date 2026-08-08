@@ -25,7 +25,7 @@ namespace mm {
 ///
 /// **Prior art:** MoonLight's `VirtualLayer.virtualChannels` — a raw `uint8_t*` sized
 /// by `channelsPerLight * nrOfLights`, RGB/RGBW/DMX via LightsHeader offsets
-/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
+/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Effects/VirtualLayer.h).
 class Buffer {
 public:
     Buffer() = default;
