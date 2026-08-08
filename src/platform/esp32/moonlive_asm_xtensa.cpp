@@ -54,8 +54,21 @@ void XtensaAssembler::addFixup(size_t at, Label label) {
 // a13 is the assembler's reserved scratch (also kZero in branchIfZero); it holds no live vreg.
 // Single movi for the common 0..255 case. Without this, Const values >255 truncate to 8 bits.
 void XtensaAssembler::movImm(Reg d, int32_t imm) {
-    const uint32_t v = static_cast<uint32_t>(imm) & 0xffff;
     const uint8_t dr = ar(d);
+    // The wide `movi` field is 12-bit SIGNED (-2048..2047), which is the only encoding here that can
+    // hold a negative constant. The compiler emits Const(-1) to express subtraction — `a - b` is
+    // `a + (b * -1)` — and building that through the zero-extended byte path below would materialise
+    // 65535, making every subtraction correct only modulo 256: invisible in a stored colour byte,
+    // silently fatal in a bounds-guarded index (the light is dropped) or a host-call argument.
+    if (imm < 0 && imm >= -2048) {
+        const uint32_t f = static_cast<uint32_t>(imm) & 0xfff;
+        const uint8_t b[3] = {uint8_t((dr << 4) | 0x2),
+                              uint8_t(0xa0 | ((f >> 8) & 0xf)),
+                              uint8_t(f & 0xff)};
+        emit(b, 3);                                                      // movi aD, #imm12
+        return;
+    }
+    const uint32_t v = static_cast<uint32_t>(imm) & 0xffff;
     if (v <= 0xff) {
         const uint8_t b[3] = {uint8_t((dr << 4) | 0x2), 0xa0, uint8_t(v)};
         emit(b, 3);

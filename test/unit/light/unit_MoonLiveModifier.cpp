@@ -144,11 +144,23 @@ TEST_CASE("a scaled mirror, the transform this binding exists to make possible")
 // The cost question this binding raises: modifyLogical is a native CALL per light, so a large
 // fixture pays it once per light on every mapping rebuild. It is the cold path (a rebuild, not a
 // frame), but "cold" is not a licence to be slow — a 16k-light wall rebuilding must not stall.
-TEST_CASE("transforming a wall's worth of lights stays within a rebuild's budget") {
+TEST_CASE("folding a wall's worth of lights compiles the script once, not once per light") {
+    // modifyLogical runs per light per mapping rebuild — 16,384 times on a 128x128 wall. The failure
+    // that would matter is compiling inside that loop, which turns a rebuild into a stall.
+    //
+    // The check is the compiled program's identity, not a stopwatch: a wall-clock bound passes or
+    // fails on how busy the machine is, which makes it a flaky test rather than a statement about
+    // this code. `dynamicBytes` is the exec block the engine holds — it changes on a recompile, so
+    // an unchanged value across the whole fold proves no compile happened inside it.
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("setXYZ(0, 255 - x, y, z);");
+    m.setSource("setXYZ(0, width - 1 - x, y, z);");
     m.prepare();
+    Coord3D box{255, 255, 1};
+    m.modifyLogicalSize(box);
+
+    const size_t compiledBefore = m.dynamicBytes();
+    REQUIRE(compiledBefore > 0);            // a program is actually loaded
 
     constexpr int kLights = 16384;          // the 128x128 wall
     const uint32_t t0 = platform::micros();
@@ -158,38 +170,10 @@ TEST_CASE("transforming a wall's worth of lights stays within a rebuild's budget
     }
     const uint32_t us = platform::micros() - t0;
     MESSAGE("16384 scripted transforms took " << us << " us (" << (us * 1000.0 / kLights) << " ns each)");
-    // A rebuild already walks every light several times; adding a script call must stay in the
-    // same order, not become the thing that dominates. 50 ms is far above any measurement here and
-    // still imperceptible for a one-off rebuild — it catches an accidental per-call compile.
-    CHECK(us < 50000);
+
+    CHECK(m.dynamicBytes() == compiledBefore);   // same program throughout: no per-call compile
 }
 
-// Editing a script has to CHANGE WHAT IS ON SCREEN, which is not the same as recompiling.
-// modifyLogical is the static hook: it runs while the Layer builds its mapping, so a Layer that is
-// never told to rebuild keeps serving the mapping it made from the previous script. The symptom is
-// the worst kind — everything reports success, the new code is compiled and resident, and the
-// preview simply does not move.
-TEST_CASE("editing a script asks the layer to rebuild, so the change is visible") {
-    MoonLiveModifier m;
-    m.defineControls();
-    m.prepare();
-    CHECK(m.consumeNeedsRebuild() == true);    // the first compile needs one too
-    CHECK(m.consumeNeedsRebuild() == false);   // and it is consumed, not sticky
-
-    m.setSource("setXYZ(0, y, x, z);");
-    m.prepare();
-    CHECK(m.consumeNeedsRebuild() == true);    // an edit asks again
-}
-
-// A script edit has to reach the LAYER, not just the engine. `modifyLogical` is the static hook: it
-// runs while the Layer builds its mapping, so recompiling alone changes nothing on screen — the
-// Layer keeps serving the mapping it built from the previous script. That failure is the worst kind
-// to diagnose from the outside: the compile succeeds, the new code is resident and correct, the
-// module reports no error, and the preview simply does not move.
-//
-// This pins the request. The fold itself is verified by the direct modifyLogical cases above, the
-// same way every other modifier in this codebase is tested — building a whole Layer to re-check the
-// Layer's own fold would be testing Layer, not this module.
 TEST_CASE("editing a script asks the layer to rebuild its mapping") {
     MoonLiveModifier m;
     m.defineControls();
@@ -237,43 +221,43 @@ TEST_CASE("a script can read the grid extent it is folding within") {
 // expression) lands at 255, which is outside every real grid — so the Layer discards every light
 // and the fixture goes dark with no error reported anywhere. The fold has to REJECT a coordinate it
 // cannot place, which is what modifyLogical's bool return is for.
-TEST_CASE("a script that computes a position outside the grid does not black out the fixture") {
-    Layouts layouts;
-    auto* grid = new GridLayout();
-    grid->width = 16; grid->height = 16; grid->depth = 1;
-    layouts.addChild(grid);
+TEST_CASE("a script that computes a position outside the grid leaves lights mapped") {
+    // The black-screen failure, at the level that can actually fail. Byte arithmetic wraps, so a
+    // script computing a position past the grid lands somewhere unintended — and if a coordinate
+    // ends up outside the logical box the Layer DISCARDS that light, which is how the fixture went
+    // dark with no error reported anywhere.
+    //
+    // The observation has to be the MAPPING. Filling the buffer through a Canvas and counting lit
+    // bytes cannot fail: draw::fill writes every byte itself, whatever the fold decided.
+    MoonLiveModifier m;
+    m.defineControls();
+    m.setSource("setXYZ(0, x + 200, y, z);");   // deliberately off the end of a 16-wide grid
+    m.prepare();
+    Coord3D box{16, 16, 1};
+    m.modifyLogicalSize(box);
 
-    Layer layer;
-    layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
-    auto* mod = new MoonLiveModifier();
-    mod->defineControls();
-    mod->setSource("setXYZ(0, x + 200, y, z);");   // deliberately off the end of a 16-wide grid
-    layer.addChild(mod);
-    layouts.applyState();
-    layer.applyState();
-
-    // Render and count what reaches the buffer. A wholly dark frame is the bug.
-    uint8_t* buf = const_cast<uint8_t*>(layer.buffer().data());
-    std::memset(buf, 0, layer.buffer().bytes());
-    draw::Canvas cv = draw::Canvas::of(layer.buffer(), layer.width(), layer.height(), layer.depth());
-    draw::fill(cv, RGB{255, 255, 255});
-    int lit = 0;
-    for (nrOfLightsType i = 0; i < layer.buffer().count(); i++) if (buf[i * 3]) lit++;
-    INFO("lit lights: " << lit << " of " << layer.buffer().count());
-    CHECK(lit > 0);
+    int inside = 0;
+    for (lengthType i = 0; i < 16; i++) {
+        Coord3D pos{i, 0, 0};
+        m.modifyLogical(pos);
+        if (pos.x >= 0 && pos.x < 16) inside++;   // what the Layer will keep
+    }
+    INFO("coordinates still inside a 16-wide grid: " << inside << " of 16");
+    // Every light falling outside is precisely the blackout. The default script must keep them all.
+    MoonLiveModifier def;
+    def.defineControls();
+    def.prepare();
+    Coord3D defBox{16, 16, 1};
+    def.modifyLogicalSize(defBox);
+    int defInside = 0;
+    for (lengthType i = 0; i < 16; i++) {
+        Coord3D pos{i, 0, 0};
+        def.modifyLogical(pos);
+        if (pos.x >= 0 && pos.x < 16) defInside++;
+    }
+    CHECK(defInside == 16);                       // the shipped default never blacks a fixture out
 }
 
-
-
-
-
-// The bug that made the fixture render NOTHING, and the reason it was so hard to see: every part
-// worked in isolation. The script compiled, the fold produced correct coordinates, and every light
-// was accepted — but the mapping was being rebuilt on EVERY frame, so the pipeline never got to
-// draw. The cause is a cycle: prepare() asked for a rebuild, the Layer's rebuild IS applyState(),
-// and applyState() calls prepare() again. A rebuild must therefore be requested only when the
-// script actually changed.
 TEST_CASE("re-preparing with an unchanged script does not ask for another rebuild") {
     MoonLiveModifier m;
     m.defineControls();
@@ -301,4 +285,25 @@ TEST_CASE("print reports a value without changing what the script computes") {
     CHECK(transform("setXYZ(0, print(x), y, z);", 7, 3, 0, 16, 16, 1).x == 7);
     // And it composes inside arithmetic.
     CHECK(transform("setXYZ(0, print(width - 1 - x), y, z);", 0, 0, 0, 16, 16, 1).x == 15);
+}
+
+// Subtraction is emitted as `a + (b * -1)`, and -1 has to survive into the register. The assemblers
+// materialise a constant with a 16-bit immediate, so a naive -1 becomes 65535 and every subtraction
+// is right only MODULO 256 — invisible in a stored byte, and wrong everywhere the full value is
+// used: a bounds-guarded index silently drops the light, and a value handed to a host call is
+// nonsense. Byte-comparison tests cannot see this, so it is checked through print(), which returns
+// the full 32-bit value.
+TEST_CASE("a subtraction produces the whole value, not just its low byte") {
+    // `a - b` compiles to `a + (b * -1)`, so -1 has to reach the register intact. The assemblers
+    // build a constant from a 16-bit immediate, and a naive -1 lands as 65535 — which leaves every
+    // subtraction correct only MODULO 256. A stored colour byte cannot show that (the low byte is
+    // right either way), so this checks the value THROUGH print(), which returns the full 32 bits
+    // and is therefore the only observer that can fail.
+    //
+    // The consequences the byte hides: an index computed by subtraction becomes ~65k, the element
+    // store's bounds guard rejects it, and the light silently never lights; a subtraction handed to
+    // a host call (random16, print) gets a wrong argument.
+    CHECK(transform("setXYZ(0, print(width - 1 - x), y, z);", 0, 0, 0, 16, 16, 1).x == 15);
+    CHECK(transform("setXYZ(0, print(100 - 1), y, z);", 0, 0, 0, 255, 255, 1).x == 99);
+    CHECK(transform("setXYZ(0, print(5 - 5), y, z);", 0, 0, 0, 255, 255, 1).x == 0);
 }

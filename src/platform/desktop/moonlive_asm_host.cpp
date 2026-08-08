@@ -45,8 +45,18 @@ void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 
-void HostAssembler::movImm(Reg d, int32_t imm) {           // movz wD, #imm16
-    emit32(0x52800000u | ((uint32_t(imm) & 0xffff) << 5) | mr(d));
+void HostAssembler::movImm(Reg d, int32_t imm) {
+    // movz builds a ZERO-extended 16-bit constant, so a negative immediate would land as its
+    // unsigned counterpart (-1 as 65535). The compiler emits Const(-1) to express subtraction —
+    // `a - b` is `a + (b * -1)` — and a wrapped -1 makes every subtraction correct only modulo 256.
+    // In a stored colour byte that is invisible; in a bounds-guarded index it silently drops the
+    // light, and in a host-call argument it is nonsense. movn is the negative form: it writes
+    // ~imm16, so movn #(~imm) materialises the true negative value.
+    if (imm < 0) {
+        emit32(0x12800000u | ((uint32_t(~imm) & 0xffff) << 5) | mr(d));   // movn wD, #~imm16
+        return;
+    }
+    emit32(0x52800000u | ((uint32_t(imm) & 0xffff) << 5) | mr(d));        // movz wD, #imm16
 }
 void HostAssembler::addImm(Reg d, Reg a, int32_t imm) {    // add xD, xA, #imm12 (64-bit)
     emit32(0x91000000u | ((uint32_t(imm) & 0xfff) << 10) | (mr(a) << 5) | mr(d));

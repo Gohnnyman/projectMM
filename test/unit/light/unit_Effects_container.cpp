@@ -174,7 +174,7 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
 
     effectsContainer.applyState();
     drivers.applyState();      // sizes + allocates the composite output buffer
-    effectsContainer.tick();      // both effects render their own buffers
+    effectsContainer.tick();      // both Layers render their own buffers
     drivers.tick();              // composite into outputBuffer_, hand it to cap
 
     REQUIRE(effectsContainer.enabledLayerCount() == 2);
@@ -196,7 +196,7 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
         CHECK(outBuf.data()[i] == static_cast<uint8_t>(expect));
         if (botBuf.data()[i] && topBuf.data()[i]) sawSum = true;
     }
-    CHECK_MESSAGE(sawSum, "expected at least one light where both effects contribute (proves real compositing)");
+    CHECK_MESSAGE(sawSum, "expected at least one light where both Layers contribute (proves real compositing)");
 }
 
 // Disabling the top layer drops cleanly to the single (bottom) layer — no crash,
@@ -243,7 +243,7 @@ TEST_CASE("Drivers composition drops to single layer when one is disabled") {
 // drivers directly (zero-copy). dynamicBytes() reflects outputBuffer_.bytes(), so
 // it's 0 ⇔ no buffer. Pins all three cases in one place:
 //   1. one identity (no-LUT) layer  → NO output buffer (zero-copy) — WITH multicore off
-//   2. two enabled effects           → output buffer (must composite)
+//   2. two enabled Layers           → output buffer (must composite)
 //   3. one layer WITH a LUT         → output buffer (must map logical→physical)
 // The multicore render↔encode split adds a fourth reason to own a buffer: it is the frame core 1
 // reads while core 0 renders the next one, so with the split ON the identity case DOES allocate one
@@ -294,7 +294,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         drivers.release();                           // stop the worker before the stack objects die
     }
 
-    // --- Case 2: two enabled effects → output buffer (must composite) ---
+    // --- Case 2: two enabled Layers → output buffer (must composite) ---
     {
         mm::Layouts layouts; mm::GridLayout grid;
         grid.width = 8; grid.height = 8; grid.depth = 1;

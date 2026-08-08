@@ -59,6 +59,7 @@ public:
     // dark, the device keeps running (robustness + no-reboot). A *source* edit re-enters here and
     // recompiles, so a new script swaps in live; a broken edit just shows its diagnostic.
     void prepare() override {
+        moonlive::resetPrintBudget();
         if (engine_.compile(source_, moonlive::lightBuiltins())) {
             clearStatus();
         } else {

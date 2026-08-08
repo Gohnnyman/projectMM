@@ -36,12 +36,19 @@ extern "C" inline uint32_t mm_light_random16(uint32_t n) {
 // line, stall the render (a UART write blocks) and bury the first values, which are the useful
 // ones. So a burst is capped and the rest are counted, not printed: the tail of a flood tells you
 // nothing the head did not.
+/// The remaining print budget. A binding resets it when it compiles, so every edit of a script gets
+/// a fresh window — without that, one burst silences the debugging tool for the life of the process,
+/// which is exactly when a second look at a misbehaving script is most needed.
+inline uint32_t& printBudget() { static uint32_t n = 0; return n; }
+
+/// Grant a fresh burst. Call from the binding's prepare(), alongside the compile.
+inline void resetPrintBudget() { printBudget() = 32; }
+
 extern "C" inline uint32_t mm_light_print(uint32_t v) {
-    static uint32_t shown = 0;
-    constexpr uint32_t kBurst = 32;
-    if (shown < kBurst) {
+    uint32_t& left = printBudget();
+    if (left > 0) {
         std::printf("[script] %u\n", static_cast<unsigned>(v));
-        if (++shown == kBurst) std::printf("[script] (further prints suppressed)\n");
+        if (--left == 0) std::printf("[script] (burst spent; edit the script for a fresh one)\n");
     }
     return v;
 }

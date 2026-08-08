@@ -27,7 +27,11 @@
 // uses. Before each call the binding writes the light's position into those arena slots. No new IR
 // op, no compiler special case — the existing control mechanism carries the inputs.
 //
-// **Coordinates are bytes, so an axis spans 0..255.** A control slot is one byte, which is the
+// **Coordinates are bytes, so an axis spans 0..255**, on the way in AND on the way out: a script
+// that computes a position past 255 keeps its low byte, so `(width - 1 - x) * 2` on a wide grid
+// lands somewhere unintended rather than being discarded. The input guard below rejects an
+// out-of-range coordinate before the script sees it; an out-of-range RESULT is the script's own.
+// A control slot is one byte, which is the
 // price of reusing the control path for inputs. That covers every grid we drive today; a wall
 // longer than 255 on one axis (the 48x256 wall is exactly at it) needs the 16-bit element store
 // that is backlogged with the same reason.
@@ -67,6 +71,7 @@ public:
                       "uint8_t x = 0;\nuint8_t y = 0;\nuint8_t z = 0;\n"
                       "uint8_t width = 0;\nuint8_t height = 0;\nuint8_t depth = 0;\n%s", source_);
 
+        moonlive::resetPrintBudget();
         if (engine_.compile(full_, moonlive::lightBuiltins())) {
             clearStatus();
         } else {
@@ -135,11 +140,13 @@ public:
         return true;
     }
 
-    const char* sourceForTest() const { return source_; }
-    Coord3D boxForTest() const { return box_; }
-
     void release() override {
         engine_.free();
+        // Forget what was compiled: release drops the program, so the next prepare() has to be
+        // treated as a first compile. Keeping it made a disabled-then-re-enabled modifier inert —
+        // the Layer folds while the engine is empty, then prepare() recompiles, sees the same
+        // source, and never asks for the rebuild that would apply it.
+        compiled_[0] = '\0';
         ModifierBase::release();
     }
 

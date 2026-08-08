@@ -36,11 +36,11 @@ setXYZ(0, (width - 1 - x) * 2, y, z);   // mirror, then stretch
 setXYZ(0, print(width - 1 - x), y, z);
 ```
 
-This is the only view into a running script. Prints are capped at a short burst per run: the script executes once per light, so an uncapped print on a 16,384-light wall would emit 16,384 blocking serial writes per rebuild.
+This is the only view into a running script. Each compile grants a short burst of prints, so every edit gets a fresh window: the script runs once per light, and an uncapped print on a 16,384-light wall would be 16,384 blocking serial writes per rebuild.
 
 ## Limits
 
-**A coordinate is a byte, so an axis spans 0..255.** A position outside that range is passed through untransformed rather than wrapped — wrapping would silently place the light somewhere it is not.
+**A coordinate is a byte, so an axis spans 0..255.** A position handed TO a script outside that range is passed through untransformed rather than wrapped. A position a script COMPUTES past 255 keeps its low byte, so `(width - 1 - x) * 2` on a grid wider than 128 lands somewhere unintended — keep a computed result inside the box.
 
 **A script cannot resize the logical box.** A modifier has two hooks: one reshapes the box once per rebuild, one folds each coordinate. A script drives only the second, so transforms that keep the box the same size work, and ones that halve it (the way the built-in [Mirror](modifiers.md#mirror) does) need the compiled modifier.
 
@@ -52,6 +52,6 @@ This is the only view into a running script. Prints are capped at a short burst 
 |---|---|
 | `source` | the script; editing it recompiles and re-maps live |
 
-Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile leaves the previous mapping alone, shows the parse error on the module, and the device keeps rendering.
+Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through — the transform disappears until the script parses again, and the device keeps rendering throughout.
 
 Detail: [technical](moxygen/MoonLiveModifier.md)
