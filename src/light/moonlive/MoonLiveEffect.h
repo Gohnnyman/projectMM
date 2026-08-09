@@ -4,6 +4,7 @@
 #include "core/moonlive/MoonLive.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstring>
+#include <cstdio>
 
 // MoonLiveEffect — a scripted effect rendered by the MoonLive engine (§3.3 of
 // livescripts-analysis-top-down.md). The thin binding side of the engine/binding seam: it
@@ -86,6 +87,13 @@ public:
     void release() override {
         engine_.free();   // release the exec block — the destructor role
         EffectBase::release();
+    }
+
+    /// Replace the script. The next prepare() compiles it — the same path a UI edit takes, so a
+    /// test and a user exercise identical code.
+    void setSource(const char* s) {
+        if (!s) return;
+        std::snprintf(source_, sizeof(source_), "%s", s);
     }
 
 private:

@@ -34,10 +34,17 @@ enum class InlineOp : uint8_t {
 
 enum class BuiltinKind : uint8_t { Call, Inline };
 
-// A host callable: one unsigned arg in, one unsigned result out (the shape a unary script
-// helper like random16 has). A typed alias keeps the table and IR type-safe across desktop and
-// ESP32 instead of threading a bare void*.
-using HostCallFn = uint32_t (*)(uint32_t);
+// A host callable. THREE unsigned args in, one unsigned result out.
+//
+// One argument covered a unary helper like random16, but a binding that hands the host a POSITION
+// needs three at once — `addLight(x, y, z)` is the shape MoonLight's own script binding uses
+// (`void addLight(uint16_t,uint16_t,uint16_t)`), and it is what lets a scripted layout emit a light
+// instead of writing into an array the host has to size in advance. A unary helper simply ignores
+// the arguments it was not given; the caller passes 0 for them.
+//
+// A typed alias keeps the table and IR type-safe across desktop and ESP32 instead of threading a
+// bare void*.
+using HostCallFn = uint32_t (*)(uint32_t, uint32_t, uint32_t);
 
 struct Builtin {
     const char*  name = nullptr;      // the script-visible name (host-owned)

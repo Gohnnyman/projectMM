@@ -28,6 +28,18 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     XtensaAssembler a;
     a.prologue();
 
+    // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
+    // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
+    // FillElems' loop) then get nothing when they ask for their own — which broke every program
+    // that contains no loop at all. Lazy allocation costs one lookup and leaves the table for the
+    // labels a program actually has.
+    Label labels[kIrLabels];
+    bool  labelMade[kIrLabels] = {};
+    auto  labelFor = [&](int32_t id) -> Label {
+        if (!labelMade[id]) { labels[id] = a.newLabel(); labelMade[id] = true; }
+        return labels[id];
+    };
+
     for (uint8_t i = 0; i < ir.count; i++) {
         const IrInst& op = ir.ops[i];
         switch (op.op) {
@@ -35,10 +47,27 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Add:    a.addReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::AddImm: a.addImm(reg(op.dst), reg(op.a), op.imm); break;
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
+            // A real register move, NOT add-immediate-zero: Xtensa's addi.n cannot encode 0 —
+            // the ISA reuses that slot for -1 — so `dst = a + 0` silently computed a - 1. A loop
+            // counter initialised through Mov therefore started at -1, the unsigned loop guard saw
+            // 0xffffffff >= limit, and the body never ran. It compiled, reported no error, and
+            // placed no lights.
+            case IrOp::Mov:    a.movReg(reg(op.dst), reg(op.a)); break;
+            case IrOp::Label:
+                if (op.imm >= 0 && op.imm < kIrLabels) a.bind(labelFor(op.imm));
+                break;
+            case IrOp::BranchGe:
+                if (op.imm >= 0 && op.imm < kIrLabels)
+                    a.branchGeU(reg(op.a), reg(op.b), labelFor(op.imm));
+                break;
+            case IrOp::BranchNe:
+                if (op.imm >= 0 && op.imm < kIrLabels)
+                    a.branchNe(reg(op.a), reg(op.b), labelFor(op.imm));
+                break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), reg(kArg4), op.imm); break;  // dst = ctrls[imm] (a6 = kArg4)
             case IrOp::Call:
                 if (!op.callFn) return 0;
-                a.call(reg(op.dst), reg(op.a), reinterpret_cast<const void*>(op.callFn));
+                a.call(reg(op.dst), reg(op.a), reg(op.b), reg(op.c), reinterpret_cast<const void*>(op.callFn));
                 break;
             case IrOp::Inline:
                 switch (op.inlineOp) {

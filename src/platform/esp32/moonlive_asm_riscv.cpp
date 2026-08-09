@@ -13,7 +13,8 @@ namespace mm::moonlive {
 // R0..R4 → a0..a4 (10..14, the host args: buf, nLights, cpl, t, ctrls — a4=kArg4 the controls
 // arena pointer). R5..R11 → t0,t1,t2,t3,t4,t5,a5 (caller-saved temps). t6(31) and a6(16) are the
 // internal scratch (store8 address, call address build), not vregs.
-static const uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15};
+static const uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
+                                          16, 17, 18, 19, 20, 21};
 static uint8_t xr(Reg r) { return kRvReg[r]; }
 static constexpr uint8_t kScratchAddr = 31;   // t6 — store8 address temp
 static constexpr uint8_t kScratchFn   = 16;   // a6 — call address build / result stash
@@ -111,15 +112,27 @@ void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
 // live across the call must be preserved — save the whole pool + ra + the host args around the
 // call (mirrors the host backend). The fn address is built with lui+addi (the hi/lo split, +1
 // to the upper when the low 12 bits' sign bit is set). 64-byte frame, 16-byte aligned.
-void RiscvAssembler::call(Reg d, Reg a, const void* fn) {
-    emit32(encAddi(2, 2, -64));                        // addi sp, sp, -64
-    emit32(encSw(1, 2, 60));                            // sw ra, 60(sp)
-    // save the host args a0..a3 and all pool temps
-    static const uint8_t saved[] = {10, 11, 12, 13, 5, 6, 7, 28, 29, 30, 14, 15};
+void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
+    // 112-byte frame, 16-byte aligned: 18 saved registers (72 bytes), three argument staging slots,
+    // and ra. The frame grew with the vreg map — every register the map hands out must be saved
+    // here, or a value live across a call is destroyed and the caller silently computes with
+    // rubbish. That failure mode is why this list is derived from kRvReg rather than written twice.
+    emit32(encAddi(2, 2, -112));                       // addi sp, sp, -112
+    emit32(encSw(1, 2, 108));                           // sw ra, 108(sp)
+    static const uint8_t saved[] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
+                                    16, 17, 18, 19, 20, 21};
     int off = 0;
     for (uint8_t r : saved) { emit32(encSw(r, 2, off)); off += 4; }
-    // arg into a0 (read BEFORE the address build touches a6)
-    emit32(encAddi(10, xr(a), 0));                     // mv a0, aArg  (if aArg==a0, no-op)
+    // The three args into a0/a1/a2 (the standard ABI registers a host built-in reads). Staged
+    // through the frame first: a source may itself BE a0/a1/a2, so moving them in place could
+    // overwrite a source a later move still needs. Slots 48/52/56 sit above the saved set (12
+    // registers, offsets 0..68) and below ra at 108.
+    emit32(encSw(xr(a), 2, 72));
+    emit32(encSw(xr(b), 2, 76));
+    emit32(encSw(xr(c), 2, 80));
+    emit32(encLw(10, 2, 72));                          // a0 = arg0
+    emit32(encLw(11, 2, 76));                          // a1 = arg1
+    emit32(encLw(12, 2, 80));                          // a2 = arg2
     // a6 = fn address via lui + addi (hi/lo split)
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
     uint32_t hi = (addr + 0x800) >> 12;                // round for the sign-extended addi
@@ -132,8 +145,8 @@ void RiscvAssembler::call(Reg d, Reg a, const void* fn) {
     // restore
     off = 0;
     for (uint8_t r : saved) { emit32(encLw(r, 2, off)); off += 4; }
-    emit32(encLw(1, 2, 60));                            // lw ra, 60(sp)
-    emit32(encAddi(2, 2, 64));                          // addi sp, sp, 64
+    emit32(encLw(1, 2, 108));                           // lw ra, 108(sp)
+    emit32(encAddi(2, 2, 112));                         // addi sp, sp, 112
     emit32(encAddi(xr(d), kScratchFn, 0));             // mv dst, a6  (the result)
 }
 

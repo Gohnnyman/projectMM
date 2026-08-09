@@ -27,7 +27,7 @@ enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9,
 using Label = uint8_t;
 
 // Branch condition (only the ones the IR needs so far).
-enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
+enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */, Ne /* != */ };
 
 class HostAssembler {
 public:
@@ -59,7 +59,7 @@ public:
     // statement after the call — the live-vreg-across-Call contract. `fn` is an absolute
     // function pointer (materialised into a scratch register). Caller-saved vregs other than
     // R0..R2 must not be live across a call (the front-end orders ops so none are).
-    void call(Reg d, Reg a, const void* fn);
+    void call(Reg d, Reg a, Reg b, Reg c, const void* fn);
     void ret();
 
 private:

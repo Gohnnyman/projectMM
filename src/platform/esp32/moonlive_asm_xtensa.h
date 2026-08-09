@@ -39,7 +39,7 @@ public:
     void branchIfZero(Reg a, Label l);   // beqz aA, l  (nLights==0 guard)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu aA, aB, l  (Bounds: skip if a>=b)
     void branchNe(Reg a, Reg b, Label l);     // bne aA, aB, l   (loop test)
-    void call(Reg d, Reg a, const void* fn);  // windowed call8 to a host built-in
+    void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // windowed call8 to a host built-in
     void epilogue();                     // retw.n
 
 private:

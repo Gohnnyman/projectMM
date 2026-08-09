@@ -284,4 +284,8 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
   **Why it waits.** It is fourteen effects' worth of change across audio-reactive and simulation families, each needing its own judgement about whether to clear, fade, or seed differently — not a mechanical sweep. `unit_Effects_gridsweep.cpp` already measures it (`afterFirst`) and asserts only the settled frame, so the number is visible without blocking.
 
+- **Drain MoonLive's `print()` through a queue** (2026-08-09). `print(v)` writes to serial directly, and an EFFECT script runs on the render tick — so a print inside one blocks the frame for as long as the UART takes. The burst cap bounds it (a handful of writes per compile, then a compare and a return), but bounded is not free, and `tick()` is annotated `MM_NONBLOCKING`.
+
+  **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
+
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)

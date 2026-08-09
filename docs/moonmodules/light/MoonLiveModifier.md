@@ -10,12 +10,12 @@ A [modifier](modifiers.md) reshapes how a Layer's output maps onto the physical 
 
 The script transforms **one coordinate**. It does not loop, because the Layer already does: it calls the script once per physical light while it builds its mapping.
 
-```c
+``c
 setXYZ(0, width - 1 - x, y, z);   // mirror along x
 setXYZ(0, y, x, z);               // swap the axes
 setXYZ(0, x + 4, y, z);           // shift by four
 setXYZ(0, (width - 1 - x) * 2, y, z);   // mirror, then stretch
-```
+``
 
 `setXYZ(index, x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`. The index is the destination slot: today the script is handed a single coordinate, so it is always `0`.
 
@@ -30,13 +30,8 @@ setXYZ(0, (width - 1 - x) * 2, y, z);   // mirror, then stretch
 
 ### Seeing inside a script
 
-`print(v)` writes a value to the serial log and returns it, so it wraps any part of an expression without changing the result:
-
-```c
-setXYZ(0, print(width - 1 - x), y, z);
-```
-
-This is the only view into a running script. Each compile grants a short burst of prints, so every edit gets a fresh window: the script runs once per light, and an uncapped print on a 16,384-light wall would be 16,384 blocking serial writes per rebuild.
+`print(v)` logs a value and returns it, so it wraps any part of an expression: `setXYZ(0, print(width - 1 - x), y, z)`.
+It is for debugging and comes back out again — [what print costs](../../../moonlive/README.md#debugging-print).
 
 ## Limits
 
@@ -51,6 +46,9 @@ This is the only view into a running script. Each compile grants a short burst o
 | control | what it does |
 |---|---|
 | `source` | the script; editing it recompiles and re-maps live |
+
+Plus one control per `@control` the script declares — `uint8_t amount = 4; // @control 0..64`
+becomes a slider, and moving it rebuilds the mapping just as editing the script does.
 
 Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through — the transform disappears until the script parses again, and the device keeps rendering throughout.
 

@@ -1,0 +1,5 @@
+// Slide the pattern along x. A coordinate that lands outside the box is dropped by the Layer,
+// so the pattern walks off the edge rather than wrapping.
+uint8_t amount = 4; // @control 0..64
+
+setXYZ(0, x + amount, y, z);

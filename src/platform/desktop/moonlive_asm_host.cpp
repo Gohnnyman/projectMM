@@ -53,6 +53,9 @@ void HostAssembler::movImm(Reg d, int32_t imm) {
     // light, and in a host-call argument it is nonsense. movn is the negative form: it writes
     // ~imm16, so movn #(~imm) materialises the true negative value.
     if (imm < 0) {
+        // movn writes ~imm16, so it reaches -65536..-1 exactly. Below that the complement no longer
+        // fits the 16-bit field and the constant would come out wrong in silence.
+        if (imm < -65536) { overflow_ = true; return; }
         emit32(0x12800000u | ((uint32_t(~imm) & 0xffff) << 5) | mr(d));   // movn wD, #~imm16
         return;
     }
@@ -87,11 +90,12 @@ void HostAssembler::branchIfZero(Reg a, Label l) {         // cbz wA, l  (offset
     emit32(0x34000000u | mr(a));
 }
 void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset patched)
-    uint8_t cond = (c == Cond::Lo) ? 0x3 : 0x2;            // LO=cc(3), HS=cs(2)
+    // arm64 condition codes: NE=1, HS/CS=2, LO/CC=3.
+    const uint8_t cond = (c == Cond::Lo) ? 0x3 : (c == Cond::Ne ? 0x1 : 0x2);
     addFixup(len_, l, static_cast<uint8_t>(1u | (cond << 4)));
     emit32(0x54000000u | cond);
 }
-void HostAssembler::call(Reg d, Reg a, const void* fn) {
+void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Preserve EVERY register that may hold a live value across the call: the host args
     // (x0/x1/x2), the link register x30 (blr overwrites it; our function is a leaf), and the
     // whole vreg scratch pool (x4-x7, x9-x14) — because a value computed before the call (e.g.
@@ -105,8 +109,15 @@ void HostAssembler::call(Reg d, Reg a, const void* fn) {
     emit32(0xa9042be9u);   // stp x9, x10, [sp, #64]
     emit32(0xa90533ebu);   // stp x11,x12, [sp, #80]
     emit32(0xa9063bedu);   // stp x13,x14, [sp, #96]
-    // arg into x0 (the built-in's first parameter)
-    emit32(0xaa0003e0u | (uint32_t(mr(a)) << 16));        // mov x0, x<arg>
+    // args into x0/x1/x2 (the built-in's three parameters). Order matters: x0 is written first,
+    // and a later source register could BE x0 — so read the sources before any of them is clobbered
+    // by moving through a scratch that is outside the vreg pool.
+    emit32(0xaa0003efu | (uint32_t(mr(a)) << 16));        // mov x15, x<a>
+    emit32(0xaa0003f0u | (uint32_t(mr(b)) << 16));        // mov x16, x<b>
+    emit32(0xaa0003f1u | (uint32_t(mr(c)) << 16));        // mov x17, x<c>
+    emit32(0xaa0f03e0u);                                   // mov x0, x15
+    emit32(0xaa1003e1u);                                   // mov x1, x16
+    emit32(0xaa1103e2u);                                   // mov x2, x17
     // materialise the 64-bit absolute fn address into x15 (movz + 3×movk)
     uint64_t addr = reinterpret_cast<uint64_t>(fn);
     emit32(0xd2800000u | ((uint32_t(addr) & 0xffff) << 5) | 15);                 // movz x15, #b0

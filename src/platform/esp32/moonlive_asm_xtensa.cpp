@@ -60,7 +60,11 @@ void XtensaAssembler::movImm(Reg d, int32_t imm) {
     // `a + (b * -1)` — and building that through the zero-extended byte path below would materialise
     // 65535, making every subtraction correct only modulo 256: invisible in a stored colour byte,
     // silently fatal in a bounds-guarded index (the light is dropped) or a host-call argument.
-    if (imm < 0 && imm >= -2048) {
+    // A negative below the 12-bit field's reach has no encoding here, and falling through to the
+    // unsigned path below would materialise a different number in silence — the failure mode that
+    // cost this backend a long debugging session. Fail the compile instead.
+    if (imm < -2048) { overflow_ = true; return; }
+    if (imm < 0) {
         const uint32_t f = static_cast<uint32_t>(imm) & 0xfff;
         const uint8_t b[3] = {uint8_t((dr << 4) | 0x2),
                               uint8_t(0xa0 | ((f >> 8) & 0xf)),
@@ -148,14 +152,21 @@ void XtensaAssembler::branchNe(Reg a, Reg b, Label l) {
 // mirroring the host backend's full-register-save. Cold path (once per call). The 48-byte
 // frame from prologue() has room at offsets 16/20/28. The 32-bit fn address is built in a8
 // byte-by-byte (movi/slli/add) — no l32r literal pool.
-void XtensaAssembler::call(Reg d, Reg a, const void* fn) {
+void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Save the rotate-out scratch a8, a9, a11 (a10 will carry arg→result).
     auto s32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x61,off4}; emit(b,3); };
     auto l32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x21,off4}; emit(b,3); };
     s32i(8, 4); s32i(9, 5); s32i(11, 7);                  // [a1+16]=a8, [a1+20]=a9, [a1+28]=a11
 
-    // arg into a10 (read aArg BEFORE the address build clobbers a8/a9).
-    emit2(uint16_t((uint32_t(ar(a)) << 8) | (10 << 4) | 0xd));   // mov a10, aArg
+    s32i(10, 6);                                          // [a1+24]=a10 — a vreg (R8) call8 rotates out
+
+    // The three args into a10/a11/a12 — call8 shifts the window by 8, so the callee reads them as
+    // its a2/a3/a4. Sources are moved HIGH-first (a12, then a11, then a10) so an earlier write
+    // cannot clobber a source a later one still needs: a10 is written last, and it is the only one
+    // of the three that a source register can be.
+    emit2(uint16_t((uint32_t(ar(c)) << 8) | (12 << 4) | 0xd));   // mov a12, argC
+    emit2(uint16_t((uint32_t(ar(b)) << 8) | (11 << 4) | 0xd));   // mov a11, argB
+    emit2(uint16_t((uint32_t(ar(a)) << 8) | (10 << 4) | 0xd));   // mov a10, argA
 
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
     auto moviA8 = [&](uint8_t v){ const uint8_t b[3]={0x82,0xa0,v}; emit(b,3); };
@@ -169,7 +180,7 @@ void XtensaAssembler::call(Reg d, Reg a, const void* fn) {
     emit3(0x0000e0u | (8u << 8));                          // callx8 a8  → result in a10
     // stash result (a10) in a12 (not in the saved set), restore a8/a9/a11, then dst = a12.
     emit2(uint16_t((10u << 8) | (12u << 4) | 0xd));        // mov a12, a10
-    l32i(8, 4); l32i(9, 5); l32i(11, 7);
+    l32i(8, 4); l32i(9, 5); l32i(10, 6); l32i(11, 7);
     emit2(uint16_t((12u << 8) | (uint32_t(ar(d)) << 4) | 0xd));   // mov aDst, a12
 }
 

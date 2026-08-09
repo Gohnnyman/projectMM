@@ -13,7 +13,12 @@
 
 namespace mm::moonlive {
 
-enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, kRegCount };
+// Twelve was the count every backend started with; RISC-V has room for more, and a nested loop
+// needs it — two loop levels hold four values live, and a three-argument call needs three temps on
+// top. x16/x17 (a6/a7) and x18..x23 (s2..s7) are free here: the emitted routine is a leaf that
+// saves what it uses, so a callee-saved register is as usable as a caller-saved one.
+enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
+                     R12, R13, R14, R15, R16, R17, kRegCount };
 using Label = uint8_t;
 enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 
@@ -38,7 +43,7 @@ public:
     void branchIfZero(Reg a, Label l);   // beqz a, l  (bge x0, a... use bgeu against x0)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
     void branchNe(Reg a, Reg b, Label l);     // bne a, b, l
-    void call(Reg d, Reg a, const void* fn);  // standard call to a host built-in
+    void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // standard call to a host built-in
     void epilogue() { ret(); }
     void ret();
 

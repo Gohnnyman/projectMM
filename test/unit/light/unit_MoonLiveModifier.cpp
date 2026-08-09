@@ -9,12 +9,14 @@
 
 #include "doctest.h"
 #include "light/moonlive/MoonLiveModifier.h"
+#include "light/moonlive/MoonLiveEffect.h"
 #include "platform/platform.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/Layouts.h"
 #include "light/layers/Layer.h"
 
 #include <cstring>
+#include <cstdio>
 #include <string>
 
 using namespace mm;
@@ -243,6 +245,9 @@ TEST_CASE("a script that computes a position outside the grid leaves lights mapp
         if (pos.x >= 0 && pos.x < 16) inside++;   // what the Layer will keep
     }
     INFO("coordinates still inside a 16-wide grid: " << inside << " of 16");
+    // The premise of this case: `x + 200` puts EVERY light outside a 16-wide grid, so the Layer
+    // drops them all. Without this the case would pass on the default-script half alone.
+    CHECK(inside == 0);
     // Every light falling outside is precisely the blackout. The default script must keep them all.
     MoonLiveModifier def;
     def.defineControls();
@@ -306,4 +311,80 @@ TEST_CASE("a subtraction produces the whole value, not just its low byte") {
     CHECK(transform("setXYZ(0, print(width - 1 - x), y, z);", 0, 0, 0, 16, 16, 1).x == 15);
     CHECK(transform("setXYZ(0, print(100 - 1), y, z);", 0, 0, 0, 255, 255, 1).x == 99);
     CHECK(transform("setXYZ(0, print(5 - 5), y, z);", 0, 0, 0, 255, 255, 1).x == 0);
+}
+
+// --- for --------------------------------------------------------------------------------------
+//
+// The loop is what a scripted LAYOUT needs: placing N lights means running N times, and a modifier's
+// per-light call is not available to it. These check it through print(), which reports the full
+// value each iteration — a stored byte would only ever show the last one.
+
+TEST_CASE("a for loop runs its body once per step") {
+    MoonLiveModifier m;
+    m.defineControls();
+    m.setSource("for (i = 0; i < 4; i = i + 1) { print(i); } setXYZ(0, x, y, z);");
+    m.prepare();
+    CHECK(m.severity() != MoonModule::Severity::Error);   // it compiles at all
+    Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
+    Coord3D p{3, 0, 0};
+    m.modifyLogical(p);
+    CHECK(p.x == 3);                                      // the statement after the loop still runs
+}
+
+TEST_CASE("a loop over an empty range runs its body no times") {
+    // The entry guard: `i < 0` must skip the body entirely rather than wrap and run forever.
+    MoonLiveModifier m;
+    m.defineControls();
+    m.setSource("for (i = 0; i < 0; i = i + 1) { print(99); } setXYZ(0, x, y, z);");
+    m.prepare();
+    CHECK(m.severity() != MoonModule::Severity::Error);
+    Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
+    Coord3D p{7, 0, 0};
+    m.modifyLogical(p);
+    CHECK(p.x == 7);
+}
+
+TEST_CASE("loops nest, which is what placing a grid of lights needs") {
+    MoonLiveModifier m;
+    m.defineControls();
+    m.setSource("for (a = 0; a < 2; a = a + 1) { for (b = 0; b < 2; b = b + 1) { print(a); } }"
+                " setXYZ(0, x, y, z);");
+    m.prepare();
+    CHECK(m.severity() != MoonModule::Severity::Error);
+    Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
+    Coord3D p{5, 0, 0};
+    m.modifyLogical(p);
+    CHECK(p.x == 5);
+}
+
+
+// The loop's real purpose, end to end: a script that PAINTS with it. A modifier's script transforms
+// one coordinate, so it can never show a loop writing many lights — an effect can, and this is the
+// shape a scripted Layout will use to place its lights.
+TEST_CASE("a loop in an effect script paints every light it walks") {
+    Layouts layouts;
+    auto* grid = new GridLayout();
+    grid->width = 8; grid->height = 1; grid->depth = 1;
+    layouts.addChild(grid);
+
+    Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    auto* fx = new MoonLiveEffect();
+    fx->defineControls();
+    fx->setSource("for (i = 0; i < 8; i = i + 1) { setRGB(i, i, 0, 0); }");
+    layer.addChild(fx);
+    layouts.applyState();
+    layer.applyState();
+
+    std::memset(const_cast<uint8_t*>(layer.buffer().data()), 0, layer.buffer().bytes());
+    layer.tick();
+
+    // Each light's red channel is its own index: proof the loop ran once per light AND that the
+    // counter reached the emitter as a distinct value each time.
+    const uint8_t* buf = layer.buffer().data();
+    for (int i = 0; i < 8; i++) {
+        CAPTURE(i);
+        CHECK(static_cast<int>(buf[i * 3]) == i);
+    }
 }

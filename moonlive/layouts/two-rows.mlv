@@ -1,0 +1,7 @@
+// Two rows from one strand: the wire runs out along y=0 and back along y=1.
+uint8_t width = 16; // @control 1..64
+
+for (i = 0; i < width; i = i + 1) {
+  addLight(i, 0, 0);
+  addLight(i, 1, 0);
+}

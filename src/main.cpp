@@ -26,6 +26,7 @@
 #include "light/effects/ParticlesEffect.h"
 #include "light/moonlive/MoonLiveEffect.h"
 #include "light/moonlive/MoonLiveModifier.h"
+#include "light/moonlive/MoonLiveLayout.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
@@ -173,6 +174,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::CarLightsLayout>("CarLightsLayout", "light/layouts.md#carlights");
     mm::ModuleFactory::registerType<mm::CubeLayout>("CubeLayout", "light/layouts.md#cube");
     mm::ModuleFactory::registerType<mm::HumanSizedCubeLayout>("HumanSizedCubeLayout", "light/layouts.md#humansizedcube");
+    mm::ModuleFactory::registerType<mm::MoonLiveLayout>("MoonLiveLayout", "light/MoonLiveLayout.md");
     mm::ModuleFactory::registerType<mm::PanelsLayout>("PanelsLayout", "light/layouts.md#panels");
     mm::ModuleFactory::registerType<mm::TorontoBarGourdsLayout>("TorontoBarGourdsLayout", "light/layouts.md#torontobargourds");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts.md#grid");

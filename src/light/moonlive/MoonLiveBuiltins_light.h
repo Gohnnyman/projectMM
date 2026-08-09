@@ -18,7 +18,7 @@ namespace mm::moonlive {
 // random16(n) → a pseudo-random value in [0, n). A simple LCG, deterministic enough that the
 // runtime Bounds guard always sees an in-range index; the same implementation on every target
 // so a script behaves identically. The one host helper exposed as a Call so far.
-extern "C" inline uint32_t mm_light_random16(uint32_t n) {
+extern "C" inline uint32_t mm_light_random16(uint32_t n, uint32_t, uint32_t) {
     static uint32_t s = 0x2545F491u;
     s = s * 1664525u + 1013904223u;
     return n ? (s >> 16) % n : 0u;
@@ -42,15 +42,43 @@ extern "C" inline uint32_t mm_light_random16(uint32_t n) {
 inline uint32_t& printBudget() { static uint32_t n = 0; return n; }
 
 /// Grant a fresh burst. Call from the binding's prepare(), alongside the compile.
+///
+/// print() writes to serial, which blocks, and an effect script runs on the render tick — so the
+/// burst is what bounds the cost: a handful of writes per compile, after which the call is a compare
+/// and a return. Draining through a queue would take the last of it off the tick; backlogged.
 inline void resetPrintBudget() { printBudget() = 32; }
 
-extern "C" inline uint32_t mm_light_print(uint32_t v) {
+extern "C" inline uint32_t mm_light_print(uint32_t v, uint32_t, uint32_t) {
     uint32_t& left = printBudget();
     if (left > 0) {
         std::printf("[script] %u\n", static_cast<unsigned>(v));
         if (--left == 0) std::printf("[script] (burst spent; edit the script for a fresh one)\n");
     }
     return v;
+}
+
+// addLight(x, y, z) → place one light at a position. The call a scripted LAYOUT is built on.
+//
+// A layout cannot write into a buffer the way an effect does: it does not know how many lights it
+// will place until it has placed them, and on a classic ESP32 a 16k-light fixture would need 48 KB
+// of coordinate staging — memory that board does not have. So the script CALLS OUT instead, once
+// per light, and the host decides what to do with each: count it on the sizing pass, emit it into
+// the consumer's sink on the walk. Nothing is stored.
+//
+// The active sink is set by the binding around each run. Outside a run it is null and a call is
+// ignored — a script that reaches addLight from an effect places nothing rather than corrupting
+// something.
+using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
+inline AddLightFn& addLightSink() { static AddLightFn f = nullptr; return f; }
+inline void*&      addLightCtx()  { static void* c = nullptr;      return c; }
+
+/// Point addLight at a consumer for the duration of one run; pass nullptr to detach.
+inline void setAddLightSink(AddLightFn fn, void* ctx) { addLightSink() = fn; addLightCtx() = ctx; }
+
+extern "C" inline uint32_t mm_light_addLight(uint32_t x, uint32_t y, uint32_t z) {
+    if (AddLightFn f = addLightSink())
+        f(addLightCtx(), static_cast<uint16_t>(x), static_cast<uint16_t>(y), static_cast<uint16_t>(z));
+    return 0;
 }
 
 // The light-domain built-in table the binding injects into the compiler. setRGB and fill are
@@ -70,6 +98,8 @@ inline BuiltinTable lightBuiltins() {
     t.add({"random16", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_random16, {}});
     // print(v)                → log v and return it. The script-level debugger.
     t.add({"print", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_print, {}});
+    // addLight(x, y, z)      → place a light. A scripted layout's whole vocabulary.
+    t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
     return t;
 }
 
