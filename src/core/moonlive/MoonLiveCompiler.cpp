@@ -514,7 +514,7 @@ CompileResult compileSource(const char* source, const BuiltinTable& table, uint8
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
 
     size_t len = lowerToBytes(ir, out, cap);
-    if (len == 0) { r.error = "codegen failed (unsupported on this target, or too large)"; return r; }
+    if (len == 0) { r.error = kCodegenFailed; return r; }
     r.ok = true;
     r.len = len;
     // Surface the declared controls so the binding can create real MoonModule controls.

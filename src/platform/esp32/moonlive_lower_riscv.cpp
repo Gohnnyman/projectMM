@@ -19,9 +19,18 @@ Reg reg(VReg v) { return static_cast<Reg>(v); }
 
 size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     // StoreElem folds the address into the index vreg (no scratch); FillElems needs two.
-    if (!out || cap == 0 || ir.vregsUsed + 2 > kRegCount) return 0;
-    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed);
-    const Reg sAddr = static_cast<Reg>(ir.vregsUsed + 1);
+    // Reserve scratch only for the inline ops this program actually contains: FillElems needs two
+    // (loop counter + per-channel address), StoreElem one (the address — it must NOT be folded into
+    // the caller's index vreg, which destroys a `for` counter). Reserving the maximum unconditionally
+    // cost a register every script paid for, and that register is what a nested loop was short of on
+    // the smallest file.
+    const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 2
+                          : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
+    if (!out || cap == 0 || ir.vregsUsed + scratch > kRegCount) return 0;
+    // sAddr FIRST: it is the one StoreElem also uses, and a store-only program reserves a single
+    // scratch — so the shared one has to be the lowest index or it would name an unreserved register.
+    const Reg sAddr = static_cast<Reg>(ir.vregsUsed);       // per-channel address (both ops)
+    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 1);   // FillElems loop counter
 
     RiscvAssembler a;
 
@@ -72,11 +81,13 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
                 switch (op.inlineOp) {
                     case InlineOp::StoreElem: {
                         Label skip = a.newLabel();
+                        // The address goes in SCRATCH, not the index vreg: folding it in destroyed
+                        // a `for` counter, which the loop's step and test read again after the store.
                         a.branchGeU(reg(op.a), reg(kArg1), skip);
-                        a.mulReg(reg(op.a), reg(op.a), reg(kArg2));    // index = index*cpl
-                        a.store8(reg(kArg0), reg(op.a), reg(op.b));
-                        a.addImm(reg(op.a), reg(op.a), 1); a.store8(reg(kArg0), reg(op.a), reg(op.c));
-                        a.addImm(reg(op.a), reg(op.a), 1); a.store8(reg(kArg0), reg(op.a), reg(op.d));
+                        a.mulReg(sAddr, reg(op.a), reg(kArg2));        // addr = index * cpl
+                        a.store8(reg(kArg0), sAddr, reg(op.b));
+                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.c));
+                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.d));
                         a.bind(skip);
                         break;
                     }

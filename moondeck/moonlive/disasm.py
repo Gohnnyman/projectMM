@@ -55,7 +55,7 @@ def main() -> int:
             print(run.stdout.strip() or run.stderr.strip())
             return 1
 
-        hexbytes = "".join(l for l in run.stdout.splitlines() if not l.startswith("#"))
+        hexbytes = "".join(line for line in run.stdout.splitlines() if not line.startswith("#"))
         raw = binascii.unhexlify(hexbytes.replace(" ", ""))
         print(f"# {len(raw)} bytes\n")
 
@@ -66,7 +66,7 @@ def main() -> int:
                              capture_output=True, text=True)
         # Skip objdump's file header; the instructions start after the section line.
         lines = dis.stdout.splitlines()
-        start = next((i for i, l in enumerate(lines) if l.startswith("00000000")), 0)
+        start = next((i for i, line in enumerate(lines) if line.startswith("00000000")), 0)
         print("\n".join(lines[start:]))
     return 0
 

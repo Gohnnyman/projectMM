@@ -24,10 +24,19 @@ Reg reg(VReg v) { return static_cast<Reg>(v); }
 
 size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     // Reserve three scratch regs above the program's vregs for the inline ops' temps.
-    if (!out || cap == 0 || ir.vregsUsed + 3 > kRegCount) return 0;
-    const Reg sOff  = static_cast<Reg>(ir.vregsUsed);        // base byte offset of the current light
-    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 1);    // loop counter
-    const Reg sAddr = static_cast<Reg>(ir.vregsUsed + 2);    // per-channel address (off, off+1, off+2)
+    // Reserve scratch only for the inline ops this program actually contains. Unlike Xtensa and
+    // RISC-V, THIS backend's StoreElem needs one scratch too (sAddr — it does not fold the address
+    // into the index vreg), so the two cases differ: FillElems needs three, StoreElem one, neither
+    // needs any. Reserving the maximum unconditionally cost a register every script paid for.
+    const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 3
+                          : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
+    if (!out || cap == 0 || ir.vregsUsed + scratch > kRegCount) return 0;
+    // sAddr FIRST, because it is the one StoreElem also uses: a store-only program reserves a single
+    // scratch, so the shared one has to be the lowest index or it would name a register outside the
+    // reservation. sOff/sCtr are FillElems-only and sit above it.
+    const Reg sAddr = static_cast<Reg>(ir.vregsUsed);        // per-channel address (off, off+1, off+2)
+    const Reg sOff  = static_cast<Reg>(ir.vregsUsed + 1);    // base byte offset of the current light
+    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 2);    // loop counter
 
     HostAssembler a;
 

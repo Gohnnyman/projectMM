@@ -19,11 +19,18 @@ Reg reg(VReg v) { return static_cast<Reg>(v); }
 }
 
 size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
-    // StoreElem needs no scratch (it folds the address into the index vreg); FillElems needs two
-    // (counter + per-channel addr) above the program's vregs. Reserve the max either uses.
-    if (!out || cap == 0 || ir.vregsUsed + 2 > kRegCount) return 0;
-    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed);       // FillElems loop counter
-    const Reg sAddr = static_cast<Reg>(ir.vregsUsed + 1);   // FillElems per-channel address
+    // Reserve scratch only for the inline ops this program actually contains: FillElems needs two
+    // (loop counter + per-channel address), StoreElem one (the address — it must NOT be folded into
+    // the caller's index vreg, which destroys a `for` counter). Reserving the maximum unconditionally
+    // cost a register every script paid for, and that register is what a nested loop was short of on
+    // the smallest file.
+    const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 2
+                          : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
+    if (!out || cap == 0 || ir.vregsUsed + scratch > kRegCount) return 0;
+    // sAddr FIRST: it is the one StoreElem also uses, and a store-only program reserves a single
+    // scratch — so the shared one has to be the lowest index or it would name an unreserved register.
+    const Reg sAddr = static_cast<Reg>(ir.vregsUsed);       // per-channel address (both ops)
+    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 1);   // FillElems loop counter
 
     XtensaAssembler a;
     a.prologue();
@@ -72,14 +79,18 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Inline:
                 switch (op.inlineOp) {
                     case InlineOp::StoreElem: {
-                        // setRGB(index=a, r=b, g=c, b=d): bounds-guard, then fold the address
-                        // INTO the index vreg (dead after) so no extra scratch is needed.
+                        // setRGB(index=a, r=b, g=c, b=d): bounds-guard, then build the address in
+                        // SCRATCH. It used to fold into the index vreg, on the assumption that the
+                        // index is dead after the store — true for a throwaway temp, false for a
+                        // `for` counter, which the loop's own step and test read again. `setRGB(i,…)`
+                        // inside a loop therefore left the counter holding i*cpl+2 and the loop ran
+                        // the wrong number of times.
                         Label skip = a.newLabel();
                         a.branchGeU(reg(op.a), reg(kArg1), skip);     // index >= nLights → skip
-                        a.mulReg(reg(op.a), reg(op.a), reg(kArg2));    // index = index * cpl  (= addr)
-                        a.store8(reg(kArg0), reg(op.a), reg(op.b));    // store r
-                        a.addImm(reg(op.a), reg(op.a), 1); a.store8(reg(kArg0), reg(op.a), reg(op.c));
-                        a.addImm(reg(op.a), reg(op.a), 1); a.store8(reg(kArg0), reg(op.a), reg(op.d));
+                        a.mulReg(sAddr, reg(op.a), reg(kArg2));        // addr = index * cpl
+                        a.store8(reg(kArg0), sAddr, reg(op.b));        // store r
+                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.c));
+                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.d));
                         a.bind(skip);
                         break;
                     }

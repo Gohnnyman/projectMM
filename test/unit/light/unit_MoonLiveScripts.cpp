@@ -70,7 +70,15 @@ TEST_CASE("every script in moonlive/ compiles") {
             moonlive::MoonLive engine;
             const bool ok = engine.compile(full.c_str(), moonlive::lightBuiltins());
             if (!ok) std::printf("FAIL %-28s %s\n", label.c_str(), engine.error());
+            // compile() both PARSES and emits native code, and only the second half needs a backend
+            // for this host's ISA (MM_MOONLIVE_HAS_HOST_JIT — 0 on x86_64, which is what CI runs).
+            // Requiring success there would fail every script for a reason that has nothing to do
+            // with the script, so without a backend the only failure allowed is the codegen one.
+#if MM_MOONLIVE_HAS_HOST_JIT
             CHECK(ok);
+#else
+            CHECK((ok || std::string(engine.error()) == moonlive::kCodegenFailed));
+#endif
             engine.free();
             checked++;
         }

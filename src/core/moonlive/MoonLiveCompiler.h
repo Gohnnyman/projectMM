@@ -20,6 +20,12 @@
 
 namespace mm::moonlive {
 
+/// The diagnostic when lowering produces nothing: no backend for this ISA, or a program too large.
+/// Named so a test can distinguish "this host has no JIT" from "this script is wrong" without
+/// matching on prose.
+inline constexpr const char* kCodegenFailed = "codegen failed (unsupported on this target, or too large)";
+
+
 // Result of compiling source: on success, ok==true and the bytes are in out[0..len). On
 // failure, ok==false and error points at a static diagnostic (1-based column, 0 if n/a).
 struct CompileResult {

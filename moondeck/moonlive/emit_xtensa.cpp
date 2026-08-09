@@ -2,6 +2,11 @@
 #include <cstddef>
 #include <cstring>
 #include <cstdio>
+// The Xtensa backend is `#if defined(__XTENSA__)`, so on this host it compiles to nothing — there
+// is no library to link against, which is the whole point: this tool runs the REAL Xtensa emitter on
+// the development machine so an encoding can be read without flashing a board. Defining the macro
+// and including the sources is what makes that possible; the target build never sees this file, so
+// there is still exactly one backend definition in the firmware.
 #define __XTENSA__ 1
 #include "platform/esp32/moonlive_asm_xtensa.h"
 #include "platform/esp32/moonlive_asm_xtensa.cpp"

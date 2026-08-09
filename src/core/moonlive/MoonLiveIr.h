@@ -110,6 +110,20 @@ struct IrProgram {
         if (i.dst + 1 > vregsUsed) vregsUsed = static_cast<VReg>(i.dst + 1);
         return true;
     }
+
+    /// Which inline ops this program contains, so a backend reserves scratch only for what is there.
+    ///
+    /// The backends reserved their maximum unconditionally, which cost a register no matter what the
+    /// script did — and that one register is what made a nested loop refuse to compile on the
+    /// smallest target, since a layout script neither fills nor stores elements. How MANY scratch
+    /// registers each op costs is per-ISA (the host needs one for StoreElem, which Xtensa and RISC-V
+    /// fold into the index vreg) and stays with each backend; WHICH ops are present is a property of
+    /// the program, so it is answered once here.
+    bool hasInline(InlineOp which) const {
+        for (uint8_t i = 0; i < count; i++)
+            if (ops[i].op == IrOp::Inline && ops[i].inlineOp == which) return true;
+        return false;
+    }
 };
 
 }  // namespace mm::moonlive

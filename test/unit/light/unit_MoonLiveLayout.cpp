@@ -248,3 +248,37 @@ TEST_CASE("a scripted control keeps its live value when the script is edited") {
     l.prepare();
     CHECK(l.lightCount() == 48);          // 16 inherited, height 3 its own
 }
+
+// A layout script never fills, so it should not pay for the scratch registers a fill needs. The
+// backends reserved them unconditionally, and on the smallest register file (Xtensa, 12) that one
+// register was the difference between a nested loop compiling and being refused outright — the
+// shipped default script is a nested loop, so the module's own default did not compile there.
+//
+// This is a register-budget property, and the budget differs per target, so what it pins portably is
+// the behaviour: a nested loop places every light of the grid it describes.
+TEST_CASE("a nested loop lays out a full grid, on every target's register budget") {
+    const std::vector<Coord3D> p = place(
+        "for (yy = 0; yy < 3; yy = yy + 1) {"
+        "  for (xx = 0; xx < 5; xx = xx + 1) { addLight(xx, yy, 0); } }");
+    REQUIRE(p.size() == 15);               // 3 rows x 5 columns, none dropped
+    CHECK(p[0]  == Coord3D{0, 0, 0});
+    CHECK(p[4]  == Coord3D{4, 0, 0});      // end of the first row
+    CHECK(p[5]  == Coord3D{0, 1, 0});      // the inner counter restarted
+    CHECK(p[14] == Coord3D{4, 2, 0});
+}
+
+// A `for` counter must survive whatever the body does to it. The device backends built a light's
+// byte address by multiplying the index register IN PLACE — fine when the index is a throwaway temp,
+// wrong when it is the loop counter, which the step and the loop test read again afterwards. A
+// gradient (`for (i…) { setRGB(i, …) }`) therefore ran the wrong number of times on Xtensa and
+// RISC-V while being correct on the desktop host, which used a scratch register instead.
+//
+// Pinned through a LAYOUT because the count is the observable: the host executes this test, and the
+// arithmetic the backends share is the same. addLight's index is likewise the counter.
+TEST_CASE("a loop counter survives the body that uses it") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }");
+    l.prepare();
+    CHECK(l.lightCount() == 6);          // a clobbered counter gives some other number
+}

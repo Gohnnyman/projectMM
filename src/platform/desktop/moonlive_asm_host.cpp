@@ -16,8 +16,19 @@ namespace mm::moonlive {
 // the control-values arena pointer, kArg4). R5..R13 = caller-saved scratch x9..x14 then x5..x7.
 // Index math uses the 64-bit views (xN) for addresses, 32-bit (wN) for counters/colors — same
 // register number, so one map suffices. x15 is the call() address/immediate scratch (not a vreg).
-static const uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
+static constexpr uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
 static uint8_t mr(Reg r) { return kArm64Reg[r]; }
+
+// A scratch register that is ALSO a vreg silently corrupts values — see the RISC-V backend, where
+// kScratchFn aliased vreg R12 and every call returned a stale value. Checked here so the map can
+// never grow over a scratch.
+constexpr bool armScratchOutsideMap() {
+    constexpr uint8_t scratch[] = {15, 16, 17};
+    for (uint8_t r : kArm64Reg) for (uint8_t s : scratch) if (r == s) return false;
+    return true;
+}
+static_assert(armScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
+
 
 Label HostAssembler::newLabel() {
     if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
@@ -97,13 +108,20 @@ void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset 
 }
 void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Preserve EVERY register that may hold a live value across the call: the host args
-    // (x0/x1/x2), the link register x30 (blr overwrites it; our function is a leaf), and the
+    // (x0/x1/x2/x3), the link register x30 (blr overwrites it; our function is a leaf), and the
     // whole vreg scratch pool (x4-x7, x9-x14) — because a value computed before the call (e.g.
     // a first random16's result) can be live across a SECOND call. Saving the full pool makes
     // the live-vreg-across-call contract hold for any expression; it's a cold path (once per
-    // call, not per pixel). 112-byte frame (7 pairs) keeps sp 16-aligned.
-    emit32(0xa9b907e0u);   // stp x0, x1,  [sp, #-112]!
+    // call, not per pixel). 128-byte frame (8 pairs) keeps sp 16-aligned.
+    //
+    // x3 is kArg3, the elapsed time. Nothing reads it after a call TODAY (the grammar has no `t`
+    // identifier and no lowering emits a read of it), so the omission was unobservable — but a
+    // built-in is free to clobber x3 under the AAPCS, so exposing `t` to scripts would have turned
+    // this into a silent wrong-value bug. Saved here rather than left as a trap. It pairs with x8,
+    // which this backend never uses, because stp works on pairs.
+    emit32(0xa9b807e0u);   // stp x0, x1,  [sp, #-128]!
     emit32(0xa9017be2u);   // stp x2, x30, [sp, #16]
+    emit32(0xa90723e3u);   // stp x3, x8,  [sp, #112]
     emit32(0xa90217e4u);   // stp x4, x5,  [sp, #32]
     emit32(0xa9031fe6u);   // stp x6, x7,  [sp, #48]
     emit32(0xa9042be9u);   // stp x9, x10, [sp, #64]
@@ -129,13 +147,14 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // dst register are both in the saved set the restore overwrites.
     emit32(0xaa0003efu);   // mov x15, x0   (result → x15)
     // restore the full saved set (reverse order)
+    emit32(0xa94723e3u);   // ldp x3, x8,  [sp, #112]
     emit32(0xa9463bedu);   // ldp x13,x14, [sp, #96]
     emit32(0xa94533ebu);   // ldp x11,x12, [sp, #80]
     emit32(0xa9442be9u);   // ldp x9, x10, [sp, #64]
     emit32(0xa9431fe6u);   // ldp x6, x7,  [sp, #48]
     emit32(0xa94217e4u);   // ldp x4, x5,  [sp, #32]
     emit32(0xa9417be2u);   // ldp x2, x30, [sp, #16]
-    emit32(0xa8c707e0u);   // ldp x0, x1,  [sp], #112
+    emit32(0xa8c807e0u);   // ldp x0, x1,  [sp], #128
     // now move the stashed result into dst (dst is restored/valid; x15 holds the result)
     emit32(0xaa0f03e0u | uint32_t(mr(d)));   // mov x<dst>, x15
 }

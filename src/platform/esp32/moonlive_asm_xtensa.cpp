@@ -17,8 +17,19 @@ namespace mm::moonlive {
 
 // R0..R3 → a2..a5 (the windowed-ABI args); R4..R11 → a6..a11, a14, a15. a12/a13 are internal
 // scratch (store8 address, branchIfZero zero-reg, call result stash), so not in the pool.
-static const uint8_t kXtReg[kRegCount] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15};
+static constexpr uint8_t kXtReg[kRegCount] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15};
 static uint8_t ar(Reg r) { return kXtReg[r]; }
+
+// A scratch register that is ALSO a vreg silently corrupts values — see the RISC-V backend, where
+// kScratchFn aliased vreg R12 and every call returned a stale value. Checked here so the map can
+// never grow over a scratch.
+constexpr bool xtScratchOutsideMap() {
+    constexpr uint8_t scratch[] = {12, 13};
+    for (uint8_t r : kXtReg) for (uint8_t s : scratch) if (r == s) return false;
+    return true;
+}
+static_assert(xtScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
+
 
 void XtensaAssembler::emit(const uint8_t* p, size_t n) {
     if (len_ + n > kCap) { overflow_ = true; return; }

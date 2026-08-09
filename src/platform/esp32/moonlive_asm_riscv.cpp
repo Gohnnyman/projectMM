@@ -11,13 +11,28 @@
 namespace mm::moonlive {
 
 // R0..R4 → a0..a4 (10..14, the host args: buf, nLights, cpl, t, ctrls — a4=kArg4 the controls
-// arena pointer). R5..R11 → t0,t1,t2,t3,t4,t5,a5 (caller-saved temps). t6(31) and a6(16) are the
-// internal scratch (store8 address, call address build), not vregs.
-static const uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
+// arena pointer). R5..R11 → t0,t1,t2,t3,t4,t5,a5 (caller-saved temps). t6(31) is the internal
+// scratch (store8 address, call address build + result stash), not a vreg.
+static constexpr uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
                                           16, 17, 18, 19, 20, 21};
 static uint8_t xr(Reg r) { return kRvReg[r]; }
+// t6 is the ONLY caller-saved register outside kRvReg, so it is the only safe scratch: every other
+// free register is callee-saved (s0/s1, s6..s11) and would have to be preserved. Both uses below are
+// transient — store8 consumes it within two instructions, and call() finishes with it before any
+// store8 can run — so one register serves both.
 static constexpr uint8_t kScratchAddr = 31;   // t6 — store8 address temp
-static constexpr uint8_t kScratchFn   = 16;   // a6 — call address build / result stash
+static constexpr uint8_t kScratchFn   = 31;   // t6 — call address build / result stash
+
+// A scratch register that is ALSO a vreg silently corrupts values. kScratchFn was x16/a6, which is
+// kRvReg[12] = vreg R12: call() stashed its result in a6, then the restore loop reloaded x16 from
+// the frame and destroyed it, so every call returned R12's stale value. Latent only because it needs
+// vregsUsed > 12. Checked here so the map can never grow over a scratch again.
+constexpr bool rvScratchOutsideMap() {
+    constexpr uint8_t scratch[] = {kScratchAddr, kScratchFn};
+    for (uint8_t r : kRvReg) for (uint8_t s : scratch) if (r == s) return false;
+    return true;
+}
+static_assert(rvScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
 
 void RiscvAssembler::emit32(uint32_t w) {
     if (len_ + 4 > kCap) { overflow_ = true; return; }
@@ -125,7 +140,7 @@ void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     for (uint8_t r : saved) { emit32(encSw(r, 2, off)); off += 4; }
     // The three args into a0/a1/a2 (the standard ABI registers a host built-in reads). Staged
     // through the frame first: a source may itself BE a0/a1/a2, so moving them in place could
-    // overwrite a source a later move still needs. Slots 48/52/56 sit above the saved set (12
+    // overwrite a source a later move still needs. Slots 72/76/80 sit above the saved set (18
     // registers, offsets 0..68) and below ra at 108.
     emit32(encSw(xr(a), 2, 72));
     emit32(encSw(xr(b), 2, 76));
@@ -133,21 +148,23 @@ void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     emit32(encLw(10, 2, 72));                          // a0 = arg0
     emit32(encLw(11, 2, 76));                          // a1 = arg1
     emit32(encLw(12, 2, 80));                          // a2 = arg2
-    // a6 = fn address via lui + addi (hi/lo split)
+    // t6 = fn address via lui + addi (hi/lo split). t6 is caller-saved, so the callee may clobber
+    // it — harmless: it is dead across the call, written before jalr and rewritten after.
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
     uint32_t hi = (addr + 0x800) >> 12;                // round for the sign-extended addi
     int32_t  lo = static_cast<int32_t>(addr) - static_cast<int32_t>(hi << 12);
-    emit32(encLui(kScratchFn, hi & 0xfffff));          // lui a6, hi
-    emit32(encAddi(kScratchFn, kScratchFn, lo));       // addi a6, a6, lo
-    emit32((kScratchFn << 15) | (1 << 7) | 0x67);      // jalr ra, a6, 0
-    // stash result (a0) in a6 before restoring (a0 is restored to the old buf)
-    emit32(encAddi(kScratchFn, 10, 0));                // mv a6, a0
+    emit32(encLui(kScratchFn, hi & 0xfffff));          // lui t6, hi
+    emit32(encAddi(kScratchFn, kScratchFn, lo));       // addi t6, t6, lo
+    emit32((kScratchFn << 15) | (1 << 7) | 0x67);      // jalr ra, t6, 0
+    // stash the result (a0) in t6 before restoring (a0 is restored to the old buf). t6 is outside
+    // the saved set, so the restore loop below cannot destroy it.
+    emit32(encAddi(kScratchFn, 10, 0));                // mv t6, a0
     // restore
     off = 0;
     for (uint8_t r : saved) { emit32(encLw(r, 2, off)); off += 4; }
     emit32(encLw(1, 2, 108));                           // lw ra, 108(sp)
     emit32(encAddi(2, 2, 112));                         // addi sp, sp, 112
-    emit32(encAddi(xr(d), kScratchFn, 0));             // mv dst, a6  (the result)
+    emit32(encAddi(xr(d), kScratchFn, 0));             // mv dst, t6  (the result)
 }
 
 void RiscvAssembler::ret() { emit32(0x00008067u); }    // ret = jalr x0, ra, 0

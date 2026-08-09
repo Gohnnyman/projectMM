@@ -97,7 +97,7 @@
         "desktop-macos": {
           "tick_us": [
             5,
-            6
+            7
           ],
           "free_heap": [
             0,
@@ -196,7 +196,7 @@
       "observed": {
         "desktop-macos": {
           "tick_us": [
-            6,
+            5,
             6
           ],
           "free_heap": [
