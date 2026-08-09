@@ -38,7 +38,9 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     const Reg sOff  = static_cast<Reg>(ir.vregsUsed + 1);    // base byte offset of the current light
     const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 2);    // loop counter
 
-    HostAssembler a;
+    // Two branch slots per IR op is an upper bound: only StoreElem, FillElems and the branch
+    // ops emit one, and each is a single op. Plus the inline ops' own labels.
+    HostAssembler a(out, cap, static_cast<uint16_t>(ir.count * 2 + 8));
 
     // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
     // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
@@ -52,7 +54,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
         return labels[id];
     };
 
-    for (uint8_t i = 0; i < ir.count; i++) {
+    for (uint16_t i = 0; i < ir.count; i++) {
         const IrInst& op = ir.ops[i];
         switch (op.op) {
             case IrOp::Const:  a.movImm(reg(op.dst), op.imm); break;
@@ -120,8 +122,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     }
     a.ret();
     a.finalize();
-    if (a.overflowed() || a.size() > cap) return 0;
-    std::memcpy(out, a.bytes(), a.size());
+    if (a.overflowed()) return 0;
     return a.size();
 }
 

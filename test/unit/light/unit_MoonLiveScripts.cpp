@@ -108,13 +108,19 @@ TEST_CASE("a script may be commented, and only @control carries meaning") {
         moonlive::MoonLive engine;
         const bool ok = engine.compile(c.src, moonlive::lightBuiltins());
         INFO(c.what);
-        CHECK(ok == c.ok);
+        // What this case is about is the LEXER, which runs on every host. Where there is no backend
+        // for this ISA a valid script still fails, at codegen — so accept that one diagnostic rather
+        // than dropping the coverage. A script expected to FAIL must still fail everywhere.
+        if (c.ok) CHECK((ok || std::string(engine.error()) == moonlive::kCodegenFailed));
+        else      CHECK(!ok);
         engine.free();
     }
 }
 
 TEST_CASE("a comment changes nothing about what a script does") {
-    // The stronger claim: commenting a script does not alter the code it produces.
+    // The stronger claim: commenting a script does not alter the code it produces. Needs a backend —
+    // with no code emitted, "same length" is two zeroes and proves nothing.
+#if MM_MOONLIVE_HAS_HOST_JIT
     moonlive::MoonLive bare, commented;
     CHECK(bare.compile("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }",
                        moonlive::lightBuiltins()));
@@ -124,7 +130,9 @@ TEST_CASE("a comment changes nothing about what a script does") {
                             "}",
                             moonlive::lightBuiltins()));
     CHECK(bare.codeLen() == commented.codeLen());   // byte-for-byte the same program
+    CHECK(bare.codeLen() > 0);                      // and it is a real program, not two zeroes
     bare.free();
     commented.free();
+#endif
 }
 

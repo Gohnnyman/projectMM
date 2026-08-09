@@ -43,6 +43,9 @@ def main() -> int:
             ["c++", "-std=c++20", "-O0", "-I", os.path.join(ROOT, "src"),
              "-I", os.path.join(ROOT, "src", "platform", "desktop"),
              TOOL_SRC, os.path.join(ROOT, "src", "core", "moonlive", "MoonLiveCompiler.cpp"),
+             # platform::alloc/free — the IR op array and the assembler's branch tables are
+             # sized to the script, so the emitter needs the host platform implementation.
+             os.path.join(ROOT, "src", "platform", "desktop", "platform_desktop.cpp"),
              "-o", emitter],
             capture_output=True, text=True)
         if build.returncode != 0:

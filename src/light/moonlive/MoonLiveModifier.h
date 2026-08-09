@@ -67,12 +67,19 @@ public:
     void prepare() override {
         // Prepend the input declarations. The user's script sees `x`, `y`, `z` as ordinary control
         // reads; the binding sees three arena slots it can write per light.
-        std::snprintf(full_, sizeof(full_),
+        // The prefixed script lives only for this call, so it is a cold-path temporary rather than a
+        // member: as a member it was a third full-size buffer, static per modifier, for a string that
+        // exists for the duration of one compile.
+        const size_t fullCap = std::strlen(source_) + kPreambleBytes;
+        auto* full = static_cast<char*>(platform::alloc(fullCap));
+        if (!full) { setStatus("no memory to compile", Severity::Error); return; }
+        struct Free { char* p; ~Free() { platform::free(p); } } freeFull{full};
+        std::snprintf(full, fullCap,
                       "uint8_t x = 0;\nuint8_t y = 0;\nuint8_t z = 0;\n"
                       "uint8_t width = 0;\nuint8_t height = 0;\nuint8_t depth = 0;\n%s", source_);
 
         moonlive::resetPrintBudget();
-        if (engine_.compile(full_, moonlive::lightBuiltins())) {
+        if (engine_.compile(full, moonlive::lightBuiltins())) {
             clearStatus();
         } else {
             setStatus(engine_.error(), Severity::Error);
@@ -85,8 +92,9 @@ public:
         // again: setting the flag unconditionally makes the two call each other forever, the
         // mapping is rebuilt every frame, and the fixture renders nothing at all. Comparing the
         // compiled source is what breaks that cycle.
-        if (std::strcmp(full_, compiled_) != 0) {
-            std::snprintf(compiled_, sizeof(compiled_), "%s", full_);
+        const uint32_t h = moonlive::sourceHash(full);
+        if (h != compiledHash_) {
+            compiledHash_ = h;
             needsRebuild_ = true;
         }
     }
@@ -146,7 +154,7 @@ public:
         // treated as a first compile. Keeping it made a disabled-then-re-enabled modifier inert —
         // the Layer folds while the engine is empty, then prepare() recompiles, sees the same
         // source, and never asks for the rebuild that would apply it.
-        compiled_[0] = '\0';
+        compiledHash_ = 0;
         ModifierBase::release();
     }
 
@@ -169,12 +177,19 @@ private:
     // Default script — a mirror on x. Chosen because it is instantly readable on a bench strand
     // (the pattern runs the other way) and is a modifier people actually reach for, so a working
     // binding looks like something rather than like nothing.
-    char source_[384] = "setXYZ(0, width - 1 - x, y, z);";
+        // 4 KB, not 512 B: a script's length is what a user actually runs into first, and 512
+    // characters is about a dozen statements — the buffer silently TRUNCATED anything longer,
+    // so a long script failed to parse with no indication why. Sized to match what the
+    // compiler now accepts (its IR and code buffers are sized to the script). A fixed member
+    // rather than an allocation because a control binds to a stable address.
+    char source_[4096] = "setXYZ(0, width - 1 - x, y, z);";
 
-    // The user's source with the input declarations prepended — what actually gets compiled.
-    char full_[512] = {};
-    // The source the CURRENT mapping was built from; a rebuild is needed only when it changes.
-    char compiled_[512] = {};
+    /// Bytes the prepended declarations occupy, plus the NUL — the preamble above.
+    static constexpr size_t kPreambleBytes = 128;
+    // A hash of the source the CURRENT mapping was built from; a rebuild is needed only when it
+    // changes. A hash, not a copy: the copy cost as much static RAM as the script buffer itself,
+    // and this comparison is all it was ever used for.
+    uint32_t compiledHash_ = 0;
 
     char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 

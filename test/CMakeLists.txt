@@ -111,6 +111,7 @@ add_executable(mm_tests
     unit/light/unit_MoonLiveModifier.cpp
     unit/light/unit_MoonLiveLayout.cpp
     unit/light/unit_MoonLiveScripts.cpp
+    unit/light/probe_w.cpp
     unit/light/unit_Layouts_container.cpp
     unit/light/unit_Layouts_mutation.cpp
     unit/light/unit_Layouts_toggle_cycle.cpp

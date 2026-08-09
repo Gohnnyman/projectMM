@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/platform.h"   // alloc/free — the branch tables are sized to the script
+
 #include <cstdint>
 #include <cstddef>
 
@@ -24,13 +26,38 @@ enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9,
 
 // A label is an index into the assembler's label table; bind() fixes its position, branches to
 // it are back-patched when bound.
-using Label = uint8_t;
+// uint16_t, not uint8_t: every bounds-guarded store burns a label, so a 256-label
+// ceiling is ~256 statements — a limit a real script reaches.
+using Label = uint16_t;
 
 // Branch condition (only the ones the IR needs so far).
 enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */, Ne /* != */ };
 
 class HostAssembler {
 public:
+    /// Emit into `out` (capacity `cap`). The buffer belongs to the caller and is already
+    /// sized to the script, so there is no fixed code ceiling and no second copy: this was
+    /// a `uint8_t buf_[768]` member, which capped every script at 768 bytes AND made the
+    /// assembler a ~1.3 KB stack local on a 12 KB task.
+    /// Emit into `out` (capacity `cap`), with branch tables sized for `branches` of them.
+    ///
+    /// The caller's buffer is already sized to the script, so there is no fixed code ceiling
+    /// and no second copy: this was a `uint8_t buf_[768]` member, which capped every script
+    /// at 768 bytes AND made the assembler a ~1.3 KB stack local on a 12 KB task.
+    ///
+    /// `branches` is an upper bound on labels and fixups. It comes from the IR op count
+    /// rather than the code size: only a handful of ops emit a branch at all, so sizing from
+    /// bytes over-allocated by orders of magnitude (a 6 KB script asked for ~1 MB).
+    HostAssembler(uint8_t* out, size_t cap, uint16_t branches) : buf_(out), cap_(cap) {
+        labelCap_ = branches ? branches : 8;
+        fixupCap_ = labelCap_;
+        labelPos_ = static_cast<int32_t*>(platform::alloc(size_t(labelCap_) * sizeof(int32_t)));
+        fixups_   = static_cast<Fixup*>(platform::alloc(size_t(fixupCap_) * sizeof(Fixup)));
+        if (!labelPos_ || !fixups_) overflow_ = true;   // degrade: the compile fails cleanly
+    }
+    ~HostAssembler() { platform::free(labelPos_); platform::free(fixups_); }
+    HostAssembler(const HostAssembler&) = delete;
+    HostAssembler& operator=(const HostAssembler&) = delete;
     // --- buffer ---
     // Resolve all branch fixups against bound labels, then expose the finished bytes. Call
     // once after the last instruction; bytes()/size() are valid only after finalize().
@@ -63,24 +90,24 @@ public:
     void ret();
 
 private:
-    static constexpr size_t kCap = 768;
-    static constexpr uint8_t kMaxLabels = 16;
-    static constexpr uint8_t kMaxFixups = 32;
 
     void emit32(uint32_t w);             // append one 32-bit instruction (arm64) — or byte run (x64)
     void emitBytes(const uint8_t* p, size_t n);
     void addFixup(size_t at, Label label, uint8_t kind);  // enqueue a branch fixup (bounds-checked)
 
-    uint8_t  buf_[kCap] = {};
+    uint8_t* buf_ = nullptr;   // the caller's buffer — see the constructor
+    size_t   cap_ = 0;
     size_t   len_ = 0;
     bool     overflow_ = false;
 
     // Label positions (-1 = unbound) and pending branch fixups.
-    int32_t  labelPos_[kMaxLabels];
-    uint8_t  labelCount_ = 0;
+    int32_t* labelPos_ = nullptr;   // sized to the script; see the constructor
+    uint16_t labelCap_ = 0;
+    uint16_t labelCount_ = 0;
     struct Fixup { size_t at; Label label; uint8_t kind; };  // kind: 0=cbz,1=b.cond
-    Fixup    fixups_[kMaxFixups];
-    uint8_t  fixupCount_ = 0;
+    Fixup*   fixups_ = nullptr;
+    uint16_t fixupCap_ = 0;
+    uint16_t fixupCount_ = 0;
 
     void patchBranches();                // resolve all fixups against bound labels
 };

@@ -434,6 +434,10 @@ struct Parser {
         // Skip the step expression without emitting: scan to the closing ')'.
         int depth = 0;
         while (!failed && lex.kind != Tok::End) {
+            // A lexer error stops the scan. Tok::Error is not Tok::End and advance() does not move
+            // past the offending character, so without this the loop spins forever on a script with
+            // a stray character in the step expression — a hang, not a diagnostic.
+            if (lex.kind == Tok::Error) { fail(lex.err); return false; }
             if (lex.kind == Tok::LParen) depth++;
             else if (lex.kind == Tok::RParen) { if (depth == 0) break; depth--; }
             lex.advance();
@@ -503,6 +507,28 @@ struct Parser {
 
 }  // namespace
 
+// How many IR ops this source can possibly produce — an UPPER bound, computed by running the lexer
+// once before parsing so the op array is sized to the script.
+//
+// The bound must never be too small (the parser would fail on a valid script), so it is deliberately
+// generous rather than exact. Measured costs it is derived from: a call with N arguments is N+1 ops;
+// each operand or operator contributes at most one more; a `for` adds a fixed 10 (init, the entry
+// guard, the step, the two branches and their labels) — confirmed by a nested pair costing exactly
+// twice that. Two ops per token plus ten per `for`, with a floor, covers every construct with room
+// to spare; a token is at most one operand or operator, so it cannot be beaten by any arrangement.
+static uint16_t estimateOps(const char* source) {
+    Lexer lex(source);
+    uint32_t tokens = 0, fors = 0;
+    while (lex.kind != Tok::End && lex.kind != Tok::Error) {
+        tokens++;
+        // `for` is an identifier to the lexer; the loop overhead is what makes it worth counting.
+        if (lex.kind == Tok::Ident && lex.identLen == 3 && std::strncmp(lex.identBeg, "for", 3) == 0) fors++;
+        lex.advance();
+    }
+    const uint32_t n = 16 + tokens * 2 + fors * 10;      // the floor covers a tiny script's fixed ops
+    return static_cast<uint16_t>(n > kMaxIrOps ? kMaxIrOps : n);
+}
+
 CompileResult compileSource(const char* source, const BuiltinTable& table, uint8_t* out, size_t cap) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
@@ -510,6 +536,7 @@ CompileResult compileSource(const char* source, const BuiltinTable& table, uint8
 
     Lexer lex(source);
     IrProgram ir;
+    if (!ir.reserve(estimateOps(source))) { r.error = "no memory for the program"; return r; }
     Parser parser{lex, table, ir};
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
 

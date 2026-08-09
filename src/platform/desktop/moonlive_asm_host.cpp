@@ -31,28 +31,32 @@ static_assert(armScratchOutsideMap(), "a scratch register is also a vreg — cal
 
 
 Label HostAssembler::newLabel() {
-    if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
-    if (labelCount_ >= kMaxLabels) { overflow_ = true; return 0; }   // same overflow signal as emit32
+    // A failed table allocation sets overflow_ in the constructor, but every method still runs —
+    // so each one that touches a table checks the pointer. Writing through the null was a heap
+    // corruption that surfaced much later, in an unrelated heap walk.
+    if (!labelPos_) { overflow_ = true; return 0; }
+    if (labelCount_ == 0) for (uint16_t i = 0; i < labelCap_; i++) labelPos_[i] = -1;
+    if (labelCount_ >= labelCap_) { overflow_ = true; return 0; }   // same overflow signal as emit32
     Label l = labelCount_++;
     labelPos_[l] = -1;
     return l;
 }
-void HostAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
+void HostAssembler::bind(Label l) { if (labelPos_ && l < labelCap_) labelPos_[l] = static_cast<int32_t>(len_); }
 
 // Record a pending branch fixup, guarding the fixed table — a script with too many branches sets
 // overflow_ rather than writing past fixups_ (the same failure path as a full code buffer).
 void HostAssembler::addFixup(size_t at, Label label, uint8_t kind) {
-    if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
+    if (!fixups_ || fixupCount_ >= fixupCap_) { overflow_ = true; return; }
     fixups_[fixupCount_++] = {at, label, kind};
 }
 
 void HostAssembler::emit32(uint32_t w) {
-    if (len_ + 4 > kCap) { overflow_ = true; return; }
+    if (!buf_ || len_ + 4 > cap_) { overflow_ = true; return; }
     buf_[len_++] = uint8_t(w); buf_[len_++] = uint8_t(w >> 8);
     buf_[len_++] = uint8_t(w >> 16); buf_[len_++] = uint8_t(w >> 24);
 }
 void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
-    if (len_ + n > kCap) { overflow_ = true; return; }
+    if (!buf_ || len_ + n > cap_) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 
@@ -161,11 +165,19 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 void HostAssembler::ret() { emit32(0xd65f03c0u); }
 
 void HostAssembler::patchBranches() {
-    for (uint8_t i = 0; i < fixupCount_; i++) {
+    if (!labelPos_ || !fixups_) return;   // a failed table allocation already failed the compile
+    for (uint16_t i = 0; i < fixupCount_; i++) {   // uint16_t: fixupCount_ is no longer a byte
         const Fixup& f = fixups_[i];
+        if (f.label >= labelCap_) continue;
         int32_t target = labelPos_[f.label];
         if (target < 0) continue;                                     // unbound label — leave the branch as-is (overflow_ already failed the compile)
         int32_t rel = (target - static_cast<int32_t>(f.at)) >> 2;     // PC-relative, /4
+        // Bounds-check the patch site. buf_ is the CALLER's buffer now, sized to the script —
+        // it used to be an oversized fixed member, where a stray patch landed harmlessly inside
+        // it. A fixup recorded just before the emit that overflowed still names an offset past
+        // the end, and writing there corrupts the heap: the failure surfaces much later, in an
+        // unrelated allocation, which is what made it look like a resize race.
+        if (f.at + 4 > len_) continue;
         uint32_t w; std::memcpy(&w, buf_ + f.at, 4);
         w |= (uint32_t(rel) & 0x7ffff) << 5;                          // imm19 field (cbz & b.cond)
         std::memcpy(buf_ + f.at, &w, 4);
