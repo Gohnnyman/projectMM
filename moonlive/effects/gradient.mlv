@@ -1,0 +1,5 @@
+// A gradient painted by a loop: red rises across the strand while blue falls.
+// The script that first proved `for` reaches the emitter with a distinct value each pass.
+for (i = 0; i < 256; i = i + 1) {
+  setRGB(i, i, 255 - i, 60);
+}

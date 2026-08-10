@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
+
 #include <cstdint>
 #include <cstddef>
 
@@ -27,7 +29,7 @@ enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9,
 using Label = uint8_t;
 
 // Branch condition (only the ones the IR needs so far).
-enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
+enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */, Ne /* != */ };
 
 class HostAssembler {
 public:
@@ -54,16 +56,18 @@ public:
     void cmp(Reg a, Reg b);              // flags = a - b
     void branchIfZero(Reg a, Label l);   // if a == 0 goto l
     void branchIf(Cond c, Label l);      // if flags satisfy c goto l (after cmp)
-    // Call a host built-in: d = fn(a). Preserves the host-arg registers (R0/R1/R2 = buf,
+    // Call a host built-in: d = fn(a, b, c). Preserves the host-arg registers (R0/R1/R2 = buf,
     // nLights, cpl) across the call by saving them on the stack, so they stay live for the
     // statement after the call — the live-vreg-across-Call contract. `fn` is an absolute
-    // function pointer (materialised into a scratch register). Caller-saved vregs other than
-    // R0..R2 must not be live across a call (the front-end orders ops so none are).
-    void call(Reg d, Reg a, const void* fn);
+    // function pointer (materialised into a scratch register). The implementation saves the WHOLE
+    // vreg pool, not just R0..R2, so any value may be live across a call — a loop counter and its
+    // limit are, whenever the body calls anything, which is most real effects.
+    void call(Reg d, Reg a, Reg b, Reg c, const void* fn);
     void ret();
 
 private:
-    static constexpr size_t kCap = 768;
+    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
+    static constexpr size_t kCap = kCodeCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 

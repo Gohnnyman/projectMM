@@ -41,7 +41,7 @@ def asset_dir_for(type_name: str):
         return ASSETS / "light" / "layouts"
     if type_name.endswith("Driver"):
         return ASSETS / "light" / "drivers"
-    if type_name in ("Layouts", "Layers", "Drivers"):
+    if type_name in ("Layouts", "Effects", "Drivers"):
         return ASSETS / "light"
     return ASSETS / "core"
 

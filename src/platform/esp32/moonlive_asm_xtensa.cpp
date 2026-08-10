@@ -17,8 +17,19 @@ namespace mm::moonlive {
 
 // R0..R3 → a2..a5 (the windowed-ABI args); R4..R11 → a6..a11, a14, a15. a12/a13 are internal
 // scratch (store8 address, branchIfZero zero-reg, call result stash), so not in the pool.
-static const uint8_t kXtReg[kRegCount] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15};
+static constexpr uint8_t kXtReg[kRegCount] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15};
 static uint8_t ar(Reg r) { return kXtReg[r]; }
+
+// A scratch register that is ALSO a vreg silently corrupts values — see the RISC-V backend, where
+// kScratchFn aliased vreg R12 and every call returned a stale value. Checked here so the map can
+// never grow over a scratch.
+constexpr bool xtScratchOutsideMap() {
+    constexpr uint8_t scratch[] = {12, 13};
+    for (uint8_t r : kXtReg) for (uint8_t s : scratch) if (r == s) return false;
+    return true;
+}
+static_assert(xtScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
+
 
 void XtensaAssembler::emit(const uint8_t* p, size_t n) {
     if (len_ + n > kCap) { overflow_ = true; return; }
@@ -54,8 +65,25 @@ void XtensaAssembler::addFixup(size_t at, Label label) {
 // a13 is the assembler's reserved scratch (also kZero in branchIfZero); it holds no live vreg.
 // Single movi for the common 0..255 case. Without this, Const values >255 truncate to 8 bits.
 void XtensaAssembler::movImm(Reg d, int32_t imm) {
-    const uint32_t v = static_cast<uint32_t>(imm) & 0xffff;
     const uint8_t dr = ar(d);
+    // The wide `movi` field is 12-bit SIGNED (-2048..2047), which is the only encoding here that can
+    // hold a negative constant. The compiler emits Const(-1) to express subtraction — `a - b` is
+    // `a + (b * -1)` — and building that through the zero-extended byte path below would materialise
+    // 65535, making every subtraction correct only modulo 256: invisible in a stored colour byte,
+    // silently fatal in a bounds-guarded index (the light is dropped) or a host-call argument.
+    // A negative below the 12-bit field's reach has no encoding here, and falling through to the
+    // unsigned path below would materialise a different number in silence — the failure mode that
+    // cost this backend a long debugging session. Fail the compile instead.
+    if (imm < -2048) { overflow_ = true; return; }
+    if (imm < 0) {
+        const uint32_t f = static_cast<uint32_t>(imm) & 0xfff;
+        const uint8_t b[3] = {uint8_t((dr << 4) | 0x2),
+                              uint8_t(0xa0 | ((f >> 8) & 0xf)),
+                              uint8_t(f & 0xff)};
+        emit(b, 3);                                                      // movi aD, #imm12
+        return;
+    }
+    const uint32_t v = static_cast<uint32_t>(imm) & 0xffff;
     if (v <= 0xff) {
         const uint8_t b[3] = {uint8_t((dr << 4) | 0x2), 0xa0, uint8_t(v)};
         emit(b, 3);
@@ -135,14 +163,30 @@ void XtensaAssembler::branchNe(Reg a, Reg b, Label l) {
 // mirroring the host backend's full-register-save. Cold path (once per call). The 48-byte
 // frame from prologue() has room at offsets 16/20/28. The 32-bit fn address is built in a8
 // byte-by-byte (movi/slli/add) — no l32r literal pool.
-void XtensaAssembler::call(Reg d, Reg a, const void* fn) {
+void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Save the rotate-out scratch a8, a9, a11 (a10 will carry arg→result).
     auto s32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x61,off4}; emit(b,3); };
     auto l32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x21,off4}; emit(b,3); };
     s32i(8, 4); s32i(9, 5); s32i(11, 7);                  // [a1+16]=a8, [a1+20]=a9, [a1+28]=a11
+    // a14/a15 are vregs R10/R11 (kXtReg), and CALL8 rotates the window out from under them — so a
+    // value live across a call in either was destroyed. Reachable on the SHIPPED default: grid.mlv
+    // is a nested loop (11 vregs, so R10 is in use) whose body calls addLight. The entry frame is 48
+    // bytes and call() uses 16/20/24/28, so 32/36 are free.
+    s32i(14, 8); s32i(15, 9);                             // [a1+32]=a14, [a1+36]=a15
 
-    // arg into a10 (read aArg BEFORE the address build clobbers a8/a9).
-    emit2(uint16_t((uint32_t(ar(a)) << 8) | (10 << 4) | 0xd));   // mov a10, aArg
+    s32i(10, 6);                                          // [a1+24]=a10 — a vreg (R8) call8 rotates out
+
+    // The three args into a10/a11/a12 — call8 shifts the window by 8, so the callee reads them as
+    // its a2/a3/a4. Moved HIGH-first (a12, then a11, then a10) so an earlier write cannot clobber a
+    // source a later one still needs.
+    //
+    // argA goes through a13 first. a11 is vreg R9, so argA can BE a11 — and writing argB into a11
+    // would then destroy argA before the a10 move reads it. High-first ordering alone does not cover
+    // that case; a13 is outside the vreg map, so staging there does.
+    emit2(uint16_t((uint32_t(ar(a)) << 8) | (13 << 4) | 0xd));   // mov a13, argA  (a13 is scratch)
+    emit2(uint16_t((uint32_t(ar(c)) << 8) | (12 << 4) | 0xd));   // mov a12, argC
+    emit2(uint16_t((uint32_t(ar(b)) << 8) | (11 << 4) | 0xd));   // mov a11, argB
+    emit2(uint16_t((13u << 8) | (10 << 4) | 0xd));               // mov a10, a13
 
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
     auto moviA8 = [&](uint8_t v){ const uint8_t b[3]={0x82,0xa0,v}; emit(b,3); };
@@ -156,7 +200,8 @@ void XtensaAssembler::call(Reg d, Reg a, const void* fn) {
     emit3(0x0000e0u | (8u << 8));                          // callx8 a8  → result in a10
     // stash result (a10) in a12 (not in the saved set), restore a8/a9/a11, then dst = a12.
     emit2(uint16_t((10u << 8) | (12u << 4) | 0xd));        // mov a12, a10
-    l32i(8, 4); l32i(9, 5); l32i(11, 7);
+    l32i(8, 4); l32i(9, 5); l32i(10, 6); l32i(11, 7);
+    l32i(14, 8); l32i(15, 9);
     emit2(uint16_t((12u << 8) | (uint32_t(ar(d)) << 4) | 0xd));   // mov aDst, a12
 }
 

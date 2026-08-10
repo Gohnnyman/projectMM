@@ -1,0 +1,10 @@
+// A circle: `count` lights evenly around a centre, spanning 2*radius+1 cells.
+// Lights and grid cells differ -- 24 lights in an 11x11 box.
+// `cos`/`sin` run 0..65535 centred at 32768, so scaling by the DIAMETER lands the whole circle.
+uint8_t count = 24;   // @control 3..255
+uint8_t radius = 5;   // @control 1..127
+
+for (i = 0; i < count; i = i + 1) {
+  addLight(scale(cos(i * turn(count)), radius * 2 + 1),
+           scale(sin(i * turn(count)), radius * 2 + 1), 0);
+}

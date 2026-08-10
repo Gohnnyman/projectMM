@@ -33,18 +33,33 @@ static constexpr uint8_t kMaxVRegs = 16;     // a statement uses a handful; no a
 static constexpr uint8_t kMaxIrOps = 64;     // a statement is a handful of ops; fixed, no heap
 
 // The op set — neutral. Three-address form: dst plus up to three source operands. (Counted
-// loops and bounds guards are not IR ops: the StoreElem/FillElems inline ops carry their own
-// loop + bounds-guard in the per-ISA lowering. They'll arrive here when a script statement needs
-// a general loop — added then, not speculatively now.)
+// Control flow arrived with the script-level `for`, which is what the note here anticipated: the
+// StoreElem/FillElems inline ops still carry their own loop in the per-ISA lowering, but a loop a
+// SCRIPT writes cannot live inside one opcode. Three ops carry it, and they are deliberately the
+// smallest set that every backend already has instructions for — a label is a position, and the
+// only branch every ISA here exposes is compare-and-branch-if-greater-or-equal (arm64 spells it
+// cmp + b.hs, Xtensa and RISC-V have bgeu directly).
 enum class IrOp : uint8_t {
     Const,     // dst = imm
     Add,       // dst = a + b
     AddImm,    // dst = a + imm
     Mul,       // dst = a * b
-    Call,      // dst = (*callFn)(a) — call a host-registered function (callFn = the C fn ptr)
+    Call,      // dst = (*callFn)(a, b, c) — call a host-registered function. Three operands
+               // because a binding that hands the host a POSITION needs them at once; a
+               // unary helper ignores b and c, and the compiler passes a zero vreg.
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
     LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
+    Mov,       // dst = a — the assignment a loop variable needs (vregs are otherwise write-once)
+    Label,     // a branch target; `imm` is the label id. Emits no instruction.
+    BranchGe,  // if (a >= b) goto label `imm` — UNSIGNED. The loop's ENTRY guard: skip a loop
+               // whose range is empty, which is also what makes `for (i = 0; i < 0; …)` correct.
+    BranchNe,  // if (a != b) goto label `imm` — the BACKWARD edge that closes the loop.
 };
+
+// Why these two branches and no unconditional jump: a bottom-tested loop needs exactly an entry
+// guard and a back edge, and every backend here already has both (bgeu / bne on Xtensa and RISC-V,
+// cmp + b.hs / b.ne on arm64). It is the shape FillElems has always lowered by hand, so the
+// instruction sequence is proven on all three ISAs before a script could ever emit one.
 
 struct IrInst {
     IrOp     op;
@@ -69,7 +84,14 @@ struct DeclaredControl {
     uint8_t     offset = 0;            // byte offset into the controls arena (declaration order)
 };
 
-static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful of controls; fixed, no heap
+/// Branch targets one IR program may use. Two per `for` (entry guard + back edge), and the counter
+/// runs for the whole program rather than per scope — a label is never reused once a loop closes —
+/// so this bounds the TOTAL number of loops in a script (8), not how deeply they nest. The
+/// assemblers carry the same ceiling in their own label tables, and the compiler fails loudly
+/// rather than silently miscompiling past it. Nesting depth is bounded separately, by `locals`.
+static constexpr uint8_t kIrLabels = 16;
+
+
 static constexpr uint8_t kMaxControlName = 24;   // max control-name length (incl. NUL); the compiler
                                                  // rejects longer names so the binding's name pool
                                                  // can't truncate distinct names into a collision
@@ -89,6 +111,20 @@ struct IrProgram {
         ops[count++] = i;
         if (i.dst + 1 > vregsUsed) vregsUsed = static_cast<VReg>(i.dst + 1);
         return true;
+    }
+
+    /// Which inline ops this program contains, so a backend reserves scratch only for what is there.
+    ///
+    /// The backends reserved their maximum unconditionally, which cost a register no matter what the
+    /// script did — and that one register is what made a nested loop refuse to compile on the
+    /// smallest target, since a layout script neither fills nor stores elements. How MANY scratch
+    /// registers each op costs is per-ISA (the host needs one for StoreElem, which Xtensa and RISC-V
+    /// fold into the index vreg) and stays with each backend; WHICH ops are present is a property of
+    /// the program, so it is answered once here.
+    bool hasInline(InlineOp which) const {
+        for (uint8_t i = 0; i < count; i++)
+            if (ops[i].op == IrOp::Inline && ops[i].inlineOp == which) return true;
+        return false;
     }
 };
 

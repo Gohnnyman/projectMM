@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
+
 #include <cstdint>
 #include <cstddef>
 
@@ -13,7 +15,18 @@
 
 namespace mm::moonlive {
 
-enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, kRegCount };
+// Twelve was the count every backend started with; RISC-V has room for more, and a nested loop
+// needs it — two loop levels hold four values live, and a three-argument call needs three temps on
+// top. Fourteen is what the CALLER-SAVED registers alone provide, and that is the whole map.
+//
+// It briefly reached eighteen by also mapping x18..x21 (s2..s5) on the reasoning that "the emitted
+// routine is a leaf that saves what it uses". It does not: prologue() is empty, so the routine has
+// no entry/exit save at all and would have returned to its caller with four callee-saved registers
+// clobbered. Giving the routine a prologue would cost every script a save/restore it almost never
+// needs; dropping the four costs nothing, since fourteen still exceeds Xtensa's twelve and no
+// script measured here uses more than eleven.
+enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
+                     R12, R13, kRegCount };
 using Label = uint8_t;
 enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 
@@ -38,12 +51,13 @@ public:
     void branchIfZero(Reg a, Label l);   // beqz a, l  (bge x0, a... use bgeu against x0)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
     void branchNe(Reg a, Reg b, Label l);     // bne a, b, l
-    void call(Reg d, Reg a, const void* fn);  // standard call to a host built-in
+    void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // standard call to a host built-in
     void epilogue() { ret(); }
     void ret();
 
 private:
-    static constexpr size_t kCap = 768;
+    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
+    static constexpr size_t kCap = kCodeCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 

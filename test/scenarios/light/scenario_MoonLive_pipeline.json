@@ -1,0 +1,310 @@
+{
+  "name": "scenario_MoonLive_pipeline",
+  "module": "MoonLiveLayout",
+  "mode": "mutate",
+  "also": [
+    "MoonLiveEffect",
+    "MoonLiveModifier",
+    "MoonLive",
+    "Layouts",
+    "Layer"
+  ],
+  "description": "Drive a WHOLE pipeline whose layout, effect and modifier are all live scripts, and verify it keeps rendering across every edit. This is the end-to-end proof the unit tests cannot give: they exercise each binding against a stub, while here a scripted layout decides where the lights are, a scripted effect colours them, and a scripted modifier folds the mapping, composed in one Layer feeding a real driver. The steps walk the live-authoring loop a user performs: start on the default 16x16 script, add a scripted effect and see it colour the fixture, then replace the layout script with a 24-light row and watch the buffer resize under a running effect; add a scripted modifier and edit it live; break the layout script and confirm the device degrades to zero lights rather than dying; recover it and confirm the fixture comes back. A scripted layout is the demanding case because the pipeline asks it for a light COUNT before asking where any light is, and both answers come from running the same script, so a mismatch shows up here as a wrong buffer size or a wedged tick rather than a compile error. The compile + emit path is pinned by unit_moonlive_compiler / unit_MoonLiveLayout; this is the wired-pipeline gate.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-scripted-layout",
+      "op": "add_module",
+      "id": "MLL",
+      "type": "MoonLiveLayout",
+      "parent_id": "Layouts"
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "NetworkSendDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "baseline-default-script",
+      "op": "measure",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            16
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-10"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-scripted-effect",
+      "op": "add_module",
+      "id": "FX",
+      "type": "MoonLiveEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "effect-gradient",
+      "op": "set_control",
+      "id": "FX",
+      "key": "source",
+      "value": "setRGB(random16(256), 255, 200, 60);"
+    },
+    {
+      "name": "measure-scripted-effect",
+      "op": "measure",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            16
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-10"
+          ]
+        }
+      }
+    },
+    {
+      "name": "layout-a-row",
+      "op": "set_control",
+      "id": "MLL",
+      "key": "source",
+      "value": "for (i = 0; i < 24; i = i + 1) { addLight(i, 0, 0); }"
+    },
+    {
+      "name": "measure-scripted-row",
+      "op": "measure",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            12
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-10"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-scripted-modifier",
+      "op": "add_module",
+      "id": "MOD",
+      "type": "MoonLiveModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "modifier-mirror",
+      "op": "set_control",
+      "id": "MOD",
+      "key": "source",
+      "value": "setXYZ(0, width - 1 - x, y, z);"
+    },
+    {
+      "name": "measure-all-three-scripted",
+      "op": "measure",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            13
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-10"
+          ]
+        }
+      }
+    },
+    {
+      "name": "modifier-transpose",
+      "op": "set_control",
+      "id": "MOD",
+      "key": "source",
+      "value": "setXYZ(0, y, x, z);"
+    },
+    {
+      "name": "measure-modifier-edited",
+      "op": "measure",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            20
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-10"
+          ]
+        }
+      }
+    },
+    {
+      "name": "break-the-layout",
+      "op": "set_control",
+      "id": "MLL",
+      "key": "source",
+      "value": "for (i = 0; i < 4; i = i + 1) { addLight(i, i"
+    },
+    {
+      "name": "measure-broken-layout",
+      "op": "measure",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-09"
+          ]
+        }
+      }
+    },
+    {
+      "name": "recover-the-layout",
+      "op": "set_control",
+      "id": "MLL",
+      "key": "source",
+      "value": "for (i = 0; i < 12; i = i + 1) { addLight(i, 0, 0); }"
+    },
+    {
+      "name": "measure-recovered",
+      "op": "measure",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            20
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-10"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-modifier",
+      "op": "remove_module",
+      "id": "MOD"
+    },
+    {
+      "name": "measure-after-removal",
+      "op": "measure",
+      "description": "The scripted effect still colours the scripted layout after the modifier goes.",
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            35
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-09",
+            "2026-08-10"
+          ]
+        }
+      }
+    }
+  ]
+}

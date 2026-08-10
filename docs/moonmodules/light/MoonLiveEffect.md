@@ -4,7 +4,7 @@ MoonLive is projectMM's **live-script engine** — author an effect as text and 
 
 Scripts call the same [power functions](power-functions.md) compiled effects use, reached through the builtin table — so the vocabulary is shared, in its flat scalar form.
 
-A scripted effect carries its **script source** as an editable, persisted multi-line text control (a resizable `textarea` in the UI), and a front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick. The grammar is a function-call statement with **expression arguments** — any argument may be a literal or a nested call:
+A scripted effect carries its **script source** as an editable, persisted multi-line text control (a resizable `textarea` in the UI), and a front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick. The grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call:
 
 ```
 setRGB(random16(256), 0, 0, 255);   // a random pixel, blue
@@ -27,6 +27,47 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
   Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Editing the `source` recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
 
+### System variables — what the engine hands a script
+
+Some names are **reserved**: the engine defines them, the script only reads them, and a declaration that reuses one is a compile error (`name is a system variable`). Each module supplies the names it actually writes, so a name a script cannot be given is simply unknown there rather than silently reading 0.
+
+| name | what it is | layout | effect | modifier |
+|---|---|:-:|:-:|:-:|
+| `t` | elapsed milliseconds — the clock an animation is written against | ✓ | ✓ | ✓ |
+| `width`, `height`, `depth` | the **logical grid** the script renders into, `0..255` | | ✓ | ✓ |
+| `x`, `y`, `z` | the light being transformed, `0..255` | | | ✓ |
+
+Every one but `t` is a byte, because it lives in the controls arena. A grid extent past 255 reports 255 rather than wrapping to a small number, and a modifier handed a coordinate outside `0..255` passes it through untransformed instead of folding a wrong position — so a script never silently sees a value that means something else.
+
+Supplying a name is also what reserves it, so the tight lists are what leave `x` and `y` usable as ordinary loop counters in a layout or an effect — neither is handed a coordinate.
+
+`width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it is not given them at all, and names its own controls instead (`cols`, `rows`).
+
+Reserving is what makes the guarantee hold: without it a declaration would silently shadow the value the engine handed in, and the script would disagree with its layer with no error anywhere.
+
+### The vocabulary — what a script can call
+
+Registered by the light domain, not built into the compiler (the core owns only the grammar and a generic call/inline mechanism), so the list is one edit in `MoonLiveBuiltins_light.h`.
+
+| call | does |
+|---|---|
+| `setRGB(index, r, g, b)` | write one light |
+| `setXYZ(index, x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
+| `fill(r, g, b)` | write every light |
+| `addLight(x, y, z)` | place the next light (a [layout](MoonLiveLayout.md)) |
+| `random16(n)` | a value in `[0, n)` |
+| `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
+| `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
+| `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
+| `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
+| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
+| `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
+| `print(v)` | log a value and return it ([what it costs](../../../moonlive/README.md#debugging-print)) |
+
+`sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
+
+`turn(n)` exists because a full revolution is 65536 — one past the largest number a script can write — and the grammar has no division. Without it, placing `n` points evenly on a circle is not expressible.
+
 ### Wire contract — control declaration
 
 The controls are **derived from `source`** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `source`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line `source` round-trips.
@@ -36,7 +77,7 @@ The controls are **derived from `source`** (one per declared `uint8` control; th
 - **`MoonLive`** (`src/core/moonlive/MoonLive.h/.cpp`) — the **domain-neutral engine core**. Owns a block of executable memory; `compile(source, table)` runs the front-end against a host builtin table and places the emitted code, `run(buf, nLights, cpl, t)` calls it. Includes only `<cstdint>`, the compiler/emitter seams, and the platform seam — never `EffectBase`, `Buffer`, or any LED type.
 - **`MoonLiveBuiltins`** (`src/core/moonlive/MoonLiveBuiltins.h`) — the **neutral host-binding seam**: a `BuiltinTable` of `{name → descriptor}`, where a descriptor is either `Call` (a host C function pointer — a pure helper like `random16`) or `Inline` (a neutral opcode tag the backend emits inline — the hot-path buffer writers, no per-pixel call). The core owns no function names; it resolves a call against whatever the host registered.
 - **`MoonLiveCompiler`** (`src/core/moonlive/MoonLiveCompiler.h/.cpp`) — the **platform-independent front-end**: a recursive-descent lexer + expression parser that lowers each statement to the typed IR (`MoonLiveIr.h`). Pure (source + table in, IR out, deterministic). Knows the *language*, never an ISA and never a domain.
-- **`MoonLiveBuiltins_light`** (`src/light/moonlive/MoonLiveBuiltins_light.h`) — the **light-domain registration**: the only place the LED vocabulary lives. Registers `setRGB`/`fill` (Inline, lowering to RGB stores) and `random16` (Call). A different host (display, sensor) writes its own table; the core is unchanged.
+- **`MoonLiveBuiltins_light`** (`src/light/moonlive/MoonLiveBuiltins_light.h`) — the **light-domain registration**: the only place the LED vocabulary lives. Registers the whole vocabulary above — Inline ops lowering to stores, and Calls into host helpers — plus the system variables each binding supplies. A different host (display, sensor) writes its own table; the core is unchanged.
 - **per-ISA assembler + lowering** (`src/platform/<target>/moonlive_asm_*` + `moonlive_lower_*`) — a tiny named-instruction MacroAssembler with label back-patching, and the IR→bytes lowering that drives it. Xtensa for the classic/S3 (`__XTENSA__`), the host ISA on desktop (arm64/x86-64). Adding an ISA is a new assembler + lowering; the front-end and IR are unchanged. (`emitFill`/`emitAnimatedFill` remain as the hand-encoded `fill` references the assembler's output is checked against.)
 - **`MoonLiveEffect`** (`src/light/moonlive/MoonLiveEffect.h`) — the **thin binding**: a first-class `EffectBase` carrying the `source` control, whose `tick()` delegates to the engine over its own `buffer()` and passes the light builtin table to `compile`. The engine is projectMM-agnostic; the binding is the only coupled layer.
 

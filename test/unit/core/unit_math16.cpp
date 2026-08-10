@@ -425,3 +425,27 @@ TEST_CASE("atan16 handles the extremes of its input range") {
     CHECK(atan16(INT32_MAX, INT32_MAX) == 8192);     // and the opposite diagonal
     CHECK(atan16(0, 0) == 0);                        // the centre has no direction
 }
+
+// The 8-bit waveforms cap at 255, which quantises coarsely across the fixtures this drives — a
+// 128x128 wall indexed through a 0..255 ramp moves in steps, not smoothly. These are the same
+// textbook shapes at full range, so a position scales to any axis length without rescaling.
+TEST_CASE("a triangle wave rises to full scale and falls back") {
+    CHECK(mm::triwave16(0) == 0);
+    CHECK(mm::triwave16(32767) == 65534);       // just short of the peak, on the way up
+    CHECK(mm::triwave16(65535) == 0);           // back to the start
+    // Monotone up to the midpoint, monotone down after it — the fold that makes it a triangle.
+    CHECK(mm::triwave16(8192) < mm::triwave16(16384));
+    CHECK(mm::triwave16(49152) < mm::triwave16(40960));
+}
+
+TEST_CASE("a beat completes one full cycle per beat, at any tempo") {
+    // 60 BPM = one cycle per second: the ramp climbs across the second and restarts.
+    CHECK(mm::beat16(60, 0) == 0);
+    CHECK(mm::beat16(60, 500) > 32000);         // half way through the cycle, half way up
+    CHECK(mm::beat16(60, 500) < 33600);
+    CHECK(mm::beat16(60, 1000) == 0);           // one second later, back to the start
+    // Twice the tempo reaches the same point in half the time.
+    CHECK(mm::beat16(120, 250) == mm::beat16(60, 500));
+    // A zero tempo is a still frame rather than a divide-by-zero.
+    CHECK(mm::beat16(0, 1234) == 0);
+}

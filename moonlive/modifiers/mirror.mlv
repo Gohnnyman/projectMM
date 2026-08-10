@@ -1,0 +1,2 @@
+// Mirror along x. Reflecting around `width` (not a fixed 255) keeps every light in the grid.
+setXYZ(0, width - 1 - x, y, z);

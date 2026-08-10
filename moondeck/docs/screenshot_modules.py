@@ -84,7 +84,7 @@ def asset_dir_for(type_name: str) -> Path:
         return ASSETS / "light" / "layouts"
     if type_name.endswith("Driver"):
         return ASSETS / "light" / "drivers"
-    if type_name in ("Layouts", "Layers", "Drivers"):
+    if type_name in ("Layouts", "Effects", "Drivers"):
         return ASSETS / "light"
     return ASSETS / "core"   # SystemModule, FilesystemModule, DevicesModule, … and the rest
 
@@ -123,7 +123,7 @@ MODULES = [
 ]
 
 # Container types that exist in the pipeline but are not added via REST
-CONTAINERS = ["Layouts", "Layers", "Drivers"]
+CONTAINERS = ["Layouts", "Effects", "Drivers"]
 
 # Core modules: always present in the pipeline, never added/deleted via REST.
 # Each entry: type_name — the module's type string as reported by /api/types.
@@ -415,7 +415,7 @@ def find_parent_ids(host: str) -> tuple[dict[str, str], dict[str, str]]:
 
     parents maps role → module name to use as parent_id when adding a child.
     nav_roots maps role → top-level nav sidebar name (what to click).
-    Layer is nested inside Layers, so its nav root is "Layers" not "Layer".
+    Layer is nested inside Effects, so its nav root is "Effects" not "Layer".
     """
     r = _get(f"http://{host}/api/state", timeout=5)
     if not r.ok:
@@ -448,7 +448,7 @@ def find_parent_ids(host: str) -> tuple[dict[str, str], dict[str, str]]:
 def find_container_nav_names(host: str) -> dict[str, str]:
     """Return a map of container type → module name for top-level containers.
 
-    Used to screenshot Layouts, Layers, Drivers cards directly.
+    Used to screenshot Layouts, Effects, Drivers cards directly.
     """
     r = _get(f"http://{host}/api/state", timeout=5)
     if not r.ok:
@@ -539,7 +539,7 @@ def screenshot_module(page: Page, host: str, module_id: str,
 
 def screenshot_container(page: Page, host: str, container_name: str,
                          out_path: Path) -> bool:
-    """Screenshot a top-level container card (Layouts, Layers, Drivers)."""
+    """Screenshot a top-level container card (Layouts, Effects, Drivers)."""
     _load_page(page, host)
     _click_nav(page, container_name)
     return _screenshot_card(page, container_name, out_path)
@@ -772,7 +772,7 @@ def main() -> int:
                 if filter_allows:
                     if not overview_path.exists() or args.force:
                         print("  ui_overview …", end=" ", flush=True)
-                        # Use Layers nav to show a populated view
+                        # Use Effects nav to show a populated view
                         nav = nav_roots.get("Layer", "")
                         ok = screenshot_fullpage(page, args.host, overview_path, nav_root=nav)
                         print(f"saved → {overview_path.relative_to(ROOT)}" if ok else "failed")
@@ -812,7 +812,7 @@ def main() -> int:
             if args.extras_only:
                 raise _ExtrasOnlyDone()
 
-            # --- Container cards (Layouts, Layers, Drivers) ---
+            # --- Container cards (Layouts, Effects, Drivers) ---
             for container_type in CONTAINERS:
                 if filt and filt not in container_type.lower():
                     continue

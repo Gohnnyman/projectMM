@@ -9,7 +9,7 @@
     "RmtLedDriver",
     "Layouts",
     "GridLayout",
-    "Layers",
+    "Effects",
     "Layer",
     "NoiseEffect",
     "Drivers",
@@ -26,8 +26,8 @@
     {
       "name": "fix-layers",
       "op": "add_module",
-      "id": "Layers",
-      "type": "Layers",
+      "id": "Effects",
+      "type": "Effects",
       "props": {
         "layouts": "Layouts"
       }
@@ -38,7 +38,7 @@
       "id": "Drivers",
       "type": "Drivers",
       "props": {
-        "layers": "Layers"
+        "effects": "Effects"
       }
     }
   ],
@@ -46,7 +46,7 @@
     {
       "name": "clear-layers",
       "op": "clear_children",
-      "id": "Layers"
+      "id": "Effects"
     },
     {
       "name": "clear-drivers",
@@ -70,7 +70,7 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "parent_id": "Layers",
+      "parent_id": "Effects",
       "props": {
         "channelsPerLight": 3
       }
@@ -1155,7 +1155,7 @@
         "desktop-macos": {
           "tick_us": [
             4,
-            22
+            35
           ],
           "free_heap": [
             0,
@@ -1167,7 +1167,7 @@
           ],
           "at": [
             "2026-07-26",
-            "2026-07-31"
+            "2026-08-09"
           ]
         }
       }
@@ -1233,7 +1233,7 @@
         "desktop-macos": {
           "tick_us": [
             17,
-            94
+            206
           ],
           "free_heap": [
             0,
@@ -1245,7 +1245,7 @@
           ],
           "at": [
             "2026-07-26",
-            "2026-07-31"
+            "2026-08-09"
           ]
         }
       }

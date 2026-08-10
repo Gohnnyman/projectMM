@@ -24,12 +24,33 @@ Reg reg(VReg v) { return static_cast<Reg>(v); }
 
 size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     // Reserve three scratch regs above the program's vregs for the inline ops' temps.
-    if (!out || cap == 0 || ir.vregsUsed + 3 > kRegCount) return 0;
-    const Reg sOff  = static_cast<Reg>(ir.vregsUsed);        // base byte offset of the current light
-    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 1);    // loop counter
-    const Reg sAddr = static_cast<Reg>(ir.vregsUsed + 2);    // per-channel address (off, off+1, off+2)
+    // Reserve scratch only for the inline ops this program actually contains. Unlike Xtensa and
+    // RISC-V, THIS backend's StoreElem needs one scratch too (sAddr — it does not fold the address
+    // into the index vreg), so the two cases differ: FillElems needs three, StoreElem one, neither
+    // needs any. Reserving the maximum unconditionally cost a register every script paid for.
+    const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 3
+                          : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
+    if (!out || cap == 0 || ir.vregsUsed + scratch > kRegCount) return 0;
+    // sAddr FIRST, because it is the one StoreElem also uses: a store-only program reserves a single
+    // scratch, so the shared one has to be the lowest index or it would name a register outside the
+    // reservation. sOff/sCtr are FillElems-only and sit above it.
+    const Reg sAddr = static_cast<Reg>(ir.vregsUsed);        // per-channel address (off, off+1, off+2)
+    const Reg sOff  = static_cast<Reg>(ir.vregsUsed + 1);    // base byte offset of the current light
+    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 2);    // loop counter
 
     HostAssembler a;
+
+    // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
+    // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
+    // FillElems' loop) then get nothing when they ask for their own — which broke every program
+    // that contains no loop at all. Lazy allocation costs one lookup and leaves the table for the
+    // labels a program actually has.
+    Label labels[kIrLabels];
+    bool  labelMade[kIrLabels] = {};
+    auto  labelFor = [&](int32_t id) -> Label {
+        if (!labelMade[id]) { labels[id] = a.newLabel(); labelMade[id] = true; }
+        return labels[id];
+    };
 
     for (uint8_t i = 0; i < ir.count; i++) {
         const IrInst& op = ir.ops[i];
@@ -38,10 +59,26 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Add:    a.addReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::AddImm: a.addImm(reg(op.dst), reg(op.a), op.imm); break;
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
+            case IrOp::Mov:    a.addImm(reg(op.dst), reg(op.a), 0); break;   // dst = a + 0
+            case IrOp::Label:
+                if (op.imm >= 0 && op.imm < kIrLabels) a.bind(labelFor(op.imm));
+                break;
+            case IrOp::BranchGe:
+                if (op.imm >= 0 && op.imm < kIrLabels) {
+                    a.cmp(reg(op.a), reg(op.b));
+                    a.branchIf(Cond::Hs, labelFor(op.imm));     // unsigned >=
+                }
+                break;
+            case IrOp::BranchNe:
+                if (op.imm >= 0 && op.imm < kIrLabels) {
+                    a.cmp(reg(op.a), reg(op.b));
+                    a.branchIf(Cond::Ne, labelFor(op.imm));
+                }
+                break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), reg(kArg4), op.imm); break;  // dst = ctrls[imm]
             case IrOp::Call:
                 if (!op.callFn) return 0;
-                a.call(reg(op.dst), reg(op.a), reinterpret_cast<const void*>(op.callFn));
+                a.call(reg(op.dst), reg(op.a), reg(op.b), reg(op.c), reinterpret_cast<const void*>(op.callFn));
                 break;
             case IrOp::Inline:
                 switch (op.inlineOp) {

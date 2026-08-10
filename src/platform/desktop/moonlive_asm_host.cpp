@@ -16,8 +16,19 @@ namespace mm::moonlive {
 // the control-values arena pointer, kArg4). R5..R13 = caller-saved scratch x9..x14 then x5..x7.
 // Index math uses the 64-bit views (xN) for addresses, 32-bit (wN) for counters/colors — same
 // register number, so one map suffices. x15 is the call() address/immediate scratch (not a vreg).
-static const uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
+static constexpr uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
 static uint8_t mr(Reg r) { return kArm64Reg[r]; }
+
+// A scratch register that is ALSO a vreg silently corrupts values — see the RISC-V backend, where
+// kScratchFn aliased vreg R12 and every call returned a stale value. Checked here so the map can
+// never grow over a scratch.
+constexpr bool armScratchOutsideMap() {
+    constexpr uint8_t scratch[] = {15, 16, 17};
+    for (uint8_t r : kArm64Reg) for (uint8_t s : scratch) if (r == s) return false;
+    return true;
+}
+static_assert(armScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
+
 
 Label HostAssembler::newLabel() {
     if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
@@ -45,8 +56,21 @@ void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 
-void HostAssembler::movImm(Reg d, int32_t imm) {           // movz wD, #imm16
-    emit32(0x52800000u | ((uint32_t(imm) & 0xffff) << 5) | mr(d));
+void HostAssembler::movImm(Reg d, int32_t imm) {
+    // movz builds a ZERO-extended 16-bit constant, so a negative immediate would land as its
+    // unsigned counterpart (-1 as 65535). The compiler emits Const(-1) to express subtraction —
+    // `a - b` is `a + (b * -1)` — and a wrapped -1 makes every subtraction correct only modulo 256.
+    // In a stored colour byte that is invisible; in a bounds-guarded index it silently drops the
+    // light, and in a host-call argument it is nonsense. movn is the negative form: it writes
+    // ~imm16, so movn #(~imm) materialises the true negative value.
+    if (imm < 0) {
+        // movn writes ~imm16, so it reaches -65536..-1 exactly. Below that the complement no longer
+        // fits the 16-bit field and the constant would come out wrong in silence.
+        if (imm < -65536) { overflow_ = true; return; }
+        emit32(0x12800000u | ((uint32_t(~imm) & 0xffff) << 5) | mr(d));   // movn wD, #~imm16
+        return;
+    }
+    emit32(0x52800000u | ((uint32_t(imm) & 0xffff) << 5) | mr(d));        // movz wD, #imm16
 }
 void HostAssembler::addImm(Reg d, Reg a, int32_t imm) {    // add xD, xA, #imm12 (64-bit)
     emit32(0x91000000u | ((uint32_t(imm) & 0xfff) << 10) | (mr(a) << 5) | mr(d));
@@ -77,26 +101,40 @@ void HostAssembler::branchIfZero(Reg a, Label l) {         // cbz wA, l  (offset
     emit32(0x34000000u | mr(a));
 }
 void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset patched)
-    uint8_t cond = (c == Cond::Lo) ? 0x3 : 0x2;            // LO=cc(3), HS=cs(2)
+    // arm64 condition codes: NE=1, HS/CS=2, LO/CC=3.
+    const uint8_t cond = (c == Cond::Lo) ? 0x3 : (c == Cond::Ne ? 0x1 : 0x2);
     addFixup(len_, l, static_cast<uint8_t>(1u | (cond << 4)));
     emit32(0x54000000u | cond);
 }
-void HostAssembler::call(Reg d, Reg a, const void* fn) {
+void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Preserve EVERY register that may hold a live value across the call: the host args
-    // (x0/x1/x2), the link register x30 (blr overwrites it; our function is a leaf), and the
+    // (x0/x1/x2/x3), the link register x30 (blr overwrites it; our function is a leaf), and the
     // whole vreg scratch pool (x4-x7, x9-x14) — because a value computed before the call (e.g.
     // a first random16's result) can be live across a SECOND call. Saving the full pool makes
     // the live-vreg-across-call contract hold for any expression; it's a cold path (once per
-    // call, not per pixel). 112-byte frame (7 pairs) keeps sp 16-aligned.
-    emit32(0xa9b907e0u);   // stp x0, x1,  [sp, #-112]!
+    // call, not per pixel). 128-byte frame (8 pairs) keeps sp 16-aligned.
+    //
+    // x3 is kArg3, the elapsed time — which scripts now read as the system variable `t`, so a
+    // built-in clobbering it (legal for any callee under the AAPCS) would be a silent wrong-value
+    // bug in any animated script that calls anything. Saved before it could become one. It pairs
+    // with x8, which this backend never uses, because stp works on pairs.
+    emit32(0xa9b807e0u);   // stp x0, x1,  [sp, #-128]!
     emit32(0xa9017be2u);   // stp x2, x30, [sp, #16]
+    emit32(0xa90723e3u);   // stp x3, x8,  [sp, #112]
     emit32(0xa90217e4u);   // stp x4, x5,  [sp, #32]
     emit32(0xa9031fe6u);   // stp x6, x7,  [sp, #48]
     emit32(0xa9042be9u);   // stp x9, x10, [sp, #64]
     emit32(0xa90533ebu);   // stp x11,x12, [sp, #80]
     emit32(0xa9063bedu);   // stp x13,x14, [sp, #96]
-    // arg into x0 (the built-in's first parameter)
-    emit32(0xaa0003e0u | (uint32_t(mr(a)) << 16));        // mov x0, x<arg>
+    // args into x0/x1/x2 (the built-in's three parameters). Order matters: x0 is written first,
+    // and a later source register could BE x0 — so read the sources before any of them is clobbered
+    // by moving through a scratch that is outside the vreg pool.
+    emit32(0xaa0003efu | (uint32_t(mr(a)) << 16));        // mov x15, x<a>
+    emit32(0xaa0003f0u | (uint32_t(mr(b)) << 16));        // mov x16, x<b>
+    emit32(0xaa0003f1u | (uint32_t(mr(c)) << 16));        // mov x17, x<c>
+    emit32(0xaa0f03e0u);                                   // mov x0, x15
+    emit32(0xaa1003e1u);                                   // mov x1, x16
+    emit32(0xaa1103e2u);                                   // mov x2, x17
     // materialise the 64-bit absolute fn address into x15 (movz + 3×movk)
     uint64_t addr = reinterpret_cast<uint64_t>(fn);
     emit32(0xd2800000u | ((uint32_t(addr) & 0xffff) << 5) | 15);                 // movz x15, #b0
@@ -108,13 +146,14 @@ void HostAssembler::call(Reg d, Reg a, const void* fn) {
     // dst register are both in the saved set the restore overwrites.
     emit32(0xaa0003efu);   // mov x15, x0   (result → x15)
     // restore the full saved set (reverse order)
+    emit32(0xa94723e3u);   // ldp x3, x8,  [sp, #112]
     emit32(0xa9463bedu);   // ldp x13,x14, [sp, #96]
     emit32(0xa94533ebu);   // ldp x11,x12, [sp, #80]
     emit32(0xa9442be9u);   // ldp x9, x10, [sp, #64]
     emit32(0xa9431fe6u);   // ldp x6, x7,  [sp, #48]
     emit32(0xa94217e4u);   // ldp x4, x5,  [sp, #32]
     emit32(0xa9417be2u);   // ldp x2, x30, [sp, #16]
-    emit32(0xa8c707e0u);   // ldp x0, x1,  [sp], #112
+    emit32(0xa8c807e0u);   // ldp x0, x1,  [sp], #128
     // now move the stashed result into dst (dst is restored/valid; x15 holds the result)
     emit32(0xaa0f03e0u | uint32_t(mr(d)));   // mov x<dst>, x15
 }

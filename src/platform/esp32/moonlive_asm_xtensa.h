@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
+
 #include <cstdint>
 #include <cstddef>
 
@@ -39,11 +41,12 @@ public:
     void branchIfZero(Reg a, Label l);   // beqz aA, l  (nLights==0 guard)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu aA, aB, l  (Bounds: skip if a>=b)
     void branchNe(Reg a, Reg b, Label l);     // bne aA, aB, l   (loop test)
-    void call(Reg d, Reg a, const void* fn);  // windowed call8 to a host built-in
+    void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // windowed call8 to a host built-in
     void epilogue();                     // retw.n
 
 private:
-    static constexpr size_t kCap = 768;
+    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
+    static constexpr size_t kCap = kCodeCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 

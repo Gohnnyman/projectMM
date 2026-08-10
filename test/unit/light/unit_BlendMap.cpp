@@ -347,3 +347,36 @@ TEST_CASE("blendMap no-LUT additive clamps at 255") {
     mm::blendMap(src, dst, lut, 3, mm::BlendOp::Additive, 255, /*clearFirst=*/false);
     CHECK(dst.data()[0] == 255); CHECK(dst.data()[1] == 255); CHECK(dst.data()[2] == 255);
 }
+
+// A mapping outliving the buffer it was built for must not write past that buffer.
+//
+// This is the resize window: prepareTree rebuilds the layer's mapping and the driver's output buffer
+// in separate steps, and a render tick landing between them sees the NEW mapping's physical indices
+// with the OLD, smaller buffer. Unbounded, the write ran off the end and corrupted the heap — the
+// crash then surfaced later inside an unrelated allocation, which is why resizing a scripted layout
+// looked intermittently fatal rather than pointing at the real writer.
+//
+// A mapped light the destination cannot hold is skipped. The frame is briefly wrong (the window is
+// an ordering problem, not fixed here); it cannot corrupt memory, which is the property that counts.
+TEST_CASE("a mapping larger than its destination writes only what the buffer holds") {
+    mm::Buffer src, dst;
+    src.allocate(8, 3);        // eight logical lights
+    dst.allocate(4, 3);        // a destination sized for the count BEFORE the resize
+    for (size_t i = 0; i < src.bytes(); i++) src.data()[i] = 0xAB;
+
+    // A LUT that maps light i to physical i, for more lights than dst holds.
+    mm::MappingLUT lut;
+    REQUIRE(lut.build(8, 8));
+    for (mm::nrOfLightsType i = 0; i < 8; i++) {
+        const mm::nrOfLightsType phys = i;
+        lut.setMapping(i, &phys, 1);
+    }
+
+    mm::blendMap(src, dst, lut, 3);
+
+    // Everything the destination does hold was written; nothing beyond it was touched.
+    for (size_t i = 0; i < dst.bytes(); i++) {
+        INFO("byte " << i);
+        CHECK(dst.data()[i] == 0xAB);
+    }
+}

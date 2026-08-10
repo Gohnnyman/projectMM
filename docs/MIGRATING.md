@@ -20,6 +20,43 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### MoonLive: a script can no longer declare a name the engine supplies (2026-08-10)
+
+`t` (elapsed milliseconds), `width`/`height`/`depth` (the logical grid) and `x`/`y`/`z` (the light a modifier is transforming) are now **system variables** the engine supplies, so a script cannot declare one. Previously each binding faked them by prepending hidden declarations to the script, which meant an effect could declare its own `width` and quietly disagree with the layer it was drawing into.
+
+Each module supplies only the names it writes, so what is reserved depends on the module: a layout gets `t` alone, an effect adds the grid, a modifier adds the coordinate. **`x` and `y` remain usable as loop counters in a layout or an effect.**
+
+**Action: *update a file*, for scripted layouts only.**
+
+A **layout** is the one script that legitimately used those names for its own controls: it *defines* where lights are, so it has no grid to be handed. A persisted layout script declaring `uint8_t width = 16;` now fails to compile with `name is a system variable`, and the layout places no lights — the fixture is **dark** until the script is edited.
+
+| What | Why | What to do |
+|---|---|---|
+| A scripted layout declaring `width`/`height` | The name is what the layout is defining, so the declaration is a compile error and no lights are placed | Edit the script's `source` control, renaming its own controls (the shipped `grid.mlv` uses `cols`/`rows`) |
+| A scripted **modifier** using `x`, `y` or `z` as a loop variable | A modifier IS handed a coordinate under those names, so they cannot also be counters there | Rename the loop variable to something the modifier is not handed (`i`, `n`) |
+
+Effects and modifiers need no change: they were already being handed these values, just through a preamble instead of by name. The error names the clash, and the module shows it on its card, so a broken script says why rather than failing silently.
+
+### The `Layers` container is renamed to `Effects` (2026-08-08)
+
+The three top-level light containers are now **Layouts, Effects, Drivers** — L.E.D. The old name sat one character from its own child (`Layers` holding `Layer`s) and read as a near-twin of `Layouts`, which is the pair a newcomer actually has to tell apart. The tree is unchanged in shape: `Effects` → `Layer`s → effects and modifiers.
+
+**Action: *re-add a module* and *re-save presets*.**
+
+The type name is the persisted filename and the preset capture key, so two things do not survive the update:
+
+| What | Why | What to do |
+|---|---|---|
+| The saved light tree | The device looks for `/.config/Effects.json` and the old file is `Layers.json`, so the light tree boots empty | Re-add your Layer, effect and modifiers, then let it save |
+| Presets that capture the look | A preset file records `"captures": "Layers"`, a name no module now answers to | Re-save each preset once the tree is rebuilt |
+
+A preset also records the ROLE it covers, and that role is now named after the container rather than after a module inside it: `"layer"` becomes `"effects"`. A preset carrying the old role still loads, but shows no tint on its pad until it is re-saved — the UI has no `layer` role to colour it by.
+
+Renaming the file on the device works if you would rather not rebuild by hand: `Layers.json` → `Effects.json`, and inside each `/.config/presets/*.json` both `"Layers"` → `"Effects"` (the captured container) and `"layer"` → `"effects"` (the role, which is what tints the pad). Nothing else in either file changes.
+
+The child `Layer` keeps its name, as does everything under it.
+
+
 ### The `peripheral` options are renamed to name the peripheral, not the bus protocol (2026-07-30)
 
 The `peripheral` dropdown no longer says `i80` / `MoonI80`. "i80" is the Intel 8080 bus shape `esp_lcd` speaks — it is not a peripheral any ESP32 datasheet lists, and it matched nothing a user could look up: on the classic ESP32 that backend **is the I2S peripheral**, on the S3/P4/S31 it is the **LCD** peripheral. The new labels name the silicon block plus who drives it, which is the actual choice being made.

@@ -12,7 +12,8 @@ namespace {
 // `ControlAnno` is a captured `// @control min..max` comment (a control's UI range). A plain
 // `//` line comment is skipped like whitespace; only the @control form becomes a token, carrying
 // its min/max in annoMin/annoMax. `Assign` is `=` (a control declaration's initializer).
-enum class Tok { Ident, Number, Assign, LParen, RParen, Comma, Semicolon, ControlAnno, End, Error };
+enum class Tok { Ident, Number, Assign, LParen, RParen, LBrace, RBrace, Comma, Semicolon,
+                 ControlAnno, Plus, Minus, Star, Less, End, Error };
 
 struct Lexer {
     const char* p;
@@ -76,6 +77,17 @@ struct Lexer {
         if (c == ')') { p++; kind = Tok::RParen; return; }
         if (c == ',') { p++; kind = Tok::Comma; return; }
         if (c == ';') { p++; kind = Tok::Semicolon; return; }
+        if (c == '+') { p++; kind = Tok::Plus;    return; }
+        if (c == '-') { p++; kind = Tok::Minus;   return; }
+        if (c == '*') { p++; kind = Tok::Star;    return; }
+        if (c == '{') { p++; kind = Tok::LBrace;  return; }
+        if (c == '}') { p++; kind = Tok::RBrace;  return; }
+        if (c == '<') { p++; kind = Tok::Less;    return; }
+        // '/' only reaches here when it is NOT the `//` a comment starts with (handled above).
+        // '/' and '%' are deliberately NOT tokens yet. No ISA here has a cheap integer divide, so
+        // both would lower to a host call — which the light domain already ships as `mod(a, b)` and
+        // `turn(n)`, so the capability exists under a name instead of an operator. A script using
+        // the character gets "unexpected character", which is the honest answer. Backlogged.
         if (isDigit(c)) {
             long v = 0; readNumber(v);
             number = v; kind = Tok::Number; return;
@@ -98,10 +110,19 @@ struct Lexer {
 struct Parser {
     Lexer&             lex;
     const BuiltinTable& table;
+    const SysVarTable&  sysvars;
     IrProgram&         ir;
     VReg               nextTemp = kFirstTemp;   // high-water mark — also IrProgram.vregsUsed
     VReg               freeStack[kMaxVRegs] = {};   // recycled temps (LIFO), so a dead vreg is reused
     uint8_t            freeCount = 0;
+    // Script-local variables — today only a `for` loop's counter. Distinct from a declared control
+    // (a control is a UI value the script READS; a local is one the script WRITES) and from a temp
+    // (a temp is write-once and recycled). Held in a vreg for the loop's lifetime.
+    struct Local { const char* name; size_t nameLen; VReg reg; };
+    Local              locals[4] = {};
+    uint8_t            localCount = 0;
+    uint8_t            nextLabel = 0;          // IR label ids, handed out in source order
+
     DeclaredControl    controls[kMaxCtrls] = {};  // controls the script declared (decl lines)
     uint8_t            controlCount = 0;
     const char*        error = "";
@@ -132,7 +153,13 @@ struct Parser {
         fail("script too complex (out of registers)");
         return kFirstTemp;
     }
-    void freeTemp(VReg v) { if (v >= kFirstTemp && freeCount < kMaxVRegs) freeStack[freeCount++] = v; }
+    void freeTemp(VReg v) {
+        // A loop variable's register is live for the whole loop, and parseExpr hands it back
+        // directly (see parsePrimary), so a consumer freeing "its" operand would recycle a vreg the
+        // loop still reads and the counter would be overwritten mid-iteration.
+        for (uint8_t i = 0; i < localCount; i++) if (locals[i].reg == v) return;
+        if (v >= kFirstTemp && freeCount < kMaxVRegs) freeStack[freeCount++] = v;
+    }
 
     // Append an IR op, failing the compile if the program is full or names an out-of-budget
     // vreg (IrProgram::push validates both). Centralises the check so no call site forgets it.
@@ -144,11 +171,73 @@ struct Parser {
         return true;
     }
 
-    // expr := number | ident | call.  Returns the vreg holding the value (or 0 on failure). A bare
-    // ident that names a declared control reads its live value (a LoadCtrl of its arena offset); an
-    // ident followed by `(` is a call.
+    // expr    := term { ("+" | "-") term }
+    // term    := primary { "*" primary }
+    // primary := number | ident | call | "(" expr ")"
+    //
+    // Precedence climbing, the textbook shape: each level consumes the tighter-binding one below
+    // it, so `2 + 3 * 4` is 14 rather than 20 without any special case. Every operator lowers to IR
+    // the three backends ALREADY have (Const/Add/Mul) — a - b is emitted as a + (b * -1), because
+    // no ISA here has a subtract and Xtensa's add-immediate encodes only 1..15, so negating the
+    // immediate would silently produce a wrong constant.
     VReg parseExpr() {
+        VReg lhs = parseTerm();
+        while (!failed && (lex.kind == Tok::Plus || lex.kind == Tok::Minus)) {
+            const bool negate = (lex.kind == Tok::Minus);
+            lex.advance();
+            VReg rhs = parseTerm();
+            if (failed) return 0;
+            if (negate) {
+                VReg m = alloc();
+                emit({IrOp::Const, m, 0,0,0,0, -1, nullptr, {}});
+                VReg n = alloc();
+                emit({IrOp::Mul, n, rhs, m, 0,0, 0, nullptr, {}});
+                freeTemp(m); freeTemp(rhs);
+                rhs = n;
+            }
+            VReg dst = alloc();
+            emit({IrOp::Add, dst, lhs, rhs, 0,0, 0, nullptr, {}});
+            freeTemp(lhs); freeTemp(rhs);
+            lhs = dst;
+        }
+        return lhs;
+    }
+
+    VReg parseTerm() {
+        VReg lhs = parsePrimary();
+        while (!failed && lex.kind == Tok::Star) {
+            lex.advance();
+            VReg rhs = parsePrimary();
+            if (failed) return 0;
+            VReg dst = alloc();
+            emit({IrOp::Mul, dst, lhs, rhs, 0,0, 0, nullptr, {}});
+            freeTemp(lhs); freeTemp(rhs);
+            lhs = dst;
+        }
+        return lhs;
+    }
+
+    // A bare ident that names a declared control reads its live value (a LoadCtrl of its arena
+    // offset); an ident followed by `(` is a call.
+    VReg parsePrimary() {
         if (failed) return 0;
+        if (lex.kind == Tok::LParen) {                   // grouping
+            lex.advance();
+            VReg v = parseExpr();
+            if (!expect(Tok::RParen, "expected ')'")) return 0;
+            return v;
+        }
+        if (lex.kind == Tok::Minus) {                    // unary minus: 0 - v, as (v * -1)
+            lex.advance();
+            VReg v = parsePrimary();
+            if (failed) return 0;
+            VReg m = alloc();
+            emit({IrOp::Const, m, 0,0,0,0, -1, nullptr, {}});
+            VReg dst = alloc();
+            emit({IrOp::Mul, dst, v, m, 0,0, 0, nullptr, {}});
+            freeTemp(m); freeTemp(v);
+            return dst;
+        }
         if (lex.kind == Tok::Number) {
             if (lex.number < 0 || lex.number > 65535) { fail("number out of range (0..65535)"); return 0; }
             VReg v = alloc();
@@ -157,6 +246,29 @@ struct Parser {
             return v;
         }
         if (lex.kind == Tok::Ident) {
+            // A system variable the host defines: `t` (elapsed ms, an argument register) or a
+            // per-frame value the binding writes (`width`/`height`/`depth`, arena slots). Resolved
+            // BEFORE locals and controls so the name means one thing in every script; the
+            // declaration paths reject the name, so nothing can shadow it.
+            if (const SysVar* sv = sysvars.find(lex.identBeg, lex.identLen)) {
+                lex.advance();
+                if (sv->kind == SysVarKind::Arg) return sv->where;   // free: already in a register
+                VReg v = alloc();
+                emit({IrOp::LoadCtrl, v, 0,0,0,0, sv->where, nullptr, {}});
+                return v;
+            }
+            for (uint8_t li = 0; li < localCount; li++) {
+                if (locals[li].nameLen == lex.identLen &&
+                    std::strncmp(locals[li].name, lex.identBeg, lex.identLen) == 0) {
+                    // Return the variable's OWN register rather than copying it into a temp. A copy
+                    // per read burns a vreg each time, and the budget is small — the lowerer needs
+                    // three scratch registers above the program's high-water mark, so a script has
+                    // about six temps in total. Callers must therefore not freeTemp() a local; the
+                    // free-list only ever holds values alloc() handed out.
+                    lex.advance();
+                    return locals[li].reg;
+                }
+            }
             int ci = findControl(lex.identBeg, lex.identLen);
             if (ci >= 0) {                                // a declared control read
                 VReg v = alloc();
@@ -200,7 +312,7 @@ struct Parser {
         // The IR Call op carries a single argument vreg, so a Call-kind builtin must be unary.
         // (Today random16 is the only one.) Reject a multi-arg Call up front rather than silently
         // dropping args[1..]; a future N-ary helper needs the IR Call contract widened first.
-        if (fn->kind == BuiltinKind::Call && fn->argc > 1) { fail("multi-argument calls are not supported"); return; }
+        if (fn->kind == BuiltinKind::Call && fn->argc > 3) { fail("a call takes at most three arguments"); return; }
 
         if (resultOut) {
             if (fn->kind != BuiltinKind::Call || !fn->returns) { fail("this function does not return a value"); return; }
@@ -210,7 +322,7 @@ struct Parser {
             // safe even when result == arg.
             for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
             VReg r = alloc();
-            emit({IrOp::Call, r, args[0], 0,0,0, 0, fn->fn, {}});
+            emit({IrOp::Call, r, args[0], args[1], args[2], 0, 0, fn->fn, {}});
             *resultOut = r;
         } else {
             // A statement call. Call kinds with a result are also allowed as statements (result
@@ -218,7 +330,7 @@ struct Parser {
             if (fn->kind == BuiltinKind::Call) {
                 for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
                 VReg r = alloc();
-                emit({IrOp::Call, r, args[0], 0,0,0, 0, fn->fn, {}});
+                emit({IrOp::Call, r, args[0], args[1], args[2], 0, 0, fn->fn, {}});
                 freeTemp(r);
             } else {
                 // Inline op: hand the operand vregs to the backend via an Inline IR op. The
@@ -235,6 +347,7 @@ struct Parser {
         if (lex.kind != Tok::Ident) { fail("expected a control name after the type"); return; }
         const char* name = lex.identBeg; size_t nameLen = lex.identLen;
         if (nameLen >= kMaxControlName) { fail("control name too long"); return; }   // no silent truncation downstream
+        if (sysvars.find(name, nameLen)) { fail("name is a system variable"); return; }
         if (findControl(name, nameLen) >= 0) { fail("duplicate control name"); return; }
         // A control name must not shadow a builtin: a declared `random16` would make `random16(…)`
         // ambiguous (control read vs call). Reject it at the source so the resolution never collides.
@@ -274,16 +387,164 @@ struct Parser {
 
     // program := { decl } { stmt }.  Declarations (control vars) come first, then one-or-more
     // call statements. (Multi-statement now: a script has decl lines AND a statement line.)
+    /// stmt := call ";" | forStmt
+    /// forStmt := "for" "(" ident "=" expr ";" ident "<" expr ";" ident "=" expr ")" "{" {stmt} "}"
+    ///
+    /// C-style deliberately: it is the form a script author already knows, and the third clause is
+    /// what a serpentine layout needs (`i = i + 2`, or counting down) without inventing more syntax.
+    ///
+    /// Lowered as a BOTTOM-TESTED loop, which is the shape FillElems has always emitted by hand and
+    /// so is proven on all three ISAs:
+    ///
+    ///     i = init
+    ///     BranchGe i, limit -> done      ; an empty range runs the body zero times
+    ///   top:
+    ///     body
+    ///     i = step
+    ///     BranchNe i, limit -> top       ; back edge
+    ///   done:
+    ///
+    /// The back edge tests NOT-EQUAL rather than less-than because no ISA here has branch-if-less;
+    /// that is exact for the `i = i + 1` case and terminates for any step that eventually hits the
+    /// limit. A step that overshoots (`i = i + 3` over a limit it skips past) would not — so the
+    /// limit is re-tested with BranchGe at the top of each iteration instead. See below.
+    bool parseFor() {
+        lex.advance();                                     // consume `for`
+        if (!expect(Tok::LParen, "expected '(' after for")) return false;
+
+        // --- init: ident = expr ---
+        if (lex.kind != Tok::Ident) { fail("expected a loop variable"); return false; }
+        if (localCount >= 4) { fail("too many nested loops"); return false; }
+        const char* varName = lex.identBeg;
+        const size_t varLen = lex.identLen;
+        if (sysvars.find(varName, varLen)) { fail("name is a system variable"); return false; }
+        // A nested loop reusing the enclosing loop's name would bind a SECOND register to that name:
+        // the inner step then writes the register the outer back edge tests, and the emitted program
+        // never terminates — a hang on the render task from a script a user can type. Refused for the
+        // same reason a duplicate control name is.
+        for (uint8_t li = 0; li < localCount; li++)
+            if (locals[li].nameLen == varLen &&
+                std::strncmp(locals[li].name, varName, varLen) == 0) {
+                fail("loop variable already in use"); return false;
+            }
+        lex.advance();
+        if (!expect(Tok::Assign, "expected '=' in the for's first clause")) return false;
+        VReg init = parseExpr();
+        if (failed) return false;
+        VReg counter = alloc();
+        emit({IrOp::Mov, counter, init, 0,0,0, 0, nullptr, {}});
+        freeTemp(init);
+        const uint8_t myLocal = localCount;
+        locals[localCount++] = {varName, varLen, counter};
+        if (!expect(Tok::Semicolon, "expected ';' after the for's first clause")) return false;
+
+        // --- condition: ident < expr  (the only comparison the language has) ---
+        // The name must be the loop variable: the emitted code tests `counter` whatever is written
+        // here, so a different name compiles clean and runs as if it said the right one. That is a
+        // wrong fixture with no diagnostic anywhere — the failure mode hardest to trace back to a
+        // typo. (`for (y…) { for (x = 0; y < cols; x = x + 1) … }` is the realistic version.)
+        if (lex.kind != Tok::Ident) { fail("expected the loop variable in the condition"); return false; }
+        if (lex.identLen != varLen || std::strncmp(lex.identBeg, varName, varLen) != 0) {
+            fail("the condition must test the loop variable"); return false;
+        }
+        lex.advance();
+        if (!expect(Tok::Less, "expected '<' — it is the only comparison a for condition takes")) return false;
+        // Hold the bound in the vreg parseExpr produced rather than copying it into a fresh one.
+        // The copy cost a register for the whole body, and the budget is small: Xtensa maps twelve
+        // registers, five of which are argument slots, so a NESTED loop plus a three-argument call
+        // ran out and the compile was refused on that target while succeeding on the host.
+        VReg limit = parseExpr();
+        if (failed) return false;
+        if (!expect(Tok::Semicolon, "expected ';' after the for's condition")) return false;
+
+        // --- step: ident = expr (parsed now, emitted after the body) ---
+        if (lex.kind != Tok::Ident) { fail("expected the loop variable in the step"); return false; }
+        if (lex.identLen != varLen || std::strncmp(lex.identBeg, varName, varLen) != 0) {
+            fail("the step must advance the loop variable"); return false;   // it advances `counter` regardless
+        }
+        lex.advance();
+        if (!expect(Tok::Assign, "expected '=' in the for's third clause")) return false;
+        const char* stepSrc = lex.tokBeg;                  // re-lexed after the body
+        // Skip the step expression without emitting: scan to the closing ')'.
+        int depth = 0;
+        while (!failed && lex.kind != Tok::End) {
+            // A lexer error stops the scan. Tok::Error is not Tok::End and advance() does not move
+            // past the offending character, so without this the loop spins forever on a script with
+            // a stray character in the step expression — a hang, not a diagnostic.
+            if (lex.kind == Tok::Error) { fail(lex.err); return false; }
+            if (lex.kind == Tok::LParen) depth++;
+            else if (lex.kind == Tok::RParen) { if (depth == 0) break; depth--; }
+            lex.advance();
+        }
+        if (!expect(Tok::RParen, "expected ')' to close the for")) return false;
+        if (!expect(Tok::LBrace, "expected '{' — a for's body is braced")) return false;
+
+        if (nextLabel + 2 > kIrLabels) { fail("too many loops in one script"); return false; }
+        const uint8_t lDone = nextLabel++;
+        const uint8_t lTop  = nextLabel++;
+
+        emit({IrOp::BranchGe, 0, counter, limit, 0,0, lDone, nullptr, {}});   // empty range
+        emit({IrOp::Label,    0, 0,0,0,0,             lTop,  nullptr, {}});
+
+        while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End) {
+            if (!parseStatement()) return false;
+        }
+        if (!expect(Tok::RBrace, "expected '}' to close the for's body")) return false;
+
+        // The step, re-lexed from the source it was skipped over.
+        {
+            Lexer stepLex(stepSrc);
+            Lexer save = lex;
+            lex = stepLex;
+            VReg s = parseExpr();
+            if (failed) return false;
+            // parseExpr stops at the first token it cannot consume, so without this the step
+            // silently ignores whatever follows it — `i = i + 1 garbage` compiled clean. The
+            // skip-scan above already found the real ')', so anything else here is a typo.
+            if (lex.kind != Tok::RParen) {
+                lex = save; fail("unexpected token in the for's step"); return false;
+            }
+            emit({IrOp::Mov, counter, s, 0,0,0, 0, nullptr, {}});
+            freeTemp(s);
+            lex = save;
+        }
+        // Re-test the limit at the top rather than relying on equality alone: a step that jumps
+        // PAST the limit would never make counter == limit, and the loop would run away.
+        emit({IrOp::BranchGe, 0, counter, limit, 0,0, lDone, nullptr, {}});
+        emit({IrOp::BranchNe, 0, counter, limit, 0,0, lTop,  nullptr, {}});
+        emit({IrOp::Label,    0, 0,0,0,0,             lDone, nullptr, {}});
+
+        freeTemp(limit);
+        localCount = myLocal;                              // the loop variable leaves scope
+        // ...and its REGISTER goes back to the pool. Dropping only the name left the vreg allocated
+        // for the rest of the compile, so every `for` a script wrote cost one permanently — two
+        // sequential loops held two counters even though the first was dead. That is what put a
+        // two-loop effect one register over the smallest file (Xtensa has twelve) while each loop
+        // compiled fine alone. Freed only AFTER localCount drops, since freeTemp refuses to recycle
+        // a register any live local still names.
+        freeTemp(counter);
+        return true;
+    }
+
+    /// One statement: a call, or a for.
+    bool parseStatement() {
+        if (lex.kind == Tok::Ident && lex.identLen == 3 &&
+            std::strncmp(lex.identBeg, "for", 3) == 0) {
+            return parseFor();
+        }
+        if (lex.kind != Tok::Ident) { fail("expected a function call"); return false; }
+        parseCall(nullptr);
+        if (failed) return false;
+        return expect(Tok::Semicolon, "expected ';'");
+    }
+
     bool parseProgram() {
         while (!failed && atTypeKeyword()) { lex.advance(); parseDecl(); }
         if (failed) return false;
         if (lex.kind == Tok::End) { fail("empty program (no statement)"); return false; }
         bool any = false;
         while (!failed && lex.kind != Tok::End) {
-            if (lex.kind != Tok::Ident) { fail("expected a function call"); return false; }
-            parseCall(nullptr);                          // a statement
-            if (failed) return false;
-            if (!expect(Tok::Semicolon, "expected ';'")) return false;
+            if (!parseStatement()) return false;
             any = true;
         }
         if (!any) { fail("expected a statement"); return false; }
@@ -293,18 +554,19 @@ struct Parser {
 
 }  // namespace
 
-CompileResult compileSource(const char* source, const BuiltinTable& table, uint8_t* out, size_t cap) {
+CompileResult compileSource(const char* source, const BuiltinTable& table,
+                            const SysVarTable& sysvars, uint8_t* out, size_t cap) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
     if (!out || cap == 0) { r.error = "no code buffer"; return r; }
 
     Lexer lex(source);
     IrProgram ir;
-    Parser parser{lex, table, ir};
+    Parser parser{lex, table, sysvars, ir};
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
 
     size_t len = lowerToBytes(ir, out, cap);
-    if (len == 0) { r.error = "codegen failed (unsupported on this target, or too large)"; return r; }
+    if (len == 0) { r.error = kCodegenFailed; return r; }
     r.ok = true;
     r.len = len;
     // Surface the declared controls so the binding can create real MoonModule controls.
