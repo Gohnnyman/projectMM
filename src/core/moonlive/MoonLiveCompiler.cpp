@@ -434,6 +434,10 @@ struct Parser {
         // Skip the step expression without emitting: scan to the closing ')'.
         int depth = 0;
         while (!failed && lex.kind != Tok::End) {
+            // A lexer error stops the scan. Tok::Error is not Tok::End and advance() does not move
+            // past the offending character, so without this the loop spins forever on a script with
+            // a stray character in the step expression — a hang, not a diagnostic.
+            if (lex.kind == Tok::Error) { fail(lex.err); return false; }
             if (lex.kind == Tok::LParen) depth++;
             else if (lex.kind == Tok::RParen) { if (depth == 0) break; depth--; }
             lex.advance();

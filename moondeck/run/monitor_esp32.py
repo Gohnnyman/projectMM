@@ -2,16 +2,59 @@
 # /// script
 # dependencies = ["pyserial"]
 # ///
-"""Monitor the ESP32 serial output. Saves to esp32/monitor.log."""
+"""Monitor the ESP32 serial output, decoding panic backtraces. Saves to esp32/monitor.log.
+
+A crash prints `Backtrace: 0x4038456d:0x3fcae310 …` — raw addresses that say nothing on their own.
+Pass ``--firmware`` and each one is annotated with its function, file and line, so a panic names the
+faulting source line in the monitor instead of starting an addr2line session. Same idea as
+PlatformIO's ``esp32_exception_decoder`` monitor filter; here it is the toolchain's own addr2line
+against the ELF the firmware was built from.
+"""
 
 import argparse
+import glob
+import os
+import re
 import serial
+import subprocess
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 LOG_FILE = ROOT / "esp32" / "monitor.log"
+
+# A panic line: "Backtrace: 0xPC:0xSP 0xPC:0xSP …" (Xtensa) — the PCs are what we resolve.
+BACKTRACE_RE = re.compile(r"Backtrace:((?:\s*0x[0-9a-fA-F]+:0x[0-9a-fA-F]+)+)")
+# A bare "PC      : 0x…" register-dump line names the faulting instruction directly.
+PC_RE = re.compile(r"^(PC|EXCVADDR)\s*:\s*(0x[0-9a-fA-F]+)")
+# The device announces which firmware it is running; used to catch a stale ELF.
+SHA_RE = re.compile(r"ELF file SHA256:\s*([0-9a-f]+)")
+
+
+def find_addr2line(firmware: str):
+    """The addr2line for this firmware's ISA, and the ELF to resolve against.
+
+    Returns (tool, elf) or (None, None) when either is missing — decoding is then skipped and the
+    monitor still runs, because a missing toolchain must not cost you the serial output.
+    """
+    elf = ROOT / "build" / f"esp32-{firmware}" / "projectMM.elf"
+    if not elf.exists():
+        return None, None
+    # P4 is RISC-V; every other supported target is Xtensa.
+    pattern = ("riscv32-esp-elf/bin/riscv32-esp-elf-addr2line" if "p4" in firmware
+               else "xtensa-esp-elf/bin/xtensa-esp32*-elf-addr2line")
+    hits = glob.glob(os.path.expanduser(f"~/.espressif/tools/*/*/{pattern}"))
+    return (sorted(hits)[-1], str(elf)) if hits else (None, None)
+
+
+def decode(tool: str, elf: str, addrs: list[str]) -> list[str]:
+    """Resolve addresses to `function at file:line`, one line each. Empty on any failure."""
+    try:
+        out = subprocess.run([tool, "-pfiaC", "-e", elf, *addrs],
+                             capture_output=True, text=True, timeout=20)
+        return [line for line in out.stdout.splitlines() if line.strip()]
+    except Exception:
+        return []
 
 # Shared moondeck.json + logLevel-toggle helpers (one level up, reachable from check/ and run/).
 sys.path.insert(0, str(ROOT / "moondeck"))
@@ -21,7 +64,20 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", required=True, help="Serial port")
     parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
+    parser.add_argument("--firmware", help="Firmware variant whose ELF decodes panic backtraces "
+                                           "(e.g. esp32s3-n16r8). Without it, addresses print raw.")
     args = parser.parse_args()
+
+    tool = elf = elf_sha = None
+    if args.firmware:
+        tool, elf = find_addr2line(args.firmware)
+        if tool:
+            import hashlib
+            elf_sha = hashlib.sha256(Path(elf).read_bytes()).hexdigest()
+            print(f"Decoding backtraces against build/esp32-{args.firmware}/projectMM.elf "
+                  f"({elf_sha[:9]})")
+        else:
+            print(f"No ELF or toolchain for {args.firmware} — addresses print raw.")
 
     # Raise the device(s) to Info so the tick line shows while monitoring; restore each device's ORIGINAL
     # level on exit (monitor failure and normal Ctrl+C alike), so a device the user set to Debug/Error
@@ -45,8 +101,37 @@ def main():
                     line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
                     if line:
                         print(line)
-                        sys.stdout.flush()
                         log.write(line + "\n")
+                        # Annotate a panic in place: the decoded frames follow the raw line, so the
+                        # log keeps the original AND the reading, and a crash names its source line.
+                        if tool:
+                            # The device prints the SHA of the firmware it is running. If that is not
+                            # the ELF we decode against, every resolved line would be from a different
+                            # build — confidently wrong, which is worse than raw addresses.
+                            sha = SHA_RE.match(line)
+                            if sha and elf_sha and not elf_sha.startswith(sha.group(1)):
+                                warn = (f"  !! running firmware {sha.group(1)} != this ELF "
+                                        f"{elf_sha[:9]} — reflash, or decoded lines will be wrong")
+                                print(warn)
+                                log.write(warn + "\n")
+                            addrs = []
+                            m = BACKTRACE_RE.search(line)
+                            if m:
+                                addrs = [p.split(":")[0] for p in m.group(1).split()]
+                                if "CORRUPTED" in line:
+                                    note = ("  !! stack chain corrupted — frames past the first are "
+                                            "not real; the fault is a stack overflow or a wild jump")
+                                    print(note)
+                                    log.write(note + "\n")
+                            else:
+                                pc = PC_RE.match(line)
+                                if pc and pc.group(1) == "PC":
+                                    addrs = [pc.group(2)]
+                            for i, d in enumerate(decode(tool, elf, addrs)):
+                                out = f"  #{i} {d}"
+                                print(out)
+                                log.write(out + "\n")
+                        sys.stdout.flush()
                         log.flush()
             except KeyboardInterrupt:
                 pass

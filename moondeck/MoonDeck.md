@@ -949,10 +949,21 @@ Typical use: forcing a fresh-first-boot after firmware experiments leave the Lit
 Monitor serial output. Long-running — shows Stop button.
 
 ```bash
-uv run moondeck/run/monitor_esp32.py --port /dev/tty.usbserial-0001
+uv run moondeck/run/monitor_esp32.py --port /dev/tty.usbserial-0001 --firmware esp32s3-n16r8
 ```
 
 Reads serial at 115200 baud. Output streams to MoonDeck's log and is saved to `esp32/monitor.log` for later inspection (useful when crashes flood the output).
+
+**Panic backtraces are decoded.** A crash prints `Backtrace: 0x4038456d:0x3fcae310 …`, which says nothing on its own; with `--firmware` each address is resolved against that build's ELF and the function, file and line print underneath:
+
+```
+Guru Meditation Error: Core 0 panic'ed (LoadProhibited)
+Backtrace: 0x4210b93b:0x3fcc8fa0 0x4200fbf8:0x3fcc8fc0
+  #0 src/light/moonlive/MoonLiveLayout.h:119
+  #1 src/light/moonlive/MoonLiveBuiltins_light.h:82
+```
+
+So a panic names its source line in the monitor rather than starting a separate addr2line session. Same purpose as PlatformIO's `esp32_exception_decoder` monitor filter; here it is the toolchain's own `addr2line` against `build/esp32-<firmware>/projectMM.elf`, picking the Xtensa or RISC-V tool from the firmware name. Without `--firmware`, or when that build has no ELF, addresses print raw and the monitor runs as before — decoding must never cost you the serial output.
 
 ### improv_provision
 

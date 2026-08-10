@@ -78,7 +78,7 @@ public:
             setStatus(engine_.error(), Severity::Error);
         }
         rebuildControls();
-        setDynamicBytes(engine_.ok() ? engine_.codeCap() : 0);
+        setDynamicBytes(engine_.heapBytes());
         // Ask for a rebuild ONLY when the script actually changed. modifyLogical is the static
         // hook — it runs while the Layer builds its mapping — so an edit is invisible until the
         // Layer rebuilds. But the rebuild the Layer performs IS applyState(), which calls prepare()

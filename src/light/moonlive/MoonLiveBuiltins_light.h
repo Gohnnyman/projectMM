@@ -69,15 +69,28 @@ extern "C" inline uint32_t mm_light_print(uint32_t v, uint32_t, uint32_t) {
 // ignored — a script that reaches addLight from an effect places nothing rather than corrupting
 // something.
 using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
-inline AddLightFn& addLightSink() { static AddLightFn f = nullptr; return f; }
-inline void*&      addLightCtx()  { static void* c = nullptr;      return c; }
+
+/// THREAD_LOCAL, not one global: the sink belongs to whichever thread is running a script, and more
+/// than one does. A layout is asked for its light count and its coordinates from the HTTP task when a
+/// control is edited, while the render task walks the same layout for the frame — as one global, one
+/// thread cleared the sink while the other was mid-run and the built-in called through a live
+/// function pointer with a null context. That is a null dereference on the render core, seen as an
+/// intermittent crash while resizing a scripted layout.
+///
+/// The function and the context are ONE struct so they cannot be observed half-updated. Same shape
+/// as the WDT subscription flag in the ESP32 worker, which had the same bug for the same reason.
+struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
+inline AddLightSink& addLightSink() { static thread_local AddLightSink s; return s; }
 
 /// Point addLight at a consumer for the duration of one run; pass nullptr to detach.
-inline void setAddLightSink(AddLightFn fn, void* ctx) { addLightSink() = fn; addLightCtx() = ctx; }
+inline void setAddLightSink(AddLightFn fn, void* ctx) { addLightSink() = {fn, ctx}; }
 
 extern "C" inline uint32_t mm_light_addLight(uint32_t x, uint32_t y, uint32_t z) {
-    if (AddLightFn f = addLightSink())
-        f(addLightCtx(), static_cast<uint16_t>(x), static_cast<uint16_t>(y), static_cast<uint16_t>(z));
+    // Both halves checked: a sink is only ever installed as a pair, but a context of null with a live
+    // function is exactly what the crash was, so the guard states the whole precondition.
+    const AddLightSink s = addLightSink();
+    if (s.fn && s.ctx)
+        s.fn(s.ctx, static_cast<uint16_t>(x), static_cast<uint16_t>(y), static_cast<uint16_t>(z));
     return 0;
 }
 

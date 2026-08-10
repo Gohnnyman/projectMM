@@ -68,6 +68,14 @@ public:
     // accounting. 0 until compiled / after free().
     size_t codeCap() const { return codeCap_; }
 
+    /// Every heap byte this engine holds — the exec block plus the control arena.
+    ///
+    /// What a binding reports as its dynamicBytes: the card is supposed to show the memory the
+    /// module actually costs, and codeCap() alone missed the arena. The arena is small but it is a
+    /// real allocation with the module's lifetime, and "roughly right" is how a memory figure stops
+    /// being worth reading.
+    size_t heapBytes() const { return codeCap_ + (ctrlArena_ ? kMaxCtrls : 0); }
+
     // The controls the last compile() declared (empty if none / not a source compile). The binding
     // reads this to create real MoonModule controls bound to the arena slots.
     const DeclaredControl* declaredControls(uint8_t& count) const { count = controlCount_; return controls_; }

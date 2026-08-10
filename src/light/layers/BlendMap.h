@@ -89,6 +89,21 @@ inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
     const nrOfLightsType logCount = lut.logicalCount();
     const bool full = (opacity == 255);
 
+    // How many whole lights each buffer actually holds. Every mapped access below is bounded by
+    // these, because a LUT entry is only valid against the buffer it was BUILT for.
+    //
+    // A reshape rebuilds the mapping and the driver's output buffer in separate steps of the same
+    // prepareTree sweep (Layouts, then the Layer, then Drivers), and a render tick can land between
+    // them — with the new mapping's physical indices and the old, smaller buffer. Unbounded, that
+    // writes past the end and corrupts the heap; the failure then surfaces later in an unrelated
+    // allocation, which is what made resizing a layout look intermittently fatal. The identity path
+    // above has always clamped to min(src, dst) for the same reason; the mapped path did not.
+    //
+    // This is a bound, not a fix for the ordering — the window is still there and the frame drawn
+    // inside it is briefly wrong. It cannot corrupt memory, which is the property that matters.
+    const size_t dstLights = channelsPerLight ? dst.bytes() / channelsPerLight : 0;
+    const size_t srcLights = channelsPerLight ? src.bytes() / channelsPerLight : 0;
+
     // Overwrite is the default op (single layer / bottom of a composite). It
     // defers to the LUT's own overwrites() flag: a mapping where each physical
     // cell is written once (mirror, shuffle, sparse box→driver) plain-copies;
@@ -102,8 +117,10 @@ inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
     // --- Plain overwrite (replace) — single-write LUT; copy, no read-back. ---
     if (op == BlendOp::Overwrite && full && lut.overwrites()) {
         for (nrOfLightsType li = 0; li < logCount; li++) {
+            if (li >= srcLights) break;
             const uint8_t* srcLight = src.data() + static_cast<size_t>(li) * channelsPerLight;
             lut.forEachDestination(li, [&](nrOfLightsType physIdx) {
+                if (physIdx >= dstLights) return;
                 uint8_t* dstLight = dst.data() + static_cast<size_t>(physIdx) * channelsPerLight;
                 for (uint8_t c = 0; c < channelsPerLight; c++) dstLight[c] = srcLight[c];
             });
@@ -114,8 +131,10 @@ inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
     // --- Additive with clamp; opacity scales the source. full-opacity skips the scale. ---
     if (effectiveAdditive) {
         for (nrOfLightsType li = 0; li < logCount; li++) {
+            if (li >= srcLights) break;
             const uint8_t* srcLight = src.data() + static_cast<size_t>(li) * channelsPerLight;
             lut.forEachDestination(li, [&](nrOfLightsType physIdx) {
+                if (physIdx >= dstLights) return;
                 uint8_t* dstLight = dst.data() + static_cast<size_t>(physIdx) * channelsPerLight;
                 for (uint8_t c = 0; c < channelsPerLight; c++) {
                     uint16_t s = full ? srcLight[c] : div255(static_cast<uint16_t>(srcLight[c]) * opacity);
@@ -130,8 +149,10 @@ inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
     // --- Alpha (over): dst = src*α + dst*(255-α). full-opacity collapses to overwrite. ---
     const uint16_t inv = static_cast<uint16_t>(255 - opacity);
     for (nrOfLightsType li = 0; li < logCount; li++) {
+        if (li >= srcLights) break;
         const uint8_t* srcLight = src.data() + static_cast<size_t>(li) * channelsPerLight;
         lut.forEachDestination(li, [&](nrOfLightsType physIdx) {
+            if (physIdx >= dstLights) return;
             uint8_t* dstLight = dst.data() + static_cast<size_t>(physIdx) * channelsPerLight;
             for (uint8_t c = 0; c < channelsPerLight; c++) {
                 if (full) { dstLight[c] = srcLight[c]; continue; }

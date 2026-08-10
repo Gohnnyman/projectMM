@@ -474,8 +474,9 @@ public:
             Coord3D logical; nrOfLightsType logicalCount;  // final box, for the flatten + guard
             nrOfLightsType* counts;   // pass A: per-cell count.  pass B: per-cell write cursor.
             nrOfLightsType* dests;    // pass B only.
+            nrOfLightsType destCap;   // what dests actually holds — pass B must not exceed it.
             bool scatter;
-        } fctx{this, logical, logicalCount, counts, dests, /*scatter=*/false};
+        } fctx{this, logical, logicalCount, counts, dests, driverCount, /*scatter=*/false};
 
         auto onCoord = [](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
             auto* f = static_cast<FoldCtx*>(c);
@@ -494,8 +495,20 @@ public:
                 static_cast<nrOfLightsType>(pos.y) * static_cast<nrOfLightsType>(f->logical.x) +
                 static_cast<nrOfLightsType>(pos.x);
             if (li >= f->logicalCount) return;                                       // defensive
-            if (f->scatter) f->dests[f->counts[li]++] = driverIdx;  // pass B: write at the cursor
-            else            f->counts[li]++;                        // pass A: bump the count
+            // Pass B writes where pass A counted — safe only while both passes see the SAME
+            // coordinates. A scripted layout compiles lazily inside forEachCoord, so a control
+            // edited between the two passes makes pass B emit more lights than pass A counted and
+            // the scatter runs past dests. That corrupts the heap; the failure then surfaces in an
+            // unrelated allocation, which is what made resizing a scripted layout crash at random.
+            // The bound makes a disagreement cost a dropped destination, never memory.
+            if (f->scatter) {
+                const nrOfLightsType slot = f->counts[li];
+                if (slot >= f->destCap) return;
+                f->dests[slot] = driverIdx;
+                f->counts[li]++;
+            } else {
+                f->counts[li]++;                                    // pass A: bump the count
+            }
         };
 
         // A GAP (black pixel) is DROPPED from the LUT: its physical slot is already counted in

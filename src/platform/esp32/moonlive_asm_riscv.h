@@ -15,10 +15,16 @@ namespace mm::moonlive {
 
 // Twelve was the count every backend started with; RISC-V has room for more, and a nested loop
 // needs it — two loop levels hold four values live, and a three-argument call needs three temps on
-// top. x16/x17 (a6/a7) and x18..x23 (s2..s7) are free here: the emitted routine is a leaf that
-// saves what it uses, so a callee-saved register is as usable as a caller-saved one.
+// top. Fourteen is what the CALLER-SAVED registers alone provide, and that is the whole map.
+//
+// It briefly reached eighteen by also mapping x18..x21 (s2..s5) on the reasoning that "the emitted
+// routine is a leaf that saves what it uses". It does not: prologue() is empty, so the routine has
+// no entry/exit save at all and would have returned to its caller with four callee-saved registers
+// clobbered. Giving the routine a prologue would cost every script a save/restore it almost never
+// needs; dropping the four costs nothing, since fourteen still exceeds Xtensa's twelve and no
+// script measured here uses more than eleven.
 enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
-                     R12, R13, R14, R15, R16, R17, kRegCount };
+                     R12, R13, kRegCount };
 using Label = uint8_t;
 enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 

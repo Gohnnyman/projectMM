@@ -411,6 +411,7 @@
       "help": "monitor_esp32",
       "script": "run/monitor_esp32.py",
       "needs_port": true,
+      "needs_firmware": true,
       "long_running": true,
       "process_name": "monitor_esp32"
     },

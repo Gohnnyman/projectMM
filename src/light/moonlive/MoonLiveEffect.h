@@ -72,7 +72,7 @@ public:
         rebuildControls();
         // Report the exec block as the module's heap use (codeCap, the word-rounded allocation),
         // so the UI card's "+ dynamic" reflects the JIT'd program — 0 when the compile failed.
-        setDynamicBytes(engine_.ok() ? engine_.codeCap() : 0);
+        setDynamicBytes(engine_.heapBytes());
     }
 
     void tick() MM_NONBLOCKING override {

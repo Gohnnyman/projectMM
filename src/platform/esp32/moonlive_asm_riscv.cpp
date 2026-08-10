@@ -14,7 +14,7 @@ namespace mm::moonlive {
 // arena pointer). R5..R11 → t0,t1,t2,t3,t4,t5,a5 (caller-saved temps). t6(31) is the internal
 // scratch (store8 address, call address build + result stash), not a vreg.
 static constexpr uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
-                                          16, 17, 18, 19, 20, 21};
+                                              16, 17};
 static uint8_t xr(Reg r) { return kRvReg[r]; }
 // t6 is the ONLY caller-saved register outside kRvReg, so it is the only safe scratch: every other
 // free register is callee-saved (s0/s1, s6..s11) and would have to be preserved. Both uses below are
@@ -128,26 +128,25 @@ void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
 // call (mirrors the host backend). The fn address is built with lui+addi (the hi/lo split, +1
 // to the upper when the low 12 bits' sign bit is set). 64-byte frame, 16-byte aligned.
 void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
-    // 112-byte frame, 16-byte aligned: 18 saved registers (72 bytes), three argument staging slots,
-    // and ra. The frame grew with the vreg map — every register the map hands out must be saved
-    // here, or a value live across a call is destroyed and the caller silently computes with
-    // rubbish. That failure mode is why this list is derived from kRvReg rather than written twice.
-    emit32(encAddi(2, 2, -112));                       // addi sp, sp, -112
-    emit32(encSw(1, 2, 108));                           // sw ra, 108(sp)
-    static const uint8_t saved[] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
-                                    16, 17, 18, 19, 20, 21};
+    // 80-byte frame, 16-byte aligned: 14 saved registers (56 bytes), three argument staging slots
+    // (56/60/64), and ra at 76. Every register the map hands out is saved here, or a value live
+    // across a call is destroyed and the caller silently computes with rubbish — which is why the
+    // list mirrors kRvReg exactly.
+    emit32(encAddi(2, 2, -80));                        // addi sp, sp, -80
+    emit32(encSw(1, 2, 76));                            // sw ra, 76(sp)
+    static const uint8_t saved[] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15, 16, 17};
     int off = 0;
     for (uint8_t r : saved) { emit32(encSw(r, 2, off)); off += 4; }
     // The three args into a0/a1/a2 (the standard ABI registers a host built-in reads). Staged
     // through the frame first: a source may itself BE a0/a1/a2, so moving them in place could
-    // overwrite a source a later move still needs. Slots 72/76/80 sit above the saved set (18
-    // registers, offsets 0..68) and below ra at 108.
-    emit32(encSw(xr(a), 2, 72));
-    emit32(encSw(xr(b), 2, 76));
-    emit32(encSw(xr(c), 2, 80));
-    emit32(encLw(10, 2, 72));                          // a0 = arg0
-    emit32(encLw(11, 2, 76));                          // a1 = arg1
-    emit32(encLw(12, 2, 80));                          // a2 = arg2
+    // overwrite a source a later move still needs. Slots 56/60/64 sit above the saved set (14
+    // registers, offsets 0..52) and below ra at 76.
+    emit32(encSw(xr(a), 2, 56));
+    emit32(encSw(xr(b), 2, 60));
+    emit32(encSw(xr(c), 2, 64));
+    emit32(encLw(10, 2, 56));                          // a0 = arg0
+    emit32(encLw(11, 2, 60));                          // a1 = arg1
+    emit32(encLw(12, 2, 64));                          // a2 = arg2
     // t6 = fn address via lui + addi (hi/lo split). t6 is caller-saved, so the callee may clobber
     // it — harmless: it is dead across the call, written before jalr and rewritten after.
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
@@ -162,8 +161,8 @@ void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // restore
     off = 0;
     for (uint8_t r : saved) { emit32(encLw(r, 2, off)); off += 4; }
-    emit32(encLw(1, 2, 108));                           // lw ra, 108(sp)
-    emit32(encAddi(2, 2, 112));                         // addi sp, sp, 112
+    emit32(encLw(1, 2, 76));                           // lw ra, 108(sp)
+    emit32(encAddi(2, 2, 80));                         // addi sp, sp, 112
     emit32(encAddi(xr(d), kScratchFn, 0));             // mv dst, t6  (the result)
 }
 

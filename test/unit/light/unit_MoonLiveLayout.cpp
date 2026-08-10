@@ -12,12 +12,26 @@
 
 #include "doctest.h"
 #include "light/moonlive/MoonLiveLayout.h"
+#include "light/moonlive/MoonLiveBuiltins_light.h"
+#include "platform/platform.h"
+#include "core/moonlive/moonlive_emit.h"
+#include "core/moonlive/MoonLiveCompiler.h"
+#include "light/layers/Layer.h"
+#include "light/layouts/Layouts.h"
 
 #include <cstring>
 #include <cstdio>
 #include <vector>
+#include <thread>
 
 using namespace mm;
+
+
+// Every case here compiles a script and runs the emitted native code, so all of them need a JIT
+// backend for the host ISA. `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86_64 — which is what CI runs — and
+// there a layout reports zero lights for a reason that has nothing to do with the layout. Gated as a
+// block, the same way unit_moonlive_fill / unit_moonlive_ir do it.
+#if MM_MOONLIVE_HAS_HOST_JIT
 
 namespace {
 /// Collect what a layout emits, the way the Layer's mapping build does.
@@ -276,9 +290,141 @@ TEST_CASE("a nested loop lays out a full grid, on every target's register budget
 // Pinned through a LAYOUT because the count is the observable: the host executes this test, and the
 // arithmetic the backends share is the same. addLight's index is likewise the counter.
 TEST_CASE("a loop counter survives the body that uses it") {
+    SUBCASE("through a call — addLight") {
+        MoonLiveLayout l;
+        l.defineControls();
+        l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }");
+        l.prepare();
+        CHECK(l.lightCount() == 6);      // a clobbered counter gives some other number
+    }
+    SUBCASE("through an inline store — setRGB") {
+        // The case the bug was actually in: StoreElem folded the byte address into the index
+        // register, which for `setRGB(i, …)` is the counter itself. The count above cannot see that
+        // — addLight is a Call and takes a different path — so this drives the emitted code and
+        // checks every light was written, which is what a wrong counter changes.
+        uint8_t code[4096];
+        auto r = moonlive::compileSource("for (i = 0; i < 6; i = i + 1) { setRGB(i, 200, 0, 0); }",
+                                         moonlive::lightBuiltins(), code, sizeof(code));
+        REQUIRE(r.ok);
+        void* blk = platform::allocExec(r.len);
+        REQUIRE(blk);
+        platform::writeExec(blk, code, r.len);
+        uint8_t buf[6 * 3] = {};
+        uint8_t arena[moonlive::kMaxCtrls] = {};
+        reinterpret_cast<moonlive::CtrlFn>(blk)(buf, 6, 3, 0, arena);
+        for (int i = 0; i < 6; i++) {
+            INFO("light " << i);
+            CHECK(buf[i * 3] == 200);    // every one of the six written, none skipped or repeated
+        }
+        platform::freeExec(blk, r.len);
+    }
+}
+
+// A malformed script must produce a diagnostic, never a hang. The `for` header's step expression is
+// scanned by a small loop that skips to the closing paren; a lexer ERROR is not the END token, and
+// the lexer does not move past the offending character, so the scan spun forever on a stray symbol.
+// A device compiling that script would wedge with no message at all.
+TEST_CASE("a stray character in a for header is rejected, not spun on") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }");
-    l.prepare();
-    CHECK(l.lightCount() == 6);          // a clobbered counter gives some other number
+    l.setSource("for (i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }");
+    l.prepare();                                    // must return — a hang fails by timeout
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    CHECK(l.lightCount() == 0);
 }
+
+// A scripted layout is asked for its lights from more than one thread: the HTTP task runs the script
+// when a control is edited, while the render task walks the same layout for the frame. The sink the
+// script calls out through used to be one process-wide pair, so one thread cleared it while the other
+// was mid-run — the built-in then called a live function pointer with a null context and the render
+// core took a null dereference. It presented as an intermittent crash while resizing on an S3.
+//
+// Two threads walking their own layouts concurrently must each see their own sink.
+TEST_CASE("two threads can run scripts at once without stealing each other's sink") {
+    auto place = [](int width, int reps) {
+        MoonLiveLayout l;
+        l.defineControls();
+        char src[128];
+        std::snprintf(src, sizeof(src), "for (i = 0; i < %d; i = i + 1) { addLight(i, 0, 0); }", width);
+        l.setSource(src);
+        l.prepare();
+        for (int r = 0; r < reps; r++)
+            if (l.lightCount() != static_cast<nrOfLightsType>(width)) return false;
+        return true;
+    };
+
+    bool aOk = false, bOk = false;
+    std::thread a([&] { aOk = place(7, 400); });
+    std::thread b([&] { bOk = place(23, 400); });
+    a.join();
+    b.join();
+    CHECK(aOk);      // each thread counted ITS OWN script every time
+    CHECK(bOk);
+}
+
+// The card's memory figure has to be the memory the module actually holds, or it is not worth
+// reading. A scripted module owns two heap blocks — the emitted code and the control-values arena —
+// and dynamicBytes counted only the first, so every scripted card under-reported. It also read 0
+// whenever the script failed to compile, while the arena was still allocated.
+TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setSource("uint8_t width = 4; // @control 1..64\n"
+                "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }");
+    l.prepare();
+    const size_t compiled = l.dynamicBytes();
+    CHECK(compiled > 0);
+    CHECK(l.lightCount() == 4);
+
+    // A broken script frees the code but keeps the arena, so the figure drops without reaching zero.
+    l.setSource("for (i = 0; i < 4; i = i + 1) { addLight(i, i");   // unclosed
+    l.prepare();
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    CHECK(l.dynamicBytes() < compiled);      // the code block is gone
+    CHECK(l.dynamicBytes() > 0);             // the arena is not
+}
+
+// The layer builds its mapping in two passes over the layouts: pass A counts destinations, pass B
+// scatters driver indices into an array sized by that count. Both passes call forEachCoord — and a
+// scripted layout COMPILES lazily inside forEachCoord, so a control edited between the two passes
+// makes pass B emit more lights than pass A counted. The scatter then ran past its array and
+// corrupted the heap; the crash surfaced later inside an unrelated allocation, which is why resizing
+// a scripted layout failed at random rather than pointing anywhere near the layer.
+//
+// A layout that grows mid-build must cost a dropped destination, never memory.
+TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
+    MoonLiveLayout layout;
+    layout.defineControls();
+    layout.setSource("uint8_t width = 4; // @control 1..64\n"
+                     "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }");
+    layout.prepare();
+
+    mm::Layouts group;
+    group.addChild(&layout);
+    mm::Layer layer;
+    layer.setLayouts(&group);
+    layer.setChannelsPerLight(3);
+    layer.defineControls();
+    group.applyState();
+    layer.applyState();
+
+    auto setWidth = [&](uint8_t v) {
+        const auto& cs = layout.controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (cs[i].name && std::strcmp(cs[i].name, "width") == 0)
+                *static_cast<uint8_t*>(cs[i].ptr) = v;
+    };
+
+    // Grow and shrink repeatedly, rebuilding each time — the resize loop a slider drives.
+    for (uint8_t w : {4, 32, 8, 48, 16, 64, 2, 24}) {
+        setWidth(w);
+        group.applyState();
+        layer.applyState();
+        INFO("width " << (int)w);
+        CHECK(layout.lightCount() == w);
+        REQUIRE(layer.buffer().data() != nullptr);
+        CHECK(layer.buffer().count() >= w);
+    }
+}
+
+#endif  // MM_MOONLIVE_HAS_HOST_JIT

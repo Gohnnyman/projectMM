@@ -102,6 +102,11 @@ private:
     /// before those children have prepared. A layout whose count is arithmetic (GridLayout) does not
     /// notice; one that needs a compiled program would report an empty fixture to whoever asked
     /// first, and the pipeline would come up dark with no error anywhere.
+    ///
+    /// This const_cast is the ONE mechanism a scripted layout needs that a compiled one does not
+    /// (architecture.md, MoonLive) — it exists only because of that prepare ordering. Removing it
+    /// means letting children prepare before a container aggregates them, which is a core lifecycle
+    /// change; until then the exception is here, named, rather than spread across the bindings.
     void compile() const {
         if (engine_.ok() && std::strcmp(source_, compiled_) == 0) return;   // already current
         auto* self = const_cast<MoonLiveLayout*>(this);
@@ -109,7 +114,7 @@ private:
         if (self->engine_.compile(source_, moonlive::lightBuiltins())) self->clearStatus();
         else                                                          self->setStatus(self->engine_.error(), Severity::Error);
         std::snprintf(self->compiled_, sizeof(compiled_), "%s", source_);
-        self->setDynamicBytes(engine_.ok() ? engine_.codeCap() : 0);
+        self->setDynamicBytes(engine_.heapBytes());
     }
 
     struct Counter { nrOfLightsType n; };

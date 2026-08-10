@@ -51,7 +51,7 @@ It is for debugging and comes back out again — [what print costs](../../../moo
 
 A layout has to answer **how many lights** before it produces a single coordinate — the Layer sizes its buffer from that number and only then asks where each light is. A script cannot be asked "how many?" without running it.
 
-So it runs twice. On the first pass `addLight` counts; on the second it emits each position to whoever asked. Same script, same arithmetic, so as long as the script is deterministic the two answers cannot drift apart — which is exactly what the compiled layouts do (`SphereLayout` walks its shell twice for the same reason). A script that calls `random16` breaks that condition and gets a count that does not match what it places; see [Limits](#limits).
+So it runs twice. On the first pass `addLight` counts; on the second it emits each position to whoever asked. Same script, same arithmetic, so as long as the script is deterministic the two answers cannot drift apart — which is exactly what the compiled layouts do (`SphereLayout` walks its shell twice for the same reason). A script that calls `random16` breaks that condition. The two passes disagree on the COUNT only when the random value decides a loop bound or how many times `addLight` runs; a random COORDINATE keeps the count right and simply places the lights somewhere else on the second pass, so the fixture is the size it claims but not the shape. See [Limits](#limits).
 
 **Nothing is stored between the passes.** Staging 16,384 coordinates would cost 48 KB, which a classic ESP32 driving that many lights does not have spare. Running the script again is cheaper than remembering what it said, and it means a scripted layout costs the same as a compiled one: the JIT'd program, and nothing that grows with the light count.
 
@@ -59,7 +59,7 @@ So it runs twice. On the first pass `addLight` counts; on the second it emits ea
 
 **The grammar is arithmetic, calls and `for`** — `+`, `-`, `*`, parentheses, nested loops. Division, `%` and `if` are not in the language yet, so a serpentine over an arbitrary number of rows (every other row reversed) is not expressible today. A fixed few rows can be written out as one loop per direction — `two-rows.mlv` does exactly that — but each row costs its own loop, so it does not scale to a panel.
 
-**A script runs twice per rebuild**, once to count and once to place. It has to be deterministic: a script whose output depends on `random16` reports one count and then places a different set.
+**A script runs twice per rebuild**, once to count and once to place, so it has to be deterministic. With `random16` in a loop bound or around an `addLight` call, the two passes disagree on the count; with `random16` in a coordinate, the count holds and only the positions move.
 
 ## Controls
 
