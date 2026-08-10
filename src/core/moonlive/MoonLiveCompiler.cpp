@@ -439,7 +439,14 @@ struct Parser {
         if (!expect(Tok::Semicolon, "expected ';' after the for's first clause")) return false;
 
         // --- condition: ident < expr  (the only comparison the language has) ---
+        // The name must be the loop variable: the emitted code tests `counter` whatever is written
+        // here, so a different name compiles clean and runs as if it said the right one. That is a
+        // wrong fixture with no diagnostic anywhere — the failure mode hardest to trace back to a
+        // typo. (`for (y…) { for (x = 0; y < cols; x = x + 1) … }` is the realistic version.)
         if (lex.kind != Tok::Ident) { fail("expected the loop variable in the condition"); return false; }
+        if (lex.identLen != varLen || std::strncmp(lex.identBeg, varName, varLen) != 0) {
+            fail("the condition must test the loop variable"); return false;
+        }
         lex.advance();
         if (!expect(Tok::Less, "expected '<' — it is the only comparison a for condition takes")) return false;
         // Hold the bound in the vreg parseExpr produced rather than copying it into a fresh one.
@@ -452,6 +459,9 @@ struct Parser {
 
         // --- step: ident = expr (parsed now, emitted after the body) ---
         if (lex.kind != Tok::Ident) { fail("expected the loop variable in the step"); return false; }
+        if (lex.identLen != varLen || std::strncmp(lex.identBeg, varName, varLen) != 0) {
+            fail("the step must advance the loop variable"); return false;   // it advances `counter` regardless
+        }
         lex.advance();
         if (!expect(Tok::Assign, "expected '=' in the for's third clause")) return false;
         const char* stepSrc = lex.tokBeg;                  // re-lexed after the body
@@ -488,6 +498,12 @@ struct Parser {
             lex = stepLex;
             VReg s = parseExpr();
             if (failed) return false;
+            // parseExpr stops at the first token it cannot consume, so without this the step
+            // silently ignores whatever follows it — `i = i + 1 garbage` compiled clean. The
+            // skip-scan above already found the real ')', so anything else here is a typo.
+            if (lex.kind != Tok::RParen) {
+                lex = save; fail("unexpected token in the for's step"); return false;
+            }
             emit({IrOp::Mov, counter, s, 0,0,0, 0, nullptr, {}});
             freeTemp(s);
             lex = save;

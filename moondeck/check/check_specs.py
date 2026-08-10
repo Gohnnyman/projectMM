@@ -80,7 +80,7 @@ def find_moonmodules():
 # else keeps a per-module page named for the type. The match is purely on the type-name **suffix**, so
 # EVERY *Layout module (CarLightsLayout, CubeLayout, PanelLayout, RingLayout, …) routes to layouts.md,
 # every *Driver to drivers.md, etc. — not just a hand-picked subset. New effect/modifier/layout/driver
-# types fold in automatically. (Layouts/Layers/Drivers are CONTAINERS, not leaf modules — none of those
+# types fold in automatically. (Layouts/Effects/Drivers are CONTAINERS, not leaf modules — none of those
 # stems ends in a suffix below ("Drivers" ≠ "Driver"), so each container keeps its own per-module page;
 # the CRTP base ParallelLedDriver is skipped in discover_modules as a template.)
 CONSOLIDATED_PAGES = {

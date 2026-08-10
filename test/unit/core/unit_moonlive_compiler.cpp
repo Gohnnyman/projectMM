@@ -274,6 +274,42 @@ TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
 #endif
 }
 
+// The emitted loop tests and advances its OWN counter whatever name the condition and step clauses
+// write, so a mistyped name used to compile clean and run as though it said the right thing — a
+// wrong fixture with no diagnostic anywhere. Found by review.
+TEST_CASE("a for loop's condition and step must name the loop variable") {
+    uint8_t out[512];
+    struct Case { const char* src; const char* err; const char* what; };
+    const Case refused[] = {
+        {"for (i = 0; j < 3; i = i + 1) { addLight(i, 0, 0); }",
+         "the condition must test the loop variable", "a typo in the condition"},
+        {"for (i = 0; i < 3; j = j + 1) { addLight(i, 0, 0); }",
+         "the step must advance the loop variable",   "a typo in the step"},
+        // Plain names, not x/y: those are system variables in this table and would be refused a
+        // step earlier, hiding what this case is about.
+        {"for (a = 0; a < 4; a = a + 1) { for (b = 0; a < 4; b = b + 1) { addLight(b, a, 0); } }",
+         "the condition must test the loop variable", "an inner loop testing the OUTER variable"},
+        // The step is re-lexed from the source it was skipped over, and an expression parser stops
+        // at the first token it cannot use — so trailing junk was silently dropped.
+        {"for (i = 0; i < 3; i = i + 1 garbage) { addLight(i, 0, 0); }",
+         "unexpected token in the for's step", "trailing junk after the step expression"},
+    };
+    for (const Case& c : refused) {
+        INFO(c.what);
+        auto r = moonlive::compileSource(c.src, kTable, kSys, out, sizeof(out));
+        CHECK_FALSE(r.ok);
+        CHECK(std::string(r.error) == c.err);
+    }
+    // The ordinary loop is untouched.
+    auto ok = moonlive::compileSource("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }",
+                                      kTable, kSys, out, sizeof(out));
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(ok.ok);
+#else
+    CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));
+#endif
+}
+
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {
     uint8_t out[768];
     const char* bad[] = {

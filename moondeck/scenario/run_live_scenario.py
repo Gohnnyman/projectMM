@@ -211,7 +211,7 @@ def _child_names_of(state: dict, container_name: str) -> list:
 # Containers whose USER-ADDED children a scenario may clear/rebuild — the tree the
 # snapshot/restore protects. A scenario that clear_children's one of these destroys
 # the board's real config; restoring the snapshot afterward leaves the board as found.
-_SNAPSHOT_CONTAINERS = {"Layouts", "Layers", "Drivers", "Services", "Layer"}
+_SNAPSHOT_CONTAINERS = {"Layouts", "Effects", "Drivers", "Services", "Layer"}
 
 
 def _snapshot_tree(state: dict) -> list:
@@ -331,7 +331,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         live_state = client.get("/api/state")
         target = _detect_target(live_state)
         # Walk the steps in order, growing the reachable set as add_module steps
-        # create ids. The containers (Layouts/Layers/Drivers) are always present.
+        # create ids. The containers (Layouts/Effects/Drivers) are always present.
         reachable = _collect_module_names(live_state)
         missing = []
         for step in scenario.get("steps", []):

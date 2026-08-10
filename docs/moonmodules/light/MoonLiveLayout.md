@@ -52,7 +52,7 @@ for (i = 0; i < count; i = i + 1) {
 
 A script reads whatever it declares. `uint8_t cols = 16; // @control 1..64` becomes a real slider in the UI, and the loop reads it — which is how a panel gets resized without editing code.
 
-It also reads `t`, the elapsed milliseconds, which is a [system variable](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) rather than a control — the only one a layout is given. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
+`t` is the one [system variable](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) a layout is given, and it is always **0** here: the script runs twice per rebuild (once to count, once to place) and must agree with itself, so it is handed a fixed clock rather than a live one — a moving `t` would let the two passes disagree on how many lights there are. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
 
 ### Seeing inside a script
 

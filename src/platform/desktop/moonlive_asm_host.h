@@ -59,8 +59,9 @@ public:
     // Call a host built-in: d = fn(a, b, c). Preserves the host-arg registers (R0/R1/R2 = buf,
     // nLights, cpl) across the call by saving them on the stack, so they stay live for the
     // statement after the call — the live-vreg-across-Call contract. `fn` is an absolute
-    // function pointer (materialised into a scratch register). Caller-saved vregs other than
-    // R0..R2 must not be live across a call (the front-end orders ops so none are).
+    // function pointer (materialised into a scratch register). The implementation saves the WHOLE
+    // vreg pool, not just R0..R2, so any value may be live across a call — a loop counter and its
+    // limit are, whenever the body calls anything, which is most real effects.
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);
     void ret();
 

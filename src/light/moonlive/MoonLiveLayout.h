@@ -159,7 +159,10 @@ private:
         "}";
 
     // The source the loaded program was built from, so compile() is a no-op when current.
-    mutable char compiled_[1024] = {};
+    // sizeof(source_), never a literal: a copy too small to hold source_ truncates, never
+    // compares equal, and the mapping rebuilds every frame — the blank-screen loop this
+    // comparison exists to prevent.
+    mutable char compiled_[sizeof(source_)] = {};
 
     char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 };

@@ -9,7 +9,6 @@ and it compiles to native code on the next tick.
 | `layouts/` | [MoonLiveLayout](../docs/moonmodules/light/MoonLiveLayout.md) | where the lights physically are — `addLight(x, y, z)` |
 | `effects/` | [MoonLiveEffect](../docs/moonmodules/light/MoonLiveEffect.md) | a colour per light — `setRGB(index, r, g, b)` |
 | `modifiers/` | [MoonLiveModifier](../docs/moonmodules/light/MoonLiveModifier.md) | where one light lands — `setXYZ(0, x, y, z)` |
-| `drivers/` | — | nothing yet; a scripted driver has no binding |
 
 Each module ships one of these as its default, so the folder doubles as the reference for what a
 working script looks like.

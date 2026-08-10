@@ -24,7 +24,7 @@ namespace mm {
 /// **Naming convention.** Capital `Drivers` is the container class; lowercase
 /// "driver"/"drivers" is the English singular/plural for individual `DriverBase`
 /// children. Capitalisation disambiguates "the Drivers container" from "two drivers
-/// running" (same rule for `Layouts`/layout and `Effects`/layer).
+/// running" (same rule for `Layouts`/layout and `Effects`/effect).
 ///
 /// **Shared output buffer.** Necessary because blend+map writes to arbitrary physical
 /// positions via LUT — the output is not filled sequentially, so a driver cannot read
@@ -181,7 +181,7 @@ public:
     //    a Layer cleared and rebuilt via the API (clear_children + add_module)
     //    is picked up on the next prepareTree without re-running main.cpp wiring.
     //  - setLayer(Layer*): pin a specific Layer directly (test rigs that build a
-    //    Layer outside a Effects container). Skips re-resolution.
+    //    Layer outside an Effects container). Skips re-resolution.
     void setEffects(Effects* layers) {
         effects_ = layers;
         if (effects_) layer_ = effects_->activeLayer();

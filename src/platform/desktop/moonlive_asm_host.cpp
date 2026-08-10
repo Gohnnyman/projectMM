@@ -114,11 +114,10 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // the live-vreg-across-call contract hold for any expression; it's a cold path (once per
     // call, not per pixel). 128-byte frame (8 pairs) keeps sp 16-aligned.
     //
-    // x3 is kArg3, the elapsed time. Nothing reads it after a call TODAY (the grammar has no `t`
-    // identifier and no lowering emits a read of it), so the omission was unobservable — but a
-    // built-in is free to clobber x3 under the AAPCS, so exposing `t` to scripts would have turned
-    // this into a silent wrong-value bug. Saved here rather than left as a trap. It pairs with x8,
-    // which this backend never uses, because stp works on pairs.
+    // x3 is kArg3, the elapsed time — which scripts now read as the system variable `t`, so a
+    // built-in clobbering it (legal for any callee under the AAPCS) would be a silent wrong-value
+    // bug in any animated script that calls anything. Saved before it could become one. It pairs
+    // with x8, which this backend never uses, because stp works on pairs.
     emit32(0xa9b807e0u);   // stp x0, x1,  [sp, #-128]!
     emit32(0xa9017be2u);   // stp x2, x30, [sp, #16]
     emit32(0xa90723e3u);   // stp x3, x8,  [sp, #112]

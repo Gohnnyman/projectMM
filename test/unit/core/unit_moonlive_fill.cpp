@@ -147,6 +147,26 @@ TEST_CASE("platform allocExec returns usable executable memory, freeExec release
 static moonlive::BuiltinTable kCtrlTable = moonlive::lightBuiltins();
 static moonlive::SysVarTable kSys = moonlive::modifierSysVars();
 
+// A loop counter and its limit are live ACROSS a call whenever the body calls anything — which is
+// most real effects. The assembler's contract says it preserves what has to survive; this runs the
+// loop and counts, so a backend that clobbered either would show up as a short or runaway loop
+// rather than as an argument about which registers are caller-saved.
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("a loop counter survives a call in the body") {
+    moonlive::MoonLive eng;
+    // random16 is a Call; `i` and the limit `w` are both live around it.
+    REQUIRE(eng.compile("uint8_t w = 8;\nfor (i = 0; i < w; i = i + 1) { setRGB(i, random16(200), 200, 0); }",
+                        kCtrlTable, kSys));
+    uint8_t buf[8 * 3] = {};
+    eng.run(buf, 8, 3, 0);
+    int written = 0;
+    for (int i = 0; i < 8; i++)
+        if (buf[i * 3] || buf[i * 3 + 1] || buf[i * 3 + 2]) written++;
+    CHECK(written == 8);     // every iteration ran: the counter was not clobbered by the call
+    eng.free();
+}
+#endif
+
 TEST_CASE("MoonLive controls: declaredControls + controlSlot seeded from the default") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("uint8_t speed = 42; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kCtrlTable, kSys));

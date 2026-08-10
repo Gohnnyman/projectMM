@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "core/moonlive/MoonLiveBuiltins.h"
+#include "core/moonlive/MoonLiveIr.h"   // kArg3 — the register `t` is passed in
 
 #include <cstdint>
 

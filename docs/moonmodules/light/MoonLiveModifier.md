@@ -10,12 +10,12 @@ A [modifier](modifiers.md) reshapes how a Layer's output maps onto the physical 
 
 The script transforms **one coordinate**. It needs no loop over the lights, because the Layer already does that: it calls the script once per physical light while it builds its mapping. (A `for` is available if the arithmetic wants one — it just is not how the script reaches the next light.)
 
-``c
+```c
 setXYZ(0, width - 1 - x, y, z);   // mirror along x
 setXYZ(0, y, x, z);               // swap the axes
 setXYZ(0, x + 4, y, z);           // shift by four
 setXYZ(0, (width - 1 - x) * 2, y, z);   // mirror, then stretch
-``
+```
 
 `setXYZ(index, x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`. The index is the destination slot: today the script is handed a single coordinate, so it is always `0`.
 
