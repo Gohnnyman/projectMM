@@ -2,8 +2,6 @@
 #include "core/moonlive/MoonLiveCompiler.h"
 #include "platform/platform.h"
 
-#include <cstring>
-
 namespace mm::moonlive {
 
 // Fixed cap for an emitted routine. Sized for the heaviest realistic single statement — a
@@ -58,22 +56,8 @@ bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 bool MoonLive::compile(const char* source, const BuiltinTable& table) {
-    // Staging sized to the SOURCE, not to a fixed worst case. It was `uint8_t staging[768]`, which
-    // capped a script's emitted code at 768 bytes — about six statements — and put 768 bytes on the
-    // stack of a 12 KB task for every compile, however small the script.
-    //
-    // Eight code bytes per source character is the upper bound: the densest measured construct is a
-    // three-argument call at ~128 emitted bytes from ~16 characters. The assembler's own overflow
-    // check still catches a miss, so a wrong factor fails the compile rather than corrupting memory.
-    // It matters that this is not wildly generous — a 6 KB script on an ESP32 cannot afford an
-    // allocation sized by guesswork. Freed before returning, on every path.
-    const size_t srcLen = source ? std::strlen(source) : 0;
-    const size_t stagingCap = 256 + srcLen * 8;
-    auto* staging = static_cast<uint8_t*>(platform::alloc(stagingCap));
-    if (!staging) { freeCode(); error_ = "no code memory"; return false; }
-    struct Free { uint8_t* p; ~Free() { platform::free(p); } } freeStaging{staging};
-
-    CompileResult cr = compileSource(source, table, staging, stagingCap);
+    uint8_t staging[kCodeCap];
+    CompileResult cr = compileSource(source, table, staging, kCodeCap);
     if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
     // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
     // set — ensureArena reads the previous controlCount_ to know which slots are new.

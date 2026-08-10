@@ -103,12 +103,12 @@ private:
     /// notice; one that needs a compiled program would report an empty fixture to whoever asked
     /// first, and the pipeline would come up dark with no error anywhere.
     void compile() const {
-        if (engine_.ok() && moonlive::sourceHash(source_) == compiledHash_) return;   // already current
+        if (engine_.ok() && std::strcmp(source_, compiled_) == 0) return;   // already current
         auto* self = const_cast<MoonLiveLayout*>(this);
         moonlive::resetPrintBudget();
         if (self->engine_.compile(source_, moonlive::lightBuiltins())) self->clearStatus();
         else                                                          self->setStatus(self->engine_.error(), Severity::Error);
-        self->compiledHash_ = moonlive::sourceHash(source_);
+        std::snprintf(self->compiled_, sizeof(compiled_), "%s", source_);
         self->setDynamicBytes(engine_.ok() ? engine_.codeCap() : 0);
     }
 
@@ -141,12 +141,7 @@ private:
 
     // Default script — a grid, the layout almost every panel is. The nested loop and the index
     // arithmetic are the whole definition, which is the case for scripting a layout at all.
-        // 4 KB, not 512 B: a script's length is what a user actually runs into first, and 512
-    // characters is about a dozen statements — the buffer silently TRUNCATED anything longer,
-    // so a long script failed to parse with no indication why. Sized to match what the
-    // compiler now accepts (its IR and code buffers are sized to the script). A fixed member
-    // rather than an allocation because a control binds to a stable address.
-    char source_[4096] =
+    char source_[512] =
         "uint8_t width = 16;  // @control 1..64\n"
         "uint8_t height = 16; // @control 1..64\n"
         "for (yy = 0; yy < height; yy = yy + 1) {\n"
@@ -155,10 +150,8 @@ private:
         "  }\n"
         "}";
 
-    // A hash of the source the loaded program was built from, so compile() is a no-op when
-    // current. A hash rather than a second copy of the script: the copy was as large as the
-    // source buffer, and static per module.
-    mutable uint32_t compiledHash_ = 0;
+    // The source the loaded program was built from, so compile() is a no-op when current.
+    mutable char compiled_[512] = {};
 
     char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 };

@@ -12,28 +12,12 @@
 
 #include "doctest.h"
 #include "light/moonlive/MoonLiveLayout.h"
-#include "light/layers/Layer.h"
-#include "light/layouts/Layouts.h"
-#include "core/moonlive/MoonLive.h"
-#include "platform/platform.h"
-#include "core/moonlive/moonlive_emit.h"
-#include "core/moonlive/MoonLiveCompiler.h"
-#include "light/moonlive/MoonLiveBuiltins_light.h"
 
 #include <cstring>
 #include <cstdio>
 #include <vector>
-#include <string>
 
 using namespace mm;
-
-
-// Every case here compiles a script and runs the emitted native code, so all of them need a JIT
-// backend for the host ISA. `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86_64 — which is what CI runs — and
-// there a layout reports zero lights for a reason that has nothing to do with the layout. Gated as a
-// block, the same way unit_moonlive_fill / unit_moonlive_ir do it; on a host without a backend the
-// scripted modules degrade to "renders dark", and that is what these cases would be re-measuring.
-#if MM_MOONLIVE_HAS_HOST_JIT
 
 namespace {
 /// Collect what a layout emits, the way the Layer's mapping build does.
@@ -292,127 +276,9 @@ TEST_CASE("a nested loop lays out a full grid, on every target's register budget
 // Pinned through a LAYOUT because the count is the observable: the host executes this test, and the
 // arithmetic the backends share is the same. addLight's index is likewise the counter.
 TEST_CASE("a loop counter survives the body that uses it") {
-    SUBCASE("through a call — addLight") {
-        MoonLiveLayout l;
-        l.defineControls();
-        l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }");
-        l.prepare();
-        CHECK(l.lightCount() == 6);      // a clobbered counter gives some other number
-    }
-    SUBCASE("through an inline store — setRGB") {
-        // The case the bug was actually in: StoreElem folded the byte address into the index
-        // register, which for `setRGB(i, …)` is the counter itself. The count above cannot see that
-        // — addLight is a Call and takes a different path — so this drives the emitted code and
-        // checks every light was written, which is what a wrong counter changes.
-        uint8_t code[4096];
-        auto r = moonlive::compileSource("for (i = 0; i < 6; i = i + 1) { setRGB(i, 200, 0, 0); }",
-                                         moonlive::lightBuiltins(), code, sizeof(code));
-        REQUIRE(r.ok);
-        void* blk = platform::allocExec(r.len);
-        REQUIRE(blk);
-        platform::writeExec(blk, code, r.len);
-        uint8_t buf[6 * 3] = {};
-        uint8_t arena[moonlive::kMaxCtrls] = {};
-        reinterpret_cast<moonlive::CtrlFn>(blk)(buf, 6, 3, 0, arena);
-        for (int i = 0; i < 6; i++) {
-            INFO("light " << i);
-            CHECK(buf[i * 3] == 200);    // every one of the six written, none skipped or repeated
-        }
-        platform::freeExec(blk, r.len);
-    }
-}
-
-// A malformed script must produce a diagnostic, never a hang. The `for` header's step expression is
-// scanned by a small loop that skips to the closing paren; a lexer ERROR is not the END token, and
-// the lexer does not move past the offending character, so the scan spun forever on a stray symbol.
-// A device compiling that script would wedge with no message at all.
-TEST_CASE("a stray character in a for header is rejected, not spun on") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }");
-    l.prepare();                                    // must return — a hang fails by timeout
-    CHECK(l.severity() == MoonModule::Severity::Error);
-    CHECK(l.lightCount() == 0);
-}
-
-// Resizing a layout live is what a user does with a width slider, and it is where a scripted layout
-// crashed an S3: the light count changes, so the Layer's mapping and buffer must BOTH be rebuilt to
-// the new size before anything renders through them. A mapping built for the new count against a
-// buffer still sized for the old one indexes past its end — a heap corruption that surfaces later,
-// somewhere unrelated. Growing is the dangerous direction; shrinking leaves the write inside a
-// buffer that is still large enough, which is what made it look intermittent.
-//
-// Wired through a real Layer, because a bare layout cannot show the disagreement: the whole point is
-// that two structures must agree after the resize.
-TEST_CASE("resizing a scripted layout leaves the layer's mapping and buffer in step") {
-    MoonLiveLayout layout;
-    layout.defineControls();
-    layout.setSource("uint8_t width = 4;  // @control 1..64\n"
-                     "uint8_t height = 4; // @control 1..64\n"
-                     "for (yy = 0; yy < height; yy = yy + 1) {"
-                     "  for (xx = 0; xx < width; xx = xx + 1) { addLight(xx, yy, 0); } }");
-
-    mm::Layouts group;
-    group.addChild(&layout);
-    mm::Layer layer;
-    layer.setLayouts(&group);
-    layer.setChannelsPerLight(3);
-    layer.defineControls();
-
-    // Move the slider the way the UI does, growing and shrinking, and re-prepare the whole pipeline
-    // each time — the order Scheduler::prepareTree walks it.
-    auto setExtent = [&](const char* name, uint8_t v) {
-        const auto& cs = layout.controls();
-        for (uint8_t i = 0; i < cs.count(); i++)
-            if (cs[i].name && std::strcmp(cs[i].name, name) == 0)
-                *static_cast<uint8_t*>(cs[i].ptr) = v;
-    };
-
-    for (uint8_t w : {4, 16, 8, 32, 2, 24}) {
-        setExtent("width", w);
-        group.applyState();
-        layer.applyState();
-
-        const nrOfLightsType expected = static_cast<nrOfLightsType>(w) * 4;
-        INFO("width " << (int)w);
-        CHECK(layout.lightCount() == expected);
-        CHECK(group.totalLightCount() == expected);
-
-        // The two that must agree: the buffer holds every light the mapping can address. A buffer
-        // smaller than the mapping's highest destination is the overrun this pins.
-        REQUIRE(layer.buffer().data() != nullptr);
-        CHECK(layer.buffer().count() >= expected);
-    }
-}
-
-#endif  // MM_MOONLIVE_HAS_HOST_JIT
-
-// A script's size is bounded by the device's memory, not by constants chosen when a script was one
-// statement. Both the IR and the emitted code used to be fixed-size buffers: 64 IR ops and 768 code
-// bytes, which is about SIX statements — and they were stack members, so raising them would have
-// traded a compile limit for a stack overflow on a 12 KB task. Both are now sized to the script.
-//
-// Each case here is a script that did not compile before.
-TEST_CASE("a script is limited by memory, not by a fixed op or code budget") {
-    SUBCASE("more statements than the old 64-op IR budget held") {
-        std::string src;
-        for (int i = 0; i < 60; i++) src += "addLight(" + std::to_string(i) + ", 0, 0);";
-        MoonLiveLayout l;
-        l.defineControls();
-        l.setSource(src.c_str());
-        l.prepare();
-        CHECK(l.severity() != MoonModule::Severity::Error);
-        CHECK(l.lightCount() == 60);
-    }
-    SUBCASE("more emitted code than the old 768-byte buffer held") {
-        // setRGB lowers to a bounds-guarded store — the densest construct, and the one that hit the
-        // code ceiling first, at six statements.
-        std::string src;
-        for (int i = 0; i < 40; i++) src += "setRGB(" + std::to_string(i) + ", 1, 2, 3);";
-        moonlive::MoonLive engine;
-        const bool ok = engine.compile(src.c_str(), moonlive::lightBuiltins());
-        CHECK(ok);
-        CHECK(engine.codeLen() > 768);        // the buffer it would have overflowed
-        engine.free();
-    }
+    l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }");
+    l.prepare();
+    CHECK(l.lightCount() == 6);          // a clobbered counter gives some other number
 }

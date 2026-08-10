@@ -1,7 +1,5 @@
 #pragma once
 
-#include "platform/platform.h"   // alloc/free — the branch tables are sized to the script
-
 #include <cstdint>
 #include <cstddef>
 
@@ -17,46 +15,15 @@ namespace mm::moonlive {
 
 // Twelve was the count every backend started with; RISC-V has room for more, and a nested loop
 // needs it — two loop levels hold four values live, and a three-argument call needs three temps on
-// top. Fourteen is what the CALLER-SAVED registers alone provide, and that is the whole map.
-//
-// It briefly reached eighteen by also mapping x18..x21 (s2..s5) on the reasoning that "the emitted
-// routine is a leaf that saves what it uses". It does not: prologue() is empty, so the routine has
-// no entry/exit save at all and would have returned to its caller with four callee-saved registers
-// clobbered. Giving the routine a prologue would cost every script a save/restore it almost never
-// needs; dropping the four costs nothing, since fourteen still exceeds Xtensa's twelve and no
-// script measured here uses more than eleven.
+// top. x16/x17 (a6/a7) and x18..x23 (s2..s7) are free here: the emitted routine is a leaf that
+// saves what it uses, so a callee-saved register is as usable as a caller-saved one.
 enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
-                     R12, R13, kRegCount };
-// uint16_t, not uint8_t: every bounds-guarded store burns a label, so a 256-label
-// ceiling is ~256 statements — a limit a real script reaches.
-using Label = uint16_t;
+                     R12, R13, R14, R15, R16, R17, kRegCount };
+using Label = uint8_t;
 enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 
 class RiscvAssembler {
 public:
-    /// Emit into `out` (capacity `cap`). The buffer belongs to the caller and is already
-    /// sized to the script, so there is no fixed code ceiling and no second copy: this was
-    /// a `uint8_t buf_[768]` member, which capped every script at 768 bytes AND made the
-    /// assembler a ~1.3 KB stack local on a 12 KB task.
-    /// Emit into `out` (capacity `cap`), with branch tables sized for `branches` of them.
-    ///
-    /// The caller's buffer is already sized to the script, so there is no fixed code ceiling
-    /// and no second copy: this was a `uint8_t buf_[768]` member, which capped every script
-    /// at 768 bytes AND made the assembler a ~1.3 KB stack local on a 12 KB task.
-    ///
-    /// `branches` is an upper bound on labels and fixups. It comes from the IR op count
-    /// rather than the code size: only a handful of ops emit a branch at all, so sizing from
-    /// bytes over-allocated by orders of magnitude (a 6 KB script asked for ~1 MB).
-    RiscvAssembler(uint8_t* out, size_t cap, uint16_t branches) : buf_(out), cap_(cap) {
-        labelCap_ = branches ? branches : 8;
-        fixupCap_ = labelCap_;
-        labelPos_ = static_cast<int32_t*>(platform::alloc(size_t(labelCap_) * sizeof(int32_t)));
-        fixups_   = static_cast<Fixup*>(platform::alloc(size_t(fixupCap_) * sizeof(Fixup)));
-        if (!labelPos_ || !fixups_) overflow_ = true;   // degrade: the compile fails cleanly
-    }
-    ~RiscvAssembler() { platform::free(labelPos_); platform::free(fixups_); }
-    RiscvAssembler(const RiscvAssembler&) = delete;
-    RiscvAssembler& operator=(const RiscvAssembler&) = delete;
     void finalize() { patchBranches(); }
     const uint8_t* bytes() const { return buf_; }
     size_t size() const { return len_; }
@@ -81,22 +48,22 @@ public:
     void ret();
 
 private:
+    static constexpr size_t kCap = 768;
+    static constexpr uint8_t kMaxLabels = 16;
+    static constexpr uint8_t kMaxFixups = 32;
 
     void emit32(uint32_t w);
     void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
 
-    uint8_t* buf_ = nullptr;   // the caller's buffer — see the constructor
-    size_t   cap_ = 0;
+    uint8_t  buf_[kCap] = {};
     size_t   len_ = 0;
     bool     overflow_ = false;
 
-    int32_t* labelPos_ = nullptr;   // sized to the script; see the constructor
-    uint16_t labelCap_ = 0;
-    uint16_t labelCount_ = 0;
+    int32_t  labelPos_[kMaxLabels];
+    uint8_t  labelCount_ = 0;
     struct Fixup { size_t at; Label label; };   // all B-type, 4 bytes at `at`
-    Fixup*   fixups_ = nullptr;
-    uint16_t fixupCap_ = 0;
-    uint16_t fixupCount_ = 0;
+    Fixup    fixups_[kMaxFixups];
+    uint8_t  fixupCount_ = 0;
 
     void patchBranches();
 };

@@ -32,9 +32,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     const Reg sAddr = static_cast<Reg>(ir.vregsUsed);       // per-channel address (both ops)
     const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 1);   // FillElems loop counter
 
-    // Two branch slots per IR op is an upper bound: only StoreElem, FillElems and the branch
-    // ops emit one, and each is a single op. Plus the inline ops' own labels.
-    RiscvAssembler a(out, cap, static_cast<uint16_t>(ir.count * 2 + 8));
+    RiscvAssembler a;
 
     // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
     // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
@@ -48,7 +46,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
         return labels[id];
     };
 
-    for (uint16_t i = 0; i < ir.count; i++) {
+    for (uint8_t i = 0; i < ir.count; i++) {
         const IrInst& op = ir.ops[i];
         switch (op.op) {
             case IrOp::Const:  a.movImm(reg(op.dst), op.imm); break;
@@ -114,7 +112,8 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     }
     a.epilogue();
     a.finalize();
-    if (a.overflowed()) return 0;
+    if (a.overflowed() || a.size() > cap) return 0;
+    std::memcpy(out, a.bytes(), a.size());
     return a.size();
 }
 

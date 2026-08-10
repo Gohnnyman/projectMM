@@ -20,17 +20,6 @@
 
 namespace mm::moonlive {
 
-/// FNV-1a over a NUL-terminated string — "has this source changed since I compiled it?" in 4 bytes
-/// instead of a second copy of the script. The bindings each kept a full duplicate buffer for that
-/// comparison, which is what a 4 KB script turns into 8 KB of static RAM per module; on a classic
-/// ESP32 a handful of scripted modules would not fit. Not cryptographic: a collision would skip one
-/// recompile, and the next edit self-heals it.
-inline uint32_t sourceHash(const char* s) {
-    uint32_t h = 2166136261u;
-    for (; s && *s; ++s) { h ^= static_cast<uint8_t>(*s); h *= 16777619u; }
-    return h;
-}
-
 /// The diagnostic when lowering produces nothing: no backend for this ISA, or a program too large.
 /// Named so a test can distinguish "this host has no JIT" from "this script is wrong" without
 /// matching on prose.

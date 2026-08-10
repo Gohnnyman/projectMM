@@ -17,16 +17,6 @@ working script looks like.
 `unit_MoonLiveScripts` compiles every file here, so a script that stops parsing when the language
 changes fails the build rather than waiting to be pasted into a device.
 
-## How big a script can be
-
-A script's size is bounded by the device's free memory, not by a fixed budget: the compiler sizes
-its working buffers to the source it is given. The `source` control holds 4 KB of text, which is a
-few hundred statements — well past what a layout or effect needs. A script that outgrows the device
-fails to compile with a diagnostic; it never truncates silently.
-
-That 4 KB is held per scripted module whether the script fills it or not, which is a few percent of a
-classic ESP32's free RAM per module. Shrinking it is backlogged.
-
 ## Debugging: print
 
 `print(v)` writes a value to the serial log and returns it, so it wraps any part of an expression

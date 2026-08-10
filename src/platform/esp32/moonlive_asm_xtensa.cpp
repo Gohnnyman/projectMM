@@ -32,7 +32,7 @@ static_assert(xtScratchOutsideMap(), "a scratch register is also a vreg — call
 
 
 void XtensaAssembler::emit(const uint8_t* p, size_t n) {
-    if (!buf_ || len_ + n > cap_) { overflow_ = true; return; }
+    if (len_ + n > kCap) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 void XtensaAssembler::emit2(uint16_t w) {
@@ -48,19 +48,15 @@ void XtensaAssembler::prologue() { emit3(0x006136u); }   // entry a1, 48
 void XtensaAssembler::epilogue() { emit2(0xf01du); }     // retw.n
 
 Label XtensaAssembler::newLabel() {
-    // A failed table allocation sets overflow_ in the constructor, but every method still runs —
-    // so each one that touches a table checks the pointer. Writing through the null was a heap
-    // corruption that surfaced much later, in an unrelated heap walk.
-    if (!labelPos_) { overflow_ = true; return 0; }
-    if (labelCount_ == 0) for (uint16_t i = 0; i < labelCap_; i++) labelPos_[i] = -1;
-    if (labelCount_ >= labelCap_) { overflow_ = true; return 0; }   // same overflow signal as emit
+    if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
+    if (labelCount_ >= kMaxLabels) { overflow_ = true; return 0; }   // same overflow signal as emit
     Label l = labelCount_++; labelPos_[l] = -1; return l;
 }
-void XtensaAssembler::bind(Label l) { if (labelPos_ && l < labelCap_) labelPos_[l] = static_cast<int32_t>(len_); }
+void XtensaAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
 
 // Record a pending branch fixup, guarding the fixed table (overflow_ rather than an OOB write).
 void XtensaAssembler::addFixup(size_t at, Label label) {
-    if (!fixups_ || fixupCount_ >= fixupCap_) { overflow_ = true; return; }
+    if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
     fixups_[fixupCount_++] = {at, label};
 }
 
@@ -172,25 +168,16 @@ void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     auto s32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x61,off4}; emit(b,3); };
     auto l32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x21,off4}; emit(b,3); };
     s32i(8, 4); s32i(9, 5); s32i(11, 7);                  // [a1+16]=a8, [a1+20]=a9, [a1+28]=a11
-    // a14/a15 are vregs R10/R11 (kXtReg), and CALL8 rotates the window out from under them — so a
-    // value live across a call in either was destroyed. Reachable on the SHIPPED default: grid.mlv
-    // is a nested loop (11 vregs, so R10 is in use) whose body calls addLight. The entry frame is 48
-    // bytes and call() uses 16/20/24/28, so 32/36 are free.
-    s32i(14, 8); s32i(15, 9);                             // [a1+32]=a14, [a1+36]=a15
 
     s32i(10, 6);                                          // [a1+24]=a10 — a vreg (R8) call8 rotates out
 
     // The three args into a10/a11/a12 — call8 shifts the window by 8, so the callee reads them as
-    // its a2/a3/a4. Moved HIGH-first (a12, then a11, then a10) so an earlier write cannot clobber a
-    // source a later one still needs.
-    //
-    // argA goes through a13 first. a11 is vreg R9, so argA can BE a11 — and writing argB into a11
-    // would then destroy argA before the a10 move reads it. High-first ordering alone does not cover
-    // that case; a13 is outside the vreg map, so staging there does.
-    emit2(uint16_t((uint32_t(ar(a)) << 8) | (13 << 4) | 0xd));   // mov a13, argA  (a13 is scratch)
+    // its a2/a3/a4. Sources are moved HIGH-first (a12, then a11, then a10) so an earlier write
+    // cannot clobber a source a later one still needs: a10 is written last, and it is the only one
+    // of the three that a source register can be.
     emit2(uint16_t((uint32_t(ar(c)) << 8) | (12 << 4) | 0xd));   // mov a12, argC
     emit2(uint16_t((uint32_t(ar(b)) << 8) | (11 << 4) | 0xd));   // mov a11, argB
-    emit2(uint16_t((13u << 8) | (10 << 4) | 0xd));               // mov a10, a13
+    emit2(uint16_t((uint32_t(ar(a)) << 8) | (10 << 4) | 0xd));   // mov a10, argA
 
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
     auto moviA8 = [&](uint8_t v){ const uint8_t b[3]={0x82,0xa0,v}; emit(b,3); };
@@ -205,23 +192,14 @@ void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // stash result (a10) in a12 (not in the saved set), restore a8/a9/a11, then dst = a12.
     emit2(uint16_t((10u << 8) | (12u << 4) | 0xd));        // mov a12, a10
     l32i(8, 4); l32i(9, 5); l32i(10, 6); l32i(11, 7);
-    l32i(14, 8); l32i(15, 9);
     emit2(uint16_t((12u << 8) | (uint32_t(ar(d)) << 4) | 0xd));   // mov aDst, a12
 }
 
 void XtensaAssembler::patchBranches() {
-    if (!labelPos_ || !fixups_) return;   // a failed table allocation already failed the compile
-    for (uint16_t i = 0; i < fixupCount_; i++) {   // uint16_t: fixupCount_ is no longer a byte
+    for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
-        if (f.label >= labelCap_) continue;
         if (labelPos_[f.label] < 0) continue;                                  // unbound label — leave as-is (overflow_ already failed the compile)
         int32_t off = labelPos_[f.label] - (static_cast<int32_t>(f.at) + 4);   // verified rule
-        // Bounds-check the patch site. buf_ is the CALLER's buffer now, sized to the script —
-        // it used to be an oversized fixed member, where a stray patch landed harmlessly inside
-        // it. A fixup recorded just before the emit that overflowed still names an offset past
-        // the end, and writing there corrupts the heap: the failure surfaces much later, in an
-        // unrelated allocation, which is what made it look like a resize race.
-        if (f.at + 2 >= len_) continue;
         buf_[f.at + 2] = static_cast<uint8_t>(off & 0xff);                     // offset byte at +2
     }
 }

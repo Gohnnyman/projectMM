@@ -139,22 +139,6 @@ uint32_t Scheduler::elapsed() const {
 }
 
 void Scheduler::prepareTree() {
-    // Hold the render worker for the WHOLE walk, not per module.
-    //
-    // applyState() runs in registration order — Layouts, then the Layer, then Drivers — so a reshape
-    // leaves a window where the Layer has rebuilt its mapping for the NEW light count while the
-    // driver's output buffer is still sized for the old one. A render tick landing in that window
-    // indexes the new LUT into the old buffer. The mutators that ADD or REMOVE modules already
-    // quiesce for exactly this reason (MoonModule::quiesceForMutation); a reshape mutates as much
-    // memory and did not, which is the inconsistency this closes.
-    //
-    // Not MoonLive-specific: LayoutBase::affectsPrepare returns true for every layout control, so a
-    // compiled GridLayout's width takes the same path.
-    //
-    // Closing this window did NOT stop the heap corruption seen when resizing a scripted layout on an
-    // S3 — that assert is `block_locate_free`, a damaged free list, which means a write past a heap
-    // block rather than two readers racing. That bug is still open; this stands on its own.
-    MoonModule::notifyQuiesceRender();
     for (uint8_t i = 0; i < moduleCount_; i++) {
         modules_[i]->applyState();
     }

@@ -102,12 +102,7 @@ private:
     // A live, always-visible starting example (and a good demo-reel slot). The index random16(256)
     // covers a typical grid; setRGB bounds-guards it (an index past the light count is skipped, and
     // 0×0 is safe), so most ticks land on a real light and the demo stays visibly lit.
-        // 4 KB, not 512 B: a script's length is what a user actually runs into first, and 512
-    // characters is about a dozen statements — the buffer silently TRUNCATED anything longer,
-    // so a long script failed to parse with no indication why. Sized to match what the
-    // compiler now accepts (its IR and code buffers are sized to the script). A fixed member
-    // rather than an allocation because a control binds to a stable address.
-    char source_[4096] = "setRGB(random16(256), random16(256), random16(256), random16(256));";
+    char source_[512] = "setRGB(random16(256), random16(256), random16(256), random16(256));";
                                                // 512 fits a multi-line
                                                // multi-control script (a decl per control + the
                                                // statement); grow-on-demand is backlogged for the

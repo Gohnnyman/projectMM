@@ -284,21 +284,6 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
   **Why it waits.** It is fourteen effects' worth of change across audio-reactive and simulation families, each needing its own judgement about whether to clear, fade, or seed differently — not a mechanical sweep. `unit_Effects_gridsweep.cpp` already measures it (`afterFirst`) and asserts only the settled frame, so the number is visible without blocking.
 
-- **Shrink a scripted module below its 4 KB script buffer** (2026-08-09). Each MoonLive module holds
-  `source_[4096]` as a fixed member, so a layout, an effect and a modifier cost ~4.6 KB of static RAM
-  each whether the script is one line or a thousand. On a classic ESP32 (~160 KB free internal) a
-  pipeline of one each is ~14 KB, and a stack of several modifiers gets uncomfortable. It is also
-  what `ModuleFactory::registerType`'s stack `T probe` pays: a 13 KB module overflowed the 12 KB main
-  task stack outright and bootlooped an S3 — the buffer is now 4.6 KB, which fits, but a temporary
-  probe still takes 38% of that stack.
-
-  **Two independent fixes, either helps:** (a) `registerType` should not construct a whole module on
-  the stack to read `role()`/`dimensions()` — a static constant or a heap probe removes the cliff for
-  every large module, not just these; (b) `source_` could be a right-sized allocation like the
-  compiler's own buffers, but a control BINDS to its address, so it needs the stable-address handling
-  a ScratchBuffer-style owner provides. (a) is the smaller change and the one that unblocks the
-  classic ESP32.
-
 - **Drain MoonLive's `print()` through a queue** (2026-08-09). `print(v)` writes to serial directly, and an EFFECT script runs on the render tick — so a print inside one blocks the frame for as long as the UART takes. The burst cap bounds it (a handful of writes per compile, then a compare and a return), but bounded is not free, and `tick()` is annotated `MM_NONBLOCKING`.
 
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
