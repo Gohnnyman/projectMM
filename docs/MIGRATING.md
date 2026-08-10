@@ -52,7 +52,7 @@ The type name is the persisted filename and the preset capture key, so two thing
 
 A preset also records the ROLE it covers, and that role is now named after the container rather than after a module inside it: `"layer"` becomes `"effects"`. A preset carrying the old role still loads, but shows no tint on its pad until it is re-saved — the UI has no `layer` role to colour it by.
 
-Renaming the file on the device works if you would rather not rebuild by hand: `Layers.json` → `Effects.json`, and `"Layers"` → `"Effects"` inside each `/.config/presets/*.json`. Nothing else in either file changes.
+Renaming the file on the device works if you would rather not rebuild by hand: `Layers.json` → `Effects.json`, and inside each `/.config/presets/*.json` both `"Layers"` → `"Effects"` (the captured container) and `"layer"` → `"effects"` (the role, which is what tints the pad). Nothing else in either file changes.
 
 The child `Layer` keeps its name, as does everything under it.
 

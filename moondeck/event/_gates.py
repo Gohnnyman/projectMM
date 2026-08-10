@@ -136,6 +136,14 @@ def mechanical_gates(firmware, esp32="freshness", triggered=True):
              when(*COMPILES_DESKTOP, "test/scenarios/")),
         Gate("platform boundary", UV + ["moondeck/check/check_platform_boundary.py"],
              when("src/", exclude=("src/platform/",))),
+        # The clang build above cannot see what CI sees: GCC warns where clang is silent
+        # (-Wstringop-truncation, -Wformat-truncation) and does not leak standard headers
+        # transitively, so a missing #include is green locally and red on every CI job. With
+        # -Werror those are hard failures discovered only after a push. Compiling with the real
+        # thing answers it here — see build_desktop.py --gcc for the four cycles that cost once.
+        Gate("GCC build (CI's toolchain)",
+             UV + ["moondeck/build/build_desktop.py", "--gcc", "--tests"],
+             when(*COMPILES_DESKTOP)),
         # Reports what the compiler proved about THIS change: -Wfunction-effects checks the
         # render path transitively, and `--incremental` restricts the rebuild to what the commit
         # touched, so the gate answers "did this add a blocking call" in ~1s rather than

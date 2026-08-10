@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <string>
 #include <vector>
 #include <algorithm>
 
@@ -226,11 +227,19 @@ TEST_CASE("a script cannot declare a name the engine already defines") {
     // The same names READ fine — refusing the declaration is what keeps the read meaningful.
     auto ok = moonlive::compileSource("setRGB(width, height, depth, t);", kTable, kSys,
                                       out, sizeof(out));
-    CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));   // parses; codegen needs a backend
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(ok.ok);                                        // a backend exists: it must emit
+#else
+    CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));   // parses; no backend here
+#endif
     // A name the host did NOT register is an ordinary control, not a reserved word.
     auto own = moonlive::compileSource("uint8_t cols = 16;\nsetRGB(cols, 0, 0, 0);", kTable, kSys,
                                        out, sizeof(out));
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(own.ok);
+#else
     CHECK((own.ok || std::string(own.error) == moonlive::kCodegenFailed));
+#endif
 }
 
 // Found by review: this compiled cleanly and emitted a program that NEVER RETURNED. The inner loop
@@ -248,13 +257,21 @@ TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
     auto ok = moonlive::compileSource(
         "for (yy = 0; yy < 2; yy = yy + 1) { for (xx = 0; xx < 2; xx = xx + 1) { addLight(xx, yy, 0); } }",
         kTable, kSys, out, sizeof(out));
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(ok.ok);
+#else
     CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));
+#endif
     // Sequential loops REUSE a name legitimately: the first has left scope by the time the second
     // binds, so this must still compile (two-rows.mlv is exactly this shape).
     auto seq = moonlive::compileSource(
         "for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } for (i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); }",
         kTable, kSys, out, sizeof(out));
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(seq.ok);
+#else
     CHECK((seq.ok || std::string(seq.error) == moonlive::kCodegenFailed));
+#endif
 }
 
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {

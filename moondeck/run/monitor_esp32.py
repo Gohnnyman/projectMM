@@ -177,7 +177,11 @@ def main():
             except KeyboardInterrupt:
                 pass
             finally:
-                ser.close()
+                # `ser` is None while the reconnect loop waits for a rebooting board to come back,
+                # which is exactly when Ctrl+C is likely — closing unconditionally would end the
+                # session on an AttributeError traceback instead of the clean line below.
+                if ser is not None:
+                    ser.close()
                 print(f"\nStopped. Full log: {LOG_FILE}")
 
 if __name__ == "__main__":

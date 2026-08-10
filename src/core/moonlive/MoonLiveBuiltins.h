@@ -141,8 +141,17 @@ struct SysVarTable {
     SysVar  items[kMax];
     uint8_t count = 0;
 
+    // Rejects an offset the arena cannot hold, rather than storing it and failing at run time:
+    // controlSlot() would return nullptr for it and the binding's per-frame write would vanish
+    // with no error anywhere. An Arena slot must sit in the system range (above the script's
+    // controls, inside the arena); an Arg must name a real argument register.
     bool add(const SysVar& v) {
         if (count >= kMax || v.name == nullptr) return false;
+        if (v.kind == SysVarKind::Arena && (v.where < kMaxCtrls || v.where >= kArenaBytes))
+            return false;
+        // kArg4 is the last argument register (MoonLiveIr.h owns the enum, and includes THIS
+        // header, so the bound is spelled here rather than referenced).
+        if (v.kind == SysVarKind::Arg && v.where > 4) return false;
         items[count++] = v;
         return true;
     }

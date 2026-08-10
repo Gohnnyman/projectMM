@@ -25,6 +25,9 @@ using namespace mm;
 int main(int argc, char** argv) {
     const char* src = argc > 1 ? argv[1] : "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }";
     uint8_t buf[4096];
+    // The WIDEST system-variable list on purpose: this tool disassembles whatever script is passed
+    // on the command line — layout, effect or modifier — so it must accept every name any binding
+    // supplies. A narrower list would refuse the scripts it exists to inspect.
     auto r = moonlive::compileSource(src, moonlive::lightBuiltins(),
                                      moonlive::modifierSysVars(), buf, sizeof(buf));
     if (!r.ok) { printf("compile failed: %s\n", r.error); return 1; }

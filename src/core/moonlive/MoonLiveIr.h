@@ -84,9 +84,11 @@ struct DeclaredControl {
     uint8_t     offset = 0;            // byte offset into the controls arena (declaration order)
 };
 
-/// Branch targets one IR program may use. Two per `for` (entry guard + back edge), so this is the
-/// nesting depth a script can reach; the assemblers carry the same ceiling in their own label
-/// tables, and the compiler fails loudly rather than silently miscompiling past it.
+/// Branch targets one IR program may use. Two per `for` (entry guard + back edge), and the counter
+/// runs for the whole program rather than per scope — a label is never reused once a loop closes —
+/// so this bounds the TOTAL number of loops in a script (8), not how deeply they nest. The
+/// assemblers carry the same ceiling in their own label tables, and the compiler fails loudly
+/// rather than silently miscompiling past it. Nesting depth is bounded separately, by `locals`.
 static constexpr uint8_t kIrLabels = 16;
 
 

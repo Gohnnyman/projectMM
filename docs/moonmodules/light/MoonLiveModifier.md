@@ -8,7 +8,7 @@ A [modifier](modifiers.md) reshapes how a Layer's output maps onto the physical 
 
 ## Writing one
 
-The script transforms **one coordinate**. It does not loop, because the Layer already does: it calls the script once per physical light while it builds its mapping.
+The script transforms **one coordinate**. It needs no loop over the lights, because the Layer already does that: it calls the script once per physical light while it builds its mapping. (A `for` is available if the arithmetic wants one — it just is not how the script reaches the next light.)
 
 ``c
 setXYZ(0, width - 1 - x, y, z);   // mirror along x
@@ -36,7 +36,7 @@ It is for debugging and comes back out again — [what print costs](../../../moo
 
 **A script cannot resize the logical box.** A modifier has two hooks: one reshapes the box once per rebuild, one folds each coordinate. A script drives only the second, so transforms that keep the box the same size work, and ones that halve it (the way the built-in [Mirror](modifiers.md#mirror) does) need the compiled modifier.
 
-**The grammar is arithmetic over calls** — `+`, `-`, `*`, parentheses, and the usual precedence. Division, `if` and `for` are not in the language yet.
+**The grammar is arithmetic over calls** — `+`, `-`, `*`, parentheses, the usual precedence, and `for`. Division and `if` are not in the language yet.
 
 ## Controls
 

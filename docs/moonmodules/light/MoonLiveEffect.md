@@ -34,8 +34,10 @@ Some names are **reserved**: the engine defines them, the script only reads them
 | name | what it is | layout | effect | modifier |
 |---|---|:-:|:-:|:-:|
 | `t` | elapsed milliseconds — the clock an animation is written against | ✓ | ✓ | ✓ |
-| `width`, `height`, `depth` | the **logical grid** the script renders into | | ✓ | ✓ |
-| `x`, `y`, `z` | the light being transformed | | | ✓ |
+| `width`, `height`, `depth` | the **logical grid** the script renders into, `0..255` | | ✓ | ✓ |
+| `x`, `y`, `z` | the light being transformed, `0..255` | | | ✓ |
+
+Every one but `t` is a byte, because it lives in the controls arena. A grid extent past 255 reports 255 rather than wrapping to a small number, and a modifier handed a coordinate outside `0..255` passes it through untransformed instead of folding a wrong position — so a script never silently sees a value that means something else.
 
 Supplying a name is also what reserves it, so the tight lists are what leave `x` and `y` usable as ordinary loop counters in a layout or an effect — neither is handed a coordinate.
 
@@ -57,8 +59,8 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
 | `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
 | `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
-| `scale(value, n)` | a `0..65535` value onto `0..n` — lands a wave on an axis |
-| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `0..65535` centred at 32768 |
+| `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
+| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
 | `print(v)` | log a value and return it ([what it costs](../../../moonlive/README.md#debugging-print)) |
 

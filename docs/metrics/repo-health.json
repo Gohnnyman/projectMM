@@ -1,18 +1,18 @@
 {
-  "commit": "4806046b",
+  "commit": "9e5169a6",
   "flash": {
     "esp32": 1762368,
     "esp32p4-eth": 1600848,
     "esp32p4-eth-wifi": 1793760,
-    "esp32s3-n16r8": 1752128,
+    "esp32s3-n16r8": 1752080,
     "esp32s3-n8r8": 1666992,
-    "esp32s31": 2024592,
+    "esp32s31": 2024656,
     "desktop": 1137800
   },
   "perf": {
     "desktop": {
-      "tick_us": 138,
-      "fps": 7246
+      "tick_us": 126,
+      "fps": 7936
     },
     "esp32": {
       "tick_us": 2151,
@@ -20,16 +20,16 @@
     }
   },
   "loc": {
-    "core": 16946,
+    "core": 16957,
     "light": 24264,
     "platform": 12841,
     "ui": 6468,
-    "test": 41137,
-    "moondeck": 20308
+    "test": 41162,
+    "moondeck": 20323
   },
   "comments": {
     "core": {
-      "lines": 6380,
+      "lines": 6388,
       "ratio": 0.41
     },
     "light": {
@@ -45,11 +45,11 @@
       "ratio": 0.274
     },
     "test": {
-      "lines": 7141,
+      "lines": 7144,
       "ratio": 0.2
     },
     "moondeck": {
-      "lines": 3235,
+      "lines": 3246,
       "ratio": 0.183
     }
   },
@@ -59,9 +59,9 @@
   },
   "docs": {
     "md_files": 178,
-    "md_lines": 24389,
+    "md_lines": 24393,
     "plans_files": 91,
-    "backlog_lines": 3623,
+    "backlog_lines": 3625,
     "lessons_lines": 454,
     "claude_md_lines": 135
   },

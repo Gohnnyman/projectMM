@@ -56,7 +56,7 @@ public:
     void cmp(Reg a, Reg b);              // flags = a - b
     void branchIfZero(Reg a, Label l);   // if a == 0 goto l
     void branchIf(Cond c, Label l);      // if flags satisfy c goto l (after cmp)
-    // Call a host built-in: d = fn(a). Preserves the host-arg registers (R0/R1/R2 = buf,
+    // Call a host built-in: d = fn(a, b, c). Preserves the host-arg registers (R0/R1/R2 = buf,
     // nLights, cpl) across the call by saving them on the stack, so they stay live for the
     // statement after the call — the live-vreg-across-Call contract. `fn` is an absolute
     // function pointer (materialised into a scratch register). Caller-saved vregs other than

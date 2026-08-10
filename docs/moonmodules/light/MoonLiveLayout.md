@@ -10,7 +10,7 @@ A [layout](layouts.md) is the one part of the pipeline that differs for every ph
 
 The script places every light itself, with a loop. That is the difference from a scripted modifier: the Layer calls a modifier once per light, so its script transforms a single coordinate — a layout has no such per-light call to ride on.
 
-``c
+```c
 uint8_t cols = 16;  // @control 1..64
 uint8_t rows = 16;  // @control 1..64
 
@@ -19,7 +19,7 @@ for (y = 0; y < rows; y = y + 1) {
     addLight(x, y, 0);
   }
 }
-``
+```
 
 That is the default: a plain grid, one light per cell. `addLight(x, y, z)` places the next light along the strand — no index, because the order the script calls it in *is* the strand order.
 
@@ -29,7 +29,7 @@ They are named `cols`/`rows` because `width`, `height` and `depth` are [system v
 
 A few shapes that are one line here and a new class otherwise:
 
-``c
+```c
 // a strand that runs right to left
 for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }
 
@@ -46,7 +46,7 @@ for (i = 0; i < count; i = i + 1) {
   addLight(scale(cos(i * turn(count)), radius * 2 + 1),
            scale(sin(i * turn(count)), radius * 2 + 1), 0);
 }
-``
+```
 
 ### What a script can read
 

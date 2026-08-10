@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <fstream>
 
 // Persistence round-trip: set deviceName → save → recreate Scheduler+modules → load → assert.

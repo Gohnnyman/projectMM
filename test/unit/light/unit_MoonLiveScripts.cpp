@@ -116,7 +116,14 @@ TEST_CASE("a script gets the system variables its own module supplies, and no ot
     for (const Case& c : cases) {
         INFO(c.what);
         auto r = moonlive::compileSource(c.src, moonlive::lightBuiltins(), c.sys, out, sizeof(out));
+        // Where a backend exists, a valid script must actually EMIT — accepting kCodegenFailed
+        // everywhere would let a codegen regression pass as a pass. Only a host with no assembler
+        // for its ISA (x86_64, which is what CI runs) is allowed that answer.
+#if MM_MOONLIVE_HAS_HOST_JIT
+        if (c.ok) CHECK(r.ok);
+#else
         if (c.ok) CHECK((r.ok || std::string(r.error) == moonlive::kCodegenFailed));
+#endif
         else      CHECK_FALSE(r.ok);
     }
 }

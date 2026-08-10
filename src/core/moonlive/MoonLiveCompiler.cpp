@@ -469,7 +469,7 @@ struct Parser {
         if (!expect(Tok::RParen, "expected ')' to close the for")) return false;
         if (!expect(Tok::LBrace, "expected '{' — a for's body is braced")) return false;
 
-        if (nextLabel + 2 > kIrLabels) { fail("loops nested too deeply"); return false; }
+        if (nextLabel + 2 > kIrLabels) { fail("too many loops in one script"); return false; }
         const uint8_t lDone = nextLabel++;
         const uint8_t lTop  = nextLabel++;
 
