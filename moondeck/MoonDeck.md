@@ -956,7 +956,7 @@ Reads serial at 115200 baud. Output streams to MoonDeck's log and is saved to `e
 
 **Panic backtraces are decoded.** A crash prints `Backtrace: 0x4038456d:0x3fcae310 …`, which says nothing on its own; with `--firmware` each address is resolved against that build's ELF and the function, file and line print underneath:
 
-```
+```text
 Guru Meditation Error: Core 0 panic'ed (LoadProhibited)
 Backtrace: 0x4210b93b:0x3fcc8fa0 0x4200fbf8:0x3fcc8fc0
   #0 src/light/moonlive/MoonLiveLayout.h:119

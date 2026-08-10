@@ -1,4 +1,2 @@
-// Mirror along x: the pattern runs the other way.
-// `width` is the extent of the box this fold happens in, and reflecting around it (rather than
-// around a fixed 255) is what keeps every light inside the grid.
+// Mirror along x. Reflecting around `width` (not a fixed 255) keeps every light in the grid.
 setXYZ(0, width - 1 - x, y, z);

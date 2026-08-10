@@ -27,6 +27,45 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
   Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Editing the `source` recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
 
+### System variables — what the engine hands a script
+
+Some names are **reserved**: the engine defines them, the script only reads them, and a declaration that reuses one is a compile error (`name is a system variable`). Each module supplies the names it actually writes, so a name a script cannot be given is simply unknown there rather than silently reading 0.
+
+| name | what it is | layout | effect | modifier |
+|---|---|:-:|:-:|:-:|
+| `t` | elapsed milliseconds — the clock an animation is written against | ✓ | ✓ | ✓ |
+| `width`, `height`, `depth` | the **logical grid** the script renders into | | ✓ | ✓ |
+| `x`, `y`, `z` | the light being transformed | | | ✓ |
+
+Supplying a name is also what reserves it, so the tight lists are what leave `x` and `y` usable as ordinary loop counters in a layout or an effect — neither is handed a coordinate.
+
+`width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it is not given them at all, and names its own controls instead (`cols`, `rows`).
+
+Reserving is what makes the guarantee hold: without it a declaration would silently shadow the value the engine handed in, and the script would disagree with its layer with no error anywhere.
+
+### The vocabulary — what a script can call
+
+Registered by the light domain, not built into the compiler (the core owns only the grammar and a generic call/inline mechanism), so the list is one edit in `MoonLiveBuiltins_light.h`.
+
+| call | does |
+|---|---|
+| `setRGB(index, r, g, b)` | write one light |
+| `setXYZ(index, x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
+| `fill(r, g, b)` | write every light |
+| `addLight(x, y, z)` | place the next light (a [layout](MoonLiveLayout.md)) |
+| `random16(n)` | a value in `[0, n)` |
+| `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
+| `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
+| `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
+| `scale(value, n)` | a `0..65535` value onto `0..n` — lands a wave on an axis |
+| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `0..65535` centred at 32768 |
+| `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
+| `print(v)` | log a value and return it ([what it costs](../../../moonlive/README.md#debugging-print)) |
+
+`sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
+
+`turn(n)` exists because a full revolution is 65536 — one past the largest number a script can write — and the grammar has no division. Without it, placing `n` points evenly on a circle is not expressible.
+
 ### Wire contract — control declaration
 
 The controls are **derived from `source`** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `source`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line `source` round-trips.

@@ -55,10 +55,10 @@ std::vector<Coord3D> place(const char* script) {
 TEST_CASE("the default script lays out a grid, one light per cell") {
     // The shape almost every panel is, and the script that ships: a nested loop calling addLight.
     const std::vector<Coord3D> p = place(
-        "uint8_t width = 4;  // @control 1..64\n"
-        "uint8_t height = 2; // @control 1..64\n"
-        "for (yy = 0; yy < height; yy = yy + 1) {"
-        "  for (xx = 0; xx < width; xx = xx + 1) { addLight(xx, yy, 0); } }");
+        "uint8_t cols = 4;  // @control 1..64\n"
+        "uint8_t rows = 2; // @control 1..64\n"
+        "for (yy = 0; yy < rows; yy = yy + 1) {"
+        "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }");
     REQUIRE(p.size() == 8);
     CHECK(p[0] == Coord3D{0, 0, 0});
     CHECK(p[3] == Coord3D{3, 0, 0});
@@ -71,10 +71,10 @@ TEST_CASE("the light count is known before any coordinate is asked for") {
     // forEachCoord. A count that came from the walk would arrive too late to be useful.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t width = 5;  // @control 1..64\n"
-                "uint8_t height = 3; // @control 1..64\n"
-                "for (yy = 0; yy < height; yy = yy + 1) {"
-                "  for (xx = 0; xx < width; xx = xx + 1) { addLight(xx, yy, 0); } }");
+    l.setSource("uint8_t cols = 5;  // @control 1..64\n"
+                "uint8_t rows = 3; // @control 1..64\n"
+                "for (yy = 0; yy < rows; yy = yy + 1) {"
+                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }");
     l.prepare();
     CHECK(l.lightCount() == 15);           // answered without anyone calling forEachCoord
 }
@@ -109,8 +109,8 @@ TEST_CASE("a scripted layout allocates nothing, like every other layout") {
 TEST_CASE("a script places lights wherever it likes, which is the point of scripting one") {
     // A strand that runs right to left: one line here, a new C++ class otherwise.
     const std::vector<Coord3D> p = place(
-        "uint8_t width = 4; // @control 1..64\n"
-        "for (i = 0; i < width; i = i + 1) { addLight(width - 1 - i, 0, 0); }");
+        "uint8_t cols = 4; // @control 1..64\n"
+        "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }");
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{3, 0, 0});
     CHECK(p[3] == Coord3D{0, 0, 0});
@@ -154,19 +154,19 @@ TEST_CASE("editing the script changes the fixture") {
 TEST_CASE("the scripts the documentation shows all compile") {
     const char* fromDocs[] = {
         // the default
-        "uint8_t width = 16;  // @control 1..64\n"
-        "uint8_t height = 16; // @control 1..64\n"
-        "for (yy = 0; yy < height; yy = yy + 1) {"
-        "  for (xx = 0; xx < width; xx = xx + 1) { addLight(xx, yy, 0); } }",
+        "uint8_t cols = 16;  // @control 1..64\n"
+        "uint8_t rows = 16; // @control 1..64\n"
+        "for (yy = 0; yy < rows; yy = yy + 1) {"
+        "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }",
         // right to left
-        "uint8_t width = 8; // @control 1..64\n"
-        "for (i = 0; i < width; i = i + 1) { addLight(width - 1 - i, 0, 0); }",
+        "uint8_t cols = 8; // @control 1..64\n"
+        "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }",
         // a diagonal
-        "uint8_t width = 8; // @control 1..64\n"
-        "for (i = 0; i < width; i = i + 1) { addLight(i, i, 0); }",
+        "uint8_t cols = 8; // @control 1..64\n"
+        "for (i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }",
         // two rows, stacked
-        "uint8_t width = 8; // @control 1..64\n"
-        "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }",
+        "uint8_t cols = 8; // @control 1..64\n"
+        "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }",
         // print wrapping an argument
         "for (i = 0; i < 2; i = i + 1) { addLight(print(i), 0, 0); }",
     };
@@ -224,8 +224,8 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
     CHECK(l.lightCount() == 6);
 
     // And a subtraction inside the placement, where the coordinate is the observable.
-    std::vector<Coord3D> p = place("uint8_t width = 4; // @control 1..64\n"
-                                   "for (i = 0; i < width; i = i + 1) { addLight(width - 1 - i, 0, 0); }");
+    std::vector<Coord3D> p = place("uint8_t cols = 4; // @control 1..64\n"
+                                   "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }");
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{3, 0, 0});      // 4 - 1 - 0
     CHECK(p[3] == Coord3D{0, 0, 0});      // 4 - 1 - 3
@@ -235,7 +235,7 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
 // control arena delivers it by keeping a slot's value when the control persists across a recompile
 // (MoonLive.h, ensureArena). The consequence, which is easy to be surprised by: the arena matches
 // controls by OFFSET, so a DIFFERENT script whose first control happens to sit at the same offset
-// inherits the value rather than its own initialiser. Two scripts that both open with a `width` are
+// inherits the value rather than its own initialiser. Two scripts that both open with a `cols` are
 // the same slot as far as the engine is concerned.
 //
 // This pins the behaviour so a change to it is a decision rather than an accident. Setting the
@@ -243,24 +243,24 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
 TEST_CASE("a scripted control keeps its live value when the script is edited") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t width = 16; // @control 1..64\n"
-                "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }");
+    l.setSource("uint8_t cols = 16; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
     l.prepare();
     CHECK(l.lightCount() == 16);
 
-    // A second script declaring width at the same offset inherits the live 16, not its own 8.
-    l.setSource("uint8_t width = 8; // @control 1..64\n"
-                "for (i = 0; i < width; i = i + 1) { addLight(i, 1, 0); }");
+    // A second script declaring cols at the same offset inherits the live 16, not its own 8.
+    l.setSource("uint8_t cols = 8; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }");
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A script whose first control is a NEW slot gets its own initialiser: nothing to inherit.
-    l.setSource("uint8_t width = 16;  // @control 1..64\n"
-                "uint8_t height = 3;  // @control 1..64\n"
-                "for (yy = 0; yy < height; yy = yy + 1) {"
-                "  for (xx = 0; xx < width; xx = xx + 1) { addLight(xx, yy, 0); } }");
+    l.setSource("uint8_t cols = 16;  // @control 1..64\n"
+                "uint8_t rows = 3;  // @control 1..64\n"
+                "for (yy = 0; yy < rows; yy = yy + 1) {"
+                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }");
     l.prepare();
-    CHECK(l.lightCount() == 48);          // 16 inherited, height 3 its own
+    CHECK(l.lightCount() == 48);          // 16 inherited, rows 3 its own
 }
 
 // A layout script never fills, so it should not pay for the scratch registers a fill needs. The
@@ -304,13 +304,13 @@ TEST_CASE("a loop counter survives the body that uses it") {
         // checks every light was written, which is what a wrong counter changes.
         uint8_t code[4096];
         auto r = moonlive::compileSource("for (i = 0; i < 6; i = i + 1) { setRGB(i, 200, 0, 0); }",
-                                         moonlive::lightBuiltins(), code, sizeof(code));
+                                         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
         REQUIRE(r.ok);
         void* blk = platform::allocExec(r.len);
         REQUIRE(blk);
         platform::writeExec(blk, code, r.len);
         uint8_t buf[6 * 3] = {};
-        uint8_t arena[moonlive::kMaxCtrls] = {};
+        uint8_t arena[moonlive::kArenaBytes] = {};
         reinterpret_cast<moonlive::CtrlFn>(blk)(buf, 6, 3, 0, arena);
         for (int i = 0; i < 6; i++) {
             INFO("light " << i);
@@ -341,15 +341,15 @@ TEST_CASE("a stray character in a for header is rejected, not spun on") {
 //
 // Two threads walking their own layouts concurrently must each see their own sink.
 TEST_CASE("two threads can run scripts at once without stealing each other's sink") {
-    auto place = [](int width, int reps) {
+    auto place = [](int cols, int reps) {
         MoonLiveLayout l;
         l.defineControls();
         char src[128];
-        std::snprintf(src, sizeof(src), "for (i = 0; i < %d; i = i + 1) { addLight(i, 0, 0); }", width);
+        std::snprintf(src, sizeof(src), "for (i = 0; i < %d; i = i + 1) { addLight(i, 0, 0); }", cols);
         l.setSource(src);
         l.prepare();
         for (int r = 0; r < reps; r++)
-            if (l.lightCount() != static_cast<nrOfLightsType>(width)) return false;
+            if (l.lightCount() != static_cast<nrOfLightsType>(cols)) return false;
         return true;
     };
 
@@ -369,8 +369,8 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
 TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t width = 4; // @control 1..64\n"
-                "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }");
+    l.setSource("uint8_t cols = 4; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
     l.prepare();
     const size_t compiled = l.dynamicBytes();
     CHECK(compiled > 0);
@@ -395,8 +395,8 @@ TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not")
 TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     MoonLiveLayout layout;
     layout.defineControls();
-    layout.setSource("uint8_t width = 4; // @control 1..64\n"
-                     "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }");
+    layout.setSource("uint8_t cols = 4; // @control 1..64\n"
+                     "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
     layout.prepare();
 
     mm::Layouts group;
@@ -411,7 +411,7 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     auto setWidth = [&](uint8_t v) {
         const auto& cs = layout.controls();
         for (uint8_t i = 0; i < cs.count(); i++)
-            if (cs[i].name && std::strcmp(cs[i].name, "width") == 0)
+            if (cs[i].name && std::strcmp(cs[i].name, "cols") == 0)
                 *static_cast<uint8_t*>(cs[i].ptr) = v;
     };
 
@@ -420,7 +420,7 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
         setWidth(w);
         group.applyState();
         layer.applyState();
-        INFO("width " << (int)w);
+        INFO("cols " << (int)w);
         CHECK(layout.lightCount() == w);
         REQUIRE(layer.buffer().data() != nullptr);
         CHECK(layer.buffer().count() >= w);

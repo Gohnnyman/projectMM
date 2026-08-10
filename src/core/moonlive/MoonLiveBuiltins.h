@@ -78,4 +78,83 @@ struct BuiltinTable {
     }
 };
 
+static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful of controls; fixed, no heap
+
+// The controls arena holds two kinds of byte, in one allocation with a fixed split:
+//   [0 .. kMaxCtrls)                  script-declared controls, offset == declaration index
+//   [kMaxCtrls .. kArenaBytes)        host system variables (width/height/…), offset assigned by
+//                                     the host and CONSTANT for the program's life
+// System variables sit ABOVE the script's range so that adding or removing a control — which
+// renumbers every control offset — cannot move them. The binding caches their slot pointers, so a
+// moving offset would silently write the wrong byte.
+// Fixed cap for an emitted routine, shared by the engine's staging buffer and EVERY backend's code
+// buffer — they must agree, or a script that fits the caller's buffer still overflows the
+// assembler's. One constant is what makes that structural instead of a comment in four files.
+//
+// It was once sized for the heaviest single STATEMENT, but a real effect is several statements, and
+// the shipped `lines.mlv` emits 908 bytes on RISC-V against 461 on Xtensa for the same script: RISC-V
+// is fixed-4-byte and saves the whole register pool around every call, so it needs roughly twice the
+// room for identical work. Sizing to the DENSEST backend silently made a script that runs on an S3
+// fail on an S31.
+//
+// 2 KB covers the measured worst case with headroom. The emitter returns the real length and the
+// live exec block is allocated to THAT, so the tail costs nothing beyond one staging buffer during
+// the compile. Word-aligned so allocExec/writeExec's word-rounding never exceeds it.
+static constexpr size_t  kCodeCap = 2048;
+
+// The script text a binding holds. 1 KB, not 512 B: 512 could not hold a DOCUMENTED script — the
+// shipped lines.mlv is ~490 characters with its comments — and a script that overruns is silently
+// truncated mid-token, so it fails to compile with no hint that length was the reason. A binding is
+// ~2 KB at this size, which the smallest board still carries.
+static constexpr size_t  kMaxScriptBytes = 1024;
+
+static constexpr uint8_t kMaxSysVars  = 8;
+static constexpr uint8_t kArenaBytes  = kMaxCtrls + kMaxSysVars;
+
+/// A name the HOST defines and the script only reads: `width`, `height`, `depth`. Reserved — a
+/// script cannot declare one, so the name means the same thing in every script (the `t` rule, one
+/// construct wider). Distinct from a control: nobody sets it in the UI, and it never appears in
+/// declaredControls(), so no binding has to hide it.
+///
+/// The common case is read from the controls arena like a control is, because the value changes per frame and
+/// the emitted code must not bake it in. The difference is ownership: the BINDING owns the slot
+/// and writes it (from the layer), and the compiler reserves the slot rather than the script
+/// declaring it.
+enum class SysVarKind : uint8_t {
+    Arena,   // a byte in the controls arena the binding writes per frame (width/height/depth)
+    Arg,     // an argument register the host passes on every run (t) — costs no instruction
+};
+
+struct SysVar {
+    const char* name = nullptr;
+    SysVarKind  kind = SysVarKind::Arena;
+    uint8_t     where = 0;   // Arena: byte offset into the arena. Arg: the VReg (kArg0..kArg4).
+};
+
+/// The system variables one host domain defines. Same shape and lookup as BuiltinTable — a host
+/// hands the compiler both, and the compiler resolves names against them without knowing the domain.
+struct SysVarTable {
+    // Bounded by the arena's system range, not chosen independently: a host that could register
+    // more system variables than the arena reserves would hand out an offset controlSlot() rejects,
+    // and the binding's per-frame write would be silently dropped.
+    static constexpr uint8_t kMax = kMaxSysVars;
+    SysVar  items[kMax];
+    uint8_t count = 0;
+
+    bool add(const SysVar& v) {
+        if (count >= kMax || v.name == nullptr) return false;
+        items[count++] = v;
+        return true;
+    }
+    const SysVar* find(const char* name, size_t len) const {
+        for (uint8_t i = 0; i < count; i++) {
+            const char* n = items[i].name;
+            size_t j = 0;
+            for (; j < len && n[j]; j++) if (n[j] != name[j]) break;
+            if (j == len && n[j] == 0) return &items[i];
+        }
+        return nullptr;
+    }
+};
+
 }  // namespace mm::moonlive

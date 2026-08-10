@@ -21,10 +21,7 @@ setXYZ(0, (width - 1 - x) * 2, y, z);   // mirror, then stretch
 
 ### What a script can read
 
-| name | is |
-|---|---|
-| `x`, `y`, `z` | the position of the light being folded |
-| `width`, `height`, `depth` | the box that position lives in |
+`x`, `y`, `z` (the light being folded) and `width`, `height`, `depth` (the box it lives in) are [system variables](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) — the engine writes them per call, and a script cannot declare a name that shadows one.
 
 `width` matters more than it looks. A mirror written against a fixed `255` sends every light of a 16-wide grid far outside the grid, the Layer discards each one as out of bounds, and the fixture goes black — with no error anywhere, because the script itself ran perfectly.
 

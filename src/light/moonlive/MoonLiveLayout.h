@@ -111,7 +111,10 @@ private:
         if (engine_.ok() && std::strcmp(source_, compiled_) == 0) return;   // already current
         auto* self = const_cast<MoonLiveLayout*>(this);
         moonlive::resetPrintBudget();
-        if (self->engine_.compile(source_, moonlive::lightBuiltins())) self->clearStatus();
+        // A layout is the one script with no layer to ask, so it gets the clock and nothing else:
+        // it names its own size controls, and `x`/`y` stay free as ordinary loop counters.
+        if (self->engine_.compile(source_, moonlive::lightBuiltins(), moonlive::layoutSysVars()))
+            self->clearStatus();
         else                                                          self->setStatus(self->engine_.error(), Severity::Error);
         std::snprintf(self->compiled_, sizeof(compiled_), "%s", source_);
         self->setDynamicBytes(engine_.heapBytes());
@@ -146,17 +149,17 @@ private:
 
     // Default script — a grid, the layout almost every panel is. The nested loop and the index
     // arithmetic are the whole definition, which is the case for scripting a layout at all.
-    char source_[512] =
-        "uint8_t width = 16;  // @control 1..64\n"
-        "uint8_t height = 16; // @control 1..64\n"
-        "for (yy = 0; yy < height; yy = yy + 1) {\n"
-        "  for (xx = 0; xx < width; xx = xx + 1) {\n"
-        "    addLight(xx, yy, 0);\n"
+    char source_[moonlive::kMaxScriptBytes] =
+        "uint8_t cols = 16;  // @control 1..64\n"
+        "uint8_t rows = 16;  // @control 1..64\n"
+        "for (y = 0; y < rows; y = y + 1) {\n"
+        "  for (x = 0; x < cols; x = x + 1) {\n"
+        "    addLight(x, y, 0);\n"
         "  }\n"
         "}";
 
     // The source the loaded program was built from, so compile() is a no-op when current.
-    mutable char compiled_[512] = {};
+    mutable char compiled_[1024] = {};
 
     char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 };

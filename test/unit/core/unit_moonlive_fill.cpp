@@ -145,10 +145,11 @@ TEST_CASE("platform allocExec returns usable executable memory, freeExec release
 // source edit that keeps the control, and is released by free(). The codegen/live-read is pinned
 // in unit_moonlive_ir; this is the engine's ownership + lifecycle contract.
 static moonlive::BuiltinTable kCtrlTable = moonlive::lightBuiltins();
+static moonlive::SysVarTable kSys = moonlive::modifierSysVars();
 
 TEST_CASE("MoonLive controls: declaredControls + controlSlot seeded from the default") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile("uint8_t speed = 42; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kCtrlTable));
+    REQUIRE(eng.compile("uint8_t speed = 42; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kCtrlTable, kSys));
     uint8_t n = 0;
     const moonlive::DeclaredControl* dc = eng.declaredControls(n);
     REQUIRE(n == 1);
@@ -156,38 +157,40 @@ TEST_CASE("MoonLive controls: declaredControls + controlSlot seeded from the def
     uint8_t* slot = eng.controlSlot(0);
     REQUIRE(slot != nullptr);
     CHECK(*slot == 42);                                  // arena slot seeded to the declared default
-    CHECK(eng.controlSlot(1) == nullptr);                // out-of-range offset → nullptr (robust)
+    // Offset 1 is a real arena byte (an undeclared control slot), so it resolves. Past the arena
+    // — controls plus the host's system variables — there is nothing to point at.
+    CHECK(eng.controlSlot(moonlive::kArenaBytes) == nullptr);   // out of range → nullptr (robust)
 }
 
 TEST_CASE("MoonLive controls: arena address is STABLE across a recompile and the slot value survives") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile("uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);", kCtrlTable));
+    REQUIRE(eng.compile("uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);", kCtrlTable, kSys));
     uint8_t* before = eng.controlSlot(0);
     REQUIRE(before != nullptr);
     *before = 12;                                        // a "slider move" — write the live value
 
     // Edit the source (recompile) but KEEP the control. The grow-only arena must not move, and the
     // live value must survive (a kept control keeps its slider position across a source edit).
-    REQUIRE(eng.compile("uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 255, 0, 0);", kCtrlTable));
+    REQUIRE(eng.compile("uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 255, 0, 0);", kCtrlTable, kSys));
     uint8_t* after = eng.controlSlot(0);
     CHECK(after == before);                              // STABLE address — no dangling bound pointer
     CHECK(*after == 12);                                 // value preserved across the recompile
 
     // Adding a SECOND control keeps the first's value and seeds the new slot from its default.
-    REQUIRE(eng.compile("uint8_t speed = 7; // @control 0..15\nuint8_t hue = 200; // @control 0..255\nsetRGB(speed, hue, 0, 255);", kCtrlTable));
+    REQUIRE(eng.compile("uint8_t speed = 7; // @control 0..15\nuint8_t hue = 200; // @control 0..255\nsetRGB(speed, hue, 0, 255);", kCtrlTable, kSys));
     CHECK(*eng.controlSlot(0) == 12);                    // speed kept its live value
     CHECK(*eng.controlSlot(1) == 200);                   // hue seeded from its default
 }
 
 TEST_CASE("MoonLive controls: free() releases the arena (no stale slot after release)") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);", kCtrlTable));
+    REQUIRE(eng.compile("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);", kCtrlTable, kSys));
     REQUIRE(eng.controlSlot(0) != nullptr);
     eng.free();
     CHECK_FALSE(eng.ok());
     CHECK(eng.controlSlot(0) == nullptr);                // arena gone — no dangling pointer handed out
     // Recompiling after a full free re-acquires cleanly (add/remove robustness).
-    REQUIRE(eng.compile("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);", kCtrlTable));
+    REQUIRE(eng.compile("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);", kCtrlTable, kSys));
     REQUIRE(eng.controlSlot(0) != nullptr);
     CHECK(*eng.controlSlot(0) == 5);                     // re-seeded from default
 }

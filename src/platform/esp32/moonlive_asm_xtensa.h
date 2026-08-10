@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
+
 #include <cstdint>
 #include <cstddef>
 
@@ -43,7 +45,8 @@ public:
     void epilogue();                     // retw.n
 
 private:
-    static constexpr size_t kCap = 768;
+    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
+    static constexpr size_t kCap = kCodeCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 

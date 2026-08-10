@@ -13,6 +13,8 @@
 
 #include "doctest.h"
 #include "core/moonlive/MoonLive.h"
+#include "platform/platform.h"
+#include "core/moonlive/moonlive_emit.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 
 #include <filesystem>
@@ -56,19 +58,16 @@ TEST_CASE("every script in moonlive/ compiles") {
             const std::string src = read(file);
             const std::string label = std::string(sub) + "/" + file.filename().string();
 
-            // Compile it the way its own module does. A MODIFIER script reads `x`, `y` and `z`,
-            // which its binding prepends as declarations before compiling — so a modifier script is
-            // only valid with that preamble, and testing it bare would report a failure that never
-            // happens in use.
-            std::string full;
-            if (std::string(sub) == "modifiers")
-                full = "uint8_t x = 0;\nuint8_t y = 0;\nuint8_t z = 0;\n"
-                       "uint8_t width = 16;\nuint8_t height = 16;\nuint8_t depth = 1;\n" + src;
-            else
-                full = src;
-
+            // Compile it exactly as it ships, against the system variables ITS OWN binding supplies
+            // — a layout gets the clock, an effect the grid, a modifier the grid plus a coordinate.
+            // Using one shared list here would let a script read a name its module never writes and
+            // still pass, which is the silent-zero this per-binding split exists to prevent.
+            const moonlive::SysVarTable sys =
+                std::string(sub) == "layouts"   ? moonlive::layoutSysVars()   :
+                std::string(sub) == "modifiers" ? moonlive::modifierSysVars() :
+                                                  moonlive::effectSysVars();
             moonlive::MoonLive engine;
-            const bool ok = engine.compile(full.c_str(), moonlive::lightBuiltins());
+            const bool ok = engine.compile(src.c_str(), moonlive::lightBuiltins(), sys);
             if (!ok) std::printf("FAIL %-28s %s\n", label.c_str(), engine.error());
             // compile() both PARSES and emits native code, and only the second half needs a backend
             // for this host's ISA (MM_MOONLIVE_HAS_HOST_JIT — 0 on x86_64, which is what CI runs).
@@ -90,6 +89,38 @@ TEST_CASE("every script in moonlive/ compiles") {
 // Comments are what makes a script in `moonlive/` readable, so the lexer has to treat a plain `//`
 // line as whitespace — anywhere, including between the statements of a loop body. The one exception
 // is `// @control min..max`, which is not a comment at all but the declaration of a UI slider.
+// Each binding supplies the system variables it actually WRITES, and supplying a name is also what
+// reserves it. That split is what keeps `x` usable as a loop counter in a layout while still making
+// it mean "the light being folded" in a modifier — and what turns a layout reading `width` into an
+// error instead of a silent 0 that places no lights and reports success.
+TEST_CASE("a script gets the system variables its own module supplies, and no others") {
+    struct Case { moonlive::SysVarTable sys; const char* src; bool ok; const char* what; };
+    const Case cases[] = {
+        {moonlive::layoutSysVars(),
+         "for (y = 0; y < 2; y = y + 1) { for (x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }",
+         true,  "a layout nests x/y loops: nothing hands it a coordinate, so the names are free"},
+        {moonlive::layoutSysVars(), "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }",
+         false, "a layout cannot read width: it DEFINES the grid, so there is no size to hand it"},
+        {moonlive::effectSysVars(), "setRGB(width, 0, 0, 0);",
+         true,  "an effect reads the layer's width"},
+        {moonlive::effectSysVars(), "for (x = 0; x < 3; x = x + 1) { setRGB(x, 0, 0, 0); }",
+         true,  "an effect uses x as a loop counter: it renders a buffer, not one light"},
+        {moonlive::effectSysVars(), "setRGB(x, 0, 0, 0);",
+         false, "an effect cannot read x: no coordinate is written for it"},
+        {moonlive::modifierSysVars(), "setXYZ(0, width - 1 - x, y, z);",
+         true,  "a modifier reads the coordinate AND the box it lives in"},
+        {moonlive::modifierSysVars(), "for (x = 0; x < 3; x = x + 1) { setXYZ(0, x, 0, 0); }",
+         false, "a modifier cannot loop on x: that name is the light it was handed"},
+    };
+    uint8_t out[2048];
+    for (const Case& c : cases) {
+        INFO(c.what);
+        auto r = moonlive::compileSource(c.src, moonlive::lightBuiltins(), c.sys, out, sizeof(out));
+        if (c.ok) CHECK((r.ok || std::string(r.error) == moonlive::kCodegenFailed));
+        else      CHECK_FALSE(r.ok);
+    }
+}
+
 TEST_CASE("a script may be commented, and only @control carries meaning") {
     struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
@@ -106,25 +137,114 @@ TEST_CASE("a script may be commented, and only @control carries meaning") {
     };
     for (const Case& c : cases) {
         moonlive::MoonLive engine;
-        const bool ok = engine.compile(c.src, moonlive::lightBuiltins());
+        const bool ok = engine.compile(c.src, moonlive::lightBuiltins(), moonlive::modifierSysVars());
         INFO(c.what);
-        CHECK(ok == c.ok);
+        // What this case is about is the LEXER, which runs on every host. Where there is no backend
+        // for this ISA a valid script still fails, at codegen — so accept that one diagnostic rather
+        // than dropping the coverage. A script expected to FAIL must still fail everywhere.
+        if (c.ok) CHECK((ok || std::string(engine.error()) == moonlive::kCodegenFailed));
+        else      CHECK(!ok);
         engine.free();
     }
 }
 
 TEST_CASE("a comment changes nothing about what a script does") {
-    // The stronger claim: commenting a script does not alter the code it produces.
+    // The stronger claim: commenting a script does not alter the code it produces. Needs a backend —
+    // with no code emitted, "same length" is two zeroes and proves nothing.
+#if MM_MOONLIVE_HAS_HOST_JIT
     moonlive::MoonLive bare, commented;
     CHECK(bare.compile("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }",
-                       moonlive::lightBuiltins()));
+                       moonlive::lightBuiltins(), moonlive::modifierSysVars()));
     CHECK(commented.compile("// place three lights in a row\n"
                             "for (i = 0; i < 3; i = i + 1) {\n"
                             "  addLight(i, 0, 0);   // one per step\n"
                             "}",
-                            moonlive::lightBuiltins()));
+                            moonlive::lightBuiltins(), moonlive::modifierSysVars()));
     CHECK(bare.codeLen() == commented.codeLen());   // byte-for-byte the same program
+    CHECK(bare.codeLen() > 0);                      // and a real program, not two zeroes
     bare.free();
     commented.free();
+#endif
 }
 
+
+// `t` is the elapsed milliseconds the host passes on every run. Without it a script cannot animate —
+// every frame computes the same thing — so it is the difference between a static pattern and an
+// effect. It resolves to the argument register the host already fills, costing no instruction and no
+// temp: the emitted code reads a3/a0 directly rather than loading a value.
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("a script reads elapsed time, so it can animate") {
+    uint8_t code[2048];
+    auto r = moonlive::compileSource("setRGB(t, 200, 0, 0);", moonlive::lightBuiltins(),
+                                     moonlive::modifierSysVars(),
+                                     code, sizeof(code));
+    REQUIRE(r.ok);
+    void* blk = platform::allocExec(r.len);
+    REQUIRE(blk);
+    platform::writeExec(blk, code, r.len);
+    auto fn = reinterpret_cast<moonlive::CtrlFn>(blk);
+    uint8_t arena[moonlive::kArenaBytes] = {};
+
+    // The lit light must follow t: a frame at t=3 lights light 3, not light 0.
+    for (uint32_t tv : {0u, 3u, 7u}) {
+        uint8_t buf[10 * 3] = {};
+        fn(buf, 10, 3, tv, arena);
+        INFO("t = " << tv);
+        CHECK(buf[tv * 3] == 200);                  // the light AT t is lit
+        if (tv != 0) CHECK(buf[0] == 0);            // and light 0 is not, so it really moved
+    }
+    platform::freeExec(blk, r.len);
+}
+#endif
+
+// `mod` is what turns a moving pattern into a repeating one. `t` grows without bound, so a sweep
+// written as `t * speed` runs off the end of the fixture once and never comes back; folding it with
+// `mod(…, width)` makes it return to the start and cycle forever. It is a host Call rather than an
+// operator because no ISA here has a cheap integer divide — Xtensa has none at all.
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("mod wraps a sweep, so an animation repeats instead of running off the end") {
+    uint8_t code[4096];
+    auto r = moonlive::compileSource(
+        "uint8_t w = 16;   // @control 1..64\n"
+        "for (yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }",
+        moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
+    REQUIRE(r.ok);
+    void* blk = platform::allocExec(r.len);
+    REQUIRE(blk);
+    platform::writeExec(blk, code, r.len);
+    auto fn = reinterpret_cast<moonlive::CtrlFn>(blk);
+    uint8_t arena[moonlive::kArenaBytes] = {16};
+
+    // The lit column follows t, and t == width comes back to column 0 rather than off the grid.
+    auto columnAt = [&](uint32_t tv) {
+        uint8_t buf[256 * 3] = {};
+        fn(buf, 256, 3, tv, arena);
+        for (int i = 0; i < 256; i++) if (buf[i * 3]) return i % 16;
+        return -1;                                  // nothing lit: the sweep left the fixture
+    };
+    CHECK(columnAt(0)  == 0);
+    CHECK(columnAt(7)  == 7);
+    CHECK(columnAt(15) == 15);
+    CHECK(columnAt(16) == 0);                       // wrapped, not lost
+    CHECK(columnAt(33) == 1);                       // and keeps cycling
+}
+#endif
+
+// A `for` releases its counter's REGISTER when the loop ends, not just its name. Dropping only the
+// name left the vreg allocated for the rest of the compile, so every loop a script wrote cost one
+// permanently: two sequential loops held two counters even though the first was long dead. That put
+// an ordinary two-loop effect one register over the smallest register file (Xtensa has twelve) while
+// each loop compiled fine on its own — the confusing part, since neither half looked too big.
+TEST_CASE("sequential loops reuse the same register, so a script is not billed per loop") {
+    uint8_t code[8192];
+    // Four loops, each with a call in the body — comfortably over budget if counters accumulate.
+    auto r = moonlive::compileSource(
+        "uint8_t w = 16;   // @control 1..64\n"
+        "for (a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
+        "for (b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
+        "for (c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"
+        "for (d = 0; d < w; d = d + 1) { setRGB(d, 255, 255, 0); }",
+        moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
+    if (!r.ok) INFO(r.error);
+    CHECK(r.ok);
+}

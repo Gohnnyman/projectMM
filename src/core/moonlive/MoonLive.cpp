@@ -4,13 +4,6 @@
 
 namespace mm::moonlive {
 
-// Fixed cap for an emitted routine. Sized for the heaviest realistic single statement — a
-// setRGB with all four arguments a host call (4 × a full register-save call sequence, ~140
-// bytes each on RISC-V, the bulkiest ISA, plus the inline store). The emitter returns the real
-// length and the unused tail is harmless; exec memory is cheap, so we size for the worst case
-// rather than grow per script. Word-aligned so allocExec/writeExec's word-rounding never
-// exceeds it.
-static constexpr size_t kCodeCap = 768;
 
 // Drop the prior compilation's CODE (the exec block + the typed fn pointers), but NOT the control
 // arena — the arena's address must survive a recompile so a control pointer the binding bound to
@@ -55,9 +48,9 @@ bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
     return true;
 }
 
-bool MoonLive::compile(const char* source, const BuiltinTable& table) {
+bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysVarTable& sysvars) {
     uint8_t staging[kCodeCap];
-    CompileResult cr = compileSource(source, table, staging, kCodeCap);
+    CompileResult cr = compileSource(source, table, sysvars, staging, kCodeCap);
     if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
     // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
     // set — ensureArena reads the previous controlCount_ to know which slots are new.
@@ -89,9 +82,9 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table) {
 // control preserves the slider position). Returns false on alloc failure.
 bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
     if (!ctrlArena_) {
-        ctrlArena_ = static_cast<uint8_t*>(platform::alloc(kMaxCtrls));
+        ctrlArena_ = static_cast<uint8_t*>(platform::alloc(kArenaBytes));
         if (!ctrlArena_) return false;
-        for (uint8_t i = 0; i < kMaxCtrls; i++) ctrlArena_[i] = 0;
+        for (uint8_t i = 0; i < kArenaBytes; i++) ctrlArena_[i] = 0;
     }
     for (uint8_t i = controlCount_; i < count; i++) ctrlArena_[i] = static_cast<uint8_t>(decls[i].def);
     return true;

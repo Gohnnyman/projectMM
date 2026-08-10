@@ -25,7 +25,8 @@ using namespace mm;
 int main(int argc, char** argv) {
     const char* src = argc > 1 ? argv[1] : "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }";
     uint8_t buf[4096];
-    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(), buf, sizeof(buf));
+    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(),
+                                     moonlive::modifierSysVars(), buf, sizeof(buf));
     if (!r.ok) { printf("compile failed: %s\n", r.error); return 1; }
     printf("# %s\n# %zu bytes\n", src, r.len);
     for (size_t i = 0; i < r.len; i++) printf("%02x%s", buf[i], (i % 16 == 15) ? "\n" : " ");

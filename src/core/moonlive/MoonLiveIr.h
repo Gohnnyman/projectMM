@@ -89,7 +89,7 @@ struct DeclaredControl {
 /// tables, and the compiler fails loudly rather than silently miscompiling past it.
 static constexpr uint8_t kIrLabels = 16;
 
-static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful of controls; fixed, no heap
+
 static constexpr uint8_t kMaxControlName = 24;   // max control-name length (incl. NUL); the compiler
                                                  // rejects longer names so the binding's name pool
                                                  // can't truncate distinct names into a collision

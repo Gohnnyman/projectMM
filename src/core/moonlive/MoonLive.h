@@ -37,7 +37,7 @@ public:
     // built-ins — see MoonLiveBuiltins.h). The front-end parses an expression-call statement
     // and lowers it through the IR + per-ISA assembler. A parse/codegen error leaves the engine
     // !ok() with error() pointing at the diagnostic — the script editor's failure path.
-    bool compile(const char* source, const BuiltinTable& table);
+    bool compile(const char* source, const BuiltinTable& table, const SysVarTable& sysvars);
 
     // Compile the animated routine (color derived from the per-frame `t`).
     bool compileAnimated();
@@ -74,7 +74,7 @@ public:
     /// module actually costs, and codeCap() alone missed the arena. The arena is small but it is a
     /// real allocation with the module's lifetime, and "roughly right" is how a memory figure stops
     /// being worth reading.
-    size_t heapBytes() const { return codeCap_ + (ctrlArena_ ? kMaxCtrls : 0); }
+    size_t heapBytes() const { return codeCap_ + (ctrlArena_ ? kArenaBytes : 0); }
 
     // The controls the last compile() declared (empty if none / not a source compile). The binding
     // reads this to create real MoonModule controls bound to the arena slots.
@@ -83,7 +83,11 @@ public:
     // reference here. nullptr if offset is out of range. The arena is allocated once at full
     // capacity (ensureArena) and never moves, so a bound control pointer stays valid for the
     // engine's lifetime, across every recompile (the stable-slot contract).
-    uint8_t* controlSlot(uint8_t offset) { return (ctrlArena_ && offset < controlCount_) ? &ctrlArena_[offset] : nullptr; }
+    /// The live byte at an arena offset: a script-declared control (offset < kMaxCtrls) or a host
+    /// system variable (above it). Bounded by the ARENA, not by controlCount_ — a system variable's
+    /// slot exists whether or not the script declared any control, and the binding writes it every
+    /// frame. Returns nullptr for an offset the arena does not hold.
+    uint8_t* controlSlot(uint8_t offset) { return (ctrlArena_ && offset < kArenaBytes) ? &ctrlArena_[offset] : nullptr; }
 
 private:
     // Shared post-emit step: copy `len` staged bytes into a fresh exec block. Returns the
@@ -109,7 +113,7 @@ private:
     CtrlFn  ctrl_ = nullptr;     // front-end-compiled routine (5-arg, reads the controls arena)
     const char* error_ = "";
 
-    uint8_t* ctrlArena_ = nullptr;   // live control-value bytes (platform::alloc, kMaxCtrls, fixed)
+    uint8_t* ctrlArena_ = nullptr;   // live control + system-variable bytes (platform::alloc, kArenaBytes, fixed)
     uint8_t  controlCount_ = 0;      // controls the current program declared
     DeclaredControl controls_[kMaxCtrls] = {};   // the declared-control metadata for the binding
 };

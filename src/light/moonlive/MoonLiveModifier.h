@@ -21,11 +21,10 @@
 // contrast, has to place N different positions in a single pass with no per-light call to ride on,
 // so it needs a loop the language does not have yet; that is why this comes first.
 //
-// **How the script reads the coordinate.** `x`, `y` and `z` are ordinary script controls, declared
-// by this module rather than by the author: prepare() prepends three `uint8_t` declarations to the
-// user's source, so a bare `x` in an expression compiles to the same LoadCtrl any control read
-// uses. Before each call the binding writes the light's position into those arena slots. No new IR
-// op, no compiler special case — the existing control mechanism carries the inputs.
+// **How the script reads the coordinate.** `x`, `y` and `z` are system variables the light domain
+// defines (`modifierSysVars`), so a bare `x` in an expression compiles to the same LoadCtrl a control
+// read uses. Before each call the binding writes the light's position into those arena slots. No
+// new IR op — the compiler resolves the name, and a script cannot declare one that shadows it.
 //
 // **Coordinates are bytes, so an axis spans 0..255**, on the way in AND on the way out: a script
 // that computes a position past 255 keeps its low byte, so `(width - 1 - x) * 2` on a wide grid
@@ -45,12 +44,11 @@ public:
 
     void defineControls() override {
         controls_.addTextArea("source", source_, sizeof(source_));
-        // The controls the SCRIPT declared, minus the three the binding injects: `x`, `y` and `z`
-        // are inputs the Layer writes per light, not sliders a user sets, so they stay out of the
-        // UI while still being ordinary arena slots to the compiler.
+        // Every control the script declared. System variables (`x`/`y`/`z`, `width`/`height`/
+        // `depth`, `t`) are not controls and never appear here, so there is nothing to filter out.
         uint8_t n = 0;
         const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
-        for (uint8_t i = kInputCount; i < n; i++) {
+        for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
             if (!slot) continue;
             std::memcpy(ctrlNames_[i], decls[i].name, decls[i].nameLen);
@@ -59,20 +57,19 @@ public:
         }
     }
 
-    /// Compile the script, with the coordinate inputs prepended.
+    /// Compile the script as written.
     ///
     /// ModifierBase::affectsPrepare returns true for every control, which is right here: a source
     /// edit and a scripted-control move both change where lights land, and the Layer has to rebuild
     /// its mapping either way.
     void prepare() override {
-        // Prepend the input declarations. The user's script sees `x`, `y`, `z` as ordinary control
-        // reads; the binding sees three arena slots it can write per light.
-        std::snprintf(full_, sizeof(full_),
-                      "uint8_t x = 0;\nuint8_t y = 0;\nuint8_t z = 0;\n"
-                      "uint8_t width = 0;\nuint8_t height = 0;\nuint8_t depth = 0;\n%s", source_);
-
+        // The script compiles as written. `x`/`y`/`z` (the light being transformed) and
+        // `width`/`height`/`depth` (the box it sits in) are SYSTEM VARIABLES the light domain
+        // defines — the binding writes their slots per call, and the compiler reserves the names so
+        // a script cannot declare one and shadow the value it is being handed.
         moonlive::resetPrintBudget();
-        if (engine_.compile(full_, moonlive::lightBuiltins())) {
+        if (engine_.compile(source_, moonlive::lightBuiltins(),
+                            moonlive::modifierSysVars())) {
             clearStatus();
         } else {
             setStatus(engine_.error(), Severity::Error);
@@ -85,8 +82,8 @@ public:
         // again: setting the flag unconditionally makes the two call each other forever, the
         // mapping is rebuilt every frame, and the fixture renders nothing at all. Comparing the
         // compiled source is what breaks that cycle.
-        if (std::strcmp(full_, compiled_) != 0) {
-            std::snprintf(compiled_, sizeof(compiled_), "%s", full_);
+        if (std::strcmp(source_, compiled_) != 0) {
+            std::snprintf(compiled_, sizeof(compiled_), "%s", source_);
             needsRebuild_ = true;
         }
     }
@@ -112,9 +109,9 @@ public:
             return true;
 
         auto* self = const_cast<MoonLiveModifier*>(this);
-        uint8_t* sx = self->engine_.controlSlot(0);
-        uint8_t* sy = self->engine_.controlSlot(1);
-        uint8_t* sz = self->engine_.controlSlot(2);
+        uint8_t* sx = self->engine_.controlSlot(moonlive::kSysX);
+        uint8_t* sy = self->engine_.controlSlot(moonlive::kSysY);
+        uint8_t* sz = self->engine_.controlSlot(moonlive::kSysZ);
         if (!sx || !sy || !sz) return true;
         *sx = static_cast<uint8_t>(pos.x);
         *sy = static_cast<uint8_t>(pos.y);
@@ -123,9 +120,9 @@ public:
         // which is wrong but bounded — and that axis already cannot be scripted at all (the input
         // guard above passes it straight through), so no script sees the clamped value.
         auto clamp255 = [](lengthType v) { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
-        if (uint8_t* sw = self->engine_.controlSlot(3)) *sw = clamp255(box_.x);
-        if (uint8_t* sh = self->engine_.controlSlot(4)) *sh = clamp255(box_.y);
-        if (uint8_t* sd = self->engine_.controlSlot(5)) *sd = clamp255(box_.z);
+        if (uint8_t* sw = self->engine_.controlSlot(moonlive::kSysWidth))  *sw = clamp255(box_.x);
+        if (uint8_t* sh = self->engine_.controlSlot(moonlive::kSysHeight)) *sh = clamp255(box_.y);
+        if (uint8_t* sd = self->engine_.controlSlot(moonlive::kSysDepth))  *sd = clamp255(box_.z);
 
         // One light's worth of destination. The script addresses it as index 0 today; the
         // index argument is real (setXYZ(index, x, y, z), the same shape as setRGB), so a
@@ -158,23 +155,18 @@ public:
     }
 
 private:
-    /// The declarations prepended to every script, in arena order: the coordinate being folded,
-    /// then the box it lives in. A script needs the EXTENT to write a mirror at all — reflecting
-    /// around a hard-coded 255 sends every light outside a 16-wide grid, the Layer drops them as
-    /// out of bounds, and the fixture goes black.
-    static constexpr uint8_t kInputCount = 6;
-
     mutable moonlive::MoonLive engine_;
 
     // Default script — a mirror on x. Chosen because it is instantly readable on a bench strand
     // (the pattern runs the other way) and is a modifier people actually reach for, so a working
     // binding looks like something rather than like nothing.
-    char source_[384] = "setXYZ(0, width - 1 - x, y, z);";
+    char source_[moonlive::kMaxScriptBytes] = "setXYZ(0, width - 1 - x, y, z);";
 
-    // The user's source with the input declarations prepended — what actually gets compiled.
-    char full_[512] = {};
     // The source the CURRENT mapping was built from; a rebuild is needed only when it changes.
-    char compiled_[512] = {};
+    // sizeof(source_), never a literal: this is the string compared to decide whether to rebuild,
+    // so a copy too small to hold source_ truncates, never matches, and the mapping rebuilds every
+    // frame — the blank-screen loop the comparison exists to prevent.
+    char compiled_[sizeof(source_)] = {};
 
     char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 

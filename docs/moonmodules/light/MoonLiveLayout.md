@@ -11,40 +11,52 @@ A [layout](layouts.md) is the one part of the pipeline that differs for every ph
 The script places every light itself, with a loop. That is the difference from a scripted modifier: the Layer calls a modifier once per light, so its script transforms a single coordinate — a layout has no such per-light call to ride on.
 
 ``c
-uint8_t width = 16;  // @control 1..64
-uint8_t height = 16; // @control 1..64
+uint8_t cols = 16;  // @control 1..64
+uint8_t rows = 16;  // @control 1..64
 
-for (yy = 0; yy < height; yy = yy + 1) {
-  for (xx = 0; xx < width; xx = xx + 1) {
-    addLight(xx, yy, 0);
+for (y = 0; y < rows; y = y + 1) {
+  for (x = 0; x < cols; x = x + 1) {
+    addLight(x, y, 0);
   }
 }
 ``
 
 That is the default: a plain grid, one light per cell. `addLight(x, y, z)` places the next light along the strand — no index, because the order the script calls it in *is* the strand order.
 
-The `width` and `height` lines are the script's own controls, not something the module hands it. A layout is never told how big it is: the pipeline works out the bounding box from the coordinates the layouts actually place, so a size passed in from outside would be a second answer that could disagree with the first.
+The `cols` and `rows` lines are the script's own controls, not something the module hands it. A layout is never told how big it is: the pipeline works out the bounding box from the coordinates the layouts actually place, so a size passed in from outside would be a second answer that could disagree with the first.
+
+They are named `cols`/`rows` because `width`, `height` and `depth` are [system variables](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) — the logical grid the Layer hands an effect or a modifier. A layout is upstream of that grid, so it names its own controls.
 
 A few shapes that are one line here and a new class otherwise:
 
 ``c
 // a strand that runs right to left
-for (i = 0; i < width; i = i + 1) { addLight(width - 1 - i, 0, 0); }
+for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }
 
 // a diagonal
-for (i = 0; i < width; i = i + 1) { addLight(i, i, 0); }
+for (i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }
 
 // two rows, stacked
-for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }
+for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }
+
+// a circle: lights and grid cells are not the same number
+uint8_t count = 24;   // @control 3..255
+uint8_t radius = 5;   // @control 1..127
+for (i = 0; i < count; i = i + 1) {
+  addLight(scale(cos(i * turn(count)), radius * 2 + 1),
+           scale(sin(i * turn(count)), radius * 2 + 1), 0);
+}
 ``
 
 ### What a script can read
 
-A script reads whatever it declares. `uint8_t width = 16; // @control 1..64` becomes a real slider in the UI, and the loop reads it — which is how a panel gets resized without editing code.
+A script reads whatever it declares. `uint8_t cols = 16; // @control 1..64` becomes a real slider in the UI, and the loop reads it — which is how a panel gets resized without editing code.
+
+It also reads `t`, the elapsed milliseconds, which is a [system variable](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) rather than a control — the only one a layout is given. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
 
 ### Seeing inside a script
 
-`print(v)` logs a value and returns it, so it wraps any part of an expression: `addLight(print(xx), yy, 0)`.
+`print(v)` logs a value and returns it, so it wraps any part of an expression: `addLight(print(x), y, 0)`.
 It is for debugging and comes back out again — [what print costs](../../../moonlive/README.md#debugging-print).
 
 ## How the count is known

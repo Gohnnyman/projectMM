@@ -20,6 +20,7 @@
 using namespace mm;
 
 static moonlive::BuiltinTable kTable = moonlive::lightBuiltins();
+static moonlive::SysVarTable kSys = moonlive::modifierSysVars();
 
 // Compile + run a source on a w-light, 3-channel buffer; returns the rendered buffer.
 // Only used by the JIT-gated tests below; guard the definition too so a non-JIT build
@@ -27,7 +28,7 @@ static moonlive::BuiltinTable kTable = moonlive::lightBuiltins();
 #if MM_MOONLIVE_HAS_HOST_JIT
 static std::vector<uint8_t> render(const char* src, int nLights, uint32_t t = 0) {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile(src, kTable));
+    REQUIRE(eng.compile(src, kTable, kSys));
     REQUIRE(eng.ok());
     std::vector<uint8_t> buf(nLights * 3, 0);
     eng.run(buf.data(), nLights, 3, t);
@@ -58,7 +59,7 @@ TEST_CASE("compileSource: setRGB(index, r,g,b) writes one pixel") {
 // REMARK #1: every argument is an expression — random16 in ANY slot.
 TEST_CASE("compileSource: random16 works in any argument slot") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile("setRGB(random16(8), random16(256), 30, 0);", kTable));
+    REQUIRE(eng.compile("setRGB(random16(8), random16(256), 30, 0);", kTable, kSys));
     REQUIRE(eng.ok());
     for (int run = 0; run < 32; run++) {
         std::vector<uint8_t> buf(8 * 3, 0);
@@ -72,10 +73,10 @@ TEST_CASE("compileSource: random16 works in any argument slot") {
 // REMARK #2: a literal / random16 bound may be a uint16 (0..65535), not capped at 255.
 TEST_CASE("compileSource: random16 accepts a uint16 bound (>255)") {
     moonlive::MoonLive eng;
-    CHECK(eng.compile("setRGB(random16(65535), 0, 0, 255);", kTable));   // 65535 accepted
-    CHECK(eng.compile("setRGB(1000, 0, 0, 255);", kTable));              // literal index > 255 ok
+    CHECK(eng.compile("setRGB(random16(65535), 0, 0, 255);", kTable, kSys));   // 65535 accepted
+    CHECK(eng.compile("setRGB(1000, 0, 0, 255);", kTable, kSys));              // literal index > 255 ok
     uint8_t out[256];
-    auto r = moonlive::compileSource("setRGB(70000, 0, 0, 0);", kTable, out, sizeof(out));
+    auto r = moonlive::compileSource("setRGB(70000, 0, 0, 0);", kTable, kSys, out, sizeof(out));
     CHECK_FALSE(r.ok);   // 70000 > 65535 → rejected
 }
 
@@ -99,18 +100,18 @@ TEST_CASE("compileSource rejects malformed programs with a diagnostic, never cra
         "setRGB(random8(8), 0, 0, 0);",      // unknown nested function
     };
     for (auto s : bad) {
-        auto r = moonlive::compileSource(s, kTable, out, sizeof(out));
+        auto r = moonlive::compileSource(s, kTable, kSys, out, sizeof(out));
         CHECK_FALSE(r.ok);                   // the parser contract: malformed → rejected
         CHECK(std::strlen(r.error) > 0);     // …with a diagnostic
     }
     // A value-returning function used as a void statement IS valid (result discarded).
-    CHECK(moonlive::compileSource("random16(8);", kTable, out, sizeof(out)).ok);
+    CHECK(moonlive::compileSource("random16(8);", kTable, kSys, out, sizeof(out)).ok);
 }
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
 
 TEST_CASE("MoonLive.compile(source) on a bad script leaves the engine !ok with an error") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("setRGB(oops);", kTable));
+    CHECK_FALSE(eng.compile("setRGB(oops);", kTable, kSys));
     CHECK_FALSE(eng.ok());
     CHECK(std::strlen(eng.error()) > 0);
     std::vector<uint8_t> buf(3, 0xAB);
@@ -130,7 +131,7 @@ TEST_CASE("a multi-call statement reuses dead vregs and stays within the registe
             "setRGB(random16(128), random16(256), random16(256), 0);",              // 3 calls
             "setRGB(random16(128), random16(256), random16(256), random16(256));",  // 4 calls
          }) {
-        auto r = moonlive::compileSource(s, t, out, sizeof(out));
+        auto r = moonlive::compileSource(s, t, kSys, out, sizeof(out));
         CHECK(r.ok);          // without vreg reuse the 3-/4-call cases overflow the register file
         CHECK(r.len > 0);
     }
@@ -143,25 +144,25 @@ TEST_CASE("core compiler has no built-in functions of its own (empty table → a
     moonlive::BuiltinTable empty;
     uint8_t out[256];
     for (const char* s : {"setRGB(0,0,0,0);", "fill(0,0,0);", "random16(8);"}) {
-        auto r = moonlive::compileSource(s, empty, out, sizeof(out));
+        auto r = moonlive::compileSource(s, empty, {}, out, sizeof(out));
         CHECK_FALSE(r.ok);                       // the core doesn't know any of these
         CHECK(std::strlen(r.error) > 0);
     }
     // A host can register an arbitrary name against the same neutral machinery.
     moonlive::BuiltinTable custom;
     custom.add({"paint", 4, false, moonlive::BuiltinKind::Inline, nullptr, moonlive::InlineOp::StoreElem});
-    auto r = moonlive::compileSource("paint(2, 9, 8, 7);", custom, out, sizeof(out));
+    auto r = moonlive::compileSource("paint(2, 9, 8, 7);", custom, {}, out, sizeof(out));
     CHECK(r.ok);                                 // a different name, same core path
 }
 
 TEST_CASE("MoonLive recompiling swaps the program live (fill <-> setRGB)") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile("fill(0,0,255);", kTable));
+    REQUIRE(eng.compile("fill(0,0,255);", kTable, kSys));
     std::vector<uint8_t> buf(4 * 3, 0);
     eng.run(buf.data(), 4, 3, 0);
     CHECK(buf[0*3+2] == 255); CHECK(buf[3*3+2] == 255);
 
-    REQUIRE(eng.compile("setRGB(1, 255, 0, 0);", kTable));
+    REQUIRE(eng.compile("setRGB(1, 255, 0, 0);", kTable, kSys));
     std::fill(buf.begin(), buf.end(), 0);
     eng.run(buf.data(), 4, 3, 0);
     CHECK(buf[1*3+0] == 255); CHECK(buf[0] == 0);
@@ -173,7 +174,7 @@ TEST_CASE("MoonLive recompiling swaps the program live (fill <-> setRGB)") {
 TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
     uint8_t out[768];
     auto r = moonlive::compileSource(
-        "uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kTable, out, sizeof(out));
+        "uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kTable, kSys, out, sizeof(out));
     REQUIRE(r.ok);
     REQUIRE(r.controlCount == 1);
     const auto& c = r.controls[0];
@@ -184,7 +185,7 @@ TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
 
     // No annotation → default 0..255; two controls get sequential offsets (each default in range).
     auto r2 = moonlive::compileSource(
-        "uint8_t a = 10;\nuint8_t b = 5; // @control 1..7\nsetRGB(a, b, 0, 0);", kTable, out, sizeof(out));
+        "uint8_t a = 10;\nuint8_t b = 5; // @control 1..7\nsetRGB(a, b, 0, 0);", kTable, kSys, out, sizeof(out));
     REQUIRE(r2.ok);
     REQUIRE(r2.controlCount == 2);
     CHECK(r2.controls[0].max == 255); CHECK(r2.controls[0].offset == 0);   // a: no anno
@@ -194,12 +195,67 @@ TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
     // with "@control" (e.g. "@controlled") is a plain comment, not a malformed
     // annotation — it's skipped, the declaration takes the default 0..255 range.
     auto r3 = moonlive::compileSource(
-        "uint8_t speed = 9; // @controlled by the user\nsetRGB(speed, 0, 0, 0);", kTable, out, sizeof(out));
+        "uint8_t speed = 9; // @controlled by the user\nsetRGB(speed, 0, 0, 0);", kTable, kSys, out, sizeof(out));
     REQUIRE(r3.ok);
     REQUIRE(r3.controlCount == 1);
     CHECK(r3.controls[0].min == 0); CHECK(r3.controls[0].max == 255); CHECK(r3.controls[0].def == 9);
 }
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
+
+// A system variable is a value the HOST hands the script — the layer's size, the light being
+// transformed, the clock. Letting a script declare the same name would shadow the value it is being
+// given, silently: an effect declaring `width = 16` on an 8x8 panel draws off the edge, and every
+// statement in it still runs perfectly. So the name is refused wherever a name can be introduced,
+// which is exactly two places: a control declaration and a `for` loop variable.
+TEST_CASE("a script cannot declare a name the engine already defines") {
+    uint8_t out[512];
+    struct Case { const char* src; const char* what; };
+    const Case refused[] = {
+        {"uint8_t width = 16; // @control 1..64\nsetRGB(0, 0, 0, 0);", "a control named width"},
+        {"uint8_t t = 5;\nsetRGB(0, 0, 0, 0);",                        "a control named t"},
+        {"for (x = 0; x < 4; x = x + 1) { setRGB(x, 0, 0, 0); }",       "a loop variable named x"},
+        {"for (height = 0; height < 4; height = height + 1) { setRGB(0, 0, 0, 0); }",
+                                                                        "a loop variable named height"},
+    };
+    for (const Case& c : refused) {
+        INFO(c.what);
+        auto r = moonlive::compileSource(c.src, kTable, kSys, out, sizeof(out));
+        CHECK_FALSE(r.ok);
+        CHECK(std::string(r.error) == "name is a system variable");   // the clash is named, not generic
+    }
+    // The same names READ fine — refusing the declaration is what keeps the read meaningful.
+    auto ok = moonlive::compileSource("setRGB(width, height, depth, t);", kTable, kSys,
+                                      out, sizeof(out));
+    CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));   // parses; codegen needs a backend
+    // A name the host did NOT register is an ordinary control, not a reserved word.
+    auto own = moonlive::compileSource("uint8_t cols = 16;\nsetRGB(cols, 0, 0, 0);", kTable, kSys,
+                                       out, sizeof(out));
+    CHECK((own.ok || std::string(own.error) == moonlive::kCodegenFailed));
+}
+
+// Found by review: this compiled cleanly and emitted a program that NEVER RETURNED. The inner loop
+// bound a second register to the same name, so its step wrote the register the outer back edge
+// tested and the counter never advanced — a hang on the render task, from a script a user can type
+// into the editor. Robustness says any input degrades visibly rather than wedging the device.
+TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
+    uint8_t out[512];
+    auto r = moonlive::compileSource(
+        "for (i = 0; i < 2; i = i + 1) { for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } }",
+        kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+    CHECK(std::string(r.error) == "loop variable already in use");
+    // Distinct names nest fine — the check must not refuse the ordinary case it exists to protect.
+    auto ok = moonlive::compileSource(
+        "for (yy = 0; yy < 2; yy = yy + 1) { for (xx = 0; xx < 2; xx = xx + 1) { addLight(xx, yy, 0); } }",
+        kTable, kSys, out, sizeof(out));
+    CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));
+    // Sequential loops REUSE a name legitimately: the first has left scope by the time the second
+    // binds, so this must still compile (two-rows.mlv is exactly this shape).
+    auto seq = moonlive::compileSource(
+        "for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } for (i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); }",
+        kTable, kSys, out, sizeof(out));
+    CHECK((seq.ok || std::string(seq.error) == moonlive::kCodegenFailed));
+}
 
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {
     uint8_t out[768];
@@ -216,7 +272,7 @@ TEST_CASE("compileSource: malformed control declarations fail with a diagnostic,
         "uint8_t s = 1; uint8_t s = 2; setRGB(0,0,0,0);",            // duplicate name
     };
     for (auto s : bad) {
-        auto r = moonlive::compileSource(s, kTable, out, sizeof(out));
+        auto r = moonlive::compileSource(s, kTable, kSys, out, sizeof(out));
         CHECK_FALSE(r.ok);
         CHECK(std::strlen(r.error) > 0);
     }

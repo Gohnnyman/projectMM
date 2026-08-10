@@ -55,7 +55,14 @@ def main() -> int:
             print(run.stdout.strip() or run.stderr.strip())
             return 1
 
-        hexbytes = "".join(line for line in run.stdout.splitlines() if not line.startswith("#"))
+        # Keep only lines that ARE hex. The emitter echoes the script as a `# …` comment, but a
+        # MULTI-LINE script only gets `#` on its first line, so a "not a comment" filter fed the
+        # remaining source lines into unhexlify and died on an odd-length string.
+        def is_hex(line: str) -> bool:
+            s = line.replace(" ", "")
+            return bool(s) and all(c in "0123456789abcdefABCDEF" for c in s)
+
+        hexbytes = "".join(line for line in run.stdout.splitlines() if is_hex(line))
         raw = binascii.unhexlify(hexbytes.replace(" ", ""))
         print(f"# {len(raw)} bytes\n")
 

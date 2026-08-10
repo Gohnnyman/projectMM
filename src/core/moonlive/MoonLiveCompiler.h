@@ -41,6 +41,9 @@ struct CompileResult {
 
 // Compile `source` to machine code in `out` (capacity `cap`), resolving calls against `table`.
 // Pure: no I/O, no allocation beyond the caller's buffer.
-CompileResult compileSource(const char* source, const BuiltinTable& table, uint8_t* out, size_t cap);
+/// `sysvars` are names the HOST defines and a script may only read (`t`, `width`, …). They are
+/// reserved: a declaration that reuses one fails to compile, so a name means one thing everywhere.
+CompileResult compileSource(const char* source, const BuiltinTable& table,
+                            const SysVarTable& sysvars, uint8_t* out, size_t cap);
 
 }  // namespace mm::moonlive

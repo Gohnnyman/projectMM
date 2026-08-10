@@ -371,4 +371,29 @@ inline angle16 kaleido(angle16 a, uint8_t segments) {
     return static_cast<angle16>(within);
 }
 
+// --- 16-bit waveforms ------------------------------------------------------------------------
+// The 8-bit forms in math8.h cap at 255, which is short of the fixtures this drives: a 128x128 wall
+// is 16384 lights, and an animation indexed through a 0..255 ramp quantises to coarse steps across
+// it. These are the same textbook shapes at full 16-bit range, so a position scales to any axis
+// length without the caller rescaling.
+
+// Triangle wave: 0 to 65535 over the first half of the cycle and back over the second — the fold of
+// a ramp, the 16-bit twin of triwave8. Cheaper and sharper than a sine where an effect wants a
+// linear sweep out and back.
+constexpr uint16_t triwave16(uint16_t i) {
+    return i < 32768 ? static_cast<uint16_t>(i * 2)
+                     : static_cast<uint16_t>((65535 - i) * 2);
+}
+
+// beat16: a 0..65535 sawtooth completing `bpm` cycles per minute, measured from `timebase`.
+// The 16-bit twin of beat8 — same FastLED semantics, full range, so `beat16(bpm) * n >> 16` lands
+// on any axis length evenly rather than in 1/256ths.
+constexpr uint16_t beat16(uint8_t bpm, uint32_t ms, uint32_t timebase = 0) {
+    if (bpm == 0) return 0;
+    const uint32_t period = 60000u / bpm;
+    if (period == 0) return 0;
+    const uint32_t pos = (ms - timebase) % period;
+    return static_cast<uint16_t>((pos * 65536u) / period);
+}
+
 }  // namespace mm

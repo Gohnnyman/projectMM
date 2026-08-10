@@ -18,6 +18,8 @@ import re
 import serial
 import subprocess
 import sys
+import time
+from contextlib import suppress
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -69,14 +71,24 @@ def main():
     args = parser.parse_args()
 
     tool = elf = elf_sha = None
+    # Cleared for the rest of the session once the device reports a firmware SHA that is not this
+    # ELF's. Starts true: until the device says otherwise, the requested ELF is the best answer.
+    sha_ok = True
     if args.firmware:
         tool, elf = find_addr2line(args.firmware)
         if tool:
             import hashlib
-            elf_sha = hashlib.sha256(Path(elf).read_bytes()).hexdigest()
-            print(f"Decoding backtraces against build/esp32-{args.firmware}/projectMM.elf "
-                  f"({elf_sha[:9]})")
-        else:
+            # The ELF can vanish or turn unreadable between find_addr2line and here (a rebuild
+            # mid-monitor). Decoding is the accessory; the serial output is the point — so a
+            # failure here drops to raw addresses rather than ending the session.
+            try:
+                elf_sha = hashlib.sha256(Path(elf).read_bytes()).hexdigest()
+                print(f"Decoding backtraces against build/esp32-{args.firmware}/projectMM.elf "
+                      f"({elf_sha[:9]})")
+            except OSError as e:
+                tool = elf = elf_sha = None
+                print(f"Cannot read the ELF for {args.firmware} ({e}) — addresses print raw.")
+        if not tool:
             print(f"No ELF or toolchain for {args.firmware} — addresses print raw.")
 
     # Raise the device(s) to Info so the tick line shows while monitoring; restore each device's ORIGINAL
@@ -98,7 +110,32 @@ def main():
         with open(LOG_FILE, "w") as log:
             try:
                 while True:
-                    line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                    # A USB-CDC port on an S3/P4 is provided BY the firmware, so it disappears and
+                    # re-enumerates on every reboot — exactly when the log matters most. Reconnect
+                    # instead of dying: a crash-loop used to end the monitor with a traceback, losing
+                    # the panic that caused it. Ctrl+C still stops, because that raises separately.
+                    try:
+                        raw = ser.readline()
+                    except (serial.SerialException, OSError):
+                        note = "  -- device disconnected (reboot?), waiting for it to come back --"
+                        print(note)
+                        log.write(note + "\n")
+                        log.flush()
+                        sys.stdout.flush()
+                        with suppress(Exception):
+                            ser.close()
+                        ser = None
+                        while ser is None:
+                            time.sleep(0.3)
+                            with suppress(Exception):
+                                ser = serial.Serial(args.port, args.baud, timeout=1)
+                        note = "  -- reconnected --"
+                        print(note)
+                        log.write(note + "\n")
+                        log.flush()
+                        sys.stdout.flush()
+                        continue
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                     if line:
                         print(line)
                         log.write(line + "\n")
@@ -110,8 +147,9 @@ def main():
                             # build — confidently wrong, which is worse than raw addresses.
                             sha = SHA_RE.match(line)
                             if sha and elf_sha and not elf_sha.startswith(sha.group(1)):
+                                sha_ok = False
                                 warn = (f"  !! running firmware {sha.group(1)} != this ELF "
-                                        f"{elf_sha[:9]} — reflash, or decoded lines will be wrong")
+                                        f"{elf_sha[:9]} — reflash to decode; addresses print raw")
                                 print(warn)
                                 log.write(warn + "\n")
                             addrs = []
@@ -127,7 +165,10 @@ def main():
                                 pc = PC_RE.match(line)
                                 if pc and pc.group(1) == "PC":
                                     addrs = [pc.group(2)]
-                            for i, d in enumerate(decode(tool, elf, addrs)):
+                            # Only decode against the ELF the device is actually running. A
+                            # mismatch resolves every address in a different build's layout, which
+                            # reads as fact and sends you to the wrong file.
+                            for i, d in enumerate(decode(tool, elf, addrs) if sha_ok else []):
                                 out = f"  #{i} {d}"
                                 print(out)
                                 log.write(out + "\n")

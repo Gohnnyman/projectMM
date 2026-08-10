@@ -20,6 +20,23 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### MoonLive: a script can no longer declare a name the engine supplies (2026-08-10)
+
+`t` (elapsed milliseconds), `width`/`height`/`depth` (the logical grid) and `x`/`y`/`z` (the light a modifier is transforming) are now **system variables** the engine supplies, so a script cannot declare one. Previously each binding faked them by prepending hidden declarations to the script, which meant an effect could declare its own `width` and quietly disagree with the layer it was drawing into.
+
+Each module supplies only the names it writes, so what is reserved depends on the module: a layout gets `t` alone, an effect adds the grid, a modifier adds the coordinate. **`x` and `y` remain usable as loop counters in a layout or an effect.**
+
+**Action: *update a file*, for scripted layouts only.**
+
+A **layout** is the one script that legitimately used those names for its own controls: it *defines* where lights are, so it has no grid to be handed. A persisted layout script declaring `uint8_t width = 16;` now fails to compile with `name is a system variable`, and the layout places no lights — the fixture is **dark** until the script is edited.
+
+| What | Why | What to do |
+|---|---|---|
+| A scripted layout declaring `width`/`height` | The name is what the layout is defining, so the declaration is a compile error and no lights are placed | Edit the script's `source` control, renaming its own controls (the shipped `grid.mlv` uses `cols`/`rows`) |
+| A scripted **modifier** using `x`, `y` or `z` as a loop variable | A modifier IS handed a coordinate under those names, so they cannot also be counters there | Rename the loop variable to something the modifier is not handed (`i`, `n`) |
+
+Effects and modifiers need no change: they were already being handed these values, just through a preamble instead of by name. The error names the clash, and the module shows it on its card, so a broken script says why rather than failing silently.
+
 ### The `Layers` container is renamed to `Effects` (2026-08-08)
 
 The three top-level light containers are now **Layouts, Effects, Drivers** — L.E.D. The old name sat one character from its own child (`Layers` holding `Layer`s) and read as a near-twin of `Layouts`, which is the pair a newcomer actually has to tell apart. The tree is unchanged in shape: `Effects` → `Layer`s → effects and modifiers.

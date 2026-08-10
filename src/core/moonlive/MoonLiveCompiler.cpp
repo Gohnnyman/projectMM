@@ -84,9 +84,10 @@ struct Lexer {
         if (c == '}') { p++; kind = Tok::RBrace;  return; }
         if (c == '<') { p++; kind = Tok::Less;    return; }
         // '/' only reaches here when it is NOT the `//` a comment starts with (handled above).
-        // '/' and '%' are deliberately NOT tokens yet: a divide needs a two-argument host call
-        // (no ISA here has a divide instruction) and Call is unary today. A script using them gets
-        // "unexpected character", which is the honest answer. Backlogged with that reason.
+        // '/' and '%' are deliberately NOT tokens yet. No ISA here has a cheap integer divide, so
+        // both would lower to a host call — which the light domain already ships as `mod(a, b)` and
+        // `turn(n)`, so the capability exists under a name instead of an operator. A script using
+        // the character gets "unexpected character", which is the honest answer. Backlogged.
         if (isDigit(c)) {
             long v = 0; readNumber(v);
             number = v; kind = Tok::Number; return;
@@ -109,6 +110,7 @@ struct Lexer {
 struct Parser {
     Lexer&             lex;
     const BuiltinTable& table;
+    const SysVarTable&  sysvars;
     IrProgram&         ir;
     VReg               nextTemp = kFirstTemp;   // high-water mark — also IrProgram.vregsUsed
     VReg               freeStack[kMaxVRegs] = {};   // recycled temps (LIFO), so a dead vreg is reused
@@ -244,6 +246,17 @@ struct Parser {
             return v;
         }
         if (lex.kind == Tok::Ident) {
+            // A system variable the host defines: `t` (elapsed ms, an argument register) or a
+            // per-frame value the binding writes (`width`/`height`/`depth`, arena slots). Resolved
+            // BEFORE locals and controls so the name means one thing in every script; the
+            // declaration paths reject the name, so nothing can shadow it.
+            if (const SysVar* sv = sysvars.find(lex.identBeg, lex.identLen)) {
+                lex.advance();
+                if (sv->kind == SysVarKind::Arg) return sv->where;   // free: already in a register
+                VReg v = alloc();
+                emit({IrOp::LoadCtrl, v, 0,0,0,0, sv->where, nullptr, {}});
+                return v;
+            }
             for (uint8_t li = 0; li < localCount; li++) {
                 if (locals[li].nameLen == lex.identLen &&
                     std::strncmp(locals[li].name, lex.identBeg, lex.identLen) == 0) {
@@ -334,6 +347,7 @@ struct Parser {
         if (lex.kind != Tok::Ident) { fail("expected a control name after the type"); return; }
         const char* name = lex.identBeg; size_t nameLen = lex.identLen;
         if (nameLen >= kMaxControlName) { fail("control name too long"); return; }   // no silent truncation downstream
+        if (sysvars.find(name, nameLen)) { fail("name is a system variable"); return; }
         if (findControl(name, nameLen) >= 0) { fail("duplicate control name"); return; }
         // A control name must not shadow a builtin: a declared `random16` would make `random16(…)`
         // ambiguous (control read vs call). Reject it at the source so the resolution never collides.
@@ -403,6 +417,16 @@ struct Parser {
         if (localCount >= 4) { fail("too many nested loops"); return false; }
         const char* varName = lex.identBeg;
         const size_t varLen = lex.identLen;
+        if (sysvars.find(varName, varLen)) { fail("name is a system variable"); return false; }
+        // A nested loop reusing the enclosing loop's name would bind a SECOND register to that name:
+        // the inner step then writes the register the outer back edge tests, and the emitted program
+        // never terminates — a hang on the render task from a script a user can type. Refused for the
+        // same reason a duplicate control name is.
+        for (uint8_t li = 0; li < localCount; li++)
+            if (locals[li].nameLen == varLen &&
+                std::strncmp(locals[li].name, varName, varLen) == 0) {
+                fail("loop variable already in use"); return false;
+            }
         lex.advance();
         if (!expect(Tok::Assign, "expected '=' in the for's first clause")) return false;
         VReg init = parseExpr();
@@ -476,6 +500,13 @@ struct Parser {
 
         freeTemp(limit);
         localCount = myLocal;                              // the loop variable leaves scope
+        // ...and its REGISTER goes back to the pool. Dropping only the name left the vreg allocated
+        // for the rest of the compile, so every `for` a script wrote cost one permanently — two
+        // sequential loops held two counters even though the first was dead. That is what put a
+        // two-loop effect one register over the smallest file (Xtensa has twelve) while each loop
+        // compiled fine alone. Freed only AFTER localCount drops, since freeTemp refuses to recycle
+        // a register any live local still names.
+        freeTemp(counter);
         return true;
     }
 
@@ -507,14 +538,15 @@ struct Parser {
 
 }  // namespace
 
-CompileResult compileSource(const char* source, const BuiltinTable& table, uint8_t* out, size_t cap) {
+CompileResult compileSource(const char* source, const BuiltinTable& table,
+                            const SysVarTable& sysvars, uint8_t* out, size_t cap) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
     if (!out || cap == 0) { r.error = "no code buffer"; return r; }
 
     Lexer lex(source);
     IrProgram ir;
-    Parser parser{lex, table, ir};
+    Parser parser{lex, table, sysvars, ir};
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
 
     size_t len = lowerToBytes(ir, out, cap);
