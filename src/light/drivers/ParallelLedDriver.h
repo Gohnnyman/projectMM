@@ -574,7 +574,15 @@ public:
         // busCapacity() guard below (which the other two need) does not apply. The whole-frame paths keep
         // their guard and their proven behavior byte-for-byte.
         if (peripheral_->busIsRing()) { tickRing(outCh); return; }
-        if (frameBytes_ > peripheral_->busCapacity()) return;
+        // A frame past what the peripheral's single transfer can carry (Parlio: 65535 bytes) used to
+        // return here silently: the LEDs froze on their last frame, the render loop and UI stayed
+        // healthy, and only a reboot appeared to help — until the count crossed the line again. Say
+        // it instead, with the number the user has to act on: the ceiling in LIGHTS PER LANE, since
+        // that is the control they set. (github.com/MoonModules/projectMM/issues/44)
+        if (frameBytes_ > peripheral_->busCapacity()) {
+            reportOverCapacity(outCh);
+            return;
+        }
 
         // Two explicitly-separate whole-frame paths so the OFF path is PROVABLY the pre-Step-1.5 behavior
         // (no regression) and pays nothing for the double-buffer it isn't using. The mode is fixed by
@@ -607,6 +615,8 @@ public:
         if (peripheral_->busTransmit(0, frameBytes_)) {
             inFlight_[0] = true;
             busWaitIfBusy(0);   // synchronous: wait it out here; clears the flag on completion
+        } else if (deadFrames_ < kDeadFramesBeforeGiveUp) {
+            deadFrames_++;      // a REFUSED frame is as dead as a wedged one — see busWaitIfBusy
         }
     }
 
@@ -636,6 +646,8 @@ public:
         if (peripheral_->busTransmit(active_, frameBytes_)) {
             inFlight_[active_] = true;
             active_ ^= 1;
+        } else if (deadFrames_ < kDeadFramesBeforeGiveUp) {
+            deadFrames_++;      // a REFUSED frame is as dead as a wedged one — see busWaitIfBusy
         }
     }
 
@@ -678,6 +690,8 @@ public:
         const uint32_t tkW2 = platform::cycleCount();
         if (peripheral_->busTransmitRing()) {
             inFlight_[0] = true;   // kicked; DO NOT wait here — the next tick waits, freeing the core now
+        } else if (deadFrames_ < kDeadFramesBeforeGiveUp) {
+            deadFrames_++;         // a REFUSED frame is as dead as a wedged one — see busWaitIfBusy
         }
         const uint32_t tkW3 = platform::cycleCount();
         constexpr uint32_t kCyPerUs = 240;   // S3 at 240 MHz
@@ -720,6 +734,8 @@ public:
             // The transfer did not complete within many times its own wire time, so it is not going
             // to. Count it: a bus that keeps doing this is broken, and the ONLY thing that matters
             // then is that the driver stops spending the render thread on it (see deadFrames_).
+            // A transfer the peripheral REFUSES outright earns the same strike, counted at the
+            // busTransmit call sites — it never reaches here, because nothing went in flight.
             if (deadFrames_ < kDeadFramesBeforeGiveUp) deadFrames_++;
             return false;   // still in flight — do not reuse the buffer
         }
@@ -766,6 +782,24 @@ public:
     /// strike count clears and output resumes on its own; if it doesn't, we fall straight back to
     /// given-up, having spent one frame's wait per ~`kGiveUpRetryTicks` ticks — cheap enough not to
     /// starve the network, unlike retrying every tick.
+    /// The frame does not fit one transfer. Report the ceiling the way the user sets it — lights per
+    /// lane — rather than the byte figure they would have to derive it from. Cleared by reinit(), so
+    /// lowering the count restores normal reporting.
+    void reportOverCapacity(uint8_t outCh) {
+        if (overCapReported_) return;
+        overCapReported_ = true;
+        const uint8_t opp     = outputsPerPin();
+        const size_t  pad     = padBytesFor(slotBytes(), opp);
+        const size_t  rowBytes = rowBytesFor(outCh, slotBytes(), opp);
+        const size_t  cap     = peripheral_->busCapacity();
+        const size_t  usable  = cap > pad ? cap - pad : 0;
+        const unsigned fits   = rowBytes ? static_cast<unsigned>(usable / rowBytes) : 0;
+        std::snprintf(overCapBuf_, sizeof(overCapBuf_),
+                      "too many lights per pin: %u exceeds this peripheral's %u — lower ledsPerPin",
+                      static_cast<unsigned>(maxLaneLights_), fits);
+        setStatus(overCapBuf_, Severity::Error);
+    }
+
     bool busGaveUp() {
         if (deadFrames_ < kDeadFramesBeforeGiveUp) return false;
         if (!gaveUpReported_) {
@@ -1275,6 +1309,11 @@ protected:
     // spend the render thread and starve the network.
     uint8_t deadFrames_ = 0;
     bool gaveUpReported_ = false;        // one status write per give-up, not one per tick
+    // setStatus stores the POINTER, so the text has to outlive the call; and the message is written
+    // once per over-capacity episode, not once per tick, since it would otherwise rewrite the status
+    // at frame rate for as long as the count stays too high.
+    char overCapBuf_[96] = {};
+    bool overCapReported_ = false;
     static constexpr uint8_t kDeadFramesBeforeGiveUp = 8;
     // Given-up retry cadence: once given up, let one frame try every this-many ticks so a TRANSIENT stall
     // self-recovers without a reinit (see busGaveUp). ~50 ticks ≈ 1 s of retries — rare enough not to
@@ -1685,6 +1724,7 @@ protected:
         // + the latch bit), not the strand count — 48 lanes on 6 pins is still an 8-bit bus. The
         // ×8 lands in the slot COUNT instead (outputsPerPin()), which is what grows the frame.
         frameBytes_ = frameBytesFor(maxLaneLights_, outCh, slotBytes(), outputsPerPin());
+        overCapReported_ = false;   // a new geometry re-earns its verdict: lowering the count recovers
         // Size the per-row correction scratch to kMaxLanes × outCh (grows-only, off the hot path).
         // Stride outCh, so any channel count fits without the old fixed-4-byte overflow.
         prepareWire(outCh);
@@ -1823,7 +1863,7 @@ protected:
             !frameFitsDmaBudget(frameBytes_, budget)) {
             // deinit() above already cleared the bus and inited_ — just report and bail.
             if (char* b = failBufEnsure()) {
-                std::snprintf(b, kFailBufLen, "frame %uKB over i80 DMA %uKB: fewer lights/pin",
+                std::snprintf(b, kFailBufLen, "frame %uKB over the bus %uKB: fewer lights/pin",
                               static_cast<unsigned>(frameBytes_ / 1024),
                               static_cast<unsigned>(budget / 1024));
                 setStatus(b, Severity::Error);

@@ -35,7 +35,7 @@
 
 #include <cstring>
 #include <functional>  // the transmit callback passed to the shared frame loopback
-#include <new>      // std::nothrow
+#include <new>      // placement new (the state is built in heap_caps memory)
 
 namespace mm::platform {
 
@@ -63,6 +63,9 @@ struct ParlioState {
     SemaphoreHandle_t done[2] = {nullptr, nullptr};
     uint8_t* buf[2] = {nullptr, nullptr};
     size_t cap = 0;   // shared per-buffer capacity (both buffers equal)
+    // Storage for the two done-semaphores. Static (not xSemaphoreCreateBinary) so the control
+    // block lives inside this internal-RAM struct, where the cache-safe ISR can reach it.
+    StaticSemaphore_t doneBuf[2] = {};
     volatile uint8_t fifo[2] = {0, 0};
     volatile uint8_t fifoHead = 0;
     volatile uint8_t fifoTail = 0;
@@ -91,6 +94,12 @@ bool IRAM_ATTR parlioDoneCb(parlio_tx_unit_handle_t, const parlio_tx_done_event_
     return high == pdTRUE;
 }
 
+// The struct is placement-new'd into heap_caps_aligned_alloc'd memory using alignof(ParlioState),
+// so any alignment it needs is honoured by construction. This pins the assumption that the value is
+// a power of two the allocator accepts — a member needing more would otherwise fail silently.
+static_assert(alignof(ParlioState) <= 16 && (alignof(ParlioState) & (alignof(ParlioState) - 1)) == 0,
+              "ParlioState alignment must be a small power of two for heap_caps_aligned_alloc");
+
 void destroyState(ParlioState* st) {
     if (!st) return;
     if (st->unit) {
@@ -99,15 +108,24 @@ void destroyState(ParlioState* st) {
     }
     for (auto* b : st->buf) if (b) heap_caps_free(b);
     for (auto* s : st->done) if (s) vSemaphoreDelete(s);
-    delete st;
+    st->~ParlioState();     // placement-new'd into heap_caps memory, so destroy and free by hand
+    heap_caps_free(st);
 }
 
 // One TX unit + DMA buffer(s). pclkHz is the WS2812 slot rate (2.67 MHz). `wantSecond` allocates the
 // async double-buffer's second frame buffer (best-effort); false → buffer 0 only.
 ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
                          uint32_t pclkHz, size_t bufferBytes, bool wantSecond) {
-    auto* st = new (std::nothrow) ParlioState();
-    if (!st) return nullptr;
+    // INTERNAL RAM, not plain `new`: with CONFIG_SPIRAM_USE_MALLOC the default allocator can hand
+    // back PSRAM, and parlioDoneCb runs as a cache-safe ISR (PARLIO_TX_ISR_CACHE_SAFE) — it fires
+    // with the flash cache disabled, when PSRAM is unreachable. Every field it touches must be
+    // internal. Placement-new because heap_caps gives raw memory.
+    // ALIGNED: the struct holds 64-bit timestamps, so alignof is 8 while heap_caps_malloc only
+    // promises word alignment — the static_assert below pins that, and this allocator honours it.
+    void* mem = heap_caps_aligned_alloc(alignof(ParlioState), sizeof(ParlioState),
+                                        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!mem) return nullptr;
+    auto* st = new (mem) ParlioState();
 
     parlio_tx_unit_config_t cfg = {};
     cfg.clk_src = PARLIO_CLK_SRC_DEFAULT;     // PLL_F160M → /60 = 2.67 MHz
@@ -134,7 +152,8 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
         return nullptr;
     }
 
-    st->done[0] = xSemaphoreCreateBinary();
+    // Internal-RAM semaphore: the ISR gives it with the cache disabled (see createState).
+    st->done[0] = xSemaphoreCreateBinaryStatic(&st->doneBuf[0]);
     if (!st->done[0]) { destroyState(st); return nullptr; }
     parlio_tx_event_callbacks_t cbs = {};
     cbs.on_trans_done = parlioDoneCb;
@@ -174,7 +193,7 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     // common path allocates exactly one buffer. Same allocate-and-degrade as the i80 driver: buf[1]
     // null (won't-fit or not-wanted) means single-buffer mode.
     if (wantSecond) {
-        st->done[1] = xSemaphoreCreateBinary();
+        st->done[1] = xSemaphoreCreateBinaryStatic(&st->doneBuf[1]);
         if (st->done[1]) {
             // PSRAM first (no internal-heap impact). Internal fallback ONLY if it leaves HEAP_RESERVE
             // intact — the second buffer is a nice-to-have, so it must never eat the WiFi/HTTP reserve

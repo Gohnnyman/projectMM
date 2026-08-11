@@ -906,7 +906,9 @@ private:
             apShutdownPending_ = true;
             syncTxPower();  // see setWifiCredentials's syncTxPower comment
             std::snprintf(statusBuf_, sizeof(statusBuf_), "AP: %s @ 4.3.2.1", apName); setStatus(statusBuf_, Severity::Status);
-            std::printf("NetworkModule: AP started: %s\n", apName);
+            // The address is what a user needs: AP mode exists so they can open the UI and
+            // enter credentials. Naming the network without it sends them looking for a URL.
+            std::printf("NetworkModule: AP started: %s → join it and open http://4.3.2.1\n", apName);
         } else {
             state_ = State::Idle;
             std::snprintf(statusBuf_, sizeof(statusBuf_), "No network"); setStatus(statusBuf_, Severity::Error);

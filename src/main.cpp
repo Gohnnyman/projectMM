@@ -573,12 +573,20 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                 sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
     // NetworkSend is no longer boot-wired (added per board via the catalog), so
     // there is no boot-time instance whose IP we could log here.
-    // The server binds all interfaces (INADDR_ANY) — reachable from other
-    // devices on the LAN, not only localhost.
-    std::printf("HTTP server → http://localhost:%u\n", httpServer->port);
+    // The server binds all interfaces (INADDR_ANY) — reachable from other devices on the LAN.
+    // `localhost` is only meaningful where the browser runs ON the host, so a device prints the
+    // interface address instead: hostIp() is empty on ESP32 (the address belongs to NetworkModule
+    // and no interface is up this early), and pointing a user at localhost on a board sends them
+    // to their own machine. NetworkModule logs the real address as each interface comes up.
     const char* hostIp = mm::platform::hostIp();
     if (hostIp && hostIp[0]) {
-        std::printf("            → http://%s:%u (from the network)\n", hostIp, httpServer->port);
+        std::printf("HTTP server → http://%s:%u\n", hostIp, httpServer->port);
+    } else {
+        // No address yet, for two different reasons: on a device that is normal this early (an
+        // interface is not up, and NetworkModule logs the address when it comes up), while on a
+        // desktop it means hostIp() found no route at all. Stating what is true — no address yet —
+        // covers both without promising a follow-up message that an offline desktop never prints.
+        std::printf("HTTP server on port %u — no network address yet\n", httpServer->port);
     }
 
     size_t heap = mm::platform::freeHeap();

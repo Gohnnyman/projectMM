@@ -107,6 +107,10 @@ private:
     /// (architecture.md, MoonLive) — it exists only because of that prepare ordering. Removing it
     /// means letting children prepare before a container aggregates them, which is a core lifecycle
     /// change; until then the exception is here, named, rather than spread across the bindings.
+    /// Single-threaded by construction: both the mapping rebuild that walks a layout and the tick
+    /// that follows it run on the render thread, so the lazy compile below cannot overlap a walk.
+    /// Moving layout work to a worker would change that — the engine would then need a published
+    /// immutable program rather than one mutated in place.
     void compile() const {
         if (engine_.ok() && std::strcmp(source_, compiled_) == 0) return;   // already current
         auto* self = const_cast<MoonLiveLayout*>(this);
