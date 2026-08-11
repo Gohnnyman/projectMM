@@ -1863,7 +1863,7 @@ protected:
             !frameFitsDmaBudget(frameBytes_, budget)) {
             // deinit() above already cleared the bus and inited_ — just report and bail.
             if (char* b = failBufEnsure()) {
-                std::snprintf(b, kFailBufLen, "frame %uKB over i80 DMA %uKB: fewer lights/pin",
+                std::snprintf(b, kFailBufLen, "frame %uKB over the bus %uKB: fewer lights/pin",
                               static_cast<unsigned>(frameBytes_ / 1024),
                               static_cast<unsigned>(budget / 1024));
                 setStatus(b, Severity::Error);
