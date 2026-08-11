@@ -167,6 +167,23 @@ TEST_CASE("a loop counter survives a call in the body") {
 }
 #endif
 
+// `t` is an argument register, not an arena byte — so unlike a control it can be CLOBBERED by a
+// callee under the ABI. Every animated script that calls anything reads it after a call, so this
+// runs a script that does exactly that and checks the value that comes out is the one passed in.
+// (The arm64 backend saves x3 for this reason; the comment there is not evidence, this is.)
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("elapsed time survives a call that happens before it is read") {
+    moonlive::MoonLive eng;
+    // random16 runs FIRST (it is the second argument), then `t` is read for the third — so the
+    // green channel can only be right if `t` outlived the call.
+    REQUIRE(eng.compile("setRGB(0, random16(200), mod(t, 200), 0);", kCtrlTable, kSys));
+    uint8_t buf[3] = {};
+    eng.run(buf, 1, 3, 12345);
+    CHECK(buf[1] == 12345 % 200);   // 145 — the elapsed value the host passed, not a clobbered one
+    eng.free();
+}
+#endif
+
 TEST_CASE("MoonLive controls: declaredControls + controlSlot seeded from the default") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("uint8_t speed = 42; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kCtrlTable, kSys));

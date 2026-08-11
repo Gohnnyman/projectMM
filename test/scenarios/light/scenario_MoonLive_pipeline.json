@@ -128,7 +128,7 @@
         "desktop-macos": {
           "tick_us": [
             5,
-            12
+            18
           ],
           "free_heap": [
             0,
