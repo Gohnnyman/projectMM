@@ -582,8 +582,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     if (hostIp && hostIp[0]) {
         std::printf("HTTP server → http://%s:%u\n", hostIp, httpServer->port);
     } else {
-        std::printf("HTTP server listening on port %u — the network module reports the address\n",
-                    httpServer->port);
+        // No address yet, for two different reasons: on a device that is normal this early (an
+        // interface is not up, and NetworkModule logs the address when it comes up), while on a
+        // desktop it means hostIp() found no route at all. Stating what is true — no address yet —
+        // covers both without promising a follow-up message that an offline desktop never prints.
+        std::printf("HTTP server on port %u — no network address yet\n", httpServer->port);
     }
 
     size_t heap = mm::platform::freeHeap();

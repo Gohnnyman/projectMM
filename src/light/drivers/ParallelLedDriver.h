@@ -690,6 +690,8 @@ public:
         const uint32_t tkW2 = platform::cycleCount();
         if (peripheral_->busTransmitRing()) {
             inFlight_[0] = true;   // kicked; DO NOT wait here — the next tick waits, freeing the core now
+        } else if (deadFrames_ < kDeadFramesBeforeGiveUp) {
+            deadFrames_++;         // a REFUSED frame is as dead as a wedged one — see busWaitIfBusy
         }
         const uint32_t tkW3 = platform::cycleCount();
         constexpr uint32_t kCyPerUs = 240;   // S3 at 240 MHz

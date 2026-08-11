@@ -174,12 +174,13 @@ TEST_CASE("a loop counter survives a call in the body") {
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("elapsed time survives a call that happens before it is read") {
     moonlive::MoonLive eng;
-    // random16 runs FIRST (it is the second argument), then `t` is read for the third — so the
-    // green channel can only be right if `t` outlived the call.
-    REQUIRE(eng.compile("setRGB(0, random16(200), mod(t, 200), 0);", kCtrlTable, kSys));
-    uint8_t buf[3] = {};
-    eng.run(buf, 1, 3, 12345);
-    CHECK(buf[1] == 12345 % 200);   // 145 — the elapsed value the host passed, not a clobbered one
+    // Two STATEMENTS, so the ordering is the language's, not an argument-evaluation detail: the
+    // first call happens, and only then is `t` read. Light 0 burns the call; light 1 reads t.
+    REQUIRE(eng.compile("setRGB(0, random16(200), 0, 0);\n"
+                        "setRGB(1, mod(t, 200), 0, 0);", kCtrlTable, kSys));
+    uint8_t buf[2 * 3] = {};
+    eng.run(buf, 2, 3, 12345);
+    CHECK(buf[3] == 12345 % 200);   // 145 — the elapsed value the host passed, not a clobbered one
     eng.free();
 }
 #endif
