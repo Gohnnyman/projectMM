@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/moonlive/MoonLive.h"
+#include "light/moonlive/MoonLiveScriptFile.h"
 #include "light/layouts/LayoutBase.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstdio>
@@ -39,7 +40,9 @@ public:
     const char* tags() const override { return "📝"; }   // scripted
 
     void defineControls() override {
-        controls_.addTextArea("source", source_, sizeof(source_));
+        // The script NAME, not the script — the text lives in a file the UI loads and saves
+        // through /api/file. A module costs ~32 bytes here instead of a resident kilobyte.
+        controls_.addText("script", script_, sizeof(script_));
         // Every control the SCRIPT declared — including any extents it loops over. A layout does not
         // RECEIVE a width: the pipeline derives its bounding box from the coordinates the layouts
         // actually place (Layouts::prepare, "max coordinate + 1 per axis"), so a width handed in
@@ -50,9 +53,7 @@ public:
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
             if (!slot) continue;
-            std::memcpy(ctrlNames_[i], decls[i].name, decls[i].nameLen);
-            ctrlNames_[i][decls[i].nameLen] = '\0';
-            controls_.addUint8(ctrlNames_[i], *slot, decls[i].min, decls[i].max);
+            controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
         }
     }
 
@@ -89,9 +90,11 @@ public:
     }
 
     /// Replace the script. The next prepare() compiles it — the path a UI edit takes.
-    void setSource(const char* s) {
-        if (!s) return;
-        std::snprintf(source_, sizeof(source_), "%s", s);
+    /// Point the layout at a script in the shared script directory; the next prepare() compiles it.
+    void setScript(const char* name) {
+        if (!name) return;
+        std::snprintf(script_, sizeof(script_), "%s", name);
+        compiledHash_ = 0;          // a different file: whatever was compiled is not it
     }
 
 private:
@@ -112,15 +115,22 @@ private:
     /// Moving layout work to a worker would change that — the engine would then need a published
     /// immutable program rather than one mutated in place.
     void compile() const {
-        if (engine_.ok() && std::strcmp(source_, compiled_) == 0) return;   // already current
+        if (engine_.ok() && compiledHash_ != 0) return;   // already current for this script
         auto* self = const_cast<MoonLiveLayout*>(this);
         moonlive::resetPrintBudget();
         // A layout is the one script with no layer to ask, so it gets the clock and nothing else:
         // it names its own size controls, and `x`/`y` stay free as ordinary loop counters.
-        if (self->engine_.compile(source_, moonlive::lightBuiltins(), moonlive::layoutSysVars()))
+        const char* err = nullptr;
+        uint32_t hash = 0;
+        if (moonlive::compileScriptFile(self->engine_, script_, moonlive::lightBuiltins(),
+                                        moonlive::layoutSysVars(), err, &hash)) {
             self->clearStatus();
-        else                                                          self->setStatus(self->engine_.error(), Severity::Error);
-        std::snprintf(self->compiled_, sizeof(compiled_), "%s", source_);
+        } else {
+            self->setStatus(err, Severity::Error);
+        }
+        // The CONTENT hash, not a copy of the text: 4 bytes to answer "is what I compiled still what
+        // the file says", which is all the rebuild check ever needed. 0 means "nothing compiled".
+        self->compiledHash_ = hash;
         self->setDynamicBytes(engine_.heapBytes());
     }
 
@@ -151,24 +161,16 @@ private:
 
     mutable moonlive::MoonLive engine_;
 
-    // Default script — a grid, the layout almost every panel is. The nested loop and the index
-    // arithmetic are the whole definition, which is the case for scripting a layout at all.
-    char source_[moonlive::kMaxScriptBytes] =
-        "uint8_t cols = 16;  // @control 1..64\n"
-        "uint8_t rows = 16;  // @control 1..64\n"
-        "for (y = 0; y < rows; y = y + 1) {\n"
-        "  for (x = 0; x < cols; x = x + 1) {\n"
-        "    addLight(x, y, 0);\n"
-        "  }\n"
-        "}";
+    // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
+    // "no script" and places no lights until one is named, rather than every new layout compiling
+    // the same default grid.
+    char script_[32] = "";
 
-    // The source the loaded program was built from, so compile() is a no-op when current.
-    // sizeof(source_), never a literal: a copy too small to hold source_ truncates, never
-    // compares equal, and the mapping rebuilds every frame — the blank-screen loop this
-    // comparison exists to prevent.
-    mutable char compiled_[sizeof(source_)] = {};
+    // FNV-1a of the text the loaded program was built from — 4 bytes in place of a second copy of
+    // the source. Non-zero means "this engine holds a compiled program for that content"; 0 means
+    // nothing is compiled, which is what setScript() restores when the file changes.
+    mutable uint32_t compiledHash_ = 0;
 
-    char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 };
 
 }  // namespace mm

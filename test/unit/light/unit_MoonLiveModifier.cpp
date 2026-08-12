@@ -8,6 +8,7 @@
 // broken script degrades to a pass-through instead of taking the pipeline down.
 
 #include "doctest.h"
+#include "MoonLiveScriptFixture.h"
 #include "light/moonlive/MoonLiveModifier.h"
 #include "light/moonlive/MoonLiveEffect.h"
 #include "platform/platform.h"
@@ -34,7 +35,7 @@ Coord3D transform(const char* script, lengthType x, lengthType y, lengthType z,
                   lengthType w = 255, lengthType h = 255, lengthType d = 1) {
     MoonLiveModifier m;
     m.defineControls();
-    if (script) m.setSource(script);
+    if (script) m.setScript(mmWriteScript(script));
     m.prepare();
     Coord3D box{w, h, d};
     m.modifyLogicalSize(box);      // the Layer always does this before folding
@@ -47,7 +48,7 @@ Coord3D transform(const char* script, lengthType x, lengthType y, lengthType z,
 TEST_CASE("a scripted modifier mirrors the pattern, the way a hand-written one would") {
     // The default script. A mirror is the shape that makes a working binding obvious on a bench
     // strand — the pattern simply runs the other way.
-    const Coord3D p = transform(nullptr, 10, 20, 0);
+    const Coord3D p = transform("setXYZ(0, width - 1 - x, y, z);", 10, 20, 0);
     CHECK(p.x == 244);          // width(255) - 1 - 10
     CHECK(p.y == 20);           // untouched axes stay put
     CHECK(p.z == 0);
@@ -84,7 +85,7 @@ TEST_CASE("a broken script leaves the pattern alone rather than taking the layer
     // the pipeline keeps rendering.
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("setXYZ(0, x, y");     // no closing paren, no semicolon
+    m.setScript(mmWriteScript("setXYZ(0, x, y"));     // no closing paren, no semicolon
     m.prepare();
     Coord3D box{255, 255, 1};
     m.modifyLogicalSize(box);
@@ -109,15 +110,16 @@ TEST_CASE("editing the script changes the transform without a rebuild of the fir
     // The live-edit loop: the same module, a new script, a different mapping.
     MoonLiveModifier m;
     m.defineControls();
+    m.setScript(mmWriteScript("setXYZ(0, width - 1 - x, y, z);"));
     m.prepare();
     Coord3D box{255, 255, 1};
     m.modifyLogicalSize(box);      // the Layer hands every modifier its box before folding
 
     Coord3D a{10, 20, 0};
     m.modifyLogical(a);
-    CHECK(a.x == 244);                                 // the default mirror
+    CHECK(a.x == 244);                                 // the mirror
 
-    m.setSource("setXYZ(0, x, y, z);");
+    m.setScript(mmWriteScript("setXYZ(0, x, y, z);"));
     m.prepare();
 
     Coord3D b{10, 20, 0};
@@ -163,7 +165,7 @@ TEST_CASE("folding a wall's worth of lights compiles the script once, not once p
     // an unchanged value across the whole fold proves no compile happened inside it.
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("setXYZ(0, width - 1 - x, y, z);");
+    m.setScript(mmWriteScript("setXYZ(0, width - 1 - x, y, z);"));
     m.prepare();
     Coord3D box{255, 255, 1};
     m.modifyLogicalSize(box);
@@ -186,12 +188,12 @@ TEST_CASE("folding a wall's worth of lights compiles the script once, not once p
 TEST_CASE("editing a script asks the layer to rebuild its mapping") {
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("setXYZ(0, x, y, z);");
+    m.setScript(mmWriteScript("setXYZ(0, x, y, z);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);     // the first compile needs one too
     CHECK(m.consumeNeedsRebuild() == false);    // and it is consumed, not sticky
 
-    m.setSource("setXYZ(0, 7 - x, y, z);");
+    m.setScript(mmWriteScript("setXYZ(0, 7 - x, y, z);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);     // an edit asks again
 
@@ -207,13 +209,13 @@ TEST_CASE("editing a script asks the layer to rebuild its mapping") {
 // be able to read the EXTENT it is folding within, and the default has to use it.
 TEST_CASE("the default script mirrors within the grid it is given, not a fixed 255") {
     // A 16-wide grid: x=0 must land on the far end of THAT grid, 15 — not 245.
-    const Coord3D p = transform(nullptr, 0, 0, 0, /*w=*/16, /*h=*/16, /*d=*/1);
+    const Coord3D p = transform("setXYZ(0, width - 1 - x, y, z);", 0, 0, 0, /*w=*/16, /*h=*/16, /*d=*/1);
     CHECK(p.x == 15);
     CHECK(p.y == 0);
 
     // Every coordinate has to stay inside the box, or the Layer discards it.
     for (lengthType i = 0; i < 16; i++) {
-        const Coord3D q = transform(nullptr, i, 0, 0, 16, 16, 1);
+        const Coord3D q = transform("setXYZ(0, width - 1 - x, y, z);", i, 0, 0, 16, 16, 1);
         CAPTURE(i);
         CHECK(q.x >= 0);
         CHECK(q.x < 16);
@@ -240,7 +242,7 @@ TEST_CASE("a script that computes a position outside the grid leaves lights mapp
     // bytes cannot fail: draw::fill writes every byte itself, whatever the fold decided.
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("setXYZ(0, x + 200, y, z);");   // deliberately off the end of a 16-wide grid
+    m.setScript(mmWriteScript("setXYZ(0, x + 200, y, z);"));   // deliberately off the end of a 16-wide grid
     m.prepare();
     Coord3D box{16, 16, 1};
     m.modifyLogicalSize(box);
@@ -273,6 +275,10 @@ TEST_CASE("a script that computes a position outside the grid leaves lights mapp
 TEST_CASE("re-preparing with an unchanged script does not ask for another rebuild") {
     MoonLiveModifier m;
     m.defineControls();
+    // A module with no script compiles nothing and therefore asks for nothing — the rebuild request
+    // exists to APPLY a new transform, and there is none. Name one, so the first prepare has
+    // something to compile and the "unchanged" case below is the real question.
+    m.setScript(mmWriteScript("setXYZ(0, width - 1 - x, y, z);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);    // the first compile needs one
 
@@ -284,7 +290,7 @@ TEST_CASE("re-preparing with an unchanged script does not ask for another rebuil
     CHECK(m.consumeNeedsRebuild() == false);
 
     // A real edit still asks.
-    m.setSource("setXYZ(0, y, x, z);");
+    m.setScript(mmWriteScript("setXYZ(0, y, x, z);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);
 }
@@ -329,7 +335,7 @@ TEST_CASE("a subtraction produces the whole value, not just its low byte") {
 TEST_CASE("a for loop runs its body once per step") {
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("for (i = 0; i < 4; i = i + 1) { print(i); } setXYZ(0, x, y, z);");
+    m.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { print(i); } setXYZ(0, x, y, z);"));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);   // it compiles at all
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
@@ -342,7 +348,7 @@ TEST_CASE("a loop over an empty range runs its body no times") {
     // The entry guard: `i < 0` must skip the body entirely rather than wrap and run forever.
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("for (i = 0; i < 0; i = i + 1) { print(99); } setXYZ(0, x, y, z);");
+    m.setScript(mmWriteScript("for (i = 0; i < 0; i = i + 1) { print(99); } setXYZ(0, x, y, z);"));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
@@ -354,8 +360,8 @@ TEST_CASE("a loop over an empty range runs its body no times") {
 TEST_CASE("loops nest, which is what placing a grid of lights needs") {
     MoonLiveModifier m;
     m.defineControls();
-    m.setSource("for (a = 0; a < 2; a = a + 1) { for (b = 0; b < 2; b = b + 1) { print(a); } }"
-                " setXYZ(0, x, y, z);");
+    m.setScript(mmWriteScript("for (a = 0; a < 2; a = a + 1) { for (b = 0; b < 2; b = b + 1) { print(a); } }"
+                " setXYZ(0, x, y, z);"));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
@@ -379,7 +385,7 @@ TEST_CASE("a loop in an effect script paints every light it walks") {
     layer.setChannelsPerLight(3);
     auto* fx = new MoonLiveEffect();
     fx->defineControls();
-    fx->setSource("for (i = 0; i < 8; i = i + 1) { setRGB(i, i, 0, 0); }");
+    fx->setScript(mmWriteScript("for (i = 0; i < 8; i = i + 1) { setRGB(i, i, 0, 0); }"));
     layer.addChild(fx);
     layouts.applyState();
     layer.applyState();

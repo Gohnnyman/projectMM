@@ -580,7 +580,7 @@ public:
         // it instead, with the number the user has to act on: the ceiling in LIGHTS PER LANE, since
         // that is the control they set. (github.com/MoonModules/projectMM/issues/44)
         if (frameBytes_ > peripheral_->busCapacity()) {
-            reportOverCapacity(outCh);
+            reportOverCapacity(outCh, peripheral_->busCapacity());
             return;
         }
 
@@ -785,13 +785,16 @@ public:
     /// The frame does not fit one transfer. Report the ceiling the way the user sets it — lights per
     /// lane — rather than the byte figure they would have to derive it from. Cleared by reinit(), so
     /// lowering the count restores normal reporting.
-    void reportOverCapacity(uint8_t outCh) {
+    /// `cap` is the byte ceiling to measure against — the peripheral's live buffer capacity on the
+    /// tick path, or its declared DMA budget at reinit(), where no bus exists yet and busCapacity()
+    /// would read 0. Passing it in keeps one message for both, instead of a KB figure on one path
+    /// and the actionable light count on the other.
+    void reportOverCapacity(uint8_t outCh, size_t cap) {
         if (overCapReported_) return;
         overCapReported_ = true;
         const uint8_t opp     = outputsPerPin();
         const size_t  pad     = padBytesFor(slotBytes(), opp);
         const size_t  rowBytes = rowBytesFor(outCh, slotBytes(), opp);
-        const size_t  cap     = peripheral_->busCapacity();
         const size_t  usable  = cap > pad ? cap - pad : 0;
         const unsigned fits   = rowBytes ? static_cast<unsigned>(usable / rowBytes) : 0;
         std::snprintf(overCapBuf_, sizeof(overCapBuf_),
@@ -1862,14 +1865,11 @@ protected:
         if (const size_t budget = peripheral_->dmaBudgetBytes();
             !frameFitsDmaBudget(frameBytes_, budget)) {
             // deinit() above already cleared the bus and inited_ — just report and bail.
-            if (char* b = failBufEnsure()) {
-                std::snprintf(b, kFailBufLen, "frame %uKB over the bus %uKB: fewer lights/pin",
-                              static_cast<unsigned>(frameBytes_ / 1024),
-                              static_cast<unsigned>(budget / 1024));
-                setStatus(b, Severity::Error);
-            } else {
-                setStatus(peripheral_->initFailMsg(), Severity::Error);
-            }
+            // Same message the tick path gives, measured against the DECLARED budget (no bus is up
+            // yet, so busCapacity() would read 0): the light count the user has to lower, not a KB
+            // figure they would have to convert. reinit() cleared overCapReported_ above, so this
+            // reports once per geometry rather than once per attempt.
+            reportOverCapacity(correction_.outChannels, budget);
             return;
         }
         // Allocate the second buffer only when wanted (see wantSecond above — gated on the toggle AND the

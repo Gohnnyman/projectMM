@@ -67,7 +67,16 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
         else if (ctrlArena_[i] > hi) ctrlArena_[i] = hi;
     }
     controlCount_ = cr.controlCount;
-    for (uint8_t i = 0; i < cr.controlCount; i++) controls_[i] = cr.controls[i];
+    for (uint8_t i = 0; i < cr.controlCount; i++) {
+        controls_[i] = cr.controls[i];
+        // Re-point `name` at our own copy: the parser's pointer is into the source text, which the
+        // caller may free as soon as this returns.
+        const uint8_t len = cr.controls[i].nameLen < kMaxControlName - 1
+                          ? cr.controls[i].nameLen : static_cast<uint8_t>(kMaxControlName - 1);
+        for (uint8_t j = 0; j < len; j++) ctrlNames_[i][j] = cr.controls[i].name[j];
+        ctrlNames_[i][len] = '\0';
+        controls_[i].name = ctrlNames_[i];
+    }
     ctrl_ = reinterpret_cast<CtrlFn>(block);
     return true;
 }

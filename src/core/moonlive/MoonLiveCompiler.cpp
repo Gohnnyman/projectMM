@@ -560,8 +560,26 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     if (!source) { r.error = "no source"; return r; }
     if (!out || cap == 0) { r.error = "no code buffer"; return r; }
 
-    Lexer lex(source);
+    // Size the op array to THIS script before parsing. The bound is per-TOKEN rather than
+    // per-construct: no token the lexer can produce lowers to more than a handful of ops (the
+    // densest is a call argument — evaluate, then the Call itself), so counting tokens and
+    // multiplying is an over-estimate that cannot undershoot. Over-estimating costs a few unused
+    // entries on a cold path; undershooting would fail a script that fits, so the direction of the
+    // error is the whole point. push() still refuses past `cap`, so a wrong estimate degrades with
+    // a diagnostic rather than corrupting memory.
+    uint32_t tokens = 0;
+    for (Lexer scan(source); scan.kind != Tok::End && scan.kind != Tok::Error; scan.advance()) {
+        if (++tokens > kMaxIrOps) break;   // runaway source — reserve() rejects past the bound
+    }
     IrProgram ir;
+    // +8 covers a program's fixed overhead (the prologue/epilogue ops a tiny script still needs)
+    // so a one-token source cannot round down to nothing.
+    if (!ir.reserve(static_cast<uint16_t>(tokens * kIrOpsPerToken + 8 > kMaxIrOps
+                                          ? kMaxIrOps : tokens * kIrOpsPerToken + 8))) {
+        r.error = "script too large";
+        return r;
+    }
+    Lexer lex(source);
     Parser parser{lex, table, sysvars, ir};
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
 

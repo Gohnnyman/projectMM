@@ -76,11 +76,12 @@ public:
     uint8_t* busBuffer(uint8_t i) override        { return platform::parlioWs2812Buffer(parlio_, i); }
     /// The per-buffer byte capacity (fixed at bus creation; both buffers equal).
     size_t   busCapacity() const override         { return platform::parlioWs2812BufferCapacity(parlio_); }
-    // Parlio sends a frame in ONE transfer, and the peripheral caps that at 65535 bytes — a hard
-    // limit, unlike a memory budget that varies with the heap. Declaring it here lets reinit()
-    // refuse an oversized frame with an actionable status BEFORE busInit tries (and fails) to
-    // allocate it, which is what left the LEDs frozen with a healthy UI (issue #44).
-    size_t   dmaBudgetBytes() const override      { return 65535; }
+    // Parlio sends a frame in ONE transfer, and the peripheral caps that. The cap is a HARDWARE
+    // fact (derived from PARLIO_LL_TX_MAX_BITS_PER_FRAME), so the platform owns the number and this
+    // asks for it — reinit() then refuses an oversized frame with an actionable status BEFORE
+    // busInit tries (and fails) to allocate it, which is what left the LEDs frozen with a healthy
+    // UI (issue #44).
+    size_t   dmaBudgetBytes() const override      { return platform::parlioMaxTransferBytes(); }
     /// Kick off the autonomous transfer of the first `bytes` of DMA buffer `i`;
     /// returns whether it started.
     bool  busTransmit(uint8_t i, size_t bytes) override { return platform::parlioWs2812Transmit(parlio_, i, bytes); }

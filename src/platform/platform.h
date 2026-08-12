@@ -1165,6 +1165,11 @@ bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
 uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer);
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
 
+// The most bytes Parlio can send in ONE transfer — a HARDWARE ceiling, not a heap budget, so it
+// needs no handle and holds before anything is allocated. A caller sizes a frame against it to
+// refuse an impossible configuration up front instead of failing the bus init.
+size_t parlioMaxTransferBytes();
+
 // Start the autonomous DMA transfer of buffer `buffer`'s first `bytes`; pair
 // with parlioWs2812Wait on the SAME buffer. No refill deadline once started
 // (single-shot, not the loop-transmission mode Parlio also offers).

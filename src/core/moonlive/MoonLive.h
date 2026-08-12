@@ -116,6 +116,12 @@ private:
     uint8_t* ctrlArena_ = nullptr;   // live control + system-variable bytes (platform::alloc, kArenaBytes, fixed)
     uint8_t  controlCount_ = 0;      // controls the current program declared
     DeclaredControl controls_[kMaxCtrls] = {};   // the declared-control metadata for the binding
+    // The declared NAMES, owned. A DeclaredControl's `name` points into the SOURCE TEXT, which the
+    // caller is free to release the moment compile() returns — and does, now that a script is read
+    // from a file into a transient buffer. Copying the bytes here is what lets the engine outlive
+    // the text it was built from; without it a binding reads freed memory when it publishes its
+    // controls, which showed up as a control literally named "\x05".
+    char ctrlNames_[kMaxCtrls][kMaxControlName] = {};
 };
 
 }  // namespace mm::moonlive

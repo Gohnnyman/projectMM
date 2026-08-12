@@ -11,6 +11,7 @@
 // broken script leaves an empty fixture rather than taking the pipeline down.
 
 #include "doctest.h"
+#include "MoonLiveScriptFixture.h"
 #include "light/moonlive/MoonLiveLayout.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include "platform/platform.h"
@@ -38,7 +39,7 @@ namespace {
 std::vector<Coord3D> place(const char* script) {
     MoonLiveLayout l;
     l.defineControls();
-    if (script) l.setSource(script);
+    if (script) l.setScript(mmWriteScript(script));
     l.prepare();
 
     std::vector<Coord3D> out;
@@ -71,10 +72,10 @@ TEST_CASE("the light count is known before any coordinate is asked for") {
     // forEachCoord. A count that came from the walk would arrive too late to be useful.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t cols = 5;  // @control 1..64\n"
+    l.setScript(mmWriteScript("uint8_t cols = 5;  // @control 1..64\n"
                 "uint8_t rows = 3; // @control 1..64\n"
                 "for (yy = 0; yy < rows; yy = yy + 1) {"
-                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }");
+                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"));
     l.prepare();
     CHECK(l.lightCount() == 15);           // answered without anyone calling forEachCoord
 }
@@ -83,7 +84,7 @@ TEST_CASE("the count and the coordinates always agree, because one script produc
     // The property SphereLayout names: count and emit run the same code, so they cannot drift.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
 
     std::vector<Coord3D> seen;
@@ -99,7 +100,7 @@ TEST_CASE("a scripted layout allocates nothing, like every other layout") {
     // have. The script calls out per light instead, so the only heap here is the compiled program.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4096; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 4096; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 4096);
     // dynamicBytes is the JIT'd program only — no coordinate storage grows with the light count.
@@ -129,7 +130,7 @@ TEST_CASE("a broken script leaves an empty fixture rather than taking the pipeli
     // fixture reports no lights, the module carries the diagnostic, and the device keeps running.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4; i = i + 1) { addLight(i, i");   // unclosed
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, i"));   // unclosed
     l.prepare();
     CHECK(l.lightCount() == 0);
     CHECK(l.severity() == MoonModule::Severity::Error);
@@ -139,11 +140,11 @@ TEST_CASE("editing the script changes the fixture") {
     // The live-edit loop: the same module, a new script, a different physical shape.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 4);
 
-    l.setSource("for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 2);
 }
@@ -173,7 +174,7 @@ TEST_CASE("the scripts the documentation shows all compile") {
     for (const char* s : fromDocs) {
         MoonLiveLayout l;
         l.defineControls();
-        l.setSource(s);
+        l.setScript(mmWriteScript(s));
         l.prepare();
         INFO("script: " << s);
         CHECK(l.severity() != MoonModule::Severity::Error);
@@ -188,7 +189,7 @@ TEST_CASE("the scripts the documentation shows all compile") {
 TEST_CASE("a layout answers count and coordinates every time it is asked") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
 
     CHECK(l.lightCount() == 6);
@@ -219,7 +220,7 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
     MoonLiveLayout l;
     l.defineControls();
     // 10 - 4 must be 6 lights. A widened -1 makes the bound enormous and the count is not 6.
-    l.setSource("for (i = 0; i < 10 - 4; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 10 - 4; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 6);
 
@@ -243,22 +244,22 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
 TEST_CASE("a scripted control keeps its live value when the script is edited") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t cols = 16; // @control 1..64\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("uint8_t cols = 16; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A second script declaring cols at the same offset inherits the live 16, not its own 8.
-    l.setSource("uint8_t cols = 8; // @control 1..64\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }");
+    l.setScript(mmWriteScript("uint8_t cols = 8; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A script whose first control is a NEW slot gets its own initialiser: nothing to inherit.
-    l.setSource("uint8_t cols = 16;  // @control 1..64\n"
+    l.setScript(mmWriteScript("uint8_t cols = 16;  // @control 1..64\n"
                 "uint8_t rows = 3;  // @control 1..64\n"
                 "for (yy = 0; yy < rows; yy = yy + 1) {"
-                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }");
+                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"));
     l.prepare();
     CHECK(l.lightCount() == 48);          // 16 inherited, rows 3 its own
 }
@@ -293,7 +294,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
     SUBCASE("through a call — addLight") {
         MoonLiveLayout l;
         l.defineControls();
-        l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }");
+        l.setScript(mmWriteScript("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }"));
         l.prepare();
         CHECK(l.lightCount() == 6);      // a clobbered counter gives some other number
     }
@@ -327,7 +328,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
 TEST_CASE("a stray character in a for header is rejected, not spun on") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }"));
     l.prepare();                                    // must return — a hang fails by timeout
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.lightCount() == 0);
@@ -346,7 +347,7 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
         l.defineControls();
         char src[128];
         std::snprintf(src, sizeof(src), "for (i = 0; i < %d; i = i + 1) { addLight(i, 0, 0); }", cols);
-        l.setSource(src);
+        l.setScript(mmWriteScript(src));
         l.prepare();
         for (int r = 0; r < reps; r++)
             if (l.lightCount() != static_cast<nrOfLightsType>(cols)) return false;
@@ -369,15 +370,15 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
 TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t cols = 4; // @control 1..64\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("uint8_t cols = 4; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     const size_t compiled = l.dynamicBytes();
     CHECK(compiled > 0);
     CHECK(l.lightCount() == 4);
 
     // A broken script frees the code but keeps the arena, so the figure drops without reaching zero.
-    l.setSource("for (i = 0; i < 4; i = i + 1) { addLight(i, i");   // unclosed
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, i"));   // unclosed
     l.prepare();
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.dynamicBytes() < compiled);      // the code block is gone
@@ -395,9 +396,12 @@ TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not")
 TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     MoonLiveLayout layout;
     layout.defineControls();
-    layout.setSource("uint8_t cols = 4; // @control 1..64\n"
-                     "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
+    layout.setScript(mmWriteScript("uint8_t cols = 4; // @control 1..64\n"
+                     "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }"));
     layout.prepare();
+    // The script's own controls (`cols`) exist only once it has COMPILED, and a module starts with
+    // no script now — so the control list has to be rebuilt after prepare() for setWidth to find it.
+    layout.rebuildControls();
 
     mm::Layouts group;
     group.addChild(&layout);
@@ -428,3 +432,4 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
 }
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
+

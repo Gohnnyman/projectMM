@@ -2,6 +2,7 @@
 
 #include "light/effects/EffectBase.h"
 #include "core/moonlive/MoonLive.h"
+#include "light/moonlive/MoonLiveScriptFile.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstring>
 #include <cstdio>
@@ -31,7 +32,10 @@ public:
     // next render tick reads — no recompile (the live-edit guarantee). Editing the source
     // recompiles (the script-editor loop), which re-derives the control set.
     void defineControls() override {
-        controls_.addTextArea("source", source_, sizeof(source_));
+        // The script NAME, not the script. The text lives in a file the UI loads, edits and
+        // saves through /api/file — so a module costs ~32 bytes here instead of a resident
+        // kilobyte, and a script is bounded by the filesystem rather than by this array.
+        controls_.addText("script", script_, sizeof(script_));
         // Every control the script declared. System variables (`width`, `height`, `depth`, `t`)
         // are not controls and never appear here, so there is nothing to filter out.
         uint8_t n = 0;
@@ -39,13 +43,10 @@ public:
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
             if (!slot) continue;   // engine not compiled yet (first sweep) — controls appear after prepare
-            // The declared name is a span into source_ (not NUL-terminated); copy it into a stable
-            // member pool so the control descriptor's borrowed name pointer stays valid. The compiler
-            // rejects names ≥ kMaxControlName, so the full name always fits — no truncation, no
-            // distinct-names-collapsing-to-the-same-prefix collision.
-            std::memcpy(ctrlNames_[i], decls[i].name, decls[i].nameLen);
-            ctrlNames_[i][decls[i].nameLen] = '\0';
-            controls_.addUint8(ctrlNames_[i], *slot, decls[i].min, decls[i].max);
+            // The engine owns its declared names (MoonLive::compile copies them out of the
+            // source before the text is freed), so the descriptor can borrow that pointer
+            // directly — a second per-binding pool would be the same fact in two places.
+            controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
         }
     }
 
@@ -68,10 +69,12 @@ public:
         // would be a second, disagreeing answer: set it to 16 on an 8x8 panel and the effect draws
         // off the edge. The compiler reserves the name, so that cannot happen.
         moonlive::resetPrintBudget();
-        if (engine_.compile(source_, moonlive::lightBuiltins(), moonlive::effectSysVars())) {
+        const char* err = nullptr;
+        if (moonlive::compileScriptFile(engine_, script_, moonlive::lightBuiltins(),
+                                        moonlive::effectSysVars(), err)) {
             clearStatus();
         } else {
-            setStatus(engine_.error(), Severity::Error);
+            setStatus(err, Severity::Error);
         }
         // The compile re-derives the declared-control set, so rebuild the control list to surface
         // it (the same rebuildControls() pattern NetworkModule uses when a state change reshapes
@@ -104,9 +107,11 @@ public:
 
     /// Replace the script. The next prepare() compiles it — the same path a UI edit takes, so a
     /// test and a user exercise identical code.
-    void setSource(const char* s) {
-        if (!s) return;
-        std::snprintf(source_, sizeof(source_), "%s", s);
+    /// Point the module at a script in the shared script directory. The file itself is written by
+    /// the UI (or the File Manager); this only says WHICH one, and the next prepare() compiles it.
+    void setScript(const char* name) {
+        if (!name) return;
+        std::snprintf(script_, sizeof(script_), "%s", name);
     }
 
 private:
@@ -123,15 +128,13 @@ private:
     }
 
 
-    char source_[moonlive::kMaxScriptBytes] = "setRGB(random16(256), random16(256), random16(256), random16(256));";
+    // A fresh card starts with NO script: it reports "no script" and renders nothing until one
+    // is named. Naming a default here would make every new module compile the same effect.
+    char script_[32] = "";
                                                // 512 fits a multi-line
                                                // multi-control script (a decl per control + the
                                                // statement); grow-on-demand is backlogged for the
                                                // bigger Ripples-class scripts of later stages.
-    // Stable NUL-terminated copies of the script-declared control names (the control descriptor
-    // borrows the pointer; the decl span into source_ is not NUL-terminated). Sized to the
-    // compiler's name limit so a name always fits without truncation.
-    char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 };
 
 }  // namespace mm

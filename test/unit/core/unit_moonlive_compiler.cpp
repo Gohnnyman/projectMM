@@ -310,6 +310,29 @@ TEST_CASE("a for loop's condition and step must name the loop variable") {
 #endif
 }
 
+// The op array is sized to the script, so `count` is a uint16_t — and every loop over it has to be
+// one too. A uint8_t counter wrapped at 256 ops and spun forever, which on a device is a watchdog
+// reset from a script that merely got long. Found by bisecting: 60 statements fine, 80 hung.
+TEST_CASE("a long script compiles or refuses, but never spins") {
+    uint8_t out[16384];
+    // A long ARITHMETIC chain, not many statements: each `+ 1` is one cheap op, so this passes 256
+    // IR ops while staying inside the code buffer. Repeated statements hit the code ceiling first
+    // and return before the wrap, which is why they do not pin this.
+    std::string many = "addLight(1";
+    for (int i = 0; i < 200; i++) many += " + 1";
+    many += ", 0, 0);";
+    auto r = moonlive::compileSource(many.c_str(), kTable, kSys, out, sizeof(out));
+    // Either answer is fine — what is NOT fine is never returning, which is what this pins.
+    CHECK((r.ok || std::strlen(r.error) > 0));
+
+    // And the sanity bound still refuses a runaway rather than trying to allocate for it.
+    std::string absurd;
+    for (int i = 0; i < 3000; i++) absurd += "addLight(1, 0, 0);";
+    auto big = moonlive::compileSource(absurd.c_str(), kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(big.ok);
+    CHECK(std::string(big.error) == "script too large");
+}
+
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {
     uint8_t out[768];
     const char* bad[] = {

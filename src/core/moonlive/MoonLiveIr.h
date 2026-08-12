@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include "core/moonlive/MoonLiveBuiltins.h"   // InlineOp (a neutral opcode tag)
+#include "platform/platform.h"                // alloc/free — the op array is sized to the script
 
 // MoonLive IR — the typed intermediate representation between the front-end and the per-ISA
 // assembler (§3.2 of livescripts-analysis-top-down.md). The front-end lowers an AST to a flat
@@ -30,7 +31,15 @@ using VReg = uint8_t;
 enum : VReg { kArg0 = 0, kArg1 = 1, kArg2 = 2, kArg3 = 3, kArg4 = 4, kFirstTemp = 5 };
 
 static constexpr uint8_t kMaxVRegs = 16;     // a statement uses a handful; no allocator yet
-static constexpr uint8_t kMaxIrOps = 64;     // a statement is a handful of ops; fixed, no heap
+// An upper SANITY bound, not the working limit: the op array is sized to the script (see IrProgram),
+// so a one-statement script pays for one statement. This exists only so a runaway source fails with
+// a diagnostic instead of asking for an allocation that would exhaust a small device's heap.
+static constexpr uint16_t kMaxIrOps = 4096;
+
+// Ops a single source token can lower to, worst case. The compiler sizes its op array by counting
+// tokens and multiplying — an over-estimate by construction, which is the safe direction: a few
+// unused entries on a cold path, versus refusing a script that would have fit.
+static constexpr uint16_t kIrOpsPerToken = 4;
 
 // The op set — neutral. Three-address form: dst plus up to three source operands. (Counted
 // Control flow arrived with the script-level `for`, which is what the note here anticipated: the
@@ -96,14 +105,42 @@ static constexpr uint8_t kMaxControlName = 24;   // max control-name length (inc
                                                  // rejects longer names so the binding's name pool
                                                  // can't truncate distinct names into a collision
 
-// A lowered program: a fixed list of ops plus the vreg high-water mark.
+// A lowered program: the ops, sized to the script, plus the vreg high-water mark.
+//
+// The op array is HEAP-ALLOCATED rather than an `IrInst ops[kMaxIrOps]` member. As a member it cost
+// the same ~2 KB of STACK for a one-statement script as for a full one, and this object is a local
+// on the compile path of a 12 KB main task — so raising the ceiling by growing the array would have
+// traded a compile limit for a stack overflow (this project has already lost a P4 to a large stack
+// frame). Sizing to the script makes the small case cheaper AND the large case possible.
+// Compilation is cold path, so the allocation costs nothing that matters.
+//
+// Ownership is RAII: one allocation, freed in the destructor, copying deleted. There is no manual
+// free path to miss — the reverted 32026eb5 turned four tables into independently-nullable pointers
+// and its own comment records the heap corruption that followed from missing one guard.
 struct IrProgram {
-    IrInst  ops[kMaxIrOps];
-    uint8_t count = 0;
-    VReg    vregsUsed = kFirstTemp;
+    IrInst*  ops = nullptr;
+    uint16_t cap = 0;                      // entries allocated
+    uint16_t count = 0;
+    VReg     vregsUsed = kFirstTemp;
+
+    IrProgram() = default;
+    ~IrProgram() { platform::free(ops); }
+    IrProgram(const IrProgram&) = delete;              // owns a buffer; a copy would double-free
+    IrProgram& operator=(const IrProgram&) = delete;
+
+    /// Size the op array to `n` entries. False when the allocation fails or `n` exceeds the sanity
+    /// bound, so the caller reports a diagnostic instead of writing through a null pointer.
+    bool reserve(uint16_t n) {
+        if (n == 0 || n > kMaxIrOps) return false;
+        platform::free(ops);
+        ops = static_cast<IrInst*>(platform::alloc(sizeof(IrInst) * n));
+        cap = ops ? n : 0;
+        count = 0;
+        return ops != nullptr;
+    }
 
     bool push(const IrInst& i) {
-        if (count >= kMaxIrOps) return false;
+        if (!ops || count >= cap) return false;
         // Reject any op that names a vreg outside the fixed register budget — an invalid program
         // is dropped at the seam rather than reaching a backend that would index past its map.
         if (i.dst >= kMaxVRegs || i.a >= kMaxVRegs || i.b >= kMaxVRegs ||
@@ -122,7 +159,7 @@ struct IrProgram {
     /// fold into the index vreg) and stays with each backend; WHICH ops are present is a property of
     /// the program, so it is answered once here.
     bool hasInline(InlineOp which) const {
-        for (uint8_t i = 0; i < count; i++)
+        for (uint16_t i = 0; i < count; i++)   // uint16_t: `count` is, so a uint8_t never terminates
             if (ops[i].op == IrOp::Inline && ops[i].inlineOp == which) return true;
         return false;
     }

@@ -1603,6 +1603,10 @@ uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer) {
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h) {
     return h.impl ? static_cast<HostBus*>(h.impl)->capacity : 0;
 }
+// The desktop host emulates the bus in ordinary memory, so there is no single-transfer ceiling to
+// declare — 0 is the "no bound" contract dmaBudgetBytes() reads, matching every other host-side
+// Parlio stub here.
+size_t parlioMaxTransferBytes() { return 0; }
 bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     return h.impl && static_cast<HostBus*>(h.impl)->transmit(buffer, bytes);
 }

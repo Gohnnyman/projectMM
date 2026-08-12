@@ -43,6 +43,9 @@ def main() -> int:
             ["c++", "-std=c++20", "-O0", "-I", os.path.join(ROOT, "src"),
              "-I", os.path.join(ROOT, "src", "platform", "desktop"),
              TOOL_SRC, os.path.join(ROOT, "src", "core", "moonlive", "MoonLiveCompiler.cpp"),
+             # The IR sizes its op array with platform::alloc, so the platform implementation has
+             # to come along — the compiler is no longer self-contained.
+             os.path.join(ROOT, "src", "platform", "desktop", "platform_desktop.cpp"),
              "-o", emitter],
             capture_output=True, text=True)
         if build.returncode != 0:

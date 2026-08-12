@@ -46,7 +46,9 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
         return labels[id];
     };
 
-    for (uint8_t i = 0; i < ir.count; i++) {
+    // uint16_t, matching IrProgram::count: the op array is sized to the script now, so a
+    // uint8_t counter wrapped at 256 ops and looped forever instead of emitting.
+    for (uint16_t i = 0; i < ir.count; i++) {
         const IrInst& op = ir.ops[i];
         switch (op.op) {
             case IrOp::Const:  a.movImm(reg(op.dst), op.imm); break;

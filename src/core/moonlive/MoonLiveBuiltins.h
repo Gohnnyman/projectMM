@@ -102,12 +102,6 @@ static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful 
 // the compile. Word-aligned so allocExec/writeExec's word-rounding never exceeds it.
 static constexpr size_t  kCodeCap = 2048;
 
-// The script text a binding holds. 1 KB, not 512 B: 512 could not hold a DOCUMENTED script — the
-// shipped lines.mlv is ~490 characters with its comments — and a script that overruns is silently
-// truncated mid-token, so it fails to compile with no hint that length was the reason. A binding is
-// ~2 KB at this size, which the smallest board still carries.
-static constexpr size_t  kMaxScriptBytes = 1024;
-
 static constexpr uint8_t kMaxSysVars  = 8;
 static constexpr uint8_t kArenaBytes  = kMaxCtrls + kMaxSysVars;
 
