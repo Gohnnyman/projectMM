@@ -53,9 +53,9 @@ public:
     // A `source` edit must recompile — route it through the prepare rebuild sweep so a new
     // script swaps in live (the script-editor loop). A SCRIPTED CONTROL's value change must NOT
     // recompile: it just updates an arena byte the running native code reads next tick. So only
-    // "source" triggers a rebuild; every scripted control returns false (the live-edit path).
+    // "script" triggers a rebuild; every scripted control returns false (the live-edit path).
     bool affectsPrepare(const char* controlName) const override {
-        return std::strcmp(controlName, "source") == 0;
+        return std::strcmp(controlName, "script") == 0;
     }
 
     // Compile the source on the cold rebuild path. A failed compile (parse error or no exec

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/platform.h"   // alloc/free — the emit buffer is heap, not stack
+
 #include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
 
 #include <cstdint>
@@ -22,6 +24,13 @@ enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 
 class XtensaAssembler {
 public:
+    // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
+    // would double-free the buffer it emits into.
+    ~XtensaAssembler() { platform::free(buf_); }
+    XtensaAssembler() = default;
+    XtensaAssembler(const XtensaAssembler&) = delete;
+    XtensaAssembler& operator=(const XtensaAssembler&) = delete;
+
     void finalize() { patchBranches(); }
     const uint8_t* bytes() const { return buf_; }
     size_t size() const { return len_; }
@@ -55,7 +64,12 @@ private:
     void emit3(uint32_t w);              // wide (24-bit) instruction
     void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
 
-    uint8_t  buf_[kCap] = {};
+    // HEAP, not a member array: the assembler is a stack local in lowerToBytes, so a kCap-sized
+    // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
+    // frames. On a classic ESP32 that overflowed the task and faulted inside _xt_context_save
+    // (the plan named this: "buf_[kCap] inside the assembler, itself a stack local"). The buffer is
+    // scratch that ends in a memcpy to the caller's output, so nothing outlives the object.
+    uint8_t* buf_ = static_cast<uint8_t*>(platform::alloc(kCap));
     size_t   len_ = 0;
     bool     overflow_ = false;
 

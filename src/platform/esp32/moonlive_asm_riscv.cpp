@@ -35,7 +35,7 @@ constexpr bool rvScratchOutsideMap() {
 static_assert(rvScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
 
 void RiscvAssembler::emit32(uint32_t w) {
-    if (len_ + 4 > kCap) { overflow_ = true; return; }
+    if (!buf_ || len_ + 4 > kCap) { overflow_ = true; return; }
     buf_[len_++] = uint8_t(w); buf_[len_++] = uint8_t(w >> 8);
     buf_[len_++] = uint8_t(w >> 16); buf_[len_++] = uint8_t(w >> 24);
 }
@@ -169,6 +169,9 @@ void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 void RiscvAssembler::ret() { emit32(0x00008067u); }    // ret = jalr x0, ra, 0
 
 void RiscvAssembler::patchBranches() {
+    // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
+    // stated rather than left to the reader to derive from fixupCount_ being 0.
+    if (!buf_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         if (labelPos_[f.label] < 0) continue;                  // unbound label — leave as-is (overflow_ already failed the compile)

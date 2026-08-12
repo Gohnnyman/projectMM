@@ -793,10 +793,17 @@ public:
         if (overCapReported_) return;
         overCapReported_ = true;
         const uint8_t opp     = outputsPerPin();
-        const size_t  pad     = padBytesFor(slotBytes(), opp);
         const size_t  rowBytes = rowBytesFor(outCh, slotBytes(), opp);
-        const size_t  usable  = cap > pad ? cap - pad : 0;
-        const unsigned fits   = rowBytes ? static_cast<unsigned>(usable / rowBytes) : 0;
+        const size_t  pad     = padBytesFor(slotBytes(), opp);
+        // Count DOWN through frameBytesFor, not up through a division: the frame is 64-byte ROUNDED,
+        // so `(cap - pad) / rowBytes` overshoots by one — it reported 898 lights, whose frame rounds
+        // to 65536 against a 65535 cap. A limit that still fails is worse than no limit.
+        unsigned fits = 0;
+        if (rowBytes && cap > pad) {
+            fits = static_cast<unsigned>((cap - pad) / rowBytes);
+            while (fits > 0 && frameBytesFor(static_cast<nrOfLightsType>(fits), outCh,
+                                             slotBytes(), opp) > cap) fits--;
+        }
         std::snprintf(overCapBuf_, sizeof(overCapBuf_),
                       "too many lights per pin: %u exceeds this peripheral's %u — lower ledsPerPin",
                       static_cast<unsigned>(maxLaneLights_), fits);

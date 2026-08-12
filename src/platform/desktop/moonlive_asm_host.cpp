@@ -47,12 +47,12 @@ void HostAssembler::addFixup(size_t at, Label label, uint8_t kind) {
 }
 
 void HostAssembler::emit32(uint32_t w) {
-    if (len_ + 4 > kCap) { overflow_ = true; return; }
+    if (!buf_ || len_ + 4 > kCap) { overflow_ = true; return; }
     buf_[len_++] = uint8_t(w); buf_[len_++] = uint8_t(w >> 8);
     buf_[len_++] = uint8_t(w >> 16); buf_[len_++] = uint8_t(w >> 24);
 }
 void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
-    if (len_ + n > kCap) { overflow_ = true; return; }
+    if (!buf_ || len_ + n > kCap) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 
@@ -160,6 +160,9 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 void HostAssembler::ret() { emit32(0xd65f03c0u); }
 
 void HostAssembler::patchBranches() {
+    // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
+    // stated rather than left to the reader to derive from fixupCount_ being 0.
+    if (!buf_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         int32_t target = labelPos_[f.label];

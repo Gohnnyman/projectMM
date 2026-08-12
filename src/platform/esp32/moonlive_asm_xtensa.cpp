@@ -32,7 +32,9 @@ static_assert(xtScratchOutsideMap(), "a scratch register is also a vreg — call
 
 
 void XtensaAssembler::emit(const uint8_t* p, size_t n) {
-    if (len_ + n > kCap) { overflow_ = true; return; }
+    // !buf_ covers a failed allocation: the compile then fails cleanly at overflowed() instead
+    // of writing through a null pointer.
+    if (!buf_ || len_ + n > kCap) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 void XtensaAssembler::emit2(uint16_t w) {
@@ -206,6 +208,9 @@ void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 }
 
 void XtensaAssembler::patchBranches() {
+    // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
+    // stated rather than left to the reader to derive from fixupCount_ being 0.
+    if (!buf_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         if (labelPos_[f.label] < 0) continue;                                  // unbound label — leave as-is (overflow_ already failed the compile)

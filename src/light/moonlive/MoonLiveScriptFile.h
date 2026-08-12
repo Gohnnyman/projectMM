@@ -18,6 +18,10 @@ inline constexpr const char* kScriptDir = "/moonlive";
 /// cannot ask a 320 KB device for an allocation it will not survive.
 inline constexpr long kScriptFileMax = 16384;
 
+/// Longest script name accepted. Bounds the path buffer below — a module's `script` control is 32
+/// bytes, so this is the same limit stated where the path is built.
+inline constexpr size_t kMaxScriptName = 40;
+
 /// Read `<kScriptDir>/<name>` and compile it. The source lives in a right-sized heap buffer for the
 /// duration of the compile and is freed before returning, so a module holds a filename (~32 B) and
 /// the emitted code — never the script text. That is the whole point: the fixed per-module arrays
@@ -45,6 +49,22 @@ inline bool compileScriptFile(MoonLive& engine, const char* name,
     platform::fsMkdir(kScriptDir);
 
     if (!name || !name[0]) { err = "no script — set the script name"; return false; }
+
+    // A BASENAME only. The fixed directory is the point — a module names a script, it does not
+    // address the filesystem — so a separator or a `..` would let a control value reach outside
+    // kScriptDir (`../.config/NetworkModule.json` reads the device's saved credentials). Rejected
+    // rather than sanitised: a name that needs rewriting to be safe is a name a user mistyped.
+    for (const char* c = name; *c; c++)
+        if (*c == '/' || *c == '\\') { err = "script name is a file in the script folder, not a path"; return false; }
+    if (std::strcmp(name, "..") == 0 || std::strncmp(name, "../", 3) == 0) {
+        err = "script name is a file in the script folder, not a path"; return false;
+    }
+    // .mlv, so a stray name cannot pull in an unrelated file that happens to sit alongside. The
+    // upper bound also lets the compiler see that the snprintf below cannot truncate.
+    const size_t len = std::strlen(name);
+    if (len < 5 || len > kMaxScriptName || std::strcmp(name + len - 4, ".mlv") != 0) {
+        err = "script name must end in .mlv"; return false;
+    }
 
     char path[96];
     std::snprintf(path, sizeof(path), "%s/%s", kScriptDir, name);

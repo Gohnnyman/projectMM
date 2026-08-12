@@ -433,3 +433,39 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
 
+// A control write lands directly in the module's buffer — addText binds it — so setScript() is NOT
+// called. Nothing then cleared the compiled-hash, and compile()'s early-return kept the OLD program
+// running under the new name. Found by review; the same class of bug hardware found in the effect.
+TEST_CASE("naming a different script through the control actually swaps the program") {
+    MoonLiveLayout l;
+    l.defineControls();
+    const char* four = mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(four);
+    l.prepare();
+    REQUIRE(l.lightCount() == 4);
+
+    // Write the OTHER script the way the API does: straight into the bound control buffer.
+    const char* nine = mmWriteScript("for (i = 0; i < 9; i = i + 1) { addLight(i, 0, 0); }");
+    const auto& cs = l.controls();
+    for (uint8_t i = 0; i < cs.count(); i++)
+        if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
+            std::snprintf(static_cast<char*>(cs[i].ptr), 32, "%s", nine);
+    l.onControlChanged("script");
+    l.prepare();
+    CHECK(l.lightCount() == 9);      // the new file, not the cached program
+}
+
+// The fixed script directory is a boundary: a module names a file inside it, and cannot address the
+// filesystem. Without this, a control value of "../.config/NetworkModule.json" reads the device's
+// saved WiFi credentials as if they were a script.
+TEST_CASE("a script name cannot escape the script folder") {
+    MoonLiveLayout l;
+    l.defineControls();
+    for (const char* bad : {"../.config/NetworkModule.json", "..", "sub/dir.mlv", "grid.txt"}) {
+        INFO(bad);
+        l.setScript(bad);
+        l.prepare();
+        CHECK(l.severity() == MoonModule::Severity::Error);
+        CHECK(l.lightCount() == 0);
+    }
+}

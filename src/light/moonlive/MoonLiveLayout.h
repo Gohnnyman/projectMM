@@ -90,6 +90,13 @@ public:
     }
 
     /// Replace the script. The next prepare() compiles it — the path a UI edit takes.
+    /// A control write lands DIRECTLY in script_ (addText binds the buffer), so setScript() is not
+    /// called and nothing would clear the compiled-hash — compile() would early-return and keep
+    /// running the previous script under a new name. Clearing it here covers both paths.
+    void onControlChanged(const char* name) override {
+        if (name && std::strcmp(name, "script") == 0) compiledHash_ = 0;
+    }
+
     /// Point the layout at a script in the shared script directory; the next prepare() compiles it.
     void setScript(const char* name) {
         if (!name) return;

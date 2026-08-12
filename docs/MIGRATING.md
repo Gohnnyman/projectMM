@@ -49,7 +49,7 @@ A **layout** is the one script that legitimately used those names for its own co
 
 | What | Why | What to do |
 |---|---|---|
-| A scripted layout declaring `width`/`height` | The name is what the layout is defining, so the declaration is a compile error and no lights are placed | Edit the script's `source` control, renaming its own controls (the shipped `grid.mlv` uses `cols`/`rows`) |
+| A scripted layout declaring `width`/`height` | The name is what the layout is defining, so the declaration is a compile error and no lights are placed | Edit the `.mlv` file in the File Manager, renaming its own controls (the shipped `grid.mlv` uses `cols`/`rows`), then set the module's `script` control to that file |
 | A scripted **modifier** using `x`, `y` or `z` as a loop variable | A modifier IS handed a coordinate under those names, so they cannot also be counters there | Rename the loop variable to something the modifier is not handed (`i`, `n`) |
 
 Effects and modifiers need no change: they were already being handed these values, just through a preamble instead of by name. The error names the clash, and the module shows it on its card, so a broken script says why rather than failing silently.
