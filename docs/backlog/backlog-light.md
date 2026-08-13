@@ -290,11 +290,35 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
   Compiling inside `defineControls` is NOT the fix (tried): it makes the default script's controls exist before `setSource` runs, and swapping the source then re-seeds every control from its new declared default — the same value-loss, moved. The real fix is ordering: the engine must compile once the persisted `source` is in place but before controls are published, which is a Scheduler-phase question (the same parent-before-child ordering the `const_cast` in `MoonLiveLayout::compile` already works around). Affects all three MoonLive bindings, not just the layout.
 
-- **MoonLive compiling watchdogs a classic ESP32** (2026-08-12). Naming a script on an Olimex Gateway resets the board with `rst:0x8 (TG1WDT_SYS_RESET)` — the TASK watchdog at 12 s, not a panic: there is no `Guru Meditation`, no backtrace, and the last serial lines are ordinary ticks. So the compile is not crashing, it is taking longer than twelve seconds with the render task waiting on it, and the watchdog does its job. Bench-captured on serial while adding one `MoonLiveLayout` with `grid.mlv`; the P4 compiles the same script in well under a second.
+- **Xtensa's vreg map violates the windowed ABI** (2026-08-13). ROOT CAUSE, found by comparing a
+  working ESP32-S31 (RISC-V) against a crashing S3 on identical firmware and scripts.
 
-  **Not a stack overflow** — that was the earlier theory and it was wrong. ~4.1 KB was moved off the compile chain (`MoonLive::compile`'s staging buffer and each assembler's `buf_`, both now heap, RAII-owned) which was worth doing on its own merits (the plan named it) but did not change this: the board still resets, now with the watchdog signature rather than `Double exception`. The earlier `Double exception` runs came from a board carrying persisted WiFi credentials, a separate issue.
+  `call8` rotates the register window by eight: the callee's `a0..a7` ARE the caller's `a8..a15`, so
+  every host call clobbers `a8..a15`. ESP-IDF states it plainly — `a8..a15 clobbered (if
+  window_spill8)` in `components/xtensa/include/xtensa/coreasm.h`. Our map is `a2..a11`, so `a8..a11`
+  hold script values inside the rotation window. Measured crash: `A0 = 0x00000100` — that is
+  `nLights` (256), a script value sitting in the return-address register. Intermittent, because
+  whether it is fatal depends on which vreg held what when the window turned; that intermittency is
+  what made it survive a day of plausible theories.
 
-  **Where to look:** the classic's ticks already read ~9 ms with `renderWait` ~8 ms BEFORE any compile, so the render loop has almost no slack. Either the compile is genuinely that slow on a 240 MHz single-issue Xtensa with no PSRAM, or something in the path blocks (the LittleFS read, `platform::alloc` under a fragmented heap). Measure first — instrument `compileScriptFile` with timings and run it on the classic — before assuming which. Moving the compile off the render task is the likely fix, but it is a scheduling change and wants its own cycle.
+  Only `a0`(return address), `a1`(sp) and `a2..a7` survive a call, so the safe map is **six** vregs,
+  not ten. Six does not fit today: five are the fixed ABI vregs (`buf`, `nLights`, `cpl`, `t`,
+  `ctrls`), leaving one. Closing this needs those five OFF permanent registers and into the frame —
+  the register-promotion question [Plan-20260813](../history/plans/Plan-20260813%20-%20MoonLive%20on%20a%20stack%20machine%20%E2%80%94%20the%20frame%20is%20where%20values%20live.md)
+  defers on purpose. RISC-V is unaffected: no window, and its `call()` saves 14 registers into an
+  explicit 80-byte frame, which is why the S31 runs layout + plasma + modifier stably.
+
+  Until then a scripted layout, and any effect whose script CALLS a builtin, is unreliable on Xtensa.
+  Straight-line and inline-only scripts (`setRGB`, `fill`) are fine — they emit no call.
+
+- **A scripted LAYOUT crashes on Xtensa: the emitted code is wrong** (2026-08-12). Naming any script on a `MoonLiveLayout` resets an S3 — `addLight(0, 0, 0);` alone is enough. A scripted EFFECT on the same board is fine, which is the whole clue: an effect writes pixels through `setRGB`, a layout calls `addLight`, and only the layout path faults.
+
+  **Measured, so the earlier theories are retired.** Per-stage timings on the S3 read `stat 2.0 ms, alloc 8 us, read 2.7 ms, compile 0.5 ms` — the compile COMPLETES, in about five milliseconds, and the crash comes after it returns. So this is not a slow compile and not the task watchdog running out: tracing either side of `runScript` shows the fault lands *inside the JIT'd code*, as `Guru Meditation Error: Double exception` with a corrupted backtrace, or as `LoadProhibited` at a nonsense address. (Filesystem access IS expensive — ~90% of the load — but that is a cost, not the bug.)
+
+  **The defect is visible in the disassembly.** `uv run moondeck/moonlive/disasm.py '<script text>'` on the grid shape shows the call sequence ending:
+  `mov.n a11, a12` (the call result into the destination) immediately followed by `movi a11, 1`, which overwrites it; the loop then compares against registers restored from the wrong frame slots, so the bounds are not the loop's own. The counters run away and `addLight` is called unboundedly until the host callback exhausts the stack — which is exactly the `Double exception` signature.
+
+  **Xtensa only.** The identical script on the arm64 host backend calls `addLight` exactly 256 times for a 16×16 grid, so the core compiler and the register allocator are right and the fault is in `XtensaAssembler::call` / the Xtensa lowering of a void call whose destination register is a live vreg. No test executes Xtensa code (only arm64 runs in tests), which is why this shipped — the gap the MoonLive plan named. A test that runs emitted Xtensa bytes, or a `disasm.py` assertion over the shipped scripts, is what would have caught it.
 
 - **A scripted modifier that reshapes the grid** (2026-08-10). `ModifierBase::modifyLogicalSize` lets a modifier change the logical `width`/`height`/`depth` — a Multiply kaleidoscope grows the grid, a crop shrinks it — and a compiled modifier uses it. A SCRIPTED one cannot: system variables are read-only, so `MoonLiveModifier` writes the box in and never reads it back. Needs a writable system variable — the binding reads the slots after the script returns and reports the result through `modifyLogicalSize` — which is a new `SysVarKind` (or a mutable flag on `SysVar`) plus the read-back, not a new builtin. Until then a scripted modifier can fold coordinates but not resize the grid they live in.
 

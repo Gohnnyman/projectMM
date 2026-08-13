@@ -46,7 +46,20 @@ public:
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
 
-    void prologue() {}                   // RV needs no fixed prologue (sp managed in call())
+    // --- the call frame ---
+    // The register allocator's overflow storage (core/moonlive/MoonLiveSpill.h). RV32 had no frame
+    // at all outside call(), so a spilling program is the first thing here that needs one: prologue
+    // opens it and parks s0 (the standard frame pointer) at its top, epilogue tears it down. Slots
+    // are addressed from s0, NOT sp, because call() moves sp by 80 bytes around every host call —
+    // sp-relative offsets would be wrong for its duration, and reading a spilled value after a
+    // random16() is the ordinary case. It is also the layout a nested or recursive script function
+    // needs: one s0 per activation.
+    // slots == 0 emits nothing, so a non-spilling script keeps today's zero-instruction entry.
+    void prologue(uint8_t slots = 0);
+    void spillStore(Reg r, uint8_t slot);
+    void spillLoad(Reg r, uint8_t slot);
+    static constexpr uint8_t kMaxSpillSlots = 16;
+
     Label newLabel();
     void  bind(Label l);
 
@@ -61,7 +74,7 @@ public:
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
     void branchNe(Reg a, Reg b, Label l);     // bne a, b, l
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // standard call to a host built-in
-    void epilogue() { ret(); }
+    void epilogue();                     // undo prologue's frame (if any), then ret
     void ret();
 
 private:
@@ -81,6 +94,10 @@ private:
     uint8_t* buf_ = static_cast<uint8_t*>(platform::alloc(kCap));
     size_t   len_ = 0;
     bool     overflow_ = false;
+    // Frame size in bytes, 0 when no prologue was emitted. epilogue() reads it, so the teardown can
+    // never disagree with the setup about how far sp moved — a mismatch there returns to a corrupted
+    // stack, which looks like anything except the compiler bug it is.
+    uint16_t frameBytes_ = 0;
 
     int32_t  labelPos_[kMaxLabels];
     uint8_t  labelCount_ = 0;

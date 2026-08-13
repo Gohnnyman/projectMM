@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstdio>
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/moonlive/MoonLiveCompiler.h"   // CompileResult (carries the declared controls)
@@ -53,7 +54,11 @@ public:
     // grid size / layout, the hard rule).
     void run(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t) const {
         if (!buf || nLights == 0 || cpl < 3) return;
-        if (ctrl_) ctrl_(buf, nLights, cpl, t, ctrlArena_);   // front-end-compiled (reads controls)
+        // The arena is the fifth argument, and a front-end-compiled program reads its controls and
+        // system variables straight through it — a null there is dereferenced by the EMITTED code,
+        // which faults as a LoadProhibited at a nonsense address with no C++ frame to blame. Checked
+        // with the other preconditions rather than trusted: every other operand of the call is.
+        if (ctrl_ && ctrlArena_) ctrl_(buf, nLights, cpl, t, ctrlArena_);   // front-end-compiled
         else if (fn_) fn_(buf, nLights, cpl);                 // hand-encoded fixed fill
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }

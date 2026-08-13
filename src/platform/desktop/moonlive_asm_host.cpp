@@ -17,7 +17,12 @@ namespace mm::moonlive {
 // Index math uses the 64-bit views (xN) for addresses, 32-bit (wN) for counters/colors — same
 // register number, so one map suffices. x15 is the call() address/immediate scratch (not a vreg).
 static constexpr uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
-static uint8_t mr(Reg r) { return kArm64Reg[r]; }
+// BOUNDS-CHECKED. The inline ops address their scratch as `vregsUsed + n`, so an index one past the
+// map is reachable whenever the reservation and the map disagree — and an out-of-bounds read returns
+// whatever byte follows the array, making the emitted instruction name a register chosen by
+// accident. Clamping turns that into a wrong-but-safe register instead of undefined behaviour; the
+// static_assert below and the lowerer's reservation are what stop it happening at all.
+static uint8_t mr(Reg r) { return kArm64Reg[r < kRegCount ? r : kRegCount - 1]; }
 
 // A scratch register that is ALSO a vreg silently corrupts values — see the RISC-V backend, where
 // kScratchFn aliased vreg R12 and every call returned a stale value. Checked here so the map can
@@ -54,6 +59,48 @@ void HostAssembler::emit32(uint32_t w) {
 void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
     if (!buf_ || len_ + n > kCap) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
+}
+
+// --- the call frame: the register allocator's overflow storage ---------------------------------
+//
+// x29 is the AAPCS frame pointer, callee-saved and outside both the vreg map and the {x15,x16,x17}
+// scratch set, so nothing this backend emits can disturb it. Slots are addressed from x29 rather
+// than sp precisely because call() moves sp by 128 bytes around every host call: sp-relative offsets
+// would be wrong for the duration of the call, and a script whose spilled value is read after a
+// random16() is the ordinary case, not an exotic one. It is also the layout a nested call needs —
+// each activation gets its own x29 — which is why the frame pointer is here now rather than added
+// later when script-defined functions arrive.
+//
+// Layout: [x29+0] = saved x29, [x29+8] = saved x30, slot n at [x29 + 16 + n*8].
+static constexpr uint16_t kSlotBase = 16;
+
+void HostAssembler::prologue(uint8_t slots) {
+    if (slots == 0) return;                       // no spilling: no frame, no cost
+    if (slots > kMaxSpillSlots) { overflow_ = true; return; }
+    // 16-byte aligned, as the AAPCS requires of sp at every instruction boundary — an unaligned sp
+    // faults on the first stp a callee executes, which would surface as a crash inside random16.
+    const uint16_t bytes = static_cast<uint16_t>((kSlotBase + slots * 8 + 15) & ~15);
+    frameBytes_ = bytes;
+    emit32(0xa9800000u | ((uint32_t((-int32_t(bytes)) / 8) & 0x7f) << 15) | (30u << 10) | (31u << 5) | 29u);
+    emit32(0x910003fdu);                          // mov x29, sp
+}
+void HostAssembler::epilogue() {
+    if (frameBytes_ != 0) {
+        emit32(0x910003bfu);                      // mov sp, x29   (drop anything call() left behind)
+        emit32(0xa8c00000u | ((uint32_t(frameBytes_) / 8) << 15) | (30u << 10) | (31u << 5) | 29u);
+    }
+    ret();
+}
+// str/ldr with a 12-bit SCALED unsigned offset (imm12 counts 8-byte units for the 64-bit form).
+// 64-bit, not 32: a vreg can hold a pointer — kArg0 is the buffer — and truncating one to 32 bits on
+// the way to a slot would produce a wild store the moment a spilled pointer came back.
+void HostAssembler::spillStore(Reg r, uint8_t slot) {
+    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    emit32(0xf9000000u | ((uint32_t(kSlotBase + slot * 8) / 8) << 10) | (29u << 5) | mr(r));
+}
+void HostAssembler::spillLoad(Reg r, uint8_t slot) {
+    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    emit32(0xf9400000u | ((uint32_t(kSlotBase + slot * 8) / 8) << 10) | (29u << 5) | mr(r));
 }
 
 void HostAssembler::movImm(Reg d, int32_t imm) {

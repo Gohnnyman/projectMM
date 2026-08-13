@@ -1,5 +1,12 @@
 # Plan: MoonLive scales — right-sized IR, and the stack as the register overflow
 
+> **Steps 1–3 shipped. Steps 4–5 (the register allocator) are SUPERSEDED by
+> [Plan-20260813 — MoonLive on a stack machine](Plan-20260813%20-%20MoonLive%20on%20a%20stack%20machine%20%E2%80%94%20the%20frame%20is%20where%20values%20live.md).**
+> The allocator was built and works on the host at every budget, but on Xtensa it leaves ZERO
+> allocatable registers (10 − 1 scratch − 5 ABI vregs − 4 reload temps), so every looped script is
+> refused there. Bench-measured on an S3. The successor plan puts every variable in the frame
+> instead and keeps registers for expression temporaries only.
+
 ## Context
 
 MoonLive scripts hit hard walls far below what a user would call a complex script. Two separate
@@ -174,6 +181,13 @@ Both allocations are freed when compilation ends: they are compile-time scratch,
 running program. The only thing that outlives a compile is the exec block, which is unchanged.
 
 ### 2. Spill to the frame (removes the register wall)
+
+**The frame is a call frame, not a slot file.** Script-local functions are the next feature: callable
+from the script, taking arguments, containing loops and `if`, calling other functions, and
+recursive. A recursive function's spill slots cannot be one fixed region — each activation needs its
+own — so slots are addressed as offsets from a frame pointer that a prologue establishes, which is
+the layout a nested call reuses by pushing another frame. Spilling one top-level program is what
+ships here; the frame discipline is chosen so functions add a call sequence rather than a redesign.
 
 **New IR ops** ([MoonLiveIr.h](src/core/moonlive/MoonLiveIr.h)):
 

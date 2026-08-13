@@ -1,5 +1,6 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveIr.h"
+#include "core/moonlive/MoonLiveSpill.h"   // the register allocator — core's, run before lowering
 #include "moonlive_asm_host.h"
 
 #include <cstring>
@@ -22,7 +23,7 @@ namespace {
 Reg reg(VReg v) { return static_cast<Reg>(v); }
 }
 
-size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
+size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze) {
     // Reserve three scratch regs above the program's vregs for the inline ops' temps.
     // Reserve scratch only for the inline ops this program actually contains. Unlike Xtensa and
     // RISC-V, THIS backend's StoreElem needs one scratch too (sAddr — it does not fold the address
@@ -30,7 +31,16 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     // needs any. Reserving the maximum unconditionally cost a register every script paid for.
     const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 3
                           : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
-    if (!out || cap == 0 || ir.vregsUsed + scratch > kRegCount) return 0;
+    if (!out || cap == 0) return 0;
+
+    // Run the register allocator before lowering. It leaves a program that already fits untouched,
+    // and rewrites one that does not into Spill/Reload against this backend's frame — replacing the
+    // hand-rolled `vregsUsed + scratch > kRegCount` bail that used to REFUSE such a script outright.
+    // False here means even the spilled form does not fit, which is a diagnostic, never a miscompile.
+    uint8_t slots = 0;
+    const RegBudget budget = squeeze ? *squeeze
+                                    : RegBudget{kRegCount, scratch, HostAssembler::kMaxSpillSlots};
+    if (!spillToBudget(ir, budget, slots)) return 0;
     // sAddr FIRST, because it is the one StoreElem also uses: a store-only program reserves a single
     // scratch, so the shared one has to be the lowest index or it would name a register outside the
     // reservation. sOff/sCtr are FillElems-only and sit above it.
@@ -39,6 +49,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 2);    // loop counter
 
     HostAssembler a;
+    a.prologue(slots);   // nothing at all when the program did not spill
 
     // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
     // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
@@ -78,6 +89,9 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
                 }
                 break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), reg(kArg4), op.imm); break;  // dst = ctrls[imm]
+            // The allocator's two ops. `imm` is a slot INDEX; the assembler owns the frame layout.
+            case IrOp::Spill:  a.spillStore(reg(op.a), static_cast<uint8_t>(op.imm)); break;
+            case IrOp::Reload: a.spillLoad(reg(op.dst), static_cast<uint8_t>(op.imm)); break;
             case IrOp::Call:
                 if (!op.callFn) return 0;
                 a.call(reg(op.dst), reg(op.a), reg(op.b), reg(op.c), reinterpret_cast<const void*>(op.callFn));
@@ -120,7 +134,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             default: break;   // Loop/LoopEnd/Bounds/BoundsEnd are not emitted by the parser now
         }
     }
-    a.ret();
+    a.epilogue();   // tears the spill frame down (if any), then ret
     a.finalize();
     if (a.overflowed() || a.size() > cap) return 0;
     std::memcpy(out, a.bytes(), a.size());
@@ -129,7 +143,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
 
 #else   // unsupported host ISA (e.g. Windows x64) — degrade: no codegen, compile fails cleanly.
 
-size_t lowerToBytes(const IrProgram&, uint8_t*, size_t) { return 0; }
+size_t lowerToBytes(IrProgram&, uint8_t*, size_t, const RegBudget*) { return 0; }
 
 #endif
 

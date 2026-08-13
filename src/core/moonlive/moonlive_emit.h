@@ -52,10 +52,37 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap);
 
 struct IrProgram;   // src/core/moonlive/MoonLiveIr.h
 
+// What one target's register file offers the allocator — the ONLY thing core's spill pass needs to
+// know about an ISA, and the reason the allocator is written once instead of three times. Each
+// backend fills this in from its own map and hands it to spillToBudget (MoonLiveSpill.h); nothing
+// ISA-specific crosses in the other direction.
+struct RegBudget {
+    uint8_t regs = 0;        // machine registers the vreg map exposes (kRegCount)
+    uint8_t reserved = 0;    // registers the backend keeps for the inline ops this program contains
+    uint8_t slots = 0;       // spill slots the backend's frame can address (0 = cannot spill at all)
+
+    /// Registers left for the allocator once the backend's inline scratch is taken out. Saturating,
+    /// because a program whose scratch demand exceeds the whole file must report "no registers"
+    /// rather than wrap to a huge count and allocate against a register that does not exist.
+    uint8_t allocatable() const { return regs > reserved ? uint8_t(regs - reserved) : uint8_t(0); }
+};
+
 // Lower a typed IR program to machine code for this TU's ISA, via the per-ISA assembler.
 // This is the general codegen path the front-end uses; emitFill/emitAnimatedFill are the
 // hand-encoded references the assembler-built output is behaviorally checked against. Returns
 // the byte count, or 0 on overflow / cap too small (the caller degrades).
-size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap);
+//
+// `ir` is taken by NON-CONST reference because the backend runs core's register allocator over it
+// first (MoonLiveSpill.h), which rewrites a program that names more live values than this target has
+// registers. Taking a copy instead would double the compile's peak memory on the smallest device for
+// no benefit — the IR is compile-time scratch the caller drops immediately afterwards.
+///
+/// `squeeze`, when non-null, REPLACES the register budget this backend would compute for itself.
+/// It exists because the spiller is the hardest logic in the compiler and only one backend is ever
+/// executed by tests: with a budget deliberately smaller than the host's, the allocator runs on the
+/// arm64 path a test can actually call and RUN, and the same script at the full and the squeezed
+/// budget must render identical pixels. Without this seam the pass would be verifiable only on
+/// hardware. Production callers pass nullptr and get the target's real budget.
+size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze = nullptr);
 
 }  // namespace mm::moonlive

@@ -455,6 +455,72 @@ TEST_CASE("naming a different script through the control actually swaps the prog
     CHECK(l.lightCount() == 9);      // the new file, not the cached program
 }
 
+// A layout that cannot compile must stay quiet, not keep trying.
+//
+// The pipeline asks a layout for its size and then walks it, and BOTH ask it to compile first — so a
+// failure that leaves "nothing is compiled" looks exactly like "not compiled yet" and every ask
+// re-reads the file. On an ESP32 one attempt is two LittleFS operations (~5 ms), and the repeated
+// asks during a single rebuild starved the task until the 12-second watchdog reset the board: a
+// missing script took the whole device down rather than showing an error. The behaviour to pin is
+// that a failed layout still places no lights however many times it is asked, and says so.
+TEST_CASE("a layout whose script is missing reports it without retrying forever") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript("definitely-not-there.mlv");
+    l.prepare();
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    // Every ask the pipeline could make, several times over. Each one used to re-read the file.
+    int placed = 0;
+    CoordSink sink{[](void* ctx, nrOfLightsType, lengthType, lengthType, lengthType) {
+        (*static_cast<int*>(ctx))++;
+    }, nullptr, &placed};
+    for (int i = 0; i < 50; i++) {
+        CHECK(l.lightCount() == 0);
+        l.forEachCoord(sink);
+    }
+    CHECK(placed == 0);
+    CHECK(l.severity() == MoonModule::Severity::Error);   // and it still says what is wrong
+
+    // A working script after a failed one must still compile — the give-up is per script name, not
+    // permanent, or fixing a typo would need a reboot.
+    const char* good = "for (i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }";
+    l.setScript(mmWriteScript(good));
+    l.prepare();
+    CHECK(l.lightCount() == 5);
+}
+
+// A layout that starts with NO script must still compile the first real one it is given.
+//
+// Every device boots a fresh layout card with an empty script control, so the very first compile
+// always fails with "no script — set the script name". When the give-up flag was a bare bool that
+// failure latched, and the card then reported "no script" forever however many valid names were set
+// afterwards: the render loop asks for the light count long before a control write can clear a flag,
+// so the guard re-armed itself on every tick. Bench-caught on an S3 — the host never saw it because
+// a test constructs a fresh layout per case and never boots one empty.
+TEST_CASE("a layout that starts empty still compiles the first script it is given") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.prepare();                                  // the empty-script boot: fails, as it should
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    CHECK(l.lightCount() == 0);
+
+    // The RENDER LOOP keeps asking while no script is set — this is the step that re-armed the
+    // flag on device and that a straight prepare/setScript sequence never reproduces.
+    for (int i = 0; i < 5; i++) CHECK(l.lightCount() == 0);
+
+    // Write the control the way the UI does — straight into the bound buffer, then
+    // onControlChanged — because addText binds `script_` directly and setScript() is NOT called on
+    // that path. That is exactly how a device sets a script, and where the latch survived.
+    const char* name = mmWriteScript("for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }");
+    auto& cs = l.controls();
+    for (uint8_t i = 0; i < cs.count(); i++)
+        if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
+            std::snprintf(static_cast<char*>(cs[i].ptr), 32, "%s", name);
+    l.onControlChanged("script");
+    l.prepare();
+    CHECK(l.lightCount() == 6);                   // the give-up must not have latched
+}
+
 // The fixed script directory is a boundary: a module names a file inside it, and cannot address the
 // filesystem. Without this, a control value of "../.config/NetworkModule.json" reads the device's
 // saved WiFi credentials as if they were a script.

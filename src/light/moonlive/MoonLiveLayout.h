@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/moonlive/MoonLive.h"
+#include "platform/platform.h"
 #include "light/moonlive/MoonLiveScriptFile.h"
 #include "light/layouts/LayoutBase.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
@@ -94,7 +95,7 @@ public:
     /// called and nothing would clear the compiled-hash — compile() would early-return and keep
     /// running the previous script under a new name. Clearing it here covers both paths.
     void onControlChanged(const char* name) override {
-        if (name && std::strcmp(name, "script") == 0) compiledHash_ = 0;
+        if (name && std::strcmp(name, "script") == 0) { compiledHash_ = 0; compileFailed_ = false; }
     }
 
     /// Point the layout at a script in the shared script directory; the next prepare() compiles it.
@@ -102,6 +103,7 @@ public:
         if (!name) return;
         std::snprintf(script_, sizeof(script_), "%s", name);
         compiledHash_ = 0;          // a different file: whatever was compiled is not it
+        compileFailed_ = false;     // and it has not been tried yet
     }
 
 private:
@@ -123,6 +125,11 @@ private:
     /// immutable program rather than one mutated in place.
     void compile() const {
         if (engine_.ok() && compiledHash_ != 0) return;   // already current for this script
+        // Give up only on the name that ACTUALLY failed. As a bare flag this latched on the empty
+        // script every device boots with, and then skipped the compile forever — the card sat at
+        // "no script" however many times a real one was named, because the render loop asks for the
+        // light count long before any control write clears a flag.
+        if (compileFailed_ && std::strcmp(failedScript_, script_) == 0) return;
         auto* self = const_cast<MoonLiveLayout*>(this);
         moonlive::resetPrintBudget();
         // A layout is the one script with no layer to ask, so it gets the clock and nothing else:
@@ -132,8 +139,12 @@ private:
         if (moonlive::compileScriptFile(self->engine_, script_, moonlive::lightBuiltins(),
                                         moonlive::layoutSysVars(), err, &hash)) {
             self->clearStatus();
+            self->compileFailed_ = false;
         } else {
             self->setStatus(err, Severity::Error);
+            // Remember WHICH name failed, so a different one is still tried.
+            self->compileFailed_ = true;
+            std::snprintf(self->failedScript_, sizeof(failedScript_), "%s", script_);
         }
         // The CONTENT hash, not a copy of the text: 4 bytes to answer "is what I compiled still what
         // the file says", which is all the rebuild check ever needed. 0 means "nothing compiled".
@@ -177,6 +188,16 @@ private:
     // the source. Non-zero means "this engine holds a compiled program for that content"; 0 means
     // nothing is compiled, which is what setScript() restores when the file changes.
     mutable uint32_t compiledHash_ = 0;
+
+    // Has this script name already been tried and failed? A FAILED compile leaves compiledHash_ at 0
+    // and the engine not ok(), which is indistinguishable from "not compiled yet" — so without this
+    // flag every lightCount()/forEachCoord() re-reads and re-compiles the file. Each attempt is two
+    // LittleFS operations (~5 ms on an S3), the pipeline asks repeatedly while sizing and walking the
+    // fixture, and the retries starve the task until the 12 s watchdog resets the device. One attempt
+    // per script name is all that can ever help: nothing about the file changes between two calls in
+    // the same rebuild. Cleared wherever compiledHash_ is, because both mean "this is a new script".
+    mutable bool compileFailed_ = false;
+    mutable char failedScript_[32] = "";   // the name compileFailed_ refers to
 
 };
 

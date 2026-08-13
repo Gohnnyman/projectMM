@@ -282,11 +282,13 @@ public:
             controls_.setHidden(controls_.count() - 1, state_ != State::ConnectedSta);
             // TX power applies whenever the WiFi radio is active (STA or AP).
             // Hide on Ethernet / Idle where the radio is off.
+            // Expert-only: a radio-tuning readout, not something a normal install reads.
             controls_.addReadOnlyInt("txPower", txPower_, "dBm");
             const bool radioOn = (state_ == State::ConnectedSta
                                   || state_ == State::WaitingSta
                                   || state_ == State::AP);
             controls_.setHidden(controls_.count() - 1, !radioOn);
+            controls_.setAdvanced(controls_.count() - 1);
             // Writable TX-power cap (the weak-power / brown-out WiFi cap). Range 0..21 dBm.
             // 0 = "no override" (sentinel — syncTxPower then writes the
             // ESP-IDF ceiling, ~20 dBm, to actively lift any prior cap;
@@ -299,8 +301,11 @@ public:
             // TX-power cap is meaningless on Ethernet / Idle where the radio is off.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
             controls_.setHidden(controls_.count() - 1, !radioOn);
+            controls_.setAdvanced(controls_.count() - 1);
         }
+        // Expert-only: discovery works without it, and the projectMM UI finds devices over UDP.
         controls_.addBool("mDNS", mdnsEnabled_);
+        controls_.setAdvanced(controls_.count() - 1);
 
         // addressing goes immediately before the static-IP fields it conditions, so
         // the dropdown and the fields it reveals stay adjacent (mDNS, unrelated,

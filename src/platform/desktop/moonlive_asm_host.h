@@ -54,6 +54,18 @@ public:
     Label newLabel();
     void  bind(Label l);                 // mark l's position = current offset
 
+    // --- the call frame ---
+    // The register allocator's overflow storage (MoonLiveSpill.h). prologue() opens a frame with
+    // room for `slots` spilled values and parks a frame pointer at its base; spillStore/spillLoad
+    // address a slot as an offset from THAT pointer, never from sp — so a call() that moves sp
+    // underneath them, and the nested/recursive calls MoonLive is gaining next, leave slot
+    // addressing untouched. slots == 0 emits nothing at all: a script that never spilled pays zero.
+    void prologue(uint8_t slots);
+    void epilogue();                     // tear the frame down, then ret
+    void spillStore(Reg r, uint8_t slot);
+    void spillLoad(Reg r, uint8_t slot);
+    static constexpr uint8_t kMaxSpillSlots = 16;   // what the frame below can address
+
     // --- instructions (named, register/immediate operands) ---
     void movImm(Reg d, int32_t imm);     // d = imm
     void addImm(Reg d, Reg a, int32_t imm);   // d = a + imm
@@ -92,6 +104,10 @@ private:
     uint8_t* buf_ = static_cast<uint8_t*>(platform::alloc(kCap));
     size_t   len_ = 0;
     bool     overflow_ = false;
+    // Frame size in bytes, 0 when no prologue was emitted. epilogue() reads it, so the teardown can
+    // never disagree with the setup about how far sp moved — the class of bug that returns to a
+    // corrupted stack and is indistinguishable from a miscompile.
+    uint16_t frameBytes_ = 0;
 
     // Label positions (-1 = unbound) and pending branch fixups.
     int32_t  labelPos_[kMaxLabels];

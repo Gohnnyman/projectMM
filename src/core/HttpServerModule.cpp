@@ -1679,7 +1679,7 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     mod->defineControls();
     mod->setup();
     mod->applyState();
-    if (scheduler_) scheduler_->prepareTree();
+    if (scheduler_) scheduler_->requestPrepareTree();
     requestFullResync();   // structural change (see requestFullResync)
 
     // Persist the new tree shape (debounced save via noteDirty).
@@ -1751,7 +1751,7 @@ HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* pare
         removedAny = true;
     }
     if (removedAny) {
-        if (scheduler_) scheduler_->prepareTree();
+        if (scheduler_) scheduler_->requestPrepareTree();
     requestFullResync();   // structural change (see requestFullResync)
         parent->markDirty();
         FilesystemModule::noteDirty();
@@ -1834,7 +1834,7 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     mod->release();
     Scheduler::deleteTree(mod);
 
-    if (scheduler_) scheduler_->prepareTree();
+    if (scheduler_) scheduler_->requestPrepareTree();
     requestFullResync();   // structural change (see requestFullResync)
 
     // Persist the new tree shape — marking the parent dirty rewrites its file
@@ -1928,7 +1928,7 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
 
     // Re-run prepare across the tree so Layer LUT / Drivers buffer
     // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.
-    if (scheduler_) scheduler_->prepareTree();
+    if (scheduler_) scheduler_->requestPrepareTree();
     requestFullResync();   // structural change (see requestFullResync)
 
     // Persist: children are encoded positionally, so marking the parent dirty
@@ -2027,7 +2027,7 @@ void HttpServerModule::handleMoveModule(platform::TcpConnection& conn, const cha
     // file is rewritten with the new order (same as add/delete handlers).
     parent->markDirty();
     FilesystemModule::noteDirty();
-    if (scheduler_) scheduler_->prepareTree();
+    if (scheduler_) scheduler_->requestPrepareTree();
     requestFullResync();   // structural change (see requestFullResync)
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }

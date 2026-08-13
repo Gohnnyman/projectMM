@@ -1,5 +1,6 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveIr.h"
+#include "core/moonlive/MoonLiveSpill.h"   // the register allocator — core's, run before lowering
 #include "moonlive_asm_riscv.h"
 
 #include <cstring>
@@ -17,7 +18,7 @@ namespace {
 Reg reg(VReg v) { return static_cast<Reg>(v); }
 }
 
-size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
+size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze) {
     // StoreElem folds the address into the index vreg (no scratch); FillElems needs two.
     // Reserve scratch only for the inline ops this program actually contains: FillElems needs two
     // (loop counter + per-channel address), StoreElem one (the address — it must NOT be folded into
@@ -26,13 +27,23 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     // the smallest file.
     const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 2
                           : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
-    if (!out || cap == 0 || ir.vregsUsed + scratch > kRegCount) return 0;
+    if (!out || cap == 0) return 0;
+
+    // Run the register allocator before lowering. It leaves a program that already fits untouched,
+    // and rewrites one that does not into Spill/Reload against this backend's frame — replacing the
+    // hand-rolled `vregsUsed + scratch > kRegCount` bail that used to REFUSE such a script outright.
+    // False here means even the spilled form does not fit, which is a diagnostic, never a miscompile.
+    uint8_t slots = 0;
+    const RegBudget budget = squeeze ? *squeeze
+                                    : RegBudget{kRegCount, scratch, RiscvAssembler::kMaxSpillSlots};
+    if (!spillToBudget(ir, budget, slots)) return 0;
     // sAddr FIRST: it is the one StoreElem also uses, and a store-only program reserves a single
     // scratch — so the shared one has to be the lowest index or it would name an unreserved register.
     const Reg sAddr = static_cast<Reg>(ir.vregsUsed);       // per-channel address (both ops)
     const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 1);   // FillElems loop counter
 
     RiscvAssembler a;
+    a.prologue(slots);   // opens a frame only when the program spilled
 
     // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
     // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
@@ -73,6 +84,9 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
                     a.branchNe(reg(op.a), reg(op.b), labelFor(op.imm));
                 break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), reg(kArg4), op.imm); break;  // dst = ctrls[imm] (a4 = kArg4)
+            // The allocator's two ops. `imm` is a slot INDEX; the assembler owns the frame layout.
+            case IrOp::Spill:  a.spillStore(reg(op.a), static_cast<uint8_t>(op.imm)); break;
+            case IrOp::Reload: a.spillLoad(reg(op.dst), static_cast<uint8_t>(op.imm)); break;
             case IrOp::Call:
                 // The IR carries the host's function pointer (the light TU's random16), valid in
                 // the single flashed image — call it directly, same as the other backends.

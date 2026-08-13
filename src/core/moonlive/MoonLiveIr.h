@@ -30,7 +30,11 @@ using VReg = uint8_t;
 // updates live, without a recompile (the kArg3/t pattern, one slot over).
 enum : VReg { kArg0 = 0, kArg1 = 1, kArg2 = 2, kArg3 = 3, kArg4 = 4, kFirstTemp = 5 };
 
-static constexpr uint8_t kMaxVRegs = 16;     // a statement uses a handful; no allocator yet
+// How many values one program may NAME. Deliberately larger than any target's register file: the
+// register allocator (MoonLiveSpill.h) parks whatever does not fit in frame slots, so this bounds
+// the compiler's own tables — the interval array is one entry per vreg, on the stack of a 12 KB task
+// — rather than the script. 32 keeps that array at a few hundred bytes.
+static constexpr uint8_t kMaxVRegs = 32;
 // An upper SANITY bound, not the working limit: the op array is sized to the script (see IrProgram),
 // so a one-statement script pays for one statement. This exists only so a runaway source fails with
 // a diagnostic instead of asking for an allocation that would exhaust a small device's heap.
@@ -63,7 +67,15 @@ enum class IrOp : uint8_t {
     BranchGe,  // if (a >= b) goto label `imm` — UNSIGNED. The loop's ENTRY guard: skip a loop
                // whose range is empty, which is also what makes `for (i = 0; i < 0; …)` correct.
     BranchNe,  // if (a != b) goto label `imm` — the BACKWARD edge that closes the loop.
+    Spill,     // frame slot `imm` = a   — a value the register file could not hold, parked
+    Reload,    // dst = frame slot `imm` — the same value brought back for one use
 };
+
+// Spill/Reload are the register allocator's output, never the parser's: MoonLiveSpill rewrites a
+// program that names more live values than the target has registers into one that fits, parking the
+// overflow in the CALL FRAME (the textbook answer — a value that outlives the register file lives in
+// memory). `imm` is a slot INDEX; each backend turns it into an offset from its own frame pointer,
+// so the core pass never knows a stack layout and the backends never know the algorithm.
 
 // Why these two branches and no unconditional jump: a bottom-tested loop needs exactly an entry
 // guard and a back edge, and every backend here already has both (bgeu / bne on Xtensa and RISC-V,
@@ -100,6 +112,12 @@ struct DeclaredControl {
 /// rather than silently miscompiling past it. Nesting depth is bounded separately, by `locals`.
 static constexpr uint8_t kIrLabels = 16;
 
+/// Script variables live in FRAME SLOTS, and this bounds how many one program may hold at once.
+/// Sixteen matches what every backend's frame can address (`kMaxSpillSlots`), so a program that
+/// parses is a program the assembler can encode. Raising it means widening the frame on all three
+/// backends together — the slot index is an instruction field, not just a table size.
+static constexpr uint8_t kMaxLocals = 16;
+
 
 static constexpr uint8_t kMaxControlName = 24;   // max control-name length (incl. NUL); the compiler
                                                  // rejects longer names so the binding's name pool
@@ -122,6 +140,11 @@ struct IrProgram {
     uint16_t cap = 0;                      // entries allocated
     uint16_t count = 0;
     VReg     vregsUsed = kFirstTemp;
+    /// Frame slots the FRONT END allocated for script variables. Slot indices 0..localSlots-1 are
+    /// already spoken for when the backend sizes its prologue, and the register allocator numbers
+    /// any spill it still needs from here up — the two share one frame, so they cannot both start
+    /// at zero without a variable and a spilled temp landing on the same bytes.
+    uint8_t  localSlots = 0;
 
     IrProgram() = default;
     ~IrProgram() { platform::free(ops); }
@@ -148,6 +171,18 @@ struct IrProgram {
         ops[count++] = i;
         if (i.dst + 1 > vregsUsed) vregsUsed = static_cast<VReg>(i.dst + 1);
         return true;
+    }
+
+    /// Exchange contents with `o`. The register allocator builds the rewritten program in a second
+    /// IrProgram (inserting a Reload before a use and a Spill after a def cannot be done in place in
+    /// a right-sized array) and swaps it in; the old buffer then dies with the local. Copy is deleted
+    /// precisely because two owners would double-free, so a swap is how ownership moves here.
+    void swap(IrProgram& o) {
+        IrInst* p = ops; ops = o.ops; o.ops = p;
+        uint16_t t = cap; cap = o.cap; o.cap = t;
+        t = count; count = o.count; o.count = t;
+        VReg v = vregsUsed; vregsUsed = o.vregsUsed; o.vregsUsed = v;
+        uint8_t ls = localSlots; localSlots = o.localSlots; o.localSlots = ls;
     }
 
     /// Which inline ops this program contains, so a backend reserves scratch only for what is there.

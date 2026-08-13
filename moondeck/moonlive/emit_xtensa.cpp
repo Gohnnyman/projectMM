@@ -25,11 +25,16 @@ using namespace mm;
 int main(int argc, char** argv) {
     const char* src = argc > 1 ? argv[1] : "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }";
     uint8_t buf[4096];
-    // The WIDEST system-variable list on purpose: this tool disassembles whatever script is passed
-    // on the command line — layout, effect or modifier — so it must accept every name any binding
-    // supplies. A narrower list would refuse the scripts it exists to inspect.
-    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(),
-                                     moonlive::modifierSysVars(), buf, sizeof(buf));
+    // Which BINDING to compile as, because the system-variable tables are different vocabularies and
+    // not nested supersets: a modifier is handed `x`/`y`/`z`, and a LAYOUT deliberately is not, so it
+    // may use those names as ordinary loop counters — which the shipped grid.mlv does. Compiling
+    // every script against the widest table therefore refuses exactly the scripts most worth
+    // inspecting ("name is a system variable"), which is how this tool came to never see grid.mlv.
+    const char* binding = argc > 2 ? argv[2] : "layout";
+    const auto sysvars = std::strcmp(binding, "modifier") == 0 ? moonlive::modifierSysVars()
+                       : std::strcmp(binding, "effect")   == 0 ? moonlive::effectSysVars()
+                                                               : moonlive::layoutSysVars();
+    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(), sysvars, buf, sizeof(buf));
     if (!r.ok) { printf("compile failed: %s\n", r.error); return 1; }
     printf("# %s\n# %zu bytes\n", src, r.len);
     for (size_t i = 0; i < r.len; i++) printf("%02x%s", buf[i], (i % 16 == 15) ? "\n" : " ");

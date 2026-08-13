@@ -94,6 +94,7 @@ add_library(mm_core STATIC
     src/core/Scheduler.cpp
     src/core/moonlive/MoonLive.cpp
     src/core/moonlive/MoonLiveCompiler.cpp
+    src/core/moonlive/MoonLiveSpill.cpp
 )
 target_include_directories(mm_core PUBLIC src/)
 target_link_libraries(mm_core PUBLIC mm_platform)

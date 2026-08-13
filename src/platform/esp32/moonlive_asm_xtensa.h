@@ -18,9 +18,19 @@
 
 namespace mm::moonlive {
 
-enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, kRegCount };
+// Ten vregs, mapping to a2..a11. NOT a14/a15: with the windowed ABI a routine that opened its frame
+// with `entry` returns through `retw.n`, which reads the caller's linkage out of the TOP of the
+// window — so a12..a15 are not general registers here, they are the return path. Using a14/a15 as
+// vregs (and restoring saved copies into them after a callx8) corrupted that linkage, and `retw.n`
+// then returned to a garbage address: `Guru Meditation (IllegalInstruction)` the moment a scripted
+// LAYOUT ran, because addLight is the call that made the window rotate. a12/a13 stay scratch.
+enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, kRegCount };
 using Label = uint8_t;
 enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
+
+/// The vreg → machine-register map, for the device-codegen test. a2..a11 only: a12/a13 are call
+/// scratch and the store8 address register, and a14/a15 carry the routine's own retw.n linkage.
+const uint8_t* xtRegMap(uint8_t& count);
 
 class XtensaAssembler {
 public:
@@ -36,7 +46,18 @@ public:
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
 
-    void prologue();                     // entry a1, 48  (must be the first instruction)
+    // --- the call frame ---
+    // The register allocator's overflow storage (core/moonlive/MoonLiveSpill.h). Xtensa already has
+    // a whole-routine frame from `entry a1, N`; prologue(slots) simply widens N to carry the spill
+    // slots above the bytes call() uses, so a spilling script costs one larger immediate and no
+    // extra instruction. slots == 0 keeps the frame exactly as it was, so nothing changes for a
+    // script that did not spill. Slots are addressed from a1, which the windowed ABI preserves
+    // across callx8 — the same property a nested or recursive script function will rely on.
+    void prologue(uint8_t slots = 0);    // entry a1, N  (must be the first instruction)
+    void spillStore(Reg r, uint8_t slot);
+    void spillLoad(Reg r, uint8_t slot);
+    static constexpr uint8_t kMaxSpillSlots = 16;
+
     Label newLabel();
     void  bind(Label l);
 
@@ -78,6 +99,10 @@ private:
     struct Fixup { size_t at; Label label; };   // all our branches use the 8-bit offset at byte+2
     Fixup    fixups_[kMaxFixups];
     uint8_t  fixupCount_ = 0;
+
+    // A conditional branch emitted as inverted-condition-over-`j`, so its reach is the jump's
+    // 18 bits rather than the branch's signed byte. See the .cpp for why that is not optional.
+    void branchRelaxed(uint8_t condNibble, Reg a, Reg b, Label l);
 
     void patchBranches();
 };

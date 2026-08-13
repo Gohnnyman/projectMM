@@ -96,6 +96,13 @@ uint32_t millis() MM_NONBLOCKING {
     return static_cast<uint32_t>(esp_timer_get_time() / 1000);
 }
 
+// The task handle IS the identity, and reading it costs one load — no TLS, so it works on a task
+// however it was created. That matters: THREADPTR is 0 on a task without TLS set up, which made
+// C++ thread_local fault at 0xfffffff0 here.
+uintptr_t currentThreadId() MM_NONBLOCKING {
+    return reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle());
+}
+
 uint32_t micros() MM_NONBLOCKING {
     return static_cast<uint32_t>(esp_timer_get_time());
 }

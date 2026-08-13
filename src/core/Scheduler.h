@@ -66,7 +66,19 @@ public:
     void release();
 
     uint32_t elapsed() const;
+
+    /// Rebuild derived state across the whole tree — buffers, mappings, and any scripted module's
+    /// compiled program. Runs the work IMMEDIATELY on the calling thread.
+    ///
+    /// Prefer requestPrepareTree() from anything but the render loop: this walk runs a scripted
+    /// layout's JIT'd code, whose frame lives on the CALLING TASK's stack like any other function's.
+    /// Called from an HTTP handler it therefore executes on the small web-server task rather than
+    /// the render task the rest of the pipeline is budgeted against.
     void prepareTree();
+
+    /// Ask for a rebuild at the next frame boundary, on the render thread. Cheap and safe to call
+    /// from any task — it sets a flag; tick() does the work.
+    void requestPrepareTree() { prepareRequested_ = true; }
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
@@ -124,6 +136,7 @@ private:
     static inline Scheduler* instance_ = nullptr;
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;
+    bool prepareRequested_ = false;   // a rebuild asked for off-thread; tick() honours it
     LoadAllFn loadAllHook_ = nullptr;
     NoteDirtyFn noteDirtyHook_ = nullptr;
     uint32_t startTime_ = 0;

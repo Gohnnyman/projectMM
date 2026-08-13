@@ -115,12 +115,22 @@ struct Parser {
     VReg               nextTemp = kFirstTemp;   // high-water mark — also IrProgram.vregsUsed
     VReg               freeStack[kMaxVRegs] = {};   // recycled temps (LIFO), so a dead vreg is reused
     uint8_t            freeCount = 0;
-    // Script-local variables — today only a `for` loop's counter. Distinct from a declared control
-    // (a control is a UI value the script READS; a local is one the script WRITES) and from a temp
-    // (a temp is write-once and recycled). Held in a vreg for the loop's lifetime.
-    struct Local { const char* name; size_t nameLen; VReg reg; };
-    Local              locals[4] = {};
+    // Script-local variables — a `for` loop's counter and its limit. Distinct from a declared
+    // control (a control is a UI value the script READS; a local is one the script WRITES) and from
+    // a temp (a temp is write-once and recycled).
+    //
+    // A local lives in a FRAME SLOT, not a register. Holding it in a register for the whole of its
+    // scope is what made a nested loop unfittable on the smallest target: Xtensa's windowed ABI
+    // leaves ten registers, five carry the host arguments, and the reload temps take the rest — so a
+    // loop counter that never yields its register left nothing to compute with and every looped
+    // script was refused. In the frame, the number of live variables is bounded by memory rather
+    // than by the register file, which is the whole point of the stack machine, and it is also what
+    // makes function arguments and recursion fall out later rather than needing new machinery.
+    struct Local { const char* name; size_t nameLen; uint8_t slot; };
+    Local              locals[kMaxLocals] = {};
     uint8_t            localCount = 0;
+    uint8_t            slotHighWater = 0;   // slots currently in scope
+    uint8_t            slotsUsed = 0;       // PEAK slots — what the prologue reserves
     uint8_t            nextLabel = 0;          // IR label ids, handed out in source order
 
     DeclaredControl    controls[kMaxCtrls] = {};  // controls the script declared (decl lines)
@@ -154,10 +164,8 @@ struct Parser {
         return kFirstTemp;
     }
     void freeTemp(VReg v) {
-        // A loop variable's register is live for the whole loop, and parseExpr hands it back
-        // directly (see parsePrimary), so a consumer freeing "its" operand would recycle a vreg the
-        // loop still reads and the counter would be overwritten mid-iteration.
-        for (uint8_t i = 0; i < localCount; i++) if (locals[i].reg == v) return;
+        // No local-register guard is needed: a variable lives in a frame slot, and reading one
+        // hands back an ordinary temp that the consumer owns. Every vreg reaching here is a temp.
         if (v >= kFirstTemp && freeCount < kMaxVRegs) freeStack[freeCount++] = v;
     }
 
@@ -260,13 +268,14 @@ struct Parser {
             for (uint8_t li = 0; li < localCount; li++) {
                 if (locals[li].nameLen == lex.identLen &&
                     std::strncmp(locals[li].name, lex.identBeg, lex.identLen) == 0) {
-                    // Return the variable's OWN register rather than copying it into a temp. A copy
-                    // per read burns a vreg each time, and the budget is small — the lowerer needs
-                    // three scratch registers above the program's high-water mark, so a script has
-                    // about six temps in total. Callers must therefore not freeTemp() a local; the
-                    // free-list only ever holds values alloc() handed out.
+                    // Load the variable from its frame slot into a fresh temp. The temp is ordinary:
+                    // the caller consumes it and frees it like any other expression value, so a
+                    // variable occupies a register only for the instruction that reads it rather
+                    // than for the whole of its scope.
                     lex.advance();
-                    return locals[li].reg;
+                    VReg v = alloc();
+                    emit({IrOp::Reload, v, 0,0,0,0, locals[li].slot, nullptr, {}});
+                    return v;
                 }
             }
             int ci = findControl(lex.identBeg, lex.identLen);
@@ -294,18 +303,39 @@ struct Parser {
         lex.advance();
         if (!expect(Tok::LParen, "expected '(' after the function name")) return;
 
-        // Evaluate each argument expression into a vreg.
+        // Evaluate each argument, PARKING it in a frame slot as soon as it is finished.
+        //
+        // The op that consumes them reads every argument at once, so evaluating straight into vregs
+        // keeps all four live simultaneously — and each argument's own sub-expression needs
+        // registers on top of that. On Xtensa's ten that is what refused every looped effect: a
+        // four-operand setRGB left nothing to compute the operands WITH. Staging through the frame
+        // means only ONE argument occupies a register at a time; they come back together in the
+        // reload just before the op, where the peak is exactly the operand count and nothing more.
         VReg args[4] = {0,0,0,0};
+        uint8_t argSlot[4] = {0,0,0,0};
+        const uint8_t argSlotBase = slotHighWater;
         uint8_t n = 0;
         if (lex.kind != Tok::RParen) {
             while (true) {
                 if (n >= fn->argc || n >= 4) { fail("too many arguments"); return; }
-                args[n++] = parseExpr();
+                const VReg v = parseExpr();
                 if (failed) return;
+                if (slotHighWater >= kMaxLocals) { fail("expression too deeply nested"); return; }
+                argSlot[n] = slotHighWater++;
+                emit({IrOp::Spill, 0, v, 0,0,0, argSlot[n], nullptr, {}});
+                freeTemp(v);                       // its register is free again immediately
+                n++;
                 if (lex.kind == Tok::Comma) { lex.advance(); continue; }
                 break;
             }
         }
+        // Bring the arguments back for the one instruction that reads them.
+        for (uint8_t i = 0; i < n; i++) {
+            args[i] = alloc();
+            emit({IrOp::Reload, args[i], 0,0,0,0, argSlot[i], nullptr, {}});
+        }
+        if (slotHighWater > slotsUsed) slotsUsed = slotHighWater;
+        slotHighWater = argSlotBase;               // the staging slots are scratch, reused per call
         if (n != fn->argc) { fail("wrong number of arguments"); return; }
         if (!expect(Tok::RParen, "expected ')'")) return;
 
@@ -414,7 +444,9 @@ struct Parser {
 
         // --- init: ident = expr ---
         if (lex.kind != Tok::Ident) { fail("expected a loop variable"); return false; }
-        if (localCount >= 4) { fail("too many nested loops"); return false; }
+        // Two slots per loop: the counter and the limit. Both must outlive the body, and both live
+        // in the frame — nesting depth is now bounded by frame slots, not by the register file.
+        if (localCount + 2 > kMaxLocals) { fail("too many nested loops"); return false; }
         const char* varName = lex.identBeg;
         const size_t varLen = lex.identLen;
         if (sysvars.find(varName, varLen)) { fail("name is a system variable"); return false; }
@@ -431,11 +463,12 @@ struct Parser {
         if (!expect(Tok::Assign, "expected '=' in the for's first clause")) return false;
         VReg init = parseExpr();
         if (failed) return false;
-        VReg counter = alloc();
-        emit({IrOp::Mov, counter, init, 0,0,0, 0, nullptr, {}});
+        // The counter starts life in its slot; the temp that computed it is released immediately.
+        const uint8_t counterSlot = slotHighWater++;
+        emit({IrOp::Spill, 0, init, 0,0,0, counterSlot, nullptr, {}});
         freeTemp(init);
         const uint8_t myLocal = localCount;
-        locals[localCount++] = {varName, varLen, counter};
+        locals[localCount++] = {varName, varLen, counterSlot};
         if (!expect(Tok::Semicolon, "expected ';' after the for's first clause")) return false;
 
         // --- condition: ident < expr  (the only comparison the language has) ---
@@ -449,12 +482,14 @@ struct Parser {
         }
         lex.advance();
         if (!expect(Tok::Less, "expected '<' — it is the only comparison a for condition takes")) return false;
-        // Hold the bound in the vreg parseExpr produced rather than copying it into a fresh one.
-        // The copy cost a register for the whole body, and the budget is small: Xtensa maps twelve
-        // registers, five of which are argument slots, so a NESTED loop plus a three-argument call
-        // ran out and the compile was refused on that target while succeeding on the host.
-        VReg limit = parseExpr();
+        // The bound goes to its own slot: it is read at the entry guard and again at the back edge,
+        // so it has to survive the body — and a body containing a call would otherwise have to keep
+        // it in a register across that call.
+        VReg limitTmp = parseExpr();
         if (failed) return false;
+        const uint8_t limitSlot = slotHighWater++;
+        emit({IrOp::Spill, 0, limitTmp, 0,0,0, limitSlot, nullptr, {}});
+        freeTemp(limitTmp);
         if (!expect(Tok::Semicolon, "expected ';' after the for's condition")) return false;
 
         // --- step: ident = expr (parsed now, emitted after the body) ---
@@ -483,7 +518,16 @@ struct Parser {
         const uint8_t lDone = nextLabel++;
         const uint8_t lTop  = nextLabel++;
 
-        emit({IrOp::BranchGe, 0, counter, limit, 0,0, lDone, nullptr, {}});   // empty range
+        // Each test reloads both operands: they live in the frame, so a comparison is
+        // load-load-branch. The reload temps die immediately, which is what keeps the body's
+        // register demand independent of how deeply loops nest.
+        {
+            VReg c = alloc(), l = alloc();
+            emit({IrOp::Reload, c, 0,0,0,0, counterSlot, nullptr, {}});
+            emit({IrOp::Reload, l, 0,0,0,0, limitSlot,   nullptr, {}});
+            emit({IrOp::BranchGe, 0, c, l, 0,0, lDone, nullptr, {}});   // empty range
+            freeTemp(l); freeTemp(c);
+        }
         emit({IrOp::Label,    0, 0,0,0,0,             lTop,  nullptr, {}});
 
         while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End) {
@@ -504,25 +548,29 @@ struct Parser {
             if (lex.kind != Tok::RParen) {
                 lex = save; fail("unexpected token in the for's step"); return false;
             }
-            emit({IrOp::Mov, counter, s, 0,0,0, 0, nullptr, {}});
+            emit({IrOp::Spill, 0, s, 0,0,0, counterSlot, nullptr, {}});
             freeTemp(s);
             lex = save;
         }
         // Re-test the limit at the top rather than relying on equality alone: a step that jumps
         // PAST the limit would never make counter == limit, and the loop would run away.
-        emit({IrOp::BranchGe, 0, counter, limit, 0,0, lDone, nullptr, {}});
-        emit({IrOp::BranchNe, 0, counter, limit, 0,0, lTop,  nullptr, {}});
+        {
+            VReg c = alloc(), l = alloc();
+            emit({IrOp::Reload, c, 0,0,0,0, counterSlot, nullptr, {}});
+            emit({IrOp::Reload, l, 0,0,0,0, limitSlot,   nullptr, {}});
+            emit({IrOp::BranchGe, 0, c, l, 0,0, lDone, nullptr, {}});
+            emit({IrOp::BranchNe, 0, c, l, 0,0, lTop,  nullptr, {}});
+            freeTemp(l); freeTemp(c);
+        }
         emit({IrOp::Label,    0, 0,0,0,0,             lDone, nullptr, {}});
 
-        freeTemp(limit);
         localCount = myLocal;                              // the loop variable leaves scope
-        // ...and its REGISTER goes back to the pool. Dropping only the name left the vreg allocated
-        // for the rest of the compile, so every `for` a script wrote cost one permanently — two
-        // sequential loops held two counters even though the first was dead. That is what put a
-        // two-loop effect one register over the smallest file (Xtensa has twelve) while each loop
-        // compiled fine alone. Freed only AFTER localCount drops, since freeTemp refuses to recycle
-        // a register any live local still names.
-        freeTemp(counter);
+        // ...and its two SLOTS are returned, so sequential loops reuse the same frame space instead
+        // of each costing its own for the rest of the program. Nesting still stacks, which is what
+        // makes a script bounded by frame size rather than by register count. `slotsUsed` keeps the
+        // PEAK, because that is what the prologue has to reserve.
+        if (slotHighWater > slotsUsed) slotsUsed = slotHighWater;
+        slotHighWater = counterSlot;
         return true;
     }
 
@@ -555,7 +603,8 @@ struct Parser {
 }  // namespace
 
 CompileResult compileSource(const char* source, const BuiltinTable& table,
-                            const SysVarTable& sysvars, uint8_t* out, size_t cap) {
+                            const SysVarTable& sysvars, uint8_t* out, size_t cap,
+                            const RegBudget* squeeze, LowerFn lower) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
     if (!out || cap == 0) { r.error = "no code buffer"; return r; }
@@ -582,8 +631,14 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     Lexer lex(source);
     Parser parser{lex, table, sysvars, ir};
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
+    // Hand the backend the frame the script's variables need. The register allocator numbers any
+    // further slot from here up, so the two never overlap in the one frame they share.
+    ir.localSlots = parser.slotsUsed;
 
-    size_t len = lowerToBytes(ir, out, cap);
+    // `lower` is normally this build's own backend; a test passes a DIFFERENT ISA's lowerer to read
+    // what a device would execute without flashing one. The front end is identical either way, which
+    // is the point — the seam is one function pointer, not a second copy of the compiler.
+    size_t len = lower ? lower(ir, out, cap, squeeze) : lowerToBytes(ir, out, cap, squeeze);
     if (len == 0) { r.error = kCodegenFailed; return r; }
     r.ok = true;
     r.len = len;

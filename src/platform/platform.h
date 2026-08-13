@@ -32,6 +32,16 @@
 namespace mm::platform {
 
 uint32_t millis() MM_NONBLOCKING;
+
+/// An opaque identity for the calling thread/task, stable for its lifetime and distinct between
+/// concurrent ones. Zero is never returned, so a caller can use it as "no thread recorded".
+///
+/// Exists because C++ `thread_local` is NOT usable on the ESP32: the compiler reaches TLS through
+/// the THREADPTR special register, and a FreeRTOS task that was not created with TLS initialised
+/// has THREADPTR = 0 — so the access dereferences a small offset from null (0xfffffff0 was the
+/// measured faulting address) and dies inside the exception handler as a Double exception. This is
+/// the portable seam for "which thread am I", used where per-thread state is genuinely needed.
+uintptr_t currentThreadId() MM_NONBLOCKING;
 uint32_t micros() MM_NONBLOCKING;
 
 // Test-only override: when set to non-zero, millis() returns this value instead

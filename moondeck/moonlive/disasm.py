@@ -36,6 +36,14 @@ def objdump() -> str:
 def main() -> int:
     script = sys.argv[1] if len(sys.argv) > 1 else \
         "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"
+    # Which binding's system variables to compile against: layout (default), effect or modifier.
+    # They are different vocabularies, not nested ones — a layout may use `x`/`y` as loop counters
+    # precisely because it is NOT handed them, so the binding has to be stated.
+    binding = sys.argv[2] if len(sys.argv) > 2 else "layout"
+    # A path is read as a file; anything else is the script text itself.
+    if os.path.isfile(script):
+        with open(script) as f:
+            script = f.read()
 
     with tempfile.TemporaryDirectory() as tmp:
         emitter = os.path.join(tmp, "emit")
@@ -43,6 +51,9 @@ def main() -> int:
             ["c++", "-std=c++20", "-O0", "-I", os.path.join(ROOT, "src"),
              "-I", os.path.join(ROOT, "src", "platform", "desktop"),
              TOOL_SRC, os.path.join(ROOT, "src", "core", "moonlive", "MoonLiveCompiler.cpp"),
+             # Every backend runs the register allocator before lowering, so the pass comes along
+             # too — without it the tool fails to link on spillToBudget.
+             os.path.join(ROOT, "src", "core", "moonlive", "MoonLiveSpill.cpp"),
              # The IR sizes its op array with platform::alloc, so the platform implementation has
              # to come along — the compiler is no longer self-contained.
              os.path.join(ROOT, "src", "platform", "desktop", "platform_desktop.cpp"),
@@ -52,7 +63,7 @@ def main() -> int:
             print(build.stderr[:2000])
             return 1
 
-        run = subprocess.run([emitter, script], capture_output=True, text=True)
+        run = subprocess.run([emitter, script, binding], capture_output=True, text=True)
         print(run.stdout.split("\n")[0])          # the script
         if run.returncode != 0:
             print(run.stdout.strip() or run.stderr.strip())

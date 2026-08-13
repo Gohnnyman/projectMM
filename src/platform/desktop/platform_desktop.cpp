@@ -140,6 +140,12 @@ uint32_t millis() MM_NONBLOCKING {
     );
 }
 
+// pthread_self() is the identity here; std::this_thread::get_id() is not convertible to an integer
+// portably. The +1 guarantees a non-zero result so callers can treat 0 as "none".
+uintptr_t currentThreadId() MM_NONBLOCKING {
+    return reinterpret_cast<uintptr_t>(pthread_self()) + 1;
+}
+
 uint32_t micros() MM_NONBLOCKING {
     auto now = std::chrono::steady_clock::now();
     return static_cast<uint32_t>(

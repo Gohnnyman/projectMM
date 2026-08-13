@@ -140,20 +140,58 @@ extern "C" inline uint32_t mm_light_print(uint32_t v, uint32_t, uint32_t) {
 // something.
 using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 
-/// THREAD_LOCAL, not one global: the sink belongs to whichever thread is running a script, and more
+/// PER-THREAD, not one global: the sink belongs to whichever thread is running a script, and more
 /// than one does. A layout is asked for its light count and its coordinates from the HTTP task when a
 /// control is edited, while the render task walks the same layout for the frame — as one global, one
 /// thread cleared the sink while the other was mid-run and the built-in called through a live
 /// function pointer with a null context. That is a null dereference on the render core, seen as an
 /// intermittent crash while resizing a scripted layout.
 ///
-/// The function and the context are ONE struct so they cannot be observed half-updated. Same shape
-/// as the WDT subscription flag in the ESP32 worker, which had the same bug for the same reason.
+/// Keyed on platform::currentThreadId() rather than C++ `thread_local`, which is UNUSABLE on the
+/// ESP32: the compiler reaches TLS through the THREADPTR special register, and a FreeRTOS task
+/// created without TLS has THREADPTR = 0 — so the access dereferences a small offset from null and
+/// dies inside the exception handler. Measured: EXCVADDR 0xfffffff0, `Double exception` in
+/// _xt_context_save, on every scripted LAYOUT (the only binding whose script calls a host function).
+/// Reading the task handle costs one load and needs no per-task setup.
+///
+/// The function and the context are ONE struct so they cannot be observed half-updated. Two slots:
+/// the render task and whichever task edits a control are the two that ever run a script at once,
+/// and a third would mean a genuinely new concurrency story rather than a bigger table.
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
-inline AddLightSink& addLightSink() { static thread_local AddLightSink s; return s; }
+
+namespace detail {
+struct SinkSlot { uintptr_t owner = 0; AddLightSink sink; };
+/// Two slots: the render task and whichever task edits a control are the two that ever run a script
+/// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
+/// calls no-op instead of writing through someone else's context.
+inline SinkSlot* sinkSlots() { static SinkSlot s[2]; return s; }
+inline AddLightSink& sinkOverflow() { static AddLightSink s; return s; }
+}  // namespace detail
+
+/// This thread's sink, claiming a slot on first use.
+inline AddLightSink& addLightSink() {
+    const uintptr_t me = platform::currentThreadId();
+    detail::SinkSlot* slots = detail::sinkSlots();
+    for (uint8_t i = 0; i < 2; i++) if (slots[i].owner == me) return slots[i].sink;
+    for (uint8_t i = 0; i < 2; i++) if (slots[i].owner == 0) { slots[i].owner = me; return slots[i].sink; }
+    return detail::sinkOverflow();
+}
 
 /// Point addLight at a consumer for the duration of one run; pass nullptr to detach.
-inline void setAddLightSink(AddLightFn fn, void* ctx) { addLightSink() = {fn, ctx}; }
+///
+/// Detaching RELEASES this thread's slot, so two slots are not exhausted by tasks that come and go —
+/// an HTTP request lands on whichever worker is free.
+inline void setAddLightSink(AddLightFn fn, void* ctx) {
+    const uintptr_t me = platform::currentThreadId();
+    detail::SinkSlot* slots = detail::sinkSlots();
+    if (!fn && !ctx) {
+        for (uint8_t i = 0; i < 2; i++)
+            if (slots[i].owner == me) { slots[i].sink = {}; slots[i].owner = 0; return; }
+        detail::sinkOverflow() = {};
+        return;
+    }
+    addLightSink() = {fn, ctx};
+}
 
 extern "C" inline uint32_t mm_light_addLight(uint32_t x, uint32_t y, uint32_t z) {
     // Both halves checked: a sink is only ever installed as a pair, but a context of null with a live

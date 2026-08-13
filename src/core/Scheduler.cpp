@@ -67,6 +67,17 @@ void Scheduler::tick() MM_NONBLOCKING {
     uint32_t now = platform::millis();
     uint32_t tickStart = platform::micros();
 
+    // A rebuild asked for from another task happens HERE, at a frame boundary on the render thread.
+    // The walk runs a scripted layout's compiled code, and that code's frame is ordinary stack on
+    // whichever task calls it — so doing it inline in an HTTP handler put a script on the web
+    // server's small stack instead of the render task's, which is the budget every other effect is
+    // measured against. Deferring also means the pipeline is never rebuilt underneath a half-rendered
+    // frame.
+    if (prepareRequested_) {
+        prepareRequested_ = false;
+        prepareTree();
+    }
+
     // Scheduler gates loop callbacks by `enabled()` — disabled modules don't tick.
     // System modules that need to keep running regardless (HttpServer, Network,
     // Filesystem — so users can re-enable other modules through them) override
@@ -220,7 +231,7 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
         target->setEnabled(mm::json::parseBool(valueJson, "value"));
         target->markDirty();
         if (noteDirtyHook_) noteDirtyHook_();
-        prepareTree();
+        requestPrepareTree();
         // `enabled` rides the FULL state, not the per-leaf value patch — so the client only learns the new
         // value from a full resync. Request one (the same signal a schema change sends); without it the
         // client's cached state keeps the old `enabled` and reverts the toggle a second later.
@@ -248,7 +259,7 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
         target->onControlChanged(controlName);
         target->markDirty();
         if (noteDirtyHook_) noteDirtyHook_();
-        if (target->affectsPrepare(controlName)) prepareTree();
+        if (target->affectsPrepare(controlName)) requestPrepareTree();
         return SetControlResult::Ok;
     }
     return SetControlResult::ControlNotFound;
