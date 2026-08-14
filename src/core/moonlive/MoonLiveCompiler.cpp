@@ -260,7 +260,11 @@ struct Parser {
             // declaration paths reject the name, so nothing can shadow it.
             if (const SysVar* sv = sysvars.find(lex.identBeg, lex.identLen)) {
                 lex.advance();
-                if (sv->kind == SysVarKind::Arg) return sv->where;   // free: already in a register
+                if (sv->kind == SysVarKind::Arg) {
+                    VReg v = alloc();   // parked at entry — bring it back for this one read
+                    emit({IrOp::Reload, v, 0,0,0,0, hostArgSlot(sv->where), nullptr, {}});
+                    return v;
+                }
                 VReg v = alloc();
                 emit({IrOp::LoadCtrl, v, 0,0,0,0, sv->where, nullptr, {}});
                 return v;
@@ -311,64 +315,66 @@ struct Parser {
         // four-operand setRGB left nothing to compute the operands WITH. Staging through the frame
         // means only ONE argument occupies a register at a time; they come back together in the
         // reload just before the op, where the peak is exactly the operand count and nothing more.
-        VReg args[4] = {0,0,0,0};
-        uint8_t argSlot[4] = {0,0,0,0};
-        const uint8_t argSlotBase = slotHighWater;
+        // Stage every argument into a CONSECUTIVE frame slot as it is evaluated. The call then
+        // carries the slot BASE and the COUNT rather than the values, so how many arguments a
+        // builtin takes is bounded by frame slots — `draw::line` wants seven — and only one
+        // argument occupies a register at a time.
+        const uint8_t argBase = slotHighWater;
         uint8_t n = 0;
         if (lex.kind != Tok::RParen) {
             while (true) {
-                if (n >= fn->argc || n >= 4) { fail("too many arguments"); return; }
+                if (n >= fn->argc) { fail("too many arguments"); return; }
                 const VReg v = parseExpr();
                 if (failed) return;
-                if (slotHighWater >= kMaxLocals) { fail("expression too deeply nested"); return; }
-                argSlot[n] = slotHighWater++;
-                emit({IrOp::Spill, 0, v, 0,0,0, argSlot[n], nullptr, {}});
+                if (slotHighWater >= kMaxLocals) { fail("too many arguments to hold"); return; }
+                emit({IrOp::Spill, 0, v, 0,0,0, slotHighWater++, nullptr, {}});
                 freeTemp(v);                       // its register is free again immediately
                 n++;
                 if (lex.kind == Tok::Comma) { lex.advance(); continue; }
                 break;
             }
         }
-        // Bring the arguments back for the one instruction that reads them.
-        for (uint8_t i = 0; i < n; i++) {
-            args[i] = alloc();
-            emit({IrOp::Reload, args[i], 0,0,0,0, argSlot[i], nullptr, {}});
-        }
         if (slotHighWater > slotsUsed) slotsUsed = slotHighWater;
-        slotHighWater = argSlotBase;               // the staging slots are scratch, reused per call
         if (n != fn->argc) { fail("wrong number of arguments"); return; }
         if (!expect(Tok::RParen, "expected ')'")) return;
 
         // The IR Call op carries a single argument vreg, so a Call-kind builtin must be unary.
         // (Today random16 is the only one.) Reject a multi-arg Call up front rather than silently
         // dropping args[1..]; a future N-ary helper needs the IR Call contract widened first.
-        if (fn->kind == BuiltinKind::Call && fn->argc > 3) { fail("a call takes at most three arguments"); return; }
-
         if (resultOut) {
             if (fn->kind != BuiltinKind::Call || !fn->returns) { fail("this function does not return a value"); return; }
-            // The argument temps are consumed by the call; free them, then allocate the result
-            // (which may reuse one of them) — this is what bounds the register count across a
-            // chain of calls. The IR Call reads its arg before the result is written, so reuse is
-            // safe even when result == arg.
-            for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
+            // The arguments live in the frame, so nothing is held in a register across the call:
+            // `imm` carries the slot they start at and `b` how many there are.
             VReg r = alloc();
-            emit({IrOp::Call, r, args[0], args[1], args[2], 0, 0, fn->fn, {}});
+            emit({IrOp::Call, r, 0, n, 0, 0, argBase, fn->fn, {}});
             *resultOut = r;
         } else {
             // A statement call. Call kinds with a result are also allowed as statements (result
             // discarded); Inline kinds emit the inline op with their operands.
             if (fn->kind == BuiltinKind::Call) {
-                for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
                 VReg r = alloc();
-                emit({IrOp::Call, r, args[0], args[1], args[2], 0, 0, fn->fn, {}});
+                emit({IrOp::Call, r, 0, n, 0, 0, argBase, fn->fn, {}});
                 freeTemp(r);
             } else {
-                // Inline op: hand the operand vregs to the backend via an Inline IR op. The
-                // operand mapping per inline op is the backend's contract (documented there).
-                emit({IrOp::Inline, 0, args[0], args[1], args[2], args[3], 0, nullptr, fn->inlineOp});
-                for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
+                // An inline op reads its operands from REGISTERS (it is emitted as instructions, not
+                // a call), so reload the staged arguments for the one op that consumes them.
+                VReg a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+                VReg* slot[4] = {&a0, &a1, &a2, &a3};
+                for (uint8_t i = 0; i < n && i < 4; i++) {
+                    *slot[i] = alloc();
+                    emit({IrOp::Reload, *slot[i], 0,0,0,0, static_cast<int32_t>(argBase + i), nullptr, {}});
+                }
+                emit({IrOp::Inline, 0, a0, a1, a2, a3, 0, nullptr, fn->inlineOp});
+                for (uint8_t i = 0; i < n && i < 4; i++) freeTemp(*slot[i]);
             }
         }
+        // Give the staging slots back — but only down to where THIS call started, and only once its
+        // result has been produced. A nested call (`setRGB(1, mod(t, 200), …)`) stages inside its
+        // parent's argument block, so resetting to a fixed base would hand the inner call the slots
+        // the outer one is still filling: measured as mod()'s arguments landing on setRGB's, and its
+        // result then overwriting them. `slotsUsed` keeps the peak, which is what the prologue
+        // reserves, so releasing here costs nothing and lets sequential calls reuse the space.
+        slotHighWater = argBase;
     }
 
     // A control declaration: `uint8_t ident = number ;` optionally followed by `// @control min..max`.
@@ -464,6 +470,10 @@ struct Parser {
         VReg init = parseExpr();
         if (failed) return false;
         // The counter starts life in its slot; the temp that computed it is released immediately.
+        // Bounded on slotHighWater, not just localCount: a call RELEASES its argument staging slots
+        // (slotHighWater = argBase) without ever having counted them as locals, so the two can
+        // diverge and the localCount check above is not sufficient on its own.
+        if (slotHighWater >= kMaxLocals) { fail("too many loop variables"); return false; }
         const uint8_t counterSlot = slotHighWater++;
         emit({IrOp::Spill, 0, init, 0,0,0, counterSlot, nullptr, {}});
         freeTemp(init);
@@ -487,6 +497,7 @@ struct Parser {
         // it in a register across that call.
         VReg limitTmp = parseExpr();
         if (failed) return false;
+        if (slotHighWater >= kMaxLocals) { fail("too many loop variables"); return false; }
         const uint8_t limitSlot = slotHighWater++;
         emit({IrOp::Spill, 0, limitTmp, 0,0,0, limitSlot, nullptr, {}});
         freeTemp(limitTmp);
@@ -587,6 +598,12 @@ struct Parser {
     }
 
     bool parseProgram() {
+        // Park the host arguments in their fixed slots at the top of the frame, once, before any
+        // script code runs. They are read-only, so one store each is all it takes — and every later
+        // read becomes a Reload, which frees five registers for the whole program.
+        for (VReg v = 0; v < kFirstTemp; v++)
+            emit({IrOp::Spill, 0, v, 0,0,0, hostArgSlot(v), nullptr, {}});
+
         while (!failed && atTypeKeyword()) { lex.advance(); parseDecl(); }
         if (failed) return false;
         if (lex.kind == Tok::End) { fail("empty program (no statement)"); return false; }
@@ -604,6 +621,19 @@ struct Parser {
 
 CompileResult compileSource(const char* source, const BuiltinTable& table,
                             const SysVarTable& sysvars, uint8_t* out, size_t cap,
+                            const RegBudget* squeeze, LowerFn lower);
+
+uint32_t countTokens(const char* source) {
+    if (!source) return 0;
+    uint32_t tokens = 0;
+    for (Lexer scan(source); scan.kind != Tok::End && scan.kind != Tok::Error; scan.advance()) {
+        if (++tokens > kMaxIrOps) break;   // runaway source — reserve() rejects past the bound
+    }
+    return tokens;
+}
+
+CompileResult compileSource(const char* source, const BuiltinTable& table,
+                            const SysVarTable& sysvars, uint8_t* out, size_t cap,
                             const RegBudget* squeeze, LowerFn lower) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
@@ -616,10 +646,7 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     // entries on a cold path; undershooting would fail a script that fits, so the direction of the
     // error is the whole point. push() still refuses past `cap`, so a wrong estimate degrades with
     // a diagnostic rather than corrupting memory.
-    uint32_t tokens = 0;
-    for (Lexer scan(source); scan.kind != Tok::End && scan.kind != Tok::Error; scan.advance()) {
-        if (++tokens > kMaxIrOps) break;   // runaway source — reserve() rejects past the bound
-    }
+    const uint32_t tokens = countTokens(source);
     IrProgram ir;
     // +8 covers a program's fixed overhead (the prologue/epilogue ops a tiny script still needs)
     // so a one-token source cannot round down to nothing.

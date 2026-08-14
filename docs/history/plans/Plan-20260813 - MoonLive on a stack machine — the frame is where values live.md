@@ -12,7 +12,7 @@ reached for register allocation with spilling. That shipped, works on the host a
 
 It still leaves MoonLive broken on Xtensa, and the arithmetic says it always will:
 
-```
+```text
 10 registers (a2..a11)  −  1 inline scratch  =  9
                         −  5 fixed ABI vregs =  4
                         −  4 reload temps    =  0 keepable
@@ -248,6 +248,41 @@ Each step is independently verifiable, and the branch stays green throughout:
    for temporaries. This belongs in CORE, not in a lowerer: it is the same "the frame is where
    values live" rule the script's own variables follow, and doing it per backend would be three
    copies of one policy — the duplication step 4 exists to remove.
+3c. ⬜ **Unlimited call arguments.** The plan's own table promises "as many slots as you push", and
+   the machinery for it already exists — `parseCall` parks every argument in a CONSECUTIVE frame
+   slot as it is evaluated. Three arbitrary constants cap it anyway: `VReg args[4]`, `n >= 4`, and
+   "a call takes at most three arguments" (`HostCallFn` is a 3-parameter C function pointer).
+
+   That cap is a real design limit, not a detail. A `line(x0, y0, x1, y1)` does not fit, and the
+   workaround — splitting it into `lineH`/`lineV`, or setting colour through ambient state — is
+   exactly the bespoke special case a stack machine exists to avoid. Every builtin added after it
+   would inherit the same distortion.
+
+   **Do NOT widen `HostCallFn` and the three assemblers' `call()`.** That spends the change on the
+   most fragile code in the project (the Xtensa call sequence has produced three separate defects)
+   and still leaves a fixed maximum, just a larger one.
+
+   **Pass a POINTER to the argument slots.** The arguments are already in consecutive frame slots;
+   the call just has to say where. Each assembler already knows its own frame layout — `spillStore`
+   and `spillLoad` compute exactly this address — so each can materialise `framePtr + argBase*4`
+   into the first argument register. The host signature becomes:
+
+   ```cpp
+   using HostCallFn = uint32_t (*)(const uint32_t* args, uint32_t argc, const uint8_t* arena);
+   ```
+
+   Three parameters, so `call()` and its 3-argument sequence are UNCHANGED in all three assemblers —
+   the fragile Xtensa windowed-call code is not touched. Arity is bounded by frame slots, which is a
+   memory question: the goal of this plan.
+
+   NOT the arena: its bytes are `uint8` (the offset is an 8-bit immediate in `l8ui`/`lbu`), so it
+   cannot carry a `uint32_t` argument. Frame slots are 4-byte words and already hold full values.
+
+   Each existing builtin becomes `args[0]`, `args[1]`, `args[2]` instead of named parameters — a
+   mechanical change, and one that finally lets `line(x0, y0, x1, y1)` and the seven-argument
+   `draw::line` be ordinary calls rather than a special case. Script-local functions will pass their
+   arguments the same way when they arrive.
+
 4. **Collapse the three lowerers into one.** With storage no longer per-target, the IR walk is one
    algorithm; what remains per-backend is encodings, the frame/ABI constants and the branch forms.
    Verify by adding nothing to the platform layer that is not genuinely platform-specific.

@@ -27,6 +27,16 @@ size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* sq
     // the smallest file.
     const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 2
                           : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
+    // A host CALL also needs two scratch registers — the address of its argument block and the
+    // count — but it SHARES them with the inline ops rather than reserving its own. A Call and an
+    // Inline are different IR instructions, so their scratch is never live at the same time, and
+    // both die at the end of the one instruction that uses them. Reserving separately cost two
+    // registers permanently, which on Xtensa's ten is the difference between compiling and not.
+    // +1 for the host-argument reload. The host arguments live in frame slots now (core parks them
+    // at entry), so an op that reads buf/nLights/cpl/ctrls brings one back for the instruction that
+    // needs it. A call's two scratch registers still share with the inline ops' — different IR
+    // instructions, never live at once.
+    const uint8_t scratchTotal = static_cast<uint8_t>((scratch < 2 ? uint8_t(2) : scratch) + 1);
     if (!out || cap == 0) return 0;
 
     // Run the register allocator before lowering. It leaves a program that already fits untouched,
@@ -34,16 +44,29 @@ size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* sq
     // hand-rolled `vregsUsed + scratch > kRegCount` bail that used to REFUSE such a script outright.
     // False here means even the spilled form does not fit, which is a diagnostic, never a miscompile.
     uint8_t slots = 0;
-    const RegBudget budget = squeeze ? *squeeze
-                                    : RegBudget{kRegCount, scratch, XtensaAssembler::kMaxSpillSlots};
+    // `squeeze` overrides the REGISTER COUNT and slot count a test wants to constrain, but never
+    // `reserved`: the scratch is what THIS lowerer is about to use for its inline ops and call
+    // argument block, so a test-supplied value would let the allocator hand out a register the
+    // lowerer then overwrites — miscompiling exactly the squeezed programs the seam exists to prove.
+    const RegBudget budget = squeeze ? RegBudget{squeeze->regs, scratchTotal, squeeze->slots}
+                                    : RegBudget{kRegCount, scratchTotal, XtensaAssembler::kMaxSpillSlots};
     if (!spillToBudget(ir, budget, slots)) return 0;
     // sAddr FIRST: it is the one StoreElem also uses, and a store-only program reserves a single
     // scratch — so the shared one has to be the lowest index or it would name an unreserved register.
     const Reg sAddr = static_cast<Reg>(ir.vregsUsed);       // per-channel address (both ops)
     const Reg sCtr  = static_cast<Reg>(ir.vregsUsed + 1);   // FillElems loop counter
 
-    XtensaAssembler a;
-    a.prologue(slots);   // widens the entry frame only when the program spilled
+    // Size the assembler's buffer to the CALLER's — `cap` is what the staging buffer holds, so
+    // the two can never disagree about how much a script may emit (they were separately
+    // constant, and a script that fit one overflowed the other).
+    XtensaAssembler a(cap);
+    // Bring a parked host argument back for the one instruction that reads it.
+    const Reg sHost = static_cast<Reg>(ir.vregsUsed + 4);
+    auto host = [&](VReg v) -> Reg { a.spillLoad(sHost, hostArgSlot(v)); return sHost; };
+    // The frame must cover the parked HOST ARGUMENTS at the top as well as whatever the parser and
+    // the allocator claimed at the bottom — they are stored before any script code runs, so a frame
+    // sized only from `slots` would put them past its end.
+    a.prologue(slots > kTotalSlots ? slots : kTotalSlots);
 
     // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
     // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
@@ -83,14 +106,23 @@ size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* sq
                 if (op.imm >= 0 && op.imm < kIrLabels)
                     a.branchNe(reg(op.a), reg(op.b), labelFor(op.imm));
                 break;
-            case IrOp::LoadCtrl: a.load8(reg(op.dst), reg(kArg4), op.imm); break;  // dst = ctrls[imm] (a6 = kArg4)
+            case IrOp::LoadCtrl: a.load8(reg(op.dst), host(kArg4), op.imm); break;  // dst = ctrls[imm] (a6 = kArg4)
             // The allocator's two ops. `imm` is a slot INDEX; the assembler owns the frame layout.
             case IrOp::Spill:  a.spillStore(reg(op.a), static_cast<uint8_t>(op.imm)); break;
             case IrOp::Reload: a.spillLoad(reg(op.dst), static_cast<uint8_t>(op.imm)); break;
-            case IrOp::Call:
+            case IrOp::Call: {
+                // The arguments are in consecutive frame slots starting at `imm`; hand the host
+                // their ADDRESS and their COUNT. Nothing is held in a register across the call, and
+                // how many arguments a builtin takes stops being a property of this instruction.
                 if (!op.callFn) return 0;
-                a.call(reg(op.dst), reg(op.a), reg(op.b), reg(op.c), reinterpret_cast<const void*>(op.callFn));
+                const Reg argPtr = static_cast<Reg>(ir.vregsUsed);
+                a.slotAddr(argPtr, static_cast<uint8_t>(op.imm));
+                const Reg argN = static_cast<Reg>(ir.vregsUsed + 1);
+                a.movImm(argN, static_cast<int32_t>(op.b));
+                a.call(reg(op.dst), argPtr, argN,
+                       host(kArg4), reinterpret_cast<const void*>(op.callFn));
                 break;
+            }
             case IrOp::Inline:
                 switch (op.inlineOp) {
                     case InlineOp::StoreElem: {
@@ -101,11 +133,11 @@ size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* sq
                         // inside a loop therefore left the counter holding i*cpl+2 and the loop ran
                         // the wrong number of times.
                         Label skip = a.newLabel();
-                        a.branchGeU(reg(op.a), reg(kArg1), skip);     // index >= nLights → skip
-                        a.mulReg(sAddr, reg(op.a), reg(kArg2));        // addr = index * cpl
-                        a.store8(reg(kArg0), sAddr, reg(op.b));        // store r
-                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.c));
-                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.d));
+                        a.branchGeU(reg(op.a), host(kArg1), skip);     // index >= nLights → skip
+                        a.mulReg(sAddr, reg(op.a), host(kArg2));        // addr = index * cpl
+                        a.store8(host(kArg0), sAddr, reg(op.b));        // store r
+                        a.addImm(sAddr, sAddr, 1); a.store8(host(kArg0), sAddr, reg(op.c));
+                        a.addImm(sAddr, sAddr, 1); a.store8(host(kArg0), sAddr, reg(op.d));
                         a.bind(skip);
                         break;
                     }
@@ -114,14 +146,14 @@ size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* sq
                         // Two scratch: sCtr (i), sAddr (the per-light address).
                         Label done = a.newLabel(), top = a.newLabel();
                         a.movImm(sCtr, 0);
-                        a.branchIfZero(reg(kArg1), done);
+                        a.branchIfZero(host(kArg1), done);
                         a.bind(top);
-                        a.mulReg(sAddr, sCtr, reg(kArg2));            // addr = i * cpl
-                        a.store8(reg(kArg0), sAddr, reg(op.a));
-                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.b));
-                        a.addImm(sAddr, sAddr, 1); a.store8(reg(kArg0), sAddr, reg(op.c));
+                        a.mulReg(sAddr, sCtr, host(kArg2));            // addr = i * cpl
+                        a.store8(host(kArg0), sAddr, reg(op.a));
+                        a.addImm(sAddr, sAddr, 1); a.store8(host(kArg0), sAddr, reg(op.b));
+                        a.addImm(sAddr, sAddr, 1); a.store8(host(kArg0), sAddr, reg(op.c));
                         a.addImm(sCtr, sCtr, 1);                       // i++
-                        a.branchNe(sCtr, reg(kArg1), top);
+                        a.branchNe(sCtr, host(kArg1), top);
                         a.bind(done);
                         break;
                     }

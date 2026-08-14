@@ -37,7 +37,12 @@ public:
     // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
     // would double-free the buffer it emits into.
     ~XtensaAssembler() { platform::free(buf_); }
-    XtensaAssembler() = default;
+    /// `cap` is the code buffer's size, chosen per SCRIPT by the caller (codeCapFor) rather
+    /// than a shared constant — the backends differ by up to 1.9x on identical source, so one
+    /// number cannot fit them all. Defaults to the sanity bound for callers that emit a fixed
+    /// blob (emitFill) and have no token count to size from.
+    explicit XtensaAssembler(size_t cap = kCodeCap)
+        : kCap(cap), buf_(static_cast<uint8_t*>(platform::alloc(cap))) {}
     XtensaAssembler(const XtensaAssembler&) = delete;
     XtensaAssembler& operator=(const XtensaAssembler&) = delete;
 
@@ -56,7 +61,8 @@ public:
     void prologue(uint8_t slots = 0);    // entry a1, N  (must be the first instruction)
     void spillStore(Reg r, uint8_t slot);
     void spillLoad(Reg r, uint8_t slot);
-    static constexpr uint8_t kMaxSpillSlots = 16;
+    void slotAddr(Reg d, uint8_t slot);   // d = &frame[slot] — a call's argument block
+    static constexpr uint8_t kMaxSpillSlots = kTotalSlots;   // parser/allocator range + the parked host args
 
     Label newLabel();
     void  bind(Label l);
@@ -75,8 +81,8 @@ public:
     void epilogue();                     // retw.n
 
 private:
-    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
-    static constexpr size_t kCap = kCodeCap;
+    // The emitted-code buffer's size, fixed for this object's life but chosen per script.
+    const size_t kCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 
@@ -90,7 +96,7 @@ private:
     // frames. On a classic ESP32 that overflowed the task and faulted inside _xt_context_save
     // (the plan named this: "buf_[kCap] inside the assembler, itself a stack local"). The buffer is
     // scratch that ends in a memcpy to the caller's output, so nothing outlives the object.
-    uint8_t* buf_ = static_cast<uint8_t*>(platform::alloc(kCap));
+    uint8_t* buf_;
     size_t   len_ = 0;
     bool     overflow_ = false;
 

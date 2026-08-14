@@ -46,7 +46,9 @@ const char* kEffectLoop   = "for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 -
 /// sets, not nested ones: a LAYOUT may use `x`/`y` as loop counters precisely because it is not
 /// handed them, which is what the shipped grid.mlv does.
 std::vector<uint8_t> emitBytes(const char* src, const mm::moonlive::SysVarTable& sysvars, bool& ok) {
-    std::vector<uint8_t> out(mm::moonlive::kCodeCap);
+    // Sized the way production sizes it, from the script's own token count — a test that always
+    // allocated the sanity bound would pass while a right-sized caller overflowed.
+    std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src)));
     auto r = mm::moonlive::compileSource(src, mm::moonlive::lightBuiltins(), sysvars,
                                          out.data(), out.size(), nullptr, MM_ISA_LOWER);
     ok = r.ok;
@@ -148,4 +150,47 @@ TEST_CASE("an unencodable script is refused, not truncated, on " MM_ISA_NAME) {
     const size_t n = emitLen(deep.c_str(), mm::moonlive::layoutSysVars(), ok);
     CHECK(n == 0);      // refused
     CHECK_FALSE(ok);    // and said so
+}
+
+// Every script we SHIP has to compile on every backend, or a user's board choice silently decides which
+// effects exist. `plasma.mlv` is why this test is here: it ran on an S3 and on desktop and was
+// refused on an S31, because one `kCodeCap` constant was sized to the densest ISA while RISC-V emits
+// up to 1.9x more for identical source. The buffer is now sized per script, and this pins that the
+// widest shipped script still fits on the sparsest backend.
+TEST_CASE("every shipped script compiles for " MM_ISA_NAME) {
+    struct Script { const char* name; const char* src; int binding; };   // 0=layout 1=effect 2=modifier
+    // The two heaviest of each kind, by emitted bytes. Inline rather than read from disk: a unit
+    // test that touches the filesystem fails for reasons that have nothing to do with codegen.
+    const Script scripts[] = {
+        // The real ring.mlv and plasma.mlv, verbatim. plasma is the heaviest script that ships —
+        // a nested loop over the grid with four host calls per cell — and the one that was refused.
+        {"ring.mlv",
+         "uint8_t count = 24;   // @control 3..255\n"
+         "uint8_t radius = 5;   // @control 1..127\n"
+         "for (i = 0; i < count; i = i + 1) {\n"
+         "  addLight(scale(cos(i * turn(count)), radius * 2 + 1),\n"
+         "           scale(sin(i * turn(count)), radius * 2 + 1), 0);\n"
+         "}\n", 0},
+        {"plasma.mlv",
+         "uint8_t bpm = 12;      // @control 1..120\n"
+         "uint8_t zoom = 24;     // @control 1..64\n"
+         "for (y = 0; y < height; y = y + 1) {\n"
+         "  for (x = 0; x < width; x = x + 1) {\n"
+         "    setRGB(y * width + x,\n"
+         "           scale(sin(x * zoom * 8 + beat(bpm, t)), 256),\n"
+         "           scale(sin(y * zoom * 8 + beat(bpm, t)), 256),\n"
+         "           scale(cos((x + y) * zoom * 4 + beat(bpm, t)), 256));\n"
+         "  }\n"
+         "}\n", 1},
+    };
+    for (const auto& s : scripts) {
+        bool ok = false;
+        const auto& sysvars = s.binding == 0 ? mm::moonlive::layoutSysVars()
+                            : s.binding == 1 ? mm::moonlive::effectSysVars()
+                                             : mm::moonlive::modifierSysVars();
+        const size_t n = emitLen(s.src, sysvars, ok);
+        INFO("script: ", s.name, " on " MM_ISA_NAME);
+        CHECK(ok);
+        CHECK(n > 0);
+    }
 }

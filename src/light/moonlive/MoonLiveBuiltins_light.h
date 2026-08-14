@@ -5,6 +5,7 @@
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/moonlive/MoonLiveIr.h"   // kArg3 — the register `t` is passed in
 
+#include <atomic>
 #include <cstdint>
 
 #include "core/math8.h"    // beatsin16 — the shared time vocabulary
@@ -22,7 +23,8 @@ namespace mm::moonlive {
 // random16(n) → a pseudo-random value in [0, n). A simple LCG, deterministic enough that the
 // runtime Bounds guard always sees an in-range index; the same implementation on every target
 // so a script behaves identically. The one host helper exposed as a Call so far.
-extern "C" inline uint32_t mm_light_random16(uint32_t n, uint32_t, uint32_t) {
+extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t n = uint32_t(args[0]);
     static uint32_t s = 0x2545F491u;
     s = s * 1664525u + 1013904223u;
     return n ? (s >> 16) % n : 0u;
@@ -36,7 +38,8 @@ extern "C" inline uint32_t mm_light_random16(uint32_t n, uint32_t, uint32_t) {
 // all, and emitting a division routine inline would cost more code than the whole script. One host
 // function, called like any other builtin, keeps the emitted code small and the three backends
 // identical. b == 0 returns 0 rather than trapping: a script must degrade, never fault.
-extern "C" inline uint32_t mm_light_mod(uint32_t a, uint32_t b, uint32_t) {
+extern "C" inline uint32_t mm_light_mod(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t a = uint32_t(args[0]), b = uint32_t(args[1]);
     return b ? a % b : 0u;
 }
 
@@ -57,10 +60,12 @@ extern "C" inline uint32_t mm_light_mod(uint32_t a, uint32_t b, uint32_t) {
 // arrives as zero and the animation silently stands still. Explicit also matches the C++ signature
 // (beat16(bpm, ms)), so a script and an effect read the same. The modulo and divide these need live
 // in the host function, which is why they are Calls — no ISA here has a cheap integer divide.
-extern "C" inline uint32_t mm_light_beat(uint32_t bpm, uint32_t ms, uint32_t) {
+extern "C" inline uint32_t mm_light_beat(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t bpm = uint32_t(args[0]), ms = uint32_t(args[1]);
     return beat16(static_cast<uint8_t>(bpm), ms);
 }
-extern "C" inline uint32_t mm_light_beatsin(uint32_t bpm, uint32_t ms, uint32_t high) {
+extern "C" inline uint32_t mm_light_beatsin(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t bpm = uint32_t(args[0]), ms = uint32_t(args[1]), high = uint32_t(args[2]);
     // low is 0 and high is the caller's: a Call carries three arguments and bpm + ms take two, so
     // the common "oscillate from 0 up to N" form is the one exposed rather than a packed pair.
     return beatsin16(static_cast<uint8_t>(bpm), ms, 0, static_cast<uint16_t>(high));
@@ -76,21 +81,25 @@ extern "C" inline uint32_t mm_light_beatsin(uint32_t bpm, uint32_t ms, uint32_t 
 // math16's sin16/cos16 return SIGNED -32768..32767; a script's values are unsigned, so the result
 // is biased into 0..65535 with the zero line at 32768. A script that wants a coordinate scales the
 // result: `scale(sin(a), width)` sweeps the whole axis, which is the same `scale` a beat uses.
-extern "C" inline uint32_t mm_light_sin(uint32_t angle, uint32_t, uint32_t) {
+extern "C" inline uint32_t mm_light_sin(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t angle = uint32_t(args[0]);
     return static_cast<uint32_t>(sin16(static_cast<angle16>(angle)) + 32768);
 }
-extern "C" inline uint32_t mm_light_cos(uint32_t angle, uint32_t, uint32_t) {
+extern "C" inline uint32_t mm_light_cos(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t angle = uint32_t(args[0]);
     return static_cast<uint32_t>(cos16(static_cast<angle16>(angle)) + 32768);
 }
 
 // turn(n) → the angle step that divides one full revolution into n parts. A full turn is 65536 —
 // one past the largest number a script can write — so even with a divide operator the expression
 // could not be spelled. A circle therefore needs this as a builtin rather than as arithmetic.
-extern "C" inline uint32_t mm_light_turn(uint32_t n, uint32_t, uint32_t) {
+extern "C" inline uint32_t mm_light_turn(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t n = uint32_t(args[0]);
     return n ? 65536u / n : 0u;
 }
 
-extern "C" inline uint32_t mm_light_scale(uint32_t value, uint32_t n, uint32_t) {
+extern "C" inline uint32_t mm_light_scale(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t value = uint32_t(args[0]), n = uint32_t(args[1]);
     return (value * n) >> 16;
 }
 
@@ -118,7 +127,8 @@ inline uint32_t& printBudget() { static uint32_t n = 0; return n; }
 /// and a return. Draining through a queue would take the last of it off the tick; backlogged.
 inline void resetPrintBudget() { printBudget() = 32; }
 
-extern "C" inline uint32_t mm_light_print(uint32_t v, uint32_t, uint32_t) {
+extern "C" inline uint32_t mm_light_print(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t v = uint32_t(args[0]);
     uint32_t& left = printBudget();
     if (left > 0) {
         std::printf("[script] %u\n", static_cast<unsigned>(v));
@@ -160,7 +170,10 @@ using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 
 namespace detail {
-struct SinkSlot { uintptr_t owner = 0; AddLightSink sink; };
+// `owner` is ATOMIC and claimed with compare_exchange: the claim used to be a load then a store,
+// so two threads could both see the same slot free and both take it — leaving them sharing one
+// sink, which is the very aliasing this table exists to prevent.
+struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -172,8 +185,14 @@ inline AddLightSink& sinkOverflow() { static AddLightSink s; return s; }
 inline AddLightSink& addLightSink() {
     const uintptr_t me = platform::currentThreadId();
     detail::SinkSlot* slots = detail::sinkSlots();
-    for (uint8_t i = 0; i < 2; i++) if (slots[i].owner == me) return slots[i].sink;
-    for (uint8_t i = 0; i < 2; i++) if (slots[i].owner == 0) { slots[i].owner = me; return slots[i].sink; }
+    for (uint8_t i = 0; i < 2; i++)
+        if (slots[i].owner.load(std::memory_order_acquire) == me) return slots[i].sink;
+    for (uint8_t i = 0; i < 2; i++) {
+        uintptr_t free = 0;
+        if (slots[i].owner.compare_exchange_strong(free, me, std::memory_order_acq_rel,
+                                                   std::memory_order_relaxed))
+            return slots[i].sink;
+    }
     return detail::sinkOverflow();
 }
 
@@ -186,14 +205,20 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
     detail::SinkSlot* slots = detail::sinkSlots();
     if (!fn && !ctx) {
         for (uint8_t i = 0; i < 2; i++)
-            if (slots[i].owner == me) { slots[i].sink = {}; slots[i].owner = 0; return; }
+            if (slots[i].owner.load(std::memory_order_acquire) == me) {
+                slots[i].sink = {};
+                // release LAST: the slot must not look free until the sink is cleared.
+                slots[i].owner.store(0, std::memory_order_release);
+                return;
+            }
         detail::sinkOverflow() = {};
         return;
     }
     addLightSink() = {fn, ctx};
 }
 
-extern "C" inline uint32_t mm_light_addLight(uint32_t x, uint32_t y, uint32_t z) {
+extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t x = uint32_t(args[0]), y = uint32_t(args[1]), z = uint32_t(args[2]);
     // Both halves checked: a sink is only ever installed as a pair, but a context of null with a live
     // function is exactly what the crash was, so the guard states the whole precondition.
     const AddLightSink s = addLightSink();

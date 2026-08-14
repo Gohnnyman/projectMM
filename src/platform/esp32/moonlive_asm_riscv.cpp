@@ -120,12 +120,24 @@ void RiscvAssembler::epilogue() {
 // 12-bit signed immediate and the S/I-type immediates handle directly — 16 slots is 64 bytes, far
 // inside the ±2048 the field reaches.
 void RiscvAssembler::spillStore(Reg r, uint8_t slot) {
-    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    // No frame means prologue() bailed (slots == 0, or past kMaxSpillSlots). Emitting anyway would
+    // address s0 + slot*4 — ABOVE the frame pointer, i.e. the CALLER's stack. Refuse instead.
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
     emit32(encSw(xr(r), kFramePtr, -int32_t(frameBytes_) + slot * 4));
 }
 void RiscvAssembler::spillLoad(Reg r, uint8_t slot) {
-    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
     emit32(encLw(xr(r), kFramePtr, -int32_t(frameBytes_) + slot * 4));
+}
+
+// The ADDRESS of a frame slot, for a host call that reads its arguments from the frame. The slots
+// already hold the arguments; the call passes where they start rather than the values, which is what
+// makes the number of arguments a memory question instead of a register one.
+void RiscvAssembler::slotAddr(Reg d, uint8_t slot) {
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
+    // Against s0, the SAME base spillStore/spillLoad use. Computing it from sp instead lands
+    // frameBytes_ below the frame (s0 == sp + frameBytes_), so the callee writes off the end of it.
+    emit32(encAddi(xr(d), kFramePtr, -int32_t(frameBytes_) + slot * 4));   // addi xD, s0, off
 }
 
 void RiscvAssembler::movImm(Reg d, int32_t imm) {

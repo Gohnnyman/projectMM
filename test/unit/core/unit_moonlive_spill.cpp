@@ -184,10 +184,17 @@ TEST_CASE("an impossible register budget refuses the compile instead of emitting
         "    setRGB(i * 4 + j, 200, 100, 50);\n"
         "  }\n"
         "}\n";
-    uint8_t code[moonlive::kCodeCap];
+    uint8_t code[2048];
+#if MM_MOONLIVE_HAS_HOST_JIT
+    // Only where a backend exists: on x86-64 there is none, so the default lowerer emits nothing and
+    // a normal compile legitimately fails. The refusals below still mean what they say everywhere.
     REQUIRE(moonlive::compileSource(src, kT, kSys, code, sizeof(code)).ok);   // it does compile normally
+#endif
 
-    const moonlive::RegBudget noRoom{9, 1, 16};      // 5 ABI + 4 reload temps already exhaust it
+    // Fewer registers than the reload temps need. The host arguments no longer count against this
+    // — they live in frame slots and hold a register only for the parking store at entry — so the
+    // floor is the temps alone, and a budget at or below it has nothing to compute with.
+    const moonlive::RegBudget noRoom{4, 1, moonlive::kTotalSlots};
     CHECK_FALSE(moonlive::compileSource(src, kT, kSys, code, sizeof(code), &noRoom).ok);
 
     const moonlive::RegBudget noSlots{11, 1, 0};     // room to allocate, nowhere to spill INTO

@@ -115,6 +115,16 @@ void XtensaAssembler::addFixup(size_t at, Label label) {
 // 65535) is built as hi8<<8 | lo8: movi aD,hi8 ; slli aD,aD,8 ; movi a13,lo8 ; add.n aD,aD,a13.
 // a13 is the assembler's reserved scratch (also kZero in branchIfZero); it holds no live vreg.
 // Single movi for the common 0..255 case. Without this, Const values >255 truncate to 8 bits.
+// The ADDRESS of a frame slot, for a host call that reads its arguments from the frame. The slots
+// already hold the arguments; the call passes where they start rather than the values, which is what
+// makes the number of arguments a memory question instead of a register one.
+void XtensaAssembler::slotAddr(Reg d, uint8_t slot) {
+    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    const uint32_t off = kFrameBase + uint32_t(slot) * kSlotStride;
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0xc0 | 1), uint8_t(off)};
+    emit(b, 3);                                            // addi aD, a1, #off
+}
+
 void XtensaAssembler::movImm(Reg d, int32_t imm) {
     const uint8_t dr = ar(d);
     // The wide `movi` field is 12-bit SIGNED (-2048..2047), which is the only encoding here that can

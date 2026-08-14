@@ -48,12 +48,12 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 
 #define MM_ISA_NAME "Xtensa"
 // Golden values, recorded from this backend. See the .inc for what they are and are not.
-#define MM_GOLD_GRID_LEN  206u
-#define MM_GOLD_FX_LEN    69u
-#define MM_GOLD_FILLLOOP_LEN 0u    // REFUSED: one register short — see the .inc
-#define MM_GOLD_FXLOOP_LEN  133u
-#define MM_GOLD_FXLOOP_HASH 3881330729u
-#define MM_GOLD_FX_HASH   2547242340u
+#define MM_GOLD_GRID_LEN  227u
+#define MM_GOLD_FX_LEN    105u
+#define MM_GOLD_FILLLOOP_LEN 254u  // fits now: the host arguments left the register file
+#define MM_GOLD_FXLOOP_LEN  190u
+#define MM_GOLD_FXLOOP_HASH 2197538220u
+#define MM_GOLD_FX_HASH   1645855068u
 #define MM_ISA_LOWER mm_xtensa_backend::mm::moonlive::lowerToBytes
 #include "moonlive_device_codegen.inc"
 

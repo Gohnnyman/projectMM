@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 namespace mm {
@@ -78,7 +79,7 @@ public:
 
     /// Ask for a rebuild at the next frame boundary, on the render thread. Cheap and safe to call
     /// from any task — it sets a flag; tick() does the work.
-    void requestPrepareTree() { prepareRequested_ = true; }
+    void requestPrepareTree() { prepareRequested_.store(true, std::memory_order_relaxed); }
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
@@ -136,7 +137,9 @@ private:
     static inline Scheduler* instance_ = nullptr;
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;
-    bool prepareRequested_ = false;   // a rebuild asked for off-thread; tick() honours it
+    // ATOMIC: written from HTTP handlers (any task) and consumed on the render thread, so a
+    // plain bool is a data race — and a lost request means a script edit silently never applies.
+    std::atomic<bool> prepareRequested_{false};   // asked for off-thread; tick() honours it
     LoadAllFn loadAllHook_ = nullptr;
     NoteDirtyFn noteDirtyHook_ = nullptr;
     uint32_t startTime_ = 0;

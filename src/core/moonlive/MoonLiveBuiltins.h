@@ -37,14 +37,26 @@ enum class BuiltinKind : uint8_t { Call, Inline };
 // A host callable. THREE unsigned args in, one unsigned result out.
 //
 // One argument covered a unary helper like random16, but a binding that hands the host a POSITION
-// needs three at once — `addLight(x, y, z)` is the shape MoonLight's own script binding uses
-// (`void addLight(uint16_t,uint16_t,uint16_t)`), and it is what lets a scripted layout emit a light
-// instead of writing into an array the host has to size in advance. A unary helper simply ignores
-// the arguments it was not given; the caller passes 0 for them.
+// A host function receives a POINTER to its arguments, not the arguments themselves.
 //
-// A typed alias keeps the table and IR type-safe across desktop and ESP32 instead of threading a
-// bare void*.
-using HostCallFn = uint32_t (*)(uint32_t, uint32_t, uint32_t);
+// The compiler already evaluates every argument into a CONSECUTIVE frame slot (the stack machine's
+// argument staging), so the call only has to say where they start. Each backend materialises that
+// address from its own frame pointer — the arithmetic spillStore/spillLoad already do — which means
+// the number of arguments is bounded by frame slots rather than by how many the calling convention
+// can carry. `draw::line` takes seven; a fixed three would have forced it to be split into bespoke
+// halves, and every power function added after it would inherit the same distortion.
+//
+// Deliberately still THREE C parameters, so each assembler's call sequence is untouched. On Xtensa
+// that sequence is a windowed `call8`, the most defect-prone code in this project; widening it would
+// have spent the change there and still left a fixed maximum, just a larger one.
+//
+// `args` points at `argc` 32-bit values in the caller's frame, valid for the duration of the call.
+// `arena` is the control/system-variable block, as before.
+// `args` points at `argc` frame slots. The element type is uintptr_t because a frame slot IS one
+// machine word — 8 bytes on arm64, 4 on Xtensa and RISC-V — and the backends store a whole word per
+// slot. Reading them as uint32_t made args[1] land on the upper half of slot 0 on a 64-bit host,
+// which is a value of 0 rather than the argument: correct on both devices, wrong on the desktop.
+using HostCallFn = uint32_t (*)(const uintptr_t* args, uint32_t argc, const uint8_t* arena);
 
 struct Builtin {
     const char*  name = nullptr;      // the script-visible name (host-owned)
@@ -87,20 +99,31 @@ static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful 
 // System variables sit ABOVE the script's range so that adding or removing a control — which
 // renumbers every control offset — cannot move them. The binding caches their slot pointers, so a
 // moving offset would silently write the wrong byte.
-// Fixed cap for an emitted routine, shared by the engine's staging buffer and EVERY backend's code
-// buffer — they must agree, or a script that fits the caller's buffer still overflows the
-// assembler's. One constant is what makes that structural instead of a comment in four files.
+// The emitted-code buffer is sized to THE SCRIPT (codeCapFor below), not to a constant, for the
+// same reason the IR op array is: the backends differ by up to 1.9x on identical source — RISC-V is
+// fixed-4-byte and saves the whole register pool around every call where Xtensa has 3-byte narrow
+// forms — so any single number is either too small for the sparsest backend or wasteful for the
+// densest. A fixed 2 KB let `plasma.mlv` run on an S3 and desktop and REFUSED it on an S31 by 96
+// bytes, which is the second time one constant made a script's portability depend on its ISA.
 //
-// It was once sized for the heaviest single STATEMENT, but a real effect is several statements, and
-// the shipped `lines.mlv` emits 908 bytes on RISC-V against 461 on Xtensa for the same script: RISC-V
-// is fixed-4-byte and saves the whole register pool around every call, so it needs roughly twice the
-// room for identical work. Sizing to the DENSEST backend silently made a script that runs on an S3
-// fail on an S31.
-//
-// 2 KB covers the measured worst case with headroom. The emitter returns the real length and the
-// live exec block is allocated to THAT, so the tail costs nothing beyond one staging buffer during
-// the compile. Word-aligned so allocExec/writeExec's word-rounding never exceeds it.
-static constexpr size_t  kCodeCap = 2048;
+// kCodeCap survives as the SANITY bound only: a runaway script fails with a diagnostic instead of
+// exhausting the heap. It is not the working limit, so it is sized well above any real script.
+static constexpr size_t  kCodeCap = 16384;
+
+/// Bytes to reserve for a script of `tokens` tokens. Over-estimating costs one cold-path allocation
+/// that is freed when the compile ends; under-estimating fails a script that would have fit, so the
+/// direction of the error is deliberate — the same rule the IR's op estimate follows.
+///
+/// 24 bytes/token, measured across every shipped script on all three backends: the densest is
+/// `random-pixel.mlv` at 16.4 (a short script whose every token is a call argument), so this is a
+/// ~1.5x margin over the worst real case. A token-dense script emits FEWER bytes per token, not
+/// more — declarations and operators lower to a few instructions while a call lowers to a save/
+/// restore — so the small scripts set the bound. The floor covers a tiny script's fixed prologue
+/// and epilogue, which no per-token figure can express.
+constexpr size_t codeCapFor(uint32_t tokens) {
+    const size_t want = size_t(tokens) * 24 + 256;
+    return want > kCodeCap ? kCodeCap : want;
+}
 
 static constexpr uint8_t kMaxSysVars  = 8;
 static constexpr uint8_t kArenaBytes  = kMaxCtrls + kMaxSysVars;

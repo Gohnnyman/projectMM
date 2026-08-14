@@ -73,8 +73,8 @@ void Scheduler::tick() MM_NONBLOCKING {
     // server's small stack instead of the render task's, which is the budget every other effect is
     // measured against. Deferring also means the pipeline is never rebuilt underneath a half-rendered
     // frame.
-    if (prepareRequested_) {
-        prepareRequested_ = false;
+    // exchange, not test-then-clear: a request arriving between the two would be dropped.
+    if (prepareRequested_.exchange(false, std::memory_order_relaxed)) {
         prepareTree();
     }
 

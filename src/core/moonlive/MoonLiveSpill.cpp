@@ -139,8 +139,12 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         if (distinct > reloadTemps) reloadTemps = distinct;
     }
     if (reloadTemps > kMaxReloadTemps) reloadTemps = kMaxReloadTemps;
-    if (avail <= kFirstTemp + reloadTemps) return false;
-    const uint8_t keepable = static_cast<uint8_t>(avail - kFirstTemp - reloadTemps);
+    // The fixed ABI vregs are NOT subtracted any more: core parks them in frame slots at entry, so
+    // they hold a register only for the parking store itself — which runs before any temp exists, so
+    // sharing those registers afterwards is not a conflict. Reserving five here was holding space for
+    // values that had already moved out, and on a ten-register target that was the entire budget.
+    if (avail <= reloadTemps) return false;
+    const uint8_t keepable = static_cast<uint8_t>(avail - reloadTemps);
 
     // --- 1. Find the loops, innermost first ----------------------------------------------------
     // Bounded by kIrLabels because a loop needs a label, so this array cannot overflow a program the
@@ -253,6 +257,10 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             }
             continue;
         }
+        // nActive >= keepable >= 1 here: the `avail <= reloadTemps` guard above makes keepable at
+        // least one, and this branch is only reached when nActive is not below it. Stated because
+        // the index below would read active[-1] if that invariant ever moved.
+        if (nActive == 0) return false;
         const VReg furthest = active[nActive - 1];
         if (iv[furthest].end > iv[cur].end) {
             iv[furthest].spilled = true;
@@ -273,7 +281,11 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // program's high-water mark drops to something the target actually has. The reload temps sit
     // above them, and the backend's own inline scratch above that — a single ascending layout, which
     // is what lets each backend keep computing its scratch from vregsUsed as it already does.
-    VReg next = kFirstTemp;
+    // Number the kept temps from the BOTTOM of the register file. The ABI vregs keep their own
+    // identity for the entry parking store, and that store runs before any temp exists — so an
+    // overlap afterwards is not a conflict. Starting at kFirstTemp reserved five registers for
+    // values that had already moved to the frame, which pushed the top temps past the budget.
+    VReg next = 0;
     for (uint8_t v = kFirstTemp; v < ir.vregsUsed; v++)
         if (iv[v].live && !iv[v].spilled) iv[v].assigned = next++;
     for (uint8_t v = 0; v < kFirstTemp; v++) { iv[v].assigned = v; iv[v].spilled = false; }

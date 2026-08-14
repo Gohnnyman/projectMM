@@ -48,18 +48,26 @@ void* MoonLive::place(const uint8_t* staged, size_t len) {
 // MoonLive::compile — a crash on the HTTP task from naming a script. Compilation is cold path, so
 // the allocation costs nothing that matters, and this is the same reasoning that moved IrProgram's
 // op array off the stack.
+// Sized per compile rather than to kCodeCap: that constant is now the SANITY bound (16 KB), and
+// allocating it for every script would trade one wall for a heap cost on the smallest script.
 namespace {
 struct Staging {
-    uint8_t* p = static_cast<uint8_t*>(platform::alloc(kCodeCap));
+    explicit Staging(size_t bytes) : p(static_cast<uint8_t*>(platform::alloc(bytes))), n(bytes) {}
     ~Staging() { platform::free(p); }
+    Staging(const Staging&) = delete;              // owns a buffer; a copy would double-free
+    Staging& operator=(const Staging&) = delete;
     explicit operator bool() const { return p != nullptr; }
+    uint8_t* p;
+    size_t   n;
 };
 }  // namespace
 
 bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
-    Staging staging;
+    // A fixed blob with no source to measure, so the sanity bound IS the size — emitFill emits a
+    // few dozen bytes and the exec block is allocated to the real length.
+    Staging staging(codeCapFor(0));
     if (!staging) { error_ = "no memory to compile"; return false; }
-    size_t len = emitFill(staging.p, kCodeCap, r, g, b);
+    size_t len = emitFill(staging.p, staging.n, r, g, b);
     void* block = place(staging.p, len);
     if (!block) return false;
     fn_ = reinterpret_cast<FillFn>(block);
@@ -67,9 +75,9 @@ bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysVarTable& sysvars) {
-    Staging staging;
+    Staging staging(codeCapFor(countTokens(source)));
     if (!staging) { freeCode(); error_ = "no memory to compile"; return false; }
-    CompileResult cr = compileSource(source, table, sysvars, staging.p, kCodeCap);
+    CompileResult cr = compileSource(source, table, sysvars, staging.p, staging.n);
     if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
     // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
     // set — ensureArena reads the previous controlCount_ to know which slots are new.
@@ -119,9 +127,9 @@ bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
 }
 
 bool MoonLive::compileAnimated() {
-    Staging staging;
+    Staging staging(codeCapFor(0));   // a fixed blob, like compile(r,g,b) — no source to measure
     if (!staging) { error_ = "no memory to compile"; return false; }
-    size_t len = emitAnimatedFill(staging.p, kCodeCap);
+    size_t len = emitAnimatedFill(staging.p, staging.n);
     void* block = place(staging.p, len);
     if (!block) return false;
     anim_ = reinterpret_cast<AnimFn>(block);

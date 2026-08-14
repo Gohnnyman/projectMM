@@ -57,4 +57,9 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
                             const SysVarTable& sysvars, uint8_t* out, size_t cap,
                             const RegBudget* squeeze = nullptr, LowerFn lower = nullptr);
 
+/// Tokens in `source`, the one measure both right-sized buffers derive from: the caller sizes its
+/// code buffer with `codeCapFor`, and compileSource sizes the IR op array from the same count. One
+/// function so a caller cannot measure the script differently from the compiler.
+uint32_t countTokens(const char* source);
+
 }  // namespace mm::moonlive

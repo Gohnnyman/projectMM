@@ -2,8 +2,9 @@
 // The colour of a cell comes from sin(x-ish) + sin(y-ish), both scrolling on the clock, so
 // the field drifts and interferes without anything being stored between frames.
 //
-// The heaviest script that ships: a nested loop over the whole grid with four host calls per
-// cell. `scale(t, ...)` reads the clock through the same path an effect always does.
+// The heaviest script that ships: a nested loop over the whole grid with nine host calls per
+// cell (3 beat, 2 sin, 1 cos, 3 scale) feeding one setRGB. `beat(bpm, t)` reads the clock
+// through the same path an effect always does.
 uint8_t bpm = 12;      // @control 1..120
 uint8_t zoom = 24;     // @control 1..64
 

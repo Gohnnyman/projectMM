@@ -28,7 +28,8 @@ namespace mm::moonlive {
 /// value, which is not.
 ///
 /// `slotsUsed` receives how many frame slots the rewritten program needs, so the backend can size
-/// its prologue. Zero when nothing spilled.
+/// its prologue: the program's own locals (`ir.localSlots`) plus anything this pass spilled. It is
+/// therefore NOT zero when nothing spills — the locals still need their prologue capacity.
 bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed);
 
 }  // namespace mm::moonlive

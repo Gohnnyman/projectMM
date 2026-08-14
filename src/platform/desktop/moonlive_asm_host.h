@@ -38,7 +38,12 @@ public:
     // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
     // would double-free the buffer it emits into.
     ~HostAssembler() { platform::free(buf_); }
-    HostAssembler() = default;
+    /// `cap` is the code buffer's size, chosen per SCRIPT by the caller (codeCapFor) rather
+    /// than a shared constant — the backends differ by up to 1.9x on identical source, so one
+    /// number cannot fit them all. Defaults to the sanity bound for callers that emit a fixed
+    /// blob (emitFill) and have no token count to size from.
+    explicit HostAssembler(size_t cap = kCodeCap)
+        : kCap(cap), buf_(static_cast<uint8_t*>(platform::alloc(cap))) {}
     HostAssembler(const HostAssembler&) = delete;
     HostAssembler& operator=(const HostAssembler&) = delete;
 
@@ -64,7 +69,8 @@ public:
     void epilogue();                     // tear the frame down, then ret
     void spillStore(Reg r, uint8_t slot);
     void spillLoad(Reg r, uint8_t slot);
-    static constexpr uint8_t kMaxSpillSlots = 16;   // what the frame below can address
+    void slotAddr(Reg d, uint8_t slot);   // d = &frame[slot] — a call's argument block
+    static constexpr uint8_t kMaxSpillSlots = kTotalSlots;   // parser/allocator range + the parked host args   // what the frame below can address
 
     // --- instructions (named, register/immediate operands) ---
     void movImm(Reg d, int32_t imm);     // d = imm
@@ -87,8 +93,8 @@ public:
     void ret();
 
 private:
-    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
-    static constexpr size_t kCap = kCodeCap;
+    // The emitted-code buffer's size, fixed for this object's life but chosen per script.
+    const size_t kCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 
@@ -101,7 +107,7 @@ private:
     // frames. On a classic ESP32 that overflowed the task and faulted inside _xt_context_save
     // (the plan named this: "buf_[kCap] inside the assembler, itself a stack local"). The buffer is
     // scratch that ends in a memcpy to the caller's output, so nothing outlives the object.
-    uint8_t* buf_ = static_cast<uint8_t*>(platform::alloc(kCap));
+    uint8_t* buf_;
     size_t   len_ = 0;
     bool     overflow_ = false;
     // Frame size in bytes, 0 when no prologue was emitted. epilogue() reads it, so the teardown can

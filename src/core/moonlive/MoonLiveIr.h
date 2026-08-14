@@ -57,9 +57,11 @@ enum class IrOp : uint8_t {
     Add,       // dst = a + b
     AddImm,    // dst = a + imm
     Mul,       // dst = a * b
-    Call,      // dst = (*callFn)(a, b, c) — call a host-registered function. Three operands
-               // because a binding that hands the host a POSITION needs them at once; a
-               // unary helper ignores b and c, and the compiler passes a zero vreg.
+    Call,      // dst = (*callFn)(&frame[imm], b, arena) — call a host-registered function.
+               // `imm` is the frame slot where the arguments start and `b` is how many there are:
+               // the parser stages every argument into consecutive slots, so a call carries a
+               // POSITION and a COUNT rather than the values, and arity is bounded by frame slots
+               // instead of by operand fields. Backends materialise the address themselves.
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
     LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
     Mov,       // dst = a — the assignment a loop variable needs (vregs are otherwise write-once)
@@ -117,6 +119,21 @@ static constexpr uint8_t kIrLabels = 16;
 /// parses is a program the assembler can encode. Raising it means widening the frame on all three
 /// backends together — the slot index is an instruction field, not just a table size.
 static constexpr uint8_t kMaxLocals = 16;
+
+/// Where the HOST ARGUMENTS are parked. buf/nLights/cpl/t/ctrls arrive in registers and are never
+/// written, but holding them there costs FIVE registers for the whole program — on Xtensa, five of
+/// the ten the windowed ABI leaves, which is the difference between a script compiling and not. They
+/// are stored to these slots once at entry and reloaded where read, exactly like a script variable.
+///
+/// The slots sit at the TOP of the addressable range, above everything the parser and the register
+/// allocator hand out (both number upward from zero), so neither can collide with them.
+static constexpr uint8_t kHostArgSlots = kFirstTemp;                 // 5
+constexpr uint8_t hostArgSlot(VReg v) {
+    return static_cast<uint8_t>(kMaxLocals + kHostArgSlots - kFirstTemp + v);
+}
+/// Total frame slots a backend must be able to address: the parser/allocator range plus the parked
+/// host arguments above it.
+static constexpr uint8_t kTotalSlots = kMaxLocals + kHostArgSlots;
 
 
 static constexpr uint8_t kMaxControlName = 24;   // max control-name length (incl. NUL); the compiler

@@ -43,11 +43,11 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 
 #define MM_ISA_NAME "RISC-V"
 // Golden values, recorded from this backend. See the .inc for what they are and are not.
-#define MM_GOLD_GRID_LEN  352u
-#define MM_GOLD_FX_LEN    112u
-#define MM_GOLD_FILLLOOP_LEN 260u  // RISC-V has the registers; Xtensa does not
-#define MM_GOLD_FXLOOP_LEN  188u
-#define MM_GOLD_FXLOOP_HASH 1889730146u
-#define MM_GOLD_FX_HASH   3823890943u
+#define MM_GOLD_GRID_LEN  380u
+#define MM_GOLD_FX_LEN    152u
+#define MM_GOLD_FILLLOOP_LEN 328u  // RISC-V has the registers; Xtensa does not
+#define MM_GOLD_FXLOOP_LEN  228u
+#define MM_GOLD_FXLOOP_HASH 2017186717u
+#define MM_GOLD_FX_HASH   4281239978u
 #define MM_ISA_LOWER mm_riscv_backend::mm::moonlive::lowerToBytes
 #include "moonlive_device_codegen.inc"

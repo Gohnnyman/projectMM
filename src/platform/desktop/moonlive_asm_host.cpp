@@ -95,12 +95,24 @@ void HostAssembler::epilogue() {
 // 64-bit, not 32: a vreg can hold a pointer — kArg0 is the buffer — and truncating one to 32 bits on
 // the way to a slot would produce a wild store the moment a spilled pointer came back.
 void HostAssembler::spillStore(Reg r, uint8_t slot) {
-    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    // No frame means prologue() bailed; emitting would address the CALLER's stack.
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
     emit32(0xf9000000u | ((uint32_t(kSlotBase + slot * 8) / 8) << 10) | (29u << 5) | mr(r));
 }
 void HostAssembler::spillLoad(Reg r, uint8_t slot) {
-    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    // No frame means prologue() bailed; emitting would address the CALLER's stack.
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
     emit32(0xf9400000u | ((uint32_t(kSlotBase + slot * 8) / 8) << 10) | (29u << 5) | mr(r));
+}
+
+// The ADDRESS of a frame slot, for a host call that reads its arguments from the frame. The slots
+// are already where the arguments live; a call passes where they start rather than the values, which
+// is what makes the number of arguments a memory question instead of a register one.
+void HostAssembler::slotAddr(Reg d, uint8_t slot) {
+    // No frame means prologue() bailed; emitting would address the CALLER's stack.
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
+    const uint32_t off = kSlotBase + uint32_t(slot) * 8;
+    emit32(0x91000000u | (off << 10) | (29u << 5) | mr(d));   // add xD, x29, #off
 }
 
 void HostAssembler::movImm(Reg d, int32_t imm) {
