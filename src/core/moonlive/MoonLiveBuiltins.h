@@ -50,7 +50,6 @@ enum class BuiltinKind : uint8_t { Call, Inline };
 // that sequence is a windowed `call8`, the most defect-prone code in this project; widening it would
 // have spent the change there and still left a fixed maximum, just a larger one.
 //
-// `args` points at `argc` 32-bit values in the caller's frame, valid for the duration of the call.
 // `arena` is the control/system-variable block, as before.
 // `args` points at `argc` frame slots. The element type is uintptr_t because a frame slot IS one
 // machine word — 8 bytes on arm64, 4 on Xtensa and RISC-V — and the backends store a whole word per
@@ -114,14 +113,16 @@ static constexpr size_t  kCodeCap = 16384;
 /// that is freed when the compile ends; under-estimating fails a script that would have fit, so the
 /// direction of the error is deliberate — the same rule the IR's op estimate follows.
 ///
-/// 24 bytes/token, measured across every shipped script on all three backends: the densest is
-/// `random-pixel.mlv` at 16.4 (a short script whose every token is a call argument), so this is a
-/// ~1.5x margin over the worst real case. A token-dense script emits FEWER bytes per token, not
-/// more — declarations and operators lower to a few instructions while a call lowers to a save/
-/// restore — so the small scripts set the bound. The floor covers a tiny script's fixed prologue
-/// and epilogue, which no per-token figure can express.
+/// 64 bytes/token, measured across every shipped script on all three backends with `countTokens`
+/// (which skips comments, so a long header does not inflate the count). The densest is
+/// `random-pixel.mlv` at 39.3 — one statement, four nested `random16()` calls, and on RISC-V each
+/// call saves and restores the whole register pool — so this is a ~1.6x margin over the worst real
+/// case. A SHORT call-dense script sets the bound, not a long one: a call lowers to a save/restore
+/// while declarations and operators lower to a few instructions each, so bytes-per-token FALLS as a
+/// script grows. The floor covers a tiny script's fixed prologue and epilogue, which no per-token
+/// figure expresses.
 constexpr size_t codeCapFor(uint32_t tokens) {
-    const size_t want = size_t(tokens) * 24 + 256;
+    const size_t want = size_t(tokens) * 64 + 256;
     return want > kCodeCap ? kCodeCap : want;
 }
 

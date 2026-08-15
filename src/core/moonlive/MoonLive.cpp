@@ -25,9 +25,9 @@ void MoonLive::freeCode() {
 void* MoonLive::place(const uint8_t* staged, size_t len) {
     freeCode();   // drop any prior compilation's code — (re)compile is a clean re-emit (arena kept)
     if (len == 0) { error_ = "emit failed"; return nullptr; }
-    // Allocate only what was emitted, word-rounded (writeExec stores 32-bit words on IRAM), not
-    // the worst-case kCodeCap — a fill is ~50 bytes, a four-call setRGB ~600. The staging buffer
-    // is sized for the worst case; the live exec block is sized for THIS program.
+    // Allocate only what was emitted, word-rounded (writeExec stores 32-bit words on IRAM) — a fill
+    // is ~50 bytes, a four-call setRGB ~600. The staging buffer is sized from the script's token
+    // count (codeCapFor); the live exec block is sized to what the program actually emitted.
     size_t cap = (len + 3) & ~size_t(3);
     void* block = platform::allocExec(cap);
     if (!block) { error_ = "no executable memory"; return nullptr; }
@@ -63,8 +63,8 @@ struct Staging {
 }  // namespace
 
 bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
-    // A fixed blob with no source to measure, so the sanity bound IS the size — emitFill emits a
-    // few dozen bytes and the exec block is allocated to the real length.
+    // A fixed blob with no source to measure, so codeCapFor(0) gives its 256-byte floor — emitFill
+    // emits a few dozen bytes and the exec block is allocated to the real length.
     Staging staging(codeCapFor(0));
     if (!staging) { error_ = "no memory to compile"; return false; }
     size_t len = emitFill(staging.p, staging.n, r, g, b);

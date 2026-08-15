@@ -61,7 +61,11 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::Mul:
         case IrOp::BranchGe:
         case IrOp::BranchNe:   out[0] = in.a; out[1] = in.b; return 2;
-        case IrOp::Call:       out[0] = in.a; out[1] = in.b; out[2] = in.c; return 3;
+        // A Call reads NO registers. Its arguments were staged into consecutive frame slots by the
+        // parser, so `imm` is their base and `b` is how MANY there are — a literal count, not a
+        // vreg. Reporting a/b/c as sources gave the count a live interval and let the rewrite below
+        // remap it into a register number; it survived only because a fixed ABI vreg maps to itself.
+        case IrOp::Call:       return 0;
         case IrOp::Inline:
             // The inline ops read every operand field the host filled in. Both of today's ops also
             // read kArg0..kArg2 (buf, nLights, cpl), but those are fixed ABI vregs this pass never
@@ -97,7 +101,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // out slot indices without knowing the target, and a slot the backend cannot address would be
     // encoded as a truncated offset writing over something else. Checked BEFORE the early return
     // below, or a program that needs no spilling skips the check entirely.
-    if (ir.localSlots > budget.slots) return false;
+    if (ir.localSlots > kMaxLocals || ir.localSlots > budget.slots) return false;
 
     // Already fits: leave the program byte-identical. A script that never needed the allocator must
     // not pay a renumbering for its existence — and this is the path every shipped script takes.
@@ -274,7 +278,11 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             iv[cur].slot = nSpilled++;
         }
     }
-    if (nSpilled > budget.slots) return false;   // the frame cannot address that many slots
+    // Bounded by kMaxLocals, NOT budget.slots: slots kMaxLocals..kTotalSlots-1 hold the parked host
+    // arguments (hostArgSlot), which are stored once at entry and reloaded wherever a script reads
+    // buf/nLights/cpl/t/ctrls. Allowing a spill into that range would overwrite them — budget.slots
+    // is the frame's whole capacity, of which only the bottom kMaxLocals are assignable.
+    if (nSpilled > kMaxLocals || nSpilled > budget.slots) return false;
 
     // --- 4. Compact the survivors ---------------------------------------------------------------
     // The kept temps take the register numbers directly above the fixed ABI vregs, so the rewritten

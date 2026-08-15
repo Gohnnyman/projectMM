@@ -71,13 +71,27 @@ static constexpr uint8_t  kResultSlot = 8;    // byte offset 32
 static constexpr uint16_t kFrameBase  = 48;   // first byte past the bytes call() reserves
 static constexpr uint16_t kSlotStride = 4;
 
+// The BASE SAVE AREA the windowed ABI reserves at the TOP of every routine's frame. When the
+// register window overflows during a call, the hardware spills the caller's a0..a3 — including the
+// RETURN ADDRESS — into the 16 bytes below the frame's top. A routine that puts its own data there
+// has that data and its return address share memory.
+//
+// Bench-found on both an ESP32 classic and an S3: the frame was sized to exactly cover the slots, so
+// the parked host arguments (the top slots) landed inside this region. Any script at all — a bare
+// `setRGB`, a loop with no call — reset the board with `IllegalInstruction` and a DATA address in
+// A0, which is the return address after the overflow wrote through it. Never seen on RISC-V or
+// arm64: neither has a register window, so neither has a base-save area to collide with.
+static constexpr uint32_t kBaseSaveArea = 16;
+
 // ENTRY is a BRI12-format instruction: op0=6, n=3, s=the base register, and the 12-bit immediate at
 // bits 12..23 counts EIGHT-byte units. `entry a1, 48` is therefore 0x006136.
 void XtensaAssembler::prologue(uint8_t slots) {
     if (slots > kMaxSpillSlots) { overflow_ = true; return; }
     // Rounded up to 8 because the immediate counts 8-byte units; the ABI additionally wants the
-    // frame 16-byte aligned, and 48 + a multiple of 16 keeps that.
-    const uint32_t bytes = (kFrameBase + uint32_t(slots) * kSlotStride + 15u) & ~15u;
+    // frame 16-byte aligned, and 48 + a multiple of 16 keeps that. kBaseSaveArea is added ON TOP of
+    // the slots so the highest slot still ends below the window-spill region.
+    const uint32_t bytes =
+        (kFrameBase + uint32_t(slots) * kSlotStride + kBaseSaveArea + 15u) & ~15u;
     emit3(0x000136u | ((bytes / 8u) << 12));
 }
 void XtensaAssembler::epilogue() { emit2(0xf01du); }     // retw.n

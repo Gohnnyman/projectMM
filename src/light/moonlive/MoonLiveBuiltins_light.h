@@ -178,11 +178,15 @@ struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; };
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
 inline SinkSlot* sinkSlots() { static SinkSlot s[2]; return s; }
-inline AddLightSink& sinkOverflow() { static AddLightSink s; return s; }
+/// PERMANENTLY EMPTY. A third concurrent runner reads this and finds no sink, so its addLight calls
+/// no-op — setAddLightSink deliberately never installs here, because a shared sink would let two
+/// overflow threads write through each other's context.
+inline const AddLightSink& sinkOverflow() { static const AddLightSink s; return s; }
 }  // namespace detail
 
-/// This thread's sink, claiming a slot on first use.
-inline AddLightSink& addLightSink() {
+/// This thread's sink, claiming a slot on first use. Read-only: installing goes through
+/// setAddLightSink, which refuses to write into the shared overflow.
+inline const AddLightSink& addLightSink() {
     const uintptr_t me = platform::currentThreadId();
     detail::SinkSlot* slots = detail::sinkSlots();
     for (uint8_t i = 0; i < 2; i++)
@@ -211,10 +215,26 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
                 slots[i].owner.store(0, std::memory_order_release);
                 return;
             }
-        detail::sinkOverflow() = {};
-        return;
+        return;   // overflow holds no sink to clear (see below)
     }
-    addLightSink() = {fn, ctx};
+    // Install ONLY into an owned slot. Writing through addLightSink() would install into the shared
+    // overflow sink when both slots are taken, and a second overflow thread would then run through
+    // the first one's context — the exact aliasing the two-slot table exists to prevent. A third
+    // concurrent runner instead gets no sink at all, so its addLight calls no-op: visibly nothing
+    // placed, rather than lights written through another thread's layout.
+    detail::SinkSlot* owned = nullptr;
+    for (uint8_t i = 0; i < 2; i++)
+        if (slots[i].owner.load(std::memory_order_acquire) == me) { owned = &slots[i]; break; }
+    if (!owned)
+        for (uint8_t i = 0; i < 2; i++) {
+            uintptr_t free = 0;
+            if (slots[i].owner.compare_exchange_strong(free, me, std::memory_order_acq_rel,
+                                                       std::memory_order_relaxed)) {
+                owned = &slots[i];
+                break;
+            }
+        }
+    if (owned) owned->sink = {fn, ctx};
 }
 
 extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {

@@ -358,6 +358,13 @@ struct Parser {
             } else {
                 // An inline op reads its operands from REGISTERS (it is emitted as instructions, not
                 // a call), so reload the staged arguments for the one op that consumes them.
+                //
+                // FOUR is the IrInst operand ceiling for an inline op. A builtin declaring more used
+                // to be truncated here — the extra arguments evaluated, then silently dropped — which
+                // emits a working-looking op that computes the wrong thing. Refuse instead: only a
+                // CALL is unbounded (its arguments go through the frame), so a wider inline builtin
+                // needs the IR widened first, not its arguments quietly discarded.
+                if (n > 4) { fail("this function takes too many arguments to inline"); return; }
                 VReg a0 = 0, a1 = 0, a2 = 0, a3 = 0;
                 VReg* slot[4] = {&a0, &a1, &a2, &a3};
                 for (uint8_t i = 0; i < n && i < 4; i++) {

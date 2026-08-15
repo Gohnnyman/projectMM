@@ -120,6 +120,13 @@ static constexpr uint8_t kIrLabels = 16;
 /// backends together — the slot index is an instruction field, not just a table size.
 static constexpr uint8_t kMaxLocals = 16;
 
+/// The most arguments one call can carry. Bounded by the FRAME, not by the register file: the parser
+/// stages arguments into consecutive local slots, so a call can take as many as the locals range
+/// holds — which is what makes a seven-argument `draw::line` expressible at all. `push` validates a
+/// Call's count against this instead of against kMaxVRegs, which would cap arity at the register
+/// count the frame staging exists to escape.
+static constexpr uint8_t kMaxCallArgs = kMaxLocals;
+
 /// Where the HOST ARGUMENTS are parked. buf/nLights/cpl/t/ctrls arrive in registers and are never
 /// written, but holding them there costs FIVE registers for the whole program — on Xtensa, five of
 /// the ten the windowed ABI leaves, which is the difference between a script compiling and not. They
@@ -183,8 +190,18 @@ struct IrProgram {
         if (!ops || count >= cap) return false;
         // Reject any op that names a vreg outside the fixed register budget — an invalid program
         // is dropped at the seam rather than reaching a backend that would index past its map.
-        if (i.dst >= kMaxVRegs || i.a >= kMaxVRegs || i.b >= kMaxVRegs ||
-            i.c >= kMaxVRegs || i.d >= kMaxVRegs) return false;
+        //
+        // OPCODE-SPECIFIC, because not every operand field holds a vreg. For a Call, `b` is the
+        // ARGUMENT COUNT and `imm` the frame-slot base — its arguments live in the frame, not in
+        // registers. Validating `b` as a vreg capped calls at kMaxVRegs arguments, which is the very
+        // limit staging through the frame exists to remove.
+        if (i.dst >= kMaxVRegs) return false;
+        if (i.op == IrOp::Call) {
+            if (i.b > kMaxCallArgs) return false;   // a count, not a register
+        } else if (i.a >= kMaxVRegs || i.b >= kMaxVRegs ||
+                   i.c >= kMaxVRegs || i.d >= kMaxVRegs) {
+            return false;
+        }
         ops[count++] = i;
         if (i.dst + 1 > vregsUsed) vregsUsed = static_cast<VReg>(i.dst + 1);
         return true;

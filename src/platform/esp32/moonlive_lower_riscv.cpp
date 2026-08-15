@@ -61,7 +61,11 @@ size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* sq
     // constant, and a script that fit one overflowed the other).
     RiscvAssembler a(cap);
     // Bring a parked host argument back for the one instruction that reads it.
-    const Reg sHost = static_cast<Reg>(ir.vregsUsed + 4);
+    // The LAST reserved scratch index, derived from scratchTotal rather than hard-coded: the `+1`
+    // in scratchTotal above IS this register, so the reservation and the use cannot drift apart.
+    // A fixed offset sat OUTSIDE the reservation and only worked because the register maps happen
+    // to have spare entries above the high-water mark.
+    const Reg sHost = static_cast<Reg>(ir.vregsUsed + scratchTotal - 1);
     auto host = [&](VReg v) -> Reg { a.spillLoad(sHost, hostArgSlot(v)); return sHost; };
     // The frame must cover the parked HOST ARGUMENTS at the top as well as whatever the parser and
     // the allocator claimed at the bottom — they are stored before any script code runs, so a frame

@@ -20,6 +20,9 @@
 
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 #include <cstdint>
@@ -96,12 +99,12 @@ TEST_CASE("a scripted effect compiles for " MM_ISA_NAME ", straight-line and loo
     CHECK(ok);
 }
 
-// `fill` plus a loop is the one shipped shape that still does not fit the smallest register file.
-// FillElems needs two scratch registers of its own ABOVE the program's, and on Xtensa that leaves
-// eight available where the five fixed ABI vregs plus four reload temps need nine — one short. The
-// scratch is only live INSIDE the fill's own loop, where the script's temps are dead, so it could
-// overlap them; that is a per-backend change and belongs with the lowerer collapse, not here.
-// Pinned so the day it is fixed, this test says so rather than the gap being rediscovered on a bench.
+// `fill` plus a loop was the shape that did NOT fit the smallest register file: FillElems needs two
+// scratch registers above the program's, and on Xtensa that left eight where the five fixed ABI
+// vregs plus four reload temps needed nine — one short, so the golden here was 0 (REFUSED). Moving
+// the host arguments into frame slots freed those five, and it now emits on every backend.
+// Still pinned by length: it is the shape most sensitive to the register budget, so a regression
+// that pushes any backend back over the edge shows up here first.
 TEST_CASE("fill plus a loop on " MM_ISA_NAME " emits what it currently can") {
     bool ok = false;
     CHECK(emitLen("fill(0,0,0);\nfor (y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }",
@@ -152,45 +155,41 @@ TEST_CASE("an unencodable script is refused, not truncated, on " MM_ISA_NAME) {
     CHECK_FALSE(ok);    // and said so
 }
 
-// Every script we SHIP has to compile on every backend, or a user's board choice silently decides which
-// effects exist. `plasma.mlv` is why this test is here: it ran on an S3 and on desktop and was
+// Every script we SHIP has to compile on every backend, or a user's board choice silently decides
+// which effects exist. `plasma.mlv` is why this test is here: it ran on an S3 and on desktop and was
 // refused on an S31, because one `kCodeCap` constant was sized to the densest ISA while RISC-V emits
-// up to 1.9x more for identical source. The buffer is now sized per script, and this pins that the
-// widest shipped script still fits on the sparsest backend.
+// up to 1.9x more for identical source. The buffer is now sized per script, and this pins that every
+// shipped script still fits on every backend.
+//
+// Read from moonlive/ rather than copied inline: a copy is a second source of truth that drifts the
+// first time a script is edited, and it is exactly the widest scripts — the ones worth checking —
+// that would silently stop being the ones under test.
 TEST_CASE("every shipped script compiles for " MM_ISA_NAME) {
-    struct Script { const char* name; const char* src; int binding; };   // 0=layout 1=effect 2=modifier
-    // The two heaviest of each kind, by emitted bytes. Inline rather than read from disk: a unit
-    // test that touches the filesystem fails for reasons that have nothing to do with codegen.
-    const Script scripts[] = {
-        // The real ring.mlv and plasma.mlv, verbatim. plasma is the heaviest script that ships —
-        // a nested loop over the grid with four host calls per cell — and the one that was refused.
-        {"ring.mlv",
-         "uint8_t count = 24;   // @control 3..255\n"
-         "uint8_t radius = 5;   // @control 1..127\n"
-         "for (i = 0; i < count; i = i + 1) {\n"
-         "  addLight(scale(cos(i * turn(count)), radius * 2 + 1),\n"
-         "           scale(sin(i * turn(count)), radius * 2 + 1), 0);\n"
-         "}\n", 0},
-        {"plasma.mlv",
-         "uint8_t bpm = 12;      // @control 1..120\n"
-         "uint8_t zoom = 24;     // @control 1..64\n"
-         "for (y = 0; y < height; y = y + 1) {\n"
-         "  for (x = 0; x < width; x = x + 1) {\n"
-         "    setRGB(y * width + x,\n"
-         "           scale(sin(x * zoom * 8 + beat(bpm, t)), 256),\n"
-         "           scale(sin(y * zoom * 8 + beat(bpm, t)), 256),\n"
-         "           scale(cos((x + y) * zoom * 4 + beat(bpm, t)), 256));\n"
-         "  }\n"
-         "}\n", 1},
-    };
-    for (const auto& s : scripts) {
-        bool ok = false;
-        const auto& sysvars = s.binding == 0 ? mm::moonlive::layoutSysVars()
-                            : s.binding == 1 ? mm::moonlive::effectSysVars()
-                                             : mm::moonlive::modifierSysVars();
-        const size_t n = emitLen(s.src, sysvars, ok);
-        INFO("script: ", s.name, " on " MM_ISA_NAME);
-        CHECK(ok);
-        CHECK(n > 0);
+    int checked = 0;
+    for (const char* sub : {"layouts", "effects", "modifiers", "drivers"}) {
+        const std::filesystem::path dir =
+            std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path()
+            / "moonlive" / sub;
+        if (!std::filesystem::exists(dir)) continue;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            if (!entry.is_regular_file() || entry.path().extension() != ".mlv") continue;
+            std::ifstream f(entry.path());
+            std::ostringstream ss;
+            ss << f.rdbuf();
+            const std::string src = ss.str();
+            // Each binding supplies a DIFFERENT system-variable vocabulary, not a nested superset —
+            // a layout may use x/y as loop counters precisely because it is not handed them.
+            const std::string kind = sub;
+            const auto& sysvars = kind == "layouts"   ? mm::moonlive::layoutSysVars()
+                                : kind == "modifiers" ? mm::moonlive::modifierSysVars()
+                                                      : mm::moonlive::effectSysVars();
+            bool ok = false;
+            const size_t n = emitLen(src.c_str(), sysvars, ok);
+            INFO("script: ", kind, "/", entry.path().filename().string(), " on " MM_ISA_NAME);
+            CHECK(ok);
+            CHECK(n > 0);
+            checked++;
+        }
     }
+    CHECK(checked > 0);   // a silently empty folder would pass without this
 }

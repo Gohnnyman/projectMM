@@ -436,6 +436,8 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
 // A control write lands directly in the module's buffer — addText binds it — so setScript() is NOT
 // called. Nothing then cleared the compiled-hash, and compile()'s early-return kept the OLD program
 // running under the new name. Found by review; the same class of bug hardware found in the effect.
+// Needs a backend: without one BOTH counts are zero and the test passes without proving the swap.
+#if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("naming a different script through the control actually swaps the program") {
     MoonLiveLayout l;
     l.defineControls();
@@ -454,6 +456,7 @@ TEST_CASE("naming a different script through the control actually swaps the prog
     l.prepare();
     CHECK(l.lightCount() == 9);      // the new file, not the cached program
 }
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
 
 // A layout that cannot compile must stay quiet, not keep trying.
 //
@@ -486,7 +489,11 @@ TEST_CASE("a layout whose script is missing reports it without retrying forever"
     const char* good = "for (i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }";
     l.setScript(mmWriteScript(good));
     l.prepare();
+    // The COUNT needs an emitting backend; the give-up-is-per-name behaviour above does not, so
+    // only this line is gated and the rest of the case still runs on x86_64 (where CI runs).
+#if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(l.lightCount() == 5);
+#endif
 }
 
 // A layout that starts with NO script must still compile the first real one it is given.
@@ -518,7 +525,9 @@ TEST_CASE("a layout that starts empty still compiles the first script it is give
             std::snprintf(static_cast<char*>(cs[i].ptr), 32, "%s", name);
     l.onControlChanged("script");
     l.prepare();
+#if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(l.lightCount() == 6);                   // the give-up must not have latched
+#endif
 }
 
 // The fixed script directory is a boundary: a module names a file inside it, and cannot address the
