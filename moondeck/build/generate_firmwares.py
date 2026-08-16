@@ -53,7 +53,12 @@ def build_doc() -> dict:
                 "ships": spec["ships"],
                 "description": spec["description"],
             }
-            for name, spec in FIRMWARES.items()
+            # FLASHABLE variants only. This file feeds the WEB INSTALLER, the list of things a
+            # user puts on a board, so a variant that is not silicon has no place in it. The QEMU
+            # variant runs an emulator on a development machine and is driven from MoonDeck, never
+            # from the installer; listing it made the installer's naming rules have to describe
+            # something that will never appear in its UI.
+            for name, spec in FIRMWARES.items() if spec.get("installable", True)
         ]
     }
 

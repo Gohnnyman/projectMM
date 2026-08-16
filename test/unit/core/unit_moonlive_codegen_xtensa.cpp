@@ -63,6 +63,9 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 // byte 0) is >= 8, otherwise THREE. That one rule is enough to walk the stream, and walking it is
 // what makes "does this branch land on a boundary" answerable at all.
 #define MM_ISA_RESERVED_TOP 16u
+// call8 rotates the window by 8, so a8..a15 are the callee's. call() saves and restores
+// a8/a9/a10/a11 around it, so only a12..a15 are actually destroyed on the far side.
+#define MM_ISA_CALL_CLOBBER 0xf000u   // a12..a15
 #define MM_ISA_DECODE mm_xtensa_decode
 
 #include "moonlive_structural.h"
@@ -110,6 +113,30 @@ mm_structural::Decoded mm_xtensa_decode(const uint8_t* p, size_t n, size_t pc) {
     if (d.len == 3 && op0 == 0x7) {
         d.hasTarget = true;
         d.target = static_cast<int32_t>(pc) + 4 + static_cast<int8_t>(p[pc + 2]);
+        d.readsMask |= (1u << ((p[pc] >> 4) & 0xf)) | (1u << (p[pc + 1] & 0xf));   // s, t
+    }
+    // callx8 aN, emitted as the 24-bit word 0x0000e0 | (reg << 8), which is LITTLE-ENDIAN in the
+    // stream: bytes e0, reg, 00. Testing p[0]==0x00 instead of p[0]==0xe0 matched nothing, so the
+    // clobber check silently never saw a call, it passed for the same reason a broken analyser
+    // reports zero findings.
+    if (d.len == 3 && p[pc] == 0xe0 && p[pc + 2] == 0x00) {
+        d.isCall = true;
+        d.readsMask |= 1u << (p[pc + 1] & 0xf);
+    }
+    // s32i/l32i: byte0 high nibble is the value register (read on store, written on load).
+    if (d.len == 3 && p[pc + 1] == 0x61) d.readsMask  |= 1u << ((p[pc] >> 4) & 0xf);   // store
+    if (d.len == 3 && p[pc + 1] == 0x21) d.writesMask |= 1u << ((p[pc] >> 4) & 0xf);   // load
+    // movi aD, #imm8, byte1 == 0xa0, byte0 high nibble is the destination.
+    if (d.len == 3 && p[pc + 1] == 0xa0) d.writesMask |= 1u << ((p[pc] >> 4) & 0xf);
+    // add.n / mov.n (narrow): (d<<12)|(a<<8)|(b<<4)|op.
+    if (d.len == 2) {
+        const uint16_t w = uint16_t(p[pc]) | (uint16_t(p[pc + 1]) << 8);
+        const uint8_t op = w & 0xf;
+        if (op == 0xa || op == 0xd) {                        // add.n, mov.n
+            d.writesMask |= 1u << ((w >> 12) & 0xf);
+            d.readsMask  |= 1u << ((w >> 8) & 0xf);
+            if (op == 0xa) d.readsMask |= 1u << ((w >> 4) & 0xf);
+        }
     }
     return d;
 }

@@ -392,6 +392,33 @@
       "pass_port_device_model": true
     },
     {
+      "id": "check_encodings",
+      "tab": "esp32",
+      "group": "qemu",
+      "label": "Check encodings",
+      "speed": "fast",
+      "help": "check_encodings",
+      "script": "moonlive/check_encodings.py"
+    },
+    {
+      "id": "qemu_run",
+      "tab": "esp32",
+      "group": "qemu",
+      "label": "Run emulator",
+      "speed": "slow",
+      "help": "run_qemu",
+      "script": "qemu/run_qemu.py",
+      "flags": [
+        {
+          "id": "erase",
+          "label": "Erase flash",
+          "arg": "--erase",
+          "default": false
+        }
+      ],
+      "long_running": true
+    },
+    {
       "id": "erase_flash_esp32",
       "tab": "esp32",
       "group": "flash",

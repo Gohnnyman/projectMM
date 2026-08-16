@@ -558,7 +558,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(layouts);
     scheduler.addModule(effectsContainer);
     scheduler.addModule(drivers);
-    scheduler.addModule(httpServer);
+    // Only where an IP stack exists. setup() binds a listening socket, and with neither WiFi nor
+    // Ethernet compiled in nothing calls esp_netif_init(), so the TCP/IP thread never exists and
+    // lwIP asserts on its null mutex, taking the board down before the light pipeline runs. Same
+    // gate MqttModule already uses. No shipping firmware is in that state today; the gate is what
+    // makes a network-less build a supported configuration rather than a boot loop.
+    if constexpr (mm::platform::hasNetwork) scheduler.addModule(httpServer);
 
     scheduler.setup();
 

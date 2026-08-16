@@ -752,7 +752,11 @@ private:
     // ethConfigDefault so a board that DOES opt in gets its chip's historical pins without
     // re-listing them; only the PHY *selection* defaults off. Matches the installer UI,
     // whose Ethernet pill is "active" (green) only when ethType is set (ethConfigured()).
-    uint8_t ethType_       = 0;   // 0 = None; a board opts in via its catalog eth block
+    // 0 = None; a board opts in via its catalog eth block. Left at None even where the platform
+    // FIXES the interface (ethPhyIsFixed): syncEthConfig overrides the value on those targets, so
+    // seeding it here would buy nothing and would put a value outside this Select's own option list
+    // into a persisted control, which the settings loader then clamps to a DIFFERENT, real PHY.
+    uint8_t ethType_       = static_cast<uint8_t>(platform::ethNone);
     // GPIO/address members are int8_t (one byte; -1 = unused). A GPIO never exceeds
     // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
     // → number input). ethConfigDefault's fields are plain int; the values are all
@@ -800,7 +804,11 @@ private:
     void syncEthConfig() {
         if constexpr (platform::hasEthernet) {
             platform::EthPinConfig cfg{};
-            cfg.phyType        = ethType_;
+            // Where the platform FIXES the interface (ethPhyIsFixed), its type wins over the stored
+            // control: a persisted value would otherwise select hardware that does not exist there.
+            // On real silicon the flag is false and the board's own catalog value wins, as before.
+            cfg.phyType        = platform::ethPhyIsFixed
+                               ? static_cast<uint8_t>(platform::ethConfigDefault.phyType) : ethType_;
             cfg.phyAddr        = ethPhyAddr_;
             cfg.mdcGpio        = ethMdcGpio_;
             cfg.mdioGpio       = ethMdioGpio_;

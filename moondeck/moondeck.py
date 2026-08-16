@@ -1870,6 +1870,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     line = stream.readline()
                 except OSError:
                     break            # pty EIO on child exit → EOF
+                except ValueError:
+                    # The stop button: kill_script closes the pty master fd while this thread is
+                    # blocked in readline, and reading a CLOSED Python file raises ValueError, not
+                    # OSError. Uncaught it takes down the whole request handler with a traceback,
+                    # so stopping a long-running card looked like a MoonDeck crash.
+                    break
                 if not line:
                     break            # pipe EOF
                 text = line.decode("utf-8", errors="replace").rstrip("\r\n")

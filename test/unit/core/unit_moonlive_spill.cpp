@@ -269,3 +269,66 @@ TEST_CASE("a value live across a loop keeps its storage for the whole loop") {
         if (slotRef) CHECK(in.imm < slots);             // and every slot is one the prologue reserves
     }
 }
+
+#if MM_MOONLIVE_HAS_HOST_JIT
+
+// The shape that resets both Xtensa boards: a SYSTEM VARIABLE read as a loop bound, with a HOST CALL
+// in the body. Bench-bisected, each ingredient alone is fine, and only the three together fail:
+//
+//   loop, constant bound, call in body   -> runs
+//   loop, @control bound, call in body   -> runs
+//   `width` read, no loop                -> runs
+//   `width` loop, no call in body        -> runs
+//   `width` loop WITH a call in body     -> LoadProhibited inside the emitted code
+//
+// A system variable lives in the controls arena, reached through kArg4, a host argument that now
+// lives in a frame slot and is reloaded at each use. Run here on the one backend a test can execute,
+// so the failure is debuggable in a process rather than from a crash dump.
+TEST_CASE("a system variable read in a loop survives a host call in that loop") {
+    // `width` is the EFFECT vocabulary, not the modifier one this file's kSys uses.
+    static moonlive::SysVarTable fxSys = moonlive::effectSysVars();
+    // Green is a NONZERO CONSTANT, and red keeps the host call. Two reasons, both learned the hard
+    // way: random16 is one LCG shared by the whole process, so a red channel that can draw 0 makes
+    // "is this light lit" depend on how many draws earlier tests made, and a green of 0 everywhere
+    // means a loop that runs PAST width still writes 0 there, so the past-width check could not
+    // detect the runaway it is named for. A constant 7 fixes both while keeping the call, which is
+    // the ingredient this test exists for.
+    const char* src = "for (x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 7, 0); }\n";
+
+    // At the host's full budget AND at a squeezed one: Xtensa has ten registers where arm64 has
+    // fourteen, so the squeezed run is the closest a host test gets to the pressure the device is
+    // under, and pressure is what decides whether kArg4 stays in a register or goes to a slot.
+    uint8_t code[2048];
+    const auto tight = squeezed(11, 1);
+    auto r = moonlive::compileSource(src, kT, fxSys, code, sizeof(code), &tight);
+    REQUIRE(r.ok);
+
+    void* blk = platform::allocExec(r.len);
+    REQUIRE(blk != nullptr);
+    platform::writeExec(blk, code, r.len);
+
+    // The arena the binding would hand over: controls at their defaults, and `width` where
+    // MoonLiveEffect::tick writes it.
+    uint8_t arena[moonlive::kArenaBytes] = {};
+    for (uint8_t i = 0; i < r.controlCount; i++) arena[r.controls[i].offset] = r.controls[i].def;
+    const uint8_t kWidth = 8;
+    arena[moonlive::kSysWidth] = kWidth;
+
+    std::vector<uint8_t> buf(16 * 3, 0);
+    reinterpret_cast<CtrlFn>(blk)(buf.data(), 16, 3, 0, arena);
+    platform::freeExec(blk, r.len);
+
+    // Exactly `width` lights written, and only the first `width`: a loop that read a corrupted bound
+    // either stops early, runs away, or writes through a wrong pointer. Asserted on the CONSTANT
+    // channel, so the result does not depend on what the shared random16 sequence happens to return.
+    for (int i = 0; i < kWidth; i++) {
+        INFO("light ", i, " is inside width and must carry the constant");
+        CHECK(buf[i * 3 + 1] == 7);
+    }
+    for (int i = kWidth; i < 16; i++) {
+        INFO("light ", i, " is past width and must be untouched");
+        CHECK(buf[i * 3 + 1] == 0);
+    }
+}
+
+#endif  // MM_MOONLIVE_HAS_HOST_JIT

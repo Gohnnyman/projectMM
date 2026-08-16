@@ -69,7 +69,11 @@ constexpr bool hasWiFi = true;
 // Ethernet PHY config type — desktop has no Ethernet (ethInit() stubs to false),
 // but platform.h declares setEthConfig(const EthPinConfig&) for every platform, so
 // the type must exist here too. Mirror the esp32 struct; the desktop stub ignores it.
-enum EthPhyType { ethNone = 0, ethLan8720 = 1, ethIp101 = 2, ethW5500 = 3 };
+// Kept in step with the ESP32 list (platform/esp32/platform_config.h) so core code can name a
+// PHY type without knowing which platform it compiles for. `ethYt8531`/`ethOpeneth` never occur
+// on desktop; they exist here so the NAMES resolve everywhere.
+enum EthPhyType { ethNone = 0, ethLan8720 = 1, ethIp101 = 2, ethW5500 = 3,
+                  ethYt8531 = 4, ethOpeneth = 5 };
 struct EthPinConfig {
     int phyType; int phyAddr;
     int mdcGpio; int mdioGpio; int rstGpio; int rmiiClockGpio; bool rmiiClockExtIn;
@@ -88,6 +92,15 @@ constexpr bool hasNamedNetInterfaces = true;
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).
 constexpr bool hasNetwork = hasWiFi || hasEthernet;
+
+// ethPhyIsFixed, true where the interface is a property of the PLATFORM rather than of the board,
+// so a persisted or catalog-supplied PHY type must not override it. False on real silicon, where
+// which PHY a board carries is exactly what deviceModels.json exists to say.
+//
+// Set under emulation: the emulator presents one MAC and no other kind exists to select, so a saved
+// ethType from an earlier session would otherwise pick hardware that is not there and leave the
+// device with no network at all.
+constexpr bool ethPhyIsFixed = false;   // desktop has no Ethernet at all
 
 // Enough compute headroom for a per-pixel FLOAT algorithm — a raymarcher, a fractal, a feedback
 // loop that iterates per light. This is the ONE exception to the integer-only render-path rule in

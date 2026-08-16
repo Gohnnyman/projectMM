@@ -141,6 +141,25 @@ FIRMWARES: dict[str, dict] = {
                        "from deviceModels.json, default LAN8720 pins).",
         "ships": True,
     },
+    # The EMULATED board. Not silicon: QEMU has no radio and no Ethernet PHY, so this variant swaps
+    # WiFi for the emulated OpenCores MAC (see sdkconfig.defaults.qemu). `eth_only` is True for the
+    # same reason an Ethernet-only board sets it, there is no WiFi to cascade to.
+    #
+    # ships=False: nobody flashes this to a device. It exists so the whole firmware, MoonLive's
+    # emitted machine code included, can be RUN and debugged on a development machine, with the REST
+    # API and web UI reachable through a forwarded host port.
+    "qemu": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.qemu"],
+        "eth_only": True,
+        "description": "ESP32 classic under QEMU, emulated Ethernet (openeth), no WiFi. "
+                       "Run with moondeck/qemu/run_qemu.py, not flashed to hardware.",
+        "ships": False,
+        # Not silicon: keep it out of web-installer/firmwares.json entirely. `ships` already stops
+        # the release pipeline building it; this stops it reaching the installer's list, whose
+        # entries are things a user can flash to a board.
+        "installable": False,
+    },
     "esp32-16mb": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.16mb",
@@ -458,7 +477,11 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "",
     # and check for the actual enabling line rather than pattern-matching the
     # filename: the S31 enables EMAC in `sdkconfig.defaults.esp32s31` (no ".eth" in
     # the name), which a filename heuristic would miss and silently stub eth out.
-    eth_symbols = {"CONFIG_ETH_USE_ESP32_EMAC=y", "CONFIG_ETH_USE_SPI_ETHERNET=y"}
+    # openeth is the third PHY driver: QEMU's emulated MAC. Without it here the qemu variant would
+    # be treated as having no Ethernet at all, ethInit() would be stubbed to `return false`, and the
+    # emulated board would come up with no IP stack, no REST API, no web UI.
+    eth_symbols = {"CONFIG_ETH_USE_ESP32_EMAC=y", "CONFIG_ETH_USE_SPI_ETHERNET=y",
+                   "CONFIG_ETH_USE_OPENETH=y"}
 
     def fragment_enables_eth(frag: str) -> bool:
         path = ESP32_DIR / frag

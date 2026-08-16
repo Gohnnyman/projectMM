@@ -23,6 +23,13 @@ struct Decoded {
     // how the first version of this check passed against the bug it was written for.
     bool     hasFrameAlloc = false;
     uint32_t frameAlloc = 0;
+
+    // For the call-clobber check. A windowed call rotates the register file, so every register the
+    // rotation covers holds the callee's leftovers afterwards unless the caller saved and restored
+    // it. `readsMask`/`writesMask` are bit N = register N.
+    bool     isCall = false;
+    uint32_t readsMask = 0;
+    uint32_t writesMask = 0;
 };
 
 }  // namespace mm_structural
