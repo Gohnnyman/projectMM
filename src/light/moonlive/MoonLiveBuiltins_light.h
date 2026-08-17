@@ -199,7 +199,11 @@ struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canv
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
-inline SinkSlot* sinkSlots() { static SinkSlot s[2]; return s; }
+// constinit at namespace scope, not a function-local static: a local static carries a thread-safe
+// initialisation guard, which is a lock, and this is read from the render tick. Constant
+// initialisation happens before main, so the accessor is a plain address.
+inline constinit SinkSlot gSinkSlots[2]{};
+inline SinkSlot* sinkSlots() MM_NONBLOCKING { return gSinkSlots; }
 /// PERMANENTLY EMPTY. A third concurrent runner reads this and finds no sink, so its addLight calls
 /// no-op — setAddLightSink deliberately never installs here, because a shared sink would let two
 /// overflow threads write through each other's context.

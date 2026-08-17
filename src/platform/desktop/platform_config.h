@@ -141,7 +141,11 @@ constexpr bool hasImprov = false;
 // no `#if defined(__aarch64__)` outside src/platform/. A #define (not constexpr) so #include-
 // side test files can use it in `#if` — CLAUDE.md's `if constexpr` preference is for runtime
 // branches inside code, not preprocessor gating around whole TEST_CASEs.
-#if defined(__aarch64__)
+// MM_MOONLIVE_FORCE_NO_HOST_JIT makes an arm64 machine build as a backend-less one
+// (build_desktop.py --no-jit). Every x86-64 desktop already is one, so a test that wrongly
+// presumes a compile succeeds passes on an arm64 bench and fails only once CI runs it. The
+// override lets that be caught before a push instead of after.
+#if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
     #define MM_MOONLIVE_HAS_HOST_JIT 1
 #else
     #define MM_MOONLIVE_HAS_HOST_JIT 0

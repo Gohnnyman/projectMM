@@ -74,6 +74,14 @@ void Scheduler::tick() MM_NONBLOCKING {
     // measured against. Deferring also means the pipeline is never rebuilt underneath a half-rendered
     // frame.
     // exchange, not test-then-clear: a request arriving between the two would be dropped.
+    //
+    // This gate is what keeps tick() honest about its MM_NONBLOCKING annotation. prepareTree
+    // allocates, reads the filesystem and runs the JIT, none of which belongs in a frame. It runs
+    // only when another task asked for a rebuild, which is a user action (a control edit, a module
+    // added or removed, a script renamed), never a frame; a steady-state tick pays one relaxed
+    // exchange. The static analyser cannot see that, so it reports the path transitively, and the
+    // finding stays in the report on purpose: if prepareTree ever becomes reachable WITHOUT this
+    // gate, that report is the only thing that will say so.
     if (prepareRequested_.exchange(false, std::memory_order_relaxed)) {
         prepareTree();
     }

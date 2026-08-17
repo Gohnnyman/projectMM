@@ -589,8 +589,14 @@ TEST_CASE("a script name at the accepted length survives the control it is store
     l.defineControls();
     l.setScript(longName.c_str());
     l.prepare();
-    CHECK(l.severity() != MoonModule::Severity::Error);
+    // The name reached the loader intact: a clipped one is rejected for its missing extension, so
+    // the status would name the NAME rather than anything about the script's contents. Asserted
+    // this way because a host without a MoonLive backend (x86-64) fails every compile by design,
+    // and this test is about the control buffer, not about codegen.
+    if (l.severity() == MoonModule::Severity::Error)
+        CHECK(std::string(l.status()).find(".mlv") == std::string::npos);
 #if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(l.severity() != MoonModule::Severity::Error);
     CHECK(l.lightCount() == 1);
 #endif
 }

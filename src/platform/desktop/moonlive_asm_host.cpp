@@ -10,7 +10,7 @@
 
 namespace mm::moonlive {
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
 // arm64 register map: R0..R4 = the host-ABI arg registers x0..x4 (buf, nLights, cpl, t, ctrls —
 // the control-values arena pointer, kArg4). R5..R13 = caller-saved scratch x9..x14 then x5..x7.

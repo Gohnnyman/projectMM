@@ -17,7 +17,7 @@
 
 namespace mm::moonlive {
 
-#if defined(__aarch64__)   // the host assembler is implemented for arm64 only (see moonlive_asm_host.cpp)
+#if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)   // arm64 only (see moonlive_asm_host.cpp)
 
 namespace {
 Reg reg(VReg v) { return static_cast<Reg>(v); }

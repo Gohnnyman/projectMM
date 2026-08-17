@@ -144,6 +144,16 @@ def mechanical_gates(firmware, esp32="freshness", triggered=True):
         Gate("GCC build (CI's toolchain)",
              UV + ["moondeck/build/build_desktop.py", "--gcc", "--tests"],
              when(*COMPILES_DESKTOP)),
+        # The other half of "green here, red on CI": this bench is arm64 and has a MoonLive
+        # backend, while every x86-64 desktop (Windows, Linux, Intel macOS, and CI's runners)
+        # has none. A test that presumes a script compiles therefore passes locally and fails
+        # only after a push. Building with the backend gated out runs the suite the way those
+        # hosts see it. Triggered by MoonLive sources and by the tests that exercise them.
+        Gate("no-backend build (the x86-64 desktop's view)",
+             UV + ["moondeck/build/build_desktop.py", "--no-jit", "--tests"],
+             lambda f: touches(f, "src/core/moonlive/", "src/light/moonlive/",
+                               "src/platform/desktop/moonlive", "test/unit/core/unit_moonlive",
+                               "test/unit/light/unit_MoonLive")),
         # Reports what the compiler proved about THIS change: -Wfunction-effects checks the
         # render path transitively, and `--incremental` restricts the rebuild to what the commit
         # touched, so the gate answers "did this add a blocking call" in ~1s rather than
