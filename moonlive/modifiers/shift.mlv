@@ -1,5 +1,5 @@
-// Slide along x. A coordinate is a byte, so keep amount small enough that x + amount stays under
-// 256 -- past that it wraps and the light reappears at the left edge.
+// Slide along x. A coordinate is a byte, so keep amount small enough that xPos + amount stays under
+// 256: past that it wraps and the light reappears at the left edge.
 uint8_t amount = 4; // @control 0..64
 
-setXYZ(0, x + amount, y, z);
+setXYZ(0, xPos + amount, yPos, zPos);

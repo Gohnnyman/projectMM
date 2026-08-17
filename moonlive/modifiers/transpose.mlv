@@ -1,2 +1,2 @@
 // Swap the axes: rows become columns.
-setXYZ(0, y, x, z);
+setXYZ(0, yPos, xPos, zPos);

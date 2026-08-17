@@ -111,10 +111,10 @@ TEST_CASE("fill plus a loop on " MM_ISA_NAME " emits what it currently can") {
                   mm::moonlive::effectSysVars(), ok) == MM_GOLD_FILLLOOP_LEN);
 }
 
-// A scripted MODIFIER is the third binding, and the one handed x/y/z.
+// A scripted MODIFIER is the third binding, and the one handed a per-light coordinate.
 TEST_CASE("a scripted modifier compiles for " MM_ISA_NAME) {
     bool ok = false;
-    CHECK(emitLen("setXYZ(0, x, y, z);\n", mm::moonlive::modifierSysVars(), ok) > 0);
+    CHECK(emitLen("setXYZ(0, xPos, yPos, zPos);\n", mm::moonlive::modifierSysVars(), ok) > 0);
     CHECK(ok);
 }
 

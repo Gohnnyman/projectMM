@@ -35,6 +35,10 @@ enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */, Ne /* != 
 
 class HostAssembler {
 public:
+    // The register type the shared lowering (core/moonlive/moonlive_lower.h) works in.
+    // Named here because each backend's Reg is its own enum, sized to its own file.
+    using RegType = Reg;
+
     // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
     // would double-free the buffer it emits into.
     ~HostAssembler() { platform::free(buf_); }
@@ -80,9 +84,14 @@ public:
     void mulReg(Reg d, Reg a, Reg b);    // d = a * b   (index scaling by a runtime cpl)
     void store8(Reg base, Reg off, Reg val);  // byte store: base[off] = val (low 8 bits)
     void load8(Reg d, Reg base, int32_t imm); // d = base[imm] (zero-extended byte) — control read
-    void cmp(Reg a, Reg b);              // flags = a - b
+    void movReg(Reg d, Reg a);           // d = a
     void branchIfZero(Reg a, Label l);   // if a == 0 goto l
-    void branchIf(Cond c, Label l);      // if flags satisfy c goto l (after cmp)
+    // The FUSED compare-and-branch forms, which is how the shared lowering spells a conditional.
+    // arm64 has no fused branch, so these emit cmp + b.cond; RISC-V and Xtensa have the single
+    // instruction. Naming the operation rather than the flags is what lets one lowering serve all
+    // three: a backend that needs two instructions hides that here, where the encoding already is.
+    void branchGeU(Reg a, Reg b, Label l);    // if (unsigned)a >= b goto l
+    void branchNe(Reg a, Reg b, Label l);     // if a != b goto l
     // Call a host built-in: d = fn(a, b, c). Preserves the host-arg registers (R0/R1/R2 = buf,
     // nLights, cpl) across the call by saving them on the stack, so they stay live for the
     // statement after the call — the live-vreg-across-Call contract. `fn` is an absolute
@@ -93,6 +102,10 @@ public:
     void ret();
 
 private:
+    // The flags pair the fused branches above are built from. arm64-only, so private: a lowering
+    // that reached for these could not be shared with a backend that has no flags register.
+    void cmp(Reg a, Reg b);              // flags = a - b
+    void branchIf(Cond c, Label l);      // if flags satisfy c goto l (after cmp)
     // The emitted-code buffer's size, fixed for this object's life but chosen per script.
     const size_t kCap;
     static constexpr uint8_t kMaxLabels = 16;

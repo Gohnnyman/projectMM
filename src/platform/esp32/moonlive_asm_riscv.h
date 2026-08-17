@@ -34,6 +34,10 @@ enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 
 class RiscvAssembler {
 public:
+    // The register type the shared lowering (core/moonlive/moonlive_lower.h) works in.
+    // Named here because each backend's Reg is its own enum, sized to its own file.
+    using RegType = Reg;
+
     // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
     // would double-free the buffer it emits into.
     ~RiscvAssembler() { platform::free(buf_); }

@@ -93,29 +93,38 @@ TEST_CASE("every script in moonlive/ compiles") {
 // reserves it. That split is what keeps `x` usable as a loop counter in a layout while still making
 // it mean "the light being folded" in a modifier — and what turns a layout reading `width` into an
 // error instead of a silent 0 that places no lights and reports success.
-TEST_CASE("a script gets the system variables its own module supplies, and no others") {
-    struct Case { moonlive::SysVarTable sys; const char* src; bool ok; const char* what; };
+// ONE vocabulary for all three roles. A name means the same thing in every script, and the only
+// thing a binding decides is which slots it WRITES each frame.
+//
+// The per-role tables this replaced did not prevent a mistake: a layout reading `width` got a
+// compile error, which is the same outcome as reading a value that is always zero. What they did
+// create was a trap, because they were different vocabularies rather than nested ones, so a name
+// was legal in one role and RESERVED in another. `disasm.py` compiled against the widest table and
+// therefore refused `grid.mlv`, the shipped default layout, as "name is a system variable".
+TEST_CASE("every script reads the same system-variable vocabulary") {
+    struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
-        {moonlive::layoutSysVars(),
-         "for (y = 0; y < 2; y = y + 1) { for (x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }",
-         true,  "a layout nests x/y loops: nothing hands it a coordinate, so the names are free"},
-        {moonlive::layoutSysVars(), "for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }",
-         false, "a layout cannot read width: it DEFINES the grid, so there is no size to hand it"},
-        {moonlive::effectSysVars(), "setRGB(width, 0, 0, 0);",
-         true,  "an effect reads the layer's width"},
-        {moonlive::effectSysVars(), "for (x = 0; x < 3; x = x + 1) { setRGB(x, 0, 0, 0); }",
-         true,  "an effect uses x as a loop counter: it renders a buffer, not one light"},
-        {moonlive::effectSysVars(), "setRGB(x, 0, 0, 0);",
-         false, "an effect cannot read x: no coordinate is written for it"},
-        {moonlive::modifierSysVars(), "setXYZ(0, width - 1 - x, y, z);",
-         true,  "a modifier reads the coordinate AND the box it lives in"},
-        {moonlive::modifierSysVars(), "for (x = 0; x < 3; x = x + 1) { setXYZ(0, x, 0, 0); }",
-         false, "a modifier cannot loop on x: that name is the light it was handed"},
+        {"for (y = 0; y < 2; y = y + 1) { for (x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }",
+         true,  "x and y are ordinary loop counters, in EVERY role: they are the names an author "
+                "reaches for, which is why the coordinate is xPos/yPos/zPos instead"},
+        {"for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }",
+         true,  "a layout may read width: same name, same meaning, whoever asks"},
+        {"setRGB(width, 0, 0, 0);",           true,  "an effect reads the layer's width"},
+        {"setXYZ(0, width - 1 - xPos, yPos, zPos);",
+         true,  "a modifier reads its coordinate AND the box it lives in"},
+        {"setRGB(xPos, 0, 0, 0);",
+         true,  "reading a coordinate outside a modifier is legal and reads 0: no binding writes "
+                "it, so there is nothing to disagree with"},
+        {"uint8_t width = 16; // @control 1..64\nsetRGB(0, 0, 0, 0);",
+         false, "declaring one is still refused, in every role: that is what keeps a read meaningful"},
+        {"uint8_t xPos = 3;\nsetRGB(0, 0, 0, 0);",
+         false, "the coordinate names are reserved too, so a modifier cannot shadow what it is handed"},
     };
     uint8_t out[2048];
     for (const Case& c : cases) {
         INFO(c.what);
-        auto r = moonlive::compileSource(c.src, moonlive::lightBuiltins(), c.sys, out, sizeof(out));
+        auto r = moonlive::compileSource(c.src, moonlive::lightBuiltins(), moonlive::lightSysVars(),
+                                         out, sizeof(out));
         // Where a backend exists, a valid script must actually EMIT — accepting kCodegenFailed
         // everywhere would let a codegen regression pass as a pass. Only a host with no assembler
         // for its ISA (x86_64, which is what CI runs) is allowed that answer.
@@ -126,6 +135,17 @@ TEST_CASE("a script gets the system variables its own module supplies, and no ot
 #endif
         else      CHECK_FALSE(r.ok);
     }
+}
+
+// The three role accessors are aliases of the one table now. Pinned so a future change that
+// re-splits them has to say so here rather than silently reintroducing the trap above.
+TEST_CASE("the three roles are handed the same table") {
+    const auto layout = moonlive::layoutSysVars();
+    const auto effect = moonlive::effectSysVars();
+    const auto mod    = moonlive::modifierSysVars();
+    CHECK(layout.count == effect.count);
+    CHECK(effect.count == mod.count);
+    CHECK(mod.count == moonlive::lightSysVars().count);
 }
 
 TEST_CASE("a script may be commented, and only @control carries meaning") {

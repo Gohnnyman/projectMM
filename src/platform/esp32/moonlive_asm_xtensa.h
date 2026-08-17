@@ -34,6 +34,10 @@ const uint8_t* xtRegMap(uint8_t& count);
 
 class XtensaAssembler {
 public:
+    // The register type the shared lowering (core/moonlive/moonlive_lower.h) works in.
+    // Named here because each backend's Reg is its own enum, sized to its own file.
+    using RegType = Reg;
+
     // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
     // would double-free the buffer it emits into.
     ~XtensaAssembler() { platform::free(buf_); }

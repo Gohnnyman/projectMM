@@ -48,7 +48,7 @@ Coord3D transform(const char* script, lengthType x, lengthType y, lengthType z,
 TEST_CASE("a scripted modifier mirrors the pattern, the way a hand-written one would") {
     // The default script. A mirror is the shape that makes a working binding obvious on a bench
     // strand — the pattern simply runs the other way.
-    const Coord3D p = transform("setXYZ(0, width - 1 - x, y, z);", 10, 20, 0);
+    const Coord3D p = transform("setXYZ(0, width - 1 - xPos, yPos, zPos);", 10, 20, 0);
     CHECK(p.x == 244);          // width(255) - 1 - 10
     CHECK(p.y == 20);           // untouched axes stay put
     CHECK(p.z == 0);
@@ -57,25 +57,25 @@ TEST_CASE("a scripted modifier mirrors the pattern, the way a hand-written one w
 TEST_CASE("the script reads the light's own position, not a fixed value") {
     // The whole seam in one assertion: `x` inside the script has to BE this light's x. If the
     // binding failed to write the input slots, every light would transform identically.
-    const Coord3D a = transform("setXYZ(0, x, y, z);", 7, 3, 1);
+    const Coord3D a = transform("setXYZ(0, xPos, yPos, zPos);", 7, 3, 1);
     CHECK(a.x == 7);
     CHECK(a.y == 3);
     CHECK(a.z == 1);
 
-    const Coord3D b = transform("setXYZ(0, x, y, z);", 200, 100, 2);
+    const Coord3D b = transform("setXYZ(0, xPos, yPos, zPos);", 200, 100, 2);
     CHECK(b.x == 200);
     CHECK(b.y == 100);
     CHECK(b.z == 2);
 }
 
 TEST_CASE("a script can swap axes, which is a transform no control could express") {
-    const Coord3D p = transform("setXYZ(0, y, x, z);", 5, 60, 0);
+    const Coord3D p = transform("setXYZ(0, yPos, xPos, zPos);", 5, 60, 0);
     CHECK(p.x == 60);
     CHECK(p.y == 5);
 }
 
 TEST_CASE("a script can offset a coordinate, the scroll a modifier usually hard-codes") {
-    const Coord3D p = transform("setXYZ(0, x + 4, y, z);", 10, 10, 0);
+    const Coord3D p = transform("setXYZ(0, xPos + 4, yPos, zPos);", 10, 10, 0);
     CHECK(p.x == 14);
 }
 
@@ -85,7 +85,7 @@ TEST_CASE("a broken script leaves the pattern alone rather than taking the layer
     // the pipeline keeps rendering.
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript("setXYZ(0, x, y"));     // no closing paren, no semicolon
+    m.setScript(mmWriteScript("setXYZ(0, xPos, yPos"));     // no closing paren, no semicolon
     m.prepare();
     Coord3D box{255, 255, 1};
     m.modifyLogicalSize(box);
@@ -101,7 +101,7 @@ TEST_CASE("a coordinate too large for a script input passes through untransforme
     // A script input is one byte, so an axis beyond 255 cannot be handed to the script at all.
     // Passing it through unchanged is the honest degrade: wrapping it would silently place the
     // light somewhere it is not. The 16-bit element store that lifts this is backlogged.
-    const Coord3D p = transform("setXYZ(0, 255 - x, y, z);", 300, 10, 0);
+    const Coord3D p = transform("setXYZ(0, 255 - xPos, yPos, zPos);", 300, 10, 0);
     CHECK(p.x == 300);                                 // untouched, not wrapped to 44
     CHECK(p.y == 10);
 }
@@ -110,7 +110,7 @@ TEST_CASE("editing the script changes the transform without a rebuild of the fir
     // The live-edit loop: the same module, a new script, a different mapping.
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript("setXYZ(0, width - 1 - x, y, z);"));
+    m.setScript(mmWriteScript("setXYZ(0, width - 1 - xPos, yPos, zPos);"));
     m.prepare();
     Coord3D box{255, 255, 1};
     m.modifyLogicalSize(box);      // the Layer hands every modifier its box before folding
@@ -119,7 +119,7 @@ TEST_CASE("editing the script changes the transform without a rebuild of the fir
     m.modifyLogical(a);
     CHECK(a.x == 244);                                 // the mirror
 
-    m.setScript(mmWriteScript("setXYZ(0, x, y, z);"));
+    m.setScript(mmWriteScript("setXYZ(0, xPos, yPos, zPos);"));
     m.prepare();
 
     Coord3D b{10, 20, 0};
@@ -133,21 +133,21 @@ TEST_CASE("editing the script changes the transform without a rebuild of the fir
 // precedence is real — `2 + 3 * 4` silently giving 20 would corrupt every non-trivial transform.
 TEST_CASE("a script computes with the usual precedence, so a transform means what it reads like") {
     // Multiplication binds tighter than addition.
-    CHECK(transform("setXYZ(0, 2 + 3 * 4, y, z);", 0, 0, 0).x == 14);
+    CHECK(transform("setXYZ(0, 2 + 3 * 4, yPos, zPos);", 0, 0, 0).x == 14);
     // Parentheses override it.
-    CHECK(transform("setXYZ(0, (2 + 3) * 4, y, z);", 0, 0, 0).x == 20);
+    CHECK(transform("setXYZ(0, (2 + 3) * 4, yPos, zPos);", 0, 0, 0).x == 20);
     // Subtraction, which no ISA here has an instruction for: a - b is emitted as a + (b * -1).
-    CHECK(transform("setXYZ(0, 100 - 40, y, z);", 0, 0, 0).x == 60);
+    CHECK(transform("setXYZ(0, 100 - 40, yPos, zPos);", 0, 0, 0).x == 60);
     // Left-associative, so 100 - 40 - 20 is 40 rather than 80.
-    CHECK(transform("setXYZ(0, 100 - 40 - 20, y, z);", 0, 0, 0).x == 40);
+    CHECK(transform("setXYZ(0, 100 - 40 - 20, yPos, zPos);", 0, 0, 0).x == 40);
     // The coordinate inputs compose with all of it — this is the shape a real modifier uses.
-    CHECK(transform("setXYZ(0, x * 2 + 1, y, z);", 10, 0, 0).x == 21);
+    CHECK(transform("setXYZ(0, xPos * 2 + 1, yPos, zPos);", 10, 0, 0).x == 21);
 }
 
 TEST_CASE("a scaled mirror, the transform this binding exists to make possible") {
     // Two operators and an input in one expression: reflect, then halve. Expressible now, and not
     // expressible at all before arithmetic landed.
-    const Coord3D p = transform("setXYZ(0, (255 - x) * 2, y, z);", 100, 5, 0);
+    const Coord3D p = transform("setXYZ(0, (255 - xPos) * 2, yPos, zPos);", 100, 5, 0);
     CHECK(p.x == 54);      // (255-100)*2 = 310, truncated into the byte the input slot holds
     CHECK(p.y == 5);
 }
@@ -165,7 +165,7 @@ TEST_CASE("folding a wall's worth of lights compiles the script once, not once p
     // an unchanged value across the whole fold proves no compile happened inside it.
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript("setXYZ(0, width - 1 - x, y, z);"));
+    m.setScript(mmWriteScript("setXYZ(0, width - 1 - xPos, yPos, zPos);"));
     m.prepare();
     Coord3D box{255, 255, 1};
     m.modifyLogicalSize(box);
@@ -188,12 +188,12 @@ TEST_CASE("folding a wall's worth of lights compiles the script once, not once p
 TEST_CASE("editing a script asks the layer to rebuild its mapping") {
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript("setXYZ(0, x, y, z);"));
+    m.setScript(mmWriteScript("setXYZ(0, xPos, yPos, zPos);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);     // the first compile needs one too
     CHECK(m.consumeNeedsRebuild() == false);    // and it is consumed, not sticky
 
-    m.setScript(mmWriteScript("setXYZ(0, 7 - x, y, z);"));
+    m.setScript(mmWriteScript("setXYZ(0, 7 - xPos, yPos, zPos);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);     // an edit asks again
 
@@ -209,13 +209,13 @@ TEST_CASE("editing a script asks the layer to rebuild its mapping") {
 // be able to read the EXTENT it is folding within, and the default has to use it.
 TEST_CASE("the default script mirrors within the grid it is given, not a fixed 255") {
     // A 16-wide grid: x=0 must land on the far end of THAT grid, 15 — not 245.
-    const Coord3D p = transform("setXYZ(0, width - 1 - x, y, z);", 0, 0, 0, /*w=*/16, /*h=*/16, /*d=*/1);
+    const Coord3D p = transform("setXYZ(0, width - 1 - xPos, yPos, zPos);", 0, 0, 0, /*w=*/16, /*h=*/16, /*d=*/1);
     CHECK(p.x == 15);
     CHECK(p.y == 0);
 
     // Every coordinate has to stay inside the box, or the Layer discards it.
     for (lengthType i = 0; i < 16; i++) {
-        const Coord3D q = transform("setXYZ(0, width - 1 - x, y, z);", i, 0, 0, 16, 16, 1);
+        const Coord3D q = transform("setXYZ(0, width - 1 - xPos, yPos, zPos);", i, 0, 0, 16, 16, 1);
         CAPTURE(i);
         CHECK(q.x >= 0);
         CHECK(q.x < 16);
@@ -223,8 +223,8 @@ TEST_CASE("the default script mirrors within the grid it is given, not a fixed 2
 }
 
 TEST_CASE("a script can read the grid extent it is folding within") {
-    CHECK(transform("setXYZ(0, width, y, z);",  0, 0, 0, 32, 16, 1).x == 32);
-    CHECK(transform("setXYZ(0, height, y, z);", 0, 0, 0, 32, 16, 1).x == 16);
+    CHECK(transform("setXYZ(0, width, yPos, zPos);",  0, 0, 0, 32, 16, 1).x == 32);
+    CHECK(transform("setXYZ(0, height, yPos, zPos);", 0, 0, 0, 32, 16, 1).x == 16);
 }
 
 // The black-screen failure end to end, through a real Layer. Byte arithmetic wraps: a script that
@@ -242,7 +242,7 @@ TEST_CASE("a script that computes a position outside the grid leaves lights mapp
     // bytes cannot fail: draw::fill writes every byte itself, whatever the fold decided.
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript("setXYZ(0, x + 200, y, z);"));   // deliberately off the end of a 16-wide grid
+    m.setScript(mmWriteScript("setXYZ(0, xPos + 200, yPos, zPos);"));   // deliberately off the end of a 16-wide grid
     m.prepare();
     Coord3D box{16, 16, 1};
     m.modifyLogicalSize(box);
@@ -278,7 +278,7 @@ TEST_CASE("re-preparing with an unchanged script does not ask for another rebuil
     // A module with no script compiles nothing and therefore asks for nothing — the rebuild request
     // exists to APPLY a new transform, and there is none. Name one, so the first prepare has
     // something to compile and the "unchanged" case below is the real question.
-    m.setScript(mmWriteScript("setXYZ(0, width - 1 - x, y, z);"));
+    m.setScript(mmWriteScript("setXYZ(0, width - 1 - xPos, yPos, zPos);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);    // the first compile needs one
 
@@ -290,7 +290,7 @@ TEST_CASE("re-preparing with an unchanged script does not ask for another rebuil
     CHECK(m.consumeNeedsRebuild() == false);
 
     // A real edit still asks.
-    m.setScript(mmWriteScript("setXYZ(0, y, x, z);"));
+    m.setScript(mmWriteScript("setXYZ(0, yPos, xPos, zPos);"));
     m.prepare();
     CHECK(m.consumeNeedsRebuild() == true);
 }
@@ -300,9 +300,9 @@ TEST_CASE("re-preparing with an unchanged script does not ask for another rebuil
 // changing the result — `print(x)` where `x` stood still computes x.
 TEST_CASE("print reports a value without changing what the script computes") {
     // Wrapping the coordinate in print() must leave the transform identical.
-    CHECK(transform("setXYZ(0, print(x), y, z);", 7, 3, 0, 16, 16, 1).x == 7);
+    CHECK(transform("setXYZ(0, print(xPos), yPos, zPos);", 7, 3, 0, 16, 16, 1).x == 7);
     // And it composes inside arithmetic.
-    CHECK(transform("setXYZ(0, print(width - 1 - x), y, z);", 0, 0, 0, 16, 16, 1).x == 15);
+    CHECK(transform("setXYZ(0, print(width - 1 - xPos), yPos, zPos);", 0, 0, 0, 16, 16, 1).x == 15);
 }
 
 // Subtraction is emitted as `a + (b * -1)`, and -1 has to survive into the register. The assemblers
@@ -321,9 +321,9 @@ TEST_CASE("a subtraction produces the whole value, not just its low byte") {
     // The consequences the byte hides: an index computed by subtraction becomes ~65k, the element
     // store's bounds guard rejects it, and the light silently never lights; a subtraction handed to
     // a host call (random16, print) gets a wrong argument.
-    CHECK(transform("setXYZ(0, print(width - 1 - x), y, z);", 0, 0, 0, 16, 16, 1).x == 15);
-    CHECK(transform("setXYZ(0, print(100 - 1), y, z);", 0, 0, 0, 255, 255, 1).x == 99);
-    CHECK(transform("setXYZ(0, print(5 - 5), y, z);", 0, 0, 0, 255, 255, 1).x == 0);
+    CHECK(transform("setXYZ(0, print(width - 1 - xPos), yPos, zPos);", 0, 0, 0, 16, 16, 1).x == 15);
+    CHECK(transform("setXYZ(0, print(100 - 1), yPos, zPos);", 0, 0, 0, 255, 255, 1).x == 99);
+    CHECK(transform("setXYZ(0, print(5 - 5), yPos, zPos);", 0, 0, 0, 255, 255, 1).x == 0);
 }
 
 // --- for --------------------------------------------------------------------------------------
@@ -335,7 +335,7 @@ TEST_CASE("a subtraction produces the whole value, not just its low byte") {
 TEST_CASE("a for loop runs its body once per step") {
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { print(i); } setXYZ(0, x, y, z);"));
+    m.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { print(i); } setXYZ(0, xPos, yPos, zPos);"));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);   // it compiles at all
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
@@ -348,7 +348,7 @@ TEST_CASE("a loop over an empty range runs its body no times") {
     // The entry guard: `i < 0` must skip the body entirely rather than wrap and run forever.
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript("for (i = 0; i < 0; i = i + 1) { print(99); } setXYZ(0, x, y, z);"));
+    m.setScript(mmWriteScript("for (i = 0; i < 0; i = i + 1) { print(99); } setXYZ(0, xPos, yPos, zPos);"));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
@@ -361,7 +361,7 @@ TEST_CASE("loops nest, which is what placing a grid of lights needs") {
     MoonLiveModifier m;
     m.defineControls();
     m.setScript(mmWriteScript("for (a = 0; a < 2; a = a + 1) { for (b = 0; b < 2; b = b + 1) { print(a); } }"
-                " setXYZ(0, x, y, z);"));
+                " setXYZ(0, xPos, yPos, zPos);"));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);

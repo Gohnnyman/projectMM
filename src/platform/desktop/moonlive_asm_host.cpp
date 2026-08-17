@@ -165,6 +165,13 @@ void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset 
     addFixup(len_, l, static_cast<uint8_t>(1u | (cond << 4)));
     emit32(0x54000000u | cond);
 }
+// The fused forms the shared lowering calls. arm64 has no compare-and-branch pair, so each is
+// cmp + b.cond here, and one instruction on RISC-V and Xtensa. Both spellings live behind the
+// same name, which is what lets the IR walk be written once.
+void HostAssembler::movReg(Reg d, Reg a) { addImm(d, a, 0); }    // mov wD, wA (add wD, wA, #0)
+void HostAssembler::branchGeU(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Hs, l); }
+void HostAssembler::branchNe(Reg a, Reg b, Label l)  { cmp(a, b); branchIf(Cond::Ne, l); }
+
 void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Preserve EVERY register that may hold a live value across the call: the host args
     // (x0/x1/x2/x3), the link register x30 (blr overwrites it; our function is a leaf), and the

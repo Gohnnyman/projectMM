@@ -214,7 +214,8 @@ TEST_CASE("a script cannot declare a name the engine already defines") {
     const Case refused[] = {
         {"uint8_t width = 16; // @control 1..64\nsetRGB(0, 0, 0, 0);", "a control named width"},
         {"uint8_t t = 5;\nsetRGB(0, 0, 0, 0);",                        "a control named t"},
-        {"for (x = 0; x < 4; x = x + 1) { setRGB(x, 0, 0, 0); }",       "a loop variable named x"},
+        {"for (xPos = 0; xPos < 4; xPos = xPos + 1) { setRGB(xPos, 0, 0, 0); }",
+                                                                        "a loop variable named xPos"},
         {"for (height = 0; height < 4; height = height + 1) { setRGB(0, 0, 0, 0); }",
                                                                         "a loop variable named height"},
     };
