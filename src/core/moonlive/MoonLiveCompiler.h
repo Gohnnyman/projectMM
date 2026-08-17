@@ -4,6 +4,7 @@
 #include <cstddef>
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/moonlive/MoonLiveIr.h"      // DeclaredControl, kMaxCtrls (surfaced on CompileResult)
+#include "core/moonlive/moonlive_emit.h"   // RegBudget — the test-only register-budget override
 
 // MoonLive front-end (§3.2) — the platform-independent compiler: source text → tokens → AST →
 // IR → native code (via the per-ISA assembler). The grammar is a single statement that is a
@@ -43,7 +44,22 @@ struct CompileResult {
 // Pure: no I/O, no allocation beyond the caller's buffer.
 /// `sysvars` are names the HOST defines and a script may only read (`t`, `width`, …). They are
 /// reserved: a declaration that reuses one fails to compile, so a name means one thing everywhere.
+/// `squeeze` overrides the register budget the backend would pick for itself. It is the seam that
+/// makes the register allocator testable: on a host with fourteen registers, compiling the same
+/// script at the full budget and at a deliberately smaller one must render IDENTICAL pixels — the
+/// spilled program and the unspilled one are the same program. Production callers omit it.
+/// The IR→bytes step, as a function pointer. Normally null, meaning "this build's own backend".
+/// A test passes ANOTHER ISA's lowerer to read what a device would execute without flashing one —
+/// the front end is identical either way, so the seam is one pointer rather than a second compiler.
+using LowerFn = size_t (*)(IrProgram&, uint8_t*, size_t, const RegBudget*);
+
 CompileResult compileSource(const char* source, const BuiltinTable& table,
-                            const SysVarTable& sysvars, uint8_t* out, size_t cap);
+                            const SysVarTable& sysvars, uint8_t* out, size_t cap,
+                            const RegBudget* squeeze = nullptr, LowerFn lower = nullptr);
+
+/// Tokens in `source`, the one measure both right-sized buffers derive from: the caller sizes its
+/// code buffer with `codeCapFor`, and compileSource sizes the IR op array from the same count. One
+/// function so a caller cannot measure the script differently from the compiler.
+uint32_t countTokens(const char* source);
 
 }  // namespace mm::moonlive

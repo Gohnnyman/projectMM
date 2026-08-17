@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/platform.h"   // alloc/free — the emit buffer is heap, not stack
+
 #include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
 
 #include <cstdint>
@@ -32,12 +34,38 @@ enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 
 class RiscvAssembler {
 public:
+    // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
+    // would double-free the buffer it emits into.
+    ~RiscvAssembler() { platform::free(buf_); }
+    /// `cap` is the code buffer's size, chosen per SCRIPT by the caller (codeCapFor) rather
+    /// than a shared constant — the backends differ by up to 1.9x on identical source, so one
+    /// number cannot fit them all. Defaults to the sanity bound for callers that emit a fixed
+    /// blob (emitFill) and have no token count to size from.
+    explicit RiscvAssembler(size_t cap = kCodeCap)
+        : kCap(cap), buf_(static_cast<uint8_t*>(platform::alloc(cap))) {}
+    RiscvAssembler(const RiscvAssembler&) = delete;
+    RiscvAssembler& operator=(const RiscvAssembler&) = delete;
+
     void finalize() { patchBranches(); }
     const uint8_t* bytes() const { return buf_; }
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
 
-    void prologue() {}                   // RV needs no fixed prologue (sp managed in call())
+    // --- the call frame ---
+    // The register allocator's overflow storage (core/moonlive/MoonLiveSpill.h). RV32 had no frame
+    // at all outside call(), so a spilling program is the first thing here that needs one: prologue
+    // opens it and parks s0 (the standard frame pointer) at its top, epilogue tears it down. Slots
+    // are addressed from s0, NOT sp, because call() moves sp by 80 bytes around every host call —
+    // sp-relative offsets would be wrong for its duration, and reading a spilled value after a
+    // random16() is the ordinary case. It is also the layout a nested or recursive script function
+    // needs: one s0 per activation.
+    // slots == 0 emits nothing, so a non-spilling script keeps today's zero-instruction entry.
+    void prologue(uint8_t slots = 0);
+    void spillStore(Reg r, uint8_t slot);
+    void spillLoad(Reg r, uint8_t slot);
+    void slotAddr(Reg d, uint8_t slot);   // d = &frame[slot] — a call's argument block
+    static constexpr uint8_t kMaxSpillSlots = kTotalSlots;   // parser/allocator range + the parked host args
+
     Label newLabel();
     void  bind(Label l);
 
@@ -52,21 +80,30 @@ public:
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
     void branchNe(Reg a, Reg b, Label l);     // bne a, b, l
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // standard call to a host built-in
-    void epilogue() { ret(); }
+    void epilogue();                     // undo prologue's frame (if any), then ret
     void ret();
 
 private:
-    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
-    static constexpr size_t kCap = kCodeCap;
+    // The emitted-code buffer's size, fixed for this object's life but chosen per script.
+    const size_t kCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 
     void emit32(uint32_t w);
     void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
 
-    uint8_t  buf_[kCap] = {};
+    // HEAP, not a member array: the assembler is a stack local in lowerToBytes, so a kCap-sized
+    // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
+    // frames. On a classic ESP32 that overflowed the task and faulted inside _xt_context_save
+    // (the plan named this: "buf_[kCap] inside the assembler, itself a stack local"). The buffer is
+    // scratch that ends in a memcpy to the caller's output, so nothing outlives the object.
+    uint8_t* buf_;
     size_t   len_ = 0;
     bool     overflow_ = false;
+    // Frame size in bytes, 0 when no prologue was emitted. epilogue() reads it, so the teardown can
+    // never disagree with the setup about how far sp moved — a mismatch there returns to a corrupted
+    // stack, which looks like anything except the compiler bug it is.
+    uint16_t frameBytes_ = 0;
 
     int32_t  labelPos_[kMaxLabels];
     uint8_t  labelCount_ = 0;

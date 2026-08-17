@@ -4,7 +4,7 @@ MoonLive is projectMM's **live-script engine** — author an effect as text and 
 
 Scripts call the same [power functions](power-functions.md) compiled effects use, reached through the builtin table — so the vocabulary is shared, in its flat scalar form.
 
-A scripted effect carries its **script source** as an editable, persisted multi-line text control (a resizable `textarea` in the UI), and a front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick. The grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call:
+A scripted effect names a **script file** under `/moonlive/`; the UI loads, edits and saves that file, and the module holds only the name (~32 bytes) — the text is read into a right-sized buffer to compile and freed immediately, so nothing script-sized stays resident. A front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick. The grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call:
 
 ```
 setRGB(random16(256), 0, 0, 255);   // a random pixel, blue
@@ -16,7 +16,7 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
 ## Controls
 
-- `source` — the script text (default: random pixels — `setRGB(random16(256), random16(256), random16(256), random16(256));`, one random light in a random color each tick). Editing it recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot).
+- `script` — the file name under `/moonlive/`, e.g. `lines.mlv`. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default. Naming one (or re-naming it after an edit) recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot). The directory is created on demand.
 - **Scripted controls** — a script declares a tunable variable with a range annotation, and the engine surfaces it as a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
@@ -25,7 +25,7 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
   setRGB(speed, hue, 0, 255);
   ```
 
-  Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Editing the `source` recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
+  Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script file and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
 
 ### System variables — what the engine hands a script
 
@@ -55,6 +55,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `setXYZ(index, x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
 | `fill(r, g, b)` | write every light |
 | `addLight(x, y, z)` | place the next light (a [layout](MoonLiveLayout.md)) |
+| `line(x1, y1, x2, y2, r, g, b)` | a straight segment on the grid, via the shared `draw::line` |
 | `random16(n)` | a value in `[0, n)` |
 | `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
 | `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
@@ -70,7 +71,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 
 ### Wire contract — control declaration
 
-The controls are **derived from `source`** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `source`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line `source` round-trips.
+The controls are **derived from the script** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
 
 ## Pieces
 
@@ -78,8 +79,8 @@ The controls are **derived from `source`** (one per declared `uint8` control; th
 - **`MoonLiveBuiltins`** (`src/core/moonlive/MoonLiveBuiltins.h`) — the **neutral host-binding seam**: a `BuiltinTable` of `{name → descriptor}`, where a descriptor is either `Call` (a host C function pointer — a pure helper like `random16`) or `Inline` (a neutral opcode tag the backend emits inline — the hot-path buffer writers, no per-pixel call). The core owns no function names; it resolves a call against whatever the host registered.
 - **`MoonLiveCompiler`** (`src/core/moonlive/MoonLiveCompiler.h/.cpp`) — the **platform-independent front-end**: a recursive-descent lexer + expression parser that lowers each statement to the typed IR (`MoonLiveIr.h`). Pure (source + table in, IR out, deterministic). Knows the *language*, never an ISA and never a domain.
 - **`MoonLiveBuiltins_light`** (`src/light/moonlive/MoonLiveBuiltins_light.h`) — the **light-domain registration**: the only place the LED vocabulary lives. Registers the whole vocabulary above — Inline ops lowering to stores, and Calls into host helpers — plus the system variables each binding supplies. A different host (display, sensor) writes its own table; the core is unchanged.
-- **per-ISA assembler + lowering** (`src/platform/<target>/moonlive_asm_*` + `moonlive_lower_*`) — a tiny named-instruction MacroAssembler with label back-patching, and the IR→bytes lowering that drives it. Xtensa for the classic/S3 (`__XTENSA__`), the host ISA on desktop (arm64/x86-64). Adding an ISA is a new assembler + lowering; the front-end and IR are unchanged. (`emitFill`/`emitAnimatedFill` remain as the hand-encoded `fill` references the assembler's output is checked against.)
-- **`MoonLiveEffect`** (`src/light/moonlive/MoonLiveEffect.h`) — the **thin binding**: a first-class `EffectBase` carrying the `source` control, whose `tick()` delegates to the engine over its own `buffer()`. `compile(source, table, sysvars)` takes both host tables: the shared `lightBuiltins()`, and the system variables THIS binding supplies — `effectSysVars()` here, `modifierSysVars()` for a modifier, `layoutSysVars()` for a layout, which is what decides the names each kind of script can read and cannot declare. The engine is projectMM-agnostic; the binding is the only coupled layer.
+- **per-ISA assembler + lowering** (`src/platform/<target>/moonlive_asm_*` + `moonlive_lower_*`): a tiny named-instruction MacroAssembler with label back-patching, and the IR→bytes lowering that drives it. Xtensa for the classic/S3 (`__XTENSA__`), the host ISA on desktop (arm64/x86-64). Adding an ISA is a new assembler + lowering; the front-end and IR are unchanged. (`emitFill`/`emitAnimatedFill` remain as the hand-encoded `fill` references the assembler's output is checked against.) An ISA also brings its own **frame contract**, which the emitter honors before a single instruction matters: on Xtensa the top 32 bytes of every frame belong to the register-window spill hardware, enforced by a `static_assert` tied to the widest call emitted plus the structural codegen test ([why, and how it was found](../../history/lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug)).
+- **`MoonLiveEffect`** (`src/light/moonlive/MoonLiveEffect.h`) — the **thin binding**: a first-class `EffectBase` carrying the `script` control, whose `tick()` delegates to the engine over its own `buffer()`. `compile(source, table, sysvars)` takes both host tables: the shared `lightBuiltins()`, and the system variables THIS binding supplies — `effectSysVars()` here, `modifierSysVars()` for a modifier, `layoutSysVars()` for a layout, which is what decides the names each kind of script can read and cannot declare. The engine is projectMM-agnostic; the binding is the only coupled layer.
 
 ## Cross-domain wiring
 
@@ -95,9 +96,9 @@ MoonLive's native-codegen approach — compile a small C-like language straight 
 
 [unit_moonlive_fill](../../../test/unit/core/unit_moonlive_fill.cpp) runs the engine path in-process on the desktop host backend (`compile`/`run`, the animated routine, zero-lights, recompile, `free`, the `allocExec`/`writeExec`/`freeExec` round-trip, the buffer-shape guards). [unit_moonlive_ir](../../../test/unit/core/unit_moonlive_ir.cpp) pins the **behavioral golden** — a compiled `fill` and the hand-encoded reference render an identical buffer — plus setRGB's single-pixel write and the runtime bounds guard. [unit_moonlive_compiler](../../../test/unit/core/unit_moonlive_compiler.cpp) pins the expression grammar (`random16` in any/every argument slot, uint16 bounds), the parser diagnostics (no crash on malformed input), live recompile, and the **domain-neutral** property: with an empty builtin table the core knows *no* functions, and a host can register an arbitrary name against the same machinery.
 
-The grammar + bounds guard are verified live on the S3/Olimex (Xtensa) by editing the `source` control — the device compiles the expression on-chip and renders it.
+The grammar + bounds guard are verified live on the S3/Olimex (Xtensa) by saving a script file and naming it — the device compiles the expression on-chip and renders it.
 
-[scenario_MoonLiveEffect_livescript](../../../test/scenarios/light/scenario_MoonLiveEffect_livescript.json) exercises the effect **as a wired MoonModule** — what the unit tests can't reach: add it, live-edit the `source` to recolor (recompile), push a broken script (`MoonLive::compile` fails, frees the previous code, `MoonLiveEffect` reports the parse error in the status and renders dark — no crash), recover, resize the grid to 1×1 and back while rendering (the every-grid-size hard rule), then remove and re-add (exec memory re-acquired clean). It runs in-process on the desktop backend each commit, and the same JSON runs live over REST against the device backends. The Xtensa/RISC-V backends are validated by the live S3/P4 runs (a `MoonLiveEffect` on a Layer lights the grid from its `source`), which the desktop tests can't reach.
+[scenario_MoonLiveEffect_livescript](../../../test/scenarios/light/scenario_MoonLiveEffect_livescript.json) exercises the effect **as a wired MoonModule** — what the unit tests can't reach: add it, live-edit the script file to recolor (recompile), push a broken script (`MoonLive::compile` fails, frees the previous code, `MoonLiveEffect` reports the parse error in the status and renders dark — no crash), recover, resize the grid to 1×1 and back while rendering (the every-grid-size hard rule), then remove and re-add (exec memory re-acquired clean). It runs in-process on the desktop backend each commit, and the same JSON runs live over REST against the device backends. The Xtensa/RISC-V backends are validated by the live S3/P4 runs (a `MoonLiveEffect` on a Layer lights the grid from its script file), which the desktop tests can't reach.
 
 ## Source
 

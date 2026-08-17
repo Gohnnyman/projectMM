@@ -69,7 +69,11 @@ constexpr bool hasWiFi = true;
 // Ethernet PHY config type — desktop has no Ethernet (ethInit() stubs to false),
 // but platform.h declares setEthConfig(const EthPinConfig&) for every platform, so
 // the type must exist here too. Mirror the esp32 struct; the desktop stub ignores it.
-enum EthPhyType { ethNone = 0, ethLan8720 = 1, ethIp101 = 2, ethW5500 = 3 };
+// Kept in step with the ESP32 list (platform/esp32/platform_config.h) so core code can name a
+// PHY type without knowing which platform it compiles for. `ethYt8531`/`ethOpeneth` never occur
+// on desktop; they exist here so the NAMES resolve everywhere.
+enum EthPhyType { ethNone = 0, ethLan8720 = 1, ethIp101 = 2, ethW5500 = 3,
+                  ethYt8531 = 4, ethOpeneth = 5 };
 struct EthPinConfig {
     int phyType; int phyAddr;
     int mdcGpio; int mdioGpio; int rstGpio; int rmiiClockGpio; bool rmiiClockExtIn;
@@ -88,6 +92,11 @@ constexpr bool hasNamedNetInterfaces = true;
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).
 constexpr bool hasNetwork = hasWiFi || hasEthernet;
+
+// ethPhyIsFixed, true where the interface is a property of the PLATFORM rather than of the board,
+// so a persisted or catalog-supplied PHY type must not override it. The ESP32 side is where that
+// case is real (see its platform_config.h); desktop has no Ethernet to fix.
+constexpr bool ethPhyIsFixed = false;
 
 // Enough compute headroom for a per-pixel FLOAT algorithm — a raymarcher, a fractal, a feedback
 // loop that iterates per light. This is the ONE exception to the integer-only render-path rule in
@@ -132,7 +141,11 @@ constexpr bool hasImprov = false;
 // no `#if defined(__aarch64__)` outside src/platform/. A #define (not constexpr) so #include-
 // side test files can use it in `#if` — CLAUDE.md's `if constexpr` preference is for runtime
 // branches inside code, not preprocessor gating around whole TEST_CASEs.
-#if defined(__aarch64__)
+// MM_MOONLIVE_FORCE_NO_HOST_JIT makes an arm64 machine build as a backend-less one
+// (build_desktop.py --no-jit). Every x86-64 desktop already is one, so a test that wrongly
+// presumes a compile succeeds passes on an arm64 bench and fails only once CI runs it. The
+// override lets that be caught before a push instead of after.
+#if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
     #define MM_MOONLIVE_HAS_HOST_JIT 1
 #else
     #define MM_MOONLIVE_HAS_HOST_JIT 0

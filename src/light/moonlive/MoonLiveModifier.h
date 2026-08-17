@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/moonlive/MoonLive.h"
+#include "light/moonlive/MoonLiveScriptFile.h"
 #include "light/modifiers/ModifierBase.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstdio>
@@ -43,7 +44,9 @@ public:
     const char* tags() const override { return "📝"; }   // scripted
 
     void defineControls() override {
-        controls_.addTextArea("source", source_, sizeof(source_));
+        // The script NAME, not the script — the text lives in a file the UI loads and saves
+        // through /api/file. A module costs ~32 bytes here instead of a resident kilobyte.
+        controls_.addText("script", script_, sizeof(script_));
         // Every control the script declared. System variables (`x`/`y`/`z`, `width`/`height`/
         // `depth`, `t`) are not controls and never appear here, so there is nothing to filter out.
         uint8_t n = 0;
@@ -51,9 +54,7 @@ public:
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
             if (!slot) continue;
-            std::memcpy(ctrlNames_[i], decls[i].name, decls[i].nameLen);
-            ctrlNames_[i][decls[i].nameLen] = '\0';
-            controls_.addUint8(ctrlNames_[i], *slot, decls[i].min, decls[i].max);
+            controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
         }
     }
 
@@ -68,11 +69,13 @@ public:
         // defines — the binding writes their slots per call, and the compiler reserves the names so
         // a script cannot declare one and shadow the value it is being handed.
         moonlive::resetPrintBudget();
-        if (engine_.compile(source_, moonlive::lightBuiltins(),
-                            moonlive::modifierSysVars())) {
+        const char* err = nullptr;
+        uint32_t hash = 0;
+        if (moonlive::compileScriptFile(engine_, script_, moonlive::lightBuiltins(),
+                                        moonlive::modifierSysVars(), err, &hash)) {
             clearStatus();
         } else {
-            setStatus(engine_.error(), Severity::Error);
+            setStatus(err, Severity::Error);
         }
         rebuildControls();
         setDynamicBytes(engine_.heapBytes());
@@ -82,8 +85,8 @@ public:
         // again: setting the flag unconditionally makes the two call each other forever, the
         // mapping is rebuilt every frame, and the fixture renders nothing at all. Comparing the
         // compiled source is what breaks that cycle.
-        if (std::strcmp(source_, compiled_) != 0) {
-            std::snprintf(compiled_, sizeof(compiled_), "%s", source_);
+        if (hash != compiledHash_) {
+            compiledHash_ = hash;
             needsRebuild_ = true;
         }
     }
@@ -143,15 +146,16 @@ public:
         // treated as a first compile. Keeping it made a disabled-then-re-enabled modifier inert —
         // the Layer folds while the engine is empty, then prepare() recompiles, sees the same
         // source, and never asks for the rebuild that would apply it.
-        compiled_[0] = '\0';
+        compiledHash_ = 0;
         ModifierBase::release();
     }
 
     /// Replace the script. The next prepare() compiles it — the same path a UI edit takes, so a
     /// test and a user exercise identical code.
-    void setSource(const char* s) {
-        if (!s) return;
-        std::snprintf(source_, sizeof(source_), "%s", s);
+    void setScript(const char* name) {
+        if (!name) return;
+        std::snprintf(script_, sizeof(script_), "%s", name);
+        compiledHash_ = 0;          // a different file: whatever was compiled is not it
     }
 
 private:
@@ -160,15 +164,16 @@ private:
     // Default script — a mirror on x. Chosen because it is instantly readable on a bench strand
     // (the pattern runs the other way) and is a modifier people actually reach for, so a working
     // binding looks like something rather than like nothing.
-    char source_[moonlive::kMaxScriptBytes] = "setXYZ(0, width - 1 - x, y, z);";
+    // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
+    // "no script" and passes coordinates through untouched until one is named.
+    char script_[moonlive::kMaxScriptName + 1] = "";
 
-    // The source the CURRENT mapping was built from; a rebuild is needed only when it changes.
-    // sizeof(source_), never a literal: this is the string compared to decide whether to rebuild,
-    // so a copy too small to hold source_ truncates, never matches, and the mapping rebuilds every
-    // frame — the blank-screen loop the comparison exists to prevent.
-    char compiled_[sizeof(source_)] = {};
+    // FNV-1a of the text the loaded program was built from — 4 bytes in place of a second copy of
+    // the source. It answers the one question the rebuild check ever asked ("did this change"), and
+    // an unconditional rebuild here would make prepare() and the Layer's rebuild call each other
+    // forever, which is the blank-fixture loop the comparison exists to prevent.
+    uint32_t compiledHash_ = 0;
 
-    char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 
     bool needsRebuild_ = false;   // a recompile happened; the Layer's mapping is stale
     Coord3D box_{0, 0, 0};        // the logical box, from modifyLogicalSize

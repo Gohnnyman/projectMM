@@ -15,7 +15,7 @@
 
 namespace mm::moonlive {
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
 // arm64 template (assembled from fill_arm64.s, verified with clang/objdump). 18 words.
 // buf=x0, nLights=w1, cpl=w2. R/G/B live in `mov w4/w5/w6, #imm` at word indices 4,5,6.

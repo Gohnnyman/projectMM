@@ -206,6 +206,19 @@ constexpr bool hasEthernet = true;
 // hasWiFi — an Ethernet-only board (the MHC-WLED P4 shield) still has UDP.
 constexpr bool hasNetwork = hasWiFi || hasEthernet;
 
+// ethPhyIsFixed, true where the interface is a property of the PLATFORM rather than of the board,
+// so a persisted or catalog-supplied PHY type must not override it. False on real silicon, where
+// which PHY a board carries is exactly what deviceModels.json exists to say.
+//
+// Set under emulation: the emulator presents one MAC and no other kind exists to select, so a saved
+// ethType from an earlier session would otherwise pick hardware that is not there and leave the
+// device with no network at all.
+#ifdef CONFIG_ETH_USE_OPENETH
+constexpr bool ethPhyIsFixed = true;
+#else
+constexpr bool ethPhyIsFixed = false;
+#endif
+
 // Enough compute headroom for a per-pixel FLOAT algorithm — a raymarcher, a fractal, a feedback
 // loop that iterates per light. This is the ONE exception to the integer-only render-path rule in
 // coding-standards, and it is gated rather than assumed: an effect behind this constant is not
@@ -254,6 +267,9 @@ enum EthPhyType {
     ethIp101   = 2,  // RMII, IP101 PHY (Waveshare P4-NANO; managed component, P4-only)
     ethW5500   = 3,  // SPI, external W5500 module (ESP32-S3 boards — SE16, LightCrafter)
     ethYt8531  = 4,  // RGMII, YT8531 PHY (ESP32-S31 CoreBoard; on-chip 1 Gb EMAC, S31-only)
+    ethOpeneth = 5,  // QEMU's emulated OpenCores MAC, no silicon, only ever selected under emulation.
+                     // It is what gives an emulated device a real IP stack, and therefore the REST API
+                     // and the web UI: without it a QEMU run can only be watched on the serial console.
 };
 
 // Per-board Ethernet pin/PHY map — runtime-configurable (no longer a fixed
@@ -296,6 +312,15 @@ struct EthPinConfig {
 //    see above); rmiiClock* are unused for RGMII (clocks are set there too). See
 //    docs/reference/esp32-s31-coreboard.md for the schematic pin map.
 constexpr EthPinConfig ethConfigDefault =
+#ifdef CONFIG_ETH_USE_OPENETH
+    // Under emulation the interface is QEMU's MAC, whatever chip is being emulated. It has no pins
+    // and no PHY to address, so every field below is -1: ethInitOpeneth ignores them. This is a
+    // COMPILE-time branch because CONFIG_ETH_USE_OPENETH is only ever set by the qemu firmware ,
+    // there is no silicon that carries it, so no real board can take this path.
+    EthPinConfig{ /*phyType*/ ethOpeneth, /*addr*/ 1, /*mdc*/ -1, /*mdio*/ -1,
+                  /*rst*/ -1, /*rmiiClk*/ -1, /*extIn*/ false,
+                  /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 };
+#else
     isEsp32P4   ? EthPinConfig{ /*phyType*/ ethIp101, /*addr*/ 1, /*mdc*/ 31, /*mdio*/ 52,
                                 /*rst*/ 51, /*rmiiClk*/ 50, /*extIn*/ true,
                                 /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 }
@@ -308,6 +333,7 @@ constexpr EthPinConfig ethConfigDefault =
               :   EthPinConfig{ /*phyType*/ ethLan8720, /*addr*/ 0, /*mdc*/ -1, /*mdio*/ -1,
                                 /*rst*/ 5, /*rmiiClk*/ 17, /*extIn*/ false,
                                 /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 };
+#endif  // CONFIG_ETH_USE_OPENETH
 
 // OTA (esp_https_ota) is available on every ESP32 build — the OTA partition
 // layout in partitions/*.csv reserves app0/app1 unconditionally, and esp_https_ota

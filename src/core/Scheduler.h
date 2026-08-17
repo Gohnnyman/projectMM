@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 namespace mm {
@@ -66,7 +67,19 @@ public:
     void release();
 
     uint32_t elapsed() const;
+
+    /// Rebuild derived state across the whole tree — buffers, mappings, and any scripted module's
+    /// compiled program. Runs the work IMMEDIATELY on the calling thread.
+    ///
+    /// Prefer requestPrepareTree() from anything but the render loop: this walk runs a scripted
+    /// layout's JIT'd code, whose frame lives on the CALLING TASK's stack like any other function's.
+    /// Called from an HTTP handler it therefore executes on the small web-server task rather than
+    /// the render task the rest of the pipeline is budgeted against.
     void prepareTree();
+
+    /// Ask for a rebuild at the next frame boundary, on the render thread. Cheap and safe to call
+    /// from any task — it sets a flag; tick() does the work.
+    void requestPrepareTree() { prepareRequested_.store(true, std::memory_order_relaxed); }
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
@@ -124,6 +137,9 @@ private:
     static inline Scheduler* instance_ = nullptr;
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;
+    // ATOMIC: written from HTTP handlers (any task) and consumed on the render thread, so a
+    // plain bool is a data race — and a lost request means a script edit silently never applies.
+    std::atomic<bool> prepareRequested_{false};   // asked for off-thread; tick() honours it
     LoadAllFn loadAllHook_ = nullptr;
     NoteDirtyFn noteDirtyHook_ = nullptr;
     uint32_t startTime_ = 0;

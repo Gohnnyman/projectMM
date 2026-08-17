@@ -77,7 +77,7 @@ So it runs twice. On the first pass `addLight` counts; on the second it emits ea
 
 | control | what it does |
 |---|---|
-| `source` | the script; editing it recompiles and re-places the lights live |
+| `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
 
 Plus one control per `@control` the script declares.
 

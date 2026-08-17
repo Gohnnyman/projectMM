@@ -339,14 +339,23 @@ body.cards-resizing {
 
 /* The drag bar is docked-mode-hidden (only PiP needs a grab handle); the dock /
    close buttons stay available so a wide-screen user can pop the preview out. */
+/* The bar must fit ANY pane width (the PiP is 200px): the informational items (the status
+   text and the dot slider) shrink and ellipsize first, and the buttons never shrink, so the
+   dock/close controls stay reachable. Without this the nowrap status plus the slider's native
+   width pushed the buttons past the pane's overflow:hidden edge, and the control that restores
+   the preview was the very thing clipped out of view. */
 .preview-bar {
     display: flex;
     align-items: center;
     gap: 4px;
     padding: 2px 4px;
+    min-width: 0;
 }
-.preview-grip { display: none; color: var(--fg-muted); cursor: grab; user-select: none; font-size: 14px; }
-.preview-status { color: var(--fg-muted); font-size: 11px; opacity: 0.8; white-space: nowrap; }
+.preview-grip { display: none; color: var(--fg-muted); cursor: grab; user-select: none; font-size: 14px; flex-shrink: 0; }
+.preview-status {
+    color: var(--fg-muted); font-size: 11px; opacity: 0.8; white-space: nowrap;
+    flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
 /* Standard screen-reader-only pattern: present in the DOM (labels a control) but not shown. */
 .visually-hidden {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -363,6 +372,7 @@ body.cards-resizing {
     padding: 2px 4px;
     border-radius: 4px;
     opacity: 0.6;
+    flex-shrink: 0;      /* a control that shrinks away cannot be clicked */
 }
 .preview-bar-btn:hover { opacity: 1; color: var(--accent); }
 .preview-bar-btn.active { opacity: 1; color: var(--accent); }
@@ -371,6 +381,8 @@ body.cards-resizing {
    match the theme without a full custom track/thumb (recognisable + minimal). */
 .preview-dot {
     width: 70px;
+    flex: 0 1 70px;      /* shrinks (to min-width) before the buttons ever would */
+    min-width: 32px;
     height: 14px;
     margin: 0 2px;
     cursor: pointer;
@@ -404,8 +416,6 @@ body.cards-resizing {
 .mode-pip .preview-bar { cursor: grab; background: var(--bg-2); }
 .mode-pip #preview { max-height: none; }
 .mode-pip #preview-reset { top: 28px; width: 22px; height: 22px; font-size: 13px; }
-/* Expanded PiP: a larger floating view when the user taps ⤢ in PiP. */
-.mode-pip .preview-pane.expanded { width: min(80vw, 360px); }
 
 /* When the PiP is dismissed, hide the pane and show the re-show pill. */
 .workspace.preview-hidden .preview-pane { display: none; }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/platform.h"   // alloc/free — the emit buffer is heap, not stack
+
 #include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
 
 #include <cstdint>
@@ -16,18 +18,52 @@
 
 namespace mm::moonlive {
 
-enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, kRegCount };
+// Ten vregs, mapping to a2..a11. NOT a14/a15: with the windowed ABI a routine that opened its frame
+// with `entry` returns through `retw.n`, which reads the caller's linkage out of the TOP of the
+// window — so a12..a15 are not general registers here, they are the return path. Using a14/a15 as
+// vregs (and restoring saved copies into them after a callx8) corrupted that linkage, and `retw.n`
+// then returned to a garbage address: `Guru Meditation (IllegalInstruction)` the moment a scripted
+// LAYOUT ran, because addLight is the call that made the window rotate. a12/a13 stay scratch.
+enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9, kRegCount };
 using Label = uint8_t;
 enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */ };
 
+/// The vreg → machine-register map, for the device-codegen test. a2..a11 only: a12/a13 are call
+/// scratch and the store8 address register, and a14/a15 carry the routine's own retw.n linkage.
+const uint8_t* xtRegMap(uint8_t& count);
+
 class XtensaAssembler {
 public:
+    // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
+    // would double-free the buffer it emits into.
+    ~XtensaAssembler() { platform::free(buf_); }
+    /// `cap` is the code buffer's size, chosen per SCRIPT by the caller (codeCapFor) rather
+    /// than a shared constant — the backends differ by up to 1.9x on identical source, so one
+    /// number cannot fit them all. Defaults to the sanity bound for callers that emit a fixed
+    /// blob (emitFill) and have no token count to size from.
+    explicit XtensaAssembler(size_t cap = kCodeCap)
+        : kCap(cap), buf_(static_cast<uint8_t*>(platform::alloc(cap))) {}
+    XtensaAssembler(const XtensaAssembler&) = delete;
+    XtensaAssembler& operator=(const XtensaAssembler&) = delete;
+
     void finalize() { patchBranches(); }
     const uint8_t* bytes() const { return buf_; }
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
 
-    void prologue();                     // entry a1, 48  (must be the first instruction)
+    // --- the call frame ---
+    // The register allocator's overflow storage (core/moonlive/MoonLiveSpill.h). Xtensa already has
+    // a whole-routine frame from `entry a1, N`; prologue(slots) simply widens N to carry the spill
+    // slots above the bytes call() uses, so a spilling script costs one larger immediate and no
+    // extra instruction. slots == 0 keeps the frame exactly as it was, so nothing changes for a
+    // script that did not spill. Slots are addressed from a1, which the windowed ABI preserves
+    // across callx8 — the same property a nested or recursive script function will rely on.
+    void prologue(uint8_t slots = 0);    // entry a1, N  (must be the first instruction)
+    void spillStore(Reg r, uint8_t slot);
+    void spillLoad(Reg r, uint8_t slot);
+    void slotAddr(Reg d, uint8_t slot);   // d = &frame[slot] — a call's argument block
+    static constexpr uint8_t kMaxSpillSlots = kTotalSlots;   // parser/allocator range + the parked host args
+
     Label newLabel();
     void  bind(Label l);
 
@@ -45,8 +81,8 @@ public:
     void epilogue();                     // retw.n
 
 private:
-    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
-    static constexpr size_t kCap = kCodeCap;
+    // The emitted-code buffer's size, fixed for this object's life but chosen per script.
+    const size_t kCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 
@@ -55,7 +91,12 @@ private:
     void emit3(uint32_t w);              // wide (24-bit) instruction
     void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
 
-    uint8_t  buf_[kCap] = {};
+    // HEAP, not a member array: the assembler is a stack local in lowerToBytes, so a kCap-sized
+    // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
+    // frames. On a classic ESP32 that overflowed the task and faulted inside _xt_context_save
+    // (the plan named this: "buf_[kCap] inside the assembler, itself a stack local"). The buffer is
+    // scratch that ends in a memcpy to the caller's output, so nothing outlives the object.
+    uint8_t* buf_;
     size_t   len_ = 0;
     bool     overflow_ = false;
 
@@ -64,6 +105,10 @@ private:
     struct Fixup { size_t at; Label label; };   // all our branches use the 8-bit offset at byte+2
     Fixup    fixups_[kMaxFixups];
     uint8_t  fixupCount_ = 0;
+
+    // A conditional branch emitted as inverted-condition-over-`j`, so its reach is the jump's
+    // 18 bits rather than the branch's signed byte. See the .cpp for why that is not optional.
+    void branchRelaxed(uint8_t condNibble, Reg a, Reg b, Label l);
 
     void patchBranches();
 };

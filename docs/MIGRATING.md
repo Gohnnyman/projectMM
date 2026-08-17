@@ -20,6 +20,23 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### MoonLive scripts move to the filesystem (2026-08-11)
+
+A scripted module used to carry its script as a `source` textarea — a fixed 1 KB array per module, plus a second 1 KB copy to notice edits, **resident whether or not a script was loaded**. Six modules cost 13 KB of a classic ESP32's 320 KB for text that was mostly empty. The script now lives in a file under `/moonlive/`, and the module holds only its **name** (~32 bytes): it is read into a right-sized buffer to compile and freed immediately, so nothing script-sized stays in RAM. A script is bounded by the filesystem instead of by a 1 KB array.
+
+**Action: *re-add a module* — or, to keep your scripts, *update a file* first.**
+
+The `source` control no longer exists, so a persisted `"source"` value is an unknown key and is ignored (the robust-reader rule). A MoonLive module therefore boots with **no script**, reporting `no script — set the script name`, and renders nothing until one is named.
+
+| What | Why | What to do |
+|---|---|---|
+| Your script text | It was persisted under `source`, a control that is gone | **Copy it out before updating** — it is in `/.config/Layouts.json` (or `Effects.json`) as `"N.source"`. Save it as `/moonlive/<name>.mlv` via the File Manager, then set the module's `script` control to `<name>.mlv` |
+| The module's own controls | A script's `@control` sliders exist only once it has compiled, so they are absent until a script is named | Nothing — they reappear with the script, keeping their persisted values |
+
+`/moonlive/` is created on demand: naming a script is enough to make the folder appear, so a fresh device needs no setup.
+
+**Editing today** goes through the File Manager rather than the module's own card. Wiring the card's editor to the same file is a separate change.
+
 ### MoonLive: a script can no longer declare a name the engine supplies (2026-08-10)
 
 `t` (elapsed milliseconds), `width`/`height`/`depth` (the logical grid) and `x`/`y`/`z` (the light a modifier is transforming) are now **system variables** the engine supplies, so a script cannot declare one. Previously each binding faked them by prepending hidden declarations to the script, which meant an effect could declare its own `width` and quietly disagree with the layer it was drawing into.
@@ -32,7 +49,7 @@ A **layout** is the one script that legitimately used those names for its own co
 
 | What | Why | What to do |
 |---|---|---|
-| A scripted layout declaring `width`/`height` | The name is what the layout is defining, so the declaration is a compile error and no lights are placed | Edit the script's `source` control, renaming its own controls (the shipped `grid.mlv` uses `cols`/`rows`) |
+| A scripted layout declaring `width`/`height` | The name is what the layout is defining, so the declaration is a compile error and no lights are placed | Edit the `.mlv` file in the File Manager, renaming its own controls (the shipped `grid.mlv` uses `cols`/`rows`), then set the module's `script` control to that file |
 | A scripted **modifier** using `x`, `y` or `z` as a loop variable | A modifier IS handed a coordinate under those names, so they cannot also be counters there | Rename the loop variable to something the modifier is not handed (`i`, `n`) |
 
 Effects and modifiers need no change: they were already being handed these values, just through a preamble instead of by name. The error names the clash, and the module shows it on its card, so a broken script says why rather than failing silently.

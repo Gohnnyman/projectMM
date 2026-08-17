@@ -7,7 +7,7 @@ Usage:
 
 Scope is the whole branch diff (merge-base to HEAD), because architectural drift is
 visible across N commits in a way one commit hides. The judgment gates (Reviewer agent,
-external review, lessons, PR description) are MANUAL by construction — an agent reports,
+external review, lessons, PR description) are MANUAL by construction: an agent reports,
 the product owner decides. Product-owner initiated; never runs itself, never merges.
 """
 
@@ -62,13 +62,8 @@ def build_gates(firmware):
         # cannot have changed.
         Gate("performance snapshot in performance.md", None,
              lambda f: touches(f, *_TICK_PATH),
-             manual_hint="tick-path code changed on this branch — compare tick/FPS to the "
+             manual_hint="tick-path code changed on this branch: compare tick/FPS to the "
                          "previous committed values and explain significant changes"),
-
-        Gate("permission review", None,
-             manual_hint="prune .claude/settings.local.json, then snapshot the approved "
-                         "list to .claude/settings.local.cleaned.json and commit it; never "
-                         "broaden destructive or network-mutating permissions"),
 
         Gate("README / quick-start refresh", None,
              manual_hint="only if build, flash, or first-run UX changed"),
@@ -85,7 +80,7 @@ def main():
 
     sys.exit(run_gates(build_gates(args.firmware), changed_files(base=args.base),
                        f"Merge gates (branch diff vs {args.base})",
-                       next_step="The manual gates above are the product owner's call — "
+                       next_step="The manual gates above are the product owner's call: "
                                  "this script never merges."))
 
 

@@ -17,22 +17,38 @@ namespace mm::moonlive {
 
 // R0..R3 → a2..a5 (the windowed-ABI args); R4..R11 → a6..a11, a14, a15. a12/a13 are internal
 // scratch (store8 address, branchIfZero zero-reg, call result stash), so not in the pool.
-static constexpr uint8_t kXtReg[kRegCount] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15};
-static uint8_t ar(Reg r) { return kXtReg[r]; }
+static constexpr uint8_t kXtReg[kRegCount] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+// Map a vreg to its machine register. BOUNDS-CHECKED: the inline ops address their scratch as
+// `vregsUsed + n`, which walks off the end of the map when a program uses the whole file — and an
+// out-of-bounds read here returns whatever byte follows the array, so the emitted instruction names
+// a register chosen by accident. That produced a12 (a call8 window register AND this assembler's own
+// scratch) in a program that had no business touching it. Clamped to the last real entry so a
+// mistake is a wrong-but-safe register rather than undefined behaviour; the static_assert below and
+// the reservation in the lowerer are what keep it from happening at all.
+static uint8_t ar(Reg r) { return kXtReg[r < kRegCount ? r : kRegCount - 1]; }
+
+// The map, for the codegen test to assert against. Exposed rather than copied into the test, so the
+// property being checked cannot drift away from the map it is about.
+const uint8_t* xtRegMap(uint8_t& count) { count = kRegCount; return kXtReg; }
 
 // A scratch register that is ALSO a vreg silently corrupts values — see the RISC-V backend, where
 // kScratchFn aliased vreg R12 and every call returned a stale value. Checked here so the map can
 // never grow over a scratch.
 constexpr bool xtScratchOutsideMap() {
-    constexpr uint8_t scratch[] = {12, 13};
+    // a12/a13 are call() scratch; a14/a15 carry the retw.n return linkage of our own `entry` frame.
+    // Both classes are fatal as vregs, and the second one only faults once a script makes a CALL —
+    // which is why it survived every effect and killed every layout.
+    constexpr uint8_t scratch[] = {12, 13, 14, 15};
     for (uint8_t r : kXtReg) for (uint8_t s : scratch) if (r == s) return false;
     return true;
 }
-static_assert(xtScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
+static_assert(xtScratchOutsideMap(), "a scratch or window register is also a vreg — calls corrupt it");
 
 
 void XtensaAssembler::emit(const uint8_t* p, size_t n) {
-    if (len_ + n > kCap) { overflow_ = true; return; }
+    // !buf_ covers a failed allocation: the compile then fails cleanly at overflowed() instead
+    // of writing through a null pointer.
+    if (!buf_ || len_ + n > kCap) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 void XtensaAssembler::emit2(uint16_t w) {
@@ -42,10 +58,86 @@ void XtensaAssembler::emit3(uint32_t w) {
     const uint8_t b[3] = {uint8_t(w), uint8_t(w >> 8), uint8_t(w >> 16)}; emit(b, 3);
 }
 
-// entry a1, 48 — a 48-byte frame leaves room for the call8 window rotation (a routine with no
-// call would be fine with 32, but 48 is harmless and lets any program call a built-in).
-void XtensaAssembler::prologue() { emit3(0x006136u); }   // entry a1, 48
+// entry a1, N — a 48-byte frame leaves room for the call8 window rotation (a routine with no
+// call would be fine with 32, but 48 is harmless and lets any program call a built-in). call() uses
+// bytes 16..39 of it, so the register allocator's spill slots start at 48 and the frame simply grows
+// to hold them: on this ISA the whole-routine frame already exists, so spilling costs a bigger
+// immediate on ONE instruction and nothing else. a1 is the frame pointer, and the windowed ABI
+// preserves it across callx8 — which is why a slot read after a host call still finds its value, and
+// why this addressing carries over unchanged when script functions start nesting frames.
+// One word inside call()'s own save area for the return value: offsets 16..28 hold the saved
+// vregs, 32 is free, and a register cannot hold a result across a window rotation.
+static constexpr uint8_t  kResultSlot = 8;    // byte offset 32
+static constexpr uint16_t kFrameBase  = 48;   // first byte past the bytes call() reserves
+static constexpr uint16_t kSlotStride = 4;
+
+// The SAVE AREAS the windowed ABI reserves at the TOP of every call8-making routine's frame.
+// The window overflow handler (_WindowOverflow8, esp-idf components/xtensa/xtensa_vectors.S)
+// writes two 16-byte bands there, addressed from two different stack pointers:
+//   top 16 bytes    an OLDER frame's a0..a3, incl. its return address  (s32e aN, a9, -16..-4)
+//   next 16 bytes   this routine's OWN a4..a7                          (s32e aN, a0, -32..-20)
+// So the top 32 bytes are the hardware's, never ours. GCC obeys the same rule: every
+// call8-making function it compiles gets a frame of locals plus exactly 32.
+//
+// Both bands were bench-found separately. Reserving nothing put the parked host arguments under
+// the a0..a3 band: any script at all reset the board with IllegalInstruction and a DATA address
+// in A0, the return address overwritten. Reserving only 16 left the highest slot (the parked
+// arena pointer) under the a4..a7 band, which is written on ANY interrupt that lands while a
+// host call is in flight. Fast leaf calls (random16) rarely coincided with one and worked; the
+// deep libm chains of plasma (sin, beat) gave every tick a wide window to hit, and the arena
+// came back as an expression temp: LoadProhibited, A11=0, EXCVADDR=1. The corruption is spatial,
+// not timed, so no code sequence can dodge it; only the layout can. Never seen on RISC-V or
+// arm64: no register window, no hardware-owned frame bytes.
+//
+// The size follows the WIDEST call this assembler emits, and is derived from that instruction
+// below rather than written down twice: a wider call rotates the window further and its extra
+// save area grows to match (call4 spills nothing extra, call8 spills a4..a7, call12 also
+// a8..a11), so the reserve is 16 + 16 * (windows rotated - 1). A future callx12 with a hand-
+// held 32 here would put the top slot back under the spill band and resurrect this bug with
+// every static check still green.
+static constexpr uint32_t kCallxOpcode = 0x0000e0u;   // callx8 a8, the one call we emit
+
+/// Bytes the window-overflow handler may write at the top of a frame whose widest call is the
+/// given CALLX. The window increment is bits 4..5 of the opcode (1 = call4, 2 = call8,
+/// 3 = call12), and each step widens the rotation by four registers, so each adds another
+/// 16-byte quad above the base save area every `entry` frame already owns. call0 (increment 0)
+/// is not a case here: it makes no window rotation and this assembler cannot emit it.
+static constexpr uint32_t windowSaveReserveFor(uint32_t callxOpcode) {
+    return 16u * ((callxOpcode >> 4) & 0x3u);
+}
+static constexpr uint32_t kWindowSaveReserve = windowSaveReserveFor(kCallxOpcode);
+static_assert(kWindowSaveReserve == 32,
+              "callx width changed: the frame reserve moved with it, so re-check the frame "
+              "layout and MM_ISA_RESERVED_TOP in the codegen test before accepting this");
+
+// ENTRY is a BRI12-format instruction: op0=6, n=3, s=the base register, and the 12-bit immediate at
+// bits 12..23 counts EIGHT-byte units. `entry a1, 48` is therefore 0x006136.
+void XtensaAssembler::prologue(uint8_t slots) {
+    if (slots > kMaxSpillSlots) { overflow_ = true; return; }
+    // Rounded up to 8 because the immediate counts 8-byte units; the ABI additionally wants the
+    // frame 16-byte aligned, and 48 + a multiple of 16 keeps that. kWindowSaveReserve is added ON
+    // TOP of the slots so the highest slot still ends below the hardware's two save bands.
+    const uint32_t bytes =
+        (kFrameBase + uint32_t(slots) * kSlotStride + kWindowSaveReserve + 15u) & ~15u;
+    emit3(0x000136u | ((bytes / 8u) << 12));
+}
 void XtensaAssembler::epilogue() { emit2(0xf01du); }     // retw.n
+
+// s32i/l32i aR, a1, #off — the offset field counts 4-byte words, so a slot index maps straight onto
+// it. No teardown counterpart: `entry`'s frame is released by retw.n, so unlike the RISC-V and arm64
+// backends there is nothing for an epilogue to undo.
+void XtensaAssembler::spillStore(Reg r, uint8_t slot) {
+    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    const uint8_t off4 = static_cast<uint8_t>((kFrameBase + slot * kSlotStride) / 4);
+    const uint8_t b[3] = {uint8_t((ar(r) << 4) | 0x2), 0x61, off4};
+    emit(b, 3);
+}
+void XtensaAssembler::spillLoad(Reg r, uint8_t slot) {
+    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    const uint8_t off4 = static_cast<uint8_t>((kFrameBase + slot * kSlotStride) / 4);
+    const uint8_t b[3] = {uint8_t((ar(r) << 4) | 0x2), 0x21, off4};
+    emit(b, 3);
+}
 
 Label XtensaAssembler::newLabel() {
     if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
@@ -64,6 +156,16 @@ void XtensaAssembler::addFixup(size_t at, Label label) {
 // 65535) is built as hi8<<8 | lo8: movi aD,hi8 ; slli aD,aD,8 ; movi a13,lo8 ; add.n aD,aD,a13.
 // a13 is the assembler's reserved scratch (also kZero in branchIfZero); it holds no live vreg.
 // Single movi for the common 0..255 case. Without this, Const values >255 truncate to 8 bits.
+// The ADDRESS of a frame slot, for a host call that reads its arguments from the frame. The slots
+// already hold the arguments; the call passes where they start rather than the values, which is what
+// makes the number of arguments a memory question instead of a register one.
+void XtensaAssembler::slotAddr(Reg d, uint8_t slot) {
+    if (slot >= kMaxSpillSlots) { overflow_ = true; return; }
+    const uint32_t off = kFrameBase + uint32_t(slot) * kSlotStride;
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0xc0 | 1), uint8_t(off)};
+    emit(b, 3);                                            // addi aD, a1, #off
+}
+
 void XtensaAssembler::movImm(Reg d, int32_t imm) {
     const uint8_t dr = ar(d);
     // The wide `movi` field is 12-bit SIGNED (-2048..2047), which is the only encoding here that can
@@ -138,22 +240,41 @@ void XtensaAssembler::branchIfZero(Reg a, Label l) {
     static constexpr uint8_t kZero = 13;   // a13
     const uint8_t mv[3] = {uint8_t((kZero << 4) | 0x2), 0xa0, 0x00};   // movi a13, 0
     emit(mv, 3);
-    addFixup(len_, l);
-    const uint8_t br[3] = {uint8_t((ar(a) << 4) | 0x7), uint8_t((0xb << 4) | kZero), 0x00};  // bgeu a13, a
+    // Same relaxed form as the other branches: bltu a13, a, +3 (the inverse of bgeu) over a `j`.
+    const uint8_t br[3] = {uint8_t((ar(a) << 4) | 0x7), uint8_t((0x3 << 4) | kZero), 0x02};
     emit(br, 3);
+    addFixup(len_, l);
+    const uint8_t j[3] = {0x06, 0x00, 0x00};
+    emit(j, 3);
+}
+// A conditional branch to `l`, emitted as the INVERTED condition over an unconditional jump:
+//
+//     b<inv> aA, aB, +3      ; skip the jump when the branch is NOT taken
+//     j      l               ; 18-bit displacement — reaches anywhere in a script
+//
+// Xtensa's conditional branches carry a single SIGNED BYTE of displacement (±127), which a loop body
+// outgrows easily once spill traffic is in it — grid.mlv needed 177. Truncating that silently
+// retargets the branch into the middle of the program, so the choice is relax or refuse. This is the
+// textbook relaxation every compiler does (GCC and LLVM emit the short form and rewrite the ones that
+// do not fit); the fixed six-byte form skips the iterate-to-convergence step, which is worth a few
+// bytes per branch on a cold path in exchange for not having to reason about shifting offsets.
+// The 3-byte `j` keeps its own fixup, and the inverted branch's +3 is already correct as emitted.
+void XtensaAssembler::branchRelaxed(uint8_t condNibble, Reg a, Reg b, Label l) {
+    // The inverted condition, skipping the 3-byte `j` that follows. Xtensa branch displacements are
+    // relative to PC+4 (the same rule patchBranches uses), so clearing a 3-byte instruction is +2.
+    // bne(0x9) <-> beq(0x1); bgeu(0xb) <-> bltu(0x3).
+    const uint8_t inv = condNibble == 0x9 ? 0x1 : condNibble == 0x1 ? 0x9
+                      : condNibble == 0xb ? 0x3 : 0xb;
+    const uint8_t br[3] = {uint8_t((ar(b) << 4) | 0x7), uint8_t((inv << 4) | ar(a)), 0x02};
+    emit(br, 3);
+    addFixup(len_, l);
+    const uint8_t j[3] = {0x06, 0x00, 0x00};      // j — the 18-bit offset is patched in
+    emit(j, 3);
 }
 // bgeu aA, aB, l  (skip if a >= b, unsigned)
-void XtensaAssembler::branchGeU(Reg a, Reg b, Label l) {
-    addFixup(len_, l);
-    const uint8_t bytes[3] = {uint8_t((ar(b) << 4) | 0x7), uint8_t((0xb << 4) | ar(a)), 0x00};
-    emit(bytes, 3);
-}
+void XtensaAssembler::branchGeU(Reg a, Reg b, Label l) { branchRelaxed(0xb, a, b, l); }
 // bne aA, aB, l
-void XtensaAssembler::branchNe(Reg a, Reg b, Label l) {
-    addFixup(len_, l);
-    const uint8_t bytes[3] = {uint8_t((ar(b) << 4) | 0x7), uint8_t((0x9 << 4) | ar(a)), 0x00};
-    emit(bytes, 3);
-}
+void XtensaAssembler::branchNe(Reg a, Reg b, Label l) { branchRelaxed(0x9, a, b, l); }
 
 // Windowed call to a host built-in: d = fn(a). CALL8 rotates the window by 8, so the arg goes
 // in a10 and the result returns in a10. The caller's a2..a7 are preserved by the window for
@@ -165,15 +286,12 @@ void XtensaAssembler::branchNe(Reg a, Reg b, Label l) {
 // byte-by-byte (movi/slli/add) — no l32r literal pool.
 void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Save the rotate-out scratch a8, a9, a11 (a10 will carry arg→result).
-    auto s32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x61,off4}; emit(b,3); };
-    auto l32i = [&](uint8_t r, uint8_t off4){ const uint8_t b[3]={uint8_t((r<<4)|2),0x21,off4}; emit(b,3); };
+    auto s32i = [&](uint8_t r, uint8_t off4){ const uint8_t enc[3]={uint8_t((r<<4)|2),0x61,off4}; emit(enc,3); };
+    auto l32i = [&](uint8_t r, uint8_t off4){ const uint8_t enc[3]={uint8_t((r<<4)|2),0x21,off4}; emit(enc,3); };
     s32i(8, 4); s32i(9, 5); s32i(11, 7);                  // [a1+16]=a8, [a1+20]=a9, [a1+28]=a11
-    // a14/a15 are vregs R10/R11 (kXtReg), and CALL8 rotates the window out from under them — so a
-    // value live across a call in either was destroyed. Reachable on the SHIPPED default: grid.mlv
-    // is a nested loop (11 vregs, so R10 is in use) whose body calls addLight. The entry frame is 48
-    // bytes and call() uses 16/20/24/28, so 32/36 are free.
-    s32i(14, 8); s32i(15, 9);                             // [a1+32]=a14, [a1+36]=a15
-
+    // a14/a15 are deliberately NOT saved here, because they are no longer vregs (kXtReg): they carry
+    // this routine's own return linkage for retw.n, so writing saved copies back into them after the
+    // call is what broke every scripted layout. See the Reg enum for the failure that produced.
     s32i(10, 6);                                          // [a1+24]=a10 — a vreg (R8) call8 rotates out
 
     // The three args into a10/a11/a12 — call8 shifts the window by 8, so the callee reads them as
@@ -188,29 +306,56 @@ void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     emit2(uint16_t((uint32_t(ar(b)) << 8) | (11 << 4) | 0xd));   // mov a11, argB
     emit2(uint16_t((13u << 8) | (10 << 4) | 0xd));               // mov a10, a13
 
+    // The fn address is assembled a byte at a time, which needs a TEMPORARY alongside a8, and the
+    // choice of temporary is load-bearing, because call8 rotates the window: caller a8..a15 become
+    // callee a0..a7. So caller a9 IS THE CALLEE'S STACK POINTER (a1). Building the address through a9
+    // handed the callee a fragment of a function pointer as its sp; its own `entry a1, N` then sized a
+    // frame from garbage and stored through it, landing anywhere in memory, including over this
+    // routine's own parked host arguments. That is the null arena pointer a script later read
+    // (LoadProhibited at EXCVADDR 0x1, arena register zero), and it only bit scripts whose loop makes
+    // a call AND reads a system variable, because both halves have to be present to notice.
+    //
+    // a13 is the safe temporary: it maps to callee a5, the fourth argument slot, which a three-argument
+    // host function never reads. It is already this assembler's kTmp for exactly this reason.
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
-    auto moviA8 = [&](uint8_t v){ const uint8_t b[3]={0x82,0xa0,v}; emit(b,3); };
-    auto moviA9 = [&](uint8_t v){ const uint8_t b[3]={0x92,0xa0,v}; emit(b,3); };
-    auto slliA8 = [&]{ const uint8_t b[3]={0x80,0x88,0x11}; emit(b,3); };
-    auto addA8A9 = [&]{ emit2(0x889au); };
+    auto moviA8  = [&](uint8_t v){ const uint8_t enc[3]={0x82,0xa0,v}; emit(enc,3); };
+    auto moviA13 = [&](uint8_t v){ const uint8_t enc[3]={0xd2,0xa0,v}; emit(enc,3); };
+    auto slliA8  = [&]{ const uint8_t enc[3]={0x80,0x88,0x11}; emit(enc,3); };
+    auto addA8A13 = [&]{ emit2(0x88dau); };   // add.n a8, a8, a13 = (8<<12)|(8<<8)|(13<<4)|0xa
     moviA8(uint8_t(addr >> 24));
-    slliA8(); moviA9(uint8_t(addr >> 16)); addA8A9();
-    slliA8(); moviA9(uint8_t(addr >> 8));  addA8A9();
-    slliA8(); moviA9(uint8_t(addr));       addA8A9();
-    emit3(0x0000e0u | (8u << 8));                          // callx8 a8  → result in a10
-    // stash result (a10) in a12 (not in the saved set), restore a8/a9/a11, then dst = a12.
-    emit2(uint16_t((10u << 8) | (12u << 4) | 0xd));        // mov a12, a10
+    slliA8(); moviA13(uint8_t(addr >> 16)); addA8A13();
+    slliA8(); moviA13(uint8_t(addr >> 8));  addA8A13();
+    slliA8(); moviA13(uint8_t(addr));       addA8A13();
+    emit3(kCallxOpcode | (8u << 8));                       // callx8 a8  → result in a10
+    // Park the result in the FRAME, not in a register.
+    //
+    // It used to be stashed in a12 — but call8 rotates the window by eight, so the callee's a4 IS
+    // our a12: the callee overwrites the stash with its own second argument while it runs, and the
+    // "result" moved to the destination afterwards is whatever the callee happened to leave there.
+    // a12/a13 are safe as scratch only BEFORE the call, never across it. Measured: A0 = 0x100 in the
+    // crash dump — nLights, a script value that reached the return-address register this way.
+    // Slot kResultSlot sits in the bytes call() already owns, so this costs no extra frame.
+    s32i(10, kResultSlot);                                 // [a1+kResultSlot*4] = result
     l32i(8, 4); l32i(9, 5); l32i(10, 6); l32i(11, 7);
-    l32i(14, 8); l32i(15, 9);
-    emit2(uint16_t((12u << 8) | (uint32_t(ar(d)) << 4) | 0xd));   // mov aDst, a12
+    l32i(ar(d), kResultSlot);                              // dst = the parked result
 }
 
 void XtensaAssembler::patchBranches() {
+    // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
+    // stated rather than left to the reader to derive from fixupCount_ being 0.
+    if (!buf_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         if (labelPos_[f.label] < 0) continue;                                  // unbound label — leave as-is (overflow_ already failed the compile)
-        int32_t off = labelPos_[f.label] - (static_cast<int32_t>(f.at) + 4);   // verified rule
-        buf_[f.at + 2] = static_cast<uint8_t>(off & 0xff);                     // offset byte at +2
+        // Every fixup now points at a `j`, whose displacement is relative to the byte AFTER the
+        // instruction and occupies bits 6..23 — eighteen signed bits, so it reaches any script the
+        // code buffer can hold. Still range-checked: refusing beats silently retargeting a jump.
+        const int32_t off = labelPos_[f.label] - (static_cast<int32_t>(f.at) + 4);
+        if (off < -131072 || off > 131071) { overflow_ = true; return; }
+        const uint32_t enc = 0x06u | ((static_cast<uint32_t>(off) & 0x3ffffu) << 6);
+        buf_[f.at + 0] = static_cast<uint8_t>(enc);
+        buf_[f.at + 1] = static_cast<uint8_t>(enc >> 8);
+        buf_[f.at + 2] = static_cast<uint8_t>(enc >> 16);
     }
 }
 

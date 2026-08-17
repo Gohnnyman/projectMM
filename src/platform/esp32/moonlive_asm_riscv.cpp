@@ -15,7 +15,12 @@ namespace mm::moonlive {
 // scratch (store8 address, call address build + result stash), not a vreg.
 static constexpr uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
                                               16, 17};
-static uint8_t xr(Reg r) { return kRvReg[r]; }
+// BOUNDS-CHECKED. The inline ops address their scratch as `vregsUsed + n`, so an index one past the
+// map is reachable whenever the reservation and the map disagree — and an out-of-bounds read returns
+// whatever byte follows the array, making the emitted instruction name a register chosen by
+// accident. Clamping turns that into a wrong-but-safe register instead of undefined behaviour; the
+// static_assert below and the lowerer's reservation are what stop it happening at all.
+static uint8_t xr(Reg r) { return kRvReg[r < kRegCount ? r : kRegCount - 1]; }
 // t6 is the ONLY caller-saved register outside kRvReg, so it is the only safe scratch: every other
 // free register is callee-saved (s0/s1, s6..s11) and would have to be preserved. Both uses below are
 // transient — store8 consumes it within two instructions, and call() finishes with it before any
@@ -35,7 +40,7 @@ constexpr bool rvScratchOutsideMap() {
 static_assert(rvScratchOutsideMap(), "a scratch register is also a vreg — calls will corrupt it");
 
 void RiscvAssembler::emit32(uint32_t w) {
-    if (len_ + 4 > kCap) { overflow_ = true; return; }
+    if (!buf_ || len_ + 4 > kCap) { overflow_ = true; return; }
     buf_[len_++] = uint8_t(w); buf_[len_++] = uint8_t(w >> 8);
     buf_[len_++] = uint8_t(w >> 16); buf_[len_++] = uint8_t(w >> 24);
 }
@@ -81,6 +86,58 @@ static uint32_t encBranch(uint8_t rs1, uint8_t rs2, uint8_t f3, int32_t off) {  
     uint32_t o = uint32_t(off) & 0x1fff;
     return (((o >> 12) & 1) << 31) | (((o >> 5) & 0x3f) << 25) | (rs2 << 20) | (rs1 << 15) |
            (f3 << 12) | (((o >> 1) & 0xf) << 8) | (((o >> 11) & 1) << 7) | 0x63;
+}
+
+// --- the call frame: the register allocator's overflow storage ---------------------------------
+//
+// s0/fp (x8) is the standard RISC-V frame pointer: callee-saved, outside kRvReg and outside the t6
+// scratch, so nothing this backend emits disturbs it — and the routine saves and restores it, which
+// is what makes using a callee-saved register legal here (the reason the map itself stops at the
+// caller-saved set, see moonlive_asm_riscv.h).
+//
+// Layout, sp growing down: sp = s0 - frameBytes, saved s0 at [s0-4], slot n at [s0 - frameBytes + n*4].
+static constexpr uint8_t kFramePtr = 8;   // s0/fp
+
+void RiscvAssembler::prologue(uint8_t slots) {
+    if (slots == 0) return;                        // no spilling: no frame, no cost
+    if (slots > kMaxSpillSlots) { overflow_ = true; return; }
+    // 16-byte aligned, as the RISC-V calling convention requires of sp at a call boundary — an
+    // unaligned sp is the kind of thing that survives every test and faults inside a callee.
+    const uint16_t bytes = static_cast<uint16_t>((8 + slots * 4 + 15) & ~15);
+    frameBytes_ = bytes;
+    emit32(encAddi(2, 2, -int32_t(bytes)));        // addi sp, sp, -bytes
+    emit32(encSw(kFramePtr, 2, bytes - 4));        // sw s0, bytes-4(sp)
+    emit32(encAddi(kFramePtr, 2, bytes));          // addi s0, sp, bytes   (s0 = the caller's sp)
+}
+void RiscvAssembler::epilogue() {
+    if (frameBytes_ != 0) {
+        emit32(encLw(kFramePtr, 2, frameBytes_ - 4));   // lw s0, bytes-4(sp)
+        emit32(encAddi(2, 2, frameBytes_));             // addi sp, sp, bytes
+    }
+    ret();
+}
+// sw/lw against s0. The offset is NEGATIVE (slots live below the frame pointer), which encAddi's
+// 12-bit signed immediate and the S/I-type immediates handle directly: the whole slot file is a few
+// hundred bytes, far inside the +/-2048 the field reaches.
+void RiscvAssembler::spillStore(Reg r, uint8_t slot) {
+    // No frame means prologue() bailed (slots == 0, or past kMaxSpillSlots). Emitting anyway would
+    // address s0 + slot*4 — ABOVE the frame pointer, i.e. the CALLER's stack. Refuse instead.
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
+    emit32(encSw(xr(r), kFramePtr, -int32_t(frameBytes_) + slot * 4));
+}
+void RiscvAssembler::spillLoad(Reg r, uint8_t slot) {
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
+    emit32(encLw(xr(r), kFramePtr, -int32_t(frameBytes_) + slot * 4));
+}
+
+// The ADDRESS of a frame slot, for a host call that reads its arguments from the frame. The slots
+// already hold the arguments; the call passes where they start rather than the values, which is what
+// makes the number of arguments a memory question instead of a register one.
+void RiscvAssembler::slotAddr(Reg d, uint8_t slot) {
+    if (slot >= kMaxSpillSlots || frameBytes_ == 0) { overflow_ = true; return; }
+    // Against s0, the SAME base spillStore/spillLoad use. Computing it from sp instead lands
+    // frameBytes_ below the frame (s0 == sp + frameBytes_), so the callee writes off the end of it.
+    emit32(encAddi(xr(d), kFramePtr, -int32_t(frameBytes_) + slot * 4));   // addi xD, s0, off
 }
 
 void RiscvAssembler::movImm(Reg d, int32_t imm) {
@@ -169,6 +226,9 @@ void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 void RiscvAssembler::ret() { emit32(0x00008067u); }    // ret = jalr x0, ra, 0
 
 void RiscvAssembler::patchBranches() {
+    // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
+    // stated rather than left to the reader to derive from fixupCount_ being 0.
+    if (!buf_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         if (labelPos_[f.label] < 0) continue;                  // unbound label — leave as-is (overflow_ already failed the compile)

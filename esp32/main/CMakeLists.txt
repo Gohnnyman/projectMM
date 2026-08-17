@@ -12,6 +12,7 @@ idf_component_register(
         "../../src/core/Scheduler.cpp"
         "../../src/core/moonlive/MoonLive.cpp"
         "../../src/core/moonlive/MoonLiveCompiler.cpp"
+        "../../src/core/moonlive/MoonLiveSpill.cpp"
         "../../src/platform/esp32/platform_esp32.cpp"
         "../../src/platform/esp32/moonlive_emit.cpp"
         "../../src/platform/esp32/moonlive_asm_xtensa.cpp"

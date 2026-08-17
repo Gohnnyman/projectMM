@@ -32,6 +32,16 @@
 namespace mm::platform {
 
 uint32_t millis() MM_NONBLOCKING;
+
+/// An opaque identity for the calling thread/task, stable for its lifetime and distinct between
+/// concurrent ones. Zero is never returned, so a caller can use it as "no thread recorded".
+///
+/// Exists because C++ `thread_local` is NOT usable on the ESP32: the compiler reaches TLS through
+/// the THREADPTR special register, and a FreeRTOS task that was not created with TLS initialised
+/// has THREADPTR = 0 — so the access dereferences a small offset from null (0xfffffff0 was the
+/// measured faulting address) and dies inside the exception handler as a Double exception. This is
+/// the portable seam for "which thread am I", used where per-thread state is genuinely needed.
+uintptr_t currentThreadId() MM_NONBLOCKING;
 uint32_t micros() MM_NONBLOCKING;
 
 // Test-only override: when set to non-zero, millis() returns this value instead
@@ -1164,6 +1174,14 @@ bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
 // shared per-buffer capacity. See i80Ws2812Buffer for the single-buffer-degrade contract.
 uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer);
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
+
+// The most bytes Parlio can send in ONE transfer — a HARDWARE ceiling, not a heap budget, so it
+// needs no handle and holds before anything is allocated. A caller sizes a frame against it to
+// refuse an impossible configuration up front instead of failing the bus init.
+//
+// 0 means NO BOUND (the dmaBudgetBytes contract), not "zero bytes usable" — it is what a host
+// without Parlio returns, and what a caller reads as "nothing to check against".
+size_t parlioMaxTransferBytes();
 
 // Start the autonomous DMA transfer of buffer `buffer`'s first `bytes`; pair
 // with parlioWs2812Wait on the SAME buffer. No refill deadline once started

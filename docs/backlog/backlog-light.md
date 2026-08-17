@@ -292,6 +292,31 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
 - **A scripted modifier that reshapes the grid** (2026-08-10). `ModifierBase::modifyLogicalSize` lets a modifier change the logical `width`/`height`/`depth` — a Multiply kaleidoscope grows the grid, a crop shrinks it — and a compiled modifier uses it. A SCRIPTED one cannot: system variables are read-only, so `MoonLiveModifier` writes the box in and never reads it back. Needs a writable system variable — the binding reads the slots after the script returns and reports the result through `modifyLogicalSize` — which is a new `SysVarKind` (or a mutable flag on `SysVar`) plus the read-back, not a new builtin. Until then a scripted modifier can fold coordinates but not resize the grid they live in.
 
+- **Editing a script's CONTENTS through /api/file does not recompile it** (2026-08-14). A binding
+  caches `compiledHash_` and skips the compile while it is non-zero; the hash is cleared when the
+  script NAME changes (`onControlChanged`, `setScript`), but a write to `/moonlive/<same-name>` via
+  the File Manager leaves it set, so the layout keeps running the previous code until the name is
+  touched or the device reboots. `MoonLiveModifier` does not have this: it re-hashes the source on
+  every prepare and compares, which is the shape to copy.
+
+  The fix belongs at the filesystem seam rather than in the binding — a write under `/moonlive/`
+  invalidates whatever compiled from that path — so it is a small core/HTTP change, not a MoonLive
+  one. Pre-existing, not introduced by the stack-machine work.
+
+- **MoonLive has no x86-64 backend — scripts do not run on Windows** (2026-08-14). The desktop
+  assembler (`moonlive_asm_host.cpp`) is arm64-only, so `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86-64
+  Windows, x86-64 Linux and Intel macOS. `compileSource` fails cleanly there and scripted modules
+  render dark — no crash, but no MoonLive either, on the desktop platform most users run. Apple
+  Silicon macOS is the only desktop where scripts work today, which is why this stayed invisible:
+  the bench is arm64 and CI's x86-64 runners gate their MoonLive tests on the macro.
+
+  Closing it is one more backend behind the unchanged IR (the seam's whole promise): an
+  `x86_64` branch alongside the three that exist. It is the widest ISA of the four — variable-length
+  encoding, and a different calling convention per OS (System V on Linux/macOS, Microsoft x64 on
+  Windows), so the `call()` save-set and argument registers differ from everything written so far.
+  `disasm.py --isa x86_64` should land with it, since no test executes emitted bytes for any backend
+  but the host's.
+
 - **Drain MoonLive's `print()` through a queue** (2026-08-09). `print(v)` writes to serial directly, and an EFFECT script runs on the render tick — so a print inside one blocks the frame for as long as the UART takes. The burst cap bounds it (a handful of writes per compile, then a compare and a return), but bounded is not free, and `tick()` is annotated `MM_NONBLOCKING`.
 
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.

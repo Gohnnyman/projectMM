@@ -7,6 +7,7 @@
 #include "platform/platform.h"
 
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 // MoonLive Stage 1a: the load-bearing slice — emit a fixed-color fill as native code,
@@ -231,5 +232,85 @@ TEST_CASE("MoonLive controls: free() releases the arena (no stale slot after rel
     REQUIRE(eng.compile("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);", kCtrlTable, kSys));
     REQUIRE(eng.controlSlot(0) != nullptr);
     CHECK(*eng.controlSlot(0) == 5);                     // re-seeded from default
+}
+
+// line(x1, y1, x2, y2, r, g, b), the SEVEN-argument builtin and the widest call a script makes.
+// This is the behavioral pin for the args-array call ABI at an arity past the register file:
+// all seven values must arrive intact, in order, through the same staging every backend uses.
+TEST_CASE("MoonLive line() draws a horizontal segment through the installed canvas") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("line(1, 0, 3, 0, 10, 20, 200);", kCtrlTable, kSys));
+    REQUIRE(eng.ok());
+
+    // A 5-wide single-row canvas, sentinel-filled so an errant write shows.
+    std::vector<uint8_t> buf(5 * 3, 0xAB);
+    moonlive::setDrawCanvas(draw::Canvas{buf.data(), buf.size(), Coord3D{5, 1, 1}, 3});
+    eng.run(buf.data(), 5, 3, /*t*/ 0);
+    moonlive::setDrawCanvas({});
+
+    CHECK(buf[0*3] == 0xAB);                             // before the segment: untouched
+    for (int i = 1; i <= 3; i++) {
+        CHECK(buf[i*3 + 0] == 10);
+        CHECK(buf[i*3 + 1] == 20);
+        CHECK(buf[i*3 + 2] == 200);
+    }
+    CHECK(buf[4*3] == 0xAB);                             // after the segment: untouched
+}
+
+// No canvas installed (a layout or modifier host) → every draw call must no-op, not write
+// through a stale or foreign pointer. The detach after each run is what this pins.
+TEST_CASE("MoonLive line() without a canvas draws nothing") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("line(0, 0, 4, 0, 255, 255, 255);", kCtrlTable, kSys));
+    std::vector<uint8_t> buf(5 * 3, 0xAB);
+    eng.run(buf.data(), 5, 3, 0);                        // canvas never installed
+    for (uint8_t v : buf) CHECK(v == 0xAB);
+}
+
+// A binding that installs nothing (a modifier) must not consume one of the two per-thread slots
+// just by RUNNING a script that draws. Slots are claimed on install and released on detach, so a
+// claim taken on the READ path is never given back. Two such threads exhaust the table, and from
+// then on every install silently fails: the render thread's line() goes dark with nothing to see
+// but a stopped drawing. Two threads is the smallest case that shows it, because a single thread
+// re-uses the slot it already leaked.
+TEST_CASE("a script that draws with nothing installed does not consume a per-thread slot") {
+    const char* kDraws = "line(0, 0, 4, 0, 255, 255, 255);";
+    auto runWithNothingInstalled = [&] {
+        moonlive::MoonLive eng;
+        REQUIRE(eng.compile(kDraws, kCtrlTable, kSys));
+        std::vector<uint8_t> buf(5 * 3, 0xAB);
+        eng.run(buf.data(), 5, 3, 0);        // no canvas, no sink: the modifier's shape
+        for (uint8_t v : buf) CHECK(v == 0xAB);   // and it draws nothing
+    };
+    // CONCURRENT, not sequential: joined threads can be handed the same identity by the OS, and
+    // one identity claims one slot. Two live at once is what fills the table.
+    std::thread a(runWithNothingInstalled), b(runWithNothingInstalled);
+    a.join();
+    b.join();
+
+    // Both slots must still be claimable. A leaked claim from either thread above would make this
+    // install a no-op and the canvas would stay at its sentinel.
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(kDraws, kCtrlTable, kSys));
+    std::vector<uint8_t> canvasBuf(5 * 3, 0xAB);
+    moonlive::setDrawCanvas(draw::Canvas{canvasBuf.data(), canvasBuf.size(), Coord3D{5, 1, 1}, 3});
+    eng.run(canvasBuf.data(), 5, 3, 0);
+    moonlive::setDrawCanvas({});
+    for (int i = 0; i < 5; i++) CHECK(canvasBuf[i*3] == 255);   // the install took effect
+}
+
+// Script arithmetic is unsigned, so a coordinate that went "negative" arrives as a huge value.
+// The builtin clamps endpoints to the canvas, which keeps the draw instant and on-grid instead
+// of sending the line walker on a billions-of-steps march (robustness: any input, degrade
+// visibly, never stall the render thread).
+TEST_CASE("MoonLive line() clamps out-of-range endpoints to the canvas edge") {
+    moonlive::MoonLive eng;
+    // x2 = 0 - 1 wraps to the full unsigned word; the clamp pins it to the last column.
+    REQUIRE(eng.compile("line(0, 0, 0 - 1, 0, 7, 8, 9);", kCtrlTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0xAB);
+    moonlive::setDrawCanvas(draw::Canvas{buf.data(), buf.size(), Coord3D{4, 1, 1}, 3});
+    eng.run(buf.data(), 4, 3, 0);
+    moonlive::setDrawCanvas({});
+    for (int i = 0; i < 4; i++) CHECK(buf[i*3 + 0] == 7);   // the whole row drawn, promptly
 }
 #endif  // MM_MOONLIVE_HAS_HOST_JIT

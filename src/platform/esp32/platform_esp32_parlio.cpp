@@ -265,6 +265,8 @@ uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer) {
     return (st && buffer < 2) ? st->buf[buffer] : nullptr;
 }
 
+size_t parlioMaxTransferBytes() { return kParlioMaxTransferBytes; }
+
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h) {
     auto* st = static_cast<ParlioState*>(h.impl);
     return st ? st->cap : 0;
@@ -410,6 +412,7 @@ bool parlioWs2812Init(ParlioWs2812Handle&, const uint16_t*, uint8_t, uint32_t, s
 }
 uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle&, uint8_t) { return nullptr; }
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle&) { return 0; }
+size_t parlioMaxTransferBytes() { return 0; }   // no Parlio here → no bound (the budget-0 contract)
 bool parlioWs2812Transmit(ParlioWs2812Handle&, uint8_t, size_t) { return false; }
 bool parlioWs2812Wait(ParlioWs2812Handle&, uint8_t, uint32_t) { return true; }
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle&) { return 0; }

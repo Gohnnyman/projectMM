@@ -71,6 +71,17 @@ else()
     endif()
 endif()
 
+# MM_MOONLIVE_NO_HOST_JIT builds this machine the way a desktop with NO MoonLive backend sees the
+# code. Every x86-64 desktop is one (Windows, Linux, Intel macOS ship no backend), so a test that
+# wrongly presumes a compile succeeds passes on the arm64 bench and fails only once CI runs it.
+# A compile DEFINITION rather than a CMAKE_CXX_FLAGS entry: this file configures warnings through
+# add_compile_options, which does not consume that variable, so a flag passed there would reach the
+# cache and never the compiler.
+option(MM_MOONLIVE_NO_HOST_JIT "Build as a desktop with no MoonLive backend" OFF)
+if(MM_MOONLIVE_NO_HOST_JIT)
+    add_compile_definitions(MM_MOONLIVE_FORCE_NO_HOST_JIT=1)
+endif()
+
 # `uv` is the project's Python launcher (see CLAUDE.md / moondeck/MoonDeck.md).
 # The build invokes Python helpers for build_info.h generation and UI embedding;
 # resolving them through `uv run python …` keeps Windows (where `python3` isn't
@@ -94,6 +105,7 @@ add_library(mm_core STATIC
     src/core/Scheduler.cpp
     src/core/moonlive/MoonLive.cpp
     src/core/moonlive/MoonLiveCompiler.cpp
+    src/core/moonlive/MoonLiveSpill.cpp
 )
 target_include_directories(mm_core PUBLIC src/)
 target_link_libraries(mm_core PUBLIC mm_platform)

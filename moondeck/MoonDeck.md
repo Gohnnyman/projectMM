@@ -965,6 +965,41 @@ Backtrace: 0x4210b93b:0x3fcc8fa0 0x4200fbf8:0x3fcc8fc0
 
 So a panic names its source line in the monitor rather than starting a separate addr2line session. Same purpose as PlatformIO's `esp32_exception_decoder` monitor filter; here it is the toolchain's own `addr2line` against `build/esp32-<firmware>/projectMM.elf`, picking the Xtensa or RISC-V tool from the firmware name. Without `--firmware`, or when that build has no ELF, addresses print raw and the monitor runs as before — decoding must never cost you the serial output.
 
+### check_encodings
+
+Verify every instruction MoonLive emits against the toolchain's own assembler.
+
+```bash
+uv run moondeck/moonlive/check_encodings.py            # every ISA that has a toolchain
+uv run moondeck/moonlive/check_encodings.py --isa xtensa
+```
+
+MoonLive hand-encodes machine instructions, which is the right call for a JIT (an assembler cannot ship to a device) but means a wrong offset field, a truncated displacement or a misplaced register nibble is a bug nothing else notices: the golden-bytes tests compare our emission to our *previous* emission, and the structural checks compare it to a model we also wrote. Both agree with a consistent mistake.
+
+This compares it to something nobody here wrote: `xtensa-esp32-elf-as` and `riscv32-esp-elf-as`, which *are* the definition of a valid encoding for these ISAs. For each instruction we emit, it assembles the same mnemonic and requires identical bytes. It caught a hand-computed `add.n` whose register nibbles were transposed, before that instruction ever ran.
+
+What it covers, and what it does not: it proves each instruction is **encoded** correctly. It cannot prove the **sequence** is right, since a correctly encoded instruction can still save the wrong register. Execution-level checks ([run_qemu](#run_qemu), the bench) are what cover that.
+
+### run_qemu
+
+Run the firmware on an **emulated ESP32** on this machine, no board attached. Long-running: shows a Stop button.
+
+```bash
+uv run moondeck/qemu/run_qemu.py                  # boot it, web UI on :8410
+uv run moondeck/qemu/run_qemu.py --erase          # wipe the emulated flash first
+uv run moondeck/qemu/run_qemu.py --gdb            # freeze at reset, wait for a debugger on :1234
+```
+
+Uses [Espressif's QEMU fork](https://github.com/espressif/qemu) ([docs](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/tools/qemu.html)), which emulates the ESP32's CPU, memory and enough peripherals to boot a real firmware image. Install it with `python3 $IDF_PATH/tools/idf_tools.py install qemu-xtensa`.
+
+**Why it earns its place: it EXECUTES the code.** Every other check compares emitted bytes against a model of what they should be, so none can catch a mistake the model shares. The emulator runs the instructions the way silicon does, including Xtensa's register window, `entry`/`retw` and the exception path, so a JIT defect faults here, on this machine, in seconds, instead of on a bench with only a crash dump to read. That is what it was built for ([the register-window frame bug](../docs/history/lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug)).
+
+The emulated board is a full device, not a console toy: the `qemu` firmware variant swaps WiFi (no radio exists) for QEMU's emulated OpenCores MAC, so the guest gets a DHCP address and the REST API and web UI work exactly as on hardware. The same scripts, tests and browser drive it. Host port 8410 forwards to the guest's HTTP server, deliberately not 8080 so a desktop build can run alongside.
+
+**Erase flash** (the checkbox) deletes the merged flash image so every data partition, settings and scripts, comes back blank. On a real board that is `erase_flash_esp32`; here the whole chip is one file, so removing it is the same operation. Without it, everything persists across restarts.
+
+Two things to know when reading a QEMU run: the guest clock is emulated, so **timings are never KPI material**, and after any crash the emulator can boot-loop until the QEMU *process* itself is restarted (`--stop`, then start again).
+
 ### improv_provision
 
 Push WiFi credentials to a running projectMM device over USB-serial. Uses the [Improv-WiFi](https://www.improv-wifi.com/serial/) protocol — the same wire format the browser flow at improv-wifi.com uses. Device must be running a firmware that includes the Improv listener.

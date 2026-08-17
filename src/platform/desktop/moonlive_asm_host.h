@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/platform.h"   // alloc/free — the emit buffer is heap, not stack
+
 #include "core/moonlive/MoonLiveIr.h"   // kCodeCap — one cap for the staging buffer and every backend
 
 #include <cstdint>
@@ -33,6 +35,18 @@ enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */, Ne /* != 
 
 class HostAssembler {
 public:
+    // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
+    // would double-free the buffer it emits into.
+    ~HostAssembler() { platform::free(buf_); }
+    /// `cap` is the code buffer's size, chosen per SCRIPT by the caller (codeCapFor) rather
+    /// than a shared constant — the backends differ by up to 1.9x on identical source, so one
+    /// number cannot fit them all. Defaults to the sanity bound for callers that emit a fixed
+    /// blob (emitFill) and have no token count to size from.
+    explicit HostAssembler(size_t cap = kCodeCap)
+        : kCap(cap), buf_(static_cast<uint8_t*>(platform::alloc(cap))) {}
+    HostAssembler(const HostAssembler&) = delete;
+    HostAssembler& operator=(const HostAssembler&) = delete;
+
     // --- buffer ---
     // Resolve all branch fixups against bound labels, then expose the finished bytes. Call
     // once after the last instruction; bytes()/size() are valid only after finalize().
@@ -44,6 +58,19 @@ public:
     // --- labels ---
     Label newLabel();
     void  bind(Label l);                 // mark l's position = current offset
+
+    // --- the call frame ---
+    // The register allocator's overflow storage (MoonLiveSpill.h). prologue() opens a frame with
+    // room for `slots` spilled values and parks a frame pointer at its base; spillStore/spillLoad
+    // address a slot as an offset from THAT pointer, never from sp — so a call() that moves sp
+    // underneath them, and the nested/recursive calls MoonLive is gaining next, leave slot
+    // addressing untouched. slots == 0 emits nothing at all: a script that never spilled pays zero.
+    void prologue(uint8_t slots);
+    void epilogue();                     // tear the frame down, then ret
+    void spillStore(Reg r, uint8_t slot);
+    void spillLoad(Reg r, uint8_t slot);
+    void slotAddr(Reg d, uint8_t slot);   // d = &frame[slot] — a call's argument block
+    static constexpr uint8_t kMaxSpillSlots = kTotalSlots;   // parser/allocator range + the parked host args   // what the frame below can address
 
     // --- instructions (named, register/immediate operands) ---
     void movImm(Reg d, int32_t imm);     // d = imm
@@ -66,8 +93,8 @@ public:
     void ret();
 
 private:
-    // The emitted-code buffer, sized by the engine's shared cap (kCodeCap).
-    static constexpr size_t kCap = kCodeCap;
+    // The emitted-code buffer's size, fixed for this object's life but chosen per script.
+    const size_t kCap;
     static constexpr uint8_t kMaxLabels = 16;
     static constexpr uint8_t kMaxFixups = 32;
 
@@ -75,9 +102,18 @@ private:
     void emitBytes(const uint8_t* p, size_t n);
     void addFixup(size_t at, Label label, uint8_t kind);  // enqueue a branch fixup (bounds-checked)
 
-    uint8_t  buf_[kCap] = {};
+    // HEAP, not a member array: the assembler is a stack local in lowerToBytes, so a kCap-sized
+    // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
+    // frames. On a classic ESP32 that overflowed the task and faulted inside _xt_context_save
+    // (the plan named this: "buf_[kCap] inside the assembler, itself a stack local"). The buffer is
+    // scratch that ends in a memcpy to the caller's output, so nothing outlives the object.
+    uint8_t* buf_;
     size_t   len_ = 0;
     bool     overflow_ = false;
+    // Frame size in bytes, 0 when no prologue was emitted. epilogue() reads it, so the teardown can
+    // never disagree with the setup about how far sp moved — the class of bug that returns to a
+    // corrupted stack and is indistinguishable from a miscompile.
+    uint16_t frameBytes_ = 0;
 
     // Label positions (-1 = unbound) and pending branch fixups.
     int32_t  labelPos_[kMaxLabels];

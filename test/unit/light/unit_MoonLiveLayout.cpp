@@ -11,6 +11,7 @@
 // broken script leaves an empty fixture rather than taking the pipeline down.
 
 #include "doctest.h"
+#include "MoonLiveScriptFixture.h"
 #include "light/moonlive/MoonLiveLayout.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include "platform/platform.h"
@@ -38,7 +39,7 @@ namespace {
 std::vector<Coord3D> place(const char* script) {
     MoonLiveLayout l;
     l.defineControls();
-    if (script) l.setSource(script);
+    if (script) l.setScript(mmWriteScript(script));
     l.prepare();
 
     std::vector<Coord3D> out;
@@ -71,10 +72,10 @@ TEST_CASE("the light count is known before any coordinate is asked for") {
     // forEachCoord. A count that came from the walk would arrive too late to be useful.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t cols = 5;  // @control 1..64\n"
+    l.setScript(mmWriteScript("uint8_t cols = 5;  // @control 1..64\n"
                 "uint8_t rows = 3; // @control 1..64\n"
                 "for (yy = 0; yy < rows; yy = yy + 1) {"
-                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }");
+                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"));
     l.prepare();
     CHECK(l.lightCount() == 15);           // answered without anyone calling forEachCoord
 }
@@ -83,7 +84,7 @@ TEST_CASE("the count and the coordinates always agree, because one script produc
     // The property SphereLayout names: count and emit run the same code, so they cannot drift.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
 
     std::vector<Coord3D> seen;
@@ -99,7 +100,7 @@ TEST_CASE("a scripted layout allocates nothing, like every other layout") {
     // have. The script calls out per light instead, so the only heap here is the compiled program.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4096; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 4096; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 4096);
     // dynamicBytes is the JIT'd program only — no coordinate storage grows with the light count.
@@ -129,7 +130,7 @@ TEST_CASE("a broken script leaves an empty fixture rather than taking the pipeli
     // fixture reports no lights, the module carries the diagnostic, and the device keeps running.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4; i = i + 1) { addLight(i, i");   // unclosed
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, i"));   // unclosed
     l.prepare();
     CHECK(l.lightCount() == 0);
     CHECK(l.severity() == MoonModule::Severity::Error);
@@ -139,11 +140,11 @@ TEST_CASE("editing the script changes the fixture") {
     // The live-edit loop: the same module, a new script, a different physical shape.
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 4);
 
-    l.setSource("for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 2);
 }
@@ -173,7 +174,7 @@ TEST_CASE("the scripts the documentation shows all compile") {
     for (const char* s : fromDocs) {
         MoonLiveLayout l;
         l.defineControls();
-        l.setSource(s);
+        l.setScript(mmWriteScript(s));
         l.prepare();
         INFO("script: " << s);
         CHECK(l.severity() != MoonModule::Severity::Error);
@@ -188,7 +189,7 @@ TEST_CASE("the scripts the documentation shows all compile") {
 TEST_CASE("a layout answers count and coordinates every time it is asked") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
 
     CHECK(l.lightCount() == 6);
@@ -219,7 +220,7 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
     MoonLiveLayout l;
     l.defineControls();
     // 10 - 4 must be 6 lights. A widened -1 makes the bound enormous and the count is not 6.
-    l.setSource("for (i = 0; i < 10 - 4; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 10 - 4; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 6);
 
@@ -243,22 +244,22 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
 TEST_CASE("a scripted control keeps its live value when the script is edited") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t cols = 16; // @control 1..64\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("uint8_t cols = 16; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A second script declaring cols at the same offset inherits the live 16, not its own 8.
-    l.setSource("uint8_t cols = 8; // @control 1..64\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }");
+    l.setScript(mmWriteScript("uint8_t cols = 8; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }"));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A script whose first control is a NEW slot gets its own initialiser: nothing to inherit.
-    l.setSource("uint8_t cols = 16;  // @control 1..64\n"
+    l.setScript(mmWriteScript("uint8_t cols = 16;  // @control 1..64\n"
                 "uint8_t rows = 3;  // @control 1..64\n"
                 "for (yy = 0; yy < rows; yy = yy + 1) {"
-                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }");
+                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"));
     l.prepare();
     CHECK(l.lightCount() == 48);          // 16 inherited, rows 3 its own
 }
@@ -293,7 +294,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
     SUBCASE("through a call — addLight") {
         MoonLiveLayout l;
         l.defineControls();
-        l.setSource("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }");
+        l.setScript(mmWriteScript("for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }"));
         l.prepare();
         CHECK(l.lightCount() == 6);      // a clobbered counter gives some other number
     }
@@ -327,7 +328,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
 TEST_CASE("a stray character in a for header is rejected, not spun on") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("for (i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }"));
     l.prepare();                                    // must return — a hang fails by timeout
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.lightCount() == 0);
@@ -346,7 +347,7 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
         l.defineControls();
         char src[128];
         std::snprintf(src, sizeof(src), "for (i = 0; i < %d; i = i + 1) { addLight(i, 0, 0); }", cols);
-        l.setSource(src);
+        l.setScript(mmWriteScript(src));
         l.prepare();
         for (int r = 0; r < reps; r++)
             if (l.lightCount() != static_cast<nrOfLightsType>(cols)) return false;
@@ -369,15 +370,15 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
 TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setSource("uint8_t cols = 4; // @control 1..64\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(mmWriteScript("uint8_t cols = 4; // @control 1..64\n"
+                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }"));
     l.prepare();
     const size_t compiled = l.dynamicBytes();
     CHECK(compiled > 0);
     CHECK(l.lightCount() == 4);
 
     // A broken script frees the code but keeps the arena, so the figure drops without reaching zero.
-    l.setSource("for (i = 0; i < 4; i = i + 1) { addLight(i, i");   // unclosed
+    l.setScript(mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, i"));   // unclosed
     l.prepare();
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.dynamicBytes() < compiled);      // the code block is gone
@@ -395,9 +396,12 @@ TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not")
 TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     MoonLiveLayout layout;
     layout.defineControls();
-    layout.setSource("uint8_t cols = 4; // @control 1..64\n"
-                     "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }");
+    layout.setScript(mmWriteScript("uint8_t cols = 4; // @control 1..64\n"
+                     "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }"));
     layout.prepare();
+    // The script's own controls (`cols`) exist only once it has COMPILED, and a module starts with
+    // no script now — so the control list has to be rebuilt after prepare() for setWidth to find it.
+    layout.rebuildControls();
 
     mm::Layouts group;
     group.addChild(&layout);
@@ -428,3 +432,171 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
 }
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
+
+// A control write lands directly in the module's buffer — addText binds it — so setScript() is NOT
+// called. Nothing then cleared the compiled-hash, and compile()'s early-return kept the OLD program
+// running under the new name. Found by review; the same class of bug hardware found in the effect.
+// Needs a backend: without one BOTH counts are zero and the test passes without proving the swap.
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("naming a different script through the control actually swaps the program") {
+    MoonLiveLayout l;
+    l.defineControls();
+    const char* four = mmWriteScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }");
+    l.setScript(four);
+    l.prepare();
+    REQUIRE(l.lightCount() == 4);
+
+    // Write the OTHER script the way the API does: straight into the bound control buffer.
+    const char* nine = mmWriteScript("for (i = 0; i < 9; i = i + 1) { addLight(i, 0, 0); }");
+    const auto& cs = l.controls();
+    for (uint8_t i = 0; i < cs.count(); i++)
+        if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
+            std::snprintf(static_cast<char*>(cs[i].ptr), 32, "%s", nine);
+    l.onControlChanged("script");
+    l.prepare();
+    CHECK(l.lightCount() == 9);      // the new file, not the cached program
+}
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
+
+// A layout that cannot compile must stay quiet, not keep trying.
+//
+// The pipeline asks a layout for its size and then walks it, and BOTH ask it to compile first — so a
+// failure that leaves "nothing is compiled" looks exactly like "not compiled yet" and every ask
+// re-reads the file. On an ESP32 one attempt is two LittleFS operations (~5 ms), and the repeated
+// asks during a single rebuild starved the task until the 12-second watchdog reset the board: a
+// missing script took the whole device down rather than showing an error. The behaviour to pin is
+// that a failed layout still places no lights however many times it is asked, and says so.
+TEST_CASE("a layout whose script is missing reports it without retrying forever") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript("definitely-not-there.mlv");
+    l.prepare();
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    // Every ask the pipeline could make, several times over. Each one used to re-read the file.
+    int placed = 0;
+    CoordSink sink{[](void* ctx, nrOfLightsType, lengthType, lengthType, lengthType) {
+        (*static_cast<int*>(ctx))++;
+    }, nullptr, &placed};
+    for (int i = 0; i < 50; i++) {
+        CHECK(l.lightCount() == 0);
+        l.forEachCoord(sink);
+    }
+    CHECK(placed == 0);
+    CHECK(l.severity() == MoonModule::Severity::Error);   // and it still says what is wrong
+
+    // A working script after a failed one must still compile — the give-up is per script name, not
+    // permanent, or fixing a typo would need a reboot.
+    const char* good = "for (i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }";
+    l.setScript(mmWriteScript(good));
+    l.prepare();
+    // The COUNT needs an emitting backend; the give-up-is-per-name behaviour above does not, so
+    // only this line is gated and the rest of the case still runs on x86_64 (where CI runs).
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(l.lightCount() == 5);
+#endif
+}
+
+// A layout that starts with NO script must still compile the first real one it is given.
+//
+// Every device boots a fresh layout card with an empty script control, so the very first compile
+// always fails with "no script — set the script name". When the give-up flag was a bare bool that
+// failure latched, and the card then reported "no script" forever however many valid names were set
+// afterwards: the render loop asks for the light count long before a control write can clear a flag,
+// so the guard re-armed itself on every tick. Bench-caught on an S3 — the host never saw it because
+// a test constructs a fresh layout per case and never boots one empty.
+TEST_CASE("a layout that starts empty still compiles the first script it is given") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.prepare();                                  // the empty-script boot: fails, as it should
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    CHECK(l.lightCount() == 0);
+
+    // The RENDER LOOP keeps asking while no script is set — this is the step that re-armed the
+    // flag on device and that a straight prepare/setScript sequence never reproduces.
+    for (int i = 0; i < 5; i++) CHECK(l.lightCount() == 0);
+
+    // Write the control the way the UI does — straight into the bound buffer, then
+    // onControlChanged — because addText binds `script_` directly and setScript() is NOT called on
+    // that path. That is exactly how a device sets a script, and where the latch survived.
+    const char* name = mmWriteScript("for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }");
+    auto& cs = l.controls();
+    for (uint8_t i = 0; i < cs.count(); i++)
+        if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
+            std::snprintf(static_cast<char*>(cs[i].ptr), 32, "%s", name);
+    l.onControlChanged("script");
+    l.prepare();
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(l.lightCount() == 6);                   // the give-up must not have latched
+#endif
+}
+
+// The fixed script directory is a boundary: a module names a file inside it, and cannot address the
+// filesystem. Without this, a control value of "../.config/NetworkModule.json" reads the device's
+// saved WiFi credentials as if they were a script.
+TEST_CASE("a script name cannot escape the script folder") {
+    MoonLiveLayout l;
+    l.defineControls();
+    for (const char* bad : {"../.config/NetworkModule.json", "..", "sub/dir.mlv", "grid.txt"}) {
+        INFO(bad);
+        l.setScript(bad);
+        l.prepare();
+        CHECK(l.severity() == MoonModule::Severity::Error);
+        CHECK(l.lightCount() == 0);
+    }
+}
+
+// A script that STOPS being valid must take its lights with it. Every check in the loader returns
+// before the compile, and the compile is what releases the previous program, so a rename, a delete
+// or an emptied file used to leave the old code executing while the card reported the error: the
+// fixture kept rendering a script the user had removed. The one state a user can never debug is a
+// device that disagrees with its own status line.
+TEST_CASE("a script that disappears takes its lights with it") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript(mmWriteScript("addLight(1, 1, 0); addLight(2, 2, 0);"));
+    l.prepare();
+#if MM_MOONLIVE_HAS_HOST_JIT
+    REQUIRE(l.lightCount() == 2);                      // a working script first
+    CHECK(l.severity() != MoonModule::Severity::Error);
+#endif
+
+    l.setScript("gone.mlv");                           // never written, so the loader rejects it
+    l.prepare();
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    CHECK(l.lightCount() == 0);                        // the old program is gone, not just unreported
+}
+
+// The name the LOADER accepts and the name the CONTROL can hold must be the same length. They were
+// not: the control held 31 characters while the loader accepted 40, so a longer valid name was
+// silently truncated on its way in — and truncation can cut the `.mlv` off, turning a real script
+// into a name the loader then rejects. The user sees "script must end in .mlv" for a file that does.
+TEST_CASE("a script name at the accepted length survives the control it is stored in") {
+    // A name exactly at the limit: filler + ".mlv", written so the file really exists.
+    std::string longName(mm::moonlive::kMaxScriptName - 4, 'a');
+    longName += ".mlv";
+    REQUIRE(longName.size() == mm::moonlive::kMaxScriptName);
+
+    // Write a real script under that name, then name it. If the control clipped it, the loader
+    // would see a truncated name (possibly without .mlv) and report an error instead of rendering.
+    char path[128];
+    std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, longName.c_str());
+    mm::platform::fsMkdir(mm::moonlive::kScriptDir);
+    const char* body = "addLight(3, 3, 0);";
+    mm::platform::fsWriteAtomic(path, body, std::strlen(body));
+    mmScriptRegistry().push_back(path);
+
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript(longName.c_str());
+    l.prepare();
+    // The name reached the loader intact: a clipped one is rejected for its missing extension, so
+    // the status would name the NAME rather than anything about the script's contents. Asserted
+    // this way because a host without a MoonLive backend (x86-64) fails every compile by design,
+    // and this test is about the control buffer, not about codegen.
+    if (l.severity() == MoonModule::Severity::Error)
+        CHECK(std::string(l.status()).find(".mlv") == std::string::npos);
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(l.severity() != MoonModule::Severity::Error);
+    CHECK(l.lightCount() == 1);
+#endif
+}

@@ -57,6 +57,12 @@ def main():
     ap.add_argument("--gcc", action="store_true",
                     help="build with GCC instead of the default compiler — the toolchain CI uses. "
                          "Catches the warnings clang does not emit.")
+    ap.add_argument("--no-jit", action="store_true",
+                    help="build as a desktop WITHOUT a MoonLive backend (forces "
+                         "MM_MOONLIVE_HAS_HOST_JIT=0). Every x86-64 desktop is one: Windows, Linux "
+                         "and Intel macOS ship no backend, so a test that presumes a compile "
+                         "succeeds passes on an arm64 bench and fails only on CI. This runs the "
+                         "suite the way those hosts see it.")
     ap.add_argument("--tests", action="store_true",
                     help="compile the test binaries (mm_tests + mm_scenarios) instead of the firmware. "
                          "The default build makes only projectMM; the ~130 test units are a separate, "
@@ -76,6 +82,12 @@ def main():
         build_type = "Debug"
         extra = [f"-DCMAKE_C_COMPILER={cc}", f"-DCMAKE_CXX_COMPILER={cxx}"]
         print(f"Using GCC ({cxx}) in Debug — the exact toolchain + build type CI uses.")
+    if args.no_jit:
+        # Its own build dir, like --gcc: the macro changes which TEST_CASEs compile at all, so
+        # sharing a cache with the normal build would mean rebuilding the world on every switch.
+        bdir = "build/nojit"
+        extra += ["-DMM_MOONLIVE_NO_HOST_JIT=ON"]
+        print("Forcing MM_MOONLIVE_HAS_HOST_JIT=0 — the x86-64 desktop's view.")
     what = "test binaries" if args.tests else "desktop target"
     print(f"Building {what} into {bdir}/ ...")
     # CMAKE_BUILD_TYPE is honoured by single-config generators (Ninja, Make).

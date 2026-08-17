@@ -44,7 +44,11 @@
 // per-PHY SPI drivers from esp_eth core into managed components — these headers
 // come from espressif/eth_w5500 (idf_component.yml, gated to the S3). The marker
 // MM_ETH_W5500 keeps the rest of the file from repeating this compound condition.
-#if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC)
+// ...and NOT under emulation: the QEMU variant turns the internal EMAC off (there is no
+// emulated silicon for it), which would otherwise satisfy this condition and pull in a SPI
+// W5500 component that variant does not carry.
+#if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC) && \
+    !defined(CONFIG_ETH_USE_OPENETH)
 #define MM_ETH_W5500 1
 #include "driver/spi_master.h"   // W5500 SPI Ethernet (S3 boards) — bus + device config
 #include "esp_eth_mac_w5500.h"   // espressif/eth_w5500 managed component
@@ -94,6 +98,13 @@ uint32_t millis() MM_NONBLOCKING {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
     if (override_) return override_;
     return static_cast<uint32_t>(esp_timer_get_time() / 1000);
+}
+
+// The task handle IS the identity, and reading it costs one load — no TLS, so it works on a task
+// however it was created. That matters: THREADPTR is 0 on a task without TLS set up, which made
+// C++ thread_local fault at 0xfffffff0 here.
+uintptr_t currentThreadId() MM_NONBLOCKING {
+    return reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle());
 }
 
 uint32_t micros() MM_NONBLOCKING {
@@ -873,6 +884,102 @@ void ethStop() {
     ethConnected_.store(false, std::memory_order_relaxed);
 }
 
+#ifdef CONFIG_ETH_USE_OPENETH
+// QEMU's emulated OpenCores MAC. No pins, no clock, no PHY register access, the emulator presents a
+// ready MAC and IDF ships the driver for it, so this path is a fraction of ethInitEmac's setup.
+//
+// Why it exists: an emulated device with no IP stack can only be observed on the serial console. With
+// it, the REST API and the web UI work exactly as on hardware, so the same tests, scripts and UI drive
+// an emulated board, which is the whole point of emulating one.
+static bool ethInitOpeneth() {
+    // STEP-BY-STEP LOGGED, deliberately. Bringing this up is a chain of six calls where any one can
+    // fail quietly, and a silent failure looks identical to a working stack with no cable: the device
+    // simply never gets an address. Logging each step means the serial log ALONE says which link of
+    // the chain broke, instead of the failure having to be re-derived from a missing IP.
+    std::printf("mm_net: openeth 1/6: creating netif\n");
+    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
+    ethNetif_ = esp_netif_new(&netif_cfg);
+    if (!ethNetif_) { std::printf("mm_net: openeth 1/6 FAILED: esp_netif_new returned null\n"); return false; }
+
+    std::printf("mm_net: openeth 2/6: creating MAC + PHY\n");
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = 1;              // the address QEMU's model answers on
+    phy_config.reset_gpio_num = -1;       // nothing to reset in an emulator
+
+    esp_eth_mac_t* mac = esp_eth_mac_new_openeth(&mac_config);
+    // The generic ctor: QEMU's model answers the standard IEEE-802.3 registers, and the
+    // per-PHY ctors (dp83848 and friends) left esp_eth core in IDF v6 anyway.
+    esp_eth_phy_t* phy = esp_eth_phy_new_generic(&phy_config);
+    if (!mac || !phy) {
+        std::printf("mm_net: openeth 2/6 FAILED: mac=%p phy=%p\n", (void*)mac, (void*)phy);
+        if (phy) phy->del(phy);
+        if (mac) mac->del(mac);
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        return false;
+    }
+
+    std::printf("mm_net: openeth 3/6: installing driver\n");
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_handle_t eth_handle = nullptr;
+    esp_err_t err = esp_eth_driver_install(&eth_config, &eth_handle);
+    if (err != ESP_OK) {
+        std::printf("mm_net: openeth 3/6 FAILED: %s\n", esp_err_to_name(err));
+        phy->del(phy); mac->del(mac);
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        return false;
+    }
+
+    // PROMISCUOUS: QEMU's MAC implements no multicast filter, so esp_netif's attach logs an error
+    // registering one for IPv4. Accepting every frame is the emulator's stand-in for the filter it
+    // does not model, and costs nothing here, there is no real wire to be flooded from.
+    std::printf("mm_net: openeth 4/6: promiscuous mode\n");
+    bool promiscuous = true;
+    err = esp_eth_ioctl(eth_handle, ETH_CMD_S_PROMISCUOUS, &promiscuous);
+    if (err != ESP_OK) ESP_LOGW(NET_TAG, "openeth 4/6: promiscuous not set (%s), continuing",
+                                esp_err_to_name(err));
+
+    // From here the driver owns mac+phy, so every failure unwinds through driver_uninstall rather
+    // than del-ing them, exactly as ethInitEmac and ethInitSpi do. Written once as a lambda because
+    // three exits share it, and a half-cleaned failure leaks a netif and a driver on a device that
+    // then has no network to report the problem over.
+    auto fail = [&](const char* what) -> bool {
+        std::printf("mm_net: openeth FAILED: %s\n", what);
+        esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler);
+        esp_eth_driver_uninstall(eth_handle);   // frees mac + phy
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        return false;
+    };
+
+    std::printf("mm_net: openeth 5/6: attaching netif glue\n");
+    esp_eth_netif_glue_handle_t glue = esp_eth_new_netif_glue(eth_handle);
+    if (!glue) return fail("netif glue is null");
+    err = esp_netif_attach(ethNetif_, glue);
+    if (err != ESP_OK) return fail(esp_err_to_name(err));
+
+    // The EVENT HANDLERS, before start: link-up is what kicks IDF's DHCP client (via applyHostname),
+    // and GOT_IP is what flips ethConnected_ so NetworkModule leaves WaitingEth. Registering them
+    // after esp_eth_start would race the very first link-up event the emulator raises immediately.
+    // Omitting them entirely, which this function did, leaves a driver that starts, links up, and
+    // never asks for an address: the interface is up and has no IP, forever.
+    std::printf("mm_net: openeth 6/6: registering event handlers + starting driver\n");
+    err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler, nullptr);
+    if (err != ESP_OK) return fail(esp_err_to_name(err));
+    err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler, nullptr);
+    if (err != ESP_OK) return fail(esp_err_to_name(err));
+
+    err = esp_eth_start(eth_handle);
+    if (err != ESP_OK) return fail(esp_err_to_name(err));
+
+    // Retained like the other two init paths, so ethStop() can tear this interface down instead of
+    // silently no-opping on a null handle.
+    ethHandle_ = eth_handle;
+    std::printf("mm_net: openeth up, waiting for link + DHCP\n");
+    return true;
+}
+#endif  // CONFIG_ETH_USE_OPENETH
+
 bool ethInit() {
     ensureNetifInit();
     // Dispatch on the board's PHY type (runtime, from deviceModels.json via setEthConfig).
@@ -884,6 +991,9 @@ bool ethInit() {
     switch (ethConfig_.phyType) {
 #ifdef MM_ETH_W5500
         case ethW5500:   return ethInitSpi();
+#endif
+#ifdef CONFIG_ETH_USE_OPENETH
+        case ethOpeneth: return ethInitOpeneth();
 #endif
 #ifdef CONFIG_ETH_USE_ESP32_EMAC
         case ethLan8720:
@@ -1548,6 +1658,9 @@ bool mdnsInit(const char* deviceName) {
     // interface. Idempotent on the targets where the predef ETH already covers it:
     // mdns_register_netif returns ESP_ERR_INVALID_STATE ("already registered"), which we
     // treat as success, so this one path fixes the P4 without regressing S31/classic/S3.
+    // Guarded because `ethNetif_` itself only exists in the Ethernet build: an MM_NO_ETH firmware
+    // gets the stubs above, which give it ethConnected() but no netif handle to register.
+#ifndef MM_NO_ETH
     if (ethNetif_ && ethConnected()) {
         esp_err_t regErr = mdns_register_netif(ethNetif_);
         if (regErr == ESP_OK || regErr == ESP_ERR_INVALID_STATE) {
@@ -1558,6 +1671,7 @@ bool mdnsInit(const char* deviceName) {
             ESP_LOGW(NET_TAG, "mDNS eth netif register failed: %s", esp_err_to_name(regErr));
         }
     }
+#endif
 
     // FORCE A FRESH RE-ADVERTISE: remove any existing service record, then add it back.
     // A reconnect / interface switch / live rename re-runs this; just renaming the

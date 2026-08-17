@@ -140,6 +140,12 @@ uint32_t millis() MM_NONBLOCKING {
     );
 }
 
+// pthread_self() is the identity here; std::this_thread::get_id() is not convertible to an integer
+// portably. The +1 guarantees a non-zero result so callers can treat 0 as "none".
+uintptr_t currentThreadId() MM_NONBLOCKING {
+    return reinterpret_cast<uintptr_t>(pthread_self()) + 1;
+}
+
 uint32_t micros() MM_NONBLOCKING {
     auto now = std::chrono::steady_clock::now();
     return static_cast<uint32_t>(
@@ -1603,6 +1609,10 @@ uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h, uint8_t buffer) {
 size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h) {
     return h.impl ? static_cast<HostBus*>(h.impl)->capacity : 0;
 }
+// The desktop host emulates the bus in ordinary memory, so there is no single-transfer ceiling to
+// declare — 0 is the "no bound" contract dmaBudgetBytes() reads, matching every other host-side
+// Parlio stub here.
+size_t parlioMaxTransferBytes() { return 0; }
 bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     return h.impl && static_cast<HostBus*>(h.impl)->transmit(buffer, bytes);
 }

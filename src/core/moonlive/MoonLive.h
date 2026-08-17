@@ -53,7 +53,11 @@ public:
     // grid size / layout, the hard rule).
     void run(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t) const {
         if (!buf || nLights == 0 || cpl < 3) return;
-        if (ctrl_) ctrl_(buf, nLights, cpl, t, ctrlArena_);   // front-end-compiled (reads controls)
+        // The arena is the fifth argument, and a front-end-compiled program reads its controls and
+        // system variables straight through it — a null there is dereferenced by the EMITTED code,
+        // which faults as a LoadProhibited at a nonsense address with no C++ frame to blame. Checked
+        // with the other preconditions rather than trusted: every other operand of the call is.
+        if (ctrl_ && ctrlArena_) ctrl_(buf, nLights, cpl, t, ctrlArena_);   // front-end-compiled
         else if (fn_) fn_(buf, nLights, cpl);                 // hand-encoded fixed fill
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }
@@ -61,6 +65,13 @@ public:
     // Release the exec block + the control arena (the "destructor" role — release returns the
     // memory).
     void free();
+
+    // Drop the compiled code, keeping the control arena. What a caller wants when a script STOPS
+    // being usable (renamed, deleted, emptied) but the module lives on: ok() goes false so a tick
+    // renders nothing, while a bound control pointer stays valid and a scripted control keeps the
+    // live value the user set. free() would take the arena too, and the next compile would re-seed
+    // every control from its declared default.
+    void freeCode();
 
     // The emitted code length, for the golden-bytes test (0 until compiled).
     size_t codeLen() const { return codeLen_; }
@@ -95,10 +106,6 @@ private:
     // cast by the caller.
     void* place(const uint8_t* staged, size_t len);
 
-    // Drop the prior compilation's code (exec block + fn pointers) but keep the control arena, so a
-    // recompile re-emits cleanly without moving the arena a bound control pointer references.
-    void freeCode();
-
     // Ensure the control arena holds `count` bytes, seeding new slots from `decls[i].def`. Grows
     // capacity (never shrinks/moves) so a control pointer the binding holds stays valid across a
     // recompile; preserves an existing slot's live value when the script is edited but the control
@@ -116,6 +123,12 @@ private:
     uint8_t* ctrlArena_ = nullptr;   // live control + system-variable bytes (platform::alloc, kArenaBytes, fixed)
     uint8_t  controlCount_ = 0;      // controls the current program declared
     DeclaredControl controls_[kMaxCtrls] = {};   // the declared-control metadata for the binding
+    // The declared NAMES, owned. A DeclaredControl's `name` points into the SOURCE TEXT, which the
+    // caller is free to release the moment compile() returns — and does, now that a script is read
+    // from a file into a transient buffer. Copying the bytes here is what lets the engine outlive
+    // the text it was built from; without it a binding reads freed memory when it publishes its
+    // controls, which showed up as a control literally named "\x05".
+    char ctrlNames_[kMaxCtrls][kMaxControlName] = {};
 };
 
 }  // namespace mm::moonlive

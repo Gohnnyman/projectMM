@@ -42,7 +42,7 @@ It is for debugging and comes back out again — [what print costs](../../../moo
 
 | control | what it does |
 |---|---|
-| `source` | the script; editing it recompiles and re-maps live |
+| `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-maps live |
 
 Plus one control per `@control` the script declares — `uint8_t amount = 4; // @control 0..64`
 becomes a slider, and moving it rebuilds the mapping just as editing the script does.
