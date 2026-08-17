@@ -15,8 +15,8 @@ this compiles a script through a REAL backend and pipes the bytes to that ISA's 
     uv run moondeck/moonlive/disasm.py --isa all moonlive/layouts/grid.mlv layout
 
 Note there is no x86_64 backend to disassemble: the desktop assembler is arm64-only
-(`moonlive_asm_host.cpp`), and on x86 hosts MoonLive runs its interpreter instead. The three
-backends below are therefore every backend that exists.
+(`moonlive_asm_host.cpp`), and on an x86 host a compile fails cleanly and the module renders dark
+(backlogged). The three backends below are therefore every backend that exists.
 """
 
 import argparse

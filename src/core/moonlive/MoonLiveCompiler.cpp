@@ -626,10 +626,6 @@ struct Parser {
 
 }  // namespace
 
-CompileResult compileSource(const char* source, const BuiltinTable& table,
-                            const SysVarTable& sysvars, uint8_t* out, size_t cap,
-                            const RegBudget* squeeze, LowerFn lower);
-
 uint32_t countTokens(const char* source) {
     if (!source) return 0;
     uint32_t tokens = 0;

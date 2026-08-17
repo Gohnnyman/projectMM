@@ -8,7 +8,8 @@ the memory layout of the register file and the frame — never the light-placeme
 Who owns which register index, who owns which frame slot, and who is allowed to compute what from
 `vregsUsed`. Written down because four places derive numbers from each other — core's compaction,
 the spill pass, each backend's inline scratch, and each assembler's map — and changing where a value
-lives perturbs all four. A day was lost to guess-and-check before this existed.
+lives perturbs all four, so a change made against intuition rather than against this table
+silently miscompiles on one target while the others stay green.
 
 ## Registers: one ascending layout, three owners
 

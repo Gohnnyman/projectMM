@@ -241,14 +241,17 @@ Each step is independently verifiable, and the branch stays green throughout:
    each is parked as soon as it is computed and all are reloaded for the one instruction that reads
    them, so only ONE argument holds a register at a time. This is what let a looped effect, a
    four-deep nested layout and plasma compile on Xtensa at all.
-3b. ⬜ **The HOST ARGUMENTS go to the frame too** (`buf`, `nLights`, `cpl`, `t`, `ctrls`). They are
+3b. ✅ **The HOST ARGUMENTS go to the frame too** (`buf`, `nLights`, `cpl`, `t`, `ctrls`). They are
    read by the inline ops and LoadCtrl and never written, yet they permanently occupied FIVE
    registers — on Xtensa, five of the six the windowed ABI leaves a routine that calls. Parked at
    entry and reloaded where read, they cost a load at the point of use and free the register file
    for temporaries. This belongs in CORE, not in a lowerer: it is the same "the frame is where
    values live" rule the script's own variables follow, and doing it per backend would be three
    copies of one policy — the duplication step 4 exists to remove.
-3c. ⬜ **Unlimited call arguments.** The plan's own table promises "as many slots as you push", and
+3c. ✅ **Unlimited call arguments.** Shipped as designed: `HostCallFn` takes `(const uintptr_t* args,
+   uint32_t argc, const uint8_t* arena)`, the three `call()` sequences are untouched, and arity is
+   bounded by frame slots (`kMaxCallArgs = kMaxLocals`, 16). The seven-argument `line()` the section
+   below argues for is now an ordinary builtin. The plan's own table promises "as many slots as you push", and
    the machinery for it already exists — `parseCall` parks every argument in a CONSECUTIVE frame
    slot as it is evaluated. Three arbitrary constants cap it anyway: `VReg args[4]`, `n >= 4`, and
    "a call takes at most three arguments" (`HostCallFn` is a 3-parameter C function pointer).
@@ -283,22 +286,24 @@ Each step is independently verifiable, and the branch stays green throughout:
    `draw::line` be ordinary calls rather than a special case. Script-local functions will pass their
    arguments the same way when they arrive.
 
-4. **Collapse the three lowerers into one.** With storage no longer per-target, the IR walk is one
+4. ⬜ **Collapse the three lowerers into one.** With storage no longer per-target, the IR walk is one
    algorithm; what remains per-backend is encodings, the frame/ABI constants and the branch forms.
    Verify by adding nothing to the platform layer that is not genuinely platform-specific.
-5. **Delete the allocator** (`MoonLiveSpill.{h,cpp}`, `RegBudget`, the per-backend budget plumbing)
+5. ⬜ **Delete the allocator** (`MoonLiveSpill.{h,cpp}`, `RegBudget`, the per-backend budget plumbing)
    once nothing calls it. The `prologue(slots)` / `spillStore` / `spillLoad` surface on the three
    assemblers is KEPT — it is already frame-addressed through a frame pointer for exactly this
    reason, and the stack machine uses it directly.
-6. **One system-variable table for every role**, with a modifier's coordinate renamed to
+6. ⬜ **One system-variable table for every role**, with a modifier's coordinate renamed to
    `xPos`/`yPos`/`zPos`. Independent of the codegen work — different files, no shared risk — so it
    can land whenever, but it comes before step 7 because it is what makes the bindings differ by
    almost nothing. Needs a MIGRATING entry and a sweep of the shipped scripts.
-7. **Factor the three bindings onto one shared base**, so the script name, hash, engine and the
+7. ⬜ **Factor the three bindings onto one shared base**, so the script name, hash, engine and the
    compile-and-report path exist once. The scripted driver that follows should then be a small
    subclass, and that is the test of whether this step actually worked.
-8. **Bench: S3 and P4**, a scripted layout and a scripted effect, both with nested loops.
-9. **Measure** with `collect_kpi.py` and record the cost honestly in performance.md, so the later
+8. ✅ **Bench: S3 and P4**, a scripted layout and a scripted effect, both with nested loops. Done on
+   FOUR boards (S3, classic ESP32, P4, S31), scripted layout + effect, plasma and the heavier
+   ripples, after the Xtensa frame fix below.
+9. ✅ **Measure** with `collect_kpi.py` and record the cost honestly in performance.md, so the later
    decision about register promotion is made against numbers rather than intuition.
 
 Steps 4, 6 and 7 are the deduplication, and they come AFTER the mechanism works rather than during it —
@@ -374,6 +379,16 @@ derived independently in four places — core's compaction, the spill pass's res
 lowerer's scratch arithmetic, and each assembler's map — and moving the host arguments perturbs all
 four. `src/core/moonlive/register-and-slot-contract.md` now writes that ownership down, and 3b should
 be re-attempted against it rather than by iteration.
+
+**RESOLVED, and this section's diagnosis was only half right.** Step 3b landed and the vreg map
+stayed at ten, not six: no value was ever lost to the ROTATION, because `call()` saves and restores
+a8..a11 around the call itself. The real defect was one the analysis above does not reach. The
+window-overflow handler spills a frame's a4..a7 into the frame's OWN top 32 bytes, and the emitter
+reserved 16, so the parked arena pointer of step 3b sat in hardware-owned memory and any interrupt
+during a host call destroyed it. Frame LAYOUT, not register choice; spatial, not temporal; and
+invisible to every encoding check because each instruction was correct. See
+[lessons § the register-window frame bug](../lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug).
+All four boards (S3, classic, P4, S31) now run scripted layouts and effects.
 
 ## Then, separately
 

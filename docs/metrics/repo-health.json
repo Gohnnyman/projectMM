@@ -1,5 +1,5 @@
 {
-  "commit": "b808881a",
+  "commit": "6ba3a4fc",
   "flash": {
     "esp32": 1722656,
     "esp32p4-eth": 1611632,
@@ -15,8 +15,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 238,
-      "fps": 4201
+      "tick_us": 178,
+      "fps": 5617
     },
     "esp32": {
       "tick_us": 2151,
@@ -29,7 +29,7 @@
     "platform": 13583,
     "ui": 6468,
     "test": 42139,
-    "moondeck": 20813
+    "moondeck": 20808
   },
   "comments": {
     "core": {

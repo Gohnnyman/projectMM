@@ -94,13 +94,9 @@ constexpr bool hasNamedNetInterfaces = true;
 constexpr bool hasNetwork = hasWiFi || hasEthernet;
 
 // ethPhyIsFixed, true where the interface is a property of the PLATFORM rather than of the board,
-// so a persisted or catalog-supplied PHY type must not override it. False on real silicon, where
-// which PHY a board carries is exactly what deviceModels.json exists to say.
-//
-// Set under emulation: the emulator presents one MAC and no other kind exists to select, so a saved
-// ethType from an earlier session would otherwise pick hardware that is not there and leave the
-// device with no network at all.
-constexpr bool ethPhyIsFixed = false;   // desktop has no Ethernet at all
+// so a persisted or catalog-supplied PHY type must not override it. The ESP32 side is where that
+// case is real (see its platform_config.h); desktop has no Ethernet to fix.
+constexpr bool ethPhyIsFixed = false;
 
 // Enough compute headroom for a per-pixel FLOAT algorithm — a raymarcher, a fractal, a feedback
 // loop that iterates per light. This is the ONE exception to the integer-only render-path rule in

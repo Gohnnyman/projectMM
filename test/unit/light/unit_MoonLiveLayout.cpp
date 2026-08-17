@@ -544,3 +544,53 @@ TEST_CASE("a script name cannot escape the script folder") {
         CHECK(l.lightCount() == 0);
     }
 }
+
+// A script that STOPS being valid must take its lights with it. Every check in the loader returns
+// before the compile, and the compile is what releases the previous program, so a rename, a delete
+// or an emptied file used to leave the old code executing while the card reported the error: the
+// fixture kept rendering a script the user had removed. The one state a user can never debug is a
+// device that disagrees with its own status line.
+TEST_CASE("a script that disappears takes its lights with it") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript(mmWriteScript("addLight(1, 1, 0); addLight(2, 2, 0);"));
+    l.prepare();
+#if MM_MOONLIVE_HAS_HOST_JIT
+    REQUIRE(l.lightCount() == 2);                      // a working script first
+    CHECK(l.severity() != MoonModule::Severity::Error);
+#endif
+
+    l.setScript("gone.mlv");                           // never written, so the loader rejects it
+    l.prepare();
+    CHECK(l.severity() == MoonModule::Severity::Error);
+    CHECK(l.lightCount() == 0);                        // the old program is gone, not just unreported
+}
+
+// The name the LOADER accepts and the name the CONTROL can hold must be the same length. They were
+// not: the control held 31 characters while the loader accepted 40, so a longer valid name was
+// silently truncated on its way in — and truncation can cut the `.mlv` off, turning a real script
+// into a name the loader then rejects. The user sees "script must end in .mlv" for a file that does.
+TEST_CASE("a script name at the accepted length survives the control it is stored in") {
+    // A name exactly at the limit: filler + ".mlv", written so the file really exists.
+    std::string longName(mm::moonlive::kMaxScriptName - 4, 'a');
+    longName += ".mlv";
+    REQUIRE(longName.size() == mm::moonlive::kMaxScriptName);
+
+    // Write a real script under that name, then name it. If the control clipped it, the loader
+    // would see a truncated name (possibly without .mlv) and report an error instead of rendering.
+    char path[128];
+    std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, longName.c_str());
+    mm::platform::fsMkdir(mm::moonlive::kScriptDir);
+    const char* body = "addLight(3, 3, 0);";
+    mm::platform::fsWriteAtomic(path, body, std::strlen(body));
+    mmScriptRegistry().push_back(path);
+
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript(longName.c_str());
+    l.prepare();
+    CHECK(l.severity() != MoonModule::Severity::Error);
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(l.lightCount() == 1);
+#endif
+}

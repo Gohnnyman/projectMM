@@ -222,7 +222,7 @@ The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; th
 
 ### MoonLive (scripted effect) — tick + memory
 
-A `MoonLiveEffect` compiles its `source` text to native Xtensa once on the cold path (`prepare`), then `run()` is a single function-pointer call each tick. Measured on the S3 at 16×16 (the bench grid the engine is exercised on; the per-tick cost is the native loop, not interpretation):
+A `MoonLiveEffect` compiles its script to native code for whichever ISA the board runs, once on the cold path (`prepare`), then `run()` is a single function-pointer call each tick. Measured on the S3 at 16×16 (the bench grid the engine is exercised on; the per-tick cost is the native loop, not interpretation):
 
 | Script | Tick (µs) | Exec block (heap) |
 |--------|----:|----:|
@@ -232,7 +232,17 @@ A `MoonLiveEffect` compiles its `source` text to native Xtensa once on the cold 
 
 The rows above are a dated S3 bench record; the numbers below them are what a desktop run measures today. The tick cost is native-code speed — a `setRGB` is a bounds-guard + three byte stores (~26 µs including the per-tick module overhead), `fill` adds the per-light loop. The **exec block scales with the program**, not a fixed cap: a one-liner is tens of bytes of machine code (`place()` allocates the emitted length, word-rounded), reported as the module's dynamic memory (`setDynamicBytes(engine_.heapBytes())` — the exec block plus the control arena) so it shows on the UI card. At rest the engine itself is ~48 B of members + that exec block; the compile path's transient buffers (staging, IR, assembler ≈ 4 KB) live on the cold-path stack and are freed on return — see [docs/backlog/livescripts-analysis-top-down.md § 3.7](backlog/livescripts-analysis-top-down.md) for how this scales as the language grows.
 
-**System variables cost a byte store each, per binding.** They are arena slots the binding refreshes before `run()` — a null check and a byte store apiece, replacing nothing, so the per-tick figure above is unchanged by them. An **effect** writes three (`width`/`height`/`depth`) once per tick; a **modifier** writes six (those plus the `x`/`y`/`z` it is handed) on the mapping-build cold path, not per frame; a **layout** writes none, since it is given no dimensions. `t` adds no arena byte: it is an argument register the host already passes. Not quite free, though — a callee may clobber an argument register under the ABI, so a backend saves it across calls (the arm64 one stacks x3 with the vreg pool; `unit_moonlive_fill` pins that a script reading `t` after a call still sees the host's value). `t` costs nothing at all: it is an argument register the host already passes. The compile path grew (a system-variable table, resolved before locals and controls) but that is cold-path, once per `source` edit.
+**System variables cost a byte store each, per binding.** They are arena slots the binding refreshes before `run()` — a null check and a byte store apiece, replacing nothing, so the per-tick figure above is unchanged by them. An **effect** writes three (`width`/`height`/`depth`) once per tick; a **modifier** writes six (those plus the `x`/`y`/`z` it is handed) on the mapping-build cold path, not per frame; a **layout** writes none, since it is given no dimensions. `t` adds no arena byte: it is an argument register the host already passes. Not quite free, though — a callee may clobber an argument register under the ABI, so a backend saves it across calls (the arm64 one stacks x3 with the vreg pool; `unit_moonlive_fill` pins that a script reading `t` after a call still sees the host's value). The compile path grew (a system-variable table, resolved before locals and controls) but that is cold-path, once per `source` edit.
+
+**Across the four board classes** (2026-08-17, 16×16, after the Xtensa frame fix): the same shipped scripts on every ISA, so the numbers compare directly.
+
+| Script | S3 (Xtensa) | classic (Xtensa) | P4 (RISC-V) | S31 (RISC-V) | Exec block |
+|---|---:|---:|---:|---:|---:|
+| `lines.mlv` (two `line()` calls) | 76 µs | 128 µs | 30 µs | 92 µs | 2292 B |
+| `plasma.mlv` (9 host calls per cell) | 780 µs | 1038 µs | 577 µs | 725 µs | ~1124 B |
+| `ripples.mlv` (~15 host calls per cell) | 1695 µs | 2265 µs | 1098 µs | 1377 µs | 2372 B |
+
+The exec block is the emitted machine code, so it varies by ISA (the RISC-V rows above are the larger encoding); the tick is the native loop. `lines.mlv` is the cheapest of the three because `line()` moves the per-cell loop out of emitted code and into the shared `draw::line`, which is the argument for adding power functions as builtins rather than writing them in script.
 
 **Desktop tick across this cycle:** 150 → 122 µs (6666 → 8196 fps), measured by `collect_kpi.py --commit` at each commit. The gain is not from MoonLive — it tracks the two heap-overrun fixes and the register-reuse work landing earlier in the branch. No scenario `contract` was renegotiated on this branch: all 20 scenarios pass inside their existing budgets, which is the assertion surface this page defers to.
 

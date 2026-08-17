@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <cstdio>
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/moonlive/MoonLiveCompiler.h"   // CompileResult (carries the declared controls)
@@ -67,6 +66,13 @@ public:
     // memory).
     void free();
 
+    // Drop the compiled code, keeping the control arena. What a caller wants when a script STOPS
+    // being usable (renamed, deleted, emptied) but the module lives on: ok() goes false so a tick
+    // renders nothing, while a bound control pointer stays valid and a scripted control keeps the
+    // live value the user set. free() would take the arena too, and the next compile would re-seed
+    // every control from its declared default.
+    void freeCode();
+
     // The emitted code length, for the golden-bytes test (0 until compiled).
     size_t codeLen() const { return codeLen_; }
     // The allocated exec-block size (word-rounded codeLen) — the actual heap held, for memory
@@ -99,10 +105,6 @@ private:
     // block (already writeExec'd) or nullptr on failure (error_ set). The typed pointer is
     // cast by the caller.
     void* place(const uint8_t* staged, size_t len);
-
-    // Drop the prior compilation's code (exec block + fn pointers) but keep the control arena, so a
-    // recompile re-emits cleanly without moving the arena a bound control pointer references.
-    void freeCode();
 
     // Ensure the control arena holds `count` bytes, seeding new slots from `decls[i].def`. Grows
     // capacity (never shrinks/moves) so a control pointer the binding holds stays valid across a

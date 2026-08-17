@@ -117,8 +117,8 @@ void RiscvAssembler::epilogue() {
     ret();
 }
 // sw/lw against s0. The offset is NEGATIVE (slots live below the frame pointer), which encAddi's
-// 12-bit signed immediate and the S/I-type immediates handle directly — 16 slots is 64 bytes, far
-// inside the ±2048 the field reaches.
+// 12-bit signed immediate and the S/I-type immediates handle directly: the whole slot file is a few
+// hundred bytes, far inside the +/-2048 the field reaches.
 void RiscvAssembler::spillStore(Reg r, uint8_t slot) {
     // No frame means prologue() bailed (slots == 0, or past kMaxSpillSlots). Emitting anyway would
     // address s0 + slot*4 — ABOVE the frame pointer, i.e. the CALLER's stack. Refuse instead.

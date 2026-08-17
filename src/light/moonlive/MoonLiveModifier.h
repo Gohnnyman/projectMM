@@ -166,7 +166,7 @@ private:
     // binding looks like something rather than like nothing.
     // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
     // "no script" and passes coordinates through untouched until one is named.
-    char script_[32] = "";
+    char script_[moonlive::kMaxScriptName + 1] = "";
 
     // FNV-1a of the text the loaded program was built from — 4 bytes in place of a second copy of
     // the source. It answers the one question the rebuild check ever asked ("did this change"), and

@@ -25,12 +25,12 @@ public:
     const char* tags() const override { return "📝"; }   // scripted
     Dim dimensions() const override { return Dim::D2; }
 
-    // The effect carries its SCRIPT SOURCE as an editable, persisted text control, plus a control
+    // The effect carries its script's NAME as an editable, persisted text control, plus a control
     // for every variable the script DECLARED (`uint8_t speed = 50; // @control 0..99`). The
     // engine exposes the declared list after a compile; each becomes a real uint8 control bound by
     // reference to the engine's live control-arena slot, so a slider write lands in the slot the
-    // next render tick reads — no recompile (the live-edit guarantee). Editing the source
-    // recompiles (the script-editor loop), which re-derives the control set.
+    // next render tick reads, with no recompile (the live-edit guarantee). Naming a different
+    // script recompiles (the script-editor loop), which re-derives the control set.
     void defineControls() override {
         // The script NAME, not the script. The text lives in a file the UI loads, edits and
         // saves through /api/file — so a module costs ~32 bytes here instead of a resident
@@ -50,8 +50,8 @@ public:
         }
     }
 
-    // A `source` edit must recompile — route it through the prepare rebuild sweep so a new
-    // script swaps in live (the script-editor loop). A SCRIPTED CONTROL's value change must NOT
+    // Naming a different script must recompile: route it through the prepare rebuild sweep so the
+    // new one swaps in live (the script-editor loop). A SCRIPTED CONTROL's value change must NOT
     // recompile: it just updates an arena byte the running native code reads next tick. So only
     // "script" triggers a rebuild; every scripted control returns false (the live-edit path).
     bool affectsPrepare(const char* controlName) const override {
@@ -135,11 +135,7 @@ private:
 
     // A fresh card starts with NO script: it reports "no script" and renders nothing until one
     // is named. Naming a default here would make every new module compile the same effect.
-    char script_[32] = "";
-                                               // 512 fits a multi-line
-                                               // multi-control script (a decl per control + the
-                                               // statement); grow-on-demand is backlogged for the
-                                               // bigger Ripples-class scripts of later stages.
+    char script_[moonlive::kMaxScriptName + 1] = "";
 };
 
 }  // namespace mm

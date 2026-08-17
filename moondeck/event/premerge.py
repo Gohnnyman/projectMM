@@ -65,11 +65,6 @@ def build_gates(firmware):
              manual_hint="tick-path code changed on this branch — compare tick/FPS to the "
                          "previous committed values and explain significant changes"),
 
-        Gate("permission review", None,
-             manual_hint="prune .claude/settings.local.json, then snapshot the approved "
-                         "list to .claude/settings.local.cleaned.json and commit it; never "
-                         "broaden destructive or network-mutating permissions"),
-
         Gate("README / quick-start refresh", None,
              manual_hint="only if build, flash, or first-run UX changed"),
     ]

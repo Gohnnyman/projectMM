@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/moonlive/MoonLive.h"
-#include "platform/platform.h"
 #include "light/moonlive/MoonLiveScriptFile.h"
 #include "light/layouts/LayoutBase.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
@@ -182,7 +181,7 @@ private:
     // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
     // "no script" and places no lights until one is named, rather than every new layout compiling
     // the same default grid.
-    char script_[32] = "";
+    char script_[moonlive::kMaxScriptName + 1] = "";
 
     // FNV-1a of the text the loaded program was built from — 4 bytes in place of a second copy of
     // the source. Non-zero means "this engine holds a compiled program for that content"; 0 means
@@ -197,7 +196,7 @@ private:
     // per script name is all that can ever help: nothing about the file changes between two calls in
     // the same rebuild. Cleared wherever compiledHash_ is, because both mean "this is a new script".
     mutable bool compileFailed_ = false;
-    mutable char failedScript_[32] = "";   // the name compileFailed_ refers to
+    mutable char failedScript_[moonlive::kMaxScriptName + 1] = "";   // the name compileFailed_ refers to
 
 };
 

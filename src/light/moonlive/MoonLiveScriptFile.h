@@ -18,8 +18,10 @@ inline constexpr const char* kScriptDir = "/moonlive";
 /// cannot ask a 320 KB device for an allocation it will not survive.
 inline constexpr long kScriptFileMax = 16384;
 
-/// Longest script name accepted. Bounds the path buffer below — a module's `script` control is 32
-/// bytes, so this is the same limit stated where the path is built.
+/// Longest script name accepted, and the bound on the path buffer below. The bindings size their
+/// `script` control buffer from this (`kMaxScriptName + 1`), so a name this loader would accept can
+/// always be held: a shorter control would truncate silently, and truncation can strip the `.mlv`
+/// that makes a name valid at all.
 inline constexpr size_t kMaxScriptName = 40;
 
 /// Read `<kScriptDir>/<name>` and compile it. The source lives in a right-sized heap buffer for the
@@ -42,6 +44,16 @@ inline uint32_t scriptHash(const char* s, size_t len) {
 inline bool compileScriptFile(MoonLive& engine, const char* name,
                               const BuiltinTable& builtins, const SysVarTable& sysvars,
                               const char*& err, uint32_t* hashOut = nullptr) {
+    // FIRST, before any validation can return: drop whatever is already compiled. Every check
+    // below leaves through `return false`, and only engine.compile() releases the previous
+    // program, so without this a rejected script (renamed, deleted, emptied) leaves the OLD one
+    // executing while the module reports an error. The card says "script not found" and the
+    // fixture keeps rendering the script that is gone.
+    //
+    // freeCode, not free: the control ARENA must survive, or a scripted control loses the live
+    // value the user set whenever a compile fails.
+    engine.freeCode();
+
     // The script directory must exist before anything can be SAVED into it, and on a fresh device
     // nothing has created it yet — the write endpoint does not make parent directories, so a first
     // save would fail with nowhere obvious to look. Creating it here (mkdir -p, a no-op when it is
