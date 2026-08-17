@@ -140,10 +140,15 @@ uint32_t millis() MM_NONBLOCKING {
     );
 }
 
-// pthread_self() is the identity here; std::this_thread::get_id() is not convertible to an integer
-// portably. The +1 guarantees a non-zero result so callers can treat 0 as "none".
+// The OS thread identity as an integer. std::this_thread::get_id() is the portable spelling but is
+// not convertible to an integer, so each platform's own call is used: GetCurrentThreadId on Windows,
+// pthread_self elsewhere. The +1 guarantees a non-zero result so callers can treat 0 as "none".
 uintptr_t currentThreadId() MM_NONBLOCKING {
+#ifdef _WIN32
+    return static_cast<uintptr_t>(GetCurrentThreadId()) + 1;
+#else
     return reinterpret_cast<uintptr_t>(pthread_self()) + 1;
+#endif
 }
 
 uint32_t micros() MM_NONBLOCKING {
