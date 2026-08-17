@@ -33,17 +33,27 @@ namespace {
 // The shipped default layout: a nested loop whose body calls addLight. The script that crashed
 // every S3, so the one worth pinning hardest.
 const char* kGridLayout =
-    "uint8_t cols = 16;  // @control 1..64\n"
-    "uint8_t rows = 16;  // @control 1..64\n"
-    "for (y = 0; y < rows; y = y + 1) {\n"
-    "  for (x = 0; x < cols; x = x + 1) {\n"
-    "    addLight(x, y, 0);\n"
+    "class GridLayout {\n"
+    "  uint8_t cols = 16;  // @control 1..64\n"
+    "  uint8_t rows = 16;  // @control 1..64\n"
+    "  tick() {\n"
+    "    for (y = 0; y < rows; y = y + 1) {\n"
+    "      for (x = 0; x < cols; x = x + 1) {\n"
+    "        addLight(x, y, 0);\n"
+    "      }\n"
+    "    }\n"
     "  }\n"
     "}\n";
 
-// The two shapes an effect takes: straight-line, and a loop over the grid.
-const char* kEffectSimple = "setRGB(0, 255, 0, 0);\n";
-const char* kEffectLoop   = "for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); }\n";
+// The two shapes an effect takes: straight-line, and a loop over the grid. Spelled out in full
+// rather than wrapped by a helper: these pin the EXACT bytes a shipped script emits, so the source
+// they are compiled from has to be the source a user would write.
+const char* kEffectSimple =
+    "class SimpleEffect {\n  tick() { setRGB(0, 255, 0, 0); }\n}\n";
+const char* kEffectLoop =
+    "class LoopEffect {\n"
+    "  tick() { for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); } }\n"
+    "}\n";
 
 /// Compile for THIS TU's backend. `sysvars` picks the binding's vocabulary — they are different
 /// sets, not nested ones: a LAYOUT may use `x`/`y` as loop counters precisely because it is not
@@ -107,14 +117,14 @@ TEST_CASE("a scripted effect compiles for " MM_ISA_NAME ", straight-line and loo
 // that pushes any backend back over the edge shows up here first.
 TEST_CASE("fill plus a loop on " MM_ISA_NAME " emits what it currently can") {
     bool ok = false;
-    CHECK(emitLen("fill(0,0,0);\nfor (y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }",
+    CHECK(emitLen(mmScript("fill(0,0,0);\nfor (y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }"),
                   mm::moonlive::effectSysVars(), ok) == MM_GOLD_FILLLOOP_LEN);
 }
 
 // A scripted MODIFIER is the third binding, and the one handed a per-light coordinate.
 TEST_CASE("a scripted modifier compiles for " MM_ISA_NAME) {
     bool ok = false;
-    CHECK(emitLen("setXYZ(0, xPos, yPos, zPos);\n", mm::moonlive::modifierSysVars(), ok) > 0);
+    CHECK(emitLen(mmScript("setXYZ(0, xPos, yPos, zPos);\n"), mm::moonlive::modifierSysVars(), ok) > 0);
     CHECK(ok);
 }
 

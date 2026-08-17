@@ -34,7 +34,7 @@ public:
         return static_cast<nrOfLightsType>(spokes) * static_cast<nrOfLightsType>(ledsPerSpoke);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         const int32_t maxR = ledsPerSpoke;             // outermost radius (centre shift)
         nrOfLightsType idx = 0;
         for (uint16_t s = 0; s < spokes; s++) {

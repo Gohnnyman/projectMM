@@ -265,7 +265,7 @@ Effects are the on-ramp. The same "fill in the hooks, let the core orchestrate" 
 
 ### Layouts — where the pixels are
 
-A **layout** answers one question: *for light number N, where is it in 3D space?* You override `forEachCoord`, which walks every light and reports its `(x, y, z)`. A grid is the classic example:
+A **layout** answers one question: *for light number N, where is it in 3D space?* You override `placeLights`, which walks every light and reports its `(x, y, z)`. A grid is the classic example:
 
 ```cpp
 class GridLayout : public LayoutBase {
@@ -280,7 +280,7 @@ public:
 
     nrOfLightsType lightCount() const override { return width * height; }
 
-    void forEachCoord(CoordCallback cb, void* ctx) const override {
+    void placeLights(CoordCallback cb, void* ctx) const override {
         nrOfLightsType idx = 0;
         for (lengthType y = 0; y < height; y++)
             for (lengthType x = 0; x < width; x++)
@@ -321,6 +321,6 @@ You get all of that "release the pin on disable" behaviour by implementing the s
 - **The effects catalog:** [docs/moonmodules/light/effects.md](../moonmodules/light/effects.md) — every shipped effect, with screenshots and controls. The best source of copy-and-tweak starting points.
 - **The architecture doc:** [docs/architecture.md](../architecture.md) — the render pipeline (Layouts → Effects → Layer → Effect/Modifier → Drivers) and the hot-path rules (why we avoid heap and floats inside `tick()`).
 - **Coding standards:** [docs/coding-standards.md](../coding-standards.md) — the house style (header-only light modules, `constexpr`, naming) so your module reads like the rest.
-- **The real modules:** the smallest ones make the best teachers — `RainbowEffect` (a clean loop), `GameOfLifeEffect` (the memory lifecycle), `GridLayout` (`forEachCoord`).
+- **The real modules:** the smallest ones make the best teachers — `RainbowEffect` (a clean loop), `GameOfLifeEffect` (the memory lifecycle), `GridLayout` (`placeLights`).
 
 The recurring lesson across all of them: **keep your module about what it does.** Declare your controls, draw or transform in the hook, allocate-in-`prepare`/free-in-`release` if you hold memory — and let the core decide when any of it runs. That discipline is what keeps a large, multi-platform light engine understandable one small module at a time.

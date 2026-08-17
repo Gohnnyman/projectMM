@@ -43,7 +43,7 @@ public:
         return static_cast<nrOfLightsType>(width);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // The coordinate at index i is fixed at row yPosition, z=0; only the x walk
         // direction depends on reversedOrder — the two branches mirror MoonLight's
         // onLayout() forward/reverse loops exactly.

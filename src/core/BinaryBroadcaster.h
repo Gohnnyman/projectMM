@@ -13,7 +13,7 @@ namespace mm {
 struct BinaryBroadcaster {
     // Stream ONE binary WS frame whose payload is PUSHED incrementally, so the caller never
     // holds the whole frame in a buffer. Begin/push/end trio, fitting a forward-only producer
-    // like Layouts::forEachCoord (push from inside its callback):
+    // like Layouts::placeLights (push from inside its callback):
     //   beginBinaryFrame(totalLen)  — build + send the WS header (totalLen = exact payload size)
     //   pushBinaryFrame(data, len)  — send the next payload slice (call as many times as needed)
     //   endBinaryFrame()            — finish; returns true if every client got the whole frame

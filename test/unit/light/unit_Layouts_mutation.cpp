@@ -20,7 +20,7 @@ namespace {
 
 mm::nrOfLightsType countCoords(const mm::Layouts& layouts) {
     mm::nrOfLightsType n = 0;
-    layouts.forEachCoord(mm::CoordSink{[](void* ctx, mm::nrOfLightsType, mm::lengthType, mm::lengthType, mm::lengthType) {
+    layouts.placeLights(mm::CoordSink{[](void* ctx, mm::nrOfLightsType, mm::lengthType, mm::lengthType, mm::lengthType) {
         (*static_cast<mm::nrOfLightsType*>(ctx))++;
     }, nullptr, &n});
     return n;
@@ -62,7 +62,7 @@ TEST_CASE("Layouts add multiple layouts of different types") {
     // Indices stitch: the sphere's lights start where the grid's end (no holes,
     // no overlap). Collect indices and verify a contiguous 0..expected-1 range.
     std::vector<mm::nrOfLightsType> idxs;
-    layouts.forEachCoord(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType, mm::lengthType, mm::lengthType) {
+    layouts.placeLights(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType, mm::lengthType, mm::lengthType) {
         static_cast<std::vector<mm::nrOfLightsType>*>(ctx)->push_back(idx);
     }, nullptr, &idxs});
     REQUIRE(idxs.size() == expected);

@@ -103,7 +103,12 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // The frame must cover the parked HOST ARGUMENTS at the top as well as whatever the parser and
     // the allocator claimed at the bottom: they are stored before any script code runs, so a frame
     // sized only from `slots` would put them past its end.
-    a.prologue(slots > kTotalSlots ? slots : kTotalSlots);
+    const uint8_t frameSlots = slots > kTotalSlots ? slots : kTotalSlots;
+    // A program with NO named functions is one routine, so its prologue opens the block. A class
+    // gets a prologue PER FUNCTION instead, emitted at each function's first op below, because an
+    // entry point's recorded offset has to be an address a caller can jump to: pointing it past a
+    // single program-wide prologue would enter a routine whose frame was never established.
+    if (ir.fnCount == 0) a.prologue(frameSlots);
 
     // An IR label id becomes an assembler label ON FIRST USE. Allocating the whole range up front
     // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
@@ -120,6 +125,18 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // uint16_t, matching IrProgram::count: the op array is sized to the script now, so a uint8_t
     // counter wrapped at 256 ops and looped forever instead of emitting.
     for (uint16_t i = 0; i < ir.count; i++) {
+        // A named function starts here. Close the previous one and open this one, so every function
+        // is independently callable: its recorded offset is its PROLOGUE, and it returns rather than
+        // running on into whatever was emitted next.
+        for (uint8_t f = 0; f < ir.fnCount; f++) {
+            if (ir.fnIrStart[f] != i) continue;
+            if (f > 0) a.epilogue();                 // the previous function returns
+            // Recorded AFTER the epilogue and BEFORE the prologue: the offset is the first byte a
+            // caller executes, which is the frame setup, not the first statement.
+            ir.fnOffset[f] = static_cast<uint16_t>(a.size());
+            a.prologue(frameSlots);
+        }
+
         const IrInst& op = ir.ops[i];
         switch (op.op) {
             case IrOp::Const:  a.movImm(reg(op.dst), op.imm); break;

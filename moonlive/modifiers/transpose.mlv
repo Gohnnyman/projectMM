@@ -1,2 +1,7 @@
 // Swap the axes: rows become columns.
-setXYZ(0, yPos, xPos, zPos);
+
+class TransposeModifier {
+  modifyLogical() {
+    setXYZ(0, yPos, xPos, zPos);
+  }
+}

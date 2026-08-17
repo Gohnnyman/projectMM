@@ -38,7 +38,7 @@ public:
 
     nrOfLightsType lightCount() const override {
         // A restored/persisted value can be negative (the controls are signed int16); a negative
-        // dimension emits no coordinates in forEachCoord(), so report 0 here to match rather than
+        // dimension emits no coordinates in placeLights(), so report 0 here to match rather than
         // casting to uint32_t and wrapping to a huge count. Multiply in uint32_t to detect overflow.
         if (nrOfTubes <= 0 || ledsPerTube <= 0) return 0;
         uint32_t n = static_cast<uint32_t>(nrOfTubes) * static_cast<uint32_t>(ledsPerTube);
@@ -46,7 +46,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // uint32_t idx so it never wraps on a uint16_t nrOfLightsType; stop at the
         // clamped lightCount() so emitted indices stay within the buffer.
         const uint32_t limit = lightCount();

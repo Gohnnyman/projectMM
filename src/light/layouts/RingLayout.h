@@ -17,7 +17,7 @@ namespace mm {
 // pin/wiring plumbing (doNextPin/nextPin) is dropped — a projectMM layout emits
 // coordinates only; the driver owns pins.
 //
-// Float trig runs on the cold build path (forEachCoord / lightCount, called from a
+// Float trig runs on the cold build path (placeLights / lightCount, called from a
 // rebuild), never the hot render loop, so it's allowed here.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 /// Layout of a single ring of evenly-spaced LEDs.
@@ -39,14 +39,14 @@ public:
     }
 
     nrOfLightsType lightCount() const override {
-        // Reuse the exact inclusion predicate as forEachCoord so count and emit
+        // Reuse the exact inclusion predicate as placeLights so count and emit
         // never disagree (a partial arc emits fewer than nrOfLEDs lights).
         nrOfLightsType n = 0;
         walk([](void*, nrOfLightsType, lengthType, lengthType, lengthType) {}, nullptr, &n);
         return n;
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         walk(sink.cb, sink.ctx, nullptr);
     }
 

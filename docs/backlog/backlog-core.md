@@ -248,9 +248,9 @@ Sequencing rule (unchanged): each functionality lands a device-side control firs
 
 ### Per-layout coordinate offset for independent placement (backlog)
 
-`Layouts` stitches multiple child layouts into one physical light space, but only their *indices* are stitched (offset sequentially in `forEachCoord`) — their *coordinates* are not translated. Two layouts therefore overlap in the same coordinate box: two 64×64 grids both occupy x,y ∈ 0..63, so the Layer's dense bounding-box buffer is 64×64 (4096 voxels) even though the container reports 8192 lights, and the second layout's lights land on the first's positions. `scenario_Layouts_mutation` documents this (its steps assert pipeline liveness, not buffer-size arithmetic).
+`Layouts` stitches multiple child layouts into one physical light space, but only their *indices* are stitched (offset sequentially in `placeLights`) — their *coordinates* are not translated. Two layouts therefore overlap in the same coordinate box: two 64×64 grids both occupy x,y ∈ 0..63, so the Layer's dense bounding-box buffer is 64×64 (4096 voxels) even though the container reports 8192 lights, and the second layout's lights land on the first's positions. `scenario_Layouts_mutation` documents this (its steps assert pipeline liveness, not buffer-size arithmetic).
 
-When picked up: add `offsetX/Y/Z` (lengthType) controls to `LayoutBase`; `Layouts::forEachCoord` translates each child's emitted coords by its offset so layouts occupy disjoint regions of the physical extent (a 64-wide grid at offsetX=64 sits beside another at offsetX=0 → a 128×64 combined extent). `Layer::onBuildState` already derives physical dims from the max emitted coordinate, so it would pick up the wider extent automatically. Until then, "multiple layouts" means "multiple layouts sharing a coordinate box", which is only useful when they genuinely overlap (e.g. a sphere inscribed in a grid).
+When picked up: add `offsetX/Y/Z` (lengthType) controls to `LayoutBase`; `Layouts::placeLights` translates each child's emitted coords by its offset so layouts occupy disjoint regions of the physical extent (a 64-wide grid at offsetX=64 sits beside another at offsetX=0 → a 128×64 combined extent). `Layer::onBuildState` already derives physical dims from the max emitted coordinate, so it would pick up the wider extent automatically. Until then, "multiple layouts" means "multiple layouts sharing a coordinate box", which is only useful when they genuinely overlap (e.g. a sphere inscribed in a grid).
 
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
 
@@ -280,6 +280,37 @@ Run user-authored scripts on a running device — a scripted effect, layout, mod
 The **bottom-up landscape survey** is done — [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md): deep-reads the [ESPLiveScript fork](https://github.com/ewowi/ESPLiveScript/tree/fix-warnings) (a from-scratch C-like JIT that emits **native Xtensa** machine code — blazingly fast but **Xtensa-only**, so it covers classic+S3 and *not* P4/Teensy/desktop), surveys the field (PixelBlaze bytecode VM + web editor, WLED ARTI-FX AST-walking interpreter, embedded VMs / WASM / lightweight multi-ISA JITs), and extracts the load-bearing decisions (execution strategy, the IR seam ESPLiveScript lacks, the MoonModule binding, the per-pixel contract, memory placement, sync, sandboxing). Its thesis to validate: a **portable bytecode-VM baseline that runs on every target on day one + an optional native back-end for the hot ISAs behind a shared IR**. **Next: the top-down redesign** — the prompt that generates `livescripts-analysis-top-down.md` is at the bottom of the bottom-up doc; it produces the reference architecture + staged spike plan. Implementation is multi-commit, spike-ordered, after the top-down lands. Credits: [history/hpwit-ESPLiveScript.md](../history/hpwit-ESPLiveScript.md).
 
 ## HTTP and OTA
+
+### Duplicate module names are reachable, and silent (backlog)
+
+Two modules in the tree may hold the SAME name. Found on the bench: a classic ESP32 had a
+`MoonLiveLayout` and a `MoonLiveEffect` both called `MoonLive`, one under `Layouts` and one under a
+`Layer`. Nothing reported it. The UI keys a card's controls by module name, so both cards resolved to
+the same entry and the effect's `bpm`/`zoom` sliders rendered under the LAYOUT's heading, where its
+own `petals`/`radius` should have been. The server data was correct throughout; only the display was
+wrong, which is what makes it hard to recognise.
+
+`Scheduler::ensureUniqueName` exists and is called on `/api/modules` creation and after a persistence
+load, so the tree normally cannot reach this state. The bench pair predates that pass or arrived
+through a path that skipped it, which is exactly the case a check would catch. **The gap is that
+nothing NOTICES:** a name collision is tolerated silently rather than reported, and the first symptom
+is a UI showing another module's controls.
+
+Fix: assert uniqueness after the persistence load and report a collision in the module status, so a
+device that reaches this state says so instead of rendering the wrong card. Renaming a module from
+the UI would also give a user a way out; there is no `name` control today.
+
+### Deleting a module by name removes the FIRST match (backlog)
+
+`DELETE /api/modules/<name>` resolves through `findModuleByName`, which returns the first match in
+tree order. With a duplicate name (above) that is not necessarily the module the caller meant: on the
+bench, deleting the effect by name would have removed the layout, because the layout came first.
+
+Noticed while repairing that device, and avoided only by reading the handler before running the
+request. It is latent rather than dangerous today, because duplicates are supposed to be impossible,
+but the two issues compound: the state that makes a delete ambiguous is the same state nothing warns
+about. Fix alongside the check above, either by refusing an ambiguous delete or by addressing a
+module by a path rather than a bare name.
 
 ### HTTP file serving blocks the render tick (backlog)
 

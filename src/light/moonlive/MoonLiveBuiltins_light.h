@@ -345,6 +345,24 @@ enum : uint8_t {
 ///
 /// Adding one is a single line here plus the binding writing its slot.
 
+/// The entry points the light domain calls, by role. A script defines the ones its role needs; the
+/// engine looks each up by name in the one emitted block.
+///
+/// A name is a MOMENT, not a role. The host owns the moments and calls whatever the script defined
+/// for each one: `tick` when a frame is rendered, `placeLights` when lights are being placed,
+/// `modifyLogical` when one coordinate is folded. An entry a script did not define is simply not
+/// called, which is why nothing validates which names belong to which module.
+///
+/// This is what makes the bindings differ by which moments they OWN rather than by kind, and it is
+/// what lets one class serve more than one: an effect that also defines `modifyLogical` gets both,
+/// with no feature to add. It also leaves `tick` free to mean something in a layout later without a
+/// grammar change. Guarding any of it would be code spent forbidding what a script author is
+/// entitled to do, and the cost of a name nothing calls is a function that does not run, which is
+/// visible immediately rather than silent.
+inline constexpr const char* kEntryTick        = "tick";           // an effect, per frame
+inline constexpr const char* kEntryForEachCoord = "placeLights";  // a layout, placing lights
+inline constexpr const char* kEntryModify       = "modifyLogical"; // a modifier, folding one light
+
 /// The system variables EVERY light script can read. One vocabulary for all three roles, rather
 /// than a table per role.
 ///

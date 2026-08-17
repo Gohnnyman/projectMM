@@ -12,6 +12,7 @@
 // pasted without a rebuild. This test walks the folder, so a new script is covered by adding it.
 
 #include "doctest.h"
+#include "../core/moonlive_script_wrap.h"
 #include "core/moonlive/MoonLive.h"
 #include "platform/platform.h"
 #include "core/moonlive/moonlive_emit.h"
@@ -104,20 +105,20 @@ TEST_CASE("every script in moonlive/ compiles") {
 TEST_CASE("every script reads the same system-variable vocabulary") {
     struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
-        {"for (y = 0; y < 2; y = y + 1) { for (x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }",
+        {mmScript("for (y = 0; y < 2; y = y + 1) { for (x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }"),
          true,  "x and y are ordinary loop counters, in EVERY role: they are the names an author "
                 "reaches for, which is why the coordinate is xPos/yPos/zPos instead"},
-        {"for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }",
+        {mmScript("for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }"),
          true,  "a layout may read width: same name, same meaning, whoever asks"},
-        {"setRGB(width, 0, 0, 0);",           true,  "an effect reads the layer's width"},
-        {"setXYZ(0, width - 1 - xPos, yPos, zPos);",
+        {mmScript("setRGB(width, 0, 0, 0);"),           true,  "an effect reads the layer's width"},
+        {mmScript("setXYZ(0, width - 1 - xPos, yPos, zPos);"),
          true,  "a modifier reads its coordinate AND the box it lives in"},
-        {"setRGB(xPos, 0, 0, 0);",
+        {mmScript("setRGB(xPos, 0, 0, 0);"),
          true,  "reading a coordinate outside a modifier is legal and reads 0: no binding writes "
                 "it, so there is nothing to disagree with"},
-        {"uint8_t width = 16; // @control 1..64\nsetRGB(0, 0, 0, 0);",
+        {mmScript("uint8_t width = 16; // @control 1..64\nsetRGB(0, 0, 0, 0);"),
          false, "declaring one is still refused, in every role: that is what keeps a read meaningful"},
-        {"uint8_t xPos = 3;\nsetRGB(0, 0, 0, 0);",
+        {mmScript("uint8_t xPos = 3;\nsetRGB(0, 0, 0, 0);"),
          false, "the coordinate names are reserved too, so a modifier cannot shadow what it is handed"},
     };
     uint8_t out[2048];
@@ -151,15 +152,15 @@ TEST_CASE("the three roles are handed the same table") {
 TEST_CASE("a script may be commented, and only @control carries meaning") {
     struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
-        {"// leading comment\naddLight(1, 2, 3);", true, "a comment before the code"},
-        {"addLight(1, 2, 3); // trailing comment", true, "a comment after the code"},
-        {"for (i = 0; i < 2; i = i + 1) {\n  // inside the body\n  addLight(i, 0, 0);\n}", true,
+        {mmScript("// leading comment\naddLight(1, 2, 3);"), true, "a comment before the code"},
+        {mmScript("addLight(1, 2, 3); // trailing comment"), true, "a comment after the code"},
+        {mmScript("for (i = 0; i < 2; i = i + 1) {\n  // inside the body\n  addLight(i, 0, 0);\n}"), true,
          "a comment inside a loop body"},
-        {"// @controlled is a word, not an annotation\naddLight(1, 2, 3);", true,
+        {mmScript("// @controlled is a word, not an annotation\naddLight(1, 2, 3);"), true,
          "@control matched as a whole word only"},
-        {"uint8_t n = 4; // @control 1..64\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }",
+        {mmScript("uint8_t n = 4; // @control 1..64\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
          true, "an @control declaration"},
-        {"uint8_t n = 4; // @control oops\naddLight(1, 2, 3);", false,
+        {mmScript("uint8_t n = 4; // @control oops\naddLight(1, 2, 3);"), false,
          "a malformed @control is an error, not a comment"},
     };
     for (const Case& c : cases) {
@@ -180,12 +181,12 @@ TEST_CASE("a comment changes nothing about what a script does") {
     // with no code emitted, "same length" is two zeroes and proves nothing.
 #if MM_MOONLIVE_HAS_HOST_JIT
     moonlive::MoonLive bare, commented;
-    CHECK(bare.compile("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }",
+    CHECK(bare.compile(mmScript("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
                        moonlive::lightBuiltins(), moonlive::modifierSysVars()));
-    CHECK(commented.compile("// place three lights in a row\n"
+    CHECK(commented.compile(mmScript("// place three lights in a row\n"
                             "for (i = 0; i < 3; i = i + 1) {\n"
                             "  addLight(i, 0, 0);   // one per step\n"
-                            "}",
+                            "}"),
                             moonlive::lightBuiltins(), moonlive::modifierSysVars()));
     CHECK(bare.codeLen() == commented.codeLen());   // byte-for-byte the same program
     CHECK(bare.codeLen() > 0);                      // and a real program, not two zeroes
@@ -202,7 +203,7 @@ TEST_CASE("a comment changes nothing about what a script does") {
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("a script reads elapsed time, so it can animate") {
     uint8_t code[2048];
-    auto r = moonlive::compileSource("setRGB(t, 200, 0, 0);", moonlive::lightBuiltins(),
+    auto r = moonlive::compileSource(mmScript("setRGB(t, 200, 0, 0);"), moonlive::lightBuiltins(),
                                      moonlive::modifierSysVars(),
                                      code, sizeof(code));
     REQUIRE(r.ok);
@@ -232,8 +233,8 @@ TEST_CASE("a script reads elapsed time, so it can animate") {
 TEST_CASE("mod wraps a sweep, so an animation repeats instead of running off the end") {
     uint8_t code[4096];
     auto r = moonlive::compileSource(
-        "uint8_t w = 16;   // @control 1..64\n"
-        "for (yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }",
+        mmScript("uint8_t w = 16;   // @control 1..64\n"
+        "for (yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
@@ -266,11 +267,11 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
     uint8_t code[8192];
     // Four loops, each with a call in the body — comfortably over budget if counters accumulate.
     auto r = moonlive::compileSource(
-        "uint8_t w = 16;   // @control 1..64\n"
+        mmScript("uint8_t w = 16;   // @control 1..64\n"
         "for (a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
         "for (b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
         "for (c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"
-        "for (d = 0; d < w; d = d + 1) { setRGB(d, 255, 255, 0); }",
+        "for (d = 0; d < w; d = d + 1) { setRGB(d, 255, 255, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     if (!r.ok) INFO(r.error);
     // What this pins is REGISTER REUSE, which the front-end does on every host — but proving it

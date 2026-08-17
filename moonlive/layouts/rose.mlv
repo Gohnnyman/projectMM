@@ -6,15 +6,20 @@
 //
 // The envelope is recomputed where it is used: the grammar has no locals, and a layout
 // walk runs once per edit, so clarity beats the repeated call.
-uint8_t petals = 2;   // @control 1..8
-uint8_t radius = 15;  // @control 4..30
 
-for (i = 0; i < 256; i = i + 1) {
-  addLight(radius - scale(sin(i * turn(256) * petals), radius + 1)
-             + scale(cos(i * turn(256)),
-                     2 * scale(sin(i * turn(256) * petals), radius + 1) + 1),
-           radius - scale(sin(i * turn(256) * petals), radius + 1)
-             + scale(sin(i * turn(256)),
-                     2 * scale(sin(i * turn(256) * petals), radius + 1) + 1),
-           0);
+class RoseLayout {
+  uint8_t petals = 2;   // @control 1..8
+  uint8_t radius = 15;  // @control 4..30
+
+  placeLights() {
+    for (i = 0; i < 256; i = i + 1) {
+      addLight(radius - scale(sin(i * turn(256) * petals), radius + 1)
+                 + scale(cos(i * turn(256)),
+                         2 * scale(sin(i * turn(256) * petals), radius + 1) + 1),
+               radius - scale(sin(i * turn(256) * petals), radius + 1)
+                 + scale(sin(i * turn(256)),
+                         2 * scale(sin(i * turn(256) * petals), radius + 1) + 1),
+               0);
+    }
+  }
 }

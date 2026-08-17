@@ -5,6 +5,7 @@
 // the target guard is defined so the real emitter runs on this host.
 
 #include "doctest.h"
+#include "moonlive_script_wrap.h"
 
 // System and standard headers FIRST, at global scope. The backend below is wrapped in a namespace,
 // and anything it includes for the first time would otherwise be declared INSIDE that namespace —

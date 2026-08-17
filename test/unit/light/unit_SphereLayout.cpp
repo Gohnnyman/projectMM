@@ -8,7 +8,7 @@
 
 // SphereLayout places lights on the surface of a hollow sphere — a one-light-
 // thick lattice shell, centre excluded. These tests pin: the shell is hollow
-// (no centre / interior point), lightCount() matches what forEachCoord emits,
+// (no centre / interior point), lightCount() matches what placeLights emits,
 // the points are symmetric about the centre, and the radius-1 base case.
 
 namespace {
@@ -17,7 +17,7 @@ struct Pt { mm::lengthType x, y, z; };
 
 std::vector<Pt> collectPoints(const mm::SphereLayout& s) {
     std::vector<Pt> pts;
-    s.forEachCoord(mm::CoordSink{[](void* ctx, mm::nrOfLightsType, mm::lengthType x, mm::lengthType y, mm::lengthType z) {
+    s.placeLights(mm::CoordSink{[](void* ctx, mm::nrOfLightsType, mm::lengthType x, mm::lengthType y, mm::lengthType z) {
         static_cast<std::vector<Pt>*>(ctx)->push_back({x, y, z});
     }, nullptr, &pts});
     return pts;
@@ -25,7 +25,7 @@ std::vector<Pt> collectPoints(const mm::SphereLayout& s) {
 
 } // namespace
 
-// lightCount() must equal the number of points forEachCoord emits — they share
+// lightCount() must equal the number of points placeLights emits — they share
 // one shell predicate, so allocation and fill can never disagree.
 TEST_CASE("SphereLayout lightCount matches the iterator") {
     for (mm::lengthType r : {1, 2, 4, 8}) {
@@ -98,7 +98,7 @@ TEST_CASE("SphereLayout emits sequential physical indices") {
     mm::SphereLayout s;
     s.radius = 3;
     std::vector<mm::nrOfLightsType> idxs;
-    s.forEachCoord(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType, mm::lengthType, mm::lengthType) {
+    s.placeLights(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType, mm::lengthType, mm::lengthType) {
         static_cast<std::vector<mm::nrOfLightsType>*>(ctx)->push_back(idx);
     }, nullptr, &idxs});
     REQUIRE(idxs.size() == s.lightCount());

@@ -9,7 +9,7 @@ namespace mm {
 // (2r+1)^3 bounding box, centred at (r,r,r). A lattice point is on the shell
 // when its distance from the centre rounds to `radius`, i.e. it falls in the
 // half-open band [radius-0.5, radius+0.5). The same band predicate drives both
-// lightCount() (count) and forEachCoord() (emit), so they never disagree.
+// lightCount() (count) and placeLights() (emit), so they never disagree.
 //
 // Distances are compared squared (integer math, no sqrt/float per light) — the
 // hot-path discipline (integer math, no float per light) applies here even
@@ -37,7 +37,7 @@ public:
         return n;
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         forEachShellPoint(sink.cb, sink.ctx, nullptr);
     }
 

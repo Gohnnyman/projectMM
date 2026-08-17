@@ -1,6 +1,7 @@
 // @module MoonLive
 
 #include "doctest.h"
+#include "moonlive_script_wrap.h"
 #include "core/moonlive/MoonLiveCompiler.h"
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLive.h"
@@ -56,7 +57,7 @@ TEST_CASE("MoonLive compiled fill is BEHAVIORALLY identical to the hand-encoded 
 
         // compiled-from-source via the IR + assembler
         char src[64];
-        std::snprintf(src, sizeof(src), "fill(%u, %u, %u);", c[0], c[1], c[2]);
+        std::snprintf(src, sizeof(src), mmScript("fill(%u, %u, %u);"), c[0], c[1], c[2]);
         uint8_t irCode[256];
         auto r = moonlive::compileSource(src, kT, kSys, irCode, sizeof(irCode));
         REQUIRE(r.ok);
@@ -78,7 +79,7 @@ TEST_CASE("MoonLive compiled fill is BEHAVIORALLY identical to the hand-encoded 
 
 TEST_CASE("MoonLive compiled fill is robust: zero lights writes nothing") {
     uint8_t code[256];
-    auto r = moonlive::compileSource("fill(255, 0, 0);", kT, kSys, code, sizeof(code));
+    auto r = moonlive::compileSource(mmScript("fill(255, 0, 0);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = nullptr;
     auto fn = place(code, r.len, blk);
@@ -92,15 +93,15 @@ TEST_CASE("MoonLive compiled fill is robust: zero lights writes nothing") {
 
 TEST_CASE("MoonLive compileSource degrades on a too-small code buffer") {
     uint8_t tiny[4];
-    CHECK_FALSE(moonlive::compileSource("fill(0,0,255);", kT, kSys, tiny, sizeof(tiny)).ok);
-    CHECK_FALSE(moonlive::compileSource("fill(0,0,255);", kT, kSys, nullptr, 0).ok);
+    CHECK_FALSE(moonlive::compileSource(mmScript("fill(0,0,255);"), kT, kSys, tiny, sizeof(tiny)).ok);
+    CHECK_FALSE(moonlive::compileSource(mmScript("fill(0,0,255);"), kT, kSys, nullptr, 0).ok);
 }
 
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("MoonLive compiled setRGB writes one pixel; out-of-range is bounds-rejected") {
     uint8_t code[256];
     // in-range
-    auto r = moonlive::compileSource("setRGB(3, 10, 20, 200);", kT, kSys, code, sizeof(code));
+    auto r = moonlive::compileSource(mmScript("setRGB(3, 10, 20, 200);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = nullptr; auto fn = place(code, r.len, blk); REQUIRE(fn != nullptr);
     std::vector<uint8_t> buf(8 * 3, 0);
@@ -110,7 +111,7 @@ TEST_CASE("MoonLive compiled setRGB writes one pixel; out-of-range is bounds-rej
     platform::freeExec(blk, 256);
 
     // out-of-range index 99 on 8 lights → guarded, no write
-    auto r2 = moonlive::compileSource("setRGB(99, 255, 255, 255);", kT, kSys, code, sizeof(code));
+    auto r2 = moonlive::compileSource(mmScript("setRGB(99, 255, 255, 255);"), kT, kSys, code, sizeof(code));
     REQUIRE(r2.ok);
     void* blk2 = nullptr; auto fn2 = place(code, r2.len, blk2); REQUIRE(fn2 != nullptr);
     std::vector<uint8_t> buf2(8 * 3, 0xAB);
@@ -134,7 +135,7 @@ int firstLit(const std::vector<uint8_t>& b) {
 TEST_CASE("MoonLive control: a declared control reads the arena live (no recompile on value change)") {
     uint8_t code[768];
     auto r = moonlive::compileSource(
-        "uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kT, kSys, code, sizeof(code));
+        mmScript("uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
     REQUIRE(r.controlCount == 1);
     void* blk = platform::allocExec(r.len);
@@ -159,7 +160,7 @@ TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") 
     // scratch pool — pins that the call() save-set protects kArg4 (the arena pointer).
     uint8_t code[768];
     auto r = moonlive::compileSource(
-        "uint8_t idx = 0; // @control 0..15\nsetRGB(idx, random16(256), 0, 255);", kT, kSys, code, sizeof(code));
+        mmScript("uint8_t idx = 0; // @control 0..15\nsetRGB(idx, random16(256), 0, 255);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
     REQUIRE(blk != nullptr);

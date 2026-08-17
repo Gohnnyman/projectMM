@@ -11,12 +11,16 @@ A [layout](layouts.md) is the one part of the pipeline that differs for every ph
 The script places every light itself, with a loop. That is the difference from a scripted modifier: the Layer calls a modifier once per light, so its script transforms a single coordinate — a layout has no such per-light call to ride on.
 
 ```c
-uint8_t cols = 16;  // @control 1..64
-uint8_t rows = 16;  // @control 1..64
+class GridLayout {
+  uint8_t cols = 16;  // @control 1..64
+  uint8_t rows = 16;  // @control 1..64
 
-for (y = 0; y < rows; y = y + 1) {
-  for (x = 0; x < cols; x = x + 1) {
-    addLight(x, y, 0);
+  tick() {
+    for (y = 0; y < rows; y = y + 1) {
+      for (x = 0; x < cols; x = x + 1) {
+        addLight(x, y, 0);
+      }
+    }
   }
 }
 ```

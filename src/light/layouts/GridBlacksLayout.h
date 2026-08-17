@@ -48,7 +48,7 @@ public:
     // rather than take the identity fast path (which would light them). No run → renders like a Grid.
     bool hasBlackPixels() const override { return blackCount != 0; }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // uint32_t idx so it never wraps on uint16_t nrOfLightsType (no-PSRAM 512×512 > 65535); stop at
         // the clamped lightCount() so emitted indices stay within the allocated buffer.
         const uint32_t limit = lightCount();

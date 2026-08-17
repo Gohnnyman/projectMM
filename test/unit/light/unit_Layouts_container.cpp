@@ -7,7 +7,7 @@
 #include <vector>
 
 // Pins the contract that Layouts skips disabled children both in totalLightCount
-// and in forEachCoord, and that subsequent enabled children's physical indices
+// and in placeLights, and that subsequent enabled children's physical indices
 // shift down to close the gap (no holes). Matches the universal-gate behaviour
 // applied by Layer / Effects / Drivers to their own children.
 
@@ -37,7 +37,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     // Both enabled: 6 lights total, A occupies 0..3, B occupies 4..5.
     CHECK(layouts.totalLightCount() == 6);
     std::vector<Sample> samples;
-    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
+    layouts.placeLights(mm::CoordSink{collect, nullptr, &samples});
     REQUIRE(samples.size() == 6);
     CHECK(samples[0].idx == 0);
     CHECK(samples[3].idx == 3);
@@ -48,7 +48,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     a.setEnabled(false);
     CHECK(layouts.totalLightCount() == 2);
     samples.clear();
-    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
+    layouts.placeLights(mm::CoordSink{collect, nullptr, &samples});
     REQUIRE(samples.size() == 2);
     CHECK(samples[0].idx == 0);
     CHECK(samples[1].idx == 1);
@@ -60,7 +60,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     b.setEnabled(false);
     CHECK(layouts.totalLightCount() == 0);
     samples.clear();
-    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
+    layouts.placeLights(mm::CoordSink{collect, nullptr, &samples});
     CHECK(samples.empty());
 
     // Re-enable both: original layout restored.
@@ -68,7 +68,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
     b.setEnabled(true);
     CHECK(layouts.totalLightCount() == 6);
     samples.clear();
-    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
+    layouts.placeLights(mm::CoordSink{collect, nullptr, &samples});
     REQUIRE(samples.size() == 6);
     CHECK(samples[0].idx == 0);
     CHECK(samples[5].idx == 5);
@@ -77,7 +77,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
 // Disabling the Layouts container itself zeroes totalLightCount and yields no coordinates.
 TEST_CASE("Disabling the Layouts container reports zero lights and an empty iteration") {
     // The Scheduler can't gate Layouts (no tick() to skip) so totalLightCount /
-    // forEachCoord apply the gate themselves. Same universal-enable intent as
+    // placeLights apply the gate themselves. Same universal-enable intent as
     // every other container: disabled means no contribution.
     mm::Layouts layouts;
     mm::GridLayout g;
@@ -89,7 +89,7 @@ TEST_CASE("Disabling the Layouts container reports zero lights and an empty iter
     layouts.setEnabled(false);
     CHECK(layouts.totalLightCount() == 0);
     std::vector<Sample> samples;
-    layouts.forEachCoord(mm::CoordSink{collect, nullptr, &samples});
+    layouts.placeLights(mm::CoordSink{collect, nullptr, &samples});
     CHECK(samples.empty());
 
     layouts.setEnabled(true);

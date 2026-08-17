@@ -2484,7 +2484,7 @@ bool HttpServerModule::sendAllOrClose(platform::TcpConnection& ws, const uint8_t
 
 // Streamed frame: header now, payload pushed in slices, no frame-sized staging buffer — so a
 // large frame (PreviewDriver's coordinate table or color frame) goes out on a memory-tight
-// board where a contiguous block won't fit. The producer (forEachCoord) pushes forward-only;
+// board where a contiguous block won't fit. The producer (placeLights) pushes forward-only;
 // each slice fans to every client before the next push. A client that can't keep up is closed
 // (its WS message ends incomplete → it reconnects), so this never blocks the tick indefinitely.
 void HttpServerModule::beginBinaryFrame(size_t totalLen) {

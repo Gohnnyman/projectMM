@@ -254,7 +254,7 @@ private:
     // begin/push/endBinaryFrame stream a binary WS frame straight to every client with NO
     // frame-sized buffer: the header goes out on begin, each pushed slice is fanned to all
     // clients, and end reports whether every client got the whole frame. A producer (PreviewDriver
-    // streaming the producer buffer / forEachCoord) holds no copy. wsFrameAllSent_ tracks the
+    // streaming the producer buffer / placeLights) holds no copy. wsFrameAllSent_ tracks the
     // current frame's all-sent result across the push calls.
     bool wsFrameAllSent_ = true;
     // Max TOTAL WouldBlock spins for one span in sendAllOrClose before a stuck client is closed.

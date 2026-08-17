@@ -73,7 +73,7 @@ public:
 
     void setLayouts(Layouts* lg) { layouts_ = lg; }
     // The active Layouts, for consumers that need per-light coordinates (e.g.
-    // PreviewDriver builds its coordinate table from layouts()->forEachCoord).
+    // PreviewDriver builds its coordinate table from layouts()->placeLights).
     Layouts* layouts() const { return layouts_; }
     /// Channels per light (3 = RGB, 4 = RGBW, more for fixture profiles). Zero is not a valid
     /// light: it would allocate a zero-byte buffer and make every effect's per-light stride 0, so
@@ -114,7 +114,7 @@ public:
         // real position), so one callback handles both kinds — blackCb null → blackPixel falls back.
         struct DimCtx { lengthType maxX, maxY, maxZ; };
         DimCtx dctx{0, 0, 0};
-        layouts_->forEachCoord(CoordSink{[](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+        layouts_->placeLights(CoordSink{[](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
             auto* d = static_cast<DimCtx*>(ctx);
             if (x > d->maxX) d->maxX = x;
             if (y > d->maxY) d->maxY = y;
@@ -417,7 +417,7 @@ public:
     static constexpr nrOfLightsType kNoDriver = static_cast<nrOfLightsType>(-1);
 
     // Does the layout emit lights in natural box order — driver index i == box cell i (x fastest,
-    // then y, then z)? Measured, not declared: one allocation-free forEachCoord pass over the same
+    // then y, then z)? Measured, not declared: one allocation-free placeLights pass over the same
     // coords the build would walk, so there's a single source of truth (the coords) and no
     // per-layout hint to keep in sync. True → the dense memcpy fast path is valid; false → a
     // reordered grid (serpentine) needs the folded LUT. Only meaningful for a dense layout
@@ -427,7 +427,7 @@ public:
         Ctx ctx{physicalWidth_, physicalHeight_, true};
         // Only reached for a gap-free layout (a gap routes to the folded build before this is asked),
         // so blackCb is null and gaps, were there any, would fall back to the same order check.
-        layouts_->forEachCoord(CoordSink{[](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
+        layouts_->placeLights(CoordSink{[](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
             auto* k = static_cast<Ctx*>(c);
             if (!k->ok) return;   // once a mismatch is found the answer is settled; skip the rest
             nrOfLightsType box = static_cast<nrOfLightsType>(z) * k->w * k->h
@@ -442,7 +442,7 @@ public:
     // in-order writes — but folding scatters onto arbitrary, repeated logical indices.
     // So this is the textbook counting-sort CSR build: pass A counts destinations per
     // logical cell, prefix-sum to offsets, pass B scatters, then replay through
-    // setMapping in logical order. Two forEachCoord passes + a counts/dests scratch,
+    // setMapping in logical order. Two placeLights passes + a counts/dests scratch,
     // all on the cold rebuild path; the hot-path read (forEachDestination) is unchanged.
     // Returns false on OOM (caller degrades to identity).
     bool buildFoldedLUT(const Coord3D& logical,
@@ -467,7 +467,7 @@ public:
         // (the Layer's own children — enabled static modifiers, in order, no array) to a
         // logical index (or skips it if a modifier rejects it or it lands out of box —
         // guarded, never trusted), then either counts it (pass A) or writes the driver
-        // index at the cell's cursor (pass B). Everything travels through the forEachCoord
+        // index at the cell's cursor (pass B). Everything travels through the placeLights
         // void* ctx, so the lambda captures nothing (it's a function ptr).
         struct FoldCtx {
             Layer* self;   // for the dynamic child list (the modifier chain)
@@ -496,7 +496,7 @@ public:
                 static_cast<nrOfLightsType>(pos.x);
             if (li >= f->logicalCount) return;                                       // defensive
             // Pass B writes where pass A counted — safe only while both passes see the SAME
-            // coordinates. A scripted layout compiles lazily inside forEachCoord, so a control
+            // coordinates. A scripted layout compiles lazily inside placeLights, so a control
             // edited between the two passes makes pass B emit more lights than pass A counted and
             // the scatter runs past dests. That corrupts the heap; the failure then surfaces in an
             // unrelated allocation, which is what made resizing a scripted layout crash at random.
@@ -520,7 +520,7 @@ public:
             [](void*, nrOfLightsType, lengthType, lengthType, lengthType) {};
 
         // Pass A — count.
-        layouts_->forEachCoord(CoordSink{onCoord, kDropGap, &fctx});
+        layouts_->placeLights(CoordSink{onCoord, kDropGap, &fctx});
 
         // Prefix-sum counts → offsets (counts[li] becomes the start of cell li's run).
         nrOfLightsType running = 0;
@@ -533,7 +533,7 @@ public:
 
         // Pass B — scatter. counts[] is now the per-cell write cursor (offsets advance).
         fctx.scatter = true;
-        layouts_->forEachCoord(CoordSink{onCoord, kDropGap, &fctx});
+        layouts_->placeLights(CoordSink{onCoord, kDropGap, &fctx});
 
         // Pass B advanced each cell's cursor to the END of its run, so counts[i] now
         // holds the end offset of cell i — which equals the START offset of cell i+1.

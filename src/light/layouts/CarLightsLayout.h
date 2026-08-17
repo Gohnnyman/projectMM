@@ -26,7 +26,7 @@ namespace mm {
 // (int)x / (int)y truncation). The external-ringCenter form is the one CarLights
 // needs, which is why we don't delegate to RingLayout.h.
 //
-// Float trig runs on the cold build path (forEachCoord / lightCount, called from
+// Float trig runs on the cold build path (placeLights / lightCount, called from
 // a rebuild), never the hot render loop, so it's allowed here. MoonLight's
 // pin/wiring plumbing (nextPin / doNextPin) is dropped — a projectMM layout
 // emits coordinates only; the driver owns pins.
@@ -53,7 +53,7 @@ public:
         return n;
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         walk(sink.cb, sink.ctx, nullptr);
     }
 

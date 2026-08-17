@@ -9,7 +9,7 @@
 //   class MyLayout : public LayoutBase { ... };
 //   }
 //
-// A layout overrides lightCount() and forEachCoord() (reporting each light's (x,y,z)). The helper set
+// A layout overrides lightCount() and placeLights() (reporting each light's (x,y,z)). The helper set
 // below is the whole surface a layout commonly reaches for — the integer + float trig and the small
 // standard helpers coordinate placement uses. Unused declarations cost zero firmware bytes; a layout
 // needing something outside this surface adds that one extra include.
@@ -60,14 +60,14 @@ struct CoordSink {
 };
 
 /// Base for one layout child of the `Layouts` container. A concrete layout
-/// (grid, sphere shell, …) implements `lightCount` and `forEachCoord` directly —
+/// (grid, sphere shell, …) implements `lightCount` and `placeLights` directly —
 /// no wrapper. Every layout control changes the physical light count, so any
 /// control change triggers the pipeline-wide rebuild.
 class LayoutBase : public MoonModule {
 public:
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Layout; }
     virtual nrOfLightsType lightCount() const = 0;
-    virtual void forEachCoord(const CoordSink& sink) const = 0;
+    virtual void placeLights(const CoordSink& sink) const = 0;
 
     /// Whether this layout emits any GAP (black) pixels — physical wire slots held dark. Default
     /// false: a layout with no dark regions never overrides this and stays unaware gaps exist. Gates

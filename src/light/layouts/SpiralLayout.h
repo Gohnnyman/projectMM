@@ -16,7 +16,7 @@ namespace mm {
 //
 // Prior art: MoonLight SpiralLayout (MoonModules/MoonLight, src light nodes).
 // Geometry reproduced exactly — the float trig runs on the cold build path
-// (forEachCoord is called from a rebuild, not the render loop), so MoonLight's
+// (placeLights is called from a rebuild, not the render loop), so MoonLight's
 // sinf/cosf and the float→integer truncation on each coordinate are kept as-is.
 // MoonLight's per-strip pin plumbing (nextPin) is dropped: a projectMM layout
 // emits coordinates only; the driver owns wiring.
@@ -43,7 +43,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         const uint32_t limit = lightCount();
         if (limit == 0) return;
 

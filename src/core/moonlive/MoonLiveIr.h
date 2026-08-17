@@ -142,6 +142,11 @@ constexpr uint8_t hostArgSlot(VReg v) {
 /// host arguments above it.
 static constexpr uint8_t kTotalSlots = kMaxLocals + kHostArgSlots;
 
+/// Named functions one program may define. Mirrors kMaxEntryPoints in the compiler header:
+/// the IR carries the offsets, the CompileResult carries the names, and the two are filled
+/// from the same parse, so they are bounded together.
+static constexpr uint8_t kMaxIrEntries = 8;
+
 
 static constexpr uint8_t kMaxControlName = 24;   // max control-name length (incl. NUL); the compiler
                                                  // rejects longer names so the binding's name pool
@@ -169,6 +174,19 @@ struct IrProgram {
     /// any spill it still needs from here up — the two share one frame, so they cannot both start
     /// at zero without a variable and a spilled temp landing on the same bytes.
     uint8_t  localSlots = 0;
+
+    /// Where each named function's code STARTS, filled in as the lowering walks the ops.
+    ///
+    /// The front end knows which IR index a function begins at, but not which byte: that is decided
+    /// by the encoding, which is the backend's business. So the parser records the index in
+    /// `fnIrStart` and the lowering fills `fnOffset` as it passes it. This is the same crossing a
+    /// linker makes between a symbol and its address, done in one pass because there is one section.
+    ///
+    /// `fnCount` is 0 for a program with no named functions (the hand-encoded fills), and the
+    /// binding then calls the block start, which is what it has always done.
+    uint16_t fnIrStart[kMaxIrEntries] = {};
+    uint16_t fnOffset[kMaxIrEntries]  = {};
+    uint8_t  fnCount = 0;
 
     IrProgram() = default;
     ~IrProgram() { platform::free(ops); }

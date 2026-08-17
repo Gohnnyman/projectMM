@@ -31,10 +31,14 @@
 TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the frame") {
     struct Case { const char* name; const char* src; int binding; };
     const Case cases[] = {
-        {"a bare write",      "setRGB(0, 255, 0, 0);\n", 1},
-        {"a loop",            "for (i = 0; i < 3; i = i + 1) { }\n", 0},
-        {"a call in a loop",  "for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n", 0},
+        {"a bare write",      mmScript("setRGB(0, 255, 0, 0);\n"), 1},
+        {"a loop",            mmScript("for (i = 0; i < 3; i = i + 1) { }\n"), 0},
+        {"a call in a loop",  mmScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n"), 0},
         {"the shipped grid",  kGridLayout, 0},
+        // Several routines in one block, which is what a class emits. Every function after the
+        // first is what a checker reading only the prologue at byte 0 would never look at.
+        {"two functions",
+         "class TwoFns {\n  helper() { setRGB(1, 10, 20, 30); }\n  tick() { setRGB(2, 40, 50, 60); }\n}\n", 1},
     };
     for (const auto& c : cases) {
         bool ok = false;
@@ -45,26 +49,35 @@ TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the fram
         REQUIRE(ok);
         REQUIRE(code.size() > 0);
 
-        // The frame the program ACTUALLY allocated, read from its own prologue.
+        // The frame each ROUTINE allocated, re-read at every prologue in the block.
+        //
+        // A class emits one routine per function, so a block holds several prologues and a frame
+        // offset belongs to whichever one precedes it. Reading only the prologue at byte 0 and
+        // judging the whole block against it would leave every function after the first unchecked
+        // — silently, and on the target where the frame contract is fatal.
         uint32_t frame = 0;
-        {
-            const mm_structural::Decoded p0 = MM_ISA_DECODE(code.data(), code.size(), 0);
-            REQUIRE(p0.hasFrameAlloc);            // every emitted routine must open with a prologue
-            frame = p0.frameAlloc;
-        }
-        // Guarded rather than subtracted blind: `frame` is decoded from the emitted prologue, so a
-        // defect that emits a frame smaller than the reserved area would wrap this unsigned
-        // subtraction to ~4 billion and let EVERY offset below pass, the checker going blind
-        // exactly when the code is worst. Refuse instead.
-        REQUIRE(frame >= (MM_ISA_RESERVED_TOP));
-        const uint32_t usable = frame - (MM_ISA_RESERVED_TOP);
+        uint32_t usable = 0;
+        int prologues = 0;
 
         size_t pc = 0;
         while (pc < code.size()) {
             const mm_structural::Decoded d = MM_ISA_DECODE(code.data(), code.size(), pc);
             INFO("at byte ", pc);
             REQUIRE(d.len > 0);                       // an undecodable byte is itself a defect
+            if (d.hasFrameAlloc) {
+                frame = d.frameAlloc;
+                prologues++;
+                // Guarded rather than subtracted blind: a defect that emits a frame smaller than
+                // the reserved area would wrap this unsigned subtraction to ~4 billion and let
+                // EVERY offset below pass, the checker going blind exactly when the code is worst.
+                INFO("prologue frame ", frame, " needs >= ", (MM_ISA_RESERVED_TOP));
+                REQUIRE(frame >= (MM_ISA_RESERVED_TOP));
+                usable = frame - (MM_ISA_RESERVED_TOP);
+            }
             if (d.hasFrameOff) {
+                // Every frame access must follow a prologue: one that does not belongs to no frame,
+                // which is what calling an entry point past its own prologue produced.
+                REQUIRE(prologues > 0);
                 INFO("frame offset ", d.frameOff, " vs frame ", frame,
                      " (usable below ", usable, ")");
                 CHECK(d.frameOff + 4 <= usable);      // the whole 4-byte word must fit
@@ -72,6 +85,7 @@ TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the fram
             pc += d.len;
         }
         CHECK(pc == code.size());                     // the stream decoded exactly, no trailing byte
+        CHECK(prologues > 0);                         // every emitted routine opens with a prologue
     }
 }
 
@@ -79,14 +93,14 @@ TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the fram
 TEST_CASE("emitted " MM_ISA_NAME " code branches only to instruction boundaries") {
     struct Case { const char* name; const char* src; int binding; };
     const Case cases[] = {
-        {"one loop",     "for (i = 0; i < 3; i = i + 1) { }\n", 0},
+        {"one loop",     mmScript("for (i = 0; i < 3; i = i + 1) { }\n"), 0},
         {"nested loops", kGridLayout, 0},
         // Long enough that a short-displacement branch would have to be relaxed to reach.
         {"a long loop body",
-         "for (i = 0; i < 8; i = i + 1) {\n"
+         mmScript("for (i = 0; i < 8; i = i + 1) {\n"
          "  addLight(i, 0, 0); addLight(i, 1, 0); addLight(i, 2, 0); addLight(i, 3, 0);\n"
          "  addLight(i, 4, 0); addLight(i, 5, 0); addLight(i, 6, 0); addLight(i, 7, 0);\n"
-         "}\n", 0},
+         "}\n"), 0},
     };
     for (const auto& c : cases) {
         bool ok = false;
@@ -146,19 +160,19 @@ TEST_CASE("emitted " MM_ISA_NAME " code branches only to instruction boundaries"
 TEST_CASE("emitted " MM_ISA_NAME " code reads no register a call destroyed") {
     struct Case { const char* name; const char* src; int binding; };
     const Case cases[] = {
-        {"one call",            "setRGB(0, random16(256), 0, 0);\n", 1},
-        {"a call in a loop",    "for (i = 0; i < 4; i = i + 1) { setRGB(i, random16(256), 0, 0); }\n", 1},
-        {"nested calls",        "setRGB(random16(256), random16(256), random16(256), random16(256));\n", 1},
-        {"a call in a layout",  "for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n", 0},
+        {"one call",            mmScript("setRGB(0, random16(256), 0, 0);\n"), 1},
+        {"a call in a loop",    mmScript("for (i = 0; i < 4; i = i + 1) { setRGB(i, random16(256), 0, 0); }\n"), 1},
+        {"nested calls",        mmScript("setRGB(random16(256), random16(256), random16(256), random16(256));\n"), 1},
+        {"a call in a layout",  mmScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n"), 0},
         {"the shipped grid",    kGridLayout, 0},
         // The shape that crashed on hardware, and the nearest ones that did not.
         {"sysvar bound + call in body",
-         "for (x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n", 1},
+         mmScript("for (x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
         {"control bound + call in body",
-         "uint8_t n = 8; // @control 1..64\n"
-         "for (x = 0; x < n; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n", 1},
+         mmScript("uint8_t n = 8; // @control 1..64\n"
+         "for (x = 0; x < n; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
         {"sysvar read inside the body, with a call",
-         "for (x = 0; x < 4; x = x + 1) { setRGB(x, width, random16(256), 0); }\n", 1},
+         mmScript("for (x = 0; x < 4; x = x + 1) { setRGB(x, width, random16(256), 0); }\n"), 1},
     };
     for (const auto& c : cases) {
         bool ok = false;

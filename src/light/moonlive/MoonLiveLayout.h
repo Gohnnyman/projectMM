@@ -29,7 +29,7 @@
 // container and have to behave identically through this interface.
 //
 // **The count and the coordinates come from the same code.** `lightCount()` runs the script with a
-// counting sink; `forEachCoord` runs it again into the caller's. Same script, same arithmetic, so
+// counting sink; `placeLights` runs it again into the caller's. Same script, same arithmetic, so
 // the two answers cannot drift apart — the property SphereLayout's comment names.
 
 namespace mm {
@@ -77,7 +77,7 @@ public:
     }
 
     /// Run the script again, emitting each light into the consumer's sink.
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         compile();
         if (!engine_.ok()) return;
         Emitter e{&sink, 0};
@@ -108,7 +108,7 @@ public:
 private:
     /// Compile if the source has changed since the program that is loaded.
     ///
-    /// Called from prepare(), and also from lightCount()/forEachCoord — because applyState() runs
+    /// Called from prepare(), and also from lightCount()/placeLights — because applyState() runs
     /// PARENT-FIRST (MoonModule.h): the container computes its bounding box by walking its children
     /// before those children have prepared. A layout whose count is arithmetic (GridLayout) does not
     /// notice; one that needs a compiled program would report an empty fixture to whoever asked
@@ -172,7 +172,10 @@ private:
     void runScript(moonlive::AddLightFn fn, void* ctx) const {
         uint8_t scratch[3] = {0, 0, 0};
         moonlive::setAddLightSink(fn, ctx);
-        const_cast<moonlive::MoonLive&>(engine_).run(scratch, 1, 3, 0);
+        // The placement moment: run `placeLights` if the script defined one. A script without it
+        // places no lights, which the module reports as an empty fixture rather than a failure.
+        if (!engine_.hasEntry(moonlive::kEntryForEachCoord)) return;
+        const_cast<moonlive::MoonLive&>(engine_).run(scratch, 1, 3, 0, moonlive::kEntryForEachCoord);
         moonlive::setAddLightSink(nullptr, nullptr);
     }
 
@@ -190,7 +193,7 @@ private:
 
     // Has this script name already been tried and failed? A FAILED compile leaves compiledHash_ at 0
     // and the engine not ok(), which is indistinguishable from "not compiled yet" — so without this
-    // flag every lightCount()/forEachCoord() re-reads and re-compiles the file. Each attempt is two
+    // flag every lightCount()/placeLights() re-reads and re-compiles the file. Each attempt is two
     // LittleFS operations (~5 ms on an S3), the pipeline asks repeatedly while sizing and walking the
     // fixture, and the retries starve the task until the 12 s watchdog resets the device. One attempt
     // per script name is all that can ever help: nothing about the file changes between two calls in

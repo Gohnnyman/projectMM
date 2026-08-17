@@ -4,14 +4,19 @@
 // line(x1, y1, x2, y2, r, g, b) is the seven-argument draw builtin: the script names the
 // endpoints and the shared draw::line walks the pixels, replacing the per-cell loop this
 // script used to spell out.
-uint8_t bpm = 30;   // @control 1..240
 
-fill(0, 0, 0);
+class LinesEffect {
+  uint8_t bpm = 30;   // @control 1..240
 
-line(scale(beat(bpm, t), width), 0,
-     scale(beat(bpm, t), width), height - 1,
-     255, 0, 0);
+  tick() {
+    fill(0, 0, 0);
 
-line(0,         scale(beat(bpm, t), height),
-     width - 1, scale(beat(bpm, t), height),
-     0, 255, 0);
+    line(scale(beat(bpm, t), width), 0,
+         scale(beat(bpm, t), width), height - 1,
+         255, 0, 0);
+
+    line(0,         scale(beat(bpm, t), height),
+         width - 1, scale(beat(bpm, t), height),
+         0, 255, 0);
+  }
+}
