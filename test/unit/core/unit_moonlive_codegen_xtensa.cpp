@@ -52,8 +52,8 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #define MM_GOLD_FX_LEN    105u
 #define MM_GOLD_FILLLOOP_LEN 254u  // fits now: the host arguments left the register file
 #define MM_GOLD_FXLOOP_LEN  190u
-#define MM_GOLD_FXLOOP_HASH 3392170956u
-#define MM_GOLD_FX_HASH   1643214524u
+#define MM_GOLD_FXLOOP_HASH 307181036u
+#define MM_GOLD_FX_HASH   2796457628u
 #define MM_ISA_LOWER mm_xtensa_backend::mm::moonlive::lowerToBytes
 #include "moonlive_device_codegen.inc"
 
@@ -62,7 +62,12 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 // Xtensa is variable-length: an instruction is TWO bytes when its op0 field (the low nibble of
 // byte 0) is >= 8, otherwise THREE. That one rule is enough to walk the stream, and walking it is
 // what makes "does this branch land on a boundary" answerable at all.
-#define MM_ISA_RESERVED_TOP 16u
+// The bytes the register-window spill hardware owns at the top of a frame, which no emitted
+// slot may reach into. Stated independently of the emitter ON PURPOSE: kWindowSaveReserve in
+// moonlive_asm_xtensa.cpp derives its value from the call it emits and carries the two bands
+// and their `s32e` offsets, so a checker that imported it could never catch that derivation
+// going wrong. This number is the expected answer, held separately.
+#define MM_ISA_RESERVED_TOP 32u
 // call8 rotates the window by 8, so a8..a15 are the callee's. call() saves and restores
 // a8/a9/a10/a11 around it, so only a12..a15 are actually destroyed on the far side.
 #define MM_ISA_CALL_CLOBBER 0xf000u   // a12..a15

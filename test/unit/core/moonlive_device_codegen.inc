@@ -136,6 +136,12 @@ TEST_CASE("the " MM_ISA_NAME " machine code for the shipped scripts is what it w
     CHECK(emitHash(kEffectSimple, mm::moonlive::effectSysVars(), ok) == MM_GOLD_FX_HASH);
     CHECK(emitLen(kEffectLoop, mm::moonlive::effectSysVars(), ok) == MM_GOLD_FXLOOP_LEN);
     CHECK(emitHash(kEffectLoop, mm::moonlive::effectSysVars(), ok) == MM_GOLD_FXLOOP_HASH);
+
+    // KNOWN GAP: no golden pins a CALL SEQUENCE. The goldens above are inline-only code, so the
+    // call path (the code the windowed ABI makes subtle) is covered by the structural checks and
+    // the frame-offset test, not by a byte hash. A raw byte-mask golden was tried and removed: a
+    // masked scan cannot tell a movi immediate from a coincidental byte, so its hash flapped
+    // between builds. A real one needs the decoder, not a mask.
 }
 
 // Degrade, never miscompile: a script the backend cannot encode must fail cleanly. The emitters

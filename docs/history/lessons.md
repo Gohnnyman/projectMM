@@ -452,3 +452,52 @@ share a shape: a green build, plausible-looking output, and a defect only counti
   no amount of reading the new code reveals. Diffing old against new across every span and
   2.8M inputs found it in seconds. **For a hot-path primitive whose replacement is meant to be
   behaviour-identical, prove it by exhaustive comparison against the original.**
+
+## Lessons from the MoonLive-on-Xtensa branch (the register-window frame bug)
+
+MoonLive's JIT ran on desktop arm64 and on RISC-V, and reset every Xtensa board the moment a
+script called a host function. Three days, because every check we had was looking at the
+instructions and the defect was in the stack layout around them.
+
+- **On Xtensa, the top 32 bytes of a call8 frame belong to the hardware, not to the routine.**
+  The window-overflow handler (`_WindowOverflow8`, esp-idf `components/xtensa/xtensa_vectors.S`)
+  writes two 16-byte bands into a spilled frame: the top 16 take an *older* frame's a0-a3
+  (`s32e aN, a9, -16..-4`), and the next 16 take the routine's *own* a4-a7
+  (`s32e aN, a0, -32..-20`, where a0 is that frame's top). GCC obeys the same rule — every
+  call8-making function it compiles reserves locals + exactly 32, at every size. Our emitter
+  reserved 16, so the parked control-arena pointer sat inside the second band and a window
+  spill overwrote it with an expression temp. **A frame-layout question is answered by the
+  platform's own spill handler and a compiler probe, not by the ISA prose.**
+
+- **Window rotation is deterministic; the SPILL is not, so the contract is spatial.** Rotation
+  happens only at `call8`/`retw`, in our own instruction stream. The spill is lazy: it fires on
+  any interrupt that lands while a call is in flight, at an instruction we do not choose. No
+  ordering, no code sequence and no "quiet moment" can dodge it — only the layout can be right
+  or wrong. This is also the whole symptom explanation: deep call chains (plasma's `sin`/`beat`
+  into libm) gave every tick interrupt a wide window and died in under a second, brief leaf
+  calls almost never coincided, and call-free scripts never faulted at all. **A crash whose
+  frequency tracks how LONG a call runs, rather than what it computes, is an interrupt-timing
+  bug — look at what the hardware writes asynchronously, not at the code path.**
+
+- **Byte-perfect encodings prove the instructions, and say nothing about the frame.** Round-trip
+  checks against `xtensa-esp32-elf-as` passed for every instruction we emit, including the
+  `entry` whose immediate was the bug. Two other backends running the identical IR pipeline were
+  flawless, which read as "the compiler is fine, the target is haunted". **When a defect is
+  target-specific and every static check is green, suspect the contract with the platform
+  (frame, ABI, alignment) rather than the code generator.**
+
+- **The guardrail had to see the bug before the fix went in.** `MM_ISA_RESERVED_TOP` was raised
+  to 32 in the structural checker *first*, and it failed on the shipped emitter, naming the
+  offending frame offset. Only then did the emitter constant change. A test written after a fix
+  proves the fix compiles; a test that fails first proves it *detects*. The checker decodes the
+  real `entry` immediate out of the emitted bytes, so it pins the invariant rather than the
+  constant.
+
+- **A reserve constant is coupled to the widest call the emitter can produce.** 32 is exact for
+  `call8`; `call12` would need 48 (its extra save area holds a8-a11 as well). We only ever emit
+  `call8`, so the checker's 32 is an equality — but nothing in the code says so, and a future
+  wider call would leave the test green while the frames went wrong again. hpwit, who wrote the
+  new-parser Xtensa compiler, independently reached the same floor from experience ("I always
+  start at at least 32") and phrases it as a minimum for exactly this reason. The reserve is
+  therefore derived from the emitted call opcode rather than written down, so widening the call
+  moves the reserve with it or fails the build.

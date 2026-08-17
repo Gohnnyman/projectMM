@@ -71,27 +71,54 @@ static constexpr uint8_t  kResultSlot = 8;    // byte offset 32
 static constexpr uint16_t kFrameBase  = 48;   // first byte past the bytes call() reserves
 static constexpr uint16_t kSlotStride = 4;
 
-// The BASE SAVE AREA the windowed ABI reserves at the TOP of every routine's frame. When the
-// register window overflows during a call, the hardware spills the caller's a0..a3 — including the
-// RETURN ADDRESS — into the 16 bytes below the frame's top. A routine that puts its own data there
-// has that data and its return address share memory.
+// The SAVE AREAS the windowed ABI reserves at the TOP of every call8-making routine's frame.
+// The window overflow handler (_WindowOverflow8, esp-idf components/xtensa/xtensa_vectors.S)
+// writes two 16-byte bands there, addressed from two different stack pointers:
+//   top 16 bytes    an OLDER frame's a0..a3, incl. its return address  (s32e aN, a9, -16..-4)
+//   next 16 bytes   this routine's OWN a4..a7                          (s32e aN, a0, -32..-20)
+// So the top 32 bytes are the hardware's, never ours. GCC obeys the same rule: every
+// call8-making function it compiles gets a frame of locals plus exactly 32.
 //
-// Bench-found on both an ESP32 classic and an S3: the frame was sized to exactly cover the slots, so
-// the parked host arguments (the top slots) landed inside this region. Any script at all — a bare
-// `setRGB`, a loop with no call — reset the board with `IllegalInstruction` and a DATA address in
-// A0, which is the return address after the overflow wrote through it. Never seen on RISC-V or
-// arm64: neither has a register window, so neither has a base-save area to collide with.
-static constexpr uint32_t kBaseSaveArea = 16;
+// Both bands were bench-found separately. Reserving nothing put the parked host arguments under
+// the a0..a3 band: any script at all reset the board with IllegalInstruction and a DATA address
+// in A0, the return address overwritten. Reserving only 16 left the highest slot (the parked
+// arena pointer) under the a4..a7 band, which is written on ANY interrupt that lands while a
+// host call is in flight. Fast leaf calls (random16) rarely coincided with one and worked; the
+// deep libm chains of plasma (sin, beat) gave every tick a wide window to hit, and the arena
+// came back as an expression temp: LoadProhibited, A11=0, EXCVADDR=1. The corruption is spatial,
+// not timed, so no code sequence can dodge it; only the layout can. Never seen on RISC-V or
+// arm64: no register window, no hardware-owned frame bytes.
+//
+// The size follows the WIDEST call this assembler emits, and is derived from that instruction
+// below rather than written down twice: a wider call rotates the window further and its extra
+// save area grows to match (call4 spills nothing extra, call8 spills a4..a7, call12 also
+// a8..a11), so the reserve is 16 + 16 * (windows rotated - 1). A future callx12 with a hand-
+// held 32 here would put the top slot back under the spill band and resurrect this bug with
+// every static check still green.
+static constexpr uint32_t kCallxOpcode = 0x0000e0u;   // callx8 a8, the one call we emit
+
+/// Bytes the window-overflow handler may write at the top of a frame whose widest call is the
+/// given CALLX. The window increment is bits 4..5 of the opcode (1 = call4, 2 = call8,
+/// 3 = call12), and each step widens the rotation by four registers, so each adds another
+/// 16-byte quad above the base save area every `entry` frame already owns. call0 (increment 0)
+/// is not a case here: it makes no window rotation and this assembler cannot emit it.
+static constexpr uint32_t windowSaveReserveFor(uint32_t callxOpcode) {
+    return 16u * ((callxOpcode >> 4) & 0x3u);
+}
+static constexpr uint32_t kWindowSaveReserve = windowSaveReserveFor(kCallxOpcode);
+static_assert(kWindowSaveReserve == 32,
+              "callx width changed: the frame reserve moved with it, so re-check the frame "
+              "layout and MM_ISA_RESERVED_TOP in the codegen test before accepting this");
 
 // ENTRY is a BRI12-format instruction: op0=6, n=3, s=the base register, and the 12-bit immediate at
 // bits 12..23 counts EIGHT-byte units. `entry a1, 48` is therefore 0x006136.
 void XtensaAssembler::prologue(uint8_t slots) {
     if (slots > kMaxSpillSlots) { overflow_ = true; return; }
     // Rounded up to 8 because the immediate counts 8-byte units; the ABI additionally wants the
-    // frame 16-byte aligned, and 48 + a multiple of 16 keeps that. kBaseSaveArea is added ON TOP of
-    // the slots so the highest slot still ends below the window-spill region.
+    // frame 16-byte aligned, and 48 + a multiple of 16 keeps that. kWindowSaveReserve is added ON
+    // TOP of the slots so the highest slot still ends below the hardware's two save bands.
     const uint32_t bytes =
-        (kFrameBase + uint32_t(slots) * kSlotStride + kBaseSaveArea + 15u) & ~15u;
+        (kFrameBase + uint32_t(slots) * kSlotStride + kWindowSaveReserve + 15u) & ~15u;
     emit3(0x000136u | ((bytes / 8u) << 12));
 }
 void XtensaAssembler::epilogue() { emit2(0xf01du); }     // retw.n
@@ -279,16 +306,27 @@ void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     emit2(uint16_t((uint32_t(ar(b)) << 8) | (11 << 4) | 0xd));   // mov a11, argB
     emit2(uint16_t((13u << 8) | (10 << 4) | 0xd));               // mov a10, a13
 
+    // The fn address is assembled a byte at a time, which needs a TEMPORARY alongside a8, and the
+    // choice of temporary is load-bearing, because call8 rotates the window: caller a8..a15 become
+    // callee a0..a7. So caller a9 IS THE CALLEE'S STACK POINTER (a1). Building the address through a9
+    // handed the callee a fragment of a function pointer as its sp; its own `entry a1, N` then sized a
+    // frame from garbage and stored through it, landing anywhere in memory, including over this
+    // routine's own parked host arguments. That is the null arena pointer a script later read
+    // (LoadProhibited at EXCVADDR 0x1, arena register zero), and it only bit scripts whose loop makes
+    // a call AND reads a system variable, because both halves have to be present to notice.
+    //
+    // a13 is the safe temporary: it maps to callee a5, the fourth argument slot, which a three-argument
+    // host function never reads. It is already this assembler's kTmp for exactly this reason.
     uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(fn));
-    auto moviA8 = [&](uint8_t v){ const uint8_t enc[3]={0x82,0xa0,v}; emit(enc,3); };
-    auto moviA9 = [&](uint8_t v){ const uint8_t enc[3]={0x92,0xa0,v}; emit(enc,3); };
-    auto slliA8 = [&]{ const uint8_t enc[3]={0x80,0x88,0x11}; emit(enc,3); };
-    auto addA8A9 = [&]{ emit2(0x889au); };
+    auto moviA8  = [&](uint8_t v){ const uint8_t enc[3]={0x82,0xa0,v}; emit(enc,3); };
+    auto moviA13 = [&](uint8_t v){ const uint8_t enc[3]={0xd2,0xa0,v}; emit(enc,3); };
+    auto slliA8  = [&]{ const uint8_t enc[3]={0x80,0x88,0x11}; emit(enc,3); };
+    auto addA8A13 = [&]{ emit2(0x88dau); };   // add.n a8, a8, a13 = (8<<12)|(8<<8)|(13<<4)|0xa
     moviA8(uint8_t(addr >> 24));
-    slliA8(); moviA9(uint8_t(addr >> 16)); addA8A9();
-    slliA8(); moviA9(uint8_t(addr >> 8));  addA8A9();
-    slliA8(); moviA9(uint8_t(addr));       addA8A9();
-    emit3(0x0000e0u | (8u << 8));                          // callx8 a8  → result in a10
+    slliA8(); moviA13(uint8_t(addr >> 16)); addA8A13();
+    slliA8(); moviA13(uint8_t(addr >> 8));  addA8A13();
+    slliA8(); moviA13(uint8_t(addr));       addA8A13();
+    emit3(kCallxOpcode | (8u << 8));                       // callx8 a8  → result in a10
     // Park the result in the FRAME, not in a register.
     //
     // It used to be stashed in a12 — but call8 rotates the window by eight, so the callee's a4 IS

@@ -10,6 +10,7 @@
 
 #include "core/math8.h"    // beatsin16 — the shared time vocabulary
 #include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
+#include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
 
 // MoonLive — the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
 // lives: the function NAMES (`setRGB`, `fill`, `random16`), their arg counts, and the meaning
@@ -25,9 +26,18 @@ namespace mm::moonlive {
 // so a script behaves identically. The one host helper exposed as a Call so far.
 extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t n = uint32_t(args[0]);
-    static uint32_t s = 0x2545F491u;
-    s = s * 1664525u + 1013904223u;
-    return n ? (s >> 16) % n : 0u;
+    // ATOMIC, because two threads run scripts at once: the render task walks a layout for the frame
+    // while the HTTP task asks the same layout for its light count after a control edit (the reason
+    // the addLight sink is a per-thread table below). A plain `static` here is a data race, and a
+    // lost update would additionally let two draws return the SAME value, which for a "random"
+    // helper is a correctness bug rather than a tolerable one. compare_exchange keeps the sequence
+    // exactly the LCG's, just serialized.
+    static std::atomic<uint32_t> seed{0x2545F491u};
+    uint32_t prev = seed.load(std::memory_order_relaxed), next;
+    do {
+        next = prev * 1664525u + 1013904223u;
+    } while (!seed.compare_exchange_weak(prev, next, std::memory_order_relaxed));
+    return n ? (next >> 16) % n : 0u;
 }
 
 // mod(a, b) → a % b, the wrap a cyclic animation needs. `t` grows without bound, so every effect
@@ -118,21 +128,29 @@ extern "C" inline uint32_t mm_light_scale(const uintptr_t* args, uint32_t, const
 /// The remaining print budget. A binding resets it when it compiles, so every edit of a script gets
 /// a fresh window — without that, one burst silences the debugging tool for the life of the process,
 /// which is exactly when a second look at a misbehaving script is most needed.
-inline uint32_t& printBudget() { static uint32_t n = 0; return n; }
+/// ATOMIC for the same reason random16's seed is: two threads run scripts concurrently. The decrement
+/// below is the one that matters: read-modify-write on a plain uint32_t lets two threads both see 1,
+/// both decrement, and the budget WRAP to ~4 billion, turning the bound that keeps `print` off the
+/// render tick's critical path into no bound at all.
+inline std::atomic<uint32_t>& printBudget() { static std::atomic<uint32_t> n{0}; return n; }
 
 /// Grant a fresh burst. Call from the binding's prepare(), alongside the compile.
 ///
 /// print() writes to serial, which blocks, and an effect script runs on the render tick — so the
 /// burst is what bounds the cost: a handful of writes per compile, after which the call is a compare
 /// and a return. Draining through a queue would take the last of it off the tick; backlogged.
-inline void resetPrintBudget() { printBudget() = 32; }
+inline void resetPrintBudget() { printBudget().store(32, std::memory_order_relaxed); }
 
 extern "C" inline uint32_t mm_light_print(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t v = uint32_t(args[0]);
-    uint32_t& left = printBudget();
-    if (left > 0) {
+    // Claim one unit before printing, and only if there is one: a plain `if (left > 0) --left`
+    // can underflow past zero when two threads pass the test together.
+    auto& left = printBudget();
+    uint32_t have = left.load(std::memory_order_relaxed);
+    while (have > 0 && !left.compare_exchange_weak(have, have - 1, std::memory_order_relaxed)) {}
+    if (have > 0) {
         std::printf("[script] %u\n", static_cast<unsigned>(v));
-        if (--left == 0) std::printf("[script] (burst spent; edit the script for a fresh one)\n");
+        if (have == 1) std::printf("[script] (burst spent; edit the script for a fresh one)\n");
     }
     return v;
 }
@@ -173,7 +191,11 @@ namespace detail {
 // `owner` is ATOMIC and claimed with compare_exchange: the claim used to be a load then a store,
 // so two threads could both see the same slot free and both take it — leaving them sharing one
 // sink, which is the very aliasing this table exists to prevent.
-struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; };
+//
+// The slot is the ONE per-thread home for everything a running script's built-ins reach: the
+// addLight sink (a layout run installs it) and the draw canvas (an effect run installs it). A
+// second table would repeat the claim/release machinery for the same lifetime.
+struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -182,59 +204,62 @@ inline SinkSlot* sinkSlots() { static SinkSlot s[2]; return s; }
 /// no-op — setAddLightSink deliberately never installs here, because a shared sink would let two
 /// overflow threads write through each other's context.
 inline const AddLightSink& sinkOverflow() { static const AddLightSink s; return s; }
-}  // namespace detail
+/// The canvas twin of sinkOverflow: data stays null, so a third runner's draw calls no-op.
+inline const draw::Canvas& canvasOverflow() { static const draw::Canvas c{}; return c; }
 
-/// This thread's sink, claiming a slot on first use. Read-only: installing goes through
-/// setAddLightSink, which refuses to write into the shared overflow.
-inline const AddLightSink& addLightSink() {
+/// The slot this thread owns; with `claim`, take a free one when none is owned yet. Null when
+/// unowned and not claiming, or when both slots belong to other threads (the overflow case).
+inline SinkSlot* ownedSlot(bool claim) MM_NONBLOCKING {
     const uintptr_t me = platform::currentThreadId();
-    detail::SinkSlot* slots = detail::sinkSlots();
+    SinkSlot* slots = sinkSlots();
     for (uint8_t i = 0; i < 2; i++)
-        if (slots[i].owner.load(std::memory_order_acquire) == me) return slots[i].sink;
+        if (slots[i].owner.load(std::memory_order_acquire) == me) return &slots[i];
+    if (!claim) return nullptr;
     for (uint8_t i = 0; i < 2; i++) {
         uintptr_t free = 0;
         if (slots[i].owner.compare_exchange_strong(free, me, std::memory_order_acq_rel,
                                                    std::memory_order_relaxed))
-            return slots[i].sink;
+            return &slots[i];
     }
-    return detail::sinkOverflow();
+    return nullptr;
+}
+/// Release only a fully empty slot: the sink and the canvas detach independently, and a release
+/// while the other half is live would hand this thread's context to the next claimer.
+inline void releaseIfEmpty(SinkSlot* s) MM_NONBLOCKING {
+    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data)
+        s->owner.store(0, std::memory_order_release);
+}
+}  // namespace detail
+
+/// This thread's sink. A READ never claims: a freshly claimed slot is empty by construction, so
+/// claiming here could only ever return the empty sink it just made, while pinning a slot that
+/// nothing will release (only the detach paths release, and a thread that installed nothing never
+/// takes one). A script calling addLight from a binding that installs no sink (a modifier) would
+/// hold a slot for the life of its task, and two such tasks would exhaust the table and silently
+/// stop every later install. Installing claims; reading does not.
+inline const AddLightSink& addLightSink() {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    return s ? s->sink : detail::sinkOverflow();
 }
 
 /// Point addLight at a consumer for the duration of one run; pass nullptr to detach.
 ///
-/// Detaching RELEASES this thread's slot, so two slots are not exhausted by tasks that come and go —
-/// an HTTP request lands on whichever worker is free.
+/// Detaching RELEASES this thread's slot (unless the canvas half is still live), so two slots are
+/// not exhausted by tasks that come and go: an HTTP request lands on whichever worker is free.
 inline void setAddLightSink(AddLightFn fn, void* ctx) {
-    const uintptr_t me = platform::currentThreadId();
-    detail::SinkSlot* slots = detail::sinkSlots();
     if (!fn && !ctx) {
-        for (uint8_t i = 0; i < 2; i++)
-            if (slots[i].owner.load(std::memory_order_acquire) == me) {
-                slots[i].sink = {};
-                // release LAST: the slot must not look free until the sink is cleared.
-                slots[i].owner.store(0, std::memory_order_release);
-                return;
-            }
-        return;   // overflow holds no sink to clear (see below)
+        // Clear FIRST, release last: the slot must not look free until the sink is cleared.
+        detail::SinkSlot* s = detail::ownedSlot(false);
+        if (s) { s->sink = {}; detail::releaseIfEmpty(s); }
+        return;   // unowned: the overflow holds no sink to clear (see below)
     }
     // Install ONLY into an owned slot. Writing through addLightSink() would install into the shared
     // overflow sink when both slots are taken, and a second overflow thread would then run through
     // the first one's context — the exact aliasing the two-slot table exists to prevent. A third
     // concurrent runner instead gets no sink at all, so its addLight calls no-op: visibly nothing
     // placed, rather than lights written through another thread's layout.
-    detail::SinkSlot* owned = nullptr;
-    for (uint8_t i = 0; i < 2; i++)
-        if (slots[i].owner.load(std::memory_order_acquire) == me) { owned = &slots[i]; break; }
-    if (!owned)
-        for (uint8_t i = 0; i < 2; i++) {
-            uintptr_t free = 0;
-            if (slots[i].owner.compare_exchange_strong(free, me, std::memory_order_acq_rel,
-                                                       std::memory_order_relaxed)) {
-                owned = &slots[i];
-                break;
-            }
-        }
-    if (owned) owned->sink = {fn, ctx};
+    detail::SinkSlot* s = detail::ownedSlot(true);
+    if (s) s->sink = {fn, ctx};
 }
 
 extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -244,6 +269,48 @@ extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, co
     const AddLightSink s = addLightSink();
     if (s.fn && s.ctx)
         s.fn(s.ctx, static_cast<uint16_t>(x), static_cast<uint16_t>(y), static_cast<uint16_t>(z));
+    return 0;
+}
+
+/// The canvas the DRAW builtins render into, valid for the duration of one run(). The binding
+/// installs it just before engine.run and detaches (a default Canvas) right after. It lives in
+/// the same per-thread slot as the addLight sink, the one home for what a running script's
+/// built-ins may reach, because C++ `thread_local` is unusable on the ESP32 (see the sink's
+/// comment: THREADPTR is 0 on a task without TLS). A binding that installs nothing (a layout, a
+/// modifier) leaves the data pointer null and every draw call no-ops: visibly nothing drawn,
+/// never a write through another binding's buffer.
+inline const draw::Canvas& drawCanvas() {
+    detail::SinkSlot* s = detail::ownedSlot(false);   // a read never claims, see addLightSink
+    return s ? s->canvas : detail::canvasOverflow();
+}
+inline void setDrawCanvas(const draw::Canvas& cv) MM_NONBLOCKING {
+    if (!cv.data) {
+        // Clear FIRST, release last: the same order the sink detach keeps.
+        detail::SinkSlot* s = detail::ownedSlot(false);
+        if (s) { s->canvas = {}; detail::releaseIfEmpty(s); }
+        return;
+    }
+    detail::SinkSlot* s = detail::ownedSlot(true);
+    if (s) s->canvas = cv;
+}
+
+/// line(x1, y1, x2, y2, r, g, b) → a straight segment on the effect's canvas, z = 0.
+///
+/// The first seven-argument builtin, riding the args-array call ABI (every Call builtin receives
+/// its script arguments as a memory array, so arity is a data question, not a register one).
+/// Endpoints are CLAMPED to the canvas extents before drawing: script arithmetic is unsigned and
+/// wraps, so a "negative" coordinate arrives as a huge value, and an unclamped pair would send the
+/// Bresenham walker on a billions-of-steps march. The clamp turns that into a segment pinned to
+/// the edge, visible and instant.
+extern "C" inline uint32_t mm_light_line(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;
+    const auto clampAxis = [](uintptr_t v, lengthType n) -> lengthType {
+        return v >= uintptr_t(n) ? lengthType(n > 0 ? n - 1 : 0) : lengthType(v);
+    };
+    const Coord3D a{clampAxis(args[0], cv.dims.x), clampAxis(args[1], cv.dims.y), 0};
+    const Coord3D b{clampAxis(args[2], cv.dims.x), clampAxis(args[3], cv.dims.y), 0};
+    draw::line(cv, a, b, RGB{uint8_t(args[4]), uint8_t(args[5]), uint8_t(args[6])});
     return 0;
 }
 
@@ -345,6 +412,8 @@ inline BuiltinTable lightBuiltins() {
     t.add({"print", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_print, {}});
     // addLight(x, y, z)      → place a light. A scripted layout's whole vocabulary.
     t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
+    // line(x1, y1, x2, y2, r, g, b) → a segment on the canvas, via the shared draw::line.
+    t.add({"line", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_line, {}});
     return t;
 }
 

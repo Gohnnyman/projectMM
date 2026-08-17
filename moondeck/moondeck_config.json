@@ -416,7 +416,8 @@
           "default": false
         }
       ],
-      "long_running": true
+      "long_running": true,
+      "process_name": "qemu-system-xtensa"
     },
     {
       "id": "erase_flash_esp32",

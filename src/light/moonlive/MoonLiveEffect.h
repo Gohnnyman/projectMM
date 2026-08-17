@@ -97,7 +97,12 @@ public:
         writeSysVar(moonlive::kSysWidth,  width());
         writeSysVar(moonlive::kSysHeight, height());
         writeSysVar(moonlive::kSysDepth,  depth());
+        // The draw builtins (line) render through the same canvas every native effect uses,
+        // installed for exactly one run and detached after, so a script can only ever draw into
+        // the layer it is ticking in.
+        moonlive::setDrawCanvas(canvas());
         engine_.run(buffer(), nrOfLights(), cpl, elapsed());
+        moonlive::setDrawCanvas({});
     }
 
     void release() override {
