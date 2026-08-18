@@ -229,6 +229,32 @@ void XtensaAssembler::movImm(Reg d, int32_t imm) {
     emit(lo, 3);                                                         // movi a13, lo8
     emit2(uint16_t((dr << 12) | (dr << 8) | (kTmp << 4) | 0xa));         // add.n aD, aD, a13
 }
+// movPtr: a 32-bit address into a register, a byte at a time.
+//
+// The same shape movImm uses for a 16-bit constant and call() uses for its target, extended to
+// four bytes: movi the top byte, then three times (slli 8, movi the next byte into the scratch,
+// add). a13 is this assembler's reserved scratch, outside the vreg map, so nothing live is
+// disturbed.
+//
+// Byte-at-a-time rather than an l32r literal because a literal needs a pool at a known
+// PC-relative distance, and this block is COPIED to its final address after these bytes are
+// built. An absolute materialization survives that move; a PC-relative one would have to be
+// re-based.
+void XtensaAssembler::movPtr(Reg d, const void* p) {
+    const uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+    const uint8_t dr = ar(d);
+    static constexpr uint8_t kTmp = 13;
+    const uint8_t top[3] = {uint8_t((dr << 4) | 0x2), 0xa0, uint8_t(addr >> 24)};
+    emit(top, 3);                                                        // movi aD, b3
+    for (int shift = 16; shift >= 0; shift -= 8) {
+        const uint8_t sl[3] = {0x80, uint8_t((dr << 4) | dr), 0x11};
+        emit(sl, 3);                                                     // slli aD, aD, 8
+        const uint8_t by[3] = {uint8_t((kTmp << 4) | 0x2), 0xa0, uint8_t((addr >> shift) & 0xff)};
+        emit(by, 3);                                                     // movi a13, bN
+        emit2(uint16_t((dr << 12) | (dr << 8) | (kTmp << 4) | 0xa));     // add.n aD, aD, a13
+    }
+}
+
 // add.n aD, aA, aB : word (d<<12)|(a<<8)|(b<<4)|0xa
 void XtensaAssembler::addReg(Reg d, Reg a, Reg b) {
     emit2(uint16_t((ar(d) << 12) | (ar(a) << 8) | (ar(b) << 4) | 0xa));

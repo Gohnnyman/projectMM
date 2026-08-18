@@ -8,8 +8,13 @@
 // walk runs once per edit, so clarity beats the repeated call.
 
 class RoseLayout {
-  uint8_t petals = 2;   // @control 1..8
-  uint8_t radius = 15;  // @control 4..30
+  uint8_t petals = 2;
+  uint8_t radius = 15;
+
+  defineControls() {
+    addUint8("petals", petals, 1, 8);
+    addUint8("radius", radius, 4, 30);
+  }
 
   placeLights() {
     for (i = 0; i < 256; i = i + 1) {

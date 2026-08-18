@@ -298,19 +298,68 @@ than being retrofitted into a language still moving underneath it.
    registers and `bl` leaves them alone, so removing the fix fails no test there while crashing an
    S3. The boards are the only check for that class.
 
-2. ⬜ **Typed script-level members**, per *Where script-level state lives* above: a variable declared inside the
-   class but outside any function lives in the arena, is visible in every function, is initialised
-   once and survives every call. Scalars first, with the storage designed so a struct and an array
-   can follow without moving anything. This is what makes a stateful effect (fire, trails, decay)
-   expressible at all, so it is worth landing on its own and measuring before anything is built on
-   it.
+2. ✅ **`defineControls()`, replacing the `// @control` comment.** Done: a control is declared by
+   calling `addUint8("bpm", bpm, 1, 240)` inside a `defineControls()` the script defines, the same
+   call a compiled module makes. The `ControlAnno` token and its capture path are gone, all 16
+   shipped scripts and the four docs moved with it, and both boards run the new form.
 
-3. ⬜ **`defineControls()`, replacing the `// @control` comment.** A control is declared by calling
-   `addUint8("bpm", 30, 1, 240)` inside a `defineControls()` the script defines, the same call a
-   compiled module makes. Today's form is a COMMENT that changes behaviour, which is not C and does
-   not resemble the thing it imitates; the lexer's `ControlAnno` token and its capture path go away
-   with it. Comes after step 1 because it IS a function, and after step 2 because the control it
-   declares is a member. The shipped scripts and the three docs move with it.
+   **It is ORDINARY CODE, which took more than the syntax swap this step first looked like.**
+   `defineControls` is a function the binding CALLS after a successful compile, the way the
+   Scheduler calls a compiled module's; `addUint8` is a builtin in the same table as `setRGB`,
+   reaching the engine through a sink as `addLight` does. A compile-time reading of the arguments
+   was built first and rejected: it would have made `addUint8` the one call in the language whose
+   arguments must be literals, which is a special case wearing a disguise. `addUint8("speed",
+   speed, base, base * 4 + 5)` works, and a test pins it.
+
+   That required three things the step did not anticipate:
+
+   - **`IrOp::ConstPtr` and `movPtr` on all three backends.** A label is a pointer and `IrInst::imm`
+     is `int32_t`, so an address cannot ride an immediate. Each backend already materializes one for
+     a host call's target (arm64 movz + 3x movk, RISC-V lui + addi, Xtensa a byte at a time), so
+     this generalizes a proven sequence rather than adding a mechanism.
+   - **An engine-owned string pool.** `Control::name` is a HELD pointer the UI dereferences on every
+     `/api/state`, and the source buffer is freed when the compile returns, so a literal is interned
+     into memory that outlives both. In the engine rather than the exec block: that block is IRAM on
+     a device, which takes 32-bit stores only.
+   - **`byRef` and `byStr` on the builtin descriptor.** Which argument is a member (passed as its
+     arena offset, so the script reads as the reference a compiled module passes) and which must be
+     a quoted name. Stated per builtin rather than special-cased by name in the parser. `byStr`
+     came from a test: `addUint8(s, s, 0, 9)` compiled, reading the member's VALUE as the label and
+     handing the host a pointer built from a colour byte.
+
+   **SWAPPED with typed members, which this plan originally put first.** The stated reason for the
+   old order was that "the control it declares is a member", so members had to exist to declare one
+   against. Building it showed the dependency runs the other way. Every class-scope declaration is a
+   member; whether the UI shows one is a separate question `defineControls()` answers. While
+   `@control` is still the marker, the member rule has to be written in terms of a comment that this
+   step deletes, so members built first would be built against a discriminator with no future, and
+   step 3 would spend its budget unpicking that rather than on itself. Starting a member's WIP
+   against the annotation is what surfaced this: the declaration rule kept wanting to ask a question
+   the next step abolishes.
+
+3. ⬜ **Typed script-level members**, per *Where script-level state lives* above.
+
+   **Half of this arrived with step 2**, because a control turned out to BE a member the UI shows.
+   A variable declared in the class body already lives in the arena, is visible in every function,
+   is seeded once from its initializer and survives every call, and a member no `addUint8` names is
+   already private state. What is missing is that a script cannot WRITE one, which is what makes it
+   state rather than a constant.
+
+   So what remains is:
+
+   - **An assignment statement.** `x = expr;` is reachable only inside a `for` header today, so a
+     member can be declared and read and never written. `IrOp::StoreCtrl` and its lowering exist
+     (built during step 2's first attempt and set aside when the steps swapped); the grammar does
+     not. What may be assigned to is the rule worth stating: a member and a script-local may; a
+     control and a system variable may not, because the UI and the host own those and a script
+     store would be overwritten unpredictably.
+   - **Types wider than a byte, and aggregates.** Scalars work; a `Coord3D` or an array does not.
+     The storage decision is settled (scalars in the arena, per-light arrays as a `ScratchBuffer`),
+     so this is implementing it rather than deciding it. An element COUNT is already on the member
+     record, 1 for a scalar, so a wider type is a wider record rather than a second mechanism.
+
+   This is what makes a stateful effect (fire, trails, decay) expressible at all, and it is the one
+   step where a hot-path regression is plausible, so `collect_kpi.py` runs against it.
 
 3b. ✅ **A frame per FUNCTION, not per program.** Done: each function emits its own prologue and
    epilogue, the host arguments are parked per function (they were spilling into a frame that did
@@ -430,6 +479,37 @@ mechanism or a language people build with.
    This is a correctness wall on exactly the installations worth demonstrating on, and it touches
    the same typed-storage decision as steps 2 and 8, so those three want to agree with each other.
 
+### Strings: literals yes, a String TYPE not yet
+
+`IrOp::ConstPtr` gives a script string LITERALS as arguments, which is what `addUint8("bpm", bpm,
+1, 120)` needs: the text is interned into the compiled program and the emitted code carries a
+pointer that outlives the source buffer, the same lifetime answer the engine already gives control
+and entry-point names.
+
+A String TYPE is deliberately NOT next, and the reason is what the light domain measures rather
+than taste. Every one of the 52 compiled effects mentions `const char*`, and every use is
+metadata: `name()`, `tags()`, a control label. Not one manipulates text while rendering. So
+strings here are a declaration-time concern, which literals cover.
+
+**The first thing literals buy, beyond a control name, is a real debugger.** `print(v)` writes
+`[script] 42` and nothing about which value that was, so debugging a script means printing several
+numbers and inferring which line each came from. `printf("y=%d x=%d\n", y, x)` is one more builtin
+on the same table and the same call path once a string can be an argument, and it makes the one
+script-level debugging tool actually usable.
+
+It must be OUR formatter, not a `std::printf` passthrough. The format string comes from a script,
+which is the textbook format-string vulnerability: `%s` against an integer argument dereferences a
+wild pointer and `%n` writes memory. Walking the format ourselves and accepting `%d`/`%u`/`%x`/`%%`
+against arguments that are known to be integers removes the class rather than documenting it. It
+also keeps the existing print budget, which is what stops a serial write from sitting on the render
+tick.
+
+What a mutable String would additionally need is the hard half: somewhere to put bytes a script
+assigns at run time, a length convention, and comparison/concatenation as builtins. That is the
+same storage-and-ceiling question arrays face in step 8, so the two want one answer rather than
+two. The one concrete use case is a text overlay in a showcase effect, and that can go a long way
+on literals plus the numeric vocabulary already present.
+
 10. ⬜ **The editing loop, which is the thing people will actually see.** Editing a script means the
    File Manager today: find the file, edit it, save it, then re-name it on the module. The demo is
    live authoring, and that wants an editor on the module's own card, saving to the same file the
@@ -485,9 +565,10 @@ therefore needs a host test that proves the semantics and a bench run that prove
 3. **A member written by one function and read by another**, and a member that survives across
    `tick()` calls (step 2). The second is what a stateful effect depends on and is not provable by
    inspection.
-4. **The same script at the host's real budget and a squeezed one renders identical pixels.** The
+4. ✅ **The same script at the host's real budget and a squeezed one renders identical pixels.** The
    predecessor plan's technique, still the only way the register work is testable off hardware, and
-   every new construct has to keep passing it.
+   every new construct has to keep passing it. Holds after `ConstPtr` joined the lowering, which is
+   the check that matters: a new op that disturbed the allocator would show up here first.
 5. ✅ **Recursion depth degrades visibly** (step 1): a script that recurses without bound keeps the
    device rendering rather than resetting it. Pinned by `a script that recurses without end keeps
    rendering instead of resetting`, which also re-runs the script to prove the counter unwinds: a
@@ -499,11 +580,27 @@ therefore needs a host test that proves the semantics and a bench run that prove
    channel from the emitted block back to the binding, which does not exist yet: worth having, and
    left for the step that gives scripts a diagnostic path.
 6. **An arena ceiling reports a compile error** (step 8), not a failed allocation at run time.
-7. **The bench, on all four boards**, after each step: S3 and classic (Xtensa), P4 and S31 (RISC-V),
-   a scripted layout and a scripted effect. Exec-block sizes compared against the previous step, since
-   an unexplained jump is the cheapest signal that codegen went wrong.
-8. **`collect_kpi.py` after step 2**, because members change how EVERY variable is accessed. That is
-   the one step where a hot-path regression is plausible, so it is measured rather than assumed.
+7. 🟡 **The bench, on all four boards**, after each step: S3 and classic (Xtensa), P4 and S31
+   (RISC-V), a scripted layout and a scripted effect. Exec-block sizes compared against the previous
+   step, since an unexplained jump is the cheapest signal that codegen went wrong.
+
+   After step 2: **S3 and S31 done**, one board per ISA, each running a scripted layout
+   (`grid.mlv`), effect (`plasma.mlv`) and modifier with the controls their `addUint8` calls
+   declare. The classic and the P4 are NOT done, so the step is verified per ISA rather than per
+   board. Note a device keeps its scripts across a flash, so a board tests the new syntax only once
+   the converted files are uploaded to it: the S31 was still running the annotated `grid.mlv` after
+   its firmware was current.
+
+   Exec blocks at this step, for the next one to compare against:
+
+   | script | Xtensa | RISC-V |
+   |---|---:|---:|
+   | `grid.mlv` | 499 B | 880 B |
+   | `plasma.mlv` | 1378 B | 2644 B |
+8. **`collect_kpi.py` after typed members** (now step 3), because members change how EVERY variable
+   is accessed. That is the one step where a hot-path regression is plausible, so it is measured
+   rather than assumed. It moved with the step when 2 and 3 swapped: `defineControls()` runs once
+   after a compile and emits nothing per tick, so it has no hot path to regress.
 
 ## Deliberately not in this plan
 

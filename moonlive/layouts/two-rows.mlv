@@ -2,7 +2,11 @@
 // The return row counts x DOWN -- the strand turns around at the far end.
 
 class TwoRowsLayout {
-  uint8_t cols = 16; // @control 1..64
+  uint8_t cols = 16;
+
+  defineControls() {
+    addUint8("cols", cols, 1, 64);
+  }
 
   placeLights() {
     for (i = 0; i < cols; i = i + 1) {

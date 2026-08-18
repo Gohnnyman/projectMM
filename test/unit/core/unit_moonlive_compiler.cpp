@@ -71,7 +71,7 @@ TEST_CASE("compileSource: setRGB(index, r,g,b) writes one pixel") {
 TEST_CASE("a function the script calls can light pixels and read the script's controls") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  uint8_t level = 200;   // @control 0..255\n"
+                        "  uint8_t level = 200;\n"
                         "  paint() { setRGB(1, level, 0, 0); }\n"
                         "  tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
                         "}\n", kTable, kSys));
@@ -280,38 +280,58 @@ TEST_CASE("MoonLive recompiling swaps the program live (fill <-> setRGB)") {
     CHECK(buf[1*3+0] == 255); CHECK(buf[0] == 0);
 }
 
-// STAGE 1 CONTROLS — parse layer: a `uint8_t name = def; // @control min..max` declaration
-// surfaces a DeclaredControl, and a declared name used in a statement resolves to it.
-// The DeclaredControl tests also need lowerToBytes to return non-zero — r.ok gates on it.
-TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
-    uint8_t out[768];
-    auto r = moonlive::compileSource(
-        mmScript("uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);"), kTable, kSys, out, sizeof(out));
-    REQUIRE(r.ok);
-    REQUIRE(r.controlCount == 1);
-    const auto& c = r.controls[0];
-    CHECK(std::strncmp(c.name, "speed", c.nameLen) == 0);
-    CHECK(c.nameLen == 5);
-    CHECK(c.min == 0); CHECK(c.max == 99); CHECK(c.def == 50); CHECK(c.offset == 0);
-    CHECK(c.type == moonlive::CtrlType::Uint8);
+// CONTROLS: a declaration is a member, and `addUint8("name", name, lo, hi)` in defineControls
+// A control is declared by CALLING addUint8 inside defineControls, the same call a compiled module
+// makes. The declaration alone is a member: state the script owns, which the UI never sees unless
+// the script asks for it. That split is the whole point, so both halves are checked here.
+//
+// Engine-level rather than compileSource-level, because a control now exists because a function
+// RAN: compileSource emits the code, and runDefineControls executes it.
+TEST_CASE("a control is declared by calling addUint8, and a plain member is not") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t speed = 50;\n"
+                        "  uint8_t hidden = 7;\n"
+                        "  defineControls() { addUint8(\"speed\", speed, 0, 99); }\n"
+                        "  tick() { setRGB(0, speed, hidden, 255); }\n"
+                        "}\n", kTable, kSys));
+    moonlive::runDefineControls(eng);
 
-    // No annotation → default 0..255; two controls get sequential offsets (each default in range).
-    auto r2 = moonlive::compileSource(
-        mmScript("uint8_t a = 10;\nuint8_t b = 5; // @control 1..7\nsetRGB(a, b, 0, 0);"), kTable, kSys, out, sizeof(out));
-    REQUIRE(r2.ok);
-    REQUIRE(r2.controlCount == 2);
-    CHECK(r2.controls[0].max == 255); CHECK(r2.controls[0].offset == 0);   // a: no anno
-    CHECK(r2.controls[1].min == 1); CHECK(r2.controls[1].max == 7); CHECK(r2.controls[1].def == 5); CHECK(r2.controls[1].offset == 1);
+    uint8_t n = 0;
+    const auto* c = eng.declaredControls(n);
+    REQUIRE(n == 1);                                  // `hidden` is a member, not a control
+    CHECK(std::strcmp(c[0].name, "speed") == 0);
+    CHECK(c[0].min == 0); CHECK(c[0].max == 99);
+    CHECK(c[0].def == 50);                            // from the member's initializer
+    CHECK(c[0].type == moonlive::CtrlType::Uint8);
 
-    // `@control` matches as a whole word: a comment whose first word merely STARTS
-    // with "@control" (e.g. "@controlled") is a plain comment, not a malformed
-    // annotation — it's skipped, the declaration takes the default 0..255 range.
-    auto r3 = moonlive::compileSource(
-        mmScript("uint8_t speed = 9; // @controlled by the user\nsetRGB(speed, 0, 0, 0);"), kTable, kSys, out, sizeof(out));
-    REQUIRE(r3.ok);
-    REQUIRE(r3.controlCount == 1);
-    CHECK(r3.controls[0].min == 0); CHECK(r3.controls[0].max == 255); CHECK(r3.controls[0].def == 9);
+    // Both members hold their declared values, whether or not a control surfaces them: the
+    // initializer seeds the arena, which is what makes a member state rather than a constant.
+    uint8_t buf[3] = {};
+    eng.run(buf, 1, 3, 0, "tick");
+    CHECK(buf[0] == 50);                              // `speed`, which the UI also shows
+    CHECK(buf[1] == 7);                               // `hidden`, read by tick, never on the UI
 }
+
+// A control's range is an ORDINARY EXPRESSION, like every other argument in the language. Making
+// addUint8 the one call whose arguments must be literals would be a special case wearing a
+// disguise, so this pins that it is not one.
+TEST_CASE("a control's range can be computed, not just written as a literal") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t base = 10;\n"
+                        "  uint8_t speed = 20;\n"
+                        "  defineControls() { addUint8(\"speed\", speed, base, base * 4 + 5); }\n"
+                        "  tick() { setRGB(0, speed, 0, 0); }\n"
+                        "}\n", kTable, kSys));
+    moonlive::runDefineControls(eng);
+    uint8_t n = 0;
+    const auto* c = eng.declaredControls(n);
+    REQUIRE(n == 1);
+    CHECK(c[0].min == 10);        // base
+    CHECK(c[0].max == 45);        // base * 4 + 5
+}
+
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
 
 // A system variable is a value the HOST hands the script — the layer's size, the light being
@@ -323,7 +343,7 @@ TEST_CASE("a script cannot declare a name the engine already defines") {
     uint8_t out[512];
     struct Case { const char* src; const char* what; };
     const Case refused[] = {
-        {mmScript("uint8_t width = 16; // @control 1..64\nsetRGB(0, 0, 0, 0);"), "a control named width"},
+        {mmScript("uint8_t width = 16;\nsetRGB(0, 0, 0, 0);"), "a control named width"},
         {mmScript("uint8_t t = 5;\nsetRGB(0, 0, 0, 0);"),                        "a control named t"},
         {mmScript("for (xPos = 0; xPos < 4; xPos = xPos + 1) { setRGB(xPos, 0, 0, 0); }"),
                                                                         "a loop variable named xPos"},
@@ -454,14 +474,16 @@ TEST_CASE("compileSource: malformed control declarations fail with a diagnostic,
     const char* bad[] = {
         mmScript("uint8_t speed 50; setRGB(0,0,0,0);"),                        // missing '='
         mmScript("uint8_t speed = 300; setRGB(0,0,0,0);"),                     // default > 255
-        mmScript("uint8_t speed = 50; // @control 99..0\nsetRGB(0,0,0,0);"),   // reversed range
-        mmScript("uint8_t speed = 50; // @control 0..10\nsetRGB(0,0,0,0);"),   // default outside @control range
-        mmScript("uint8_t speed = 50; // @control 5\nsetRGB(0,0,0,0);"),       // lexer-level malformed: no `..max` (Tok::Error surfaced, not a generic fall-through)
-        mmScript("uint8_t speed = 50; // @control 5..\nsetRGB(0,0,0,0);"),     // lexer-level malformed: missing max
+        // The range cases moved to defineControls, where a range now lives. A comment cannot be
+        // malformed any more, because a comment no longer declares anything.
+        "class T {\n  uint8_t s = 5;\n  defineControls() { addUint8(\"s\", nope, 0, 9); }\n"
+        "  tick() { setRGB(0,0,0,0); }\n}\n",                                 // binds an undeclared member
+        "class T {\n  uint8_t s = 5;\n  defineControls() { addUint8(s, s, 0, 9); }\n"
+        "  tick() { setRGB(0,0,0,0); }\n}\n",                                 // name is not a string
         mmScript("uint8_t random16 = 5; setRGB(0,0,0,0);"),                    // name shadows a builtin
-        "uint8_t speed = 50;",                                       // no statement
+        "uint8_t speed = 50;",                                       // not even a class
         mmScript("uint8_t = 50; setRGB(0,0,0,0);"),                            // no name
-        mmScript("uint8_t s = 1; uint8_t s = 2; setRGB(0,0,0,0);"),            // duplicate name
+        mmScript("uint8_t s = 1; uint8_t s = 2; setRGB(0,0,0,0);"),            // duplicate member name
     };
     for (auto s : bad) {
         auto r = moonlive::compileSource(s, kTable, kSys, out, sizeof(out));

@@ -83,6 +83,7 @@ public:
     Label newLabel();
     void  bind(Label l);
 
+    void movPtr(Reg d, const void* p);   // a full-width address into a register (ConstPtr)
     void movImm(Reg d, int32_t imm);     // movi aD, #imm (0..255)
     void movReg(Reg d, Reg a);           // mov.n aD, aA
     void addImm(Reg d, Reg a, int32_t imm);   // addi.n aD, aA, #imm (1..15)

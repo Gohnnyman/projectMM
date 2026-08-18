@@ -23,7 +23,7 @@
 // The assembler contract, which all three satisfy:
 //   ctor(size_t cap), newLabel, bind, prologue(uint8_t), epilogue, alignForEntry, finalize,
 //   bytes, size, overflowed, spillStore, spillLoad, slotAddr,
-//   movImm, movReg, addImm, addReg, mulReg, store8, load8,
+//   movImm, movPtr, movReg, addImm, addReg, mulReg, store8, load8,
 //   branchIfZero, branchGeU, branchNe, call, callLabel, and kMaxSpillSlots.
 // The branches are the FUSED forms (compare-and-branch as one call). arm64 has no such
 // instruction and spells each as cmp + b.cond inside its assembler, which is exactly where a
@@ -231,6 +231,7 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
         const IrInst& op = ir.ops[i];
         switch (op.op) {
             case IrOp::Const:  a.movImm(reg(op.dst), op.imm); break;
+            case IrOp::ConstPtr: a.movPtr(reg(op.dst), op.ptr); break;
             case IrOp::Add:    a.addReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::AddImm: a.addImm(reg(op.dst), reg(op.a), op.imm); break;
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;

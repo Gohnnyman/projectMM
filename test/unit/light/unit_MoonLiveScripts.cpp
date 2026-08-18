@@ -89,7 +89,8 @@ TEST_CASE("every script in moonlive/ compiles") {
 
 // Comments are what makes a script in `moonlive/` readable, so the lexer has to treat a plain `//`
 // line as whitespace — anywhere, including between the statements of a loop body. The one exception
-// is `// @control min..max`, which is not a comment at all but the declaration of a UI slider.
+// was `// @control min..max`, a comment that declared a UI slider. defineControls() replaced it,
+// so every comment is now genuinely a comment.
 // Each binding supplies the system variables it actually WRITES, and supplying a name is also what
 // reserves it. That split is what keeps `x` usable as a loop counter in a layout while still making
 // it mean "the light being folded" in a modifier — and what turns a layout reading `width` into an
@@ -116,7 +117,7 @@ TEST_CASE("every script reads the same system-variable vocabulary") {
         {mmScript("setRGB(xPos, 0, 0, 0);"),
          true,  "reading a coordinate outside a modifier is legal and reads 0: no binding writes "
                 "it, so there is nothing to disagree with"},
-        {mmScript("uint8_t width = 16; // @control 1..64\nsetRGB(0, 0, 0, 0);"),
+        {mmScript("uint8_t width = 16;\nsetRGB(0, 0, 0, 0);"),
          false, "declaring one is still refused, in every role: that is what keeps a read meaningful"},
         {mmScript("uint8_t xPos = 3;\nsetRGB(0, 0, 0, 0);"),
          false, "the coordinate names are reserved too, so a modifier cannot shadow what it is handed"},
@@ -149,19 +150,20 @@ TEST_CASE("the three roles are handed the same table") {
     CHECK(mod.count == moonlive::lightSysVars().count);
 }
 
-TEST_CASE("a script may be commented, and only @control carries meaning") {
+// EVERY comment is whitespace, with no exception. There used to be one: `// @control 1..240`
+// declared a control's range, so a comment changed behavior and a malformed one was a compile
+// error. `defineControls()` replaced it, which means a comment can no longer be wrong.
+TEST_CASE("a comment is whitespace, wherever it appears") {
     struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
         {mmScript("// leading comment\naddLight(1, 2, 3);"), true, "a comment before the code"},
         {mmScript("addLight(1, 2, 3); // trailing comment"), true, "a comment after the code"},
         {mmScript("for (i = 0; i < 2; i = i + 1) {\n  // inside the body\n  addLight(i, 0, 0);\n}"), true,
          "a comment inside a loop body"},
-        {mmScript("// @controlled is a word, not an annotation\naddLight(1, 2, 3);"), true,
-         "@control matched as a whole word only"},
-        {mmScript("uint8_t n = 4; // @control 1..64\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
-         true, "an @control declaration"},
-        {mmScript("uint8_t n = 4; // @control oops\naddLight(1, 2, 3);"), false,
-         "a malformed @control is an error, not a comment"},
+        {mmScript("// @control 1..64 is just text now\naddLight(1, 2, 3);"), true,
+         "the old annotation is an ordinary comment"},
+        {mmScript("uint8_t n = 4; // anything at all !!\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
+         true, "a comment after a member declaration"},
     };
     for (const Case& c : cases) {
         moonlive::MoonLive engine;
@@ -233,7 +235,7 @@ TEST_CASE("a script reads elapsed time, so it can animate") {
 TEST_CASE("mod wraps a sweep, so an animation repeats instead of running off the end") {
     uint8_t code[4096];
     auto r = moonlive::compileSource(
-        mmScript("uint8_t w = 16;   // @control 1..64\n"
+        mmScript("uint8_t w = 16;\n"
         "for (yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     REQUIRE(r.ok);
@@ -267,7 +269,7 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
     uint8_t code[8192];
     // Four loops, each with a call in the body — comfortably over budget if counters accumulate.
     auto r = moonlive::compileSource(
-        mmScript("uint8_t w = 16;   // @control 1..64\n"
+        mmScript("uint8_t w = 16;\n"
         "for (a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
         "for (b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
         "for (c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"

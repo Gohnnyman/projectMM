@@ -13,7 +13,9 @@ A class may also define functions of its own and **call them**, including callin
 
 ```
 class CrosshairEffect {
-  uint8_t bpm = 30;   // @control 1..240
+  uint8_t bpm = 30;
+
+  defineControls() { addUint8("bpm", bpm, 1, 240); }
 
   column() { for (y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
   tick()   { fill(0, 0, 0); column(); }
@@ -24,6 +26,15 @@ These are real calls, not pasted-in text: the callee gets its own frame when it 
 lets one helper call another and lets a function recurse. A function takes no arguments and returns
 nothing yet, so a helper does a whole job rather than computing a value. `effects/crosshair.mlv` is
 the worked example.
+
+**A declaration is a MEMBER; `defineControls()` decides what the UI shows.** `uint8_t bpm = 30;` is
+state the script owns: visible in every function, surviving every tick. Naming it in
+`defineControls()` with `addUint8("bpm", bpm, 1, 240)` also puts it on the UI as a slider, which is
+the same call a compiled module makes. A member no `addUint8` names stays private to the script,
+which is how a stateful effect holds a value the user should not see.
+
+The default comes from the declaration, the range from the call, and the quoted name is the UI
+label, free to differ from the member's name.
 
 **Declare a helper above the function that calls it.** Only functions already parsed are visible, so
 a call to one declared further down reports `unknown function`. A function can always call itself.

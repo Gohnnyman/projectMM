@@ -26,21 +26,31 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 ## Controls
 
 - `script` — the file name under `/moonlive/`, e.g. `lines.mlv`. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default. Naming one (or re-naming it after an edit) recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot). The directory is created on demand.
-- **Scripted controls** — a script declares a tunable variable with a range annotation, and the engine surfaces it as a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
+- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` inside a `defineControls()`, the same call a compiled module makes. Each becomes a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
   class SpeedyEffect {
-    uint8_t speed = 50;   // @control 0..99    → a "speed" slider, default 50, range 0..99
-    uint8_t hue   = 128;  // @control 0..255
+    uint8_t speed = 50;
+    uint8_t hue   = 128;
+    uint8_t phase = 0;          // a member, not a control: the UI never shows it
 
-    tick() { setRGB(speed, hue, 0, 255); }
+    defineControls() {
+      addUint8("speed", speed, 0, 99);
+      addUint8("hue", hue, 0, 255);
+    }
+
+    tick() { setRGB(speed, hue, phase, 255); }
   }
   ```
 
-  A declared variable sits in the class body, not inside a function: it is a member, which is what
-  lets the UI bind to it and what will let one function set a value another reads.
+  A declaration sits in the class body, not inside a function: it is a **member**, visible in every
+  function and surviving every call. That is the whole of what a declaration means, and whether the
+  UI shows one is the separate question `defineControls()` answers. A member no control names is
+  simply the script's own state.
 
-  Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script file and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
+  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`. The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
+
+  `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
 
 ### System variables — what the engine hands a script
 
@@ -97,7 +107,7 @@ Two rules a script author meets:
 
 ### Wire contract — control declaration
 
-The controls are **derived from the script** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
+The controls are **declared by the script** (one per `addUint8` call in its `defineControls()`), then **surfaced in `/api/state`**, the device JSON view the integrator consumes, as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
 
 ## Pieces
 

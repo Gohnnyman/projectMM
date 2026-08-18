@@ -2,8 +2,13 @@
 // `cols`/`rows` are this layout's own controls; the logical grid comes from what it places.
 
 class GridLayout {
-  uint8_t cols = 16;  // @control 1..64
-  uint8_t rows = 16;  // @control 1..64
+  uint8_t cols = 16;
+  uint8_t rows = 16;
+
+  defineControls() {
+    addUint8("cols", cols, 1, 64);
+    addUint8("rows", rows, 1, 64);
+  }
 
   placeLights() {
     for (y = 0; y < rows; y = y + 1) {

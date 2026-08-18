@@ -101,6 +101,45 @@ public:
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }
 
+    /// Append a control the running `defineControls()` declared. The binding installs a sink that
+    /// lands here, so the control list is built by the script CALLING addUint8, exactly as a
+    /// compiled module's list is built by its defineControls() running.
+    ///
+    /// `name` must outlive the engine: it points into the string pool this engine owns, which is
+    /// what the compiler interned it into.
+    void addDeclaredControl(const char* name, uint8_t offset, uint8_t lo, uint8_t hi) {
+        if (controlCount_ >= kMaxCtrls || !name || offset >= kArenaBytes) return;
+        if (lo > hi) return;
+        // Two controls on one member would give the UI two cards writing the same byte, each
+        // overwriting the other, and two labels the same persistence key.
+        for (uint8_t i = 0; i < controlCount_; i++)
+            if (controls_[i].offset == offset) return;
+
+        // The DEFAULT is whatever the member already holds: its initializer seeded the arena
+        // before this ran, so the live byte is the declared value.
+        //
+        // CLAMPED IN THE ARENA, not just in the record. A script edit that narrows a range leaves
+        // a live value outside it, and the native code reads the arena byte every tick, not the
+        // record. Clamping only the record would leave the out-of-range value driving the effect
+        // while the UI showed a slider that could not reach it. This is the one place that knows
+        // both the range and the live byte at the same moment.
+        uint8_t def = ctrlArena_ ? ctrlArena_[offset] : lo;
+        if (def < lo) def = lo;
+        else if (def > hi) def = hi;
+        if (ctrlArena_) ctrlArena_[offset] = def;
+        controls_[controlCount_] = {name, lo, hi, def, 0, CtrlType::Uint8, offset};
+        // nameLen is what the binding reports; measured here rather than passed, so a caller
+        // cannot disagree with the string it handed over.
+        uint8_t n = 0;
+        while (name[n] && n < kMaxControlName - 1) n++;
+        controls_[controlCount_].nameLen = n;
+        controlCount_++;
+    }
+
+    /// Forget the controls a previous defineControls() declared, so re-running it rebuilds rather
+    /// than appends. A compiled module's defineControls() is re-runnable for the same reason.
+    void clearDeclaredControls() { controlCount_ = 0; }
+
     /// Does the script define this entry point? A binding asks before reporting "no tick() to run".
     bool hasEntry(const char* name) const { return entry(name) != nullptr; }
 
@@ -153,6 +192,9 @@ private:
     // recompile; preserves an existing slot's live value when the script is edited but the control
     // persists. Returns false on alloc failure (the caller degrades).
     bool ensureArena(const DeclaredControl* decls, uint8_t count);
+    // How many MEMBER slots have been seeded. A recompile seeds only the new ones, so a member
+    // that survives an edit keeps its live value rather than snapping back to its initializer.
+    uint8_t memberCount_ = 0;
 
     void*   code_ = nullptr;     // allocExec block holding the emitted machine code
     size_t  codeCap_ = 0;        // its capacity (for freeExec)
@@ -177,7 +219,12 @@ private:
     // from a file into a transient buffer. Copying the bytes here is what lets the engine outlive
     // the text it was built from; without it a binding reads freed memory when it publishes its
     // controls, which showed up as a control literally named "\x05".
-    char ctrlNames_[kMaxCtrls][kMaxControlName] = {};
+    // Text a script wrote as a literal, copied out of the compile result so a pointer the emitted
+    // code carries stays valid. In the ENGINE rather than the exec block: the block is IRAM on a
+    // device, which takes 32-bit stores only and is instruction memory, so string bytes do not
+    // belong in it. This is a plain member for the same reason ctrlNames_ is, and it lives as long
+    // as the compiled program that points into it.
+    char strings_[CompileResult::kStringPool] = {};
 };
 
 }  // namespace mm::moonlive

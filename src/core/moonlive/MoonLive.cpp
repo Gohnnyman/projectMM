@@ -20,6 +20,16 @@ void MoonLive::freeCode() {
     // The entry table describes code that no longer exists. Left behind, entry() would hand a
     // binding an address into a freed block: the same stale-state trap the control arena has.
     entryCount_ = 0;
+    // The declared controls go with it: a control record describes the program that just went
+    // away, and running its defineControls() is what will publish the next set. Dropping them here
+    // is also what makes a FAILED recompile safe, since the records would otherwise outlive the
+    // code and the pool their names point into.
+    //
+    // The string pool itself is NOT cleared here. freeCode runs mid-compile (place() calls it), so
+    // clearing would wipe the labels of the program still published while the next one is being
+    // built. It is reclaimed when the next compile interns into it from offset zero, which is the
+    // ordinary arena discipline: one program's strings at a time.
+    controlCount_ = 0;
 }
 
 // Copy `len` already-emitted bytes into a fresh exec block. writeExec hides the ISA quirks
@@ -80,33 +90,25 @@ bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
 bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysVarTable& sysvars) {
     Staging staging(codeCapFor(countTokens(source)));
     if (!staging) { freeCode(); error_ = "no memory to compile"; return false; }
-    CompileResult cr = compileSource(source, table, sysvars, staging.p, staging.n);
+    // strings_ is passed so a string literal is interned into memory that outlives the compile:
+    // the emitted code carries pointers into it, and the source buffer is freed the moment this
+    // returns. NOT cleared here: freeCode() owns that, because a control record published by the
+    // previous program still points into this pool. Zeroing before a compile that then FAILS left
+    // every published control named "" — name-keyed persistence and `POST /api/control` both go
+    // through that name, so a broken script silently unbound the user's own sliders.
+    CompileResult cr = compileSource(source, table, sysvars, staging.p, staging.n,
+                                     nullptr, nullptr, strings_, CompileResult::kStringPool);
     if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
     // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
     // set — ensureArena reads the previous controlCount_ to know which slots are new.
-    if (!ensureArena(cr.controls, cr.controlCount)) { freeCode(); error_ = "no control memory"; return false; }
+    // Seeded from the MEMBERS, not the controls: a member the UI never shows still has an
+    // initializer, and reading it before anything wrote would give 0 rather than what the script
+    // declared. A control is one of these members surfaced, so seeding members covers both.
+    if (!ensureArena(cr.members, cr.memberCount)) { freeCode(); error_ = "no control memory"; return false; }
     // Place the code. Only after it succeeds do we publish the new control set — a failed place()
     // must not leave declaredControls() advertising controls for code that isn't running.
     void* block = place(staging.p, cr.len);
     if (!block) return false;                                      // controlCount_/controls_ unchanged
-    // Clamp any kept slot whose range shrank (e.g. @control 0..99 edited to 0..10) so a stale live
-    // value can't fall outside the new bounds before the native code reads it.
-    for (uint8_t i = 0; i < cr.controlCount && i < controlCount_; i++) {
-        uint8_t lo = static_cast<uint8_t>(cr.controls[i].min), hi = static_cast<uint8_t>(cr.controls[i].max);
-        if (ctrlArena_[i] < lo) ctrlArena_[i] = lo;
-        else if (ctrlArena_[i] > hi) ctrlArena_[i] = hi;
-    }
-    controlCount_ = cr.controlCount;
-    for (uint8_t i = 0; i < cr.controlCount; i++) {
-        controls_[i] = cr.controls[i];
-        // Re-point `name` at our own copy: the parser's pointer is into the source text, which the
-        // caller may free as soon as this returns.
-        const uint8_t len = cr.controls[i].nameLen < kMaxControlName - 1
-                          ? cr.controls[i].nameLen : static_cast<uint8_t>(kMaxControlName - 1);
-        for (uint8_t j = 0; j < len; j++) ctrlNames_[i][j] = cr.controls[i].name[j];
-        ctrlNames_[i][len] = '\0';
-        controls_[i].name = ctrlNames_[i];
-    }
     // Copy the entry table, names included: a CompileResult's `name` points into the source text,
     // which the caller frees as soon as this returns.
     entryCount_ = cr.entryCount < kMaxEntryPoints ? cr.entryCount : kMaxEntryPoints;
@@ -134,7 +136,13 @@ bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
         if (!ctrlArena_) return false;
         for (uint8_t i = 0; i < kArenaBytes; i++) ctrlArena_[i] = 0;
     }
-    for (uint8_t i = controlCount_; i < count; i++) ctrlArena_[i] = static_cast<uint8_t>(decls[i].def);
+    // A NEW slot takes its declared initializer; an EXISTING one keeps its live value, so a source
+    // edit that keeps a control does not snap its slider back to the default. Indexed by the
+    // declaration's own offset rather than by position, because a member and the control that
+    // surfaces it share one arena byte and only the offset knows which.
+    for (uint8_t i = memberCount_; i < count; i++)
+        ctrlArena_[decls[i].offset] = static_cast<uint8_t>(decls[i].def);
+    memberCount_ = count;
     return true;
 }
 
@@ -153,6 +161,10 @@ void MoonLive::free() {
     if (ctrlArena_) platform::free(ctrlArena_);   // full release also releases the control arena
     ctrlArena_ = nullptr;
     controlCount_ = 0;
+    // The seeded-slot count goes with the arena it describes. Left behind, the next compile would
+    // treat every member as one it had already seeded and skip the initializers, so a script would
+    // start every value at zero instead of what it declared.
+    memberCount_ = 0;
 }
 
 }  // namespace mm::moonlive

@@ -73,6 +73,10 @@ public:
         uint32_t hash = 0;
         if (moonlive::compileScriptFile(engine_, script_, moonlive::lightBuiltins(),
                                         moonlive::modifierSysVars(), err, &hash)) {
+            // Declare the controls the script asks for, the way a compiled module does: by
+            // RUNNING defineControls(). Before rebuildControls(), which turns the declared
+            // list into UI cards.
+            moonlive::runDefineControls(engine_);
             clearStatus();
         } else {
             setStatus(err, Severity::Error);

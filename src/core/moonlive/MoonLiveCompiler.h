@@ -57,10 +57,16 @@ struct CompileResult {
     const char* error = "";
     uint16_t    errorCol = 0;
     size_t      len = 0;
-    // Controls the script declared (`uint8_t speed = 50; // @control 0..99`). The binding reads
-    // this list and creates a real MoonModule control per entry, bound to the run-time arena slot.
-    DeclaredControl controls[kMaxCtrls];
-    uint8_t         controlCount = 0;
+    // Every member the class declared (`uint8_t speed = 50;`). The engine seeds each one's arena
+    // byte with its initializer, which is what "a member is initialized once" means: a member the
+    // UI never shows still has to start at the value the script wrote.
+    DeclaredControl members[kMaxCtrls];
+    uint8_t         memberCount = 0;
+    // Text a script wrote as a string literal, NUL-separated. The source buffer is freed as soon
+    // as a compile returns, so a `const char*` the emitted code carries cannot point into it; the
+    // engine copies this pool alongside the code and the emitted pointers are rebased onto its
+    // copy. 128 bytes is a handful of control labels, which is all a string is used for today.
+    static constexpr uint16_t kStringPool = 128;
     // The name the script gave its class. What diagnostics and the module status report, so a
     // renamed FILE does not change what a user is told: the filename is what the engine loads, the
     // class name is what it is. Copied out of the source, which is freed after the compile.
@@ -84,9 +90,15 @@ struct CompileResult {
 /// the front end is identical either way, so the seam is one pointer rather than a second compiler.
 using LowerFn = size_t (*)(IrProgram&, uint8_t*, size_t, const RegBudget*);
 
+/// `strings` is where string literals are interned, supplied by the CALLER because the emitted
+/// code carries pointers into it: the parser's own storage dies with the compile, so a pointer
+/// made there would dangle before the program ran. The engine passes its own member, which lives
+/// as long as the compiled program. Null is allowed for a caller with no string literals to
+/// support (the codegen tests), and a script that uses one then fails with a diagnostic.
 CompileResult compileSource(const char* source, const BuiltinTable& table,
                             const SysVarTable& sysvars, uint8_t* out, size_t cap,
-                            const RegBudget* squeeze = nullptr, LowerFn lower = nullptr);
+                            const RegBudget* squeeze = nullptr, LowerFn lower = nullptr,
+                            char* strings = nullptr, uint16_t stringCap = 0);
 
 /// Tokens in `source`, the one measure both right-sized buffers derive from: the caller sizes its
 /// code buffer with `codeCapFor`, and compileSource sizes the IR op array from the same count. One

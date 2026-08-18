@@ -2,18 +2,16 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveIr.h"
 
-#include <cstring>   // std::strncmp (@control keyword match)
+#include <cstring>   // std::strncmp (keyword matching)
 
 namespace mm::moonlive {
 
 namespace {
 
 // --- Lexer ---------------------------------------------------------------------------
-// `ControlAnno` is a captured `// @control min..max` comment (a control's UI range). A plain
-// `//` line comment is skipped like whitespace; only the @control form becomes a token, carrying
-// its min/max in annoMin/annoMax. `Assign` is `=` (a control declaration's initializer).
-enum class Tok { Ident, Number, Assign, LParen, RParen, LBrace, RBrace, Comma, Semicolon,
-                 ControlAnno, Plus, Minus, Star, Less, End, Error };
+// A `//` line comment is whitespace. `Assign` is `=` (a member declaration's initializer).
+enum class Tok { Ident, Number, String, Assign, LParen, RParen, LBrace, RBrace, Comma, Semicolon,
+                 Plus, Minus, Star, Less, End, Error };
 
 struct Lexer {
     const char* p;
@@ -21,7 +19,6 @@ struct Lexer {
     long number = 0;
     const char* identBeg = nullptr;
     size_t identLen = 0;
-    long annoMin = 0, annoMax = 0;     // ControlAnno: the captured min..max
     const char* tokBeg = nullptr;
     const char* srcBeg;
     const char* err = "";
@@ -45,25 +42,14 @@ struct Lexer {
     void advance() {
         for (;;) {
             while (isSpace(*p)) p++;
-            // Line comment: a plain `//…` is skipped; a `// @control min..max` is captured.
+            // A line comment is whitespace, with no exception.
             if (p[0] == '/' && p[1] == '/') {
-                const char* lineStart = p;
                 p += 2;
-                while (*p == ' ' || *p == '\t') p++;
-                // Match `@control` only as a whole word — require a non-identifier
-                // char after it, so a comment like `// @controlled …` is a plain
-                // comment, not a malformed annotation.
-                if (p[0] == '@' && std::strncmp(p, "@control", 8) == 0 && !isIdentCont(p[8])) {
-                    tokBeg = lineStart;
-                    p += 8;
-                    while (*p == ' ' || *p == '\t') p++;
-                    long lo = 0, hi = 0;
-                    if (!readNumber(lo) || !(p[0] == '.' && p[1] == '.')) { kind = Tok::Error; err = "malformed @control (expected min..max)"; return; }
-                    p += 2;
-                    if (!readNumber(hi)) { kind = Tok::Error; err = "malformed @control (expected max)"; return; }
-                    annoMin = lo; annoMax = hi; kind = Tok::ControlAnno; return;
-                }
-                // plain comment — skip to end of line and re-loop (treated as whitespace)
+                // Every line comment is whitespace. A comment that CHANGED BEHAVIOR lived here:
+                // `// @control 1..120` declared a control's range, which is not C and does not
+                // resemble the compiled module a script stands in for. `defineControls()` calling
+                // `addUint8("bpm", bpm, 1, 120)` replaced it, so the token, its capture and the
+                // `lineStart` this needed are all gone.
                 while (*p && *p != '\n') p++;
                 continue;
             }
@@ -88,6 +74,19 @@ struct Lexer {
         // both would lower to a host call — which the light domain already ships as `mod(a, b)` and
         // `turn(n)`, so the capability exists under a name instead of an operator. A script using
         // the character gets "unexpected character", which is the honest answer. Backlogged.
+        // A quoted string: a control's UI label. The span goes in identBeg/identLen, the same
+        // fields an identifier uses, because both are a run of source bytes the parser reads
+        // without copying. No escapes: a control name with a quote or a newline in it is not a
+        // thing anyone needs, and the absence is one less rule to document.
+        if (c == '"') {
+            p++;
+            identBeg = p;
+            while (*p && *p != '"' && *p != '\n') p++;
+            if (*p != '"') { kind = Tok::Error; err = "unterminated string"; return; }
+            identLen = static_cast<size_t>(p - identBeg);
+            p++;                                    // the closing quote
+            kind = Tok::String; return;
+        }
         if (isDigit(c)) {
             long v = 0; readNumber(v);
             number = v; kind = Tok::Number; return;
@@ -140,19 +139,48 @@ struct Parser {
     uint8_t            slotsUsed = 0;       // PEAK slots — what the prologue reserves
     uint8_t            nextLabel = 0;          // IR label ids, handed out in source order
 
-    DeclaredControl    controls[kMaxCtrls] = {};  // controls the script declared (decl lines)
-    uint8_t            controlCount = 0;
+    // Every class-scope `uint8_t x = 0;` is a MEMBER: the class model, where a declaration inside
+    // the class is a member of it. Whether the UI shows one is a separate question the script
+    // answers by calling addUint8 in defineControls, so `controls` below is a VIEW of these rather
+    // than a second storage: a control's offset IS its member's arena byte.
+    //
+    // `DeclaredControl` carries both because they are the same record. A member that no control
+    // names simply never appears in the control list, and the binding creates no card for it.
+    char*              strings = nullptr;      // the caller's pool; see compileSource
+    uint16_t           stringCap = 0;
+    uint16_t           stringLen = 0;
+    DeclaredControl    members[kMaxCtrls] = {};
+    uint8_t            memberCount = 0;
+
     const char*        error = "";
     uint16_t           errorCol = 0;
     bool               failed = false;
 
     void fail(const char* msg) { if (!failed) { failed = true; error = msg; errorCol = lex.col(); } }
 
-    // Find a declared control by name; returns its index or -1. Names point into the source buffer
-    // (token spans, not NUL-terminated), so compare by length + bytes.
-    int findControl(const char* name, size_t len) const {
-        for (uint8_t i = 0; i < controlCount; i++)
-            if (controls[i].nameLen == len && std::strncmp(controls[i].name, name, len) == 0)
+
+    /// Copy a token's text into the program's string pool and return a pointer to it.
+    ///
+    /// The source buffer is freed the moment the compile returns, so a pointer into it would
+    /// dangle before the emitted code ran. The pool travels with the compiled program instead,
+    /// which is the same lifetime answer the engine already gives control and entry-point names.
+    /// Null when the pool is full, which the caller turns into a diagnostic rather than a silent
+    /// truncation.
+    const char* internString(const char* text, size_t len) {
+        if (!strings || stringLen + len + 1 > stringCap) return nullptr;
+        char* at = strings + stringLen;
+        for (size_t i = 0; i < len; i++) at[i] = text[i];
+        at[len] = '\0';
+        stringLen = static_cast<uint16_t>(stringLen + len + 1);
+        return at;
+    }
+
+
+    /// Find a declared MEMBER by name; its index, or -1. Names are token spans into the source
+    /// rather than NUL-terminated strings, so compare by length and bytes.
+    int findMember(const char* name, size_t len) const {
+        for (uint8_t i = 0; i < memberCount; i++)
+            if (members[i].nameLen == len && std::strncmp(members[i].name, name, len) == 0)
                 return i;
         return -1;
     }
@@ -289,10 +317,12 @@ struct Parser {
                     return v;
                 }
             }
-            int ci = findControl(lex.identBeg, lex.identLen);
-            if (ci >= 0) {                                // a declared control read
+            // A MEMBER read. A control is a member the UI shows, so this one lookup answers both:
+            // the arena byte is the same byte either way.
+            const int mi = findMember(lex.identBeg, lex.identLen);
+            if (mi >= 0) {
                 VReg v = alloc();
-                emit({IrOp::LoadCtrl, v, 0,0,0,0, controls[ci].offset, nullptr, {}});
+                emit({IrOp::LoadCtrl, v, 0,0,0,0, members[mi].offset, nullptr, {}});
                 lex.advance();
                 return v;
             }
@@ -359,7 +389,55 @@ struct Parser {
         if (lex.kind != Tok::RParen) {
             while (true) {
                 if (n >= fn->argc) { fail("too many arguments"); return; }
-                const VReg v = parseExpr();
+                // Two argument forms an ordinary expression cannot carry, both needed so a control
+                // is declared by the same call a compiled module makes:
+                //
+                //   a STRING, for the UI label. A frame slot is a machine word, so the pointer
+                //   into the source fits; the host reads it as a `const char*`.
+                //
+                //   a MEMBER BY NAME, meaning its ADDRESS rather than its value. `addUint8("bpm",
+                //   bpm, 1, 120)` reads as the reference a compiled module passes, and the compiler
+                //   supplies the arena offset the host binds to. Only where the builtin asks for it
+                //   (byRef), so `setRGB(bpm, …)` still reads bpm's value as it always did.
+                VReg v = 0;
+                const bool wantStr = (fn->byStr >> n) & 1u;
+                if (wantStr && lex.kind != Tok::String) {
+                    fail("this argument must be a name in quotes"); return;
+                }
+                // And a string ONLY where one is wanted: `setRGB("red", 0, 0, 0)` would otherwise
+                // pass the low bits of a pointer as a color index.
+                if (!wantStr && lex.kind == Tok::String) {
+                    fail("this argument is a number, not a name in quotes"); return;
+                }
+                if (lex.kind == Tok::String) {
+                    // The label is recorded HERE, at compile time, rather than travelling through
+                    // a frame slot: the source buffer is freed after the compile, so a pointer the
+                    // emitted code carried would dangle by the time the host read it. The engine
+                    // already copies control names into its own pool, which is the same lifetime
+                    // problem solved once. The slot still gets a value so the argument count is
+                    // honest; the host reads the name from the control record, not from the slot.
+                    // INTERNED, so the pointer outlives the source. The text is freed the moment
+                    // the compile returns, and this pointer travels in the emitted code to a host
+                    // that reads it later, so it cannot point into the source. The pool is part of
+                    // the compiled program, exactly as the entry-point and control names already
+                    // are: the same lifetime problem, solved the same way.
+                    // Interned into the caller's pool, which outlives the compile, so the address
+                    // is final the moment it is made and the emitted code carries it directly.
+                    const char* interned = internString(lex.identBeg, lex.identLen);
+                    if (!interned) { fail("no room for this script's strings"); return; }
+                    v = alloc();
+                    emit({IrOp::ConstPtr, v, 0,0,0,0, 0, nullptr, interned, {}});
+                    lex.advance();
+                } else if (fn->byRef && (fn->byRef >> n) & 1u) {
+                    if (lex.kind != Tok::Ident) { fail("expected the member this control is bound to"); return; }
+                    const int mi = findMember(lex.identBeg, lex.identLen);
+                    if (mi < 0) { fail("no member of that name is declared in this class"); return; }
+                    v = alloc();
+                    emit({IrOp::Const, v, 0,0,0,0, members[mi].offset, nullptr, {}});
+                    lex.advance();
+                } else {
+                    v = parseExpr();
+                }
                 if (failed) return;
                 if (slotHighWater >= kMaxLocals) { fail("too many arguments to hold"); return; }
                 emit({IrOp::Spill, 0, v, 0,0,0, slotHighWater++, nullptr, {}});
@@ -371,6 +449,7 @@ struct Parser {
         }
         if (slotHighWater > slotsUsed) slotsUsed = slotHighWater;
         if (n != fn->argc) { fail("wrong number of arguments"); return; }
+
         if (!expect(Tok::RParen, "expected ')'")) return;
 
         // The IR Call op carries a single argument vreg, so a Call-kind builtin must be unary.
@@ -406,7 +485,7 @@ struct Parser {
                     *slot[i] = alloc();
                     emit({IrOp::Reload, *slot[i], 0,0,0,0, static_cast<int32_t>(argBase + i), nullptr, {}});
                 }
-                emit({IrOp::Inline, 0, a0, a1, a2, a3, 0, nullptr, fn->inlineOp});
+                emit({IrOp::Inline, 0, a0, a1, a2, a3, 0, nullptr, nullptr, fn->inlineOp});
                 for (uint8_t i = 0; i < n && i < 4; i++) freeTemp(*slot[i]);
             }
         }
@@ -419,43 +498,39 @@ struct Parser {
         slotHighWater = argBase;
     }
 
-    // A control declaration: `uint8_t ident = number ;` optionally followed by `// @control min..max`.
+    // A MEMBER declaration: `uint8_t ident = number ;`. Whether the UI shows it is a separate
+    // question the script answers by naming it in defineControls().
     // The leading `uint8_t` keyword is already consumed by the caller. Records a DeclaredControl.
     void parseDecl() {
-        if (lex.kind != Tok::Ident) { fail("expected a control name after the type"); return; }
+        if (lex.kind != Tok::Ident) { fail("expected a member name after the type"); return; }
         const char* name = lex.identBeg; size_t nameLen = lex.identLen;
-        if (nameLen >= kMaxControlName) { fail("control name too long"); return; }   // no silent truncation downstream
+        if (nameLen >= kMaxControlName) { fail("member name too long"); return; }   // no silent truncation downstream
         if (sysvars.find(name, nameLen)) { fail("name is a system variable"); return; }
-        if (findControl(name, nameLen) >= 0) { fail("duplicate control name"); return; }
+        // Against MEMBERS, which is where a declaration now lands. Checked against the controls
+        // before, which stopped catching anything the moment a declaration became a member: two
+        // members of one name would both exist, and every read would resolve to the first while
+        // the second silently owned an arena byte nobody could reach.
+        if (findMember(name, nameLen) >= 0) { fail("duplicate member name"); return; }
         // A control name must not shadow a builtin: a declared `random16` would make `random16(…)`
         // ambiguous (control read vs call). Reject it at the source so the resolution never collides.
-        if (table.find(name, nameLen)) { fail("control name shadows a built-in function"); return; }
-        if (controlCount >= kMaxCtrls) { fail("too many controls"); return; }
+        if (table.find(name, nameLen)) { fail("member name shadows a built-in function"); return; }
         lex.advance();
-        if (!expect(Tok::Assign, "expected '=' in a control declaration")) return;
+        if (!expect(Tok::Assign, "expected '=' in a member declaration")) return;
         if (lex.kind != Tok::Number) { fail("expected a default value (a number)"); return; }
         if (lex.number < 0 || lex.number > 255) { fail("uint8_t default out of range (0..255)"); return; }
         long def = lex.number;
         lex.advance();
-        if (!expect(Tok::Semicolon, "expected ';' after the control declaration")) return;
-        // A malformed `// @control …` comment lexes to Tok::Error with a specific
-        // message (e.g. "malformed @control (expected min..max)"). Surface it here
-        // rather than letting it fall through to a generic later parse failure.
+        if (!expect(Tok::Semicolon, "expected ';' after the member declaration")) return;
+        // A lexer error carries a specific message; surface it rather than letting it fall through
+        // to a generic later parse failure.
         if (lex.kind == Tok::Error) { fail(lex.err); return; }
-        // Optional range annotation; default 0..255 if absent.
-        long lo = 0, hi = 255;
-        if (lex.kind == Tok::ControlAnno) {
-            lo = lex.annoMin; hi = lex.annoMax;
-            if (lo < 0 || hi > 255 || lo > hi) { fail("@control range out of order or out of 0..255"); return; }
-            lex.advance();
-        }
-        // The default must lie within the (possibly annotated) range — a slider can't start outside
-        // its own bounds.
-        if (def < lo || def > hi) { fail("control default is outside its @control range"); return; }
-        controls[controlCount] = {name, static_cast<uint8_t>(lo), static_cast<uint8_t>(hi),
-                                  static_cast<uint8_t>(def), static_cast<uint8_t>(nameLen),
-                                  CtrlType::Uint8, controlCount};
-        controlCount++;
+        // A MEMBER, and only that. Whether the UI shows it is a separate question the script
+        // answers by naming it in `defineControls()`, so a declaration no longer carries a range:
+        // the range belongs to the control, and a member that no control surfaces has none.
+        if (memberCount >= kMaxCtrls) { fail("too many members"); return; }
+        members[memberCount] = {name, 0, 255, static_cast<uint8_t>(def),
+                                static_cast<uint8_t>(nameLen), CtrlType::Uint8, memberCount};
+        memberCount++;
     }
 
     // Is the current Ident this exact keyword? Keywords are matched by text rather than lexed as
@@ -721,7 +796,8 @@ uint32_t countTokens(const char* source) {
 
 CompileResult compileSource(const char* source, const BuiltinTable& table,
                             const SysVarTable& sysvars, uint8_t* out, size_t cap,
-                            const RegBudget* squeeze, LowerFn lower) {
+                            const RegBudget* squeeze, LowerFn lower,
+                            char* strings, uint16_t stringCap) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
     if (!out || cap == 0) { r.error = "no code buffer"; return r; }
@@ -744,6 +820,8 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     }
     Lexer lex(source);
     Parser parser{lex, table, sysvars, ir, r.className};
+    parser.strings = strings;      // where string literals are interned; see compileSource
+    parser.stringCap = stringCap;
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
     // Hand the backend the frame the script's variables need. The register allocator numbers any
     // further slot from here up, so the two never overlap in the one frame they share.
@@ -757,8 +835,8 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     r.ok = true;
     r.len = len;
     // Surface the declared controls so the binding can create real MoonModule controls.
-    r.controlCount = parser.controlCount;
-    for (uint8_t i = 0; i < parser.controlCount; i++) r.controls[i] = parser.controls[i];
+    r.memberCount = parser.memberCount;
+    for (uint8_t i = 0; i < parser.memberCount; i++) r.members[i] = parser.members[i];
     // The functions the class defined, each with the byte its code starts at. The parser recorded
     // an IR index and the lowering converted it while emitting, so this is a real symbol table: a
     // binding asks for an entry by name and gets an address inside the one emitted block.

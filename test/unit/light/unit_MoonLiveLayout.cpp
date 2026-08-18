@@ -57,8 +57,8 @@ std::vector<Coord3D> place(const char* script) {
 TEST_CASE("the default script lays out a grid, one light per cell") {
     // The shape almost every panel is, and the script that ships: a nested loop calling addLight.
     const std::vector<Coord3D> p = place(
-        mmScriptAs("placeLights", "uint8_t cols = 4;  // @control 1..64\n"
-        "uint8_t rows = 2; // @control 1..64\n"
+        mmScriptAs("placeLights", "uint8_t cols = 4;\n"
+        "uint8_t rows = 2;\n"
         "for (yy = 0; yy < rows; yy = yy + 1) {"
         "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"));
     REQUIRE(p.size() == 8);
@@ -73,8 +73,8 @@ TEST_CASE("the light count is known before any coordinate is asked for") {
     // placeLights. A count that came from the walk would arrive too late to be useful.
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 5;  // @control 1..64\n"
-                "uint8_t rows = 3; // @control 1..64\n"
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 5;\n"
+                "uint8_t rows = 3;\n"
                 "for (yy = 0; yy < rows; yy = yy + 1) {"
                 "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }")));
     l.prepare();
@@ -111,7 +111,7 @@ TEST_CASE("a scripted layout allocates nothing, like every other layout") {
 TEST_CASE("a script places lights wherever it likes, which is the point of scripting one") {
     // A strand that runs right to left: one line here, a new C++ class otherwise.
     const std::vector<Coord3D> p = place(
-        mmScriptAs("placeLights", "uint8_t cols = 4; // @control 1..64\n"
+        mmScriptAs("placeLights", "uint8_t cols = 4;\n"
         "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"));
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{3, 0, 0});
@@ -156,18 +156,18 @@ TEST_CASE("editing the script changes the fixture") {
 TEST_CASE("the scripts the documentation shows all compile") {
     const char* fromDocs[] = {
         // the default
-        mmScriptAs("placeLights", "uint8_t cols = 16;  // @control 1..64\n"
-        "uint8_t rows = 16; // @control 1..64\n"
+        mmScriptAs("placeLights", "uint8_t cols = 16;\n"
+        "uint8_t rows = 16;\n"
         "for (yy = 0; yy < rows; yy = yy + 1) {"
         "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"),
         // right to left
-        mmScriptAs("placeLights", "uint8_t cols = 8; // @control 1..64\n"
+        mmScriptAs("placeLights", "uint8_t cols = 8;\n"
         "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"),
         // a diagonal
-        mmScriptAs("placeLights", "uint8_t cols = 8; // @control 1..64\n"
+        mmScriptAs("placeLights", "uint8_t cols = 8;\n"
         "for (i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }"),
         // two rows, stacked
-        mmScriptAs("placeLights", "uint8_t cols = 8; // @control 1..64\n"
+        mmScriptAs("placeLights", "uint8_t cols = 8;\n"
         "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }"),
         // print wrapping an argument
         mmScriptAs("placeLights", "for (i = 0; i < 2; i = i + 1) { addLight(print(i), 0, 0); }"),
@@ -226,7 +226,7 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
     CHECK(l.lightCount() == 6);
 
     // And a subtraction inside the placement, where the coordinate is the observable.
-    std::vector<Coord3D> p = place(mmScriptAs("placeLights", "uint8_t cols = 4; // @control 1..64\n"
+    std::vector<Coord3D> p = place(mmScriptAs("placeLights", "uint8_t cols = 4;\n"
                                    "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"));
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{3, 0, 0});      // 4 - 1 - 0
@@ -245,20 +245,20 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
 TEST_CASE("a scripted control keeps its live value when the script is edited") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 16; // @control 1..64\n"
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 16;\n"
                 "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A second script declaring cols at the same offset inherits the live 16, not its own 8.
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 8; // @control 1..64\n"
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 8;\n"
                 "for (i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A script whose first control is a NEW slot gets its own initialiser: nothing to inherit.
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 16;  // @control 1..64\n"
-                "uint8_t rows = 3;  // @control 1..64\n"
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 16;\n"
+                "uint8_t rows = 3;\n"
                 "for (yy = 0; yy < rows; yy = yy + 1) {"
                 "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }")));
     l.prepare();
@@ -371,7 +371,7 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
 TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 4; // @control 1..64\n"
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 4;\n"
                 "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     const size_t compiled = l.dynamicBytes();
@@ -397,8 +397,14 @@ TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not")
 TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     MoonLiveLayout layout;
     layout.defineControls();
-    layout.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 4; // @control 1..64\n"
-                     "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }")));
+    // `cols` is a CONTROL here, because the test drives it: the loop below sets it and expects the
+    // layout to resize. A member alone would not appear on the module, so this one is surfaced.
+    layout.setScript(mmWriteScript(
+        "class GrowLayout {\n"
+        "  uint8_t cols = 4;\n"
+        "  defineControls() { addUint8(\"cols\", cols, 1, 64); }\n"
+        "  placeLights() { for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); } }\n"
+        "}\n"));
     layout.prepare();
     // The script's own controls (`cols`) exist only once it has COMPILED, and a module starts with
     // no script now — so the control list has to be rebuilt after prepare() for setWidth to find it.

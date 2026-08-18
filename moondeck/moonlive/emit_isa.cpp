@@ -63,7 +63,12 @@ int main(int argc, char** argv) {
     const auto sysvars = std::strcmp(binding, "modifier") == 0 ? moonlive::modifierSysVars()
                        : std::strcmp(binding, "effect")   == 0 ? moonlive::effectSysVars()
                                                                : moonlive::layoutSysVars();
-    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(), sysvars, buf, sizeof(buf));
+    // A string pool, as the engine supplies one: `addUint8("name", ...)` interns its label there
+    // and the emitted code carries a pointer to it. Static so the pointers stay valid while the
+    // bytes below are dumped.
+    static char strings[moonlive::CompileResult::kStringPool];
+    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(), sysvars, buf, sizeof(buf),
+                                     nullptr, nullptr, strings, sizeof(strings));
     if (!r.ok) { printf("compile failed: %s\n", r.error); return 1; }
     printf("# %s\n# %zu bytes\n", src, r.len);
     for (size_t i = 0; i < r.len; i++) printf("%02x%s", buf[i], (i % 16 == 15) ? "\n" : " ");

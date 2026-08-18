@@ -135,9 +135,9 @@ int firstLit(const std::vector<uint8_t>& b) {
 TEST_CASE("MoonLive control: a declared control reads the arena live (no recompile on value change)") {
     uint8_t code[768];
     auto r = moonlive::compileSource(
-        mmScript("uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);"), kT, kSys, code, sizeof(code));
+        mmScript("uint8_t speed = 50;\nsetRGB(speed, 0, 0, 255);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
-    REQUIRE(r.controlCount == 1);
+    REQUIRE(r.memberCount == 1);      // the declaration is a member; a control needs defineControls
     void* blk = platform::allocExec(r.len);
     REQUIRE(blk != nullptr);
     platform::writeExec(blk, code, r.len);
@@ -160,7 +160,7 @@ TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") 
     // scratch pool — pins that the call() save-set protects kArg4 (the arena pointer).
     uint8_t code[768];
     auto r = moonlive::compileSource(
-        mmScript("uint8_t idx = 0; // @control 0..15\nsetRGB(idx, random16(256), 0, 255);"), kT, kSys, code, sizeof(code));
+        mmScript("uint8_t idx = 0;\nsetRGB(idx, random16(256), 0, 255);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
     REQUIRE(blk != nullptr);

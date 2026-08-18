@@ -82,6 +82,15 @@ enum class IrOp : uint8_t {
                // and temporaries die within their statement, so this holds today and is why no
                // save-set is emitted. Xtensa's window rotation would hide a violation that
                // corrupts RISC-V, so it is stated here rather than left to be discovered.
+    ConstPtr,  // dst = the pointer in `ptr`: a full-width address materialized into a register.
+               // Distinct from Const because `imm` is int32_t and a pointer is 64 bits on the
+               // desktop, so an address cannot ride an immediate. Every backend already builds one
+               // for a host call's target (arm64 movz + 3x movk, the devices a byte at a time), so
+               // this generalizes a proven sequence rather than adding a mechanism.
+               //
+               // What it carries is a string a script wrote. The source buffer is freed the moment
+               // the compile returns, so the text is interned into the compiled program and this
+               // op hands the emitted code a pointer that outlives it.
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
     LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
     Mov,       // dst = a — the assignment a loop variable needs (vregs are otherwise write-once)
@@ -110,10 +119,11 @@ struct IrInst {
     VReg     a = 0, b = 0, c = 0, d = 0;   // source vregs (op-dependent)
     int32_t  imm = 0;                      // immediate (Const) / addr offset
     HostCallFn callFn = nullptr;           // Call: the host C function pointer (typed alias)
+    const void* ptr = nullptr;             // ConstPtr: the address to materialize
     InlineOp inlineOp{};                   // Inline: the neutral opcode tag
 };
 
-// A control a script declared (`uint8_t speed = 50; // @control 0..99`). Neutral: the core
+// A control a script declared (`addUint8("speed", speed, 0, 99)`). Neutral: the core
 // knows {name, a neutral type, range, default, and the byte offset into the run-time controls
 // arena it lives at}. The light-domain binding turns this into a real MoonModule control bound to
 // the arena slot. `type` is a neutral kind — Uint8 only in Stage 1 — NOT a projectMM ControlType.

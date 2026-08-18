@@ -206,6 +206,19 @@ void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
 // live across the call must be preserved — save the whole pool + ra + the host args around the
 // call (mirrors the host backend). The fn address is built with lui+addi (the hi/lo split, +1
 // to the upper when the low 12 bits' sign bit is set). 64-byte frame, 16-byte aligned.
+// movPtr: a 32-bit address into a register, lui + addi.
+//
+// The same pair call() builds for its target, parameterized on the destination. The +0x800 rounds
+// for addi's SIGN EXTENSION: without it an address whose low half has bit 11 set lands one 4 KB
+// page low, which is the classic RISC-V hi/lo bug and is silent until the pointer is dereferenced.
+void RiscvAssembler::movPtr(Reg d, const void* p) {
+    const uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+    const uint32_t hi = (addr + 0x800) >> 12;
+    const int32_t  lo = static_cast<int32_t>(addr) - static_cast<int32_t>(hi << 12);
+    emit32(encLui(xr(d), hi & 0xfffff));
+    emit32(encAddi(xr(d), xr(d), lo));
+}
+
 void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // 80-byte frame, 16-byte aligned: 14 saved registers (56 bytes), three argument staging slots
     // (56/60/64), and ra at 76. Every register the map hands out is saved here, or a value live

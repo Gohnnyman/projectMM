@@ -47,7 +47,7 @@ public:
         // RECEIVE a width: the pipeline derives its bounding box from the coordinates the layouts
         // actually place (Layouts::prepare, "max coordinate + 1 per axis"), so a width handed in
         // from outside would be a second, disagreeing source of truth. A script that wants one
-        // declares it (`uint8_t width = 16; // @control 1..64`) and it becomes a real slider.
+        // declares it (`addUint8("width", width, 1, 64)`) and it becomes a real slider.
         uint8_t n = 0;
         const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
         for (uint8_t i = 0; i < n; i++) {
@@ -137,6 +137,10 @@ private:
         uint32_t hash = 0;
         if (moonlive::compileScriptFile(self->engine_, script_, moonlive::lightBuiltins(),
                                         moonlive::layoutSysVars(), err, &hash)) {
+            // Declare the controls the script asks for, the way a compiled module does: by
+            // RUNNING defineControls(). Before rebuildControls(), which turns the declared
+            // list into UI cards.
+            moonlive::runDefineControls(self->engine_);
             self->clearStatus();
             self->compileFailed_ = false;
         } else {

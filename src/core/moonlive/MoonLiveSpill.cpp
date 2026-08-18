@@ -51,6 +51,7 @@ struct Loop { uint16_t header; uint16_t back; };
 uint8_t sourcesOf(const IrInst& in, VReg* out) {
     switch (in.op) {
         case IrOp::Const:                                   return 0;
+        case IrOp::ConstPtr:                                return 0;   // an address, not a value
         case IrOp::Reload:                                  return 0;
         case IrOp::Label:                                   return 0;
         case IrOp::Mov:

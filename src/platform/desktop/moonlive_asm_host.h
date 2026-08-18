@@ -84,6 +84,7 @@ public:
     static constexpr uint8_t kMaxSpillSlots = kTotalSlots;   // parser/allocator range + the parked host args   // what the frame below can address
 
     // --- instructions (named, register/immediate operands) ---
+    void movPtr(Reg d, const void* p);   // a full-width address into a register (ConstPtr)
     void movImm(Reg d, int32_t imm);     // d = imm
     void addImm(Reg d, Reg a, int32_t imm);   // d = a + imm
     void addReg(Reg d, Reg a, Reg b);    // d = a + b

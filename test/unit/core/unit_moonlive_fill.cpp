@@ -188,9 +188,41 @@ TEST_CASE("elapsed time survives a call that happens before it is read") {
 }
 #endif
 
+// A FAILED recompile drops the declared controls rather than leaving them named "".
+//
+// The editor loop pushes broken text constantly: that is what editing is. A control's `name` is a
+// pointer the UI dereferences on every /api/state, and it points into the engine's string pool, so
+// a pool cleared while the records survived left every card named "" and unmatched by both
+// name-keyed persistence and `POST /api/control`. The user's own sliders came unbound from a typo.
+TEST_CASE("a broken script drops its controls instead of blanking their names") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t bpm = 30;\n"
+                        "  defineControls() { addUint8(\"bpm\", bpm, 1, 240); }\n"
+                        "  tick() { setRGB(0, bpm, 0, 0); }\n"
+                        "}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng);
+    uint8_t n = 0;
+    const moonlive::DeclaredControl* dc = eng.declaredControls(n);
+    REQUIRE(n == 1);
+    CHECK(std::strcmp(dc[0].name, "bpm") == 0);
+
+    CHECK_FALSE(eng.compile("class T { uint8_t = ; }", kCtrlTable, kSys));
+    dc = eng.declaredControls(n);
+    CHECK(n == 0);          // dropped, so nothing points into a pool the next compile reuses
+    eng.free();
+}
+
 TEST_CASE("MoonLive controls: declaredControls + controlSlot seeded from the default") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile(mmScript("uint8_t speed = 42; // @control 0..99\nsetRGB(speed, 0, 0, 255);"), kCtrlTable, kSys));
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t speed = 42;\n"
+                        "  defineControls() { addUint8(\"speed\", speed, 0, 99); }\n"
+                        "  tick() { setRGB(speed, 0, 0, 255); }\n"
+                        "}\n", kCtrlTable, kSys));
+    // A control exists because defineControls() RAN, the way a compiled module's does. This is
+    // the binding's half of that.
+    moonlive::runDefineControls(eng);
     uint8_t n = 0;
     const moonlive::DeclaredControl* dc = eng.declaredControls(n);
     REQUIRE(n == 1);
@@ -205,33 +237,33 @@ TEST_CASE("MoonLive controls: declaredControls + controlSlot seeded from the def
 
 TEST_CASE("MoonLive controls: arena address is STABLE across a recompile and the slot value survives") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile(mmScript("uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);"), kCtrlTable, kSys));
+    REQUIRE(eng.compile(mmScript("uint8_t speed = 7;\nsetRGB(speed, 0, 0, 255);"), kCtrlTable, kSys));
     uint8_t* before = eng.controlSlot(0);
     REQUIRE(before != nullptr);
     *before = 12;                                        // a "slider move" — write the live value
 
     // Edit the source (recompile) but KEEP the control. The grow-only arena must not move, and the
     // live value must survive (a kept control keeps its slider position across a source edit).
-    REQUIRE(eng.compile(mmScript("uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 255, 0, 0);"), kCtrlTable, kSys));
+    REQUIRE(eng.compile(mmScript("uint8_t speed = 7;\nsetRGB(speed, 255, 0, 0);"), kCtrlTable, kSys));
     uint8_t* after = eng.controlSlot(0);
     CHECK(after == before);                              // STABLE address — no dangling bound pointer
     CHECK(*after == 12);                                 // value preserved across the recompile
 
     // Adding a SECOND control keeps the first's value and seeds the new slot from its default.
-    REQUIRE(eng.compile(mmScript("uint8_t speed = 7; // @control 0..15\nuint8_t hue = 200; // @control 0..255\nsetRGB(speed, hue, 0, 255);"), kCtrlTable, kSys));
+    REQUIRE(eng.compile(mmScript("uint8_t speed = 7;\nuint8_t hue = 200;\nsetRGB(speed, hue, 0, 255);"), kCtrlTable, kSys));
     CHECK(*eng.controlSlot(0) == 12);                    // speed kept its live value
     CHECK(*eng.controlSlot(1) == 200);                   // hue seeded from its default
 }
 
 TEST_CASE("MoonLive controls: free() releases the arena (no stale slot after release)") {
     moonlive::MoonLive eng;
-    REQUIRE(eng.compile(mmScript("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);"), kCtrlTable, kSys));
+    REQUIRE(eng.compile(mmScript("uint8_t a = 5;\nfill(0, 0, a);"), kCtrlTable, kSys));
     REQUIRE(eng.controlSlot(0) != nullptr);
     eng.free();
     CHECK_FALSE(eng.ok());
     CHECK(eng.controlSlot(0) == nullptr);                // arena gone — no dangling pointer handed out
     // Recompiling after a full free re-acquires cleanly (add/remove robustness).
-    REQUIRE(eng.compile(mmScript("uint8_t a = 5; // @control 0..9\nfill(0, 0, a);"), kCtrlTable, kSys));
+    REQUIRE(eng.compile(mmScript("uint8_t a = 5;\nfill(0, 0, a);"), kCtrlTable, kSys));
     REQUIRE(eng.controlSlot(0) != nullptr);
     CHECK(*eng.controlSlot(0) == 5);                     // re-seeded from default
 }

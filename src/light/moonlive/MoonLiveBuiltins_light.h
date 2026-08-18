@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "core/moonlive/MoonLiveBuiltins.h"
+#include "core/moonlive/MoonLive.h"   // runDefineControls drives the engine
 #include "core/moonlive/MoonLiveIr.h"   // kArg3 — the register `t` is passed in
 
 #include <atomic>
@@ -187,6 +188,12 @@ using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 /// and a third would mean a genuinely new concurrency story rather than a bigger table.
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 
+/// Where a running `defineControls()` sends each `addUint8`. Same shape and same reason as the
+/// addLight sink: a builtin has no receiver, so the binding installs one for the duration of the
+/// run and the call reaches the engine through it.
+using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset, uint8_t lo, uint8_t hi);
+struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
+
 namespace detail {
 // `owner` is ATOMIC and claimed with compare_exchange: the claim used to be a load then a store,
 // so two threads could both see the same slot free and both take it — leaving them sharing one
@@ -195,7 +202,8 @@ namespace detail {
 // The slot is the ONE per-thread home for everything a running script's built-ins reach: the
 // addLight sink (a layout run installs it) and the draw canvas (an effect run installs it). A
 // second table would repeat the claim/release machinery for the same lifetime.
-struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas; };
+struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas;
+                  AddControlSink controls; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -227,10 +235,11 @@ inline SinkSlot* ownedSlot(bool claim) MM_NONBLOCKING {
     }
     return nullptr;
 }
-/// Release only a fully empty slot: the sink and the canvas detach independently, and a release
-/// while the other half is live would hand this thread's context to the next claimer.
+/// Release only a fully empty slot: the three halves (addLight sink, draw canvas, control sink)
+/// detach independently, and a release while any of them is live would hand this thread's context
+/// to the next claimer, whose script would then reach a dead engine through it.
 inline void releaseIfEmpty(SinkSlot* s) MM_NONBLOCKING {
-    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data)
+    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn)
         s->owner.store(0, std::memory_order_release);
 }
 }  // namespace detail
@@ -246,9 +255,25 @@ inline const AddLightSink& addLightSink() {
     return s ? s->sink : detail::sinkOverflow();
 }
 
+/// The control sink for this thread, or an empty one. Reading does not claim a slot, for the same
+/// reason addLightSink() does not: a binding that installs nothing must not hold a slot for life.
+inline const AddControlSink& addControlSink() {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit AddControlSink none{};
+    return s ? s->controls : none;
+}
+
+/// Point addUint8 at a consumer for the duration of one defineControls() run; nullptr to detach.
+inline void setAddControlSink(AddControlFn fn, void* ctx) {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->controls = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
 /// Point addLight at a consumer for the duration of one run; pass nullptr to detach.
 ///
-/// Detaching RELEASES this thread's slot (unless the canvas half is still live), so two slots are
+/// Detaching RELEASES this thread's slot (unless another half is still live), so two slots are
 /// not exhausted by tasks that come and go: an HTTP request lands on whichever worker is free.
 inline void setAddLightSink(AddLightFn fn, void* ctx) {
     if (!fn && !ctx) {
@@ -264,6 +289,25 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
     // placed, rather than lights written through another thread's layout.
     detail::SinkSlot* s = detail::ownedSlot(true);
     if (s) s->sink = {fn, ctx};
+}
+
+// addUint8(name, memberOffset, min, max): the run-time half of declaring a control.
+//
+// The CONTROL RECORD is built by the compiler, which knows the name span and the member's offset,
+// so nothing has to travel through a frame slot into a source buffer that is freed by the time
+// this runs. What is left is the call itself, which exists so that a script declares a control the
+// way a compiled module does: `defineControls()` is an ordinary function the binding calls after a
+// successful compile, and this is an ordinary builtin it calls.
+extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, const uint8_t*) {
+    // args: (name, memberOffset, min, max). The name is a pointer into the compiled program's
+    // string pool, which outlives the run; the offset is the member's arena byte, which the
+    // compiler passed by reference.
+    const char* name = reinterpret_cast<const char*>(args[0]);
+    const AddControlSink s = addControlSink();
+    if (!name || !s.fn || !s.ctx) return 0;      // no binding listening: the call is a no-op
+    s.fn(s.ctx, name, static_cast<uint8_t>(args[1]),
+         static_cast<uint8_t>(args[2]), static_cast<uint8_t>(args[3]));
+    return 0;
 }
 
 extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -360,6 +404,9 @@ enum : uint8_t {
 /// entitled to do, and the cost of a name nothing calls is a function that does not run, which is
 /// visible immediately rather than silent.
 inline constexpr const char* kEntryTick        = "tick";           // an effect, per frame
+// The declaration moment, run once after a successful compile rather than per tick: the same
+// place a compiled module's defineControls() sits in its lifecycle.
+inline constexpr const char* kEntryDefineControls = "defineControls";
 inline constexpr const char* kEntryPlaceLights = "placeLights";  // a layout, placing lights
 inline constexpr const char* kEntryModify       = "modifyLogical"; // a modifier, folding one light
 
@@ -435,7 +482,38 @@ inline BuiltinTable lightBuiltins() {
     t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
     // line(x1, y1, x2, y2, r, g, b) → a segment on the canvas, via the shared draw::line.
     t.add({"line", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_line, {}});
+    // addUint8(name, member, min, max) → declare a control on a member, the same call a compiled
+    // module makes (`controls_.addUint8("speed", speed, 1, 255)`). Bit 1 of byRef marks the second
+    // argument as the MEMBER, so the compiler passes its arena offset rather than its value, which
+    // is what makes the script read as the reference a compiled module passes.
+    t.add({"addUint8", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint8, {},
+           /*byRef*/ 0x2, /*byStr*/ 0x1});
     return t;
+}
+
+/// Run a script's `defineControls()`, so the controls it declares exist.
+///
+/// A compiled module's controls exist because `defineControls()` RAN: the Scheduler calls it on
+/// every module at setup, and again whenever a Select reshapes the visible set. A scripted one
+/// works the same way. This calls the entry point, each `addUint8` inside it reaches the engine
+/// through the control sink, and the binding's `rebuildControls()` then finds a populated list.
+///
+/// Re-runnable, like its compiled counterpart: the list is cleared first, so calling it twice
+/// rebuilds rather than appends. A script that defines no `defineControls()` declares no controls,
+/// which is the honest answer for a script that wants no UI.
+inline void runDefineControls(MoonLive& engine) {
+    // A script with no defineControls() declares no controls, which is the honest answer for one
+    // that wants no UI: there is nothing to clear and nothing to run.
+    if (!engine.hasEntry(kEntryDefineControls)) return;
+    engine.clearDeclaredControls();      // re-runnable: rebuild rather than append
+    setAddControlSink([](void* ctx, const char* n, uint8_t off, uint8_t lo, uint8_t hi) {
+        static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi);
+    }, &engine);
+    // A one-light scratch buffer: this entry point writes no pixels, but `run` refuses a null or
+    // undersized one, and honoring that contract costs less than carving out an exception.
+    uint8_t scratch[3] = {};
+    engine.run(scratch, 1, 3, 0, kEntryDefineControls);
+    setAddControlSink(nullptr, nullptr);
 }
 
 }  // namespace mm::moonlive

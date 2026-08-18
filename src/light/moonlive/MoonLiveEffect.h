@@ -26,7 +26,7 @@ public:
     Dim dimensions() const override { return Dim::D2; }
 
     // The effect carries its script's NAME as an editable, persisted text control, plus a control
-    // for every variable the script DECLARED (`uint8_t speed = 50; // @control 0..99`). The
+    // for every control the script declared (`addUint8("speed", speed, 0, 99)`). The
     // engine exposes the declared list after a compile; each becomes a real uint8 control bound by
     // reference to the engine's live control-arena slot, so a slider write lands in the slot the
     // next render tick reads, with no recompile (the live-edit guarantee). Naming a different
@@ -72,6 +72,10 @@ public:
         const char* err = nullptr;
         if (moonlive::compileScriptFile(engine_, script_, moonlive::lightBuiltins(),
                                         moonlive::effectSysVars(), err)) {
+            // Declare the controls the script asks for, the way a compiled module does: by
+            // RUNNING defineControls(). Before rebuildControls() below, which is what
+            // turns the declared list into UI cards.
+            moonlive::runDefineControls(engine_);
             clearStatus();
         } else {
             setStatus(err, Severity::Error);

@@ -172,6 +172,21 @@ void HostAssembler::movReg(Reg d, Reg a) { addImm(d, a, 0); }    // mov wD, wA (
 void HostAssembler::branchGeU(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Hs, l); }
 void HostAssembler::branchNe(Reg a, Reg b, Label l)  { cmp(a, b); branchIf(Cond::Ne, l); }
 
+// movPtr: a full 64-bit address into a register, movz + three movk.
+//
+// The same four instructions call() emits for its target, parameterized on the destination. A
+// pointer cannot ride an immediate (IrInst::imm is int32_t) and cannot be a PC-relative literal
+// either, because the emitted block is copied to its final address after these bytes are built,
+// so an absolute materialization is what stays correct across that move.
+void HostAssembler::movPtr(Reg d, const void* p) {
+    const uint64_t addr = reinterpret_cast<uint64_t>(p);
+    const uint8_t r = mr(d);
+    emit32(0xd2800000u | ((uint32_t(addr) & 0xffff) << 5) | r);                          // movz xD, #b0
+    emit32(0xf2800000u | (1u << 21) | (((uint32_t(addr >> 16)) & 0xffff) << 5) | r);     // movk xD,#b1,lsl16
+    emit32(0xf2800000u | (2u << 21) | (((uint32_t(addr >> 32)) & 0xffff) << 5) | r);     // movk xD,#b2,lsl32
+    emit32(0xf2800000u | (3u << 21) | (((uint32_t(addr >> 48)) & 0xffff) << 5) | r);     // movk xD,#b3,lsl48
+}
+
 void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Preserve EVERY register that may hold a live value across the call: the host args
     // (x0/x1/x2/x3), the link register x30 (blr overwrites it; our function is a leaf), and the
