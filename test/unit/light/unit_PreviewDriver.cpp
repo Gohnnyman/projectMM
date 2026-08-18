@@ -405,7 +405,7 @@ TEST_CASE("PreviewDriver reports its resumable-path buffers in dynamicBytes" * d
 // Dense-grid CLOSED-FORM downsample, exact color placement: a 200×1 strip pinned over a small cap
 // strides in x only, so the kept lights are columns 0,s,2s,… The color pass must read each from its
 // dense buffer index (closed-form x for a 1-row grid) and pack them in the SAME order as the coord
-// table — no forEachCoord. Painting a known color at a kept column and finding it at the matching
+// table: no placeLights. Painting a known color at a kept column and finding it at the matching
 // frame position pins the index math + the lattice order.
 TEST_CASE("PreviewDriver dense downsample packs colors by closed-form index, in lattice order") {
     const int width = 5000;                            // > the 4096 display cap → forces a stride

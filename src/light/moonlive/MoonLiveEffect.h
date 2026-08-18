@@ -101,7 +101,11 @@ public:
         // installed for exactly one run and detached after, so a script can only ever draw into
         // the layer it is ticking in.
         moonlive::setDrawCanvas(canvas());
-        engine_.run(buffer(), nrOfLights(), cpl, elapsed());
+        // The frame moment: run `tick` if the script defined one. A script that defines only
+        // `modifyLogical` renders nothing here and folds coordinates instead, which is the author's
+        // choice rather than an error.
+        if (engine_.hasEntry(moonlive::kEntryTick))
+            engine_.run(buffer(), nrOfLights(), cpl, elapsed(), moonlive::kEntryTick);
         moonlive::setDrawCanvas({});
     }
 

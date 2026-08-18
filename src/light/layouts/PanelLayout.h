@@ -62,7 +62,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // MoonLight: axes = axisOrders[wiringOrder]; XY(0) = {1,0} (Y outer, X inner),
         // YX(1) = {0,1} (X outer, Y inner). axes[0] is the outer axis, axes[1] the inner.
         const uint8_t axisOrders[2][2] = {

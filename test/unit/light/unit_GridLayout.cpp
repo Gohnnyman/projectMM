@@ -30,7 +30,7 @@ TEST_CASE("GridLayout 4x4x1 produces 16 coords in row-major order") {
     CHECK(grid.lightCount() == 16);
 
     std::vector<CoordEntry> coords;
-    grid.forEachCoord(mm::CoordSink{collectCoord, nullptr, &coords});
+    grid.placeLights(mm::CoordSink{collectCoord, nullptr, &coords});
 
     REQUIRE(coords.size() == 16);
 
@@ -72,7 +72,7 @@ TEST_CASE("GridLayout serpentine reverses x on odd rows") {
     grid.serpentine = true;
 
     std::vector<CoordEntry> coords;
-    grid.forEachCoord(mm::CoordSink{collectCoord, nullptr, &coords});
+    grid.placeLights(mm::CoordSink{collectCoord, nullptr, &coords});
     REQUIRE(coords.size() == 12);
 
     // Row 0 (even): left→right, x = 0,1,2,3 at idx 0..3
@@ -89,7 +89,7 @@ TEST_CASE("GridLayout serpentine reverses x on odd rows") {
     // Non-serpentine is unchanged: index i lands at natural box order.
     grid.serpentine = false;
     coords.clear();
-    grid.forEachCoord(mm::CoordSink{collectCoord, nullptr, &coords});
+    grid.placeLights(mm::CoordSink{collectCoord, nullptr, &coords});
     REQUIRE(coords.size() >= 6);   // guard the index accesses below (clear test failure, not UB)
     CHECK(coords[4].x == 0);   // row 1 starts at x=0 again
     CHECK(coords[5].x == 1);
@@ -105,7 +105,7 @@ TEST_CASE("GridLayout 2x2x2 produces 8 coords with z") {
     CHECK(grid.lightCount() == 8);
 
     std::vector<CoordEntry> coords;
-    grid.forEachCoord(mm::CoordSink{collectCoord, nullptr, &coords});
+    grid.placeLights(mm::CoordSink{collectCoord, nullptr, &coords});
 
     REQUIRE(coords.size() == 8);
 
@@ -133,7 +133,7 @@ TEST_CASE("GridLayout 1x1x1 edge case") {
     CHECK(grid.lightCount() == 1);
 
     std::vector<CoordEntry> coords;
-    grid.forEachCoord(mm::CoordSink{collectCoord, nullptr, &coords});
+    grid.placeLights(mm::CoordSink{collectCoord, nullptr, &coords});
 
     REQUIRE(coords.size() == 1);
     CHECK(coords[0].idx == 0);
@@ -142,7 +142,7 @@ TEST_CASE("GridLayout 1x1x1 edge case") {
     CHECK(coords[0].z == 0);
 }
 
-// Layouts with a single child delegates totalLightCount and forEachCoord to that child directly.
+// Layouts with a single child delegates totalLightCount and placeLights to that child directly.
 TEST_CASE("Layouts with one layout") {
     mm::Layouts group;
     mm::GridLayout grid;
@@ -154,7 +154,7 @@ TEST_CASE("Layouts with one layout") {
     CHECK(group.totalLightCount() == 16);
 
     std::vector<CoordEntry> coords;
-    group.forEachCoord(mm::CoordSink{collectCoord, nullptr, &coords});
+    group.placeLights(mm::CoordSink{collectCoord, nullptr, &coords});
     CHECK(coords.size() == 16);
 }
 
@@ -178,7 +178,7 @@ TEST_CASE("Layouts with two layouts offsets physical indices") {
     CHECK(group.totalLightCount() == 7);
 
     std::vector<CoordEntry> coords;
-    group.forEachCoord(mm::CoordSink{collectCoord, nullptr, &coords});
+    group.placeLights(mm::CoordSink{collectCoord, nullptr, &coords});
 
     REQUIRE(coords.size() == 7);
 

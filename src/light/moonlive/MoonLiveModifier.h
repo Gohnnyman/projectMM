@@ -132,7 +132,11 @@ public:
         // script written against a future `for` loop uses the identical call.
         uint8_t out[3] = {*sx, *sy, *sz};   // seeded with the input, so a script that writes
                                             // nothing leaves the coordinate untouched
-        self->engine_.run(out, 1, 3, 0);
+        // The fold moment: run `modifyLogical` if the script defined one, and leave the coordinate
+        // untouched otherwise. The cold path (once per light at mapping build, not per frame), so
+        // the lookup costs nothing measurable.
+        if (!engine_.hasEntry(moonlive::kEntryModify)) return true;
+        self->engine_.run(out, 1, 3, 0, moonlive::kEntryModify);
 
         pos.x = static_cast<lengthType>(out[0]);
         pos.y = static_cast<lengthType>(out[1]);

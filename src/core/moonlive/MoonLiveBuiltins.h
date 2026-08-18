@@ -91,10 +91,11 @@ struct BuiltinTable {
 
 static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful of controls; fixed, no heap
 
-// The controls arena holds two kinds of byte, in one allocation with a fixed split:
+// The controls arena holds three kinds of byte, in one allocation with a fixed split:
 //   [0 .. kMaxCtrls)                  script-declared controls, offset == declaration index
-//   [kMaxCtrls .. kArenaBytes)        host system variables (width/height/…), offset assigned by
-//                                     the host and CONSTANT for the program's life
+//   [kMaxCtrls .. kMaxCtrls+kMaxSysVars)  host system variables (width/height/…), offset assigned
+//                                     by the host and CONSTANT for the program's life
+//   [kDepthSlot]                      the recursion depth counter, owned by the emitted code
 // System variables sit ABOVE the script's range so that adding or removing a control — which
 // renumbers every control offset — cannot move them. The binding caches their slot pointers, so a
 // moving offset would silently write the wrong byte.
@@ -127,7 +128,31 @@ constexpr size_t codeCapFor(uint32_t tokens) {
 }
 
 static constexpr uint8_t kMaxSysVars  = 8;
-static constexpr uint8_t kArenaBytes  = kMaxCtrls + kMaxSysVars;
+
+/// Where the emitted code keeps its RECURSION DEPTH, one byte in the arena above the system
+/// variables. In the arena rather than in a C++ member because the counter is read and written by
+/// the emitted block itself: a recursive call happens entirely inside the exec block, with no C++
+/// frame between the activations for a host-side counter to sit in. Every function already holds
+/// the arena pointer (kArg4), so the guard costs a byte and no new argument.
+///
+/// The host zeroes it before each run rather than trusting the block to unwind cleanly: a script
+/// that hits the limit leaves the counter wherever the skipped call left it, and a stale value
+/// would shrink the budget of every later frame until nothing ran at all.
+static constexpr uint8_t kDepthSlot = kMaxCtrls + kMaxSysVars;
+
+/// The depth at which a call is REFUSED: an activation that would make the counter reach this
+/// number returns without running, so 31 activations execute, the entry function included.
+///
+/// A fixed render-task stack makes unbounded recursion a device reset, which the robustness rule
+/// forbids, so the depth is bounded at run time rather than at compile time: whether a recursion
+/// terminates is not decidable from the source. The number is measured rather than chosen. An
+/// activation costs 176 bytes of stack on Xtensa (48 host-call area + 84 slots + 32 window
+/// reserve + alignment) against a 12 KB main task, so the device resets at roughly 64 deep. This
+/// leaves the deepest legal recursion at under half the budget, which is the margin the interrupt
+/// stack and the rest of the render path need.
+static constexpr uint8_t kMaxCallDepth = 32;
+
+static constexpr uint8_t kArenaBytes  = kMaxCtrls + kMaxSysVars + 1;   // +1: kDepthSlot
 
 /// A name the HOST defines and the script only reads: `width`, `height`, `depth`. Reserved — a
 /// script cannot declare one, so the name means the same thing in every script (the `t` rule, one

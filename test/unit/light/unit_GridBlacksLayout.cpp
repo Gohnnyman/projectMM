@@ -22,7 +22,7 @@ void collectBlack(void* ctx, mm::nrOfLightsType idx, mm::lengthType x, mm::lengt
 }
 std::vector<GapEntry> walk(const mm::GridBlacksLayout& g) {
     std::vector<GapEntry> v;
-    g.forEachCoord(mm::CoordSink{collectLit, collectBlack, &v});
+    g.placeLights(mm::CoordSink{collectLit, collectBlack, &v});
     return v;
 }
 

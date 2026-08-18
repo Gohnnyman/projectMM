@@ -60,6 +60,11 @@ ISAS = {
             # Control flow. `bltu`'s displacement is a single SIGNED byte (+/-127), the field that
             # truncated silently on a long loop body before branch relaxation.
             ("callx8 a8",            "e00800", "call: the windowed call"),
+            # The script-to-script call. The offset field is patched later, so what is pinned here
+            # is the OPCODE: a wrong low-six-bits would decode as an unrelated instruction, and the
+            # first version of this used 0x25 in the wrong byte position. Assembled at a known pc
+            # with a known target so the displacement is reproducible.
+            ("call8 . - 4",          "a5ffff", "call: a function in this block, by label"),
             ("retw.n",               "1df0",   "epilogue"),
             ("l8ui a2, a11, 8",      "220b08", "LoadCtrl: read a control byte from the arena"),
             ("s8i a3, a12, 0",       "324c00", "StoreElem: write one channel"),

@@ -345,43 +345,60 @@ enum : uint8_t {
 ///
 /// Adding one is a single line here plus the binding writing its slot.
 
-/// `t` alone — every script animates, so every list starts here.
-inline void addClock(SysVarTable& t) {
+/// The entry points the light domain calls, by role. A script defines the ones its role needs; the
+/// engine looks each up by name in the one emitted block.
+///
+/// A name is a MOMENT, not a role. The host owns the moments and calls whatever the script defined
+/// for each one: `tick` when a frame is rendered, `placeLights` when lights are being placed,
+/// `modifyLogical` when one coordinate is folded. An entry a script did not define is simply not
+/// called, which is why nothing validates which names belong to which module.
+///
+/// This is what makes the bindings differ by which moments they OWN rather than by kind, and it is
+/// what lets one class serve more than one: an effect that also defines `modifyLogical` gets both,
+/// with no feature to add. It also leaves `tick` free to mean something in a layout later without a
+/// grammar change. Guarding any of it would be code spent forbidding what a script author is
+/// entitled to do, and the cost of a name nothing calls is a function that does not run, which is
+/// visible immediately rather than silent.
+inline constexpr const char* kEntryTick        = "tick";           // an effect, per frame
+inline constexpr const char* kEntryPlaceLights = "placeLights";  // a layout, placing lights
+inline constexpr const char* kEntryModify       = "modifyLogical"; // a modifier, folding one light
+
+/// The system variables EVERY light script can read. One vocabulary for all three roles, rather
+/// than a table per role.
+///
+/// The split that preceded this bought less than it cost. It prevented no mistake (a layout reading
+/// `width` got a compile error, which is the same outcome as reading a variable that is always
+/// zero) and it created a trap: the tables were different vocabularies rather than nested ones, so
+/// a name meant one thing in one role and was RESERVED in another. `disasm.py` compiled against the
+/// widest table and therefore refused `grid.mlv`, the shipped default layout, with "name is a
+/// system variable" -- the tool was blind to the one script most worth inspecting.
+///
+/// `width`/`height`/`depth` mean the same thing everywhere: the dimensions of the grid. A layout
+/// DEFINES them by the coordinates it places; an effect and a modifier READ them. What a binding
+/// still decides is which slots it WRITES each frame; reading is uniform.
+///
+/// The per-light coordinate is `xPos`/`yPos`/`zPos`, not `x`/`y`/`z`. Those are the names an author
+/// reaches for as loop counters (`grid.mlv` uses both), so reserving them globally would break the
+/// most ordinary code there is. Only a modifier is handed a coordinate; elsewhere the slots read 0.
+inline SysVarTable lightSysVars() {
+    SysVarTable t;
     // Elapsed milliseconds, passed in kArg3 on every run. An argument register, so it costs no
     // instruction and no arena byte.
     t.add({"t", SysVarKind::Arg, kArg3});
-}
-
-/// A LAYOUT: the clock, and nothing else. It is upstream of the logical grid — it contributes the
-/// physical coordinates that several layouts together bound (architecture.md § Layouts) — so there
-/// is no size to hand it, and it names its own controls (`cols`, `radius`).
-inline SysVarTable layoutSysVars() {
-    SysVarTable t;
-    addClock(t);
-    return t;
-}
-
-/// An EFFECT: the logical grid it renders into. The Layer derives width/height/depth from the
-/// layouts and its modifier chain and writes them each tick; an effect is TOLD its canvas rather
-/// than declaring it, because a size restated as a control is a second answer that can disagree.
-inline SysVarTable effectSysVars() {
-    SysVarTable t;
-    addClock(t);
     t.add({"width",  SysVarKind::Arena, kSysWidth});
     t.add({"height", SysVarKind::Arena, kSysHeight});
     t.add({"depth",  SysVarKind::Arena, kSysDepth});
+    t.add({"xPos",   SysVarKind::Arena, kSysX});
+    t.add({"yPos",   SysVarKind::Arena, kSysY});
+    t.add({"zPos",   SysVarKind::Arena, kSysZ});
     return t;
 }
 
-/// A MODIFIER: the grid, plus the coordinate of the light being folded, which the binding writes
-/// per call. This is the only binding that supplies x/y/z.
-inline SysVarTable modifierSysVars() {
-    SysVarTable t = effectSysVars();
-    t.add({"x", SysVarKind::Arena, kSysX});
-    t.add({"y", SysVarKind::Arena, kSysY});
-    t.add({"z", SysVarKind::Arena, kSysZ});
-    return t;
-}
+/// The three roles keep their names as aliases of the one table: a binding says which role it is
+/// playing, and every call site reads the same way it always did.
+inline SysVarTable layoutSysVars()   { return lightSysVars(); }
+inline SysVarTable effectSysVars()   { return lightSysVars(); }
+inline SysVarTable modifierSysVars() { return lightSysVars(); }
 
 // The light-domain built-in table the binding injects into the compiler. setRGB and fill are
 // Inline (they lower to stores — the hot-path writers, no per-call cost); random16 is a Call.

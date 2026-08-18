@@ -4,13 +4,22 @@ MoonLive is projectMM's **live-script engine** — author an effect as text and 
 
 Scripts call the same [power functions](power-functions.md) compiled effects use, reached through the builtin table — so the vocabulary is shared, in its flat scalar form.
 
-A scripted effect names a **script file** under `/moonlive/`; the UI loads, edits and saves that file, and the module holds only the name (~32 bytes) — the text is read into a right-sized buffer to compile and freed immediately, so nothing script-sized stays resident. A front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick. The grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call:
+A scripted effect names a **script file** under `/moonlive/`; the UI loads, edits and saves that file, and the module holds only the name (~32 bytes) — the text is read into a right-sized buffer to compile and freed immediately, so nothing script-sized stays resident. A front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick.
+
+**A script is a class.** It declares one, and the host calls its functions: an effect's `tick()` runs once per frame. That is the same shape a compiled effect has, so what a contributor learns from one transfers to the other.
 
 ```
-setRGB(random16(256), 0, 0, 255);   // a random pixel, blue
-setRGB(5, random16(256), 0, 0);     // pixel 5, a random red
-fill(0, 0, 255);                    // every light blue
+class RandomPixelEffect {
+  tick() {
+    setRGB(random16(256), 0, 0, 255);   // a random pixel, blue
+    setRGB(5, random16(256), 0, 0);     // pixel 5, a random red
+  }
+}
 ```
+
+Inside a function the grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call. The class declaration is required: one top-level form rather than two means one set of rules to learn and one parse path to maintain.
+
+The **class name is not the file name**. `plasma.mlv` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
 
 The functions are **not built into the compiler** — `setRGB`, `fill`, `random16` are registered by the *host* (the light domain) in a builtin table; the core compiler owns only the grammar and a generic call/inline mechanism (the ESPLiveScript / ARTI bound-function model). The compiler emits machine code for whichever ISA the device runs (Xtensa on the classic/S3) or the host ISA on desktop, places it in executable memory, and the engine calls it each render tick.
 
@@ -20,28 +29,34 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 - **Scripted controls** — a script declares a tunable variable with a range annotation, and the engine surfaces it as a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
-  uint8_t speed = 50;   // @control 0..99      → a "speed" slider, default 50, range 0..99
-  uint8_t hue   = 128;  // @control 0..255
-  setRGB(speed, hue, 0, 255);
+  class SpeedyEffect {
+    uint8_t speed = 50;   // @control 0..99    → a "speed" slider, default 50, range 0..99
+    uint8_t hue   = 128;  // @control 0..255
+
+    tick() { setRGB(speed, hue, 0, 255); }
+  }
   ```
+
+  A declared variable sits in the class body, not inside a function: it is a member, which is what
+  lets the UI bind to it and what will let one function set a value another reads.
 
   Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script file and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
 
 ### System variables — what the engine hands a script
 
-Some names are **reserved**: the engine defines them, the script only reads them, and a declaration that reuses one is a compile error (`name is a system variable`). Each module supplies the names it actually writes, so a name a script cannot be given is simply unknown there rather than silently reading 0.
+Some names are **reserved**: the engine defines them, the script only reads them, and a declaration that reuses one is a compile error (`name is a system variable`). **One vocabulary serves every role** — a name means the same thing in a layout, an effect and a modifier — so what you learn from one script transfers to the next.
 
-| name | what it is | layout | effect | modifier |
-|---|---|:-:|:-:|:-:|
-| `t` | elapsed milliseconds — the clock an animation is written against | ✓ | ✓ | ✓ |
-| `width`, `height`, `depth` | the **logical grid** the script renders into, `0..255` | | ✓ | ✓ |
-| `x`, `y`, `z` | the light being transformed, `0..255` | | | ✓ |
+| name | what it is |
+|---|---|
+| `t` | elapsed milliseconds — the clock an animation is written against |
+| `width`, `height`, `depth` | the **logical grid**, `0..255` |
+| `xPos`, `yPos`, `zPos` | the light being transformed, `0..255` (a [modifier](MoonLiveModifier.md) is the one handed these; elsewhere they read 0) |
 
 Every one but `t` is a byte, because it lives in the controls arena. A grid extent past 255 reports 255 rather than wrapping to a small number, and a modifier handed a coordinate outside `0..255` passes it through untransformed instead of folding a wrong position — so a script never silently sees a value that means something else.
 
-Supplying a name is also what reserves it, so the tight lists are what leave `x` and `y` usable as ordinary loop counters in a layout or an effect — neither is handed a coordinate.
+The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and `y` stay free as loop counters in every script**, which is what an author reaches for and what the shipped `grid.mlv` uses. Reserving them globally would break the most ordinary code there is; a per-role reservation was the alternative and was worse, because a name then meant one thing in one role and was refused in another — which is how `disasm.py`, compiling against the widest vocabulary, came to refuse the shipped default layout.
 
-`width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it is not given them at all, and names its own controls instead (`cols`, `rows`).
+`width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it names its own controls instead (`cols`, `rows`) and reads the grid only if it has a use for it.
 
 Reserving is what makes the guarantee hold: without it a declaration would silently shadow the value the engine handed in, and the script would disagree with its layer with no error anywhere.
 
@@ -68,6 +83,17 @@ Registered by the light domain, not built into the compiler (the core owns only 
 `sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
 
 `turn(n)` exists because a full revolution is 65536 — one past the largest number a script can write — and the grammar has no division. Without it, placing `n` points evenly on a circle is not expressible.
+
+### The script's own functions
+
+A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mlv` is the worked example: a `column()` and a `row()`, both called from `tick()`.
+
+These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments and returns nothing yet, so a helper does a whole job rather than computing a value.
+
+Two rules a script author meets:
+
+- **Declare a helper above the function that calls it.** Only functions already parsed are visible, so a call to one declared further down reports `unknown function`. A function can always call itself.
+- **Recursion is bounded.** About 30 calls deep a further call does nothing and returns, because a render task has a fixed stack and the alternative to a limit is a device that resets mid-frame. It is not reported: what you see is the picture being wrong where the recursion stopped, on a device that keeps running.
 
 ### Wire contract — control declaration
 

@@ -25,7 +25,7 @@ namespace mm {
 // the MoonLight lineage.
 //
 // A single walk() is the one source of truth for the geometry: lightCount()
-// runs it with a no-op callback to tally, forEachCoord() runs it to emit, so the
+// runs it with a no-op callback to tally, placeLights() runs it to emit, so the
 // count and the emitted set can never disagree (the RingLayout/SphereLayout
 // pattern). Integer math throughout; this is the cold build path.
 // Author: troyhacks — custom Toronto bar decorative-gourd installation, reconstructed for projectMM — https://github.com/troyhacks/WLED
@@ -53,7 +53,7 @@ public:
         return n;
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         walk(sink.cb, sink.ctx, nullptr);
     }
 

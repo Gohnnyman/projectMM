@@ -11,7 +11,7 @@ namespace mm {
 
 /// Top-level container for one or more `LayoutBase` children — it defines the physical light topology of the installation and is shared by every Layer in the `Effects` container (one Layouts describing the physical setup, multiple Effects render into it).
 ///
-/// **Coordinate iteration is owned by the container, not the layer:** `forEachCoord` walks every enabled child layout's coordinates in registration order, offsetting physical indices so multiple layouts (for example 16 strips making one panel) stitch into a single flat physical address space without overlap. A Layer *uses* those coordinates to build its LUT. `totalLightCount` (the sum across enabled children) sizes both the layer buffer and the driver output buffer.
+/// **Coordinate iteration is owned by the container, not the layer:** `placeLights` walks every enabled child layout's coordinates in registration order, offsetting physical indices so multiple layouts (for example 16 strips making one panel) stitch into a single flat physical address space without overlap. A Layer *uses* those coordinates to build its LUT. `totalLightCount` (the sum across enabled children) sizes both the layer buffer and the driver output buffer.
 ///
 /// **Disabling a layout:** disabling a layout child (the `enabled` toggle) removes its lights from the LUT entirely, and the indices of any layouts after it shift down to close the gap — with two grids of 4 and 2 lights, disabling the first leaves the second at indices 0–1 and `totalLightCount` drops from 6 to 2. A `Scheduler::prepareTree` fires so the LUT, layer buffer, and driver output buffer reallocate. Side effect: ArtNet universe assignments shift with the indices — to keep driver-to-fixture mapping stable across enable changes, disable the driver instead of the layout. Disabling the container itself reports zero lights and an empty iteration, the same effect as disabling every child.
 ///
@@ -46,7 +46,7 @@ public:
         return total;
     }
 
-    void forEachCoord(const CoordSink& sink) const {
+    void placeLights(const CoordSink& sink) const {
         if (!enabled()) return;
         nrOfLightsType offset = 0;
         for (uint8_t i = 0; i < childCount(); i++) {
@@ -60,7 +60,7 @@ public:
                 nrOfLightsType offset;
             };
             WrapCtx wctx{&sink, offset};
-            layout->forEachCoord(CoordSink{
+            layout->placeLights(CoordSink{
                 [](void* wc, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                     auto* w = static_cast<WrapCtx*>(wc);
                     w->sink->pixel(idx + w->offset, x, y, z);
@@ -93,11 +93,11 @@ public:
     /// setup (no lights / zero box) flags Warning so the UI shows it's empty.
     void prepare() override {
         const nrOfLightsType lights = totalLightCount();
-        // One forEachCoord pass for the bounding box: max coordinate + 1 per axis.
+        // One placeLights pass for the bounding box: max coordinate + 1 per axis.
         struct Extent { lengthType x, y, z; bool any; } e{0, 0, 0, false};
         // Gaps count toward the physical box (a black pixel is a real position at (x,y,z)), so the
         // extent walk uses one callback for both kinds — blackCb null → blackPixel falls back to it.
-        forEachCoord(CoordSink{[](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+        placeLights(CoordSink{[](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
             auto* ex = static_cast<Extent*>(ctx);
             if (x > ex->x) ex->x = x;
             if (y > ex->y) ex->y = y;

@@ -17,6 +17,9 @@ void MoonLive::freeCode() {
     fn_ = nullptr;
     anim_ = nullptr;
     ctrl_ = nullptr;
+    // The entry table describes code that no longer exists. Left behind, entry() would hand a
+    // binding an address into a freed block: the same stale-state trap the control arena has.
+    entryCount_ = 0;
 }
 
 // Copy `len` already-emitted bytes into a fresh exec block. writeExec hides the ISA quirks
@@ -103,6 +106,15 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
         for (uint8_t j = 0; j < len; j++) ctrlNames_[i][j] = cr.controls[i].name[j];
         ctrlNames_[i][len] = '\0';
         controls_[i].name = ctrlNames_[i];
+    }
+    // Copy the entry table, names included: a CompileResult's `name` points into the source text,
+    // which the caller frees as soon as this returns.
+    entryCount_ = cr.entryCount < kMaxEntryPoints ? cr.entryCount : kMaxEntryPoints;
+    for (uint8_t i = 0; i < entryCount_; i++) {
+        const uint8_t n = cr.entries[i].nameLen < kMaxEntryName ? cr.entries[i].nameLen : kMaxEntryName;
+        for (uint8_t j = 0; j < n; j++) entryNames_[i][j] = cr.entries[i].name[j];
+        entryNames_[i][n] = '\0';
+        entries_[i] = {entryNames_[i], n, cr.entries[i].offset};
     }
     ctrl_ = reinterpret_cast<CtrlFn>(block);
     return true;

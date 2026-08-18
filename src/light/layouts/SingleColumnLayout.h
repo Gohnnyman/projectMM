@@ -35,7 +35,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // Emit the column in wiring order. The COORDINATE is (xposition, y, 0);
         // reversed_order walks y from the high end down, matching MoonLight's
         // addLight order. Stop at the clamped lightCount() so emitted indices

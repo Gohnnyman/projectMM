@@ -46,7 +46,7 @@ void HostAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_ca
 
 // Record a pending branch fixup, guarding the fixed table — a script with too many branches sets
 // overflow_ rather than writing past fixups_ (the same failure path as a full code buffer).
-void HostAssembler::addFixup(size_t at, Label label, uint8_t kind) {
+void HostAssembler::addFixup(size_t at, Label label, FixKind kind) {
     if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
     fixups_[fixupCount_++] = {at, label, kind};
 }
@@ -156,15 +156,22 @@ void HostAssembler::cmp(Reg a, Reg b) {                    // cmp wA, wB  (subs 
     emit32(0x6b00001fu | (mr(b) << 16) | (mr(a) << 5));
 }
 void HostAssembler::branchIfZero(Reg a, Label l) {         // cbz wA, l  (offset patched)
-    addFixup(len_, l, 0);
+    addFixup(len_, l, FixKind::Branch);
     emit32(0x34000000u | mr(a));
 }
 void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset patched)
     // arm64 condition codes: NE=1, HS/CS=2, LO/CC=3.
     const uint8_t cond = (c == Cond::Lo) ? 0x3 : (c == Cond::Ne ? 0x1 : 0x2);
-    addFixup(len_, l, static_cast<uint8_t>(1u | (cond << 4)));
+    addFixup(len_, l, FixKind::Branch);   // the condition is already in the instruction
     emit32(0x54000000u | cond);
 }
+// The fused forms the shared lowering calls. arm64 has no compare-and-branch pair, so each is
+// cmp + b.cond here, and one instruction on RISC-V and Xtensa. Both spellings live behind the
+// same name, which is what lets the IR walk be written once.
+void HostAssembler::movReg(Reg d, Reg a) { addImm(d, a, 0); }    // mov wD, wA (add wD, wA, #0)
+void HostAssembler::branchGeU(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Hs, l); }
+void HostAssembler::branchNe(Reg a, Reg b, Label l)  { cmp(a, b); branchIf(Cond::Ne, l); }
+
 void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // Preserve EVERY register that may hold a live value across the call: the host args
     // (x0/x1/x2/x3), the link register x30 (blr overwrites it; our function is a leaf), and the
@@ -218,6 +225,22 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 }
 void HostAssembler::ret() { emit32(0xd65f03c0u); }
 
+// bl <label>: a call to a function in THIS block: the script-to-script call.
+//
+// `bl` links the return address into x30, which the callee's prologue saves into its own frame, so
+// calls nest and therefore recurse.
+//
+// Pass the host arguments on (the contract is with IrOp::CallScript in core).
+void HostAssembler::callLabel(Label l) {
+    // Reloading them is a NO-OP on this backend as long as R0..R4 map onto the ABI argument
+    // registers x0..x4 and `bl` leaves them alone, which is why removing these four instructions
+    // does not fail a single test here while the same omission crashes an S3. Emitted anyway, so
+    // the contract is expressed rather than depending on that mapping staying true.
+    for (uint8_t v = 0; v < kHostArgSlots; v++) spillLoad(static_cast<Reg>(v), hostArgSlot(v));
+    addFixup(len_, l, FixKind::Call);
+    emit32(0x94000000u);   // bl #0: the 26-bit imm is patched below
+}
+
 void HostAssembler::patchBranches() {
     // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
     // stated rather than left to the reader to derive from fixupCount_ being 0.
@@ -228,7 +251,15 @@ void HostAssembler::patchBranches() {
         if (target < 0) continue;                                     // unbound label — leave the branch as-is (overflow_ already failed the compile)
         int32_t rel = (target - static_cast<int32_t>(f.at)) >> 2;     // PC-relative, /4
         uint32_t w; std::memcpy(&w, buf_ + f.at, 4);
-        w |= (uint32_t(rel) & 0x7ffff) << 5;                          // imm19 field (cbz & b.cond)
+        if (f.kind == FixKind::Call) {
+            // bl: a 26-bit immediate at bits 0..25, not the 19-bit field the conditional branches
+            // use. Sharing their arithmetic would silently retarget the call, which is why the
+            // fixup carries a kind.
+            if (rel < -33554432 || rel > 33554431) { overflow_ = true; return; }
+            w |= uint32_t(rel) & 0x03ffffffu;
+        } else {
+            w |= (uint32_t(rel) & 0x7ffff) << 5;                      // imm19 field (cbz & b.cond)
+        }
         std::memcpy(buf_ + f.at, &w, 4);
     }
 }

@@ -1,3 +1,8 @@
 // One random light in a random colour per frame. The shipped default: always visibly alive,
 // and the smallest script that shows the engine running.
-setRGB(random16(256), random16(256), random16(256), random16(256));
+
+class RandomPixelEffect {
+  tick() {
+    setRGB(random16(256), random16(256), random16(256), random16(256));
+  }
+}

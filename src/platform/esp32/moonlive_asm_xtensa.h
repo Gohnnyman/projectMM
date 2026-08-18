@@ -34,6 +34,10 @@ const uint8_t* xtRegMap(uint8_t& count);
 
 class XtensaAssembler {
 public:
+    // The register type the shared lowering (core/moonlive/moonlive_lower.h) works in.
+    // Named here because each backend's Reg is its own enum, sized to its own file.
+    using RegType = Reg;
+
     // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
     // would double-free the buffer it emits into.
     ~XtensaAssembler() { platform::free(buf_); }
@@ -47,6 +51,18 @@ public:
     XtensaAssembler& operator=(const XtensaAssembler&) = delete;
 
     void finalize() { patchBranches(); }
+    // Pad to the alignment a FUNCTION ENTRY needs on this ISA, called before each prologue.
+    //
+    // Xtensa requires it twice over: `entry` itself must sit on a 4-byte boundary (the toolchain
+    // rejects anything else with "unaligned entry instruction"), and CALLn encodes its target as a
+    // count of 4-byte units from the call's own PC rounded down, so an unaligned callee is not
+    // expressible at all. Instructions here are 2 or 3 bytes, so a function that follows another
+    // lands on an arbitrary offset and needs the pad. This is what `.align 4` does in hand-written
+    // assembly; the fill is zeros, which is never executed because the preceding function's
+    // `retw.n` is the last instruction reached.
+    void alignForEntry() {
+        while ((len_ & 3u) != 0) { const uint8_t z = 0; emit(&z, 1); }
+    }
     const uint8_t* bytes() const { return buf_; }
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
@@ -78,18 +94,40 @@ public:
     void branchGeU(Reg a, Reg b, Label l);    // bgeu aA, aB, l  (Bounds: skip if a>=b)
     void branchNe(Reg a, Reg b, Label l);     // bne aA, aB, l   (loop test)
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // windowed call8 to a host built-in
+    /// Call a function in THIS block, by label: the script-to-script call.
+    ///
+    /// Much smaller than the host `call()` above: the arguments are already in frame slots, so
+    /// there is no staging, and the target is a label, so there is no address to build.
+    ///
+    /// CALL8, not call0. `call0` was the first choice (cheaper, no window rotation) and is WRONG
+    /// here: entry/retw and call0 are two different ABIs and do not mix. esp-idf's own abi_entry
+    /// shows the split: the windowed path emits `entry sp, locsz`, the call0 path emits
+    /// `addi sp, sp, -N` plus an explicit `s32i a0` to save the return address. This assembler
+    /// emits entry/retw.n, so its callees are windowed routines and reaching one with call0 would
+    /// hand it a frame it never allocated.
+    ///
+    /// The callee therefore owes the 32-byte window-save reserve like any other call8 frame, which
+    /// per-function prologues already give it.
+    void callLabel(Label l);
     void epilogue();                     // retw.n
 
 private:
     // The emitted-code buffer's size, fixed for this object's life but chosen per script.
     const size_t kCap;
-    static constexpr uint8_t kMaxLabels = 16;
-    static constexpr uint8_t kMaxFixups = 32;
+    // Sized in core (kAsmLabels/kAsmFixups) so the three backends cannot drift apart.
+    static constexpr uint8_t kMaxLabels = kAsmLabels;
+    static constexpr uint8_t kMaxFixups = kAsmFixups;
 
     void emit(const uint8_t* p, size_t n);
     void emit2(uint16_t w);              // narrow (16-bit) instruction
     void emit3(uint32_t w);              // wide (24-bit) instruction
-    void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
+    // A pending reference to a label. `kind` is needed now that not every fixup patches a `j`:
+    // a script-to-script call is a `call8`, whose displacement is SCALED (four-byte units) and
+    // sits in different bits. Patching one as the other retargets it silently, which is the
+    // failure this discriminator exists to make impossible.
+    enum class FixKind : uint8_t { Jump, Call };
+    struct Fixup { size_t at; Label label; FixKind kind = FixKind::Jump; };
+    void addFixup(size_t at, Label label, FixKind kind = FixKind::Jump);   // enqueue a fixup (bounds-checked)
 
     // HEAP, not a member array: the assembler is a stack local in lowerToBytes, so a kCap-sized
     // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
@@ -102,14 +140,12 @@ private:
 
     int32_t  labelPos_[kMaxLabels];
     uint8_t  labelCount_ = 0;
-    struct Fixup { size_t at; Label label; };   // all our branches use the 8-bit offset at byte+2
     Fixup    fixups_[kMaxFixups];
     uint8_t  fixupCount_ = 0;
 
     // A conditional branch emitted as inverted-condition-over-`j`, so its reach is the jump's
     // 18 bits rather than the branch's signed byte. See the .cpp for why that is not optional.
     void branchRelaxed(uint8_t condNibble, Reg a, Reg b, Label l);
-
     void patchBranches();
 };
 

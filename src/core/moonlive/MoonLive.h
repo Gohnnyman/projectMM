@@ -5,6 +5,7 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/moonlive/MoonLiveCompiler.h"   // CompileResult (carries the declared controls)
+#include <cstring>   // std::strcmp: entry lookup by name
 
 // MoonLive — the live-script engine core (domain-neutral, §3.1/§3.9 of
 // livescripts-analysis-top-down.md). compile() turns a program into native code — either a
@@ -43,6 +44,28 @@ public:
     bool compileAnimated();
 
     bool ok() const { return fn_ != nullptr || anim_ != nullptr || ctrl_ != nullptr; }
+
+    /// The compiled function named `name`, or nullptr when the script did not define one.
+    ///
+    /// This is what makes a script's ROLE a question of what it defined rather than what type it is:
+    /// a layout asks for `placeLights`, an effect for `tick`, and a script that defines both is
+    /// served by both. The address is inside the ONE emitted block, at the offset the lowering
+    /// recorded, which is why a script may define as many functions as it likes for the cost of one
+    /// allocation.
+    CtrlFn entry(const char* name) const {
+        if (!code_ || !name) return nullptr;
+        for (uint8_t i = 0; i < entryCount_; i++) {
+            if (std::strcmp(entryNames_[i], name) != 0) continue;
+            if (entries_[i].offset >= codeLen_) return nullptr;   // a corrupt map is not callable
+            return reinterpret_cast<CtrlFn>(static_cast<uint8_t*>(code_) + entries_[i].offset);
+        }
+        return nullptr;
+    }
+
+    /// Names of the functions the script defined, for a binding that wants to report them and for
+    /// the dispatch question "which entry points does this script have".
+    const char* entryName(uint8_t i) const { return i < entryCount_ ? entryNames_[i] : nullptr; }
+    uint8_t entryCount() const { return entryCount_; }
     const char* error() const { return error_; }
 
     // The hot path: run the compiled routine over the host's buffer. `t` is the host's
@@ -51,16 +74,35 @@ public:
     // channels +0/+1/+2 per light, so a buffer that can't hold RGB — null, zero lights, or
     // fewer than 3 channels per light — is left untouched rather than overrun (robust to any
     // grid size / layout, the hard rule).
-    void run(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t) const {
+    /// Run the script's ENTRY POINT called `name`, or the whole program when `name` is null.
+    ///
+    /// A binding names the function its role calls for: an effect wants `tick`, a layout
+    /// `placeLights`. Passing a name a script did not define runs NOTHING, which is the honest
+    /// answer: the module reports it rather than silently running some other function.
+    void run(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t,
+             const char* name = nullptr) const {
         if (!buf || nLights == 0 || cpl < 3) return;
         // The arena is the fifth argument, and a front-end-compiled program reads its controls and
         // system variables straight through it — a null there is dereferenced by the EMITTED code,
         // which faults as a LoadProhibited at a nonsense address with no C++ frame to blame. Checked
         // with the other preconditions rather than trusted: every other operand of the call is.
-        if (ctrl_ && ctrlArena_) ctrl_(buf, nLights, cpl, t, ctrlArena_);   // front-end-compiled
+        if (ctrl_ && ctrlArena_) {
+            // Start every frame at depth zero. The emitted code restores the counter as it unwinds,
+            // so this is normally already 0. A script that HIT the limit stopped calling
+            // rather than returning through the restore, and a leaked level would shrink the next
+            // frame's budget, and the next, until a legal recursion no longer ran. One byte.
+            ctrlArena_[kDepthSlot] = 0;
+            // A named entry when asked for one; otherwise the block start, which is what the
+            // hand-encoded programs and a single-function script both want.
+            CtrlFn f = name ? entry(name) : ctrl_;
+            if (f) f(buf, nLights, cpl, t, ctrlArena_);
+        }
         else if (fn_) fn_(buf, nLights, cpl);                 // hand-encoded fixed fill
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }
+
+    /// Does the script define this entry point? A binding asks before reporting "no tick() to run".
+    bool hasEntry(const char* name) const { return entry(name) != nullptr; }
 
     // Release the exec block + the control arena (the "destructor" role — release returns the
     // memory).
@@ -119,6 +161,13 @@ private:
     AnimFn  anim_ = nullptr;     // animated fill (4-arg, reads t), or nullptr
     CtrlFn  ctrl_ = nullptr;     // front-end-compiled routine (5-arg, reads the controls arena)
     const char* error_ = "";
+
+    // The functions the script defined, with their offsets into `code_`, and their names owned here
+    // for the same reason the control names are: a CompileResult's `name` points into source text
+    // the caller frees the moment compile() returns.
+    EntryPoint entries_[kMaxEntryPoints] = {};
+    char       entryNames_[kMaxEntryPoints][kMaxEntryName + 1] = {};
+    uint8_t    entryCount_ = 0;
 
     uint8_t* ctrlArena_ = nullptr;   // live control + system-variable bytes (platform::alloc, kArenaBytes, fixed)
     uint8_t  controlCount_ = 0;      // controls the current program declared

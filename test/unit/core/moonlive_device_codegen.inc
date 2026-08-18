@@ -33,21 +33,31 @@ namespace {
 // The shipped default layout: a nested loop whose body calls addLight. The script that crashed
 // every S3, so the one worth pinning hardest.
 const char* kGridLayout =
-    "uint8_t cols = 16;  // @control 1..64\n"
-    "uint8_t rows = 16;  // @control 1..64\n"
-    "for (y = 0; y < rows; y = y + 1) {\n"
-    "  for (x = 0; x < cols; x = x + 1) {\n"
-    "    addLight(x, y, 0);\n"
+    "class GridLayout {\n"
+    "  uint8_t cols = 16;  // @control 1..64\n"
+    "  uint8_t rows = 16;  // @control 1..64\n"
+    "  tick() {\n"
+    "    for (y = 0; y < rows; y = y + 1) {\n"
+    "      for (x = 0; x < cols; x = x + 1) {\n"
+    "        addLight(x, y, 0);\n"
+    "      }\n"
+    "    }\n"
     "  }\n"
     "}\n";
 
-// The two shapes an effect takes: straight-line, and a loop over the grid.
-const char* kEffectSimple = "setRGB(0, 255, 0, 0);\n";
-const char* kEffectLoop   = "for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); }\n";
+// The two shapes an effect takes: straight-line, and a loop over the grid. Spelled out in full
+// rather than wrapped by a helper: these pin the EXACT bytes a shipped script emits, so the source
+// they are compiled from has to be the source a user would write.
+const char* kEffectSimple =
+    "class SimpleEffect {\n  tick() { setRGB(0, 255, 0, 0); }\n}\n";
+const char* kEffectLoop =
+    "class LoopEffect {\n"
+    "  tick() { for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); } }\n"
+    "}\n";
 
-/// Compile for THIS TU's backend. `sysvars` picks the binding's vocabulary — they are different
-/// sets, not nested ones: a LAYOUT may use `x`/`y` as loop counters precisely because it is not
-/// handed them, which is what the shipped grid.mlv does.
+/// Compile for THIS TU's backend. `sysvars` is the ONE light vocabulary; the role-named
+/// accessors are aliases of it, so which one a caller passes is documentation rather than a
+/// behavioural choice (pinned by "the three roles are handed the same table").
 std::vector<uint8_t> emitBytes(const char* src, const mm::moonlive::SysVarTable& sysvars, bool& ok) {
     // Sized the way production sizes it, from the script's own token count — a test that always
     // allocated the sanity bound would pass while a right-sized caller overflowed.
@@ -107,14 +117,14 @@ TEST_CASE("a scripted effect compiles for " MM_ISA_NAME ", straight-line and loo
 // that pushes any backend back over the edge shows up here first.
 TEST_CASE("fill plus a loop on " MM_ISA_NAME " emits what it currently can") {
     bool ok = false;
-    CHECK(emitLen("fill(0,0,0);\nfor (y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }",
+    CHECK(emitLen(mmScript("fill(0,0,0);\nfor (y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }"),
                   mm::moonlive::effectSysVars(), ok) == MM_GOLD_FILLLOOP_LEN);
 }
 
-// A scripted MODIFIER is the third binding, and the one handed x/y/z.
+// A scripted MODIFIER is the third binding, and the one handed a per-light coordinate.
 TEST_CASE("a scripted modifier compiles for " MM_ISA_NAME) {
     bool ok = false;
-    CHECK(emitLen("setXYZ(0, x, y, z);\n", mm::moonlive::modifierSysVars(), ok) > 0);
+    CHECK(emitLen(mmScript("setXYZ(0, xPos, yPos, zPos);\n"), mm::moonlive::modifierSysVars(), ok) > 0);
     CHECK(ok);
 }
 
@@ -161,6 +171,67 @@ TEST_CASE("an unencodable script is refused, not truncated, on " MM_ISA_NAME) {
     CHECK_FALSE(ok);    // and said so
 }
 
+// The assembler is a LOCAL in lowerWith, and lowerWith runs on the render task, so its size is
+// stack a 12 KB task has to have spare while a script compiles. Its two fixed tables dominate it:
+// 4 bytes per label and 8 per fixup, so raising kAsmLabels/kAsmFixups is a stack decision wearing a
+// capacity costume. 16/32 put lowerWith at 480 bytes on the classic ESP32 and 48/96 puts it at
+// 1120, which is the largest frame on the compile chain (2128 bytes nested).
+//
+// This bound is a TRIPWIRE, not a target: it exists so that raising the tables is a deliberate act
+// with a number attached, rather than something noticed when a board bootloops. A P4 has already
+// been lost to an oversized frame on this path. If this fails, either the growth is wrong, or the
+// tables belong on the heap next to the code buffer, which was moved off the stack for this reason.
+TEST_CASE("the " MM_ISA_NAME " assembler stays small enough to build on a render task") {
+    // Asserted in TABLE ENTRIES rather than bytes, because bytes here are the host's: these backends
+    // are compiled on a 64-bit machine to run their real emitter, a Fixup holds a size_t, and
+    // sizeof() therefore overstates the device object. The entry counts are the same everywhere and
+    // they are what actually gets raised, so they are the honest thing to pin.
+    //
+    // The device figure, measured on the classic ESP32 image rather than derived: lowerWith's frame
+    // is 480 bytes at 16/32 and 1120 at 48/96: 4 bytes per label and 8 per fixup. Re-measure with
+    // `xtensa-esp-elf-objdump -d` and grep the `entry a1, N` of lowerWith after changing either.
+    INFO(MM_ISA_NAME " assembler = " << sizeof(MM_ISA_ASM) << " bytes on this 64-bit host");
+    CHECK(mm::moonlive::kAsmLabels <= 64);
+    CHECK(mm::moonlive::kAsmFixups <= 128);
+}
+
+// A class whose functions call each other has to place each function where a call can REACH it.
+//
+// Xtensa entry points must sit on a 4-byte boundary: the toolchain rejects an unaligned `entry`
+// outright ("unaligned entry instruction"), and CALLn encodes its target as a count of 4-byte units,
+// so an unaligned callee is not expressible either. Xtensa instructions are 2 or 3 bytes, so a
+// function following another lands wherever the previous one ended and the alignment is not free.
+// crosshair.mlv is the script that found this: three functions, and the compile was refused with the
+// generic "too large" while the same script built fine on RISC-V, whose instructions are all 4 bytes.
+//
+// Checked on every backend rather than only Xtensa, because the requirement is a property of the
+// emitted block, and a backend that gains a compressed encoding would need the same pad.
+TEST_CASE("every function in a class starts where a call can reach it, on " MM_ISA_NAME) {
+    const char* src =
+        "class T {\n"
+        "  first()  { setRGB(1, 7, 8, 9); }\n"
+        "  second() { setRGB(2, 1, 2, 3); first(); }\n"
+        "  tick()   { setRGB(0, 4, 5, 6); first(); second(); }\n"
+        "}\n";
+    std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src)));
+    auto r = mm::moonlive::compileSource(src, mm::moonlive::lightBuiltins(),
+                                         mm::moonlive::effectSysVars(), out.data(), out.size(),
+                                         nullptr, MM_ISA_LOWER);
+    INFO("compile error: ", r.error);
+    REQUIRE(r.ok);                     // the refusal this test exists for
+    REQUIRE(r.entryCount == 3);
+    for (uint8_t f = 0; f < r.entryCount; f++) {
+        INFO("function ", f, " at offset ", r.entries[f].offset);
+        CHECK((r.entries[f].offset & 3u) == 0u);
+        CHECK(r.entries[f].offset < r.len);       // inside the block it was emitted into
+    }
+    // Distinct entry points: two functions sharing an offset means one never got its own prologue,
+    // which is how the boundary bug presented: the block looked structurally plausible and the
+    // second function's frame was simply never established.
+    CHECK(r.entries[0].offset != r.entries[1].offset);
+    CHECK(r.entries[1].offset != r.entries[2].offset);
+}
+
 // Every script we SHIP has to compile on every backend, or a user's board choice silently decides
 // which effects exist. `plasma.mlv` is why this test is here: it ran on an S3 and on desktop and was
 // refused on an S31, because one `kCodeCap` constant was sized to the densest ISA while RISC-V emits
@@ -183,8 +254,9 @@ TEST_CASE("every shipped script compiles for " MM_ISA_NAME) {
             std::ostringstream ss;
             ss << f.rdbuf();
             const std::string src = ss.str();
-            // Each binding supplies a DIFFERENT system-variable vocabulary, not a nested superset —
-            // a layout may use x/y as loop counters precisely because it is not handed them.
+            // Named per role for readability; all three are the same table. Kept as a per-kind
+            // selection rather than one call so this still reads as "compile it the way its
+            // binding does" if the roles ever diverge again.
             const std::string kind = sub;
             const auto& sysvars = kind == "layouts"   ? mm::moonlive::layoutSysVars()
                                 : kind == "modifiers" ? mm::moonlive::modifierSysVars()

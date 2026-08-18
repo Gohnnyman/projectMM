@@ -232,7 +232,7 @@ public:
         nrOfLightsType n = layouts->totalLightCount();
         if (n == 0) return;
 
-        // Box EXTENT = the maximum coordinate the positions reach, which is (size − 1): forEachCoord
+        // Box EXTENT = the maximum coordinate the positions reach, which is (size − 1): placeLights
         // emits x in [0, width−1], so an 8-wide grid spans 0..7 and its extent is 7, NOT 8. The
         // header carries these extents and the browser centres the cloud by dividing by the largest,
         // so they must match the packed coordinates' span exactly — using the size (8) instead drew
@@ -276,7 +276,7 @@ public:
 
         // Count the lights the lattice keeps. A dense grid in natural order (no LUT) is a regular
         // box, so the kept count is closed-form: ceil(size/s) per axis — no walk. A sparse/mapped
-        // layout (LUT) has an arbitrary index↔position map, so it's counted by one forEachCoord
+        // layout (LUT) has an arbitrary index↔position map, so it's counted by one placeLights
         // pass applying the same lattice predicate the color/coord passes use (color[k] ↔ coord[k]
         // line up by shared order, no stored index map).
         if (denseGrid()) {
@@ -287,7 +287,7 @@ public:
             CountCtx cc{s, 0};
             // A gap is a real preview position (drawn dark at its (x,y,z)), so count/emit it like any
             // light — blackCb null → blackPixel falls back to the same handler.
-            layouts->forEachCoord(CoordSink{[](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+            layouts->placeLights(CoordSink{[](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<CountCtx*>(c);
                 if (x % p->s == 0 && y % p->s == 0 && z % p->s == 0) p->out++;
             }, nullptr, &cc});
@@ -307,7 +307,7 @@ public:
                     keptIdxAllocFailed_ = false;
                     publishHeapBytes();   // the index cache grew — refresh the memory readout
                 } else {
-                    keptIdxAllocFailed_ = true;   // degraded — the gather walks forEachCoord per frame
+                    keptIdxAllocFailed_ = true;   // degraded: the gather walks placeLights per frame
                 }
             }
         }
@@ -329,7 +329,7 @@ public:
         broadcaster_->pushBinaryFrame(h, sizeof(h));
         // Push the kept lights' scaled positions in small slices through a stack scratch. A dense
         // grid strides its box directly (closed-form, no walk over skipped cells); a sparse/mapped
-        // layout walks forEachCoord with the lattice predicate. BOTH visit the kept lights in the
+        // layout walks placeLights with the lattice predicate. BOTH visit the kept lights in the
         // SAME order the color pass uses, so color[k] ↔ coord[k] line up. The C callback can't
         // capture, so it shares PosCtx (used by both the dense loop and the sparse callback).
         struct PosCtx {
@@ -350,10 +350,10 @@ public:
                     for (lengthType x = 0; x < ax; x += s) pc.emit(x, y, z);
         } else {
             // While emitting coords, CACHE the kept lights' buffer indices — the per-frame color
-            // gather then loops this index map instead of re-walking forEachCoord over every light
+            // gather then loops this index map instead of re-walking placeLights over every light
             // (an O(total-lights) callback walk per firing, measured ~8 ms at 12K lights on the
             // encode worker). The map's lifecycle IS the coord table's: same pass, same invalidation.
-            layouts->forEachCoord(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+            layouts->placeLights(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<PosCtx*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 PreviewDriver* self = p->self;
@@ -408,7 +408,7 @@ public:
         // kept subset + order MUST match the coord table's, so color[k] ↔ coord[k] line up (the
         // browser drops a count/stride-mismatched frame). A dense grid strides its box directly —
         // light (x,y,z) is at buffer index z·H·W + y·W + x, closed-form, no walk over skipped cells. A
-        // sparse/mapped layout walks forEachCoord with the same lattice predicate (its index↔position
+        // sparse/mapped layout walks placeLights with the same lattice predicate (its index↔position
         // map is arbitrary — no formula). tick()'s idle gate means no drain holds stage_ right now.
         // TRANSPORT A/B (resumableFrames): ON gathers into the staging buffer and hands it to the
         // RESUMABLE sender (drains on tick20ms, off the render thread — the sub-hot-path fix). OFF is
@@ -454,7 +454,7 @@ public:
             // Fallback (index-map alloc miss): the full lattice walk, s as the FULL stride (not
             // clamped) — must match buildAndSendCoordTable's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
-            layer_->layouts()->forEachCoord(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+            layer_->layouts()->placeLights(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<Skip*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 p->col->emit(idx);
@@ -496,7 +496,7 @@ private:
     /// Publish the preview's operating status: PLAIN "previewing N points" normally, or a WARNING naming
     /// the degradation when a resumable-path buffer could not allocate (RAM-tight board) so the tab shows
     /// WHY it fell back — the synchronous send returns (blocking socket writes on the encode thread, the
-    /// LED-hitch this optimization removed) or the sparse gather walks forEachCoord per frame. Called from
+    /// LED-hitch this optimization removed) or the sparse gather walks placeLights per frame. Called from
     /// the cold path (prepare) and refreshed on the coord rebuild, never the render loop.
     void refreshStatus() {
         if (resumableFrames && stageAllocFailed_) {
@@ -549,9 +549,9 @@ private:
     // the graceful fallback above the cap.
     // True when the source is a dense grid in natural box order (no mapping LUT): driver index i is
     // exactly box cell i, so the kept-light set + each light's buffer index are CLOSED-FORM from the
-    // box dimensions and the stride — no forEachCoord walk needed (the count, the coord positions,
+    // box dimensions and the stride: no placeLights walk needed (the count, the coord positions,
     // and the downsampled colors all stride the box directly). A LUT means a sparse / serpentine /
-    // modified layout whose index↔position map is arbitrary, so those paths must walk forEachCoord.
+    // modified layout whose index↔position map is arbitrary, so those paths must walk placeLights.
     // Mirrors the Layer's own dense-vs-LUT decision (Layer::isNaturalOrder gates lut_.setIdentity),
     // so the two agree: no LUT ⇔ Drivers passed the dense box buffer ⇔ closed-form is valid here.
     bool denseGrid() const { return layer_ && !layer_->lut().hasLUT(); }

@@ -1,10 +1,15 @@
 // A grid, the layout almost every panel is.
 // `cols`/`rows` are this layout's own controls; the logical grid comes from what it places.
-uint8_t cols = 16;  // @control 1..64
-uint8_t rows = 16;  // @control 1..64
 
-for (y = 0; y < rows; y = y + 1) {
-  for (x = 0; x < cols; x = x + 1) {
-    addLight(x, y, 0);
+class GridLayout {
+  uint8_t cols = 16;  // @control 1..64
+  uint8_t rows = 16;  // @control 1..64
+
+  placeLights() {
+    for (y = 0; y < rows; y = y + 1) {
+      for (x = 0; x < cols; x = x + 1) {
+        addLight(x, y, 0);
+      }
+    }
   }
 }

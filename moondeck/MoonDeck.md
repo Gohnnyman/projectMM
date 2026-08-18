@@ -96,6 +96,18 @@ uv run moondeck/check/check_specs.py
 
 Scans `src/` for MoonModule `.h` files and checks each has a `docs/moonmodules/*.md` page whose control names / source facts still agree with the header. The always-run commit gate (fast, <1s) — catches `.h` ↔ doc drift even on doc-only commits.
 
+### check_prose
+
+Verify that prose a change ADDS follows the coding standards: no em-dashes, US spelling.
+
+```bash
+uv run moondeck/check/check_prose.py
+```
+
+Reads the added lines of the branch diff and the working tree, so pre-existing prose a rename
+merely touched is out of scope. Run by hand: the tree still holds instances that predate the
+check, so it is not in the gate table until those are swept.
+
 ### check_platform_boundary
 
 Verify that platform-specific code stays inside `src/platform/`.

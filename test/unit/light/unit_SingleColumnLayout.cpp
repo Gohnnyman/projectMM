@@ -28,7 +28,7 @@ void collectCoord(void* ctx, mm::nrOfLightsType idx, mm::lengthType x, mm::lengt
 
 std::vector<CoordEntry> coordsOf(const mm::LayoutBase& layout) {
     std::vector<CoordEntry> out;
-    layout.forEachCoord(mm::CoordSink{collectCoord, nullptr, &out});
+    layout.placeLights(mm::CoordSink{collectCoord, nullptr, &out});
     return out;
 }
 

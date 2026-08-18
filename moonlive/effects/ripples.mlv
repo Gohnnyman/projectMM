@@ -6,18 +6,23 @@
 //
 // The heaviest shipped script: ~15 host calls per cell against plasma's 9, so it is also
 // the working stress test for the call path.
-uint8_t bpm = 10;    // @control 1..120
-uint8_t rings = 8;   // @control 1..32
 
-for (y = 0; y < height; y = y + 1) {
-  for (x = 0; x < width; x = x + 1) {
-    setRGB(y * width + x,
-      scale(sin(((x - beatsin(bpm, t, width - 1)) * (x - beatsin(bpm, t, width - 1))
-               + (y - beatsin(bpm + 4, t, height - 1)) * (y - beatsin(bpm + 4, t, height - 1)))
-              * rings * 64), 256),
-      scale(sin(((x - beatsin(bpm + 7, t, width - 1)) * (x - beatsin(bpm + 7, t, width - 1))
-               + (y - beatsin(bpm + 3, t, height - 1)) * (y - beatsin(bpm + 3, t, height - 1)))
-              * rings * 64), 256),
-      scale(sin((x + y) * rings * 32 + beat(bpm, t)), 256));
+class RipplesEffect {
+  uint8_t bpm = 10;    // @control 1..120
+  uint8_t rings = 8;   // @control 1..32
+
+  tick() {
+    for (y = 0; y < height; y = y + 1) {
+      for (x = 0; x < width; x = x + 1) {
+        setRGB(y * width + x,
+          scale(sin(((x - beatsin(bpm, t, width - 1)) * (x - beatsin(bpm, t, width - 1))
+                   + (y - beatsin(bpm + 4, t, height - 1)) * (y - beatsin(bpm + 4, t, height - 1)))
+                  * rings * 64), 256),
+          scale(sin(((x - beatsin(bpm + 7, t, width - 1)) * (x - beatsin(bpm + 7, t, width - 1))
+                   + (y - beatsin(bpm + 3, t, height - 1)) * (y - beatsin(bpm + 3, t, height - 1)))
+                  * rings * 64), 256),
+          scale(sin((x + y) * rings * 32 + beat(bpm, t)), 256));
+      }
+    }
   }
 }

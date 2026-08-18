@@ -1,7 +1,7 @@
 # Plan: MoonLive scales — right-sized IR, and the stack as the register overflow
 
 > **Steps 1–3 shipped. Steps 4–5 (the register allocator) are SUPERSEDED by
-> [Plan-20260813 — MoonLive on a stack machine](Plan-20260813%20-%20MoonLive%20on%20a%20stack%20machine%20%E2%80%94%20the%20frame%20is%20where%20values%20live.md).**
+> [Plan-20260813 — MoonLive on a stack machine](Plan-20260813%20-%20MoonLive%20on%20a%20stack%20machine%20%E2%80%94%20the%20frame%20is%20where%20values%20live%20(shipped).md).**
 > The allocator was built and works on the host at every budget, but on Xtensa it leaves ZERO
 > allocatable registers (10 − 1 scratch − 5 ABI vregs − 4 reload temps), so every looped script is
 > refused there. Bench-measured on an S3. The successor plan puts every variable in the frame

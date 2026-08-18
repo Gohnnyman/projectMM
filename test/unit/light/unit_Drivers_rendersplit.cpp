@@ -316,7 +316,7 @@ TEST_CASE("render-split: deleting a driver WHILE core 1 is inside its tick() is 
 
 // The SIBLING-SUBTREE case: mutating a node OUTSIDE the Drivers subtree — here a LAYOUT — while the
 // encode worker runs. The worker ticks the drivers, and a driver walks the whole tree
-// (PreviewDriver::sendFrame → Layouts::forEachCoord), so freeing a layout mid-walk is a use-after-free
+// (PreviewDriver::sendFrame → Layouts::placeLights), so freeing a layout mid-walk is a use-after-free
 // EVEN THOUGH the mutated node's parent (Layouts) owns no worker. `this->quiesce()` alone misses it —
 // Layouts::quiesce() is the no-op default. The fix routes MoonModule::quiesceForMutation() through the
 // quiesce-render HOOK, which reaches the render worker wherever it lives. This is the exact crash seen

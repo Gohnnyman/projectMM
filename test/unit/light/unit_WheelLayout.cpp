@@ -16,7 +16,7 @@ struct Pt { mm::nrOfLightsType idx; mm::lengthType x, y; };
 
 std::vector<Pt> collect(const mm::WheelLayout& wheel) {
     std::vector<Pt> pts;
-    wheel.forEachCoord(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType x, mm::lengthType y, mm::lengthType) {
+    wheel.placeLights(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType x, mm::lengthType y, mm::lengthType) {
         static_cast<std::vector<Pt>*>(ctx)->push_back({idx, x, y});
     }, nullptr, &pts});
     return pts;

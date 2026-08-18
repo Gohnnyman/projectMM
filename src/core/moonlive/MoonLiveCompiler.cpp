@@ -112,6 +112,13 @@ struct Parser {
     const BuiltinTable& table;
     const SysVarTable&  sysvars;
     IrProgram&         ir;
+    char*              classNameOut = nullptr;   // the caller's buffer; the parser fills it
+    // Each function the class defined, with the IR index its body starts at. An IR index, not a byte
+    // offset: the parser runs before lowering, so the byte an entry lands on is not known yet. The
+    // emitter converts one to the other, which is the same seam a linker crosses.
+    struct FnMark { const char* name; uint8_t nameLen; uint16_t irStart; };
+    FnMark             fns[kMaxEntryPoints] = {};
+    uint8_t            fnCount = 0;
     VReg               nextTemp = kFirstTemp;   // high-water mark — also IrProgram.vregsUsed
     VReg               freeStack[kMaxVRegs] = {};   // recycled temps (LIFO), so a dead vreg is reused
     uint8_t            freeCount = 0;
@@ -303,7 +310,35 @@ struct Parser {
     void parseCall(VReg* resultOut) {
         if (lex.kind != Tok::Ident) { fail("expected a function name"); return; }
         const Builtin* fn = table.find(lex.identBeg, lex.identLen);
-        if (!fn) { fail("unknown function"); return; }
+        if (!fn) {
+            // Not a built-in: the script's own function, if it declared one by this name. Resolved
+            // against the class's function list rather than the builtin table, which is what makes
+            // a helper callable and, when the name is the running function's own, what makes
+            // recursion work: nothing here treats the two cases differently.
+            //
+            // Only functions ALREADY PARSED are visible. A forward call (to a helper declared
+            // further down) is refused rather than half-supported, because resolving it needs a
+            // second pass over the class body. The cost is that "unknown function" is what a
+            // forward call reports too, with the column but not the name, so a helper has to be
+            // declared above its caller. Recursion is unaffected: a function is added to the list
+            // before its body is parsed, so it can see itself.
+            for (uint8_t i = 0; i < fnCount; i++) {
+                if (fns[i].nameLen != lex.identLen) continue;
+                if (std::strncmp(fns[i].name, lex.identBeg, lex.identLen) != 0) continue;
+                lex.advance();
+                if (!expect(Tok::LParen, "expected '(' after the function name")) return;
+                if (!expect(Tok::RParen, "a script function takes no arguments yet")) return;
+                if (resultOut) { fail("a script function returns nothing yet"); return; }
+                // `imm` is the callee's FUNCTION NUMBER, not its position in the op array. An IR
+                // index would be the more obvious choice and was the first one, but the spill pass
+                // rewrites the array and every index past its first insertion shifts: the call then
+                // named a position that no longer started a function, and the lowering opened the
+                // next frame mid-statement. A function number survives any rewrite of the ops.
+                emit({IrOp::CallScript, 0, 0,0,0,0, static_cast<int32_t>(i), nullptr, {}});
+                return;
+            }
+            fail("unknown function"); return;
+        }
         lex.advance();
         if (!expect(Tok::LParen, "expected '(' after the function name")) return;
 
@@ -423,10 +458,14 @@ struct Parser {
         controlCount++;
     }
 
-    // Is the current Ident the `uint8_t` type keyword (the only declared type in Stage 1)?
-    bool atTypeKeyword() const {
-        return lex.kind == Tok::Ident && lex.identLen == 7 && std::strncmp(lex.identBeg, "uint8_t", 7) == 0;
+    // Is the current Ident this exact keyword? Keywords are matched by text rather than lexed as
+    // their own token kind: the set is tiny, and a script may still use `class` or `for` as part of
+    // a longer identifier, which a length-checked compare gets right for free.
+    bool atKeyword(const char* kw, size_t len) const {
+        return lex.kind == Tok::Ident && lex.identLen == len && std::strncmp(lex.identBeg, kw, len) == 0;
     }
+    // Is the current Ident the `uint8_t` type keyword (the only declared type in Stage 1)?
+    bool atTypeKeyword() const { return atKeyword("uint8_t", 7); }
 
     // program := { decl } { stmt }.  Declarations (control vars) come first, then one-or-more
     // call statements. (Multi-statement now: a script has decl lines AND a statement line.)
@@ -594,33 +633,78 @@ struct Parser {
 
     /// One statement: a call, or a for.
     bool parseStatement() {
-        if (lex.kind == Tok::Ident && lex.identLen == 3 &&
-            std::strncmp(lex.identBeg, "for", 3) == 0) {
-            return parseFor();
-        }
+        if (atKeyword("for", 3)) return parseFor();
         if (lex.kind != Tok::Ident) { fail("expected a function call"); return false; }
         parseCall(nullptr);
         if (failed) return false;
         return expect(Tok::Semicolon, "expected ';'");
     }
 
-    bool parseProgram() {
-        // Park the host arguments in their fixed slots at the top of the frame, once, before any
-        // script code runs. They are read-only, so one store each is all it takes — and every later
-        // read becomes a Reload, which frees five registers for the whole program.
-        for (VReg v = 0; v < kFirstTemp; v++)
-            emit({IrOp::Spill, 0, v, 0,0,0, hostArgSlot(v), nullptr, {}});
+    /// The body of one named function: `name() { statements }`, with the name already consumed.
+    /// Stage 1 emits it INLINE at the point the class body reaches it, which is what makes `tick()`
+    /// the whole program while it is the only entry point. Real per-function frames arrive with the
+    /// call support in this same step; this is the parse shape they will attach to.
+    bool parseFunctionBody() {
+        if (!expect(Tok::LParen,  "expected '(' after the function name")) return false;
+        if (!expect(Tok::RParen,  "expected ')': parameters arrive with typed members")) return false;
+        if (!expect(Tok::LBrace,  "expected '{' to open the function body")) return false;
+        while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End)
+            if (!parseStatement()) return false;
+        if (failed) return false;
+        return expect(Tok::RBrace, "expected '}' to close the function body");
+    }
 
+    /// program := "class" NAME "{" { decl | function } "}"
+    ///
+    /// ONE top-level form. A bare statement list is no longer accepted: keeping it would mean two
+    /// parse paths, two sets of rules to document and two things to test, permanently, so that the
+    /// shortest scripts could stay one line shorter. The class declaration is what makes a script
+    /// read as the module it stands in for, which is the whole point of the shape.
+    bool parseProgram() {
+        if (!atKeyword("class", 5)) { fail("a script is a class: expected `class <Name> { … }`"); return false; }
+        lex.advance();
+        if (lex.kind != Tok::Ident) { fail("expected a name after `class`"); return false; }
+        // Copied, not borrowed: the source buffer is freed as soon as the compile returns, and the
+        // name outlives it in the status line.
+        const size_t n = lex.identLen < kMaxClassName ? lex.identLen : kMaxClassName;
+        std::memcpy(classNameOut, lex.identBeg, n);
+        classNameOut[n] = '\0';
+        lex.advance();
+        if (!expect(Tok::LBrace, "expected '{' to open the class body")) return false;
+
+        // Declarations first (the controls), then the functions. Both live inside the braces now.
         while (!failed && atTypeKeyword()) { lex.advance(); parseDecl(); }
         if (failed) return false;
-        if (lex.kind == Tok::End) { fail("empty program (no statement)"); return false; }
+
         bool any = false;
-        while (!failed && lex.kind != Tok::End) {
-            if (!parseStatement()) return false;
+        while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End) {
+            if (lex.kind != Tok::Ident) { fail("expected a function, or '}' to close the class"); return false; }
+            if (fnCount >= kMaxEntryPoints) { fail("too many functions in one class"); return false; }
+            // The engine copies entry names into a fixed buffer, so a longer one would be
+            // TRUNCATED there. Two functions sharing a 23-character prefix would then land under
+            // the same name and `entry()` would return whichever came first: a call dispatched to
+            // the wrong function, silently. Refused here, where a control name already is, so the
+            // script author is told rather than the engine guessing.
+            if (lex.identLen > kMaxEntryName) { fail("function name too long"); return false; }
+            fns[fnCount] = {lex.identBeg, static_cast<uint8_t>(lex.identLen),
+                            static_cast<uint16_t>(ir.count)};
+            // The IR carries the start INDEX; the lowering turns it into a byte offset.
+            ir.fnIrStart[fnCount] = static_cast<uint16_t>(ir.count);
+            ir.fnCount = static_cast<uint8_t>(fnCount + 1);
+            fnCount++;
+            lex.advance();                       // the function name
+            // Park the host arguments in this FUNCTION's frame. Read-only, so one store each, and
+            // every later read is a Reload, which frees five registers for the body. Per function
+            // rather than per program because each function owns its own frame now: a spill emitted
+            // before the first prologue would write to a frame that does not exist yet.
+            for (VReg v = 0; v < kFirstTemp; v++)
+                emit({IrOp::Spill, 0, v, 0,0,0, hostArgSlot(v), nullptr, {}});
+            if (!parseFunctionBody()) return false;
             any = true;
         }
-        if (!any) { fail("expected a statement"); return false; }
-        return true;
+        if (failed) return false;
+        if (!any) { fail("a class with no function does nothing"); return false; }
+        return expect(Tok::RBrace, "expected '}' to close the class");
     }
 };
 
@@ -659,7 +743,7 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
         return r;
     }
     Lexer lex(source);
-    Parser parser{lex, table, sysvars, ir};
+    Parser parser{lex, table, sysvars, ir, r.className};
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
     // Hand the backend the frame the script's variables need. The register allocator numbers any
     // further slot from here up, so the two never overlap in the one frame they share.
@@ -675,6 +759,12 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     // Surface the declared controls so the binding can create real MoonModule controls.
     r.controlCount = parser.controlCount;
     for (uint8_t i = 0; i < parser.controlCount; i++) r.controls[i] = parser.controls[i];
+    // The functions the class defined, each with the byte its code starts at. The parser recorded
+    // an IR index and the lowering converted it while emitting, so this is a real symbol table: a
+    // binding asks for an entry by name and gets an address inside the one emitted block.
+    r.entryCount = parser.fnCount;
+    for (uint8_t i = 0; i < parser.fnCount; i++)
+        r.entries[i] = {parser.fns[i].name, parser.fns[i].nameLen, ir.fnOffset[i]};
     return r;
 }
 

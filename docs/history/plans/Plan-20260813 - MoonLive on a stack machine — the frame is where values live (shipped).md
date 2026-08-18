@@ -1,6 +1,6 @@
 # Plan: MoonLive on a stack machine — the frame is where values live
 
-Supersedes [Plan-20260809 — MoonLive scales](Plan-20260809%20-%20MoonLive%20scales%20%E2%80%94%20right-sized%20IR,%20and%20the%20stack%20as%20the%20register%20overflow.md),
+Supersedes [Plan-20260809 — MoonLive scales](Plan-20260809%20-%20MoonLive%20scales%20%E2%80%94%20right-sized%20IR,%20and%20the%20stack%20as%20the%20register%20overflow%20(shipped,%20steps%204-5%20superseded%20by%2020260813).md),
 whose steps 1–3 shipped and stand. This replaces its steps 4–5 (the register allocator) with a
 different answer to the same goal.
 
@@ -286,28 +286,76 @@ Each step is independently verifiable, and the branch stays green throughout:
    `draw::line` be ordinary calls rather than a special case. Script-local functions will pass their
    arguments the same way when they arrive.
 
-4. ⬜ **Collapse the three lowerers into one.** With storage no longer per-target, the IR walk is one
-   algorithm; what remains per-backend is encodings, the frame/ABI constants and the branch forms.
-   Verify by adding nothing to the platform layer that is not genuinely platform-specific.
-5. ⬜ **Delete the allocator** (`MoonLiveSpill.{h,cpp}`, `RegBudget`, the per-backend budget plumbing)
-   once nothing calls it. The `prologue(slots)` / `spillStore` / `spillLoad` surface on the three
-   assemblers is KEPT — it is already frame-addressed through a frame pointer for exactly this
-   reason, and the stack machine uses it directly.
-6. ⬜ **One system-variable table for every role**, with a modifier's coordinate renamed to
-   `xPos`/`yPos`/`zPos`. Independent of the codegen work — different files, no shared risk — so it
-   can land whenever, but it comes before step 7 because it is what makes the bindings differ by
-   almost nothing. Needs a MIGRATING entry and a sweep of the shipped scripts.
-7. ⬜ **Factor the three bindings onto one shared base**, so the script name, hash, engine and the
-   compile-and-report path exist once. The scripted driver that follows should then be a small
-   subclass, and that is the test of whether this step actually worked.
+4. ✅ **Collapse the three lowerers into one.** The IR walk is now `core/moonlive/moonlive_lower.h`,
+   a template over the assembler; each backend is a ~20-line adapter naming its assembler and its
+   register count. 537 lines of triplicated algorithm became 190 shared plus 62 of adapter. The
+   two device lowerings had differed by two identifier tokens; the host one by `Mov`, the branch
+   spelling, and a `FillElems` that used a third scratch register, all of which turned out to be
+   free choices rather than ISA facts. Host gained `movReg`/`branchGeU`/`branchNe` (its `cmp` and
+   `branchIf` are now private, since a flags pair cannot be shared with a backend that has none)
+   and adopted the devices' `FillElems`, which is what let the scratch reservation become uniform.
+   Verified: nothing ISA-specific left the platform layer, and all four boards emit byte-identical
+   exec blocks to the three-file version.
+5. ⛔ **DROPPED: delete the allocator.** Its precondition never came true. The step said "once
+   nothing calls it", on the assumption that a stack machine makes spilling unreachable; it does not.
+   Registers still hold expression temporaries, so a complex enough expression on Xtensa's ten still
+   spills, and all three lowerings call `spillToBudget` today. The allocator is 380 lines with its own
+   test suite built on the squeezed-budget technique, which is the ONLY way the register algorithm is
+   tested at all, since only the host backend executes in tests. Deleting it would remove a working
+   safety net and its coverage to save nothing. It earns its place; the step was written before that
+   was knowable.
+6. ✅ **One system-variable table for every role**, with a modifier's coordinate renamed to
+   `xPos`/`yPos`/`zPos`. `lightSysVars()` is the one table; the three role accessors remain as
+   aliases so every call site reads unchanged. `x`/`y`/`z` are now ordinary loop counters in every
+   role, which is what removes the trap that made `disasm.py` refuse the shipped `grid.mlv`. The
+   three shipped modifier scripts and the tests that encoded the old per-role rule moved with it;
+   the test that specified the split now specifies the single vocabulary. No MIGRATING entry: that
+   file is exempt for MoonLive until it launches, since nobody is running scripts on a device yet
+   and an entry would describe an upgrade path no user can take. Verified on the S3: a scripted
+   modifier compiles and folds with the new names.
+7. ⛔ **SUPERSEDED: factor the three bindings onto one shared base.** Not implemented, and it should
+   not be: the step asked for the wrong shape, and both the code and the product direction say so.
+
+   **The code's objection.** The three bindings derive from three SIBLING bases (`EffectBase`,
+   `LayoutBase`, `ModifierBase`), each deriving from `MoonModule`. A shared `MoonLiveBase : MoonModule`
+   therefore gives every binding TWO `MoonModule` subobjects (two control lists, two status fields)
+   unless `MoonModule` becomes a virtual base, which changes object layout and cost for every module
+   in the system to serve three of them. A CRTP mixin avoids that but cannot reach `MoonModule`'s
+   protected members without friend declarations in all three, trading duplication for access
+   plumbing.
+
+   **The payload is also smaller than it looked.** Excluding comments, the duplication is ~25 lines
+   appearing three times, of which only `defineControls()` (8 lines) is identical. The compile trunk
+   has three genuinely different tails, and `compiledHash_` MEANS two different things: the layout
+   tests only whether it is zero (a presence flag), the modifier compares its value (a change
+   detector). Sharing it naively breaks one or the other.
+
+   **The product's objection, which is the decisive one.** A MoonLive script should look like the
+   compiled module it stands in for: `defineControls()` and `tick()` for an effect,
+   `forEachCoord()`/`lightCount()` for a layout, `modifyLogical()`/`modifyLogicalSize()` for a
+   modifier. Once a script DEFINES named entry points, a binding's job is to compile, discover which
+   ones it defined, and call the right one at the right time. The three bindings stop being three
+   kinds and become one kind with different entry points present, which is also what makes "an effect
+   that also modifies" expressible. A class hierarchy is the wrong structure for that; a dispatch
+   table is the right one, and it cannot be designed before the entry points exist.
+
+   Steps 10 to 13 replace this step.
+
+Steps 10 to 13, which replaced step 7, moved to their own plan once they grew into a language
+change rather than a refactor: [Plan-20260817 — MoonLive scripts are
+classes](Plan-20260817%20-%20MoonLive%20scripts%20are%20classes.md).
+
 8. ✅ **Bench: S3 and P4**, a scripted layout and a scripted effect, both with nested loops. Done on
    FOUR boards (S3, classic ESP32, P4, S31), scripted layout + effect, plasma and the heavier
    ripples, after the Xtensa frame fix below.
 9. ✅ **Measure** with `collect_kpi.py` and record the cost honestly in performance.md, so the later
    decision about register promotion is made against numbers rather than intuition.
 
-Steps 4, 6 and 7 are the deduplication, and they come AFTER the mechanism works rather than during it —
-collapsing three copies while the design underneath is still moving would mean doing it twice.
+Steps 4 and 6 are the deduplication, and they come AFTER the mechanism works rather than during it:
+collapsing three copies while the design underneath is still moving would mean doing it twice. Step 7
+was meant to be the third, and turned out to be the point where deduplication stops being the right
+question. Steps 10 to 13 replace it, and they are additive rather than subtractive: they change what
+a script LOOKS LIKE, and the shared structure falls out at the end instead of being designed up front.
 
 ## Xtensa: the one target still failing, and why
 
@@ -390,13 +438,28 @@ invisible to every encoding check because each instruction was correct. See
 [lessons § the register-window frame bug](../lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug).
 All four boards (S3, classic, P4, S31) now run scripted layouts and effects.
 
+## Status: CLOSED
+
+Every step is resolved. 1, 2, 3, 3b, 3c, 4, 6, 8 and 9 shipped and are verified on four boards
+(S3, classic ESP32, P4, S31). Step 5 is dropped and step 7 is superseded, each with its reason
+recorded above. The machine this plan set out to build is done: values live in frame slots, one
+lowering serves every backend, one system-variable vocabulary serves every role, and the Xtensa
+frame contract that blocked the whole thing is fixed and pinned.
+
+What a script LOOKS LIKE is the next question, and it continues in
+[Plan-20260817 — MoonLive scripts are classes](Plan-20260817%20-%20MoonLive%20scripts%20are%20classes.md).
+
 ## Then, separately
 
 Only after the above is on main and measured:
 
 - Whether to promote anything into registers, and which — including whether any of the fixed ABI
   vregs earn a register at all.
-- Script-local functions with arguments, `if`, and recursion — the features this design exists to
-  make cheap.
-- A scripted DRIVER as the fourth role, which is the honest test of step 6: if it needs more than a
-  small subclass, the factoring did not go far enough.
+- A scripted DRIVER as the fourth role, which is the honest test of the successor plan's dispatch
+  step: if it needs more than its own entry point and a row in the table, the structure did not go
+  far enough.
+
+Everything else this list used to hold moved INTO the successor plan rather than being deferred:
+script functions and recursion (recursion is a stated payoff of the stack machine above, "each
+activation gets its own frame", so listing it as a later nicety contradicted this plan's own table),
+`if`, and an effect that also defines `modifyLogical`. They are launch requirements, not follow-ups.

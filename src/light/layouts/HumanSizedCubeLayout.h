@@ -38,7 +38,7 @@ public:
     const char* tags() const override { return "💫"; }
 
     nrOfLightsType lightCount() const override {
-        // Sum of the five face areas, matching the loop bounds in forEachCoord:
+        // Sum of the five face areas, matching the loop bounds in placeLights:
         //   front + back : width*height each   (2 * w*h)
         //   above        : width*depth         (w*d)
         //   left + right : depth*height each   (2 * d*h)
@@ -49,7 +49,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         const uint32_t limit = lightCount();
         uint32_t idx = 0;
 

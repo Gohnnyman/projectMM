@@ -29,6 +29,29 @@ inline constexpr const char* kCodegenFailed = "codegen failed (unsupported on th
 
 // Result of compiling source: on success, ok==true and the bytes are in out[0..len). On
 // failure, ok==false and error points at a static diagnostic (1-based column, 0 if n/a).
+/// A function the script defined, and where its code starts within the emitted block.
+///
+/// This is a symbol table, which is what every compiler and linker keeps: one code section, and a
+/// name-to-offset map over it. The binding asks for an entry by name and gets a callable address,
+/// so which ROLE a script plays is decided by which entries it defined rather than by its type.
+struct EntryPoint {
+    const char* name = nullptr;    ///< into the source, or the engine's own copy after compile
+    uint8_t     nameLen = 0;
+    uint16_t    offset = 0;        ///< byte offset of its first instruction within the block
+};
+
+/// How many named functions one script may define. A handful of entry points plus the helpers a
+/// script writes for itself; past that is a script that wants to be a module.
+inline constexpr uint8_t kMaxEntryPoints = 8;
+
+/// Longest function name the engine keeps. The host's own entry names (`placeLights`,
+/// `modifyLogicalSize`) are the long ones; a script's helpers are usually short.
+inline constexpr uint8_t kMaxEntryName = 23;
+
+/// Longest class name kept. A diagnostic quotes it, so it is bounded like every other name the
+/// engine holds rather than pointing into source that is freed as soon as the compile returns.
+inline constexpr size_t kMaxClassName = 31;
+
 struct CompileResult {
     bool        ok = false;
     const char* error = "";
@@ -38,6 +61,14 @@ struct CompileResult {
     // this list and creates a real MoonModule control per entry, bound to the run-time arena slot.
     DeclaredControl controls[kMaxCtrls];
     uint8_t         controlCount = 0;
+    // The name the script gave its class. What diagnostics and the module status report, so a
+    // renamed FILE does not change what a user is told: the filename is what the engine loads, the
+    // class name is what it is. Copied out of the source, which is freed after the compile.
+    char            className[kMaxClassName + 1] = "";
+    // The functions this script defined, in source order. `tick` is the one the light bindings look
+    // for today; the rest arrive with the per-role entry points.
+    EntryPoint      entries[kMaxEntryPoints];
+    uint8_t         entryCount = 0;
 };
 
 // Compile `source` to machine code in `out` (capacity `cap`), resolving calls against `table`.

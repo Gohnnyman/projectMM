@@ -72,7 +72,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // Choose the axis order (which loop slot drives which axis). axes[0] is
         // the OUTERMOST loop's axis, axes[2] the innermost (fastest). Verbatim
         // from MoonLight: index 0=X,1=Y,2=Z. Guard an out-of-range select.
@@ -142,7 +142,7 @@ private:
 
     // Resolve one serpentine pass's value for step `step` (0..count-1). Base
     // direction from `inc`; `snake` flips it when the enclosing counter `prev`
-    // is odd — the boustrophedon toggle. RECONSTRUCTED (see forEachCoord).
+    // is odd: the boustrophedon toggle. RECONSTRUCTED (see placeLights).
     static lengthType axisValue(lengthType step, lengthType count,
                                 bool inc, bool snake, lengthType prev) {
         bool ascending = inc;

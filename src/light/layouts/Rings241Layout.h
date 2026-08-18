@@ -42,13 +42,13 @@ public:
     nrOfLightsType lightCount() const override {
         // Fixed by construction: the nine ring sizes always sum to 241, and every
         // ring is a full circle so no LED is culled. Kept in lockstep with
-        // forEachCoord below (same kRingSizes sum).
+        // placeLights below (same kRingSizes sum).
         nrOfLightsType total = 0;
         for (uint8_t n : kRingSizes) total += n;
         return total;  // 1+8+12+16+24+32+40+48+60 = 241
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // Shared centre — MoonLight: leftMargin = 1.1 * getRadius(60), assigned to
         // a uint8_t (implicit truncation), stored as ringCenter's integer x/y, then
         // scaled per LED: x = scale * ringCenter.x.

@@ -1,0 +1,31 @@
+// Crosshair: a red column and a blue row sweeping the grid, each drawn by a function the script
+// defines for itself.
+//
+// The point of this script is the helpers. `column()` and `row()` are the script's own functions,
+// called from `tick()`. Each is a REAL call: the callee allocates its own frame when it runs, which
+// is what lets one helper call another, and eventually itself. Nothing is pasted in by the compiler.
+//
+// A script function takes no arguments and returns nothing yet, so a helper here does a whole job
+// rather than computing a value. Parameters and members that a caller can set are the next steps;
+// when they arrive, the shape of this script does not change, the helpers just get shorter.
+class CrosshairEffect {
+  uint8_t bpm = 30;   // @control 1..240
+
+  column() {
+    for (y = 0; y < height; y = y + 1) {
+      setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0);
+    }
+  }
+
+  row() {
+    for (x = 0; x < width; x = x + 1) {
+      setRGB(scale(beat(bpm + 7, t), height) * width + x, 0, 120, 255);
+    }
+  }
+
+  tick() {
+    fill(0, 0, 0);
+    column();
+    row();
+  }
+}

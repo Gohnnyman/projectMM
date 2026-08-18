@@ -35,7 +35,7 @@ public:
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    void forEachCoord(const CoordSink& sink) const override {
+    void placeLights(const CoordSink& sink) const override {
         // Use uint32_t for idx so it never wraps on uint16_t nrOfLightsType
         // (e.g. no-PSRAM ESP32 where 512×512 > 65535). Stop at the clamped
         // lightCount() so emitted indices stay within the allocated buffer.
