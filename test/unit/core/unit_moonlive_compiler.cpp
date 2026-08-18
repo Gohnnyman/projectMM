@@ -58,6 +58,99 @@ TEST_CASE(mmScript("compileSource: setRGB(index, r,g,b) writes one pixel")) {
     }
 }
 
+// A function the script calls is handed the same lights and the same controls as the one calling
+// it. Both halves matter and they fail differently: without the buffer the helper writes nowhere
+// visible, and without the controls arena its first control read dereferences a null pointer.
+//
+// Found on hardware, not here: an S3 running a three-function effect died with LoadProhibited and
+// EXCVADDR 0x9: offset 9 into a null `ctrls`. Every backend had it, including this one, because a
+// local call emitted the call instruction alone while each function's prologue parks the host
+// arguments out of the argument registers into its own frame. The callee therefore parked whatever
+// the caller had last left in them. The whole-block tests could not see it: they check that a
+// script COMPILES, and this is a script that compiles perfectly and then reads the wrong memory.
+TEST_CASE("a function the script calls can light pixels and read the script's controls") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t level = 200;   // @control 0..255\n"
+                        "  paint() { setRGB(1, level, 0, 0); }\n"
+                        "  tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
+                        "}\n", kTable, kSys));
+    REQUIRE(eng.ok());
+    std::vector<uint8_t> buf(4 * 3, 0);
+    // Named, as a binding does: an unnamed run enters the block at its FIRST function, which for a
+    // class is whichever the script declared first rather than the entry point a role asks for.
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 7);        // the caller's own write still lands
+    CHECK(buf[3] == 200);      // and the callee reached both the buffer and the control's value
+}
+
+// A helper that calls a helper: the arguments have to survive being passed on twice, not just once.
+// One level of nesting would pass even if a call clobbered what it forwards.
+TEST_CASE("arguments reach a function two calls deep") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  inner()  { setRGB(2, 44, 0, 0); }\n"
+                        "  outer()  { setRGB(1, 33, 0, 0); inner(); }\n"
+                        "  tick()   { setRGB(0, 22, 0, 0); outer(); }\n"
+                        "}\n", kTable, kSys));
+    REQUIRE(eng.ok());
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 22);
+    CHECK(buf[3] == 33);
+    CHECK(buf[6] == 44);
+}
+
+// UNBOUNDED recursion must degrade visibly and keep the device rendering. A fixed render-task
+// stack means the alternative is a reset, which the robustness rule forbids. A reset is what
+// this script produced before the depth guard: ~176 bytes of frame per activation against a 12 KB
+// main task is a device that reboots at roughly 64 deep, mid-frame, with no diagnostic.
+//
+// The guard lives in the callee's prologue and refuses by returning, so the recursion stops at
+// kMaxCallDepth and everything above it still runs. What the user sees is a picture that is wrong
+// where the recursion bottomed out, on a device that is still running.
+TEST_CASE("a script that recurses without end keeps rendering instead of resetting") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  forever() { setRGB(1, 200, 0, 0); forever(); }\n"
+                        "  tick()    { setRGB(0, 50, 0, 0); forever(); }\n"
+                        "}\n", kTable, kSys));
+    REQUIRE(eng.ok());                       // it COMPILES: whether it terminates is not decidable
+    std::vector<uint8_t> buf(4 * 3, 0);
+    // The assertion is that this RETURNS at all. Without the guard it recurses until the stack is
+    // gone: a segfault here on the host, a reset on a board.
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 50);        // the entry function ran
+    CHECK(buf[3] == 200);       // and so did the recursion, as far as it was allowed
+    // Runnable AGAIN, at full depth: the counter unwinds with the frames, so hitting the limit in
+    // one frame must not shrink the next. A leaked level per frame would silently reduce every
+    // later frame's budget until nothing recursed at all.
+    std::vector<uint8_t> second(4 * 3, 0);
+    eng.run(second.data(), 4, 3, 0, "tick");
+    CHECK(second[0] == 50);
+    CHECK(second[3] == 200);
+}
+
+// A function with an EMPTY body still balances the recursion counter.
+//
+// The depth guard is emitted at a function's first real op, because it has to follow the host
+// arguments being parked into the frame. A function whose whole body is that parking has no first
+// real op, so it got no increment while its epilogue still decremented: every call to it drove the
+// counter DOWN, two calls wrapped the byte past zero, and the next legal call was refused as too
+// deep. What a user saw was a call that silently did nothing, in a script with no recursion in it.
+TEST_CASE("an empty function does not consume the recursion budget") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  nop()  { }\n"
+                        "  draw() { setRGB(0, 255, 0, 0); }\n"
+                        "  tick() { nop(); nop(); draw(); }\n"
+                        "}\n", kTable, kSys));
+    REQUIRE(eng.ok());
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 255);   // draw() ran: the two empty calls left the budget where they found it
+}
+
 // REMARK #1: every argument is an expression — random16 in ANY slot.
 TEST_CASE("compileSource: random16 works in any argument slot") {
     moonlive::MoonLive eng;

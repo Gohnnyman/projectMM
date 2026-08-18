@@ -4,9 +4,34 @@ Scripts for the [MoonLive](../docs/moonmodules/light/MoonLiveEffect.md) engine, 
 grouped by the module that runs it. Name one in a module's `script` control on a running device and
 it compiles to native code on the next tick.
 
-Each script declares a **class**, and the host calls its functions: `tick()` today, with the
-per-role entry points (`placeLights` for a layout, `modifyLogical` for a modifier) to come. The
-class name is independent of the file name, the way a C file and the functions in it are.
+Each script declares a **class**, and the host calls its functions: `tick()` for an effect,
+`placeLights()` for a layout, `modifyLogical()` for a modifier. A function is called when it is
+present and its moment arrives, so which entry points a class defines is what decides what it does.
+The class name is independent of the file name, the way a C file and the functions in it are.
+
+A class may also define functions of its own and **call them**, including calling itself:
+
+```
+class CrosshairEffect {
+  uint8_t bpm = 30;   // @control 1..240
+
+  column() { for (y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
+  tick()   { fill(0, 0, 0); column(); }
+}
+```
+
+These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what
+lets one helper call another and lets a function recurse. A function takes no arguments and returns
+nothing yet, so a helper does a whole job rather than computing a value. `effects/crosshair.mlv` is
+the worked example.
+
+**Declare a helper above the function that calls it.** Only functions already parsed are visible, so
+a call to one declared further down reports `unknown function`. A function can always call itself.
+
+**Recursion is bounded.** About 30 calls deep, a further call does nothing and returns. A render
+task has a fixed stack, so the alternative to a limit is a device that resets mid-frame. What you
+see if you hit it is the picture being wrong where the recursion stopped, on a device that keeps
+running. Nothing is reported; the exact depth is `kMaxCallDepth`.
 
 | folder | run by | a script writes |
 |---|---|---|

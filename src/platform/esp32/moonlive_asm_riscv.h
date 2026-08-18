@@ -51,6 +51,13 @@ public:
     RiscvAssembler& operator=(const RiscvAssembler&) = delete;
 
     void finalize() { patchBranches(); }
+    // Pad to the alignment a FUNCTION ENTRY needs, called before each prologue. Every instruction
+    // on this ISA is four bytes, so a function boundary is always aligned already and this is a
+    // no-op; it exists because the shared lowering calls it, and Xtensa (2- and 3-byte forms) does
+    // need the pad. Not asserted here, because the property is about EMITTED code rather than this
+    // function: the per-ISA test "every function in a class starts where a call can reach it" is
+    // what would fail if the compressed (C) extension ever made a boundary land off four bytes.
+    void alignForEntry() {}
     const uint8_t* bytes() const { return buf_; }
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
@@ -84,17 +91,25 @@ public:
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
     void branchNe(Reg a, Reg b, Label l);     // bne a, b, l
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // standard call to a host built-in
+    /// Call a function in THIS block, by label: the script-to-script call. `jal ra, off` links the
+    /// return address in x1 and jumps; the callee's own prologue saves ra, so recursion works.
+    void callLabel(Label l);
     void epilogue();                     // undo prologue's frame (if any), then ret
     void ret();
 
 private:
     // The emitted-code buffer's size, fixed for this object's life but chosen per script.
     const size_t kCap;
-    static constexpr uint8_t kMaxLabels = 16;
-    static constexpr uint8_t kMaxFixups = 32;
+    // Sized in core (kAsmLabels/kAsmFixups) so the three backends cannot drift apart.
+    static constexpr uint8_t kMaxLabels = kAsmLabels;
+    static constexpr uint8_t kMaxFixups = kAsmFixups;
 
     void emit32(uint32_t w);
-    void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
+    // A pending reference to a label. `kind` distinguishes the B-type conditional branches from a
+    // J-type `jal`: the two scatter their immediate into different bit fields, so patching one as
+    // the other silently retargets it.
+    enum class FixKind : uint8_t { Branch, Jal };
+    void addFixup(size_t at, Label label, FixKind kind = FixKind::Branch);
 
     // HEAP, not a member array: the assembler is a stack local in lowerToBytes, so a kCap-sized
     // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
@@ -111,7 +126,7 @@ private:
 
     int32_t  labelPos_[kMaxLabels];
     uint8_t  labelCount_ = 0;
-    struct Fixup { size_t at; Label label; };   // all B-type, 4 bytes at `at`
+    struct Fixup { size_t at; Label label; FixKind kind = FixKind::Branch; };   // 4 bytes at `at`
     Fixup    fixups_[kMaxFixups];
     uint8_t  fixupCount_ = 0;
 

@@ -147,9 +147,38 @@ Label XtensaAssembler::newLabel() {
 void XtensaAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
 
 // Record a pending branch fixup, guarding the fixed table (overflow_ rather than an OOB write).
-void XtensaAssembler::addFixup(size_t at, Label label) {
+void XtensaAssembler::addFixup(size_t at, Label label, FixKind kind) {
     if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
-    fixups_[fixupCount_++] = {at, label};
+    fixups_[fixupCount_++] = {at, label, kind};
+}
+
+// call8 <label>: a call to a function in THIS block: the script-to-script call.
+//
+// CALL (not CALLX): the target is a label, so the displacement is encoded in the instruction and
+// patched below, with no address to build in a register. That is the whole reason a local call is a
+// handful of bytes where the host call is forty lines.
+//
+// call8, not call0: this assembler emits entry/retw.n, the WINDOWED ABI, and call0 belongs to the
+// other one (esp-idf's abi_entry shows the split: windowed emits `entry sp, locsz`, call0 emits an
+// explicit sp adjust plus an s32i of a0). Reaching a windowed callee with call0 hands it a frame it
+// never allocated. The callee owes the 32-byte window reserve like any other call8 frame, which its
+// own per-function prologue provides.
+void XtensaAssembler::callLabel(Label l) {
+    // Pass the host arguments on (the contract is with IrOp::CallScript in core). The Xtensa
+    // delta: call8 ROTATES the window by 8, so the callee's a2..a6 are this routine's a10..a14 and
+    // the arguments are written to the OUTGOING window, not to a2..a6, which stay this frame's own.
+    for (uint8_t v = 0; v < kHostArgSlots; v++) {
+        const uint8_t off4 = static_cast<uint8_t>((kFrameBase + hostArgSlot(v) * kSlotStride) / 4);
+        const uint8_t enc[3] = {static_cast<uint8_t>(((10 + v) << 4) | 0x2), 0x21, off4};
+        emit(enc, 3);                                      // l32i a(10+v), a1, #slot
+    }
+    addFixup(len_, l, FixKind::Call);
+    // CALL8 is format CALL: the low six bits are 0x25 (op0 = 5, n = 2) and an 18-bit signed offset
+    // occupies bits 6..23, counting FOUR-BYTE UNITS from the call's PC rounded down to a 4-byte
+    // boundary. Emitted as a placeholder and patched in patchBranches; verified against
+    // xtensa-esp32-elf-as, which encodes `call8 target` at pc 6 with target 0 as a5 ff ff.
+    const uint8_t enc[3] = {0x25, 0x00, 0x00};
+    emit(enc, 3);
 }
 
 // movi aD, #imm. The narrow byte form carries only 0..255, so a wider constant (a uint16 like
@@ -347,12 +376,34 @@ void XtensaAssembler::patchBranches() {
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         if (labelPos_[f.label] < 0) continue;                                  // unbound label — leave as-is (overflow_ already failed the compile)
-        // Every fixup now points at a `j`, whose displacement is relative to the byte AFTER the
-        // instruction and occupies bits 6..23 — eighteen signed bits, so it reaches any script the
-        // code buffer can hold. Still range-checked: refusing beats silently retargeting a jump.
-        const int32_t off = labelPos_[f.label] - (static_cast<int32_t>(f.at) + 4);
-        if (off < -131072 || off > 131071) { overflow_ = true; return; }
-        const uint32_t enc = 0x06u | ((static_cast<uint32_t>(off) & 0x3ffffu) << 6);
+        uint32_t enc = 0;
+        if (f.kind == FixKind::Jump) {
+            // `j`: the displacement is relative to the byte AFTER the instruction and occupies bits
+            // 6..23: eighteen signed bits, so it reaches any script the code buffer can hold.
+            // Range-checked: refusing beats silently retargeting a jump.
+            const int32_t off = labelPos_[f.label] - (static_cast<int32_t>(f.at) + 4);
+            if (off < -131072 || off > 131071) { overflow_ = true; return; }
+            enc = 0x06u | ((static_cast<uint32_t>(off) & 0x3ffffu) << 6);
+        } else {
+            // `call8`: the offset counts FOUR-BYTE UNITS from the call's PC rounded DOWN to a
+            // 4-byte boundary, which is why it cannot share the jump's arithmetic. The ISA states
+            // it per instruction ("the target instruction address must be a 32-bit aligned ENTRY
+            // instruction"), and it is what buys CALLn its wider reach than a jump.
+            //
+            // The target is always aligned because alignForEntry() pads before every prologue, so
+            // the check below is an assertion rather than a live path. It stays because the
+            // alternative to noticing is a call that lands mid-instruction: `entry` at an odd
+            // offset is not merely unreachable, it is rejected by the assembler outright
+            // ("unaligned entry instruction"). CALLX8 has no such rule: it encodes a full address
+            // in a register, which is why the host's call INTO a block always worked while a
+            // block-internal call did not.
+            const int32_t base = static_cast<int32_t>(f.at & ~size_t(3));
+            const int32_t byteOff = labelPos_[f.label] - (base + 4);
+            if ((byteOff & 3) != 0) { overflow_ = true; return; }
+            const int32_t off = byteOff >> 2;
+            if (off < -131072 || off > 131071) { overflow_ = true; return; }
+            enc = 0x25u | ((static_cast<uint32_t>(off) & 0x3ffffu) << 6);   // 0x25 = op0 5, n 2
+        }
         buf_[f.at + 0] = static_cast<uint8_t>(enc);
         buf_[f.at + 1] = static_cast<uint8_t>(enc >> 8);
         buf_[f.at + 2] = static_cast<uint8_t>(enc >> 16);

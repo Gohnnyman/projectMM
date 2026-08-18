@@ -62,6 +62,26 @@ enum class IrOp : uint8_t {
                // the parser stages every argument into consecutive slots, so a call carries a
                // POSITION and a COUNT rather than the values, and arity is bounded by frame slots
                // instead of by operand fields. Backends materialise the address themselves.
+    CallScript,// call the script's OWN function, the one numbered `imm` in declaration order.
+               // Distinct from Call because the target is a position in THIS program rather than a
+               // host address: the backend emits a relative call to a label, so there is nothing to
+               // materialize and nothing to stage. A function NUMBER rather than a position: this
+               // pass's own rewrite shifts every index past its first insertion, so an IR index
+               // named an op that no longer started a function. It is also what makes recursion
+               // work, since the
+               // callee's own prologue allocates a fresh frame per activation.
+               //
+               // THE CALLER PASSES THE HOST ARGUMENTS ON. Every function's prologue parks
+               // buf/nLights/cpl/t/ctrls out of the argument registers into its own frame, because
+               // that is how the host enters the block, so a call that passed nothing left the
+               // callee parking whatever those registers held and its first control read faulted on
+               // a null arena. Each backend reloads them from the frame before the call; where they
+               // go is the per-ISA part.
+               //
+               // NOTHING MAY BE LIVE IN A REGISTER ACROSS ONE. Script variables are slot-resident
+               // and temporaries die within their statement, so this holds today and is why no
+               // save-set is emitted. Xtensa's window rotation would hide a violation that
+               // corrupts RISC-V, so it is stated here rather than left to be discovered.
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
     LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
     Mov,       // dst = a — the assignment a loop variable needs (vregs are otherwise write-once)
@@ -109,10 +129,34 @@ struct DeclaredControl {
 
 /// Branch targets one IR program may use. Two per `for` (entry guard + back edge), and the counter
 /// runs for the whole program rather than per scope — a label is never reused once a loop closes —
-/// so this bounds the TOTAL number of loops in a script (8), not how deeply they nest. The
-/// assemblers carry the same ceiling in their own label tables, and the compiler fails loudly
-/// rather than silently miscompiling past it. Nesting depth is bounded separately, by `locals`.
+/// so this bounds the TOTAL number of loops in a script (8), not how deeply they nest. Nesting
+/// depth is bounded separately, by `locals`.
 static constexpr uint8_t kIrLabels = 16;
+
+/// Labels and fixups an ASSEMBLER's tables hold. Larger than kIrLabels because a backend allocates
+/// labels the IR never names: one per named function (a call may precede its definition, so these
+/// cannot be lazy), plus one per StoreElem for its bounds guard and two per FillElems. A class of
+/// three functions each holding a loop and a store needs more than the sixteen that sized these
+/// when a script was a single routine: crosshair.mlv is exactly that script, and it failed to
+/// compile with the generic "too large" rather than naming the table it exhausted.
+///
+/// Held in core so the three backends cannot drift: they carried an identical private copy each,
+/// and a script that fit one would have been refused by another.
+///
+/// THE COST IS STACK, and it is the number to watch when raising these. Both tables are members of
+/// the assembler, which is a local in lowerWith: 4 bytes per label, 8 per fixup on a 32-bit
+/// target. Measured on the classic ESP32 image, `lowerWith` went from 480 to 1120 bytes, so 48/96
+/// costs 640 bytes more than 16/32. That frame is the largest on the compile chain
+/// (compileScriptFile 144 + MoonLive::compile 288 + compileSource 576 + lowerWith 1120 = 2128
+/// nested), against CONFIG_ESP_MAIN_TASK_STACK_SIZE = 12288: 17% of the task at the deepest point.
+/// Flash is unchanged, since these are stack arrays rather than data.
+///
+/// There is headroom, but not unlimited headroom, and a compile runs on the RENDER task. Doubling
+/// these again would put lowerWith past 2 KB. If a future script needs more, move the tables to the
+/// heap alongside the code buffer (which was moved for exactly this reason) rather than raising the
+/// constants: this project has already bootlooped a P4 on an oversized stack frame.
+static constexpr uint8_t kAsmLabels = 48;
+static constexpr uint8_t kAsmFixups = 96;
 
 /// Script variables live in FRAME SLOTS, and this bounds how many one program may hold at once.
 /// Sixteen matches what every backend's frame can address (`kMaxSpillSlots`), so a program that
@@ -235,6 +279,16 @@ struct IrProgram {
         t = count; count = o.count; o.count = t;
         VReg v = vregsUsed; vregsUsed = o.vregsUsed; o.vregsUsed = v;
         uint8_t ls = localSlots; localSlots = o.localSlots; o.localSlots = ls;
+        // The FUNCTION TABLE is part of the program, so it moves with the ops. Omitting it left the
+        // spill pass's remapped boundaries in the discarded half while the lowering read the stale
+        // pre-spill ones: it then opened a function's frame two ops early, in the middle of the
+        // previous function's pixel write, and the emitted block was structurally plausible enough
+        // (one entry and one retw per function) that only a disassembly showed it.
+        uint8_t fc = fnCount; fnCount = o.fnCount; o.fnCount = fc;
+        for (uint8_t f = 0; f < kMaxIrEntries; f++) {
+            uint16_t s = fnIrStart[f]; fnIrStart[f] = o.fnIrStart[f]; o.fnIrStart[f] = s;
+            uint16_t b = fnOffset[f];  fnOffset[f]  = o.fnOffset[f];  o.fnOffset[f]  = b;
+        }
     }
 
     /// Which inline ops this program contains, so a backend reserves scratch only for what is there.
@@ -248,6 +302,15 @@ struct IrProgram {
     bool hasInline(InlineOp which) const {
         for (uint16_t i = 0; i < count; i++)   // uint16_t: `count` is, so a uint8_t never terminates
             if (ops[i].op == IrOp::Inline && ops[i].inlineOp == which) return true;
+        return false;
+    }
+
+    /// Does any function call another function of this script? The recursion depth guard is emitted
+    /// only when one does, so a script that just defines `tick()` (every shipped script today)
+    /// carries none of it.
+    bool hasScriptCall() const {
+        for (uint16_t i = 0; i < count; i++)
+            if (ops[i].op == IrOp::CallScript) return true;
         return false;
     }
 };

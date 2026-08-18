@@ -52,10 +52,25 @@ Label RiscvAssembler::newLabel() {
 }
 void RiscvAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
 
+// jal ra, <label>: a call to a function in THIS block: the script-to-script call.
+//
+// `jal` links the return address into ra (x1); the callee's prologue saves ra into its own frame,
+// which is what lets the call nest and therefore recurse.
+//
+// Pass the host arguments on (the contract is with IrOp::CallScript in core). The RISC-V delta:
+// there is no window rotation, so the values go straight into the argument registers the callee's
+// prologue reads.
+void RiscvAssembler::callLabel(Label l) {
+    for (uint8_t v = 0; v < kHostArgSlots; v++) spillLoad(static_cast<Reg>(v), hostArgSlot(v));
+    addFixup(len_, l, FixKind::Jal);
+    // jal x1, 0: opcode 0x6f, rd = 1. The 20-bit immediate is scattered by the patcher.
+    emit32(0x000000efu);
+}
+
 // Record a pending branch fixup, guarding the fixed table (overflow_ rather than an OOB write).
-void RiscvAssembler::addFixup(size_t at, Label label) {
+void RiscvAssembler::addFixup(size_t at, Label label, FixKind kind) {
     if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
-    fixups_[fixupCount_++] = {at, label};
+    fixups_[fixupCount_++] = {at, label, kind};
 }
 
 // --- I/R/S-type encoders (rd/rs1/rs2 are real x-register numbers) ---
@@ -103,15 +118,22 @@ void RiscvAssembler::prologue(uint8_t slots) {
     if (slots > kMaxSpillSlots) { overflow_ = true; return; }
     // 16-byte aligned, as the RISC-V calling convention requires of sp at a call boundary — an
     // unaligned sp is the kind of thing that survives every test and faults inside a callee.
+    // +8 for the two saved registers: the frame pointer AND the return address.
     const uint16_t bytes = static_cast<uint16_t>((8 + slots * 4 + 15) & ~15);
     frameBytes_ = bytes;
     emit32(encAddi(2, 2, -int32_t(bytes)));        // addi sp, sp, -bytes
     emit32(encSw(kFramePtr, 2, bytes - 4));        // sw s0, bytes-4(sp)
+    // SAVE ra. A leaf routine could skip this, and every routine was one until a script could call
+    // its own function: `jal` links the return address into ra, so a callee that does not save it
+    // returns to ITSELF the moment it makes a call of its own. Measured on the S31 as a stack
+    // protection fault with the task name corrupted, which is a runaway call chain, not a bad jump.
+    emit32(encSw(1, 2, bytes - 8));                // sw ra, bytes-8(sp)
     emit32(encAddi(kFramePtr, 2, bytes));          // addi s0, sp, bytes   (s0 = the caller's sp)
 }
 void RiscvAssembler::epilogue() {
     if (frameBytes_ != 0) {
         emit32(encLw(kFramePtr, 2, frameBytes_ - 4));   // lw s0, bytes-4(sp)
+        emit32(encLw(1, 2, frameBytes_ - 8));           // lw ra, bytes-8(sp) : restore before ret
         emit32(encAddi(2, 2, frameBytes_));             // addi sp, sp, bytes
     }
     ret();
@@ -234,10 +256,20 @@ void RiscvAssembler::patchBranches() {
         if (labelPos_[f.label] < 0) continue;                  // unbound label — leave as-is (overflow_ already failed the compile)
         int32_t off = labelPos_[f.label] - static_cast<int32_t>(f.at);
         uint32_t w; std::memcpy(&w, buf_ + f.at, 4);
-        // re-scatter the offset into the B-type immediate fields, keeping the rest.
-        w &= ~((1u<<31) | (0x3fu<<25) | (0xfu<<8) | (1u<<7));
-        uint32_t o = uint32_t(off) & 0x1fff;
-        w |= (((o>>12)&1)<<31) | (((o>>5)&0x3f)<<25) | (((o>>1)&0xf)<<8) | (((o>>11)&1)<<7);
+        if (f.kind == FixKind::Branch) {
+            // re-scatter the offset into the B-type immediate fields, keeping the rest.
+            w &= ~((1u<<31) | (0x3fu<<25) | (0xfu<<8) | (1u<<7));
+            uint32_t o = uint32_t(off) & 0x1fff;
+            w |= (((o>>12)&1)<<31) | (((o>>5)&0x3f)<<25) | (((o>>1)&0xf)<<8) | (((o>>11)&1)<<7);
+        } else {
+            // J-type: a DIFFERENT scatter of the same signed byte offset: imm[20|10:1|11|19:12]
+            // in bits 31..12. Sharing the B-type arithmetic would silently retarget the call, which
+            // is why the fixup carries its kind.
+            if (off < -1048576 || off > 1048575) { overflow_ = true; return; }
+            w &= 0x00000fffu;                       // keep opcode + rd
+            uint32_t o = uint32_t(off);
+            w |= (((o>>20)&1)<<31) | (((o>>1)&0x3ff)<<21) | (((o>>11)&1)<<20) | (((o>>12)&0xff)<<12);
+        }
         std::memcpy(buf_ + f.at, &w, 4);
     }
 }

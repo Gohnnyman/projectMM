@@ -310,7 +310,35 @@ struct Parser {
     void parseCall(VReg* resultOut) {
         if (lex.kind != Tok::Ident) { fail("expected a function name"); return; }
         const Builtin* fn = table.find(lex.identBeg, lex.identLen);
-        if (!fn) { fail("unknown function"); return; }
+        if (!fn) {
+            // Not a built-in: the script's own function, if it declared one by this name. Resolved
+            // against the class's function list rather than the builtin table, which is what makes
+            // a helper callable and, when the name is the running function's own, what makes
+            // recursion work: nothing here treats the two cases differently.
+            //
+            // Only functions ALREADY PARSED are visible. A forward call (to a helper declared
+            // further down) is refused rather than half-supported, because resolving it needs a
+            // second pass over the class body. The cost is that "unknown function" is what a
+            // forward call reports too, with the column but not the name, so a helper has to be
+            // declared above its caller. Recursion is unaffected: a function is added to the list
+            // before its body is parsed, so it can see itself.
+            for (uint8_t i = 0; i < fnCount; i++) {
+                if (fns[i].nameLen != lex.identLen) continue;
+                if (std::strncmp(fns[i].name, lex.identBeg, lex.identLen) != 0) continue;
+                lex.advance();
+                if (!expect(Tok::LParen, "expected '(' after the function name")) return;
+                if (!expect(Tok::RParen, "a script function takes no arguments yet")) return;
+                if (resultOut) { fail("a script function returns nothing yet"); return; }
+                // `imm` is the callee's FUNCTION NUMBER, not its position in the op array. An IR
+                // index would be the more obvious choice and was the first one, but the spill pass
+                // rewrites the array and every index past its first insertion shifts: the call then
+                // named a position that no longer started a function, and the lowering opened the
+                // next frame mid-statement. A function number survives any rewrite of the ops.
+                emit({IrOp::CallScript, 0, 0,0,0,0, static_cast<int32_t>(i), nullptr, {}});
+                return;
+            }
+            fail("unknown function"); return;
+        }
         lex.advance();
         if (!expect(Tok::LParen, "expected '(' after the function name")) return;
 

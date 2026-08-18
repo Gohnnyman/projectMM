@@ -21,10 +21,10 @@
 // backend, stay green.
 //
 // The assembler contract, which all three satisfy:
-//   ctor(size_t cap), newLabel, bind, prologue(uint8_t), epilogue, finalize,
+//   ctor(size_t cap), newLabel, bind, prologue(uint8_t), epilogue, alignForEntry, finalize,
 //   bytes, size, overflowed, spillStore, spillLoad, slotAddr,
 //   movImm, movReg, addImm, addReg, mulReg, store8, load8,
-//   branchIfZero, branchGeU, branchNe, call, and kMaxSpillSlots.
+//   branchIfZero, branchGeU, branchNe, call, callLabel, and kMaxSpillSlots.
 // The branches are the FUSED forms (compare-and-branch as one call). arm64 has no such
 // instruction and spells each as cmp + b.cond inside its assembler, which is exactly where a
 // difference of encoding belongs.
@@ -115,11 +115,72 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // FillElems' loop) then get nothing when they ask for their own, which broke every program that
     // contains no loop at all. Lazy allocation costs one lookup and leaves the table for the labels
     // a program actually has.
+    // One label per named function, allocated up front: a CallScript may appear BEFORE the
+    // function it targets (and does, for recursion), so the label has to exist before it is bound.
+    LabelId fnLabel[kMaxIrEntries];
+    for (uint8_t f = 0; f < ir.fnCount; f++) fnLabel[f] = a.newLabel();
+
+    // The depth guard is emitted only for a script whose functions call each other: it is dead
+    // weight in every script that just defines `tick()`, which is all of the shipped ones.
+    const bool guardDepth = ir.hasScriptCall();
+    // Where a function jumps when it is too deep: its own epilogue, so the refusal unwinds through
+    // the same decrement and return as a normal exit and there is no second way out of a frame.
+    LabelId tooDeep[kMaxIrEntries];
+    if (guardDepth)
+        for (uint8_t f = 0; f < ir.fnCount; f++) tooDeep[f] = a.newLabel();
+    // Function number + 1 while a guard is owed, 0 when none is: the guard is emitted a few ops
+    // after the prologue, once the host arguments have been parked.
+    int guardPending = 0;
+
     LabelId labels[kIrLabels];
     bool  labelMade[kIrLabels] = {};
     auto  labelFor = [&](int32_t id) -> LabelId {
         if (!labelMade[id]) { labels[id] = a.newLabel(); labelMade[id] = true; }
         return labels[id];
+    };
+
+    // Emit this function's depth increment, if one is still owed.
+    //
+    // It goes AFTER the function's host-argument Spills, not before them. Both the guard and the
+    // epilogue address the arena through the PARKED copy in the frame, and a refusing activation
+    // jumps straight to the epilogue, so a guard placed first would make the refusal read a frame
+    // slot nothing had written yet. Emitting it once the parking is done means the two agree by
+    // construction rather than by argument.
+    //
+    // Called both at the first non-Spill op and from closeFn, because a function may have NO other
+    // op: `nop() {}` parses, and its whole body is the five parking Spills. Flushed only at the
+    // first site, that function got no increment while its epilogue still decremented, so every
+    // call to it drove the counter DOWN. Two such calls wrapped the byte to 255 and the next real
+    // call was refused as too deep, which reads as a legal call silently doing nothing.
+    auto flushGuard = [&]() {
+        if (!guardPending) return;
+        const uint8_t f = static_cast<uint8_t>(guardPending - 1);
+        guardPending = 0;
+        const RegId d = host(kArg4);              // one reload; nothing below clobbers it
+        a.load8(sAddr, d, kDepthSlot);
+        a.movImm(sCtr, 1);
+        a.addReg(sAddr, sAddr, sCtr);             // depth + 1
+        a.movImm(sCtr, kDepthSlot);
+        a.store8(d, sCtr, sAddr);                 // arena[kDepthSlot] = depth + 1
+        a.movImm(sCtr, kMaxCallDepth);
+        a.branchGeU(sAddr, sCtr, tooDeep[f]);     // at or past the limit: unwind immediately
+    };
+
+    // Close function `f`: the one exit every activation takes, whether it ran to the end or refused
+    // at the guard. Written once so the two cannot drift: a refusal that skipped the decrement
+    // would leak a level per attempt and shrink the budget until nothing recursed at all.
+    auto closeFn = [&](uint8_t f) {
+        flushGuard();          // an empty function still balances: increment, then decrement
+        if (guardDepth) {
+            a.bind(tooDeep[f]);                      // the too-deep path joins here
+            const RegId d = host(kArg4);
+            a.load8(sAddr, d, kDepthSlot);
+            a.movImm(sCtr, -1);
+            a.addReg(sAddr, sAddr, sCtr);            // depth - 1
+            a.movImm(sCtr, kDepthSlot);
+            a.store8(d, sCtr, sAddr);
+        }
+        a.epilogue();
     };
 
     // uint16_t, matching IrProgram::count: the op array is sized to the script now, so a uint8_t
@@ -130,12 +191,35 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
         // running on into whatever was emitted next.
         for (uint8_t f = 0; f < ir.fnCount; f++) {
             if (ir.fnIrStart[f] != i) continue;
-            if (f > 0) a.epilogue();                 // the previous function returns
+            if (f > 0) closeFn(static_cast<uint8_t>(f - 1));   // the previous function returns
+            // Align BEFORE recording the offset, so the recorded address is the one a caller
+            // actually jumps to. On Xtensa a function entry must be 4-byte aligned or the call
+            // cannot be encoded and the instruction itself is illegal; the other backends are
+            // fixed-width and this costs them nothing.
+            a.alignForEntry();
             // Recorded AFTER the epilogue and BEFORE the prologue: the offset is the first byte a
             // caller executes, which is the frame setup, not the first statement.
             ir.fnOffset[f] = static_cast<uint16_t>(a.size());
+            a.bind(fnLabel[f]);                      // where a CallScript to this function lands
             a.prologue(frameSlots);
+            // THE RECURSION DEPTH GUARD, in the CALLEE's prologue: the textbook placement, one copy
+            // per function rather than one per call site, and none at all for a script that never
+            // calls (which is every shipped script today).
+            //
+            //     if (++arena[kDepthSlot] >= kMaxCallDepth) return;
+            //
+            // A refusing callee RETURNS rather than the caller skipping the call. That is what
+            // makes the guard cheap: no branch-around at every call site, no counter to restore on
+            // the way back, and one exit path. The counter is decremented in the epilogue, so it
+            // unwinds with the frames that incremented it.
+            //
+            // Degradation is visible and the device keeps rendering: the deepest calls do nothing,
+            // so the picture is wrong where the recursion bottomed out, rather than the whole
+            // device resetting. That is what the robustness rule asks for.
+            guardPending = guardDepth ? int(f) + 1 : 0;   // emit it after the args are parked
         }
+
+        if (ir.ops[i].op != IrOp::Spill) flushGuard();
 
         const IrInst& op = ir.ops[i];
         switch (op.op) {
@@ -162,6 +246,15 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                 break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), host(kArg4), op.imm); break;   // dst = ctrls[imm]
             // The allocator's two ops. `imm` is a slot INDEX; the assembler owns the frame layout.
+            case IrOp::CallScript: {
+                // `imm` is the callee's function NUMBER, so the label is a direct index. The
+                // callee's address is not known when the call is emitted (it may be defined further
+                // down, and for recursion it is the enclosing function), so this binds a label and
+                // the assembler patches the displacement once every function is placed.
+                if (op.imm < 0 || op.imm >= ir.fnCount) break;
+                a.callLabel(fnLabel[op.imm]);
+                break;
+            }
             case IrOp::Spill:  a.spillStore(reg(op.a), static_cast<uint8_t>(op.imm)); break;
             case IrOp::Reload: a.spillLoad(reg(op.dst), static_cast<uint8_t>(op.imm)); break;
             case IrOp::Call: {
@@ -211,7 +304,10 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
             default: break;
         }
     }
-    a.epilogue();
+    // Close the LAST function (or the single routine of a function-less program, which has no
+    // guard because it cannot call).
+    if (ir.fnCount > 0) closeFn(static_cast<uint8_t>(ir.fnCount - 1));
+    else a.epilogue();
     a.finalize();
     if (a.overflowed() || a.size() > cap) return 0;
     std::memcpy(out, a.bytes(), a.size());

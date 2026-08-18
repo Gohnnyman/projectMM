@@ -87,6 +87,11 @@ public:
         // which faults as a LoadProhibited at a nonsense address with no C++ frame to blame. Checked
         // with the other preconditions rather than trusted: every other operand of the call is.
         if (ctrl_ && ctrlArena_) {
+            // Start every frame at depth zero. The emitted code restores the counter as it unwinds,
+            // so this is normally already 0. A script that HIT the limit stopped calling
+            // rather than returning through the restore, and a leaked level would shrink the next
+            // frame's budget, and the next, until a legal recursion no longer ran. One byte.
+            ctrlArena_[kDepthSlot] = 0;
             // A named entry when asked for one; otherwise the block start, which is what the
             // hand-encoded programs and a single-function script both want.
             CtrlFn f = name ? entry(name) : ctrl_;

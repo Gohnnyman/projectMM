@@ -390,4 +390,18 @@ TEST_CASE("a class that defines no moment a binding owns is still a valid script
     CHECK_FALSE(eng.hasEntry("modifyLogical"));
 }
 
+
+// A script calling its own function is pinned in unit_moonlive_compiler.cpp ("a function the
+// script calls can light pixels and read the script's controls"), which asserts the same thing
+// plus the control read that a bare call was silently getting wrong.
+
+// Calling a name the class did not declare is refused, rather than resolving to something else.
+TEST_CASE("calling a function no one declared is a compile error") {
+    uint8_t out[2048];
+    auto r = moonlive::compileSource(
+        "class Nope { tick() { missing(); } }", kCtrlTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+    CHECK(std::string(r.error) == "unknown function");
+}
+
 #endif  // MM_MOONLIVE_HAS_HOST_JIT

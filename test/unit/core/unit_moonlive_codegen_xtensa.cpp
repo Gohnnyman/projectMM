@@ -56,6 +56,9 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #define MM_GOLD_FXLOOP_HASH 307181036u
 #define MM_GOLD_FX_HASH   2796457628u
 #define MM_ISA_LOWER mm_xtensa_backend::mm::moonlive::lowerToBytes
+// The assembler type itself, so the stack-budget check can measure the object the compile path
+// puts on a 12 KB task rather than re-deriving its layout from the constants.
+#define MM_ISA_ASM   mm_xtensa_backend::mm::moonlive::XtensaAssembler
 #include "moonlive_device_codegen.inc"
 
 // --- the structural checker's Xtensa decoder -------------------------------------------------

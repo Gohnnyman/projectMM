@@ -55,6 +55,13 @@ public:
     // Resolve all branch fixups against bound labels, then expose the finished bytes. Call
     // once after the last instruction; bytes()/size() are valid only after finalize().
     void finalize() { patchBranches(); }
+    // Pad to the alignment a FUNCTION ENTRY needs, called before each prologue. Every instruction
+    // on this ISA is four bytes, so a function boundary is always aligned already and this is a
+    // no-op; it exists because the shared lowering calls it, and Xtensa (2- and 3-byte forms) does
+    // need the pad. Not asserted here, because the property is about EMITTED code rather than this
+    // function: the per-ISA test "every function in a class starts where a call can reach it" is
+    // what would fail if a compressed encoding ever made a boundary land off four bytes.
+    void alignForEntry() {}
     const uint8_t* bytes() const { return buf_; }
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
@@ -99,6 +106,9 @@ public:
     // vreg pool, not just R0..R2, so any value may be live across a call — a loop counter and its
     // limit are, whenever the body calls anything, which is most real effects.
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);
+    /// Call a function in THIS block, by label: the script-to-script call. `bl` links the return
+    /// address into x30; the callee's prologue saves it, which is what lets the call nest.
+    void callLabel(Label l);
     void ret();
 
 private:
@@ -108,12 +118,20 @@ private:
     void branchIf(Cond c, Label l);      // if flags satisfy c goto l (after cmp)
     // The emitted-code buffer's size, fixed for this object's life but chosen per script.
     const size_t kCap;
-    static constexpr uint8_t kMaxLabels = 16;
-    static constexpr uint8_t kMaxFixups = 32;
+    // Sized in core (kAsmLabels/kAsmFixups) so the three backends cannot drift apart.
+    static constexpr uint8_t kMaxLabels = kAsmLabels;
+    static constexpr uint8_t kMaxFixups = kAsmFixups;
 
     void emit32(uint32_t w);             // append one 32-bit instruction (arm64) — or byte run (x64)
     void emitBytes(const uint8_t* p, size_t n);
-    void addFixup(size_t at, Label label, uint8_t kind);  // enqueue a branch fixup (bounds-checked)
+    // A pending reference to a label. The kind is needed because a call's displacement is a
+    // different field from a branch's: `bl` carries imm26 at bits 0..25, the conditional branches
+    // imm19 at bits 5..23. Patching one as the other retargets it in silence, which is the failure
+    // this discriminator exists to make impossible. Named rather than numbered, matching the other
+    // two backends: Branch covers cbz and b.cond, which share the imm19 field.
+    enum class FixKind : uint8_t { Branch, Call };
+    struct Fixup { size_t at; Label label; FixKind kind = FixKind::Branch; };
+    void addFixup(size_t at, Label label, FixKind kind = FixKind::Branch);   // bounds-checked
 
     // HEAP, not a member array: the assembler is a stack local in lowerToBytes, so a kCap-sized
     // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
@@ -131,7 +149,6 @@ private:
     // Label positions (-1 = unbound) and pending branch fixups.
     int32_t  labelPos_[kMaxLabels];
     uint8_t  labelCount_ = 0;
-    struct Fixup { size_t at; Label label; uint8_t kind; };  // kind: 0=cbz,1=b.cond
     Fixup    fixups_[kMaxFixups];
     uint8_t  fixupCount_ = 0;
 

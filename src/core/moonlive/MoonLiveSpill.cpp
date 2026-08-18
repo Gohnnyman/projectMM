@@ -66,6 +66,10 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         // vreg. Reporting a/b/c as sources gave the count a live interval and let the rewrite below
         // remap it into a register number; it survived only because a fixed ABI vreg maps to itself.
         case IrOp::Call:       return 0;
+        // Nor does a call to the script's OWN function: `imm` is the callee's function NUMBER, not
+        // a value, and the callee reads its arguments from frame slots exactly as a host built-in
+        // does.
+        case IrOp::CallScript: return 0;
         case IrOp::Inline:
             // The inline ops read every operand field the host filled in. Both of today's ops also
             // read kArg0..kArg2 (buf, nLights, cpl), but those are fixed ABI vregs this pass never
@@ -82,6 +86,9 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
 bool writesDst(IrOp op) {
     switch (op) {
         case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchNe:
+        // CallScript writes no dst either: a script function returns nothing today, so the call is
+        // a statement rather than an expression. When it gains a return value this moves.
+        case IrOp::CallScript:
         case IrOp::Spill: case IrOp::Inline: return false;
         default: return true;
     }
@@ -317,7 +324,27 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         return true;
     };
 
+    // The function boundaries move with the ops. `fnIrStart` indexes the INPUT array, and this
+    // rewrite inserts a Reload before a read and a Spill after a define, so every index past the
+    // first insertion shifts. Left unmapped, the lowering closes a function at the wrong op: it
+    // emitted a `retw` in the middle of an expanding StoreElem, splitting the pixel write across
+    // two frames. Found by disassembling, because the emitted stream was structurally plausible
+    // (two entries, two retws, one call8) and only the POSITION of the boundary was wrong.
+    //
+    // REQUIRED, and the disassembly says otherwise. Removing this makes crosshair.mlv emit a
+    // TIDIER-looking block (one entry/retw pair per function, at plausible offsets) and every
+    // host test still passes, because the host backend cannot reach this path. On an S3 that block
+    // boot-loops with StoreProhibited and the buffer pointer holding 0xff: a store through a
+    // register the split left holding a colour byte. Verify a change here on a board, not on a
+    // listing and not on the suite.
+    uint16_t newFnStart[kMaxIrEntries] = {};
+
     for (uint16_t i = 0; i < ir.count; i++) {
+        // Record where this function begins in the OUTPUT array, before anything is emitted for
+        // the op that starts it.
+        for (uint8_t f = 0; f < ir.fnCount; f++)
+            if (ir.fnIrStart[f] == i) { newFnStart[f] = out.count; }
+
         IrInst in = ir.ops[i];
         VReg src[4];
         const uint8_t n = sourcesOf(in, src);
@@ -372,6 +399,9 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     }
 
     out.vregsUsed = newHighWater;
+    // Carry the function table across the swap, with the boundaries remapped to the output array.
+    out.fnCount = ir.fnCount;
+    for (uint8_t f = 0; f < ir.fnCount; f++) out.fnIrStart[f] = newFnStart[f];
     ir.swap(out);
     slotsUsed = nSpilled;
     return true;

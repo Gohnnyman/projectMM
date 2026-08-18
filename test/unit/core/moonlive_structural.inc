@@ -39,6 +39,14 @@ TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the fram
         // first is what a checker reading only the prologue at byte 0 would never look at.
         {"two functions",
          "class TwoFns {\n  helper() { setRGB(1, 10, 20, 30); }\n  tick() { setRGB(2, 40, 50, 60); }\n}\n", 1},
+        // A function that CALLS another, which adds the argument reload and the depth guard to
+        // every prologue: both address the frame, so both are subject to this check.
+        {"a calling class",
+         "class Calls {\n  helper() { setRGB(1, 10, 20, 30); }\n  tick() { setRGB(2, 40, 50, 60); helper(); }\n}\n", 1},
+        // A RECURSIVE function: the same frame is entered many times over, so an offset that
+        // intrudes into the reserve is written by every activation rather than once.
+        {"a recursive class",
+         "class Rec {\n  down() { setRGB(1, 10, 20, 30); down(); }\n  tick() { setRGB(2, 40, 50, 60); down(); }\n}\n", 1},
     };
     for (const auto& c : cases) {
         bool ok = false;

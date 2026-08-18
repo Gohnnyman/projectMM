@@ -206,9 +206,9 @@ Steps 1 to 5 are the SHAPE: how a script is written. Steps 6 to 10 are the VOCAB
 say. The shape comes first so that every feature in the back half lands on finished ground rather
 than being retrofitted into a language still moving underneath it.
 
-1. 🟡 **The `class` declaration and script functions, together.** PARTLY DONE: the class form
-   ships and every script and test uses it; script-to-script CALLS and recursion are what remain,
-   scoped at the end of this entry.
+1. ✅ **The `class` declaration and script functions, together.** Done: the class form ships, every
+   script and test uses it, and a script now calls its own functions and itself. `crosshair.mlv` is
+   the shipped example, verified on all four boards.
 
    Originally: They are one change: making the
    declaration mandatory means there is no bare-statement-list form left, so the grammar's new top
@@ -219,24 +219,84 @@ than being retrofitted into a language still moving underneath it.
    Calls are real from the start, per the section above: a script calling its own function, and then
    calling it recursively, is the acceptance test.
 
-   **What recursion still needs, measured against the code as it now stands.** Per-function frames
-   are DONE and each activation owns its frame, so the hard half is behind us. What is missing is
-   that a script cannot yet call its own function at all: `parseCall` resolves a name against the
-   BUILTIN table only, so `helper()` inside a class reports `unknown function`. Closing that is a
-   defined piece of work rather than a subtlety:
+   **Recursion is not a feature beside local calls; it IS local calls.** A recursive call is a local
+   call whose target happens to be the running function, and the machine cannot tell the difference:
+   it allocates a frame, jumps, returns. The proviso is that every value lives in the callee's own
+   frame rather than a fixed location, which is exactly what the stack machine bought (the
+   predecessor plan's table: "a fixed slot file cannot hold two activations" becomes "each activation
+   gets its own frame"). So recursion is a TEST CASE for local calls, not separate work.
 
-   - **A script-call IR op.** `IrOp::Call` carries an absolute host function pointer; a call to a
-     script function is a different thing, a jump to a label inside this block.
-   - **A relative call in each assembler.** `call(...)` takes a `const void*` host address on all
-     three backends. A script-to-script call needs call-to-label with the same fixup machinery the
-     branches already use, which is a new instruction per ISA (`call0`/`callx` forms on Xtensa,
-     `jal` on RISC-V, `bl` on arm64).
-   - **The depth guard.** A fixed render-task stack means unbounded recursion is a reset, which the
-     robustness rule forbids, so this is a runtime counter that degrades visibly rather than a
-     compile-time limit.
+   Two things are not free, and both are robustness rather than mechanism. A runaway recursion costs
+   176 bytes of stack per activation on Xtensa (48 for the host-call area + 84 for 21 slots + 32 for
+   the window reserve + alignment) against a 12 KB main-task stack, so it resets the device at
+   roughly 64 deep: that needs a counter, and 32 is a generous limit at 46% of the budget. And on
+   Xtensa each call8 rotates the register window, so past ~8 nested frames the hardware spills to the
+   stack; that is correct and automatic, and the 32-byte reserve already accounts for where the
+   spills land, so it costs memory traffic rather than correctness.
 
-   None of it is blocked, and none of it changes what is already verified: every shipped script,
-   all three bindings and the moment model work on hardware without it.
+   **What local calls took, as built.** All four pieces landed:
+
+   - **A script-call IR op.** `IrOp::CallScript`, carrying the callee's FUNCTION NUMBER. It first
+     carried the callee's IR index, which the spill pass invalidates: every index past its first
+     inserted Reload shifts, so the call named a position that no longer started a function. A
+     function number survives any rewrite of the ops.
+   - **A relative call in each assembler.** `callLabel(Label)` on all three, reusing the branch
+     fixup machinery with a discriminator (`FixKind::Call` on Xtensa, `Jal` on RISC-V, kind 2 on
+     arm64), because a call's displacement is encoded differently from a branch's.
+   - **Function-entry alignment, which was not foreseen.** Xtensa requires a 4-byte-aligned `entry`
+    : the toolchain rejects anything else outright ("unaligned entry instruction") and CALLn
+     encodes its target in 4-byte units, so an unaligned callee is not expressible. Instructions are
+     2 or 3 bytes, so a function following another lands anywhere. `alignForEntry()` pads before
+     every prologue, which is what `.align 4` does in hand-written assembly. hpwit's `new-parser`
+     hits the same wall and leaves it unhandled, so this is the missing piece rather than a
+     workaround.
+   - **The depth guard**, in the CALLEE's prologue rather than at each call site: one copy per
+     function instead of one per call, emitted only when `hasScriptCall()`, so every shipped script
+     carries none of it. A refusing callee returns, so there is no branch-around at the call site
+     and no counter to restore across a call; the decrement lives in the one epilogue both paths
+     take. Measured: 9 instructions ≈ 25 bytes per function, one arena byte, and ~5-10% on a script
+     that calls (215-233µs vs 204µs for `crosshair.mlv` on the classic).
+
+     The counter is a byte in the CONTROL ARENA (`kDepthSlot`, above the system variables), not a
+     C++ member: recursion happens entirely inside the emitted block with no C++ frame between
+     activations, and every function already holds the arena pointer, so this costs one byte and no
+     new argument. The host zeroes it before each run rather than trusting the block to unwind: a
+     script that hit the limit would otherwise leak a level and shrink every later frame's budget.
+     A stack-limit check (comparing `sp` against a bound) is the more canonical form and is cheaper
+     still, but needs a per-platform stack-bound source; worth revisiting if the guard ever shows up
+     in a profile.
+
+   - **A bigger label and fixup table.** `kMaxLabels`/`kMaxFixups` were 16/32, sized when a script
+     was one routine, and each backend held its own private copy of both. A class allocates a label
+     per function on top of its loop and store labels, so `crosshair.mlv` exhausted the table and
+     failed with the generic "too large". Now `kAsmLabels`/`kAsmFixups` (48/96) in core, so the
+     three backends cannot drift into disagreeing about which scripts compile.
+
+     **Cost: 640 bytes of STACK, and no flash.** Both tables are members of the assembler, which is
+     a local in `lowerWith`, which runs on the render task. Measured on the classic ESP32 image,
+     that frame went 480 -> 1120 bytes (4 per label, 8 per fixup), making it the largest on the
+     compile chain: 144 + 288 + 576 + 1120 = 2128 nested, 17% of the 12 KB main task. Flash is
+     unchanged, since these are stack arrays. Pinned by `the <ISA> assembler stays small enough to
+     build on a render task`, a tripwire in entry counts rather than host bytes (the host's 64-bit
+     size_t makes its Fixup 16 bytes against the device's 8, so sizeof here overstates the device).
+     If a script ever needs more, the tables move to the heap beside the code buffer: which was
+     moved off the stack for exactly this reason: rather than the constants going up again.
+
+   **Three traps, all found on hardware and none visible to the host suite:**
+
+   - `IrProgram::swap()` did not swap the function table, so the spill pass's remapped boundaries
+     were discarded and the lowering opened a frame two ops early, mid-statement.
+   - A local call passed NO arguments. Each function's prologue parks buf/nLights/cpl/t/ctrls out of
+     the argument registers into its own frame, so a bare call left the callee parking garbage and
+     its first control read faulted at `EXCVADDR 0x9`. On Xtensa the arguments go in a10..a14,
+     because `call8` rotates the window by 8.
+   - The depth guard must be emitted AFTER the host arguments are parked. Both it and the epilogue
+     address the arena through the parked frame copy, and a refusing activation jumps straight to
+     the epilogue: a guard placed first makes the refusal read a slot nothing wrote (SIGBUS).
+
+   The host backend cannot pin the argument-passing contract: its R0..R4 map onto the ABI argument
+   registers and `bl` leaves them alone, so removing the fix fails no test there while crashing an
+   S3. The boards are the only check for that class.
 
 2. ⬜ **Typed script-level members**, per *Where script-level state lives* above: a variable declared inside the
    class but outside any function lives in the arena, is visible in every function, is initialised
@@ -408,19 +468,36 @@ The governing risk is unchanged from the predecessor plan and is what shapes all
 host backend is EXECUTED by tests**, while the constraints that bite hardest are Xtensa's. Every step
 therefore needs a host test that proves the semantics and a bench run that proves the encoding.
 
-1. **A script calling its own function, and then calling it recursively** (step 1). The recursion case
+1. ✅ **A script calling its own function, and then calling it recursively** (step 1). The recursion case
    is the one that proves a frame per activation, and it is the acceptance test for the step.
-2. **The frame contract, extended to script functions** (step 1). The structural checker must refuse a
+   Done: `a function the script calls can light pixels and read the script's controls`, `arguments
+   reach a function two calls deep`, and `a script function can call itself, each call keeping its
+   own values` in unit_moonlive_compiler.cpp, plus `every function in a class starts where a call
+   can reach it` per device backend. Each was control-checked by reverting its fix.
+2. ✅ **The frame contract, extended to script functions** (step 1). The structural checker must refuse a
    script function whose frame intrudes into the window-save reserve, and it must be shown FAILING on
    a deliberately wrong frame before it is trusted: the same control that caught the original bug.
+   Done: the checker's case list gained a calling class and a recursive one, so every prologue it
+   walks now carries the argument reload and the depth guard. Control-checked by dropping
+   kWindowSaveReserve from the frame calculation, which fires the offset check as it should. The
+   derived reserve resisted the first attempt to break it, which is the anti-drift design working:
+   editing the static_assert alone changes nothing, because the value comes from the callx opcode.
 3. **A member written by one function and read by another**, and a member that survives across
    `tick()` calls (step 2). The second is what a stateful effect depends on and is not provable by
    inspection.
 4. **The same script at the host's real budget and a squeezed one renders identical pixels.** The
    predecessor plan's technique, still the only way the register work is testable off hardware, and
    every new construct has to keep passing it.
-5. **Recursion depth degrades visibly** (step 1): a script that recurses without bound reports an
-   error and keeps the device rendering, rather than resetting it.
+5. ✅ **Recursion depth degrades visibly** (step 1): a script that recurses without bound keeps the
+   device rendering rather than resetting it. Pinned by `a script that recurses without end keeps
+   rendering instead of resetting`, which also re-runs the script to prove the counter unwinds: a
+   leaked level per frame would silently shrink every later frame's budget. Verified on the classic
+   ESP32 (the tightest stack): `forever.mlv` ran 110 seconds continuously at 109 fps, no reset.
+
+   NOT done as specified: the script does not REPORT an error. The refusal is silent, and what a
+   user sees is the picture being wrong where the recursion bottomed out. Reporting it needs a
+   channel from the emitted block back to the binding, which does not exist yet: worth having, and
+   left for the step that gives scripts a diagnostic path.
 6. **An arena ceiling reports a compile error** (step 8), not a failed allocation at run time.
 7. **The bench, on all four boards**, after each step: S3 and classic (Xtensa), P4 and S31 (RISC-V),
    a scripted layout and a scripted effect. Exec-block sizes compared against the previous step, since
