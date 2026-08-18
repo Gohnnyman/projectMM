@@ -335,7 +335,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // TIDIER-looking block (one entry/retw pair per function, at plausible offsets) and every
     // host test still passes, because the host backend cannot reach this path. On an S3 that block
     // boot-loops with StoreProhibited and the buffer pointer holding 0xff: a store through a
-    // register the split left holding a colour byte. Verify a change here on a board, not on a
+    // register the split left holding a color byte. Verify a change here on a board, not on a
     // listing and not on the suite.
     uint16_t newFnStart[kMaxIrEntries] = {};
 

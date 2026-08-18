@@ -15,7 +15,7 @@ class GridLayout {
   uint8_t cols = 16;  // @control 1..64
   uint8_t rows = 16;  // @control 1..64
 
-  tick() {
+  placeLights() {
     for (y = 0; y < rows; y = y + 1) {
       for (x = 0; x < cols; x = x + 1) {
         addLight(x, y, 0);
@@ -25,7 +25,7 @@ class GridLayout {
 }
 ```
 
-That is the default: a plain grid, one light per cell. `addLight(x, y, z)` places the next light along the strand — no index, because the order the script calls it in *is* the strand order.
+That is the default: a plain grid, one light per cell. The function is named `placeLights` because that is the moment a layout is asked about: the module calls it when the fixture is being built, and a script that does not define it places nothing. An effect's moment is `tick`, a modifier's is `modifyLogical`, and a class may define any of them. `addLight(x, y, z)` places the next light along the strand — no index, because the order the script calls it in *is* the strand order.
 
 The `cols` and `rows` lines are the script's own controls, not something the module hands it. A layout is never told how big it is: the pipeline works out the bounding box from the coordinates the layouts actually place, so a size passed in from outside would be a second answer that could disagree with the first.
 

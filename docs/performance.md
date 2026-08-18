@@ -244,7 +244,15 @@ The rows above are a dated S3 bench record; the numbers below them are what a de
 
 The exec block is the emitted machine code, so it varies by ISA (the RISC-V rows above are the larger encoding); the tick is the native loop. `lines.mlv` is the cheapest of the three because `line()` moves the per-cell loop out of emitted code and into the shared `draw::line`, which is the argument for adding power functions as builtins rather than writing them in script.
 
-**Desktop tick across this cycle:** 150 → 122 µs (6666 → 8196 fps), measured by `collect_kpi.py --commit` at each commit. The gain is not from MoonLive — it tracks the two heap-overrun fixes and the register-reuse work landing earlier in the branch. No scenario `contract` was renegotiated on this branch: all 20 scenarios pass inside their existing budgets, which is the assertion surface this page defers to.
+**A script calling its own functions** costs what the call costs, and nothing when a script makes none. `crosshair.mlv` (three functions, two calls per frame) ticks at 219 µs on the classic against 204 µs for the same drawing without the recursion guard, so roughly 5-10% on a script that calls. A script with no local call emits no guard code at all, so every shipped script is byte-identical to before: the guard is nine instructions in a function's prologue, emitted only when the program contains a `CallScript`.
+
+The **depth guard** is one arena byte, incremented on entry and decremented in the epilogue. A refused call returns rather than the caller branching around it, which is why the cost sits in the callee and not at every call site. Unbounded recursion therefore degrades instead of resetting: the classic ran a deliberately non-terminating script for 110 s at 109 fps, with the deepest calls doing nothing.
+
+**Desktop tick across this cycle:** 150 → 133 µs (6666 → 7518 fps), measured by `collect_kpi.py --commit` at each commit. The gain is not from MoonLive — it tracks the two heap-overrun fixes and the register-reuse work landing earlier in the branch. No scenario `contract` was renegotiated on this branch: all 20 scenarios pass inside their existing budgets, which is the assertion surface this page defers to.
+
+**Flash**, measured by building the classic at the branch point and again with the local-call work: 1723295 → 1726027 bytes, +2732 (+0.16%). High per line of source (about 20 bytes for ~137 net lines of code) because nearly all of it is emitter code instantiated once per backend, so one line of the shared lowering becomes three copies of emitted-instruction sequences in the image.
+
+**The compile path's stack grew 640 bytes.** `kAsmLabels`/`kAsmFixups` went from 16/32 to 48/96 because a class allocates a label per function, so `lowerWith`'s frame went 480 → 1120 bytes on the classic — the largest on the chain (144 + 288 + 576 + 1120 = 2128 nested, 17% of the 12 KB main task). It is a compile-path local, not a per-tick cost, but the compile runs on the render task.
 
 ---
 

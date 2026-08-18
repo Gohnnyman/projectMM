@@ -5,7 +5,7 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/moonlive/MoonLiveCompiler.h"   // CompileResult (carries the declared controls)
-#include <cstring>   // std::strcmp — entry lookup by name
+#include <cstring>   // std::strcmp: entry lookup by name
 
 // MoonLive — the live-script engine core (domain-neutral, §3.1/§3.9 of
 // livescripts-analysis-top-down.md). compile() turns a program into native code — either a

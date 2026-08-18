@@ -25,7 +25,7 @@ std::vector<Pt> collectPoints(const mm::SphereLayout& s) {
 
 } // namespace
 
-// lightCount() must equal the number of points placeLights emits — they share
+// lightCount() must equal the number of points placeLights emits: they share
 // one shell predicate, so allocation and fill can never disagree.
 TEST_CASE("SphereLayout lightCount matches the iterator") {
     for (mm::lengthType r : {1, 2, 4, 8}) {

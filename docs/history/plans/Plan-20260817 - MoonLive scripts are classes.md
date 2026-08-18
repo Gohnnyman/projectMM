@@ -94,7 +94,7 @@ Two constraints on it:
 
 **The standard: a script IS a class.** Not "like" one loosely: it has members (script-level
 variables) and functions, some of which the host calls from outside at known times (`tick`,
-`defineControls`, `forEachCoord`). Syntax may be simplified, and semantics may be simplified where
+`defineControls`, `placeLights`). Syntax may be simplified, and semantics may be simplified where
 that buys something, but where a reader has an expectation from any class-based language, the
 behaviour meets it. Most of what follows is settled by asking "what would a class do".
 
@@ -334,7 +334,7 @@ than being retrofitted into a language still moving underneath it.
      the end of one into the next is a real hazard, so each function returns rather than running on.
 
 4. ✅ **The remaining entry points per role.** Done, and simplified by the moment model above:
-   layouts declare `forEachCoord`, modifiers `modifyLogical`, effects `tick`, and each binding runs
+   layouts declare `placeLights`, modifiers `modifyLogical`, effects `tick`, and each binding runs
    its moment IF the script defined it. `modifyLogicalTick` is not built; it is a new moment the
    Layer would have to own, so it belongs with whatever needs it.
 
@@ -365,7 +365,7 @@ than being retrofitted into a language still moving underneath it.
 
 **A NAME IS A MOMENT, NOT A ROLE** (PO, during step 4). The binding does not pick which entry point
 belongs to its kind. The HOST owns moments and calls whatever the script defined for each: `tick`
-when a frame renders, `forEachCoord` when lights are placed, `modifyLogical` when one coordinate is
+when a frame renders, `placeLights` when lights are placed, `modifyLogical` when one coordinate is
 folded. An entry a class did not define is simply not called.
 
 This is simpler than a per-role name in every direction. There is no selection, no fallback and no
@@ -393,7 +393,7 @@ in a layout or a modifier later without a grammar change.
 
    **What it removes, measured:** `defineControls` is already byte-identical in the layout and the
    modifier, and the compile trunk is the same in all three; roughly 75 lines of ~537. What stays
-   per binding is ~20 lines of genuinely its own: the role virtuals (`forEachCoord`/`lightCount`,
+   per binding is ~20 lines of genuinely its own: the role virtuals (`placeLights`/`lightCount`,
    `modifyLogical`/`modifyLogicalSize`, `tick`/`dimensions`) and the base-class call in `release`.
 
    **Its own change, with its own bench pass.** Not folded into the language work: these three files

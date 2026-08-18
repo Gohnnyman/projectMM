@@ -184,7 +184,7 @@ TEST_CASE("the scripts the documentation shows all compile") {
 }
 
 // The container asks a layout for its count and its coordinates SEPARATELY, and both must work at
-// any time — not only immediately after prepare(). Layouts::prepare walks placeLights for the
+// any time: not only immediately after prepare(). Layouts::prepare walks placeLights for the
 // bounding box, and the Layer asks lightCount() when it sizes its buffer; a layout that answers
 // only once reports an empty fixture to whichever asks second.
 TEST_CASE("a layout answers count and coordinates every time it is asked") {
@@ -387,7 +387,7 @@ TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not")
 }
 
 // The layer builds its mapping in two passes over the layouts: pass A counts destinations, pass B
-// scatters driver indices into an array sized by that count. Both passes call placeLights — and a
+// scatters driver indices into an array sized by that count. Both passes call placeLights: and a
 // scripted layout COMPILES lazily inside placeLights, so a control edited between the two passes
 // makes pass B emit more lights than pass A counted. The scatter then ran past its array and
 // corrupted the heap; the crash surfaced later inside an unrelated allocation, which is why resizing

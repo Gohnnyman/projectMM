@@ -501,3 +501,49 @@ instructions and the defect was in the stack layout around them.
   start at at least 32") and phrases it as a minimum for exactly this reason. The reserve is
   therefore derived from the emitted call opcode rather than written down, so widening the call
   moves the reserve with it or fails the build.
+
+## Lessons from the script-functions branch: a tidier disassembly can be the broken one
+
+Local calls and recursion in MoonLive cost four stacked defects, and every one of them was
+invisible to a green test suite. The theme is narrower than "test on hardware": it is that the
+evidence which *looks* most authoritative here is the evidence that lies.
+
+- **A cleaner-looking emitted block can be the broken one.** Removing the spill pass's function
+  boundary remap makes `crosshair.mlv` disassemble BETTER on Xtensa (three tidy `entry`/`retw.n`
+  pairs instead of two and a stray) and keeps all 1282 host tests green. It also boot-loops an S3
+  with `StoreProhibited` and the light-buffer pointer holding `0xff`: a store through a register
+  that a mid-statement frame boundary left holding a colour byte. Two things conspire — the host
+  backend never executes that path, and the disassembler decodes the zero padding between
+  functions as instructions. **A change to function-boundary or frame code gets a flash and a
+  soak, never a listing review.**
+
+- **The host backend cannot pin an argument-passing contract, because its register map hides
+  one.** A script-to-script call emitted no argument setup at all, so each callee parked whatever
+  the caller had left in the argument registers and its first control read faulted at
+  `EXCVADDR 0x9`, offset 9 into a null arena. On arm64 the same omission fails nothing: R0..R4 map
+  onto the ABI argument registers and `bl` leaves them alone, so the values survive by luck of the
+  mapping. **Where a backend's register map coincides with the ABI, a test on that backend proves
+  the contract holds by accident rather than by construction — say so in the test.**
+
+- **An index into an array a later pass rewrites is a bug with a delay.** `CallScript` first
+  carried the callee's IR index. The spill pass inserts a Reload before a read, so every index past
+  its first insertion shifts and the call named an op that no longer started a function. A function
+  NUMBER survives any rewrite. **When one pass hands a position to another, hand it a name.**
+
+- **`swap()` must swap the whole object.** `IrProgram::swap` exchanged the ops, counts and slots
+  but not the function table, so the spill pass's carefully remapped boundaries went into the
+  discarded half and the lowering read the stale ones. The remap was correct; the transfer was not.
+
+- **An empty function is a real case in a guard that brackets a body.** The recursion depth guard
+  is emitted at a function's first real op, because it must follow the host arguments being parked.
+  A function whose entire body is that parking (`nop() {}` parses) never reached the emission point
+  while its epilogue still decremented, so every call to it drove the counter DOWN, two calls
+  wrapped the byte past zero, and the next legal call was refused as too deep. **Any guard with an
+  entry and an exit needs the zero-length body as a test, not just the deep one.**
+
+- **The toolchain answers ISA questions faster than reasoning does.** "Must an Xtensa `entry` be
+  4-byte aligned?" took one `xtensa-esp32-elf-as` invocation to settle: it refuses with
+  `Error: unaligned entry instruction`. The same question had already cost an afternoon of
+  hypotheses. hpwit's `new-parser` hits the identical wall and leaves it unhandled, which is
+  confirmation the question is real rather than self-inflicted. **Assemble the case before
+  theorising about it.**

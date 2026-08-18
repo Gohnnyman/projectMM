@@ -62,7 +62,7 @@ TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the fram
         // A class emits one routine per function, so a block holds several prologues and a frame
         // offset belongs to whichever one precedes it. Reading only the prologue at byte 0 and
         // judging the whole block against it would leave every function after the first unchecked
-        // — silently, and on the target where the frame contract is fatal.
+        //: silently, and on the target where the frame contract is fatal.
         uint32_t frame = 0;
         uint32_t usable = 0;
         int prologues = 0;

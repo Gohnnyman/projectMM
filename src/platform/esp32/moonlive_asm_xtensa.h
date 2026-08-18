@@ -146,8 +146,6 @@ private:
     // A conditional branch emitted as inverted-condition-over-`j`, so its reach is the jump's
     // 18 bits rather than the branch's signed byte. See the .cpp for why that is not optional.
     void branchRelaxed(uint8_t condNibble, Reg a, Reg b, Label l);
-
-
     void patchBranches();
 };
 

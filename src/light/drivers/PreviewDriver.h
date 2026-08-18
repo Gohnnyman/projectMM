@@ -307,7 +307,7 @@ public:
                     keptIdxAllocFailed_ = false;
                     publishHeapBytes();   // the index cache grew — refresh the memory readout
                 } else {
-                    keptIdxAllocFailed_ = true;   // degraded — the gather walks placeLights per frame
+                    keptIdxAllocFailed_ = true;   // degraded: the gather walks placeLights per frame
                 }
             }
         }
@@ -549,7 +549,7 @@ private:
     // the graceful fallback above the cap.
     // True when the source is a dense grid in natural box order (no mapping LUT): driver index i is
     // exactly box cell i, so the kept-light set + each light's buffer index are CLOSED-FORM from the
-    // box dimensions and the stride — no placeLights walk needed (the count, the coord positions,
+    // box dimensions and the stride: no placeLights walk needed (the count, the coord positions,
     // and the downsampled colors all stride the box directly). A LUT means a sparse / serpentine /
     // modified layout whose index↔position map is arbitrary, so those paths must walk placeLights.
     // Mirrors the Layer's own dense-vs-LUT decision (Layer::isNaturalOrder gates lut_.setIdentity),

@@ -323,7 +323,7 @@ TEST_CASE("MoonLive line() clamps out-of-range endpoints to the canvas edge") {
 //
 // This is the case a symbol table exists for, and the one that fails silently when it is wrong:
 // both functions compile, both are callable, and running the wrong one just draws the wrong thing.
-// The two write different colours to different pixels, so which ran is visible in the buffer.
+// The two write different colors to different pixels, so which ran is visible in the buffer.
 TEST_CASE("a script runs the entry point the host asked for, not whichever came first") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class TwoFns {\n"
@@ -343,8 +343,8 @@ TEST_CASE("a script runs the entry point the host asked for, not whichever came 
     CHECK(buf[1 * 3 + 1] == 0);
 }
 
-// Asking for a name the script did not define runs NOTHING. The alternative — falling back to the
-// block start — would run some arbitrary function and look like it worked, which is the failure a
+// Asking for a name the script did not define runs NOTHING. The alternative: falling back to the
+// block start: would run some arbitrary function and look like it worked, which is the failure a
 // binding cannot diagnose.
 TEST_CASE("asking for an entry point a script does not define runs nothing") {
     moonlive::MoonLive eng;

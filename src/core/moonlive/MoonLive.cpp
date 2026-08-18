@@ -18,7 +18,7 @@ void MoonLive::freeCode() {
     anim_ = nullptr;
     ctrl_ = nullptr;
     // The entry table describes code that no longer exists. Left behind, entry() would hand a
-    // binding an address into a freed block — the same stale-state trap the control arena has.
+    // binding an address into a freed block: the same stale-state trap the control arena has.
     entryCount_ = 0;
 }
 

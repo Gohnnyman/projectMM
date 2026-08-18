@@ -45,12 +45,12 @@ static std::vector<uint8_t> render(const char* src, int nLights, uint32_t t = 0)
 // The malformed-input tests further down don't gate: they assert failure, which succeeds for
 // the right reason (parse rejects) on arm64 and for a compatible reason (no codegen) on x86_64.
 #if MM_MOONLIVE_HAS_HOST_JIT
-TEST_CASE(mmScript("compileSource: fill(r,g,b) fills every light")) {
+TEST_CASE("compileSource: fill(r,g,b) fills every light") {
     auto buf = render(mmScript("fill(10, 20, 200);"), 8);
     for (int i = 0; i < 8; i++) { CHECK(buf[i*3]==10); CHECK(buf[i*3+1]==20); CHECK(buf[i*3+2]==200); }
 }
 
-TEST_CASE(mmScript("compileSource: setRGB(index, r,g,b) writes one pixel")) {
+TEST_CASE("compileSource: setRGB(index, r,g,b) writes one pixel") {
     auto buf = render(mmScript("setRGB(3, 255, 0, 0);"), 8);
     for (int i = 0; i < 8; i++) {
         uint8_t want = (i == 3) ? 255 : 0;
@@ -149,6 +149,23 @@ TEST_CASE("an empty function does not consume the recursion budget") {
     std::vector<uint8_t> buf(4 * 3, 0);
     eng.run(buf.data(), 4, 3, 0, "tick");
     CHECK(buf[0] == 255);   // draw() ran: the two empty calls left the budget where they found it
+}
+
+// An over-long function name is REFUSED, not truncated. The engine copies entry names into a
+// fixed buffer, so a longer one would be clipped there: and two functions sharing a 23-character
+// prefix would then land under the same name, with `entry()` returning whichever came first. A
+// call would dispatch to the wrong function and nothing would say so.
+TEST_CASE("a function name too long to store is refused, not silently truncated") {
+    uint8_t out[2048];
+    std::string longName(mm::moonlive::kMaxEntryName + 1, 'a');
+    const std::string src = "class T {\n  " + longName + "() { }\n  tick() { }\n}\n";
+    auto r = moonlive::compileSource(src.c_str(), kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+    CHECK(std::strlen(r.error) > 0);
+    // One character shorter is fine, so the limit is the limit and not an off-by-one.
+    const std::string ok = "class T {\n  " + longName.substr(1) + "() { }\n  tick() { }\n}\n";
+    auto r2 = moonlive::compileSource(ok.c_str(), kTable, kSys, out, sizeof(out));
+    CHECK(r2.ok);
 }
 
 // REMARK #1: every argument is an expression — random16 in ANY slot.
@@ -481,7 +498,7 @@ TEST_CASE("a class reports every function it defined, and where each one starts"
     CHECK(std::string(r.entries[1].name, r.entries[1].nameLen) == "tick");
 
     // The first entry opens the block; the second is further in. Without the offset map both would
-    // read 0, and a binding calling `tick` would run `helper` instead — silently, since both compile.
+    // read 0, and a binding calling `tick` would run `helper` instead: silently, since both compile.
     CHECK(r.entries[1].offset > r.entries[0].offset);
     CHECK(r.entries[1].offset < r.len);
 }

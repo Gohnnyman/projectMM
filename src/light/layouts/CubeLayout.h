@@ -142,7 +142,7 @@ private:
 
     // Resolve one serpentine pass's value for step `step` (0..count-1). Base
     // direction from `inc`; `snake` flips it when the enclosing counter `prev`
-    // is odd — the boustrophedon toggle. RECONSTRUCTED (see placeLights).
+    // is odd: the boustrophedon toggle. RECONSTRUCTED (see placeLights).
     static lengthType axisValue(lengthType step, lengthType count,
                                 bool inc, bool snake, lengthType prev) {
         bool ascending = inc;

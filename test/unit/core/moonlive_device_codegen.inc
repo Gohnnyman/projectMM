@@ -55,9 +55,9 @@ const char* kEffectLoop =
     "  tick() { for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); } }\n"
     "}\n";
 
-/// Compile for THIS TU's backend. `sysvars` picks the binding's vocabulary — they are different
-/// sets, not nested ones: a LAYOUT may use `x`/`y` as loop counters precisely because it is not
-/// handed them, which is what the shipped grid.mlv does.
+/// Compile for THIS TU's backend. `sysvars` is the ONE light vocabulary; the role-named
+/// accessors are aliases of it, so which one a caller passes is documentation rather than a
+/// behavioural choice (pinned by "the three roles are handed the same table").
 std::vector<uint8_t> emitBytes(const char* src, const mm::moonlive::SysVarTable& sysvars, bool& ok) {
     // Sized the way production sizes it, from the script's own token count — a test that always
     // allocated the sanity bound would pass while a right-sized caller overflowed.
@@ -254,8 +254,9 @@ TEST_CASE("every shipped script compiles for " MM_ISA_NAME) {
             std::ostringstream ss;
             ss << f.rdbuf();
             const std::string src = ss.str();
-            // Each binding supplies a DIFFERENT system-variable vocabulary, not a nested superset —
-            // a layout may use x/y as loop counters precisely because it is not handed them.
+            // Named per role for readability; all three are the same table. Kept as a per-kind
+            // selection rather than one call so this still reads as "compile it the way its
+            // binding does" if the roles ever diverge again.
             const std::string kind = sub;
             const auto& sysvars = kind == "layouts"   ? mm::moonlive::layoutSysVars()
                                 : kind == "modifiers" ? mm::moonlive::modifierSysVars()

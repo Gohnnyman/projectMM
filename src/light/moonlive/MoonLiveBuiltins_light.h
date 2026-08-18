@@ -360,7 +360,7 @@ enum : uint8_t {
 /// entitled to do, and the cost of a name nothing calls is a function that does not run, which is
 /// visible immediately rather than silent.
 inline constexpr const char* kEntryTick        = "tick";           // an effect, per frame
-inline constexpr const char* kEntryForEachCoord = "placeLights";  // a layout, placing lights
+inline constexpr const char* kEntryPlaceLights = "placeLights";  // a layout, placing lights
 inline constexpr const char* kEntryModify       = "modifyLogical"; // a modifier, folding one light
 
 /// The system variables EVERY light script can read. One vocabulary for all three roles, rather

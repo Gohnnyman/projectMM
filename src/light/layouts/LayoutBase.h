@@ -60,7 +60,7 @@ struct CoordSink {
 };
 
 /// Base for one layout child of the `Layouts` container. A concrete layout
-/// (grid, sphere shell, …) implements `lightCount` and `placeLights` directly —
+/// (grid, sphere shell, …) implements `lightCount` and `placeLights` directly ,
 /// no wrapper. Every layout control changes the physical light count, so any
 /// control change triggers the pipeline-wide rebuild.
 class LayoutBase : public MoonModule {

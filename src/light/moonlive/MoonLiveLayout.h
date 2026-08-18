@@ -108,7 +108,7 @@ public:
 private:
     /// Compile if the source has changed since the program that is loaded.
     ///
-    /// Called from prepare(), and also from lightCount()/placeLights — because applyState() runs
+    /// Called from prepare(), and also from lightCount()/placeLights: because applyState() runs
     /// PARENT-FIRST (MoonModule.h): the container computes its bounding box by walking its children
     /// before those children have prepared. A layout whose count is arithmetic (GridLayout) does not
     /// notice; one that needs a compiled program would report an empty fixture to whoever asked
@@ -174,8 +174,8 @@ private:
         moonlive::setAddLightSink(fn, ctx);
         // The placement moment: run `placeLights` if the script defined one. A script without it
         // places no lights, which the module reports as an empty fixture rather than a failure.
-        if (!engine_.hasEntry(moonlive::kEntryForEachCoord)) return;
-        const_cast<moonlive::MoonLive&>(engine_).run(scratch, 1, 3, 0, moonlive::kEntryForEachCoord);
+        if (!engine_.hasEntry(moonlive::kEntryPlaceLights)) return;
+        const_cast<moonlive::MoonLive&>(engine_).run(scratch, 1, 3, 0, moonlive::kEntryPlaceLights);
         moonlive::setAddLightSink(nullptr, nullptr);
     }
 

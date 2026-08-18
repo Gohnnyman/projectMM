@@ -84,6 +84,17 @@ Registered by the light domain, not built into the compiler (the core owns only 
 
 `turn(n)` exists because a full revolution is 65536 — one past the largest number a script can write — and the grammar has no division. Without it, placing `n` points evenly on a circle is not expressible.
 
+### The script's own functions
+
+A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mlv` is the worked example: a `column()` and a `row()`, both called from `tick()`.
+
+These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments and returns nothing yet, so a helper does a whole job rather than computing a value.
+
+Two rules a script author meets:
+
+- **Declare a helper above the function that calls it.** Only functions already parsed are visible, so a call to one declared further down reports `unknown function`. A function can always call itself.
+- **Recursion is bounded.** About 30 calls deep a further call does nothing and returns, because a render task has a fixed stack and the alternative to a limit is a device that resets mid-frame. It is not reported: what you see is the picture being wrong where the recursion stopped, on a device that keeps running.
+
 ### Wire contract — control declaration
 
 The controls are **derived from the script** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.

@@ -12,9 +12,11 @@ The script transforms **one coordinate**. It needs no loop over the lights, beca
 
 ```c
 class MirrorModifier {
-  tick() { setXYZ(0, width - 1 - xPos, yPos, zPos); }   // mirror along x
+  modifyLogical() { setXYZ(0, width - 1 - xPos, yPos, zPos); }   // mirror along x
 }
 ```
+
+The function is named `modifyLogical` because that is the moment a modifier is asked about: the Layer calls it once per light while building its mapping, and a script that does not define it passes every light through unchanged. An effect's moment is `tick`, a layout's is `placeLights`.
 
 The body is one expression per axis. Other shapes, in the same place:
 

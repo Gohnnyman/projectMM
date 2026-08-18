@@ -646,7 +646,7 @@ struct Parser {
     /// call support in this same step; this is the parse shape they will attach to.
     bool parseFunctionBody() {
         if (!expect(Tok::LParen,  "expected '(' after the function name")) return false;
-        if (!expect(Tok::RParen,  "expected ')' — parameters arrive with typed members")) return false;
+        if (!expect(Tok::RParen,  "expected ')': parameters arrive with typed members")) return false;
         if (!expect(Tok::LBrace,  "expected '{' to open the function body")) return false;
         while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End)
             if (!parseStatement()) return false;
@@ -680,6 +680,12 @@ struct Parser {
         while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End) {
             if (lex.kind != Tok::Ident) { fail("expected a function, or '}' to close the class"); return false; }
             if (fnCount >= kMaxEntryPoints) { fail("too many functions in one class"); return false; }
+            // The engine copies entry names into a fixed buffer, so a longer one would be
+            // TRUNCATED there. Two functions sharing a 23-character prefix would then land under
+            // the same name and `entry()` would return whichever came first: a call dispatched to
+            // the wrong function, silently. Refused here, where a control name already is, so the
+            // script author is told rather than the engine guessing.
+            if (lex.identLen > kMaxEntryName) { fail("function name too long"); return false; }
             fns[fnCount] = {lex.identBeg, static_cast<uint8_t>(lex.identLen),
                             static_cast<uint16_t>(ir.count)};
             // The IR carries the start INDEX; the lowering turns it into a byte offset.

@@ -5,7 +5,7 @@
 
 // Wrap a bare statement body in the class and entry point a MoonLive script needs.
 //
-// A script is a class: `class T { tick() { … } }`. Nearly every test here is about ONE behaviour
+// A script is a class: `class T { tick() { … } }`. Nearly every test here is about ONE behavior
 // inside that body (a loop counter surviving a call, a control keeping its value, a golden byte
 // sequence), and spelling the enclosing class out at every call site would bury the assertion under
 // four lines of identical ceremony. This puts the ceremony in one place so a test reads as what it
@@ -52,7 +52,7 @@ inline const char* mmScriptAs(const char* entry, const char* body) {
     }
 
     // A body past the buffer would be SILENTLY CLIPPED by snprintf, and the test would then check a
-    // script nobody wrote — which is how the runaway-script case stopped being a runaway. Refuse
+    // script nobody wrote, which is how the runaway-script case stopped being a runaway. Refuse
     // instead: a caller with a script this long builds its own std::string.
     if (std::strlen(body) + 64 >= kSlotBytes) return "";
 

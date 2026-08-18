@@ -55,21 +55,28 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // namespace, and a <utility> include here would land in it and nest a second `std`.
     auto reg = [](VReg v) { return static_cast<RegId>(v); };
 
-    // Reserve scratch only for the inline ops this program actually contains: FillElems needs two
-    // (loop counter + per-channel address), StoreElem one (the address, which must NOT be folded
-    // into the caller's index vreg, since that destroys a `for` counter). Reserving the maximum
-    // unconditionally cost a register every script paid for, and that register is what a nested
-    // loop was short of on the smallest file.
-    const uint8_t scratch = ir.hasInline(InlineOp::FillElems) ? 2
-                          : ir.hasInline(InlineOp::StoreElem) ? 1 : 0;
-    // A host CALL also needs two scratch registers, the address of its argument block and the
-    // count, but it SHARES them with the inline ops rather than reserving its own: a Call and an
-    // Inline are different IR instructions, so their scratch is never live at the same time, and
-    // both die at the end of the one instruction that uses them. Reserving separately cost two
-    // registers permanently, which on Xtensa's ten is the difference between compiling and not.
-    // The +1 is the host-argument reload: the host arguments live in frame slots (core parks them
-    // at entry), so an op that reads buf/nLights/cpl/ctrls brings one back for its own instruction.
-    const uint8_t scratchTotal = static_cast<uint8_t>((scratch < 2 ? uint8_t(2) : scratch) + 1);
+    // THREE scratch registers, for every program. Two are shared by everything that needs a
+    // temporary for the length of one instruction, and the third is the host-argument reload.
+    //
+    // The two shared ones (sAddr, sCtr below) serve, in turn: FillElems (loop counter +
+    // per-channel address), StoreElem (the address, which must NOT be folded into the caller's
+    // index vreg, since that destroys a `for` counter), a host Call (its argument block address
+    // and count), and the recursion depth guard (the counter and its comparand). None of those
+    // is live at the same time as another, because each dies inside the one instruction that
+    // uses it, so they share rather than reserve separately: reserving per user cost registers
+    // permanently, which on Xtensa's ten is the difference between compiling and not.
+    //
+    // NOT conditional on which inline ops the program contains, and the floor of two is what
+    // makes that safe. It reads like a missed optimization, and was one until the depth guard
+    // arrived: the guard is emitted in a function's prologue and uses both shared registers, in
+    // a script that may contain no inline op at all. A count derived from `hasInline` alone
+    // would hand the guard a register the program does not own.
+    //
+    // The +1 is the host-argument reload: the host arguments live in frame slots (core parks
+    // them at entry), so an op that reads buf/nLights/cpl/ctrls brings one back for its own
+    // instruction.
+    constexpr uint8_t kSharedScratch = 2;
+    const uint8_t scratchTotal = kSharedScratch + 1;
     if (!out || cap == 0) return 0;
 
     // Run the register allocator before lowering. It leaves a program that already fits untouched,
@@ -229,7 +236,7 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             // A real register move, NOT add-immediate-zero: Xtensa's addi.n cannot encode 0, since
             // the ISA reuses that slot for -1, so `dst = a + 0` silently computed a - 1. A loop
-            // counter initialised through Mov therefore started at -1, the unsigned loop guard saw
+            // counter initialized through Mov therefore started at -1, the unsigned loop guard saw
             // 0xffffffff >= limit, and the body never ran. It compiled, reported no error, and
             // placed no lights.
             case IrOp::Mov:    a.movReg(reg(op.dst), reg(op.a)); break;
