@@ -53,7 +53,11 @@
 using namespace mm;
 int main(int argc, char** argv) {
     const char* src = argc > 1 ? argv[1] : "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }";
-    uint8_t buf[4096];
+    // Sized the way the ENGINE sizes it, from the script's own token count. A fixed 4 KB refused
+    // ripples.mlv and rose.mlv on RISC-V, which emits ~1.3x Xtensa: the tool reported "codegen
+    // failed (too large)" for scripts a device compiles without trouble, so the one place that
+    // measures emitted size was lying about the two largest scripts.
+    static uint8_t buf[moonlive::kCodeCap];
     // Which BINDING to compile as, because the system-variable tables are different vocabularies and
     // not nested supersets: a modifier is handed `x`/`y`/`z`, and a LAYOUT deliberately is not, so it
     // may use those names as ordinary loop counters — which the shipped grid.mlv does. Compiling
@@ -67,7 +71,7 @@ int main(int argc, char** argv) {
     // and the emitted code carries a pointer to it. Static so the pointers stay valid while the
     // bytes below are dumped.
     static char strings[moonlive::CompileResult::kStringPool];
-    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(), sysvars, buf, sizeof(buf),
+    auto r = moonlive::compileSource(src, moonlive::lightBuiltins(), sysvars, buf, moonlive::codeCapFor(moonlive::countTokens(src)),
                                      nullptr, nullptr, strings, sizeof(strings));
     if (!r.ok) { printf("compile failed: %s\n", r.error); return 1; }
     printf("# %s\n# %zu bytes\n", src, r.len);

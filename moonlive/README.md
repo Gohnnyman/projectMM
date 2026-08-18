@@ -36,6 +36,44 @@ which is how a stateful effect holds a value the user should not see.
 The default comes from the declaration, the range from the call, and the quoted name is the UI
 label, free to differ from the member's name.
 
+**A member can be WRITTEN, which is what makes it state.** `level = level + 10;` assigns, and the
+value is still there on the next tick, because a member lives in storage that outlives the call. A
+loop variable can be assigned too. A [system variable](../docs/moonmodules/light/MoonLiveEffect.md)
+(`width`, `t`, `xPos`) cannot: the engine rewrites it before every call, so the store would vanish.
+
+A control CAN be assigned, and the effect is visible rather than surprising: the value moves under
+the slider until the user drags it again. Whether a member is a control is decided by
+`defineControls()` at run time, so the language does not distinguish the two here.
+
+**`if` and `else`,** with `<`, `<=`, `>`, `>=`, `==` and `!=`. Both sides are ordinary expressions:
+
+```c
+if (heat[i] > 40) { setRGB(i, 255, 90, 0); }
+else { setRGB(i, 0, 0, 0); }
+```
+
+**Members can be wider than a byte, and can be arrays.** `uint8_t` spans 0..255; `uint16_t` spans
+0..65535, which is what a position on a wall wider than 255 needs. An array is declared with a
+literal length and starts at zero:
+
+```c
+uint16_t phase = 900;      // a value a byte cannot hold
+uint8_t  heat[16];         // sixteen elements, all zero to begin with
+```
+
+An index is an arbitrary expression (`heat[i * 2 + 1]`), and an index outside the array is
+**clamped to the last element** rather than refused or allowed through: a script computes indices
+from live control values, so out of range is a normal run-time state, and the fixture shows a
+repeated last light instead of crashing.
+
+All of a class's members share a small fixed budget (`kCtrlBytes`), so a class that declares more
+than fits is a compile error naming the arena, not a failed allocation while a fixture runs.
+
+`effects/ember.mlv` is the worked example: a heat array that decays and re-ignites, so what it
+draws this frame depends on the last one. That is the line between an effect that evaluates a
+formula and one that runs a simulation, and it is the reason arrays exist. `plasma.mlv` would look
+identical if every frame started from scratch; `ember.mlv` would go dark.
+
 **Declare a helper above the function that calls it.** Only functions already parsed are visible, so
 a call to one declared further down reports `unknown function`. A function can always call itself.
 

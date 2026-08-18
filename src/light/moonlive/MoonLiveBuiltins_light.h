@@ -264,11 +264,14 @@ inline const AddControlSink& addControlSink() {
 }
 
 /// Point addUint8 at a consumer for the duration of one defineControls() run; nullptr to detach.
-inline void setAddControlSink(AddControlFn fn, void* ctx) {
+/// False when the two-slot table is full, which the caller must not treat as an installed sink:
+/// every addUint8 would then be a silent no-op and the script would publish no controls at all.
+inline bool setAddControlSink(AddControlFn fn, void* ctx) {
     detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
-    if (!s) return;
+    if (!s) return false;
     s->controls = {fn, ctx};
     if (!fn) detail::releaseIfEmpty(s);
+    return true;
 }
 
 /// Point addLight at a consumer for the duration of one run; pass nullptr to detach.
@@ -305,6 +308,10 @@ extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, co
     const char* name = reinterpret_cast<const char*>(args[0]);
     const AddControlSink s = addControlSink();
     if (!name || !s.fn || !s.ctx) return 0;      // no binding listening: the call is a no-op
+    // A bound is a byte, and the range is an ARBITRARY EXPRESSION, so `addUint8("n", n, 0, x * 64)`
+    // can compute past 255. Truncating would publish a slider whose top silently wraps to a small
+    // number; refusing the declaration leaves the control absent, which the user can see.
+    if (args[2] > 255 || args[3] > 255) return 0;
     s.fn(s.ctx, name, static_cast<uint8_t>(args[1]),
          static_cast<uint8_t>(args[2]), static_cast<uint8_t>(args[3]));
     return 0;
@@ -367,16 +374,16 @@ extern "C" inline uint32_t mm_light_line(const uintptr_t* args, uint32_t, const 
 //
 // `t` is an argument register (free to read); the rest are arena slots the BINDING writes each
 // frame from the layer it renders into. Their offsets are fixed constants above the script's
-// control range (see kMaxCtrls) — a binding caches these slot pointers, so they must never move.
+// control range (see kCtrlBytes): a binding caches these slot pointers, so they must never move.
 //
 // Adding one is a single line here plus the binding writing its slot.
 enum : uint8_t {
-    kSysWidth  = kMaxCtrls + 0,
-    kSysHeight = kMaxCtrls + 1,
-    kSysDepth  = kMaxCtrls + 2,
-    kSysX      = kMaxCtrls + 3,
-    kSysY      = kMaxCtrls + 4,
-    kSysZ      = kMaxCtrls + 5,
+    kSysWidth  = kCtrlBytes + 0,
+    kSysHeight = kCtrlBytes + 1,
+    kSysDepth  = kCtrlBytes + 2,
+    kSysX      = kCtrlBytes + 3,
+    kSysY      = kCtrlBytes + 4,
+    kSysZ      = kCtrlBytes + 5,
 };
 
 /// The system variables a light script can read. Each binding registers the names it actually
@@ -505,10 +512,14 @@ inline void runDefineControls(MoonLive& engine) {
     // A script with no defineControls() declares no controls, which is the honest answer for one
     // that wants no UI: there is nothing to clear and nothing to run.
     if (!engine.hasEntry(kEntryDefineControls)) return;
+    // Install BEFORE clearing. With the two-slot table full the sink cannot be installed, and a
+    // clear-then-run would drop every control and rebuild none of them: the script would appear to
+    // declare nothing. Keeping the previous set is the honest degrade, and the run is skipped
+    // rather than executed into a dead sink.
+    if (!setAddControlSink([](void* ctx, const char* n, uint8_t off, uint8_t lo, uint8_t hi) {
+            static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi);
+        }, &engine)) return;
     engine.clearDeclaredControls();      // re-runnable: rebuild rather than append
-    setAddControlSink([](void* ctx, const char* n, uint8_t off, uint8_t lo, uint8_t hi) {
-        static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi);
-    }, &engine);
     // A one-light scratch buffer: this entry point writes no pixels, but `run` refuses a null or
     // undersized one, and honoring that contract costs less than carving out an exception.
     uint8_t scratch[3] = {};

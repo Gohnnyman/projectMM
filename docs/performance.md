@@ -250,6 +250,20 @@ The **depth guard** is one arena byte, incremented on entry and decremented in t
 
 **Desktop tick across this cycle:** 150 → 133 µs (6666 → 7518 fps), measured by `collect_kpi.py --commit` at each commit. The gain is not from MoonLive — it tracks the two heap-overrun fixes and the register-reuse work landing earlier in the branch. No scenario `contract` was renegotiated on this branch: all 20 scenarios pass inside their existing budgets, which is the assertion surface this page defers to.
 
+**The compile-time staging buffer is sized from the script's tokens**, at 48 bytes per token plus a
+256-byte floor, and freed when the compile returns. The constant is the worst case rather than the
+average, because the buffer is allocated before a byte is emitted: measured across every shipped
+script on all three backends, the densest is `random-pixel.mlv` at 28.5 B/token on RISC-V (one
+statement, four nested `random16()` calls, each saving the whole register pool), so 48 is a ~1.7x
+margin. Density FALLS as a script grows, so a short call-dense script sets the bound: `gradient.mlv`
+is 5.9 and the longest shipped script is 15.3.
+
+It was 64, measured before host arguments moved into frame slots shrank what a call saves. At that
+figure the two longest scripts asked for more than the 16 KB sanity bound and were served by the
+clamp, so a script's buffer had stopped tracking its size. Re-measuring took 25% off the transient
+allocation, which matters on a classic ESP32 where the compile shares a 12 KB task. A per-ISA test
+pins that every shipped script still emits under two-thirds of its budget.
+
 **Flash**, measured by building the classic at the branch point and again with the local-call work: 1723295 → 1726027 bytes, +2732 (+0.16%). High per line of source (about 20 bytes for ~137 net lines of code) because nearly all of it is emitter code instantiated once per backend, so one line of the shared lowering becomes three copies of emitted-instruction sequences in the image.
 
 **The compile path's stack grew 640 bytes.** `kAsmLabels`/`kAsmFixups` went from 16/32 to 48/96 because a class allocates a label per function, so `lowerWith`'s frame went 480 → 1120 bytes on the classic — the largest on the chain (144 + 288 + 576 + 1120 = 2128 nested, 17% of the 12 KB main task). It is a compile-path local, not a per-tick cost, but the compile runs on the render task.

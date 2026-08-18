@@ -91,6 +91,10 @@ public:
     void mulReg(Reg d, Reg a, Reg b);    // mull aD, aA, aB
     void store8(Reg base, Reg off, Reg val);  // s8i via computed address (add then s8i,0)
     void load8(Reg d, Reg base, int32_t imm); // l8ui aDst, aBase, #imm — a control read
+    void store16(Reg base, Reg off, Reg val); // s16i via computed address (add then s16i,0)
+    void load16(Reg d, Reg base, int32_t imm);// l16ui aDst, aBase, #imm, a wide control read
+    void load8Idx(Reg d, Reg base, Reg off);  // add.n tmp,base,off ; l8ui d,tmp,0
+    void load16Idx(Reg d, Reg base, Reg off); // add.n tmp,base,off ; l16ui d,tmp,0
     void branchIfZero(Reg a, Label l);   // beqz aA, l  (nLights==0 guard)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu aA, aB, l  (Bounds: skip if a>=b)
     void branchNe(Reg a, Reg b, Label l);     // bne aA, aB, l   (loop test)

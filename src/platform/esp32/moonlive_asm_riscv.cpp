@@ -189,6 +189,26 @@ void RiscvAssembler::store8(Reg base, Reg off, Reg val) {
 void RiscvAssembler::load8(Reg d, Reg base, int32_t imm) {   // lbu rDst, imm(rBase) — control read
     emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);
 }
+void RiscvAssembler::store16(Reg base, Reg off, Reg val) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));   // t6 = base + off
+    // sh val, 0(t6): the S-type store, funct3 = 1 for a halfword where sb uses 0.
+    emit32((uint32_t(xr(val)) << 20) | (uint32_t(kScratchAddr) << 15) | (1u << 12) | 0x23u);
+}
+// lhu rDst, imm(rBase): funct3 = 5 where lbu uses 4. The immediate is in BYTES and unscaled, so
+// unlike arm64 no even-offset rule is forced by the encoding here.
+void RiscvAssembler::load16(Reg d, Reg base, int32_t imm) {
+    emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (5 << 12) | (xr(d) << 7) | 0x03);
+}
+// RISC-V has no register-offset addressing mode, so the address is computed first. Same shape as
+// store8/store16, which is why they share kScratchAddr.
+void RiscvAssembler::load8Idx(Reg d, Reg base, Reg off) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
+    emit32((uint32_t(kScratchAddr) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);     // lbu d, 0(t6)
+}
+void RiscvAssembler::load16Idx(Reg d, Reg base, Reg off) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
+    emit32((uint32_t(kScratchAddr) << 15) | (5 << 12) | (xr(d) << 7) | 0x03);     // lhu d, 0(t6)
+}
 void RiscvAssembler::branchIfZero(Reg a, Label l) {    // a == 0  ⇔  bgeu x0, a (unsigned 0 >= a)
     addFixup(len_, l);
     emit32(encBranch(0, xr(a), 7, 0));                 // bgeu x0, a, l  (patched)

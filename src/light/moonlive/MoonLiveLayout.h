@@ -47,7 +47,9 @@ public:
         // RECEIVE a width: the pipeline derives its bounding box from the coordinates the layouts
         // actually place (Layouts::prepare, "max coordinate + 1 per axis"), so a width handed in
         // from outside would be a second, disagreeing source of truth. A script that wants one
-        // declares it (`addUint8("width", width, 1, 64)`) and it becomes a real slider.
+        // declares it under its OWN name (`addUint8("cols", cols, 1, 64)`) and it becomes a real
+        // slider. Not `width`: that is a system variable the engine writes, so a script cannot
+        // declare it and the compiler refuses the name.
         uint8_t n = 0;
         const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
         for (uint8_t i = 0; i < n; i++) {
@@ -141,7 +143,11 @@ private:
             // RUNNING defineControls(). Before rebuildControls(), which turns the declared
             // list into UI cards.
             moonlive::runDefineControls(self->engine_);
-            self->clearStatus();
+            // A compiled script is not an error, but it has something to say: how big it is,
+            // and the one budget it is closest to using up. The card's memory figure is the
+            // ALLOCATION, word-rounded, which says nothing about the program itself.
+            self->engine_.describe(self->statusBuf_, sizeof(statusBuf_));
+            self->setStatus(self->statusBuf_, Severity::Status);
             self->compileFailed_ = false;
         } else {
             self->setStatus(err, Severity::Error);
@@ -184,6 +190,9 @@ private:
     }
 
     mutable moonlive::MoonLive engine_;
+    // Backing store for the status line: MoonModule::setStatus keeps a POINTER, so the text has to
+    // outlive the call. The same module-owned pattern NetworkModule uses.
+    char statusBuf_[48] = {};
 
     // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
     // "no script" and places no lights until one is named, rather than every new layout compiling

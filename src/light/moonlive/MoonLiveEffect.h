@@ -76,7 +76,11 @@ public:
             // RUNNING defineControls(). Before rebuildControls() below, which is what
             // turns the declared list into UI cards.
             moonlive::runDefineControls(engine_);
-            clearStatus();
+            // A compiled script is not an error, but it has something to say: how big it is,
+            // and the one budget it is closest to using up. The card's memory figure is the
+            // ALLOCATION, word-rounded, which says nothing about the program itself.
+            engine_.describe(statusBuf_, sizeof(statusBuf_));
+            setStatus(statusBuf_, Severity::Status);
         } else {
             setStatus(err, Severity::Error);
         }
@@ -129,6 +133,9 @@ public:
 
 private:
     moonlive::MoonLive engine_;
+    // Backing store for the status line: MoonModule::setStatus keeps a POINTER, so the text has to
+    // outlive the call. The same module-owned pattern NetworkModule uses.
+    char statusBuf_[48] = {};
     // Default script — random pixels: each tick lights one random light in a random RGB color.
     // A live, always-visible starting example (and a good demo-reel slot). The index random16(256)
     // covers a typical grid; setRGB bounds-guards it (an index past the light count is skipped, and

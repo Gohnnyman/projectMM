@@ -77,7 +77,11 @@ public:
             // RUNNING defineControls(). Before rebuildControls(), which turns the declared
             // list into UI cards.
             moonlive::runDefineControls(engine_);
-            clearStatus();
+            // A compiled script is not an error, but it has something to say: how big it is,
+            // and the one budget it is closest to using up. The card's memory figure is the
+            // ALLOCATION, word-rounded, which says nothing about the program itself.
+            engine_.describe(statusBuf_, sizeof(statusBuf_));
+            setStatus(statusBuf_, Severity::Status);
         } else {
             setStatus(err, Severity::Error);
         }
@@ -168,6 +172,9 @@ public:
 
 private:
     mutable moonlive::MoonLive engine_;
+    // Backing store for the status line: MoonModule::setStatus keeps a POINTER, so the text has to
+    // outlive the call. The same module-owned pattern NetworkModule uses.
+    char statusBuf_[48] = {};
 
     // Default script — a mirror on x. Chosen because it is instantly readable on a bench strand
     // (the pattern runs the other way) and is a modifier people actually reach for, so a working

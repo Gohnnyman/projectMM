@@ -271,8 +271,17 @@ TEST_CASE("every shipped script compiles for " MM_ISA_NAME) {
             INFO("script: ", kind, "/", entry.path().filename().string(), " on " MM_ISA_NAME);
             CHECK(ok);
             CHECK(n > 0);
+            // And it fits its own SIZING ESTIMATE with room to spare. codeCapFor allocates from a
+            // token count before a byte is emitted, so the constant is only right while the widest
+            // real script stays well inside it. This is what fails if a change makes codegen denser
+            // (a wider call sequence, a new per-statement guard) or if the constant is trimmed too
+            // far: 1.5x leaves margin for the next script, which the shipped set cannot predict.
+            const size_t budget = mm::moonlive::codeCapFor(mm::moonlive::countTokens(src.c_str()));
+            INFO("emitted ", n, " of a ", budget, "-byte budget");
+            CHECK(n * 3 <= budget * 2);
             checked++;
         }
     }
     CHECK(checked > 0);   // a silently empty folder would pass without this
 }
+

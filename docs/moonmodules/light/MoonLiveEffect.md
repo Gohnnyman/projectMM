@@ -109,6 +109,49 @@ Two rules a script author meets:
 
 The controls are **declared by the script** (one per `addUint8` call in its `defineControls()`), then **surfaced in `/api/state`**, the device JSON view the integrator consumes, as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
 
+## What the card tells you: size, memory, and how close to a wall
+
+Three numbers, and they are not the same thing.
+
+**`status` is the size of the compiled program**: how many bytes of machine code the script became.
+That is what a script author asks and what nothing else answers.
+
+**The memory figure (`696B + 1.4KB`) is what the module costs the device.** The first part is the
+module's own `sizeof`, fixed whether or not a script is loaded. The second is its dynamic bytes: the
+exec block holding the JIT'd code, plus the 17-byte control arena. So the status and the dynamic
+figure describe the same bytes from two angles, one as the program and one as the allocation, which
+is word-rounded and includes the arena.
+
+**`tickTimeUs` is the real per-tick cost** of running the compiled function, measured the way every
+module's is. `defineControls()` is not in it: that runs once after a compile.
+
+**A third allocation exists and appears nowhere**, deliberately. Compiling needs a staging buffer,
+sized from the script's token count before a byte is emitted, and it is freed the moment the compile
+returns. It never reaches a card because by the time the UI reads anything it is gone. It also does
+not accumulate: three scripted modules compiling in sequence each borrow and return it, so what
+persists per module is only the exec block, sized to what was actually emitted rather than to the
+estimate.
+
+### The walls, and which one the card warns about
+
+A script can exhaust ten limits, but only five are ones an author can act on:
+
+| limit | ceiling | what to do |
+|---|---|---|
+| code size | 16 KB | split or simplify the script |
+| controls | 8 | remove an `addUint8` |
+| members | 8 | shares the budget with controls |
+| functions | 8 | merge two helpers |
+| string bytes | 128 | shorter control labels |
+
+The other five (IR ops, virtual registers, frame slots, assembler labels and fixups) are derived
+from code size or loop nesting, so a number for them is noise: nothing an author writes addresses
+them directly.
+
+The card shows the **tightest** of the five, and only past half full: `1568 B, controls 8/8`. The
+others by definition have more room, so showing all five would bury the one that matters. An
+ordinary script reads its size and nothing else.
+
 ## Pieces
 
 - **`MoonLive`** (`src/core/moonlive/MoonLive.h/.cpp`) — the **domain-neutral engine core**. Owns a block of executable memory; `compile(source, table)` runs the front-end against a host builtin table and places the emitted code, `run(buf, nLights, cpl, t)` calls it. Includes only `<cstdint>`, the compiler/emitter seams, and the platform seam — never `EffectBase`, `Buffer`, or any LED type.

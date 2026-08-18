@@ -58,6 +58,18 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::AddImm:
         case IrOp::Spill:      out[0] = in.a;               return 1;
         case IrOp::LoadCtrl:   out[0] = kArg4;              return 1;   // reads the arena pointer
+        // A member STORE reads two things: the arena pointer and the value being written.
+        case IrOp::StoreCtrl:
+        case IrOp::StoreCtrl16: out[0] = kArg4; out[1] = in.a; return 2;
+        case IrOp::LoadCtrl16:  out[0] = kArg4;                return 1;   // reads the arena pointer
+        // An indexed access reads its INDEX (and, for a store, the value). The arena pointer is
+        // deliberately NOT reported: the rewriter below writes sources back POSITIONALLY (src[0]
+        // into in.a, src[1] into in.b), so listing kArg4 first would shift every real operand one
+        // place along, leaving the index in the value's field. LoadCtrl gets away with reporting
+        // it because it has no other source and reads the pointer through host(kArg4); these ops
+        // do the same, so kArg4 needs no live interval here either.
+        case IrOp::LoadIdx:     out[0] = in.a;               return 1;
+        case IrOp::StoreIdx:    out[0] = in.a; out[1] = in.b; return 2;
         case IrOp::Add:
         case IrOp::Mul:
         case IrOp::BranchGe:
@@ -87,6 +99,10 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
 bool writesDst(IrOp op) {
     switch (op) {
         case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchNe:
+        // A member store writes MEMORY, not a register: its `a` is the value and `imm` the arena
+        // offset, so reading its dst as a definition would give vreg 0 a spurious live range.
+        case IrOp::StoreCtrl:
+        case IrOp::StoreCtrl16:
         // CallScript writes no dst either: a script function returns nothing today, so the call is
         // a statement rather than an expression. When it gains a return value this moves.
         case IrOp::CallScript:

@@ -23,7 +23,8 @@
 // The assembler contract, which all three satisfy:
 //   ctor(size_t cap), newLabel, bind, prologue(uint8_t), epilogue, alignForEntry, finalize,
 //   bytes, size, overflowed, spillStore, spillLoad, slotAddr,
-//   movImm, movPtr, movReg, addImm, addReg, mulReg, store8, load8,
+//   movImm, movPtr, movReg, addImm, addReg, mulReg, store8, load8, store16, load16,
+//   load8Idx, load16Idx,
 //   branchIfZero, branchGeU, branchNe, call, callLabel, and kMaxSpillSlots.
 // The branches are the FUSED forms (compare-and-branch as one call). arm64 has no such
 // instruction and spells each as cmp + b.cond inside its assembler, which is exactly where a
@@ -253,6 +254,63 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                     a.branchNe(reg(op.a), reg(op.b), labelFor(op.imm));
                 break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), host(kArg4), op.imm); break;   // dst = ctrls[imm]
+            case IrOp::LoadCtrl16: a.load16(reg(op.dst), host(kArg4), op.imm); break;  // dst = *(u16*)(ctrls+imm)
+            // An ARRAY element. `imm` is the array's base, op.c the element width and op.d the
+            // element count, so both the scaling and the bound come from the IR rather than from a
+            // rule the backends would each have to know.
+            //
+            // The index is CLAMPED, not checked-and-skipped. A script computes an index from live
+            // control values, so out of range is an ordinary run-time state rather than a defect,
+            // and every arena write has to stay inside the member: the system variables and the
+            // recursion depth counter share this allocation, and a stray write would corrupt the
+            // engine rather than the picture. Clamping costs one compare and one conditional
+            // branch, which is what a bounds check costs anyway.
+            case IrOp::LoadIdx:
+            case IrOp::StoreIdx: {
+                const uint8_t width = idxWidth(op.imm);
+                const uint8_t count = idxCount(op.imm);
+                const RegId idx = reg(op.a);
+                // clamp: if (idx >= count) idx = count - 1, as ONE branch. sCtr holds the LAST
+                // valid index rather than the count, so the guard is `last >= idx`, which is true
+                // exactly when idx is in range and skips the fix-up. branchGeU is unsigned and the
+                // index is unsigned, so this also catches a negative index: it arrives as a huge
+                // unsigned value, fails the test, and clamps to the last element like any other
+                // out-of-range one.
+                const LabelId inRange = a.newLabel();
+                a.movImm(sCtr, count - 1);
+                a.branchGeU(sCtr, idx, inRange);
+                a.movReg(idx, sCtr);
+                a.bind(inRange);
+                a.movImm(sAddr, width);
+                a.mulReg(idx, idx, sAddr);              // idx *= width  (a byte offset now)
+                a.addImm(idx, idx, idxBase(op.imm));    // ... plus the array's base
+                if (op.op == IrOp::LoadIdx) {
+                    if (width == 2) a.load16Idx(reg(op.dst), host(kArg4), idx);
+                    else            a.load8Idx(reg(op.dst), host(kArg4), idx);
+                } else {
+                    if (width == 2) a.store16(host(kArg4), idx, reg(op.b));
+                    else            a.store8(host(kArg4), idx, reg(op.b));
+                }
+                break;
+            }
+            case IrOp::StoreCtrl16: {
+                // Same shape as the byte store: the offset goes through a register because the
+                // per-light writer computes its index, and sCtr rather than sAddr because store16
+                // clobbers its own address temp.
+                a.movImm(sCtr, op.imm);
+                a.store16(host(kArg4), sCtr, reg(op.a));
+                break;
+            }
+            case IrOp::StoreCtrl: {
+                // ctrls[imm] = a. store8 addresses through a REGISTER holding the offset, because
+                // it is the per-light writer's shape where the index is computed, so the constant
+                // goes into the shared scratch first. sCtr rather than sAddr: store8 clobbers its
+                // own address temp on some backends, and sAddr is that temp.
+                const RegId arena = host(kArg4);
+                a.movImm(sCtr, op.imm);
+                a.store8(arena, sCtr, reg(op.a));
+                break;
+            }
             // The allocator's two ops. `imm` is a slot INDEX; the assembler owns the frame layout.
             case IrOp::CallScript: {
                 // `imm` is the callee's function NUMBER, so the label is a direct index. The

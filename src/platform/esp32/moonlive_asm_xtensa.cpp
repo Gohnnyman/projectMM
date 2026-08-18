@@ -264,9 +264,26 @@ void XtensaAssembler::movReg(Reg d, Reg a) {
     const uint8_t b[2] = {uint8_t((ar(d) << 4) | 0xd), ar(a)};
     emit(b, 2);
 }
-// addi.n aD, aA, #imm (1..15) : word (d<<12)|(a<<8)|(imm<<4)|0xb
+// addi.n aD, aA, #imm : word (d<<12)|(a<<8)|(imm<<4)|0xb.
+//
+// The narrow form's 4-bit field encodes 1..15, and the bit pattern 0 means MINUS ONE, not zero.
+// So a caller asking to add 0 must emit no add at all, and anything outside 1..15 needs the wide
+// `addi` (8-bit signed) instead. Every caller passed a literal 1 until an array whose base offset
+// is 0 asked for `+0`; that emitted `addi.n aX, aX, -1` and shifted every element access down a
+// byte, which reached a device as a fixture that stayed dark while all host tests passed.
 void XtensaAssembler::addImm(Reg d, Reg a, int32_t imm) {
-    emit2(uint16_t((ar(d) << 12) | (ar(a) << 8) | ((imm & 0xf) << 4) | 0xb));
+    if (imm == 0) {
+        if (ar(d) != ar(a)) movReg(d, a);      // still a move: d = a + 0
+        return;
+    }
+    if (imm >= 1 && imm <= 15) {
+        emit2(uint16_t((ar(d) << 12) | (ar(a) << 8) | ((imm & 0xf) << 4) | 0xb));
+        return;
+    }
+    // addi aD, aA, #imm8 (RRI8, signed -128..127): bytes [ (d<<4)|2, 0xc0|a, imm ].
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0xc0 | ar(a)),
+                          uint8_t(imm & 0xff)};
+    emit(b, 3);
 }
 // mull aD, aA, aB : 24-bit 0x820000 | (d<<12) | (a<<8) | (b<<4)
 void XtensaAssembler::mulReg(Reg d, Reg a, Reg b) {
@@ -285,6 +302,34 @@ void XtensaAssembler::store8(Reg base, Reg off, Reg val) {
 // l8ui aDst, aBase, #imm (0..255) : bytes [ (dst<<4)|2, base, imm ] — zero-extended byte load.
 void XtensaAssembler::load8(Reg d, Reg base, int32_t imm) {
     const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), ar(base), uint8_t(imm & 0xff)};
+    emit(b, 3);
+}
+
+void XtensaAssembler::store16(Reg base, Reg off, Reg val) {
+    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
+    // s16i aVal, a12, 0: RRI8 with r = 5 where s8i uses 4.
+    const uint8_t b[3] = {uint8_t((ar(val) << 4) | 0x2), uint8_t(0x50 | kAddrScratch), 0x00};
+    emit(b, 3);
+}
+// l16ui aDst, aBase, #imm : bytes [ (dst<<4)|2, 0x10|base, imm/2 ]. The RRI8 immediate is SCALED
+// by 2 for a halfword access, so the field holds imm/2 and an odd offset is not encodable: a
+// halfword member sits on an even byte, which the arena cursor guarantees.
+void XtensaAssembler::load16(Reg d, Reg base, int32_t imm) {
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x10 | ar(base)),
+                          uint8_t((imm >> 1) & 0xff)};
+    emit(b, 3);
+}
+
+// Xtensa has no register-offset load either. The computed address goes through kAddrScratch, the
+// same temp store8/store16 use, and the RRI8 offset is 0 so the halfword scaling never applies.
+void XtensaAssembler::load8Idx(Reg d, Reg base, Reg off) {
+    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), kAddrScratch, 0x00};           // l8ui d, a12, 0
+    emit(b, 3);
+}
+void XtensaAssembler::load16Idx(Reg d, Reg base, Reg off) {
+    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x10 | kAddrScratch), 0x00};  // l16ui d, a12, 0
     emit(b, 3);
 }
 

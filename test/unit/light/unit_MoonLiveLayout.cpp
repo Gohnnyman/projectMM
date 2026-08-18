@@ -256,6 +256,15 @@ TEST_CASE("a scripted control keeps its live value when the script is edited") {
     l.prepare();
     CHECK(l.lightCount() == 16);
 
+    // A member INSERTED ABOVE cols shifts cols to the next arena byte, so the byte cols used to
+    // own now belongs to `pad`. Identity is the name at an offset, not the declaration position:
+    // pad must take its own 4 rather than inherit the 16 the user had dialed into cols.
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t pad = 4;\n"
+                "uint8_t cols = 7;\n"
+                "for (i = 0; i < pad; i = i + 1) { addLight(i, 2, 0); }")));
+    l.prepare();
+    CHECK(l.lightCount() == 4);
+
     // A script whose first control is a NEW slot gets its own initialiser: nothing to inherit.
     l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 16;\n"
                 "uint8_t rows = 3;\n"
@@ -607,3 +616,27 @@ TEST_CASE("a script name at the accepted length survives the control it is store
     CHECK(l.lightCount() == 1);
 #endif
 }
+
+#if MM_MOONLIVE_HAS_HOST_JIT
+// A SERPENTINE over an arbitrary number of rows: every other row reversed. This was the standing
+// example of what the language could not express, because it needs a per-row decision and there
+// was no `if`. It is also the most common real panel wiring, so it is worth pinning as a layout
+// rather than only as a compiler test.
+TEST_CASE("a serpentine layout places every light exactly once") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript(mmWriteScript(mmScriptAs("placeLights",
+        "uint8_t cols = 4;\n"
+        "uint8_t rows = 3;\n"
+        "uint8_t odd = 0;\n"
+        "for (y = 0; y < rows; y = y + 1) {\n"
+        "  for (x = 0; x < cols; x = x + 1) {\n"
+        "    if (odd == 0) { addLight(x, y, 0); }\n"
+        "    else { addLight(cols - 1 - x, y, 0); }\n"
+        "  }\n"
+        "  if (odd == 0) { odd = 1; } else { odd = 0; }\n"
+        "}")));
+    l.prepare();
+    CHECK(l.lightCount() == 12);   // 4 x 3, every cell placed once and none twice
+}
+#endif  // MM_MOONLIVE_HAS_HOST_JIT: the script must COMPILE for the count to mean anything.

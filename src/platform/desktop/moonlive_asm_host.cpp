@@ -152,6 +152,26 @@ void HostAssembler::store8(Reg base, Reg off, Reg val) {   // strb wVal, [xBase,
 void HostAssembler::load8(Reg d, Reg base, int32_t imm) {  // ldrb wDst, [xBase, #imm12]
     emit32(0x39400000u | ((uint32_t(imm) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
 }
+void HostAssembler::store16(Reg base, Reg off, Reg val) {  // strh wVal, [xBase, xOff]
+    emit32(0x78206800u | (mr(off) << 16) | (mr(base) << 5) | mr(val));
+}
+// ldrh wDst, [xBase, #imm12]. The immediate is SCALED by the access size, so the field holds
+// imm/2 and an odd offset cannot be encoded at all: a halfword member is placed on an even byte
+// (see the arena cursor), which is what makes the scaled form usable rather than a constraint
+// invented here.
+void HostAssembler::load16(Reg d, Reg base, int32_t imm) {
+    emit32(0x79400000u | (((uint32_t(imm) >> 1) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
+}
+// ldrb wDst, [xBase, xOff] and ldrh wDst, [xBase, xOff]. The register-offset form takes the index
+// UNSCALED for a byte; for a halfword the LSL amount would scale it, and it is left at 0 so the
+// index the caller passes is a BYTE offset in both cases. That keeps one rule for the lowering:
+// an element index is multiplied by the element width before it gets here, never after.
+void HostAssembler::load8Idx(Reg d, Reg base, Reg off) {   // ldrb wDst, [xBase, xOff]
+    emit32(0x38606800u | (mr(off) << 16) | (mr(base) << 5) | mr(d));
+}
+void HostAssembler::load16Idx(Reg d, Reg base, Reg off) {  // ldrh wDst, [xBase, xOff]
+    emit32(0x78606800u | (mr(off) << 16) | (mr(base) << 5) | mr(d));
+}
 void HostAssembler::cmp(Reg a, Reg b) {                    // cmp wA, wB  (subs wzr, wA, wB)
     emit32(0x6b00001fu | (mr(b) << 16) | (mr(a) << 5));
 }

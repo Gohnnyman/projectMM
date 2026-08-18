@@ -93,6 +93,33 @@ enum class IrOp : uint8_t {
                // op hands the emitted code a pointer that outlives it.
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
     LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
+    LoadCtrl16,  // dst = *(uint16_t*)((const uint8_t*)kArg4 + imm): read a WIDE member.
+                 // Separate ops rather than a width field on LoadCtrl/StoreCtrl: every backend
+                 // switch is exhaustive over IrOp, so a new op makes a backend that forgot the
+                 // width fail to COMPILE, where a field it silently ignored would emit a byte
+                 // access against a two-byte member and lose the high half at run time.
+    StoreCtrl16, // *(uint16_t*)((uint8_t*)kArg4 + imm) = a: write a WIDE member.
+    LoadIdx,   // dst = arena[base + a * width]: read an ARRAY element, index in vreg `a`.
+    StoreIdx,  // arena[base + a * width] = b: write an ARRAY element, index in vreg `a`.
+               // base, width and count are PACKED INTO `imm` (idxPack/idxBase/idxWidth/idxCount),
+               // NOT carried in c/d. Those are VREG fields, and the spill pass renumbers every
+               // vreg an op reports as a source, so a width parked there is rewritten into a
+               // register number: the array then addresses the wrong byte with the wrong stride.
+               // Call documents the same trap for its argument count. This one reached a device,
+               // because arm64's register map made the renumbering a no-op and every host test
+               // passed; only Xtensa showed it, as a fixture that stayed dark.
+               //
+               // The pack lets the lowering scale the index and bounds-check it: an out-of-range index is CLAMPED to the
+               // last element rather than faulting, because a script computes indices from live
+               // control values and a fixture must degrade visibly, never crash (the robustness
+               // rule). Clamping keeps every write inside the member, so it cannot corrupt the
+               // system variables or the depth counter that share the arena.
+    StoreCtrl, // ((uint8_t*)kArg4)[imm] = a: write an arena byte, which is what a MEMBER is.
+               // A control is read-only to the script (the UI owns its value); a member is the
+               // script's own state, so it needs the other direction. Same storage and the same
+               // offset space, so the only new thing is the store. An arena byte outlives every
+               // call and keeps its address across a recompile, which is exactly what "survives
+               // the tick" means, and is why a stateful effect needs this op and not a frame slot.
     Mov,       // dst = a — the assignment a loop variable needs (vregs are otherwise write-once)
     Label,     // a branch target; `imm` is the label id. Emits no instruction.
     BranchGe,  // if (a >= b) goto label `imm` — UNSIGNED. The loop's ENTRY guard: skip a loop
@@ -127,15 +154,46 @@ struct IrInst {
 // knows {name, a neutral type, range, default, and the byte offset into the run-time controls
 // arena it lives at}. The light-domain binding turns this into a real MoonModule control bound to
 // the arena slot. `type` is a neutral kind — Uint8 only in Stage 1 — NOT a projectMM ControlType.
-enum class CtrlType : uint8_t { Uint8 };
+/// A member's element type. The WIDTH is derived from it rather than stored beside it, so the two
+/// can never disagree: a record carrying both would let a `Uint16` claim one byte.
+enum class CtrlType : uint8_t { Uint8, Uint16 };
+
+/// Bytes one element of `t` occupies in the arena.
+constexpr uint8_t ctrlWidth(CtrlType t) { return t == CtrlType::Uint16 ? 2 : 1; }
 
 struct DeclaredControl {
     const char* name = nullptr;        // script-declared name (points into the source buffer)
-    uint8_t     min = 0, max = 255, def = 0;   // uint8 range/default (Stage 1 is uint8 controls)
+    uint8_t     min = 0, max = 255;    // the UI range; a control is a uint8 slider either way
+    // The initializer, wide enough for the widest member type. A control's range stays 0..255
+    // because that is what addUint8 declares and what a slider spans; the DEFAULT is separate,
+    // since a uint16_t member holds a value no slider needs to reach.
+    uint16_t    def = 0;
     uint8_t     nameLen = 0;           // length (the source is not NUL-terminated per token)
     CtrlType    type = CtrlType::Uint8;
-    uint8_t     offset = 0;            // byte offset into the controls arena (declaration order)
+    // Byte offset into the controls arena, assigned as a running CURSOR in declaration order. Not
+    // the declaration index: a Uint16 costs two bytes and an array costs count * width, so the
+    // n-th member is no longer at byte n. Everything downstream (the bindings' cached slot
+    // pointers, persistence, addUint8's by-reference argument) already keys on this offset, which
+    // is why widening a member does not reach any of them.
+    uint8_t     offset = 0;
+    // Elements: 1 for a scalar, the length for an array. Total bytes is count * ctrlWidth(type).
+    uint8_t     count = 1;
 };
+
+/// LoadIdx/StoreIdx pack (base, width, count) into the single `imm` field, because `imm` is the
+/// only per-instruction field the register allocator does not rewrite. One encoder and three
+/// accessors, so the emitter and the lowering cannot disagree about the layout.
+constexpr int32_t idxPack(uint8_t base, uint8_t width, uint8_t count) {
+    return int32_t(base) | (int32_t(width) << 8) | (int32_t(count) << 16);
+}
+constexpr uint8_t idxBase(int32_t p)  { return uint8_t(p & 0xff); }
+constexpr uint8_t idxWidth(int32_t p) { return uint8_t((p >> 8) & 0xff); }
+constexpr uint8_t idxCount(int32_t p) { return uint8_t((p >> 16) & 0xff); }
+
+/// Bytes a whole member occupies (its elements, at its width).
+constexpr uint16_t ctrlBytes(const DeclaredControl& d) {
+    return uint16_t(d.count) * ctrlWidth(d.type);
+}
 
 /// Branch targets one IR program may use. Two per `for` (entry guard + back edge), and the counter
 /// runs for the whole program rather than per scope — a label is never reused once a loop closes —

@@ -188,6 +188,46 @@ TEST_CASE("elapsed time survives a call that happens before it is read") {
 }
 #endif
 
+// The card says how big the compiled program is, and warns only when a budget is nearly gone.
+//
+// Size, because nothing could answer "how big is my script": the card's memory figure is the
+// word-rounded ALLOCATION, which says nothing about the program. One budget, not five, and only
+// past half full: a script can hit ten ceilings, but five are derived from code size or nesting
+// and a number the author cannot act on is noise.
+TEST_CASE("a compiled script reports its size, and its tightest budget only when it is filling up") {
+    moonlive::MoonLive eng;
+    char buf[48] = {};
+
+    // Nothing compiled: nothing to say.
+    eng.describe(buf, sizeof(buf));
+    CHECK(buf[0] == '\0');
+
+    // An ordinary script is nowhere near a wall, so it reports only its size.
+    REQUIRE(eng.compile("class T {\n  uint8_t bpm = 30;\n"
+                        "  defineControls() { addUint8(\"bpm\", bpm, 1, 240); }\n"
+                        "  tick() { setRGB(0, bpm, 0, 0); }\n}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng);
+    eng.describe(buf, sizeof(buf));
+    INFO("described: " << buf);
+    CHECK(std::strstr(buf, " B") != nullptr);        // a byte count
+    CHECK(std::strstr(buf, "/") == nullptr);          // and no budget: 1 of 8 controls is not news
+    CHECK(eng.codeLen() > 0);
+
+    // A script using every control slot is one edit from failing, so the card says which wall.
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t a=1; uint8_t b=1; uint8_t c=1; uint8_t d=1;\n"
+                        "  uint8_t e=1; uint8_t f=1; uint8_t g=1; uint8_t h=1;\n"
+                        "  defineControls() { addUint8(\"a\",a,0,9); addUint8(\"b\",b,0,9);\n"
+                        "    addUint8(\"c\",c,0,9); addUint8(\"d\",d,0,9); addUint8(\"e\",e,0,9);\n"
+                        "    addUint8(\"f\",f,0,9); addUint8(\"g\",g,0,9); addUint8(\"h\",h,0,9); }\n"
+                        "  tick() { setRGB(0, a, b, c); }\n}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng);
+    eng.describe(buf, sizeof(buf));
+    INFO("described: " << buf);
+    CHECK(std::strstr(buf, "controls 8/8") != nullptr);
+    eng.free();
+}
+
 // A FAILED recompile drops the declared controls rather than leaving them named "".
 //
 // The editor loop pushes broken text constantly: that is what editing is. A control's `name` is a
@@ -436,4 +476,460 @@ TEST_CASE("calling a function no one declared is a compile error") {
     CHECK(std::string(r.error) == "unknown function");
 }
 
-#endif  // MM_MOONLIVE_HAS_HOST_JIT
+
+// A member could be declared and read but never WRITTEN: `x = expr;` was reachable only inside a
+// for header. That made every member a constant, so the whole class of effects that carry state
+// forward (fire, trails, decay) was inexpressible. This is the statement that makes a member state.
+TEST_CASE("a member written by one tick is read by the next") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t level = 0;\n"
+                        "  tick() {\n"
+                        "    level = level + 10;\n"
+                        "    setRGB(0, level, 0, 0);\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 10);            // seeded 0, plus this tick's 10
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 20);            // the arena byte carried the 10 across the call
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 30);
+    eng.free();
+}
+
+// The other half of "a member is the script's own state": one function writes it, another reads it.
+// A frame slot could not do this, because each function has its own frame.
+TEST_CASE("a member written by one function is read by another") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t shared = 0;\n"
+                        "  stash() { shared = 7; }\n"
+                        "  tick() { stash(); setRGB(0, shared * 3, 0, 0); }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, "tick");   // named: a multi-function class has no single "the program"
+    CHECK(px[0] == 21);
+    eng.free();
+}
+
+// A loop counter is a frame slot, and the step clause already writes one, so a body assignment is
+// the same store: refusing it would have made the header a special case for no reason.
+TEST_CASE("a loop variable can be assigned in the loop body") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  tick() {\n"
+                        "    for (i = 0; i < 8; i = i + 1) {\n"
+                        "      i = i + 1;\n"          // skips every other light
+                        "      setRGB(i, 99, 0, 0);\n"
+                        "    }\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[24] = {};
+    eng.run(px, 8, 3, 0);
+    CHECK(px[1 * 3] == 99);        // 1, 3, 5, 7 written
+    CHECK(px[3 * 3] == 99);
+    CHECK(px[0] == 0);             // 0, 2, 4, 6 skipped
+    CHECK(px[2 * 3] == 0);
+    eng.free();
+}
+
+// The engine rewrites a system variable before every call, so a store to one would be silently
+// undone. Refused with the reason, rather than compiling into something that does not work.
+TEST_CASE("a system variable cannot be assigned") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { tick() { width = 4; } }", kCtrlTable, kSys));
+    eng.free();
+}
+
+// An assignment to a name nothing declared is a typo, and the message says where a name comes from.
+TEST_CASE("assigning to an undeclared name is refused") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { tick() { nope = 4; } }", kCtrlTable, kSys));
+    eng.free();
+}
+
+
+// Every comparison, at, above and below the boundary. Six operators lower onto TWO branch ops by
+// swapping operands and negating the sense, so an off-by-one in that mapping is invisible except at
+// the boundary itself: `a < b` and `a <= b` differ on exactly one input. The table is the proof.
+TEST_CASE("if: every comparison is exact at its boundary") {
+    struct Case { const char* op; uint8_t lit; uint8_t expect[3]; };  // probe a = 4, 5, 6 against 5
+    const Case cases[] = {
+        {"<",  5, {1, 0, 0}},
+        {"<=", 5, {1, 1, 0}},
+        {">",  5, {0, 0, 1}},
+        {">=", 5, {0, 1, 1}},
+        {"==", 5, {0, 1, 0}},
+        {"!=", 5, {1, 0, 1}},
+    };
+    for (const auto& c : cases) {
+        for (uint8_t i = 0; i < 3; i++) {
+            const uint8_t a = uint8_t(4 + i);
+            char src[192];
+            std::snprintf(src, sizeof(src),
+                          "class T { tick() { if (%u %s %u) { setRGB(0, 1, 0, 0); } } }",
+                          a, c.op, c.lit);
+            moonlive::MoonLive eng;
+            CAPTURE(src);
+            REQUIRE(eng.compile(src, kCtrlTable, kSys));
+            uint8_t px[3] = {};
+            eng.run(px, 1, 3, 0);
+            CHECK(px[0] == c.expect[i]);
+            eng.free();
+        }
+    }
+}
+
+// An else-block must run when, and only when, the then-block did not: the then-block falls through
+// to the end label rather than into the else, which is the jump an if without an else never needs.
+TEST_CASE("if/else takes exactly one branch") {
+    for (uint8_t a = 4; a <= 6; a++) {
+        char src[224];
+        std::snprintf(src, sizeof(src),
+                      "class T { tick() { if (%u < 5) { setRGB(0, 11, 0, 0); }"
+                      " else { setRGB(0, 22, 0, 0); } } }", a);
+        moonlive::MoonLive eng;
+        CAPTURE(src);
+        REQUIRE(eng.compile(src, kCtrlTable, kSys));
+        uint8_t px[3] = {};
+        eng.run(px, 1, 3, 0);
+        CHECK(px[0] == (a < 5 ? 11 : 22));
+        eng.free();
+    }
+}
+
+// A conditional inside a loop is where a mis-scoped label shows: the if's skip must land inside the
+// body, not past the back edge, or the loop runs once and exits.
+TEST_CASE("an if inside a for runs the body every iteration") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  tick() {\n"
+                        "    for (i = 0; i < 6; i = i + 1) {\n"
+                        "      if (i < 3) { setRGB(i, 50, 0, 0); }\n"
+                        "      else { setRGB(i, 200, 0, 0); }\n"
+                        "    }\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[18] = {};
+    eng.run(px, 6, 3, 0);
+    for (uint8_t i = 0; i < 6; i++) CHECK(px[i * 3] == (i < 3 ? 50 : 200));
+    eng.free();
+}
+
+// The condition is an ordinary expression on both sides, not a name-against-literal special case:
+// the same orthogonality that lets addUint8 take a computed range.
+TEST_CASE("an if condition may be an expression on both sides") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t base = 3;\n"
+                        "  tick() { if (base * 2 >= base + 2) { setRGB(0, 42, 0, 0); } }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 42);      // 6 >= 5
+    eng.free();
+}
+
+// A conditional makes a member's value decide control flow, which is the combination step 3a and
+// step 6 exist for: state that steers, rather than state that is only read out.
+TEST_CASE("a member decides which branch a tick takes") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t phase = 0;\n"
+                        "  tick() {\n"
+                        "    if (phase == 0) { setRGB(0, 7, 0, 0); phase = 1; }\n"
+                        "    else { setRGB(0, 9, 0, 0); phase = 0; }\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0); CHECK(px[0] == 7);
+    eng.run(px, 1, 3, 0); CHECK(px[0] == 9);
+    eng.run(px, 1, 3, 0); CHECK(px[0] == 7);
+    eng.free();
+}
+
+// `=` and `==` differ by one character and mean opposite things. Maximal munch is what keeps them
+// apart, and lexing `==` as two assignments would make a comparison silently parse as something else.
+TEST_CASE("== is one token, not two assignments") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { tick() { if (1 = 1) { setRGB(0,1,0,0); } } }", kCtrlTable, kSys));
+    eng.free();
+}
+
+// A member's arena offset is a BYTE CURSOR, not its declaration index. While every member was one
+// byte the two were the same number, and the difference is invisible until a member is wider than a
+// byte or is an array. Pinned now, because everything downstream keys on the offset: the bindings
+// cache arena slot pointers, persistence uses it, and addUint8 passes it by reference.
+TEST_CASE("member offsets are byte cursors assigned in declaration order") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t a = 1;\n"
+                        "  uint8_t b = 2;\n"
+                        "  uint8_t c = 3;\n"
+                        "  defineControls() {\n"
+                        "    addUint8(\"a\", a, 0, 9);\n"
+                        "    addUint8(\"b\", b, 0, 9);\n"
+                        "    addUint8(\"c\", c, 0, 9);\n"
+                        "  }\n"
+                        "  tick() { setRGB(0, a, b, c); }\n"
+                        "}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng);
+    uint8_t n = 0;
+    const moonlive::DeclaredControl* dc = eng.declaredControls(n);
+    REQUIRE(n == 3);
+    // Distinct, ascending, and each one addressing its own live byte: three members must never
+    // share a slot, which is what a cursor that failed to advance would produce.
+    CHECK(dc[0].offset == 0);
+    CHECK(dc[1].offset == 1);
+    CHECK(dc[2].offset == 2);
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, "tick");
+    CHECK(px[0] == 1);
+    CHECK(px[1] == 2);
+    CHECK(px[2] == 3);
+    eng.free();
+}
+
+// The arena's byte budget and the record count are now two different limits, and a script can
+// exhaust either one first. Asking for more member data than the arena holds is a compile error
+// with a message about the arena, rather than a member silently landing on top of another one.
+TEST_CASE("a class declaring more member data than the arena holds is refused") {
+    // The record limit (kMaxCtrls) is reached long before the byte limit when every member is a
+    // byte, so the BYTE limit is provoked with arrays: two of them exceed kCtrlBytes together
+    // while staying well inside the record count. Sized from the constants so raising either one
+    // cannot silently turn this into a test of the other limit.
+    char src[512];
+    std::snprintf(src, sizeof(src),
+                  "class T { uint8_t a[%d]; uint8_t b[%d]; tick() { a[0] = 1; } }",
+                  moonlive::kCtrlBytes, moonlive::kCtrlBytes);
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(src, kCtrlTable, kSys));
+    eng.free();
+}
+
+// A uint16_t member holds a value a byte cannot. This is the correctness wall on a 256-wide wall:
+// every arena slot was 8-bit, so a coordinate clamped at 255 and a modifier could not walk a light
+// off a large grid. The round trip is what matters: seeded wide, read wide, written wide.
+TEST_CASE("a uint16_t member holds a value above 255") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint16_t big = 1000;\n"
+                        "  tick() {\n"
+                        "    big = big + 300;\n"
+                        "    setRGB(0, big - 1300, 0, 0);\n"   // 1300 - 1300 = 0 on the first tick
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 0);      // 1000 + 300 = 1300, which a byte member could not have held
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 44);     // 1600 - 1300 = 300, truncated to a byte by setRGB: 300 & 0xff
+    eng.free();
+}
+
+// The high byte must survive being stored and reloaded. A store that wrote only the low half would
+// pass the test above on the first tick and lose the value on the second, so the boundary at 256 is
+// checked directly: 255 -> 256 is exactly where a byte member wraps to 0 and a halfword does not.
+TEST_CASE("a uint16_t member crosses the 255 boundary without wrapping") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint16_t n = 255;\n"
+                        "  tick() { n = n + 1; if (n == 256) { setRGB(0, 77, 0, 0); } }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 77);     // a byte member would be 0 here, and the branch would not be taken
+    eng.free();
+}
+
+// A wide member is placed on an EVEN byte, because two of the three backends scale a halfword
+// load's immediate by the access size and cannot encode an odd offset at all. A byte member
+// declared first is what forces the padding, so the arena cursor is what this pins.
+TEST_CASE("a uint16_t member is aligned to an even arena offset") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t  small = 1;\n"     // takes byte 0, leaving the cursor odd
+                        "  uint16_t wide = 900;\n"    // must skip byte 1 and land on byte 2
+                        "  defineControls() {\n"
+                        "    addUint8(\"small\", small, 0, 9);\n"
+                        "    addUint8(\"wide\", wide, 0, 9);\n"
+                        "  }\n"
+                        "  tick() { setRGB(0, small, 0, 0); }\n"
+                        "}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng);
+    uint8_t n = 0;
+    const moonlive::DeclaredControl* dc = eng.declaredControls(n);
+    REQUIRE(n == 2);
+    CHECK(dc[0].offset == 0);
+    CHECK(dc[1].offset == 2);          // byte 1 is padding, not a member
+    CHECK(dc[1].offset % 2 == 0);
+    eng.free();
+}
+
+// The initializer is checked against the DECLARED type, so a value a uint8_t cannot hold is a
+// compile error rather than a member that silently starts at a different number than it says.
+TEST_CASE("a uint8_t member cannot be initialized above 255") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { uint8_t x = 300; tick() { setRGB(0,x,0,0); } }", kCtrlTable, kSys));
+    eng.free();
+}
+
+// The same value is legal once the member is declared wide enough to hold it.
+TEST_CASE("a uint16_t member accepts an initializer a byte could not hold") {
+    moonlive::MoonLive eng;
+    CHECK(eng.compile("class T { uint16_t x = 300; tick() { setRGB(0, x - 300, 0, 0); } }", kCtrlTable, kSys));
+    eng.free();
+}
+
+// An array is the difference between an effect that draws a formula and one that SIMULATES
+// something: a particle list, a heat buffer, a per-light decay. Write each element, read it back.
+TEST_CASE("an array element written in one loop is read in the next") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t heat[8];\n"
+                        "  tick() {\n"
+                        "    for (i = 0; i < 8; i = i + 1) { heat[i] = i * 10; }\n"
+                        "    for (j = 0; j < 8; j = j + 1) { setRGB(j, heat[j], 0, 0); }\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[24] = {};
+    eng.run(px, 8, 3, 0);
+    for (uint8_t i = 0; i < 8; i++) CHECK(px[i * 3] == i * 10);
+    eng.free();
+}
+
+// Array contents survive across ticks, like any other member: the arena outlives every call. This
+// is what a decay or trail effect is built on, where each frame reads what the last frame left.
+TEST_CASE("array contents survive from one tick to the next") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t acc[4];\n"
+                        "  tick() {\n"
+                        "    for (i = 0; i < 4; i = i + 1) { acc[i] = acc[i] + 5; setRGB(i, acc[i], 0, 0); }\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[12] = {};
+    eng.run(px, 4, 3, 0);
+    CHECK(px[0] == 5);                     // seeded to zero, plus this tick
+    eng.run(px, 4, 3, 0);
+    CHECK(px[0] == 10);                    // the previous frame's value was still there
+    eng.run(px, 4, 3, 0);
+    CHECK(px[0] == 15);
+    eng.free();
+}
+
+// THE SAFETY CASE. A script computes an index from live control values, so out of range is an
+// ordinary run-time state, not a defect. It must not write outside the member: the system
+// variables and the recursion depth counter share the arena, so a stray write would corrupt the
+// engine rather than the picture. The index is clamped to the last element, which degrades
+// visibly (the last light repeats) and never crashes.
+TEST_CASE("an out-of-range array index is clamped, not written past the end") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t a[4];\n"
+                        "  tick() {\n"
+                        "    for (i = 0; i < 4; i = i + 1) { a[i] = 1; }\n"
+                        "    a[9] = 200;\n"                    // far past the end
+                        "    for (j = 0; j < 4; j = j + 1) { setRGB(j, a[j], 0, 0); }\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[12] = {};
+    eng.run(px, 4, 3, 0);
+    CHECK(px[0 * 3] == 1);                 // untouched
+    CHECK(px[1 * 3] == 1);
+    CHECK(px[2 * 3] == 1);
+    CHECK(px[3 * 3] == 200);               // clamped onto the LAST element
+    eng.free();
+}
+
+// The same clamp on the READ side, and the system variables must be intact afterwards: reading
+// past the end must not reach into the arena region the host owns.
+TEST_CASE("an out-of-range array read is clamped and leaves system variables intact") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t a[4];\n"
+                        "  tick() {\n"
+                        "    a[3] = 42;\n"
+                        "    setRGB(0, a[200], 0, 0);\n"       // clamps to a[3]
+                        "    setRGB(1, width, 0, 0);\n"        // a system variable, still correct
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t* w = eng.controlSlot(moonlive::kSysWidth);
+    REQUIRE(w != nullptr);
+    *w = 33;
+    uint8_t px[6] = {};
+    eng.run(px, 2, 3, 0);
+    CHECK(px[0] == 42);                    // the clamped read found the last element
+    CHECK(px[3] == 33);                    // width was not overwritten by the out-of-range access
+    eng.free();
+}
+
+// The index is an arbitrary EXPRESSION, not a bare loop counter: the same orthogonality that lets
+// addUint8 take a computed range and an if condition take one on both sides.
+TEST_CASE("an array index may be an expression") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t base = 1;\n"
+                        "  uint8_t a[8];\n"
+                        "  tick() {\n"
+                        "    a[base * 2 + 1] = 88;\n"          // a[3]
+                        "    setRGB(0, a[3], 0, 0);\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 88);
+    eng.free();
+}
+
+// An array of a wide type: the element scaling and the halfword access have to agree, which is the
+// case where an index multiplied by the wrong width silently reads a neighbour's byte.
+TEST_CASE("a uint16_t array holds per-element values above 255") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint16_t v[4];\n"
+                        "  tick() {\n"
+                        "    for (i = 0; i < 4; i = i + 1) { v[i] = 300 + i; }\n"
+                        "    if (v[0] == 300) { setRGB(0, 1, 0, 0); }\n"
+                        "    if (v[3] == 303) { setRGB(1, 1, 0, 0); }\n"
+                        "  }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[6] = {};
+    eng.run(px, 2, 3, 0);
+    CHECK(px[0] == 1);                     // element 0 kept its full value
+    CHECK(px[3] == 1);                     // and so did the last one, so the stride was right
+    eng.free();
+}
+
+// An array has no single arena byte, so assigning one as a whole is refused with the shape that
+// does work, rather than silently writing its first element.
+TEST_CASE("a whole array cannot be assigned in one statement") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { uint8_t a[4]; tick() { a = 5; } }", kCtrlTable, kSys));
+    eng.free();
+}
+
+// And the reverse: a scalar indexed as though it were an array is a typo worth catching.
+TEST_CASE("a scalar member cannot be indexed") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { uint8_t x = 1; tick() { setRGB(0, x[0], 0, 0); } }", kCtrlTable, kSys));
+    eng.free();
+}
+
+// An array asking for more bytes than the arena holds is a COMPILE error, not a failed allocation
+// while a fixture is running: a script must not be able to ask a classic ESP32 for memory it has
+// not got and find out at run time.
+TEST_CASE("an array larger than the arena is refused at compile time") {
+    char src[128];
+    std::snprintf(src, sizeof(src), "class T { uint8_t a[%d]; tick() { a[0] = 1; } }",
+                  moonlive::kCtrlBytes + 1);
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(src, kCtrlTable, kSys));
+    eng.free();
+}
+
+#endif  // MM_MOONLIVE_HAS_HOST_JIT — every case above needs compile() to SUCCEED, so
+        // they all gate on the JIT: on a target with no backend (x86-64 desktop today)
+        // the helpers they call are compiled out with it.

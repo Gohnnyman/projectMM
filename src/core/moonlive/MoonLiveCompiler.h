@@ -63,10 +63,13 @@ struct CompileResult {
     DeclaredControl members[kMaxCtrls];
     uint8_t         memberCount = 0;
     // Text a script wrote as a string literal, NUL-separated. The source buffer is freed as soon
-    // as a compile returns, so a `const char*` the emitted code carries cannot point into it; the
-    // engine copies this pool alongside the code and the emitted pointers are rebased onto its
-    // copy. 128 bytes is a handful of control labels, which is all a string is used for today.
+    // as a compile returns, so a `const char*` the emitted code carries cannot point into it. The
+    // parser interns each literal directly into this pool, which the ENGINE owns and outlives the
+    // compile, so the address the emitted code carries is already its final one: nothing is copied
+    // or rebased afterwards. 128 bytes is a handful of control labels, all a string is used for.
     static constexpr uint16_t kStringPool = 128;
+    // How many of those bytes this program interned, so a binding can report the headroom.
+    uint16_t        stringLen = 0;
     // The name the script gave its class. What diagnostics and the module status report, so a
     // renamed FILE does not change what a user is told: the filename is what the engine loads, the
     // class name is what it is. Copied out of the source, which is freed after the compile.

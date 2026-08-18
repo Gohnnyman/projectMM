@@ -176,7 +176,7 @@ TEST_CASE("emitted " MM_ISA_NAME " code reads no register a call destroyed") {
         // The shape that crashed on hardware, and the nearest ones that did not.
         {"sysvar bound + call in body",
          mmScript("for (x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
-        {"control bound + call in body",
+        {"member bound + call in body",
          mmScript("uint8_t n = 8;\n"
          "for (x = 0; x < n; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
         {"sysvar read inside the body, with a call",
@@ -229,3 +229,4 @@ TEST_CASE("emitted " MM_ISA_NAME " code reads no register a call destroyed") {
         CHECK(callsSeen > 0);
     }
 }
+

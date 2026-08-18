@@ -30,6 +30,7 @@ void MoonLive::freeCode() {
     // built. It is reclaimed when the next compile interns into it from offset zero, which is the
     // ordinary arena discipline: one program's strings at a time.
     controlCount_ = 0;
+    stringLen_ = 0;
 }
 
 // Copy `len` already-emitted bytes into a fresh exec block. writeExec hides the ISA quirks
@@ -94,7 +95,7 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
     // the emitted code carries pointers into it, and the source buffer is freed the moment this
     // returns. NOT cleared here: freeCode() owns that, because a control record published by the
     // previous program still points into this pool. Zeroing before a compile that then FAILS left
-    // every published control named "" — name-keyed persistence and `POST /api/control` both go
+    // every published control named "": name-keyed persistence and `POST /api/control` both go
     // through that name, so a broken script silently unbound the user's own sliders.
     CompileResult cr = compileSource(source, table, sysvars, staging.p, staging.n,
                                      nullptr, nullptr, strings_, CompileResult::kStringPool);
@@ -118,15 +119,16 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
         entryNames_[i][n] = '\0';
         entries_[i] = {entryNames_[i], n, cr.entries[i].offset};
     }
+    stringLen_ = cr.stringLen;
     ctrl_ = reinterpret_cast<CtrlFn>(block);
     return true;
 }
 
 // Ensure the control arena exists and seed newly-declared slots. The arena is allocated ONCE at
-// full kMaxCtrls capacity and never reallocated, so its address — and every control pointer the
+// full kArenaBytes capacity and never reallocated, so its address, and every control pointer the
 // binding bound to a slot — is fixed for the engine's lifetime (the stable-slot contract
 // controlSlot() promises; a recompile that adds a control must not move a pointer the previous
-// defineControls already published). kMaxCtrls bytes is a handful; the up-front allocation is
+// defineControls already published). kArenaBytes is a handful; the up-front allocation is
 // cheaper than the move-and-rebind it avoids. A NEW slot (beyond the previous count) is seeded
 // from its declared default; an EXISTING slot keeps its live value (a source edit that keeps the
 // control preserves the slider position). Returns false on alloc failure.
@@ -136,13 +138,36 @@ bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
         if (!ctrlArena_) return false;
         for (uint8_t i = 0; i < kArenaBytes; i++) ctrlArena_[i] = 0;
     }
-    // A NEW slot takes its declared initializer; an EXISTING one keeps its live value, so a source
-    // edit that keeps a control does not snap its slider back to the default. Indexed by the
-    // declaration's own offset rather than by position, because a member and the control that
-    // surfaces it share one arena byte and only the offset knows which.
-    for (uint8_t i = memberCount_; i < count; i++)
-        ctrlArena_[decls[i].offset] = static_cast<uint8_t>(decls[i].def);
-    memberCount_ = count;
+    // A NEW slot takes its declared initializer; one holding the SAME member keeps its live value,
+    // so a source edit that keeps a control does not snap its slider back to the default. "Same"
+    // is offset AND name: a member inserted at the top of the class shifts every later declaration
+    // to a new offset, and each of those is a different member now occupying a seeded byte, so it
+    // must take its own initializer rather than inherit the previous occupant's value.
+    uint32_t seeding = 0;
+    for (uint8_t i = 0; i < count; i++) {
+        const uint8_t off = decls[i].offset;
+        if (off >= kArenaBytes) continue;                       // the parser bounds it; belt and braces
+        // The declared name is a SPAN of the source (nameLen, no terminator), so it is compared
+        // and stored length-bounded: strcmp would read past it into the rest of the script.
+        const uint8_t n = decls[i].nameLen < kSeedNameLen - 1 ? decls[i].nameLen
+                                                             : uint8_t(kSeedNameLen - 1);
+        const bool same = ((seeded_ >> off) & 1u) &&
+                          std::strncmp(seededName_[off], decls[i].name, n) == 0 &&
+                          seededName_[off][n] == '\0';
+        if (!same) {
+            // Seed the member's WHOLE width, little-endian to match every backend's halfword
+            // load: writing only the low byte would leave the high half holding whatever the
+            // previous program left there, so a fresh uint16_t member would start at a value its
+            // script never wrote.
+            ctrlArena_[off] = static_cast<uint8_t>(decls[i].def & 0xff);
+            if (ctrlWidth(decls[i].type) == 2 && off + 1 < kArenaBytes)
+                ctrlArena_[off + 1] = static_cast<uint8_t>(decls[i].def >> 8);
+        }
+        for (uint8_t c = 0; c < n; c++) seededName_[off][c] = decls[i].name[c];
+        seededName_[off][n] = '\0';
+        seeding |= 1u << off;
+    }
+    seeded_ = seeding;   // a member the new script dropped is unseeded: its byte reseeds if it returns
     return true;
 }
 
@@ -164,7 +189,8 @@ void MoonLive::free() {
     // The seeded-slot count goes with the arena it describes. Left behind, the next compile would
     // treat every member as one it had already seeded and skip the initializers, so a script would
     // start every value at zero instead of what it declared.
-    memberCount_ = 0;
+    seeded_ = 0;
+    for (uint8_t i = 0; i < kArenaBytes; i++) seededName_[i][0] = '\0';
 }
 
 }  // namespace mm::moonlive

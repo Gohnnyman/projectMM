@@ -317,6 +317,35 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
   `disasm.py --isa x86_64` should land with it, since no test executes emitted bytes for any backend
   but the host's.
 
+- **Catch device-backend operand defects on the host** (2026-08-18). Two array-codegen bugs shipped
+  to an S3 while all 1313 host tests stayed green, and both were control-checked: reintroducing
+  either one leaves the suite fully passing. `IrInst::c`/`d` are VREG fields the spill pass
+  renumbers, so a width parked there becomes a register number; and `sourcesOf` writes its sources
+  back POSITIONALLY, so reporting `kArg4` first shifts every real operand one place along. arm64's
+  register map absorbs both, which is exactly why the suite cannot see them.
+
+  Three test shapes were tried and deleted for failing their control run: emitted-bytes difference
+  tests (wrong bytes still differ from other wrong bytes) and a register-liveness walk (the index
+  satisfies it whatever happens to the value). What DOES work is asserting an assembler primitive
+  directly, as `unit_moonlive_codegen_xtensa.cpp` now does for `addImm`. The general form is
+  probably an IR-level invariant check rather than a bytes-level one: assert that no op reports a
+  fixed ABI vreg among its positional sources, and that non-register operands never occupy c/d.
+  That is a property of the IR the host CAN evaluate, unlike the emitted code.
+
+- **Size the MoonLive control arena to the script** (2026-08-18). `kCtrlBytes` is a fixed 64 bytes
+  per engine (three engines per pipeline), so a script declaring one byte pays for 64 and one
+  wanting a 128-light array is refused. The arena is already `platform::alloc`'d, so the constant is
+  habit rather than necessity, and the member byte count is known at compile time.
+
+  What blocks it: the system variables sit ABOVE the script region at compile-time constant offsets
+  (`kSysWidth = kCtrlBytes + 0`), baked into emitted code as `LoadCtrl` immediates and cached as
+  slot POINTERS by the bindings. A script-sized region moves every one of them. Closing it means
+  putting the system variables BELOW the script region so their addresses stop depending on it,
+  which touches the sysvar table, the bindings and every emitted immediate. The hard ceiling stays
+  255 either way, since an arena offset is a `uint8_t` in the record, in `controlSlot` and in the
+  instruction. Until then, raising the constant is one edit and the failure is a clear compile
+  error naming the arena, so hitting it is visible rather than silent.
+
 - **Drain MoonLive's `print()` through a queue** (2026-08-09). `print(v)` writes to serial directly, and an EFFECT script runs on the render tick — so a print inside one blocks the frame for as long as the UART takes. The burst cap bounds it (a handful of writes per compile, then a compare and a return), but bounded is not free, and `tick()` is annotated `MM_NONBLOCKING`.
 
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
