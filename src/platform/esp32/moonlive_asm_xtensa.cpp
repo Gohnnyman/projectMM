@@ -229,6 +229,32 @@ void XtensaAssembler::movImm(Reg d, int32_t imm) {
     emit(lo, 3);                                                         // movi a13, lo8
     emit2(uint16_t((dr << 12) | (dr << 8) | (kTmp << 4) | 0xa));         // add.n aD, aD, a13
 }
+// movPtr: a 32-bit address into a register, a byte at a time.
+//
+// The same shape movImm uses for a 16-bit constant and call() uses for its target, extended to
+// four bytes: movi the top byte, then three times (slli 8, movi the next byte into the scratch,
+// add). a13 is this assembler's reserved scratch, outside the vreg map, so nothing live is
+// disturbed.
+//
+// Byte-at-a-time rather than an l32r literal because a literal needs a pool at a known
+// PC-relative distance, and this block is COPIED to its final address after these bytes are
+// built. An absolute materialization survives that move; a PC-relative one would have to be
+// re-based.
+void XtensaAssembler::movPtr(Reg d, const void* p) {
+    const uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+    const uint8_t dr = ar(d);
+    static constexpr uint8_t kTmp = 13;
+    const uint8_t top[3] = {uint8_t((dr << 4) | 0x2), 0xa0, uint8_t(addr >> 24)};
+    emit(top, 3);                                                        // movi aD, b3
+    for (int shift = 16; shift >= 0; shift -= 8) {
+        const uint8_t sl[3] = {0x80, uint8_t((dr << 4) | dr), 0x11};
+        emit(sl, 3);                                                     // slli aD, aD, 8
+        const uint8_t by[3] = {uint8_t((kTmp << 4) | 0x2), 0xa0, uint8_t((addr >> shift) & 0xff)};
+        emit(by, 3);                                                     // movi a13, bN
+        emit2(uint16_t((dr << 12) | (dr << 8) | (kTmp << 4) | 0xa));     // add.n aD, aD, a13
+    }
+}
+
 // add.n aD, aA, aB : word (d<<12)|(a<<8)|(b<<4)|0xa
 void XtensaAssembler::addReg(Reg d, Reg a, Reg b) {
     emit2(uint16_t((ar(d) << 12) | (ar(a) << 8) | (ar(b) << 4) | 0xa));
@@ -238,9 +264,26 @@ void XtensaAssembler::movReg(Reg d, Reg a) {
     const uint8_t b[2] = {uint8_t((ar(d) << 4) | 0xd), ar(a)};
     emit(b, 2);
 }
-// addi.n aD, aA, #imm (1..15) : word (d<<12)|(a<<8)|(imm<<4)|0xb
+// addi.n aD, aA, #imm : word (d<<12)|(a<<8)|(imm<<4)|0xb.
+//
+// The narrow form's 4-bit field encodes 1..15, and the bit pattern 0 means MINUS ONE, not zero.
+// So a caller asking to add 0 must emit no add at all, and anything outside 1..15 needs the wide
+// `addi` (8-bit signed) instead. Every caller passed a literal 1 until an array whose base offset
+// is 0 asked for `+0`; that emitted `addi.n aX, aX, -1` and shifted every element access down a
+// byte, which reached a device as a fixture that stayed dark while all host tests passed.
 void XtensaAssembler::addImm(Reg d, Reg a, int32_t imm) {
-    emit2(uint16_t((ar(d) << 12) | (ar(a) << 8) | ((imm & 0xf) << 4) | 0xb));
+    if (imm == 0) {
+        if (ar(d) != ar(a)) movReg(d, a);      // still a move: d = a + 0
+        return;
+    }
+    if (imm >= 1 && imm <= 15) {
+        emit2(uint16_t((ar(d) << 12) | (ar(a) << 8) | ((imm & 0xf) << 4) | 0xb));
+        return;
+    }
+    // addi aD, aA, #imm8 (RRI8, signed -128..127): bytes [ (d<<4)|2, 0xc0|a, imm ].
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0xc0 | ar(a)),
+                          uint8_t(imm & 0xff)};
+    emit(b, 3);
 }
 // mull aD, aA, aB : 24-bit 0x820000 | (d<<12) | (a<<8) | (b<<4)
 void XtensaAssembler::mulReg(Reg d, Reg a, Reg b) {
@@ -259,6 +302,34 @@ void XtensaAssembler::store8(Reg base, Reg off, Reg val) {
 // l8ui aDst, aBase, #imm (0..255) : bytes [ (dst<<4)|2, base, imm ] — zero-extended byte load.
 void XtensaAssembler::load8(Reg d, Reg base, int32_t imm) {
     const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), ar(base), uint8_t(imm & 0xff)};
+    emit(b, 3);
+}
+
+void XtensaAssembler::store16(Reg base, Reg off, Reg val) {
+    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
+    // s16i aVal, a12, 0: RRI8 with r = 5 where s8i uses 4.
+    const uint8_t b[3] = {uint8_t((ar(val) << 4) | 0x2), uint8_t(0x50 | kAddrScratch), 0x00};
+    emit(b, 3);
+}
+// l16ui aDst, aBase, #imm : bytes [ (dst<<4)|2, 0x10|base, imm/2 ]. The RRI8 immediate is SCALED
+// by 2 for a halfword access, so the field holds imm/2 and an odd offset is not encodable: a
+// halfword member sits on an even byte, which the arena cursor guarantees.
+void XtensaAssembler::load16(Reg d, Reg base, int32_t imm) {
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x10 | ar(base)),
+                          uint8_t((imm >> 1) & 0xff)};
+    emit(b, 3);
+}
+
+// Xtensa has no register-offset load either. The computed address goes through kAddrScratch, the
+// same temp store8/store16 use, and the RRI8 offset is 0 so the halfword scaling never applies.
+void XtensaAssembler::load8Idx(Reg d, Reg base, Reg off) {
+    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), kAddrScratch, 0x00};           // l8ui d, a12, 0
+    emit(b, 3);
+}
+void XtensaAssembler::load16Idx(Reg d, Reg base, Reg off) {
+    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x10 | kAddrScratch), 0x00};  // l16ui d, a12, 0
     emit(b, 3);
 }
 
@@ -282,7 +353,7 @@ void XtensaAssembler::branchIfZero(Reg a, Label l) {
 //     j      l               ; 18-bit displacement — reaches anywhere in a script
 //
 // Xtensa's conditional branches carry a single SIGNED BYTE of displacement (±127), which a loop body
-// outgrows easily once spill traffic is in it — grid.mlv needed 177. Truncating that silently
+// outgrows easily once spill traffic is in it — grid.mll needed 177. Truncating that silently
 // retargets the branch into the middle of the program, so the choice is relax or refuse. This is the
 // textbook relaxation every compiler does (GCC and LLVM emit the short form and rewrite the ones that
 // do not fit); the fixed six-byte form skips the iterate-to-convergence step, which is worth a few

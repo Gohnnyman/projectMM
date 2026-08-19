@@ -11,8 +11,8 @@ The per-ISA assemblers are ordinary C++ behind a target guard, so they build and
 this compiles a script through a REAL backend and pipes the bytes to that ISA's objdump.
 
     uv run moondeck/moonlive/disasm.py "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"
-    uv run moondeck/moonlive/disasm.py --isa riscv moonlive/effects/plasma.mlv effect
-    uv run moondeck/moonlive/disasm.py --isa all moonlive/layouts/grid.mlv layout
+    uv run moondeck/moonlive/disasm.py --isa riscv moonlive/effects/plasma.mle effect
+    uv run moondeck/moonlive/disasm.py --isa all moonlive/layouts/grid.mll layout
 
 Note there is no x86_64 backend to disassemble: the desktop assembler is arm64-only
 (`moonlive_asm_host.cpp`), and on an x86 host a compile fails cleanly and the module renders dark

@@ -12,7 +12,7 @@ The script transforms **one coordinate**. It needs no loop over the lights, beca
 
 ```c
 class MirrorModifier {
-  modifyLogical() { setXYZ(0, width - 1 - xPos, yPos, zPos); }   // mirror along x
+  modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }   // mirror along x
 }
 ```
 
@@ -21,12 +21,12 @@ The function is named `modifyLogical` because that is the moment a modifier is a
 The body is one expression per axis. Other shapes, in the same place:
 
 ```c
-setXYZ(0, yPos, xPos, zPos);               // swap the axes
-setXYZ(0, xPos + 4, yPos, zPos);           // shift by four
-setXYZ(0, (width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
+setXYZ(yPos, xPos, zPos);               // swap the axes
+setXYZ(xPos + 4, yPos, zPos);           // shift by four
+setXYZ((width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 ```
 
-`setXYZ(index, x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`. The index is the destination slot: today the script is handed a single coordinate, so it is always `0`.
+`setXYZ(x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`. The index is the destination slot: today the script is handed a single coordinate, so it is always `0`.
 
 ### What a script can read
 
@@ -36,16 +36,23 @@ setXYZ(0, (width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 
 ### Seeing inside a script
 
-`print(v)` logs a value and returns it, so it wraps any part of an expression: `setXYZ(0, print(width - 1 - xPos), yPos, zPos)`.
+`print(v)` logs a value and returns it, so it wraps any part of an expression: `setXYZ(print(width - 1 - xPos), yPos, zPos)`.
 It is for debugging and comes back out again — [what print costs](../../../moonlive/README.md#debugging-print).
 
 ## Limits
 
-**A coordinate is a byte, so an axis spans 0..255.** A position handed TO a script outside that range is passed through untransformed rather than wrapped. A position a script COMPUTES past 255 keeps its low byte, so `(width - 1 - x) * 2` on a grid wider than 128 lands somewhere unintended — keep a computed result inside the box.
+**A coordinate is a byte, so an axis spans 0..255.** A position handed TO a script outside that range is passed through untransformed rather than wrapped. A position a script COMPUTES past 255 keeps its low byte, so `(width - 1 - x) * 2` on a grid wider than 128 lands somewhere unintended, so keep a computed result inside the box. A script's own MEMBERS may be `uint16_t`, so intermediate arithmetic can exceed 255 even where the coordinate handed back cannot.
 
 **A script cannot resize the logical box.** A modifier has two hooks: one reshapes the box once per rebuild, one folds each coordinate. A script drives only the second, so transforms that keep the box the same size work, and ones that halve it (the way the built-in [Mirror](modifiers.md#mirror) does) need the compiled modifier.
 
-**The grammar is arithmetic over calls** — `+`, `-`, `*`, parentheses, the usual precedence, and `for`. Division and `if` are not in the language yet.
+**The grammar is arithmetic over calls**: `+`, `-`, `*`, parentheses, the usual precedence, `for`, and `if` with the six comparisons. Division and `%` are not operators; `mod(a, b)` and `turn(n)` are the calls that cover them.
+
+## What the card tells you
+
+`status` is the size of the compiled program; the memory figure is what the module costs the device
+(its own `sizeof`, plus the exec block and control arena); `tickTimeUs` is the real per-tick cost.
+Past half full, the status also names the tightest limit the script is approaching. Detail:
+[MoonLive](MoonLiveEffect.md#what-the-card-tells-you-size-memory-and-how-close-to-a-wall).
 
 ## Controls
 
@@ -53,7 +60,7 @@ It is for debugging and comes back out again — [what print costs](../../../moo
 |---|---|
 | `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-maps live |
 
-Plus one control per `@control` the script declares — `uint8_t amount = 4; // @control 0..64`
+Plus one control per `addUint8` in the script's `defineControls()`: `addUint8("amount", amount, 0, 64)`
 becomes a slider, and moving it rebuilds the mapping just as editing the script does.
 
 Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through — the transform disappears until the script parses again, and the device keeps rendering throughout.

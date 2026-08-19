@@ -6,7 +6,11 @@
 // script used to spell out.
 
 class LinesEffect {
-  uint8_t bpm = 30;   // @control 1..240
+  uint8_t bpm = 30;
+
+  defineControls() {
+    addUint8("bpm", bpm, 1, 240);
+  }
 
   tick() {
     fill(0, 0, 0);

@@ -28,8 +28,9 @@ namespace mm::moonlive {
 // core treats them as opaque tags; the per-ISA backend and the host both know the element is 3
 // bytes (RGB) for the light host, but that meaning lives outside the core.
 enum class InlineOp : uint8_t {
-    StoreElem,   // operands: bufVReg, indexVReg, v0, v1, v2  → store one element at index
-    FillElems,   // operands: bufVReg, countVReg, strideVReg, v0, v1, v2  → loop store over count
+    StoreElem,   // operands: indexVReg, v0, v1, v2  → store three values at `index`
+    StoreFirst,  // operands: v0, v1, v2             → store three values at element 0
+    FillElems,   // operands: v0, v1, v2             → loop store over every element
 };
 
 enum class BuiltinKind : uint8_t { Call, Inline };
@@ -64,6 +65,19 @@ struct Builtin {
     BuiltinKind  kind = BuiltinKind::Call;
     HostCallFn   fn = nullptr;        // Call: the host C function pointer
     InlineOp     inlineOp{};          // Inline: the neutral opcode tag
+    // Which arguments are passed BY REFERENCE, as a bit per position (bit 0 = first argument).
+    // A script names a member and the compiler passes its arena offset, so `addUint8("bpm", bpm,
+    // 1, 120)` reads as the reference a compiled module passes rather than as bpm's value. Zero
+    // for every builtin that takes plain values, which is all of them but this one.
+    //
+    // A bitmask rather than a per-argument enum because the only question is by-value or
+    // by-reference, and `draw::line` already proves a builtin may take seven arguments.
+    uint8_t      byRef = 0;
+    // Which arguments must be a STRING LITERAL, a bit per position. Without it a bare identifier
+    // in a name slot compiles: `addUint8(s, s, 0, 9)` read `s`'s VALUE as the label and handed the
+    // host a pointer built from a color byte. Stated per builtin for the same reason byRef is,
+    // rather than special-cased by name in the parser.
+    uint8_t      byStr = 0;
 };
 
 // A fixed-capacity table the host fills and the compiler reads. No heap; a host registers a
@@ -89,11 +103,28 @@ struct BuiltinTable {
     }
 };
 
-static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful of controls; fixed, no heap
+/// BYTES the script's own members may occupy, and separately how many members it may declare.
+///
+/// These were one number while every member was a byte and its offset WAS its declaration index.
+/// A `uint16_t` member costs two bytes and an array costs its length, so the two stopped being the
+/// same question: a script may want six members costing sixteen bytes, or two members costing
+/// twelve. The byte budget is what the arena allocates; the count is what the fixed record tables
+/// hold. Both are fixed, so neither needs a heap.
+// 64 was chosen against the first effect that wanted an array rather than in the abstract: a
+// 16-element heat buffer with two byte controls and a uint16_t phase needs 20, and a per-light
+// buffer for a small fixture wants more. 64 holds a uint8_t[64] or a uint16_t[32] alongside a few
+// scalars, costs 48 bytes per engine over the old value (three engines per pipeline, so 144 on a
+// device), and keeps the whole arena inside a byte offset, which is what LoadCtrl's immediate and
+// the DeclaredControl record both carry. Raise it against a script that needs more, not on
+// speculation: the failure is a clear compile error naming the arena, so hitting it is visible.
+static constexpr uint8_t kCtrlBytes = 64;        // arena bytes the script's members share
+static constexpr uint8_t kMaxCtrls  = 8;         // records: how many members/controls may exist
 
 // The controls arena holds three kinds of byte, in one allocation with a fixed split:
-//   [0 .. kMaxCtrls)                  script-declared controls, offset == declaration index
-//   [kMaxCtrls .. kMaxCtrls+kMaxSysVars)  host system variables (width/height/…), offset assigned
+//   [0 .. kCtrlBytes)                 script-declared members, offset == a BYTE CURSOR assigned
+//                                     in declaration order (NOT the declaration index: a member
+//                                     wider than a byte, or an array, consumes several)
+//   [kCtrlBytes .. kCtrlBytes+kMaxSysVars)  host system variables (width/height/…), offset assigned
 //                                     by the host and CONSTANT for the program's life
 //   [kDepthSlot]                      the recursion depth counter, owned by the emitted code
 // System variables sit ABOVE the script's range so that adding or removing a control — which
@@ -103,7 +134,7 @@ static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful 
 // same reason the IR op array is: the backends differ by up to 1.9x on identical source — RISC-V is
 // fixed-4-byte and saves the whole register pool around every call where Xtensa has 3-byte narrow
 // forms — so any single number is either too small for the sparsest backend or wasteful for the
-// densest. A fixed 2 KB let `plasma.mlv` run on an S3 and desktop and REFUSED it on an S31 by 96
+// densest. A fixed 2 KB let `plasma.mle` run on an S3 and desktop and REFUSED it on an S31 by 96
 // bytes, which is the second time one constant made a script's portability depend on its ISA.
 //
 // kCodeCap survives as the SANITY bound only: a runaway script fails with a diagnostic instead of
@@ -114,16 +145,29 @@ static constexpr size_t  kCodeCap = 16384;
 /// that is freed when the compile ends; under-estimating fails a script that would have fit, so the
 /// direction of the error is deliberate — the same rule the IR's op estimate follows.
 ///
-/// 64 bytes/token, measured across every shipped script on all three backends with `countTokens`
+/// 48 bytes/token, measured across every shipped script on all three backends with `countTokens`
 /// (which skips comments, so a long header does not inflate the count). The densest is
-/// `random-pixel.mlv` at 39.3 — one statement, four nested `random16()` calls, and on RISC-V each
-/// call saves and restores the whole register pool — so this is a ~1.6x margin over the worst real
-/// case. A SHORT call-dense script sets the bound, not a long one: a call lowers to a save/restore
-/// while declarations and operators lower to a few instructions each, so bytes-per-token FALLS as a
-/// script grows. The floor covers a tiny script's fixed prologue and epilogue, which no per-token
-/// figure expresses.
+/// `random-pixel.mle` at 28.5 on RISC-V: one statement, four nested `random16()` calls, and each
+/// call saves and restores the whole register pool. So this is a ~1.7x margin over the worst real
+/// case.
+///
+/// A SHORT call-dense script sets the bound, not a long one. A call lowers to a save/restore while
+/// declarations and operators lower to a few instructions each, so bytes-per-token FALLS as a
+/// script grows: `gradient.mle` is 5.9 where `random-pixel.mle` is 28.5, and the longest shipped
+/// script (`ripples.mle`, 280 tokens) is only 15.3. The margin is kept wide for that reason rather
+/// than trimmed to the observed worst: a new short call-dense script could beat 28.5, while a long
+/// one cannot.
+///
+/// It was 64, from a measurement taken before host arguments moved into frame slots, which shrank
+/// what a call saves. At 64 the two longest scripts asked for more than kCodeCap and were served by
+/// the clamp, which works but means a script's buffer stopped tracking its size. Re-measuring took
+/// 25% off the transient allocation, which matters on a classic ESP32 where the compile shares a
+/// 12 KB task.
+///
+/// The floor covers a tiny script's fixed prologue and epilogue, which no per-token figure
+/// expresses.
 constexpr size_t codeCapFor(uint32_t tokens) {
-    const size_t want = size_t(tokens) * 64 + 256;
+    const size_t want = size_t(tokens) * 48 + 256;
     return want > kCodeCap ? kCodeCap : want;
 }
 
@@ -138,7 +182,7 @@ static constexpr uint8_t kMaxSysVars  = 8;
 /// The host zeroes it before each run rather than trusting the block to unwind cleanly: a script
 /// that hits the limit leaves the counter wherever the skipped call left it, and a stale value
 /// would shrink the budget of every later frame until nothing ran at all.
-static constexpr uint8_t kDepthSlot = kMaxCtrls + kMaxSysVars;
+static constexpr uint8_t kDepthSlot = kCtrlBytes + kMaxSysVars;
 
 /// The depth at which a call is REFUSED: an activation that would make the counter reach this
 /// number returns without running, so 31 activations execute, the entry function included.
@@ -152,7 +196,7 @@ static constexpr uint8_t kDepthSlot = kMaxCtrls + kMaxSysVars;
 /// stack and the rest of the render path need.
 static constexpr uint8_t kMaxCallDepth = 32;
 
-static constexpr uint8_t kArenaBytes  = kMaxCtrls + kMaxSysVars + 1;   // +1: kDepthSlot
+static constexpr uint8_t kArenaBytes  = kCtrlBytes + kMaxSysVars + 1;   // +1: kDepthSlot
 
 /// A name the HOST defines and the script only reads: `width`, `height`, `depth`. Reserved — a
 /// script cannot declare one, so the name means the same thing in every script (the `t` rule, one
@@ -190,7 +234,7 @@ struct SysVarTable {
     // controls, inside the arena); an Arg must name a real argument register.
     bool add(const SysVar& v) {
         if (count >= kMax || v.name == nullptr) return false;
-        if (v.kind == SysVarKind::Arena && (v.where < kMaxCtrls || v.where >= kArenaBytes))
+        if (v.kind == SysVarKind::Arena && (v.where < kCtrlBytes || v.where >= kArenaBytes))
             return false;
         // kArg4 is the last argument register (MoonLiveIr.h owns the enum, and includes THIS
         // header, so the bound is spelled here rather than referenced).

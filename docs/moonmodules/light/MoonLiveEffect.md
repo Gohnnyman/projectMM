@@ -19,28 +19,44 @@ class RandomPixelEffect {
 
 Inside a function the grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call. The class declaration is required: one top-level form rather than two means one set of rules to learn and one parse path to maintain.
 
-The **class name is not the file name**. `plasma.mlv` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
+**A script's role is its extension**: `.mle` an effect, `.mll` a [layout](MoonLiveLayout.md), `.mlm` a [modifier](MoonLiveModifier.md). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
+
+The **class name is not the file name**. `plasma.mle` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
 
 The functions are **not built into the compiler** — `setRGB`, `fill`, `random16` are registered by the *host* (the light domain) in a builtin table; the core compiler owns only the grammar and a generic call/inline mechanism (the ESPLiveScript / ARTI bound-function model). The compiler emits machine code for whichever ISA the device runs (Xtensa on the classic/S3) or the host ISA on desktop, places it in executable memory, and the engine calls it each render tick.
 
 ## Controls
 
-- `script` — the file name under `/moonlive/`, e.g. `lines.mlv`. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default. Naming one (or re-naming it after an edit) recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot). The directory is created on demand.
-- **Scripted controls** — a script declares a tunable variable with a range annotation, and the engine surfaces it as a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
+- `script`: the script this module runs, picked from `/moonlive/` and **edited on the card itself**. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default.
+
+    Type in the box and the script compiles when you click away, press Ctrl/Cmd+S, or press Save; a dot on the Save button marks unsaved work. A valid script swaps in on the next tick. A failed compile frees the old code, shows the diagnostic in the module status, and renders dark until it is fixed, so a typo costs a message rather than a reboot. Fixing it in place is enough: nothing has to be renamed.
+
+    The card also creates and deletes scripts (delete asks twice), and the same editor is what the File Manager opens from a file row. The control is [`filepath`](../core/ui.md#control-types), which is generic: the module says only where its files are and which extension they carry.
+- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` inside a `defineControls()`, the same call a compiled module makes. Each becomes a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
   class SpeedyEffect {
-    uint8_t speed = 50;   // @control 0..99    → a "speed" slider, default 50, range 0..99
-    uint8_t hue   = 128;  // @control 0..255
+    uint8_t speed = 50;
+    uint8_t hue   = 128;
+    uint8_t phase = 0;          // a member, not a control: the UI never shows it
 
-    tick() { setRGB(speed, hue, 0, 255); }
+    defineControls() {
+      addUint8("speed", speed, 0, 99);
+      addUint8("hue", hue, 0, 255);
+    }
+
+    tick() { setRGB(speed, hue, phase, 255); }
   }
   ```
 
-  A declared variable sits in the class body, not inside a function: it is a member, which is what
-  lets the UI bind to it and what will let one function set a value another reads.
+  A declaration sits in the class body, not inside a function: it is a **member**, visible in every
+  function and surviving every call. That is the whole of what a declaration means, and whether the
+  UI shows one is the separate question `defineControls()` answers. A member no control names is
+  simply the script's own state.
 
-  Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script file and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
+  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`. The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
+
+  `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
 
 ### System variables — what the engine hands a script
 
@@ -54,7 +70,7 @@ Some names are **reserved**: the engine defines them, the script only reads them
 
 Every one but `t` is a byte, because it lives in the controls arena. A grid extent past 255 reports 255 rather than wrapping to a small number, and a modifier handed a coordinate outside `0..255` passes it through untransformed instead of folding a wrong position — so a script never silently sees a value that means something else.
 
-The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and `y` stay free as loop counters in every script**, which is what an author reaches for and what the shipped `grid.mlv` uses. Reserving them globally would break the most ordinary code there is; a per-role reservation was the alternative and was worse, because a name then meant one thing in one role and was refused in another — which is how `disasm.py`, compiling against the widest vocabulary, came to refuse the shipped default layout.
+The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and `y` stay free as loop counters in every script**, which is what an author reaches for and what the shipped `grid.mll` uses. Reserving them globally would break the most ordinary code there is; a per-role reservation was the alternative and was worse, because a name then meant one thing in one role and was refused in another — which is how `disasm.py`, compiling against the widest vocabulary, came to refuse the shipped default layout.
 
 `width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it names its own controls instead (`cols`, `rows`) and reads the grid only if it has a use for it.
 
@@ -67,7 +83,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | call | does |
 |---|---|
 | `setRGB(index, r, g, b)` | write one light |
-| `setXYZ(index, x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
+| `setXYZ(x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
 | `fill(r, g, b)` | write every light |
 | `addLight(x, y, z)` | place the next light (a [layout](MoonLiveLayout.md)) |
 | `line(x1, y1, x2, y2, r, g, b)` | a straight segment on the grid, via the shared `draw::line` |
@@ -86,7 +102,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 
 ### The script's own functions
 
-A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mlv` is the worked example: a `column()` and a `row()`, both called from `tick()`.
+A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mle` is the worked example: a `column()` and a `row()`, both called from `tick()`.
 
 These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments and returns nothing yet, so a helper does a whole job rather than computing a value.
 
@@ -97,7 +113,50 @@ Two rules a script author meets:
 
 ### Wire contract — control declaration
 
-The controls are **derived from the script** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
+The controls are **declared by the script** (one per `addUint8` call in its `defineControls()`), then **surfaced in `/api/state`**, the device JSON view the integrator consumes, as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
+
+## What the card tells you: size, memory, and how close to a wall
+
+Three numbers, and they are not the same thing.
+
+**`status` is the size of the compiled program**: how many bytes of machine code the script became.
+That is what a script author asks and what nothing else answers.
+
+**The memory figure (`696B + 1.4KB`) is what the module costs the device.** The first part is the
+module's own `sizeof`, fixed whether or not a script is loaded. The second is its dynamic bytes: the
+exec block holding the JIT'd code, plus the 17-byte control arena. So the status and the dynamic
+figure describe the same bytes from two angles, one as the program and one as the allocation, which
+is word-rounded and includes the arena.
+
+**`tickTimeUs` is the real per-tick cost** of running the compiled function, measured the way every
+module's is. `defineControls()` is not in it: that runs once after a compile.
+
+**A third allocation exists and appears nowhere**, deliberately. Compiling needs a staging buffer,
+sized from the script's token count before a byte is emitted, and it is freed the moment the compile
+returns. It never reaches a card because by the time the UI reads anything it is gone. It also does
+not accumulate: three scripted modules compiling in sequence each borrow and return it, so what
+persists per module is only the exec block, sized to what was actually emitted rather than to the
+estimate.
+
+### The walls, and which one the card warns about
+
+A script can exhaust ten limits, but only five are ones an author can act on:
+
+| limit | ceiling | what to do |
+|---|---|---|
+| code size | 16 KB | split or simplify the script |
+| controls | 8 | remove an `addUint8` |
+| members | 8 | shares the budget with controls |
+| functions | 8 | merge two helpers |
+| string bytes | 128 | shorter control labels |
+
+The other five (IR ops, virtual registers, frame slots, assembler labels and fixups) are derived
+from code size or loop nesting, so a number for them is noise: nothing an author writes addresses
+them directly.
+
+The card shows the **tightest** of the five, and only past half full: `1568 B, controls 8/8`. The
+others by definition have more room, so showing all five would bury the one that matters. An
+ordinary script reads its size and nothing else.
 
 ## Pieces
 

@@ -120,6 +120,21 @@ and each is a real decision rather than a detail:
   able to be a scalar, a STRUCT (`Coord3D`), an ARRAY, or an array of structs. Not on day one, but the
   storage has to be designed for it, which makes this a typed addressable region rather than a wider
   row of bytes. Everything else here is downstream of this decision.
+
+  **Correction, found when step 3 reached it.** This plan later says the storage decision is settled
+  and that an element count is already on the member record. Neither is true, and building against
+  the claim would have started in the wrong place:
+
+  - `DeclaredControl` has no count and no width. `CtrlType` has exactly one value, `Uint8`.
+  - The arena is `kArenaBytes` = 17 with a hardcoded three-way split, and a control's **offset IS
+    its declaration index**. An array or a 16-bit member breaks that identity, and the identity is
+    load-bearing outside the compiler: the bindings cache arena slot POINTERS, `addUint8` passes an
+    offset as a byte, and persistence is keyed on it.
+  - `LoadCtrl`/`StoreCtrl` lower to `load8`/`store8` on all three backends, so a wider member is a
+    new op pair per backend, not a wider record.
+
+  So the decision above is a DIRECTION, not a design. Steps 8 and 9 carry the design, and they are
+  done together because a byte arena rebuilt for arrays would be rebuilt again for 16-bit values.
 - **Cost.** Every access becomes an arena load rather than a frame slot read. Cheap at today's script
   sizes, worth measuring before it is the default for every variable.
 
@@ -298,19 +313,73 @@ than being retrofitted into a language still moving underneath it.
    registers and `bl` leaves them alone, so removing the fix fails no test there while crashing an
    S3. The boards are the only check for that class.
 
-2. ⬜ **Typed script-level members**, per *Where script-level state lives* above: a variable declared inside the
-   class but outside any function lives in the arena, is visible in every function, is initialised
-   once and survives every call. Scalars first, with the storage designed so a struct and an array
-   can follow without moving anything. This is what makes a stateful effect (fire, trails, decay)
-   expressible at all, so it is worth landing on its own and measuring before anything is built on
-   it.
+2. ✅ **`defineControls()`, replacing the `// @control` comment.** Done: a control is declared by
+   calling `addUint8("bpm", bpm, 1, 240)` inside a `defineControls()` the script defines, the same
+   call a compiled module makes. The `ControlAnno` token and its capture path are gone, all 16
+   shipped scripts and the four docs moved with it, and both boards run the new form.
 
-3. ⬜ **`defineControls()`, replacing the `// @control` comment.** A control is declared by calling
-   `addUint8("bpm", 30, 1, 240)` inside a `defineControls()` the script defines, the same call a
-   compiled module makes. Today's form is a COMMENT that changes behaviour, which is not C and does
-   not resemble the thing it imitates; the lexer's `ControlAnno` token and its capture path go away
-   with it. Comes after step 1 because it IS a function, and after step 2 because the control it
-   declares is a member. The shipped scripts and the three docs move with it.
+   **It is ORDINARY CODE, which took more than the syntax swap this step first looked like.**
+   `defineControls` is a function the binding CALLS after a successful compile, the way the
+   Scheduler calls a compiled module's; `addUint8` is a builtin in the same table as `setRGB`,
+   reaching the engine through a sink as `addLight` does. A compile-time reading of the arguments
+   was built first and rejected: it would have made `addUint8` the one call in the language whose
+   arguments must be literals, which is a special case wearing a disguise. `addUint8("speed",
+   speed, base, base * 4 + 5)` works, and a test pins it.
+
+   That required three things the step did not anticipate:
+
+   - **`IrOp::ConstPtr` and `movPtr` on all three backends.** A label is a pointer and `IrInst::imm`
+     is `int32_t`, so an address cannot ride an immediate. Each backend already materializes one for
+     a host call's target (arm64 movz + 3x movk, RISC-V lui + addi, Xtensa a byte at a time), so
+     this generalizes a proven sequence rather than adding a mechanism.
+   - **An engine-owned string pool.** `Control::name` is a HELD pointer the UI dereferences on every
+     `/api/state`, and the source buffer is freed when the compile returns, so a literal is interned
+     into memory that outlives both. In the engine rather than the exec block: that block is IRAM on
+     a device, which takes 32-bit stores only.
+   - **`byRef` and `byStr` on the builtin descriptor.** Which argument is a member (passed as its
+     arena offset, so the script reads as the reference a compiled module passes) and which must be
+     a quoted name. Stated per builtin rather than special-cased by name in the parser. `byStr`
+     came from a test: `addUint8(s, s, 0, 9)` compiled, reading the member's VALUE as the label and
+     handing the host a pointer built from a colour byte.
+
+   **SWAPPED with typed members, which this plan originally put first.** The stated reason for the
+   old order was that "the control it declares is a member", so members had to exist to declare one
+   against. Building it showed the dependency runs the other way. Every class-scope declaration is a
+   member; whether the UI shows one is a separate question `defineControls()` answers. While
+   `@control` is still the marker, the member rule has to be written in terms of a comment that this
+   step deletes, so members built first would be built against a discriminator with no future, and
+   step 3 would spend its budget unpicking that rather than on itself. Starting a member's WIP
+   against the annotation is what surfaced this: the declaration rule kept wanting to ask a question
+   the next step abolishes.
+
+3. ✅ **Typed script-level members**, per *Where script-level state lives* above. Both halves are
+   now done: the assignment statement below, and the types in steps 8 and 9.
+
+   **Half of this arrived with step 2**, because a control turned out to BE a member the UI shows.
+   A variable declared in the class body already lives in the arena, is visible in every function,
+   is seeded once from its initializer and survives every call, and a member no `addUint8` names is
+   already private state. What is missing is that a script cannot WRITE one, which is what makes it
+   state rather than a constant.
+
+   So what remains is:
+
+   - ✅ **An assignment statement.** Done. `x = expr;` was reachable only inside a `for` header, so a
+     member could be declared and read and never written. `IrOp::StoreCtrl` and its lowering were
+     recovered from step 2's first attempt; the grammar is new, one token of lookahead in
+     `parseStatement` separating `name =` from `name(`. A member and a script-local may be assigned
+     to; a SYSTEM VARIABLE may not, because the engine rewrites it before every call and the store
+     would silently vanish.
+
+     A CONTROL is deliberately NOT refused, which is a correction to what this plan said. Whether a
+     member becomes a control is decided at RUN time, by `defineControls()` calling `addUint8` on
+     it, so the parser cannot know: the direct consequence of step 2 making a control an ordinary
+     call. Writing one is also legitimate (an effect that ramps its own speed and lets the slider
+     re-take it), and the outcome is visible rather than silent.
+   - ⬜ **Types wider than a byte, and aggregates.** Scalars work; a `Coord3D` or an array does not.
+     This step is now steps 8 and 9, because the storage is NOT settled: see the correction below.
+
+   This is what makes a stateful effect (fire, trails, decay) expressible at all, and it is the one
+   step where a hot-path regression is plausible, so `collect_kpi.py` runs against it.
 
 3b. ✅ **A frame per FUNCTION, not per program.** Done: each function emits its own prologue and
    epilogue, the host arguments are parked per function (they were spilling into a frame that did
@@ -379,7 +448,15 @@ It settles step 5 before step 5 starts. The three bindings already differ only b
 own, so there is no inheritance question left to answer, and `tick` stays available to mean something
 in a layout or a modifier later without a grammar change.
 
-5. ⬜ **Consolidate the three bindings onto a HELD HELPER.** The design question this step existed
+5. ✅ **Consolidate the three bindings onto a HELD HELPER.** Done, in Plan-20260818, because the
+   editing loop needed it: saving a script only recompiles if the bindings agree on what "changed"
+   means, and they did not. `MoonLiveScript` is the held member this step describes, and it removed
+   116 lines. It also settled the recompile rule the three had drifted on: an effect had NO content
+   hash (so editing its text did nothing until the file was renamed), a layout cleared its hash only
+   on a name change, and only a modifier re-read the file. One rule now: if the file changed,
+   recompile.
+
+   The design question this step existed
    to answer is settled: the moment model above means the bindings no longer differ in behaviour,
    only in which base they extend and which moment they own. What is left is measurable duplication,
    and the shape it should take is now concrete rather than anticipated.
@@ -405,12 +482,27 @@ in a layout or a modifier later without a grammar change.
 The shape is finished at that point. What follows decides whether MoonLive is an impressive
 mechanism or a language people build with.
 
-6. ⬜ **`if` / `else`.** The single largest gap between what MoonLive can express and what an effect
-   IS. Today the language does smooth arithmetic over a grid (plasma, ripples, a gradient) and
-   nothing that branches, so fire, sparkles, particles, a boundary test, "respawn this one if it
-   died" are all unreachable. The stack machine already made this cheap (the predecessor plan's
-   table: "a branch over a region; storage is untouched"), and the emitter already has the
-   conditional branches the loops use. This is where the language stops being a demo.
+6. ✅ **`if` / `else`.** Done. The single largest gap between what MoonLive can express and what an
+   effect IS: the language did smooth arithmetic over a grid and nothing that branches.
+
+   Cheaper than expected, and the reason is worth recording. The six comparisons lower onto the TWO
+   branch ops the loops already use, `BranchGe` (unsigned `>=`) and `BranchNe`, by negating the test
+   and swapping the operands: the emitted branch skips the then-block, so `a < b` emits
+   `BranchGe a, b`. Only `>=` and `<=` need a second branch, because neither is a single unsigned
+   `>=`. **No new IR op, no backend change, no allocator change.**
+
+   The last of those is the one that could have gone wrong. The spill pass identifies a loop as a
+   `BranchNe` whose label was bound EARLIER, and an `if` always jumps FORWARD around its block, so a
+   conditional cannot be mistaken for a loop. That property came from the emit shape rather than
+   from a guard added for it.
+
+   The lexer gained `<=`, `>=`, `==`, `!=` and `>`, matched before the one-character operators they
+   contain (maximal munch): testing `=` first would have lexed `a == b` as two assignments.
+
+   Pinned by a boundary table across all six operators at, above and below the compared value, which
+   is the only place an off-by-one in the negation mapping is visible; plus an `if` inside a `for`,
+   a condition that is an expression on both sides, and a member steering which branch a tick takes.
+   Encodings confirmed on all three ISAs with `disasm.py`.
 
 7. ⬜ **Reading a light back: `get(x, y)`.** One builtin, and an entire family of effects becomes
    expressible: fire, decay, trails, blur feedback all work by reading what was drawn and modifying
@@ -419,22 +511,131 @@ mechanism or a language people build with.
    comes back: three builtins (`red`/`green`/`blue`) or bit operators, which is the same question
    the seven-argument `line()` answered for arguments and would answer once for both.
 
-8. ⬜ **Arrays, and arrays of structs.** Step 2 designs the storage for it; this is where it works.
-   A particle array is the difference between an effect that draws a formula and one that simulates
-   something, and it is what most of the effects people ask for are built on. Includes the arena
-   ceiling and its diagnostic: an array lets a script ask for more memory than a classic ESP32 has,
-   and the answer must be a clear compile error rather than a failed allocation at run time.
+8. ✅ **Arrays** (arrays of structs not yet) and **9. ✅ Wider values than a byte.** Both built and
+   on hardware; the ceiling has its number. Arrays OF STRUCTS remain unbuilt, and are their own step
+   whenever a script wants one.
 
-9. ⬜ **Wider values than a byte.** Coordinates, members and arena slots are 8-bit, so a script
-   cannot address a 256-wide wall correctly, and a modifier cannot walk a light off a large grid.
-   This is a correctness wall on exactly the installations worth demonstrating on, and it touches
-   the same typed-storage decision as steps 2 and 8, so those three want to agree with each other.
+   What shipped, in the order it had to be built:
 
-10. ⬜ **The editing loop, which is the thing people will actually see.** Editing a script means the
-   File Manager today: find the file, edit it, save it, then re-name it on the module. The demo is
-   live authoring, and that wants an editor on the module's own card, saving to the same file the
-   engine compiles. Tooling rather than language, and the last step because it is worth building
-   against the finished shape rather than twice.
+   - **A member's offset is a BYTE CURSOR**, not its declaration index. The two were the same number
+     while every member was a byte, which is why nothing downstream had to change: the bindings'
+     cached slot pointers, persistence and `addUint8` all keyed on the offset already.
+   - **The arena's byte budget split from the record count** (`kCtrlBytes` and `kMaxCtrls`). They
+     answered one question while a member was a byte and two questions afterwards.
+   - **`uint16_t` members**, with `LoadCtrl16`/`StoreCtrl16` and `load16`/`store16` on all three
+     backends. Separate ops rather than a width field, because every backend switch is exhaustive
+     over `IrOp`: a backend that forgot the width fails to COMPILE, where an ignored field would
+     have emitted a byte access against a two-byte member and lost the high half at run time.
+   - **Even alignment for a wide member**, because arm64 `ldrh` and Xtensa `l16ui` SCALE the
+     immediate by the access size and cannot encode an odd offset at all. The ISA's rule, honored
+     once in the cursor rather than worked around in two assemblers.
+   - **Arrays**, with `LoadIdx`/`StoreIdx` and a `load8Idx`/`load16Idx` pair (the stores already
+     took a register offset; the loads did not). An index is an arbitrary expression.
+   - **An out-of-range index is CLAMPED to the last element**, one compare and one branch. Not
+     refused and not allowed through: a script computes indices from live control values, so out of
+     range is an ordinary run-time state, and the arena holds the system variables and the depth
+     counter, so a stray write would corrupt the ENGINE rather than the picture.
+
+   A SERPENTINE layout now compiles, which the docs had listed as the standing example of what the
+   language could not express.
+
+   **Verification, and what it missed.** 1313 unit tests, the clamp proven in both directions
+   (including that a system variable survives an out-of-range access), and the emitted instruction
+   sequence read on all three ISAs with `disasm.py`. All of that passed while THREE codegen defects
+   were live. The bench found them:
+
+   - `width`/`count` were parked in `IrInst::c`/`d`, which are VREG fields the spill pass renumbers.
+   - `sourcesOf` reported `kArg4` as the first source, and sources are written back POSITIONALLY, so
+     the index landed in the value's field and the stored value was dropped.
+   - Xtensa `addi.n` encodes immediate 0 as MINUS ONE (its narrow field covers 1..15), so an array
+     based at arena offset 0 shifted every element access down a byte.
+
+   arm64's register map absorbed the first two and the third is Xtensa-only, so the host suite could
+   not see any of them: reintroducing either of the first two leaves all 1313 tests passing, which
+   was control-checked rather than assumed. `disasm.py` showed the wrong code without the wrongness
+   being apparent, since a plausible-looking instruction sequence is what all three produced.
+
+   Only flashing an S3 and looking at the fixture exposed them. This is the plan's own verification
+   item 9 doing the job it exists for, and the strongest evidence yet that the device backends are
+   verified by hardware, not by inspection. `addImm` is now pinned by a test asserting the ENCODER
+   (control-checked to fail on the bug); the other two are backlogged by name, because three
+   attempts at a host test each passed with the defect reintroduced.
+
+   **The ceiling is 64 bytes, sized against a real script rather than guessed.** It was a
+   placeholder 16 until the first realistic effect written against it (`ember.mle`: two byte
+   controls, a `uint16_t` counter and a 16-element heat buffer) was refused at 20 bytes. 64 holds a
+   `uint8_t[64]` or a `uint16_t[32]` alongside scalars. Raise it against a script that needs more,
+   not on speculation: the failure is a compile error naming the arena, so hitting it is visible.
+
+   Widening it also exposed a defect worth recording, found by the pre-merge Reviewer: the seeding
+   mask was a `uint32_t` written when the budget was 16, so a member at offset 32 or beyond shifted
+   past the mask's width. Undefined behaviour that in practice aliased mod 32, silently losing a
+   member's live value on every recompile. A `static_assert` now ties the mask width to the budget.
+
+   **8 and 9 were ONE step, done together.** Step 2 was expected to have designed this storage, and
+   it did not (see the correction under *Where script-level state lives*): the arena is a fixed row
+   of 17 bytes whose offset IS a declaration index. Both steps break that identity in the same
+   place, and a byte arena rebuilt for arrays would be rebuilt again for 16-bit values, so doing
+   them apart means paying for the migration twice and leaving the intermediate state on a device.
+
+   What the two share, and therefore what the step actually decides:
+
+   - **A member record with a width and an element count**, replacing an offset that means an index.
+   - **Offsets that survive a declaration changing shape**, because the bindings cache arena slot
+     POINTERS and persistence is keyed on the offset. Step 3's identity fix (a member is its name at
+     an offset, not its position) is the precedent this extends.
+   - **`LoadCtrl`/`StoreCtrl` widened**, which is a new op pair on all three backends: today both
+     lower to `load8`/`store8` unconditionally.
+   - **Where an array lives.** Per-light arrays as a `ScratchBuffer` was the direction; whether a
+     small fixed array can stay in the arena is part of the ceiling question rather than separate
+     from it.
+   - **The ceiling and its number.** A compile error needs a budget, and what a classic ESP32 can
+     spare is a product-owner decision, not one to derive from the largest script that happens to
+     exist today.
+
+### Strings: literals yes, a String TYPE not yet
+
+`IrOp::ConstPtr` gives a script string LITERALS as arguments, which is what `addUint8("bpm", bpm,
+1, 120)` needs: the text is interned into the compiled program and the emitted code carries a
+pointer that outlives the source buffer, the same lifetime answer the engine already gives control
+and entry-point names.
+
+A String TYPE is deliberately NOT next, and the reason is what the light domain measures rather
+than taste. Every one of the 52 compiled effects mentions `const char*`, and every use is
+metadata: `name()`, `tags()`, a control label. Not one manipulates text while rendering. So
+strings here are a declaration-time concern, which literals cover.
+
+**The first thing literals buy, beyond a control name, is a real debugger.** `print(v)` writes
+`[script] 42` and nothing about which value that was, so debugging a script means printing several
+numbers and inferring which line each came from. `printf("y=%d x=%d\n", y, x)` is one more builtin
+on the same table and the same call path once a string can be an argument, and it makes the one
+script-level debugging tool actually usable.
+
+It must be OUR formatter, not a `std::printf` passthrough. The format string comes from a script,
+which is the textbook format-string vulnerability: `%s` against an integer argument dereferences a
+wild pointer and `%n` writes memory. Walking the format ourselves and accepting `%d`/`%u`/`%x`/`%%`
+against arguments that are known to be integers removes the class rather than documenting it. It
+also keeps the existing print budget, which is what stops a serial write from sitting on the render
+tick.
+
+What a mutable String would additionally need is the hard half: somewhere to put bytes a script
+assigns at run time, a length convention, and comparison/concatenation as builtins. That is the
+same storage-and-ceiling question arrays face in step 8, so the two want one answer rather than
+two. The one concrete use case is a text overlay in a showcase effect, and that can go a long way
+on literals plus the numeric vocabulary already present.
+
+10. ✅ **The editing loop, which is the thing people will actually see.** Done, in
+   [Plan-20260818](Plan-20260818%20-%20A%20file%20editor%20control%20and%20a%20filesystem%20change%20seam.md).
+   A card carries a file picker and an editor; typing and clicking away recompiles.
+
+   Built EARLIER than this plan's "last step, against the finished shape" reasoning suggested, and
+   that reasoning turned out to be wrong: the shape a text editor needs (a file, and a compile
+   result) does not change when `get()` or arrays-of-structs arrive, and waiting for a language that
+   is not finished means never building it. It paid for itself immediately, since every one of this
+   plan's own codegen bugs was debugged by editing a file and re-uploading it.
+
+   Two things it needed that were not tooling at all: a CORE seam, because a file write notified
+   nothing (`requestPrepareTree` was reachable only from a control write), and step 5's helper.
 
 ## Files
 
@@ -448,7 +649,7 @@ is a step whose design is wrong.
   conditional branch, a typed member load/store).
 - `src/core/moonlive/moonlive_lower.h`: one arm per new IR op, and nothing else. Touching more than
   that means an ISA fact leaked into the language.
-- `src/core/moonlive/MoonLive.{h,cpp}`: the arena becomes typed storage (step 2) and gains its
+- `src/core/moonlive/MoonLive.{h,cpp}`: the arena becomes typed storage (step 3) and gains its
   ceiling (step 8); entry-point discovery lives here (step 1) for the bindings to consume.
 - `src/light/moonlive/MoonLive{Effect,Layout,Modifier}.h`: call an entry point instead of running
   the whole program (step 1), then collapse onto dispatch (step 5).
@@ -482,12 +683,15 @@ therefore needs a host test that proves the semantics and a bench run that prove
    kWindowSaveReserve from the frame calculation, which fires the offset check as it should. The
    derived reserve resisted the first attempt to break it, which is the anti-drift design working:
    editing the static_assert alone changes nothing, because the value comes from the callx opcode.
-3. **A member written by one function and read by another**, and a member that survives across
-   `tick()` calls (step 2). The second is what a stateful effect depends on and is not provable by
-   inspection.
-4. **The same script at the host's real budget and a squeezed one renders identical pixels.** The
+3. ✅ **A member written by one function and read by another**, and a member that survives across
+   `tick()` calls (step 3: the write is the assignment statement, which step 2 did not need). Both
+   pinned by unit tests, and the second is the one a stateful effect depends on: three consecutive
+   ticks read back 10, 20, 30 from a member the previous tick wrote. Proven on hardware too, since
+   `ember.mlv` carries its heat array and phase across every frame on all three boards.
+4. ✅ **The same script at the host's real budget and a squeezed one renders identical pixels.** The
    predecessor plan's technique, still the only way the register work is testable off hardware, and
-   every new construct has to keep passing it.
+   every new construct has to keep passing it. Holds after `ConstPtr` joined the lowering, which is
+   the check that matters: a new op that disturbed the allocator would show up here first.
 5. ✅ **Recursion depth degrades visibly** (step 1): a script that recurses without bound keeps the
    device rendering rather than resetting it. Pinned by `a script that recurses without end keeps
    rendering instead of resetting`, which also re-runs the script to prove the counter unwinds: a
@@ -498,12 +702,62 @@ therefore needs a host test that proves the semantics and a bench run that prove
    user sees is the picture being wrong where the recursion bottomed out. Reporting it needs a
    channel from the emitted block back to the binding, which does not exist yet: worth having, and
    left for the step that gives scripts a diagnostic path.
-6. **An arena ceiling reports a compile error** (step 8), not a failed allocation at run time.
-7. **The bench, on all four boards**, after each step: S3 and classic (Xtensa), P4 and S31 (RISC-V),
-   a scripted layout and a scripted effect. Exec-block sizes compared against the previous step, since
-   an unexplained jump is the cheapest signal that codegen went wrong.
-8. **`collect_kpi.py` after step 2**, because members change how EVERY variable is accessed. That is
-   the one step where a hot-path regression is plausible, so it is measured rather than assumed.
+6. ✅ **An arena ceiling reports a compile error** (step 8), not a failed allocation at run time.
+   "the class declares more member data than the arena holds", pinned by a test that sizes its
+   source from the constants so raising either limit cannot turn it into a test of the other. The
+   ceiling proved itself immediately: the first realistic effect written against it (a 16-element
+   fire buffer) was refused at the placeholder 16 bytes, which is how `kCtrlBytes` came to be 64.
+7. ✅ **The bench, on all four boards**, after each step: S3 and classic (Xtensa), P4 and S31
+   (RISC-V), a scripted layout and a scripted effect. Exec-block sizes compared against the previous
+   step, since an unexplained jump is the cheapest signal that codegen went wrong.
+
+   After step 2: **S3 and S31 done**, one board per ISA, each running a scripted layout
+   (`grid.mlv`), effect (`plasma.mlv`) and modifier with the controls their `addUint8` calls
+   declare. The classic and the P4 are NOT done, so the step is verified per ISA rather than per
+   board. Note a device keeps its scripts across a flash, so a board tests the new syntax only once
+   the converted files are uploaded to it: the S31 was still running the annotated `grid.mlv` after
+   its firmware was current.
+
+   After steps 3a, 6, 8 and 9: **classic, S3 and S31 done**, all running `ember.mlv`, an effect
+   that uses every construct at once (a `uint16_t` counter past 255, a `uint8_t[16]` heat array read
+   and written by index, member assignment carrying state between ticks, and `if`/`else` on four
+   comparisons). The P4 is NOT reflashed since these fixes; it is RISC-V like the S31, so the same
+   codegen, but that is an assumption rather than a check.
+
+   | board | ISA | ember | tick | layout |
+   |---|---|---:|---:|---:|
+   | classic ESP32 | Xtensa | 1396 B | 81 us | 499 B |
+   | S3 | Xtensa | 1396 B | 117 us | 499 B |
+   | S31 | RISC-V | 1620 B | 33 us | 880 B |
+
+   The two Xtensa targets emit BYTE-IDENTICAL code, which is the cross-check that nothing
+   target-specific leaked into codegen. This is also the step where the bench earned its place in
+   this list: it found three defects that the whole host suite, both clamp directions and
+   `disasm.py` on all three ISAs had passed over (recorded under step 8/9 above).
+
+   Exec blocks at this step, for the next one to compare against:
+
+   | script | Xtensa | RISC-V |
+   |---|---:|---:|
+   | `grid.mlv` | 499 B | 880 B |
+   | `plasma.mlv` | 1378 B | 2644 B |
+
+   After the editing loop (Plan-20260818): **all four boards flashed, wiped and re-seeded** with the
+   17 role-named scripts, each compiling its layout and effect with the pickers filtering by role.
+   Save-recompile proven on hardware: writing different text into `lines.mle` took the S3 from
+   1233 B to 107 B with no `/api/control` call.
+
+   The P4 is up and holds its scripts, but it panics with `Cache error` every few minutes while
+   idle. Established as PRE-EXISTING rather than a regression: it runs the default module tree with
+   no MoonLive module at all, and a firmware built from a clean `main` crashes identically. Recorded
+   in [backlog-core](../../backlog/backlog-core.md). A SEPARATE P4 boot loop found in the same
+   session WAS this branch's regression and is fixed: the engine had grown to 1440 bytes held by
+   value in every scripted module, which `registerType`'s stack probe could not absorb.
+
+8. **`collect_kpi.py` after typed members** (now step 3), because members change how EVERY variable
+   is accessed. That is the one step where a hot-path regression is plausible, so it is measured
+   rather than assumed. It moved with the step when 2 and 3 swapped: `defineControls()` runs once
+   after a compile and emits nothing per tick, so it has no hot path to regress.
 
 ## Deliberately not in this plan
 

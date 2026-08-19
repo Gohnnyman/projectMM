@@ -8,8 +8,13 @@
 // the working stress test for the call path.
 
 class RipplesEffect {
-  uint8_t bpm = 10;    // @control 1..120
-  uint8_t rings = 8;   // @control 1..32
+  uint8_t bpm = 10;
+  uint8_t rings = 8;
+
+  defineControls() {
+    addUint8("bpm", bpm, 1, 120);
+    addUint8("rings", rings, 1, 32);
+  }
 
   tick() {
     for (y = 0; y < height; y = y + 1) {

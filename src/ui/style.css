@@ -1647,11 +1647,81 @@ body.cards-resizing {
     font-size: 0.85rem; line-height: 1.5; background: var(--bg-1); color: var(--fg);
 }
 .fm-editor-body:focus { outline: none; }
+/* wrap="off": code reads by indentation, and a wrapped line hides its structure. The attribute
+   stops the wrapping, this makes the overflow reachable. */
+.fm-editor-body { overflow-x: auto; white-space: pre; }
 .fm-editor-foot {
     display: flex; align-items: center; justify-content: space-between;
     padding: 10px 14px; border-top: 1px solid var(--border);
 }
 .fm-editor-status { color: var(--fg-muted); font-size: 0.85rem; }
+
+/* The same editor pane mounted INLINE on a module card rather than in the dialog. Only the frame
+   differs: no backdrop, no fixed viewport height, and it takes the card's width. The .fm-editor-*
+   internals above are shared, which is the point of the extraction. */
+.fm-editor-pane { display: flex; flex-direction: column; }
+.control-fileedit {
+    margin-top: 0;
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    background: var(--bg-1);
+}
+/* Shorter than the modal's: a card is one of several on screen, and the grip resizes it. */
+.control-fileedit .fm-editor-body { min-height: 140px; }
+.control-fileedit .fm-editor-foot { padding: 6px 10px; }
+
+/* Picker row ABOVE the editor, as one column. A .control-row is a flex row, so the two have to be
+   wrapped in a single item: appended separately they become two flex children and split the width
+   between them, which leaves the editor as a narrow strip beside the dropdown. */
+.control-fileedit-stack {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column; gap: 3px;
+}
+/* Top-align the label: the control is now tall, and a centered label floats beside its middle. */
+.control-row:has(.control-fileedit-stack) { align-items: flex-start; }
+.control-row:has(.control-fileedit-stack) .control-label { padding-top: 6px; }
+
+/* The picker row itself: file chooser, save, popup, new, delete, then the status text. */
+.fileedit-bar { display: flex; align-items: center; gap: 6px; }
+/* The file actions ride the RIGHT edge as one tight group, so the picker keeps everything left
+   over: a file name is the one thing here that is long and worth reading in full. */
+/* The card's own action buttons (.card-btn, 26x26 outlined), so the editor's four read as part of
+   the card rather than as a second toolbar. 3px apart: they are one cluster, and every pixel here
+   is a pixel the file name does not get. */
+.fileedit-tools { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
+/* ⎘ (store) and ⤢ (expand) are drawn small inside their em box, where × and + fill theirs, so at
+   the shared 12px they read as specks next to the others. Sized per GLYPH rather than by raising
+   .card-btn, which would make every card's × and + oversized to fix two symbols here. */
+.fileedit-tools .fileedit-glyph-lg { font-size: 17px; }
+/* The status sits UNDER the toolbar rather than in it: sharing the row cost the picker the width
+   it needed, and this line is a few words that appear only while saving. */
+.fileedit-status {
+    display: block; font-size: 0.8rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The picker keeps a real minimum: with min-width 0 it collapsed to its arrow whenever the status
+   text competed for the row, leaving a dropdown whose own value was invisible. It still grows into
+   spare space, but never below a width that shows a file name. */
+.fileedit-pick { flex: 1 1 auto; min-width: 9ch; }
+
+/* Unsaved work, marked the way a modified editor tab is: a dot on the Save button. The button stays
+   readable on its own, so the dot is an addition rather than the only signal. */
+.fm-editor-save.dirty::after {
+    content: "";
+    display: inline-block; width: 6px; height: 6px; margin-left: 6px;
+    border-radius: 50%; background: currentcolor; vertical-align: middle;
+}
+/* On an ICON button the dot rides the corner instead, since there is no text to sit beside. Both
+   button shapes are covered: the card mounts a .card-btn, the File Manager modal a .fm-tool. */
+.fm-tool.fm-editor-save,
+.card-btn.fm-editor-save { position: relative; }
+.fm-tool.fm-editor-save.dirty::after,
+.card-btn.fm-editor-save.dirty::after {
+    position: absolute; top: 2px; right: 2px;
+    margin: 0; width: 7px; height: 7px; background: var(--accent);
+}
+/* Nothing to save reads as nothing to do, rather than a button that silently ignores a click. */
+.fm-tool.fm-editor-save:disabled,
+.card-btn.fm-editor-save:disabled { opacity: 0.4; }
 
 /* The capture toggles inside a pad popup: what a preset carries. A compact two-column grid so the
    four of them cost one popup row rather than four. */

@@ -292,17 +292,6 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
 - **A scripted modifier that reshapes the grid** (2026-08-10). `ModifierBase::modifyLogicalSize` lets a modifier change the logical `width`/`height`/`depth` — a Multiply kaleidoscope grows the grid, a crop shrinks it — and a compiled modifier uses it. A SCRIPTED one cannot: system variables are read-only, so `MoonLiveModifier` writes the box in and never reads it back. Needs a writable system variable — the binding reads the slots after the script returns and reports the result through `modifyLogicalSize` — which is a new `SysVarKind` (or a mutable flag on `SysVar`) plus the read-back, not a new builtin. Until then a scripted modifier can fold coordinates but not resize the grid they live in.
 
-- **Editing a script's CONTENTS through /api/file does not recompile it** (2026-08-14). A binding
-  caches `compiledHash_` and skips the compile while it is non-zero; the hash is cleared when the
-  script NAME changes (`onControlChanged`, `setScript`), but a write to `/moonlive/<same-name>` via
-  the File Manager leaves it set, so the layout keeps running the previous code until the name is
-  touched or the device reboots. `MoonLiveModifier` does not have this: it re-hashes the source on
-  every prepare and compares, which is the shape to copy.
-
-  The fix belongs at the filesystem seam rather than in the binding — a write under `/moonlive/`
-  invalidates whatever compiled from that path — so it is a small core/HTTP change, not a MoonLive
-  one. Pre-existing, not introduced by the stack-machine work.
-
 - **MoonLive has no x86-64 backend — scripts do not run on Windows** (2026-08-14). The desktop
   assembler (`moonlive_asm_host.cpp`) is arm64-only, so `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86-64
   Windows, x86-64 Linux and Intel macOS. `compileSource` fails cleanly there and scripted modules
@@ -316,6 +305,48 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
   Windows), so the `call()` save-set and argument registers differ from everything written so far.
   `disasm.py --isa x86_64` should land with it, since no test executes emitted bytes for any backend
   but the host's.
+
+- **The compile-failure latch is not provable on the host** (2026-08-18). `MoonLiveScript::sync`
+  refuses to re-attempt a script that failed until its (name, content) changes. The latch exists for
+  a device-only reason: each attempt is two LittleFS reads (~5 ms on an S3), a layout is asked from
+  `lightCount()`/`placeLights()` as well as `prepare()`, and the pipeline asks repeatedly while
+  sizing a fixture, so the retries starve the render task until the watchdog resets the device.
+
+  On the host a re-read costs microseconds and nothing observable differs. Four test shapes were
+  tried and each still passed with the latch REMOVED ENTIRELY, so none was kept: what survives pins
+  only that a script fixed in place compiles without a rename, which is control-checked. Closing
+  this needs either a counting seam (a compile counter the test can read) or a platform fake whose
+  reads are observable. Until then the latch is protected by its comment and by hardware, not by a
+  test.
+
+- **Catch device-backend operand defects on the host** (2026-08-18). Two array-codegen bugs shipped
+  to an S3 while all 1313 host tests stayed green, and both were control-checked: reintroducing
+  either one leaves the suite fully passing. `IrInst::c`/`d` are VREG fields the spill pass
+  renumbers, so a width parked there becomes a register number; and `sourcesOf` writes its sources
+  back POSITIONALLY, so reporting `kArg4` first shifts every real operand one place along. arm64's
+  register map absorbs both, which is exactly why the suite cannot see them.
+
+  Three test shapes were tried and deleted for failing their control run: emitted-bytes difference
+  tests (wrong bytes still differ from other wrong bytes) and a register-liveness walk (the index
+  satisfies it whatever happens to the value). What DOES work is asserting an assembler primitive
+  directly, as `unit_moonlive_codegen_xtensa.cpp` now does for `addImm`. The general form is
+  probably an IR-level invariant check rather than a bytes-level one: assert that no op reports a
+  fixed ABI vreg among its positional sources, and that non-register operands never occupy c/d.
+  That is a property of the IR the host CAN evaluate, unlike the emitted code.
+
+- **Size the MoonLive control arena to the script** (2026-08-18). `kCtrlBytes` is a fixed 64 bytes
+  per engine (three engines per pipeline), so a script declaring one byte pays for 64 and one
+  wanting a 128-light array is refused. The arena is already `platform::alloc`'d, so the constant is
+  habit rather than necessity, and the member byte count is known at compile time.
+
+  What blocks it: the system variables sit ABOVE the script region at compile-time constant offsets
+  (`kSysWidth = kCtrlBytes + 0`), baked into emitted code as `LoadCtrl` immediates and cached as
+  slot POINTERS by the bindings. A script-sized region moves every one of them. Closing it means
+  putting the system variables BELOW the script region so their addresses stop depending on it,
+  which touches the sysvar table, the bindings and every emitted immediate. The hard ceiling stays
+  255 either way, since an arena offset is a `uint8_t` in the record, in `controlSlot` and in the
+  instruction. Until then, raising the constant is one edit and the failure is a clear compile
+  error naming the arena, so hitting it is visible rather than silent.
 
 - **Drain MoonLive's `print()` through a queue** (2026-08-09). `print(v)` writes to serial directly, and an EFFECT script runs on the render tick — so a print inside one blocks the frame for as long as the UART takes. The burst cap bounds it (a handful of writes per compile, then a compare and a return), but bounded is not free, and `tick()` is annotated `MM_NONBLOCKING`.
 

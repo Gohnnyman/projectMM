@@ -44,7 +44,10 @@ std::vector<uint8_t> renderAt(const char* src, int nLights, const moonlive::RegB
     REQUIRE(blk != nullptr);
     platform::writeExec(blk, code, r.len);
     uint8_t arena[moonlive::kArenaBytes] = {};
-    for (uint8_t i = 0; i < r.controlCount; i++) arena[r.controls[i].offset] = r.controls[i].def;
+    // Seeded from the MEMBERS, as the engine does: a declaration is a member, and its initializer
+    // is what the arena holds. A control is one of those members surfaced on the UI, so seeding
+    // members covers both, and a script with no defineControls still starts at its declared values.
+    for (uint8_t i = 0; i < r.memberCount; i++) arena[r.members[i].offset] = r.members[i].def;
     reinterpret_cast<CtrlFn>(blk)(buf.data(), static_cast<uint32_t>(nLights), 3, t, arena);
     platform::freeExec(blk, r.len);
     return buf;
@@ -119,7 +122,7 @@ TEST_CASE("a spilled value survives a host call and is still correct afterwards"
     // `keep` is defined before the call and used after it, so it must be live ACROSS random16 —
     // and at a squeezed budget it is one of the values that has nowhere to live but a slot.
     const char* src =
-        mmScript("uint8_t idx = 5; // @control 0..15\n"
+        mmScript("uint8_t idx = 5;\n"
         "for (i = 0; i < 3; i = i + 1) {\n"
         "  setRGB(idx + i, random16(1) + 111, i + 1, 222);\n"
         "}\n");
@@ -145,7 +148,7 @@ TEST_CASE("a spilled value survives a host call and is still correct afterwards"
 // If it did, a control read after a spill would load from a register holding something else.
 TEST_CASE("a declared control still reads live at a squeezed budget") {
     const char* src =
-        mmScript("uint8_t pos = 0; // @control 0..15\n"
+        mmScript("uint8_t pos = 0;\n"
         "for (i = 0; i < 2; i = i + 1) {\n"
         "  setRGB(pos + i, 10, 20, 30);\n"
         "}\n");
@@ -153,7 +156,7 @@ TEST_CASE("a declared control still reads live at a squeezed budget") {
     const auto tightBudget = squeezed(11, 1);
     auto r = moonlive::compileSource(src, kT, kSys, code, sizeof(code), &tightBudget);
     REQUIRE(r.ok);
-    REQUIRE(r.controlCount == 1);
+    REQUIRE(r.memberCount == 1);   // `pos` is a member; the arena read is what this pins
     void* blk = platform::allocExec(r.len);
     REQUIRE(blk != nullptr);
     platform::writeExec(blk, code, r.len);
@@ -277,7 +280,7 @@ TEST_CASE("a value live across a loop keeps its storage for the whole loop") {
 // in the body. Bench-bisected, each ingredient alone is fine, and only the three together fail:
 //
 //   loop, constant bound, call in body   -> runs
-//   loop, @control bound, call in body   -> runs
+//   loop, member-bound limit, call in body   -> runs
 //   `width` read, no loop                -> runs
 //   `width` loop, no call in body        -> runs
 //   `width` loop WITH a call in body     -> LoadProhibited inside the emitted code
@@ -311,7 +314,7 @@ TEST_CASE("a system variable read in a loop survives a host call in that loop") 
     // The arena the binding would hand over: controls at their defaults, and `width` where
     // MoonLiveEffect::tick writes it.
     uint8_t arena[moonlive::kArenaBytes] = {};
-    for (uint8_t i = 0; i < r.controlCount; i++) arena[r.controls[i].offset] = r.controls[i].def;
+    for (uint8_t i = 0; i < r.memberCount; i++) arena[r.members[i].offset] = r.members[i].def;
     const uint8_t kWidth = 8;
     arena[moonlive::kSysWidth] = kWidth;
 

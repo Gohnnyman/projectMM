@@ -191,7 +191,7 @@ TEST_CASE("parseString decodes the standard JSON string escapes (symmetric with 
     CHECK(out[0] == 'x'); CHECK(out[1] == 0x01); CHECK(out[2] == 'y'); CHECK(out[3] == 0x1f);
 
     // a multi-line script value (the MoonLive Stage-1 case)
-    json::parseString("{\"source\":\"uint8_t s = 1; // @control 0..9\\nsetRGB(s,0,0,255);\"}",
+    json::parseString("{\"source\":\"uint8_t s = 1;\\nsetRGB(s,0,0,255);\"}",
                       "source", out, sizeof(out));
     CHECK(std::strchr(out, '\n') != nullptr);          // real newline, so the // comment ends
     CHECK(std::strstr(out, "setRGB") != nullptr);      // the statement survives on its own line

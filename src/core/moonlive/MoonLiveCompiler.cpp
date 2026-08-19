@@ -2,18 +2,17 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveIr.h"
 
-#include <cstring>   // std::strncmp (@control keyword match)
+#include <cstring>   // std::strncmp (keyword matching)
 
 namespace mm::moonlive {
 
 namespace {
 
 // --- Lexer ---------------------------------------------------------------------------
-// `ControlAnno` is a captured `// @control min..max` comment (a control's UI range). A plain
-// `//` line comment is skipped like whitespace; only the @control form becomes a token, carrying
-// its min/max in annoMin/annoMax. `Assign` is `=` (a control declaration's initializer).
-enum class Tok { Ident, Number, Assign, LParen, RParen, LBrace, RBrace, Comma, Semicolon,
-                 ControlAnno, Plus, Minus, Star, Less, End, Error };
+// A `//` line comment is whitespace. `Assign` is `=` (a member declaration's initializer).
+enum class Tok { Ident, Number, String, Assign, LParen, RParen, LBrace, RBrace, Comma, Semicolon,
+                 Plus, Minus, Star, Less, LessEq, Greater, GreaterEq, EqEq, NotEq,
+                 LBracket, RBracket, End, Error };
 
 struct Lexer {
     const char* p;
@@ -21,7 +20,6 @@ struct Lexer {
     long number = 0;
     const char* identBeg = nullptr;
     size_t identLen = 0;
-    long annoMin = 0, annoMax = 0;     // ControlAnno: the captured min..max
     const char* tokBeg = nullptr;
     const char* srcBeg;
     const char* err = "";
@@ -45,25 +43,14 @@ struct Lexer {
     void advance() {
         for (;;) {
             while (isSpace(*p)) p++;
-            // Line comment: a plain `//…` is skipped; a `// @control min..max` is captured.
+            // A line comment is whitespace, with no exception.
             if (p[0] == '/' && p[1] == '/') {
-                const char* lineStart = p;
                 p += 2;
-                while (*p == ' ' || *p == '\t') p++;
-                // Match `@control` only as a whole word — require a non-identifier
-                // char after it, so a comment like `// @controlled …` is a plain
-                // comment, not a malformed annotation.
-                if (p[0] == '@' && std::strncmp(p, "@control", 8) == 0 && !isIdentCont(p[8])) {
-                    tokBeg = lineStart;
-                    p += 8;
-                    while (*p == ' ' || *p == '\t') p++;
-                    long lo = 0, hi = 0;
-                    if (!readNumber(lo) || !(p[0] == '.' && p[1] == '.')) { kind = Tok::Error; err = "malformed @control (expected min..max)"; return; }
-                    p += 2;
-                    if (!readNumber(hi)) { kind = Tok::Error; err = "malformed @control (expected max)"; return; }
-                    annoMin = lo; annoMax = hi; kind = Tok::ControlAnno; return;
-                }
-                // plain comment — skip to end of line and re-loop (treated as whitespace)
+                // Every line comment is whitespace. A comment that CHANGED BEHAVIOR lived here:
+                // `// @control 1..120` declared a control's range, which is not C and does not
+                // resemble the compiled module a script stands in for. `defineControls()` calling
+                // `addUint8("bpm", bpm, 1, 120)` replaced it, so the token, its capture and the
+                // `lineStart` this needed are all gone.
                 while (*p && *p != '\n') p++;
                 continue;
             }
@@ -72,6 +59,12 @@ struct Lexer {
         tokBeg = p;
         char c = *p;
         if (c == 0) { kind = Tok::End; return; }
+        // Two-character operators first: '<' is a prefix of '<=' and '=' of '==', so testing a
+        // short form ahead of the long one would lex `a == b` as two assignments. Maximal munch.
+        if (c == '<' && p[1] == '=') { p += 2; kind = Tok::LessEq;    return; }
+        if (c == '>' && p[1] == '=') { p += 2; kind = Tok::GreaterEq; return; }
+        if (c == '=' && p[1] == '=') { p += 2; kind = Tok::EqEq;      return; }
+        if (c == '!' && p[1] == '=') { p += 2; kind = Tok::NotEq;     return; }
         if (c == '=') { p++; kind = Tok::Assign; return; }
         if (c == '(') { p++; kind = Tok::LParen; return; }
         if (c == ')') { p++; kind = Tok::RParen; return; }
@@ -82,12 +75,28 @@ struct Lexer {
         if (c == '*') { p++; kind = Tok::Star;    return; }
         if (c == '{') { p++; kind = Tok::LBrace;  return; }
         if (c == '}') { p++; kind = Tok::RBrace;  return; }
+        if (c == '[') { p++; kind = Tok::LBracket; return; }
+        if (c == ']') { p++; kind = Tok::RBracket; return; }
         if (c == '<') { p++; kind = Tok::Less;    return; }
+        if (c == '>') { p++; kind = Tok::Greater; return; }
         // '/' only reaches here when it is NOT the `//` a comment starts with (handled above).
         // '/' and '%' are deliberately NOT tokens yet. No ISA here has a cheap integer divide, so
         // both would lower to a host call — which the light domain already ships as `mod(a, b)` and
         // `turn(n)`, so the capability exists under a name instead of an operator. A script using
         // the character gets "unexpected character", which is the honest answer. Backlogged.
+        // A quoted string: a control's UI label. The span goes in identBeg/identLen, the same
+        // fields an identifier uses, because both are a run of source bytes the parser reads
+        // without copying. No escapes: a control name with a quote or a newline in it is not a
+        // thing anyone needs, and the absence is one less rule to document.
+        if (c == '"') {
+            p++;
+            identBeg = p;
+            while (*p && *p != '"' && *p != '\n') p++;
+            if (*p != '"') { kind = Tok::Error; err = "unterminated string"; return; }
+            identLen = static_cast<size_t>(p - identBeg);
+            p++;                                    // the closing quote
+            kind = Tok::String; return;
+        }
         if (isDigit(c)) {
             long v = 0; readNumber(v);
             number = v; kind = Tok::Number; return;
@@ -140,19 +149,60 @@ struct Parser {
     uint8_t            slotsUsed = 0;       // PEAK slots — what the prologue reserves
     uint8_t            nextLabel = 0;          // IR label ids, handed out in source order
 
-    DeclaredControl    controls[kMaxCtrls] = {};  // controls the script declared (decl lines)
-    uint8_t            controlCount = 0;
+    // Every class-scope `uint8_t x = 0;` is a MEMBER: the class model, where a declaration inside
+    // the class is a member of it. Whether the UI shows one is a separate question the script
+    // answers by calling addUint8 in defineControls, so `controls` below is a VIEW of these rather
+    // than a second storage: a control's offset IS its member's arena byte.
+    //
+    // `DeclaredControl` carries both because they are the same record. A member that no control
+    // names simply never appears in the control list, and the binding creates no card for it.
+    char*              strings = nullptr;      // the caller's pool; see compileSource
+    uint16_t           stringCap = 0;
+    uint16_t           stringLen = 0;
+    DeclaredControl    members[kMaxCtrls] = {};
+    // Arena bytes the members declared so far occupy: the cursor the next declaration is placed at.
+    // Separate from memberCount now that a member's size is not always one byte.
+    uint8_t            memberBytes = 0;
+    uint8_t            memberCount = 0;
+
     const char*        error = "";
     uint16_t           errorCol = 0;
     bool               failed = false;
 
     void fail(const char* msg) { if (!failed) { failed = true; error = msg; errorCol = lex.col(); } }
 
-    // Find a declared control by name; returns its index or -1. Names point into the source buffer
-    // (token spans, not NUL-terminated), so compare by length + bytes.
-    int findControl(const char* name, size_t len) const {
-        for (uint8_t i = 0; i < controlCount; i++)
-            if (controls[i].nameLen == len && std::strncmp(controls[i].name, name, len) == 0)
+
+    /// Copy a token's text into the program's string pool and return a pointer to it.
+    ///
+    /// The source buffer is freed the moment the compile returns, so a pointer into it would
+    /// dangle before the emitted code ran. The pool travels with the compiled program instead,
+    /// which is the same lifetime answer the engine already gives control and entry-point names.
+    /// Null when the pool is full, which the caller turns into a diagnostic rather than a silent
+    /// truncation.
+    const char* internString(const char* text, size_t len) {
+        if (!strings || stringLen + len + 1 > stringCap) return nullptr;
+        char* at = strings + stringLen;
+        for (size_t i = 0; i < len; i++) at[i] = text[i];
+        at[len] = '\0';
+        stringLen = static_cast<uint16_t>(stringLen + len + 1);
+        return at;
+    }
+
+
+    /// Find a script-local (a `for` counter or limit) by name; its index, or -1. Same span
+    /// comparison as findMember, for the same reason.
+    int findLocal(const char* name, size_t len) const {
+        for (uint8_t i = 0; i < localCount; i++)
+            if (locals[i].nameLen == len && std::strncmp(locals[i].name, name, len) == 0)
+                return i;
+        return -1;
+    }
+
+    /// Find a declared MEMBER by name; its index, or -1. Names are token spans into the source
+    /// rather than NUL-terminated strings, so compare by length and bytes.
+    int findMember(const char* name, size_t len) const {
+        for (uint8_t i = 0; i < memberCount; i++)
+            if (members[i].nameLen == len && std::strncmp(members[i].name, name, len) == 0)
                 return i;
         return -1;
     }
@@ -276,24 +326,42 @@ struct Parser {
                 emit({IrOp::LoadCtrl, v, 0,0,0,0, sv->where, nullptr, {}});
                 return v;
             }
-            for (uint8_t li = 0; li < localCount; li++) {
-                if (locals[li].nameLen == lex.identLen &&
-                    std::strncmp(locals[li].name, lex.identBeg, lex.identLen) == 0) {
-                    // Load the variable from its frame slot into a fresh temp. The temp is ordinary:
-                    // the caller consumes it and frees it like any other expression value, so a
-                    // variable occupies a register only for the instruction that reads it rather
-                    // than for the whole of its scope.
+            const int li = findLocal(lex.identBeg, lex.identLen);
+            if (li >= 0) {
+                // Load the variable from its frame slot into a fresh temp. The temp is ordinary:
+                // the caller consumes it and frees it like any other expression value, so a
+                // variable occupies a register only for the instruction that reads it rather
+                // than for the whole of its scope.
+                lex.advance();
+                VReg v = alloc();
+                emit({IrOp::Reload, v, 0,0,0,0, locals[li].slot, nullptr, {}});
+                return v;
+            }
+            // A MEMBER read. A control is a member the UI shows, so this one lookup answers both:
+            // the arena byte is the same byte either way.
+            const int mi = findMember(lex.identBeg, lex.identLen);
+            if (mi >= 0) {
+                lex.advance();
+                // An ARRAY element: `heat[i]`, where the index is an arbitrary expression. The
+                // same orthogonality the rest of the language has, so an index may be a member, a
+                // loop counter or arithmetic over both.
+                if (lex.kind == Tok::LBracket) {
+                    if (members[mi].count == 1) { fail("this member is not an array"); return 0; }
                     lex.advance();
+                    VReg idx = parseExpr();
+                    if (failed) return 0;
+                    if (!expect(Tok::RBracket, "expected ']' to close an array index")) { freeTemp(idx); return 0; }
                     VReg v = alloc();
-                    emit({IrOp::Reload, v, 0,0,0,0, locals[li].slot, nullptr, {}});
+                    emit({IrOp::LoadIdx, v, idx, 0, 0, 0,
+                          idxPack(members[mi].offset, ctrlWidth(members[mi].type),
+                                  members[mi].count), nullptr, {}});
+                    freeTemp(idx);
                     return v;
                 }
-            }
-            int ci = findControl(lex.identBeg, lex.identLen);
-            if (ci >= 0) {                                // a declared control read
+                if (members[mi].count > 1) { fail("an array needs an index: write name[i]"); return 0; }
                 VReg v = alloc();
-                emit({IrOp::LoadCtrl, v, 0,0,0,0, controls[ci].offset, nullptr, {}});
-                lex.advance();
+                emit({members[mi].type == CtrlType::Uint16 ? IrOp::LoadCtrl16 : IrOp::LoadCtrl,
+                      v, 0,0,0,0, members[mi].offset, nullptr, {}});
                 return v;
             }
             VReg out = 0;
@@ -359,7 +427,55 @@ struct Parser {
         if (lex.kind != Tok::RParen) {
             while (true) {
                 if (n >= fn->argc) { fail("too many arguments"); return; }
-                const VReg v = parseExpr();
+                // Two argument forms an ordinary expression cannot carry, both needed so a control
+                // is declared by the same call a compiled module makes:
+                //
+                //   a STRING, for the UI label. A frame slot is a machine word, so the pointer
+                //   into the source fits; the host reads it as a `const char*`.
+                //
+                //   a MEMBER BY NAME, meaning its ADDRESS rather than its value. `addUint8("bpm",
+                //   bpm, 1, 120)` reads as the reference a compiled module passes, and the compiler
+                //   supplies the arena offset the host binds to. Only where the builtin asks for it
+                //   (byRef), so `setRGB(bpm, …)` still reads bpm's value as it always did.
+                VReg v = 0;
+                const bool wantStr = (fn->byStr >> n) & 1u;
+                if (wantStr && lex.kind != Tok::String) {
+                    fail("this argument must be a name in quotes"); return;
+                }
+                // And a string ONLY where one is wanted: `setRGB("red", 0, 0, 0)` would otherwise
+                // pass the low bits of a pointer as a color index.
+                if (!wantStr && lex.kind == Tok::String) {
+                    fail("this argument is a number, not a name in quotes"); return;
+                }
+                if (lex.kind == Tok::String) {
+                    // The label is recorded HERE, at compile time, rather than travelling through
+                    // a frame slot: the source buffer is freed after the compile, so a pointer the
+                    // emitted code carried would dangle by the time the host read it. The engine
+                    // already copies control names into its own pool, which is the same lifetime
+                    // problem solved once. The slot still gets a value so the argument count is
+                    // honest; the host reads the name from the control record, not from the slot.
+                    // INTERNED, so the pointer outlives the source. The text is freed the moment
+                    // the compile returns, and this pointer travels in the emitted code to a host
+                    // that reads it later, so it cannot point into the source. The pool is part of
+                    // the compiled program, exactly as the entry-point and control names already
+                    // are: the same lifetime problem, solved the same way.
+                    // Interned into the caller's pool, which outlives the compile, so the address
+                    // is final the moment it is made and the emitted code carries it directly.
+                    const char* interned = internString(lex.identBeg, lex.identLen);
+                    if (!interned) { fail("no room for this script's strings"); return; }
+                    v = alloc();
+                    emit({IrOp::ConstPtr, v, 0,0,0,0, 0, nullptr, interned, {}});
+                    lex.advance();
+                } else if ((fn->byRef >> n) & 1u) {
+                    if (lex.kind != Tok::Ident) { fail("expected the member this control is bound to"); return; }
+                    const int mi = findMember(lex.identBeg, lex.identLen);
+                    if (mi < 0) { fail("no member of that name is declared in this class"); return; }
+                    v = alloc();
+                    emit({IrOp::Const, v, 0,0,0,0, members[mi].offset, nullptr, {}});
+                    lex.advance();
+                } else {
+                    v = parseExpr();
+                }
                 if (failed) return;
                 if (slotHighWater >= kMaxLocals) { fail("too many arguments to hold"); return; }
                 emit({IrOp::Spill, 0, v, 0,0,0, slotHighWater++, nullptr, {}});
@@ -371,6 +487,7 @@ struct Parser {
         }
         if (slotHighWater > slotsUsed) slotsUsed = slotHighWater;
         if (n != fn->argc) { fail("wrong number of arguments"); return; }
+
         if (!expect(Tok::RParen, "expected ')'")) return;
 
         // The IR Call op carries a single argument vreg, so a Call-kind builtin must be unary.
@@ -406,7 +523,7 @@ struct Parser {
                     *slot[i] = alloc();
                     emit({IrOp::Reload, *slot[i], 0,0,0,0, static_cast<int32_t>(argBase + i), nullptr, {}});
                 }
-                emit({IrOp::Inline, 0, a0, a1, a2, a3, 0, nullptr, fn->inlineOp});
+                emit({IrOp::Inline, 0, a0, a1, a2, a3, 0, nullptr, nullptr, fn->inlineOp});
                 for (uint8_t i = 0; i < n && i < 4; i++) freeTemp(*slot[i]);
             }
         }
@@ -419,43 +536,94 @@ struct Parser {
         slotHighWater = argBase;
     }
 
-    // A control declaration: `uint8_t ident = number ;` optionally followed by `// @control min..max`.
+    // A MEMBER declaration: `uint8_t ident = number ;`. Whether the UI shows it is a separate
+    // question the script answers by naming it in defineControls().
     // The leading `uint8_t` keyword is already consumed by the caller. Records a DeclaredControl.
-    void parseDecl() {
-        if (lex.kind != Tok::Ident) { fail("expected a control name after the type"); return; }
+    void parseDecl(CtrlType type) {
+        if (lex.kind != Tok::Ident) { fail("expected a member name after the type"); return; }
         const char* name = lex.identBeg; size_t nameLen = lex.identLen;
-        if (nameLen >= kMaxControlName) { fail("control name too long"); return; }   // no silent truncation downstream
+        if (nameLen >= kMaxControlName) { fail("member name too long"); return; }   // no silent truncation downstream
         if (sysvars.find(name, nameLen)) { fail("name is a system variable"); return; }
-        if (findControl(name, nameLen) >= 0) { fail("duplicate control name"); return; }
+        // Against MEMBERS, which is where a declaration now lands. Checked against the controls
+        // before, which stopped catching anything the moment a declaration became a member: two
+        // members of one name would both exist, and every read would resolve to the first while
+        // the second silently owned an arena byte nobody could reach.
+        if (findMember(name, nameLen) >= 0) { fail("duplicate member name"); return; }
         // A control name must not shadow a builtin: a declared `random16` would make `random16(…)`
         // ambiguous (control read vs call). Reject it at the source so the resolution never collides.
-        if (table.find(name, nameLen)) { fail("control name shadows a built-in function"); return; }
-        if (controlCount >= kMaxCtrls) { fail("too many controls"); return; }
+        if (table.find(name, nameLen)) { fail("member name shadows a built-in function"); return; }
         lex.advance();
-        if (!expect(Tok::Assign, "expected '=' in a control declaration")) return;
+        // An ARRAY: `uint8_t heat[16];`. The length is a literal, not an expression, because the
+        // arena is sized at compile time: a length read from a control would make the member's
+        // size depend on a value the UI changes while the program runs.
+        uint8_t count = 1;
+        if (lex.kind == Tok::LBracket) {
+            lex.advance();
+            if (lex.kind != Tok::Number) { fail("expected an array length (a number)"); return; }
+            if (lex.number < 1 || lex.number > kCtrlBytes) { fail("array length out of range"); return; }
+            count = static_cast<uint8_t>(lex.number);
+            lex.advance();
+            if (!expect(Tok::RBracket, "expected ']' to close the array length")) return;
+            if (!expect(Tok::Semicolon, "expected ';': an array has no initializer")) return;
+            if (lex.kind == Tok::Error) { fail(lex.err); return; }
+            if (memberCount >= kMaxCtrls) { fail("too many members"); return; }
+            const uint8_t align = ctrlWidth(type);
+            uint16_t at = memberBytes;
+            if (align > 1 && (at % align) != 0) at = uint16_t(at + (align - at % align));
+            const uint16_t need = uint16_t(count) * align;
+            if (at + need > kCtrlBytes) { fail("the class declares more member data than the arena holds"); return; }
+            // Zero, not a written initializer: an element-wise initializer list would be a second
+            // syntax for what a `for` in the script already expresses, and every element seeding to
+            // the same value is what a decay or particle buffer starts from anyway.
+            members[memberCount] = {name, 0, 255, 0, static_cast<uint8_t>(nameLen), type,
+                                    static_cast<uint8_t>(at), count};
+            memberBytes = static_cast<uint8_t>(at + need);
+            memberCount++;
+            return;
+        }
+        if (!expect(Tok::Assign, "expected '=' in a member declaration")) return;
         if (lex.kind != Tok::Number) { fail("expected a default value (a number)"); return; }
-        if (lex.number < 0 || lex.number > 255) { fail("uint8_t default out of range (0..255)"); return; }
+        // The initializer is range-checked against the DECLARED type, so a uint8_t member cannot be
+        // given a value it silently truncates. A uint16_t's own default is bounded below, once its
+        // arena slot is known: the DeclaredControl record carries a byte, so a wide default is the
+        // seeding path's concern rather than the parser's.
+        const long defMax = type == CtrlType::Uint16 ? 65535 : 255;
+        if (lex.number < 0 || lex.number > defMax) {
+            fail(type == CtrlType::Uint16 ? "uint16_t default out of range (0..65535)"
+                                          : "uint8_t default out of range (0..255)");
+            return;
+        }
         long def = lex.number;
         lex.advance();
-        if (!expect(Tok::Semicolon, "expected ';' after the control declaration")) return;
-        // A malformed `// @control …` comment lexes to Tok::Error with a specific
-        // message (e.g. "malformed @control (expected min..max)"). Surface it here
-        // rather than letting it fall through to a generic later parse failure.
+        if (!expect(Tok::Semicolon, "expected ';' after the member declaration")) return;
+        // A lexer error carries a specific message; surface it rather than letting it fall through
+        // to a generic later parse failure.
         if (lex.kind == Tok::Error) { fail(lex.err); return; }
-        // Optional range annotation; default 0..255 if absent.
-        long lo = 0, hi = 255;
-        if (lex.kind == Tok::ControlAnno) {
-            lo = lex.annoMin; hi = lex.annoMax;
-            if (lo < 0 || hi > 255 || lo > hi) { fail("@control range out of order or out of 0..255"); return; }
-            lex.advance();
-        }
-        // The default must lie within the (possibly annotated) range — a slider can't start outside
-        // its own bounds.
-        if (def < lo || def > hi) { fail("control default is outside its @control range"); return; }
-        controls[controlCount] = {name, static_cast<uint8_t>(lo), static_cast<uint8_t>(hi),
-                                  static_cast<uint8_t>(def), static_cast<uint8_t>(nameLen),
-                                  CtrlType::Uint8, controlCount};
-        controlCount++;
+        // A MEMBER, and only that. Whether the UI shows it is a separate question the script
+        // answers by naming it in `defineControls()`, so a declaration no longer carries a range:
+        // the range belongs to the control, and a member that no control surfaces has none.
+        if (memberCount >= kMaxCtrls) { fail("too many members"); return; }
+        // The offset is a running BYTE CURSOR, not the declaration index: a member wider than a
+        // byte consumes several, so the n-th member is no longer at byte n. Checked against the
+        // arena's byte budget rather than against the record count, because those are now two
+        // different limits and a script can exhaust either one first.
+        // A wide member is placed on an EVEN byte. Two of the three backends scale a halfword
+        // load's immediate by the access size (arm64 ldrh, Xtensa l16ui), so an odd offset is not
+        // encodable at all: the alignment is the ISA's rule, honored here once rather than worked
+        // around in two assemblers.
+        const uint8_t align = ctrlWidth(type);
+        uint16_t at = memberBytes;
+        if (align > 1 && (at % align) != 0) at = uint16_t(at + (align - at % align));
+        const uint16_t need = uint16_t(ctrlWidth(type));
+        if (at + need > kCtrlBytes) { fail("the class declares more member data than the arena holds"); return; }
+        // def is uint16_t on the record precisely so a wide member's initializer survives; casting
+        // it to a byte here truncated `uint16_t phase = 1000;` to 232. Invisible to a test that
+        // observes through setRGB, because the error is always a multiple of 256.
+        members[memberCount] = {name, 0, 255, static_cast<uint16_t>(def),
+                                static_cast<uint8_t>(nameLen), type,
+                                static_cast<uint8_t>(at), 1};
+        memberBytes = static_cast<uint8_t>(at + need);
+        memberCount++;
     }
 
     // Is the current Ident this exact keyword? Keywords are matched by text rather than lexed as
@@ -465,7 +633,9 @@ struct Parser {
         return lex.kind == Tok::Ident && lex.identLen == len && std::strncmp(lex.identBeg, kw, len) == 0;
     }
     // Is the current Ident the `uint8_t` type keyword (the only declared type in Stage 1)?
-    bool atTypeKeyword() const { return atKeyword("uint8_t", 7); }
+    bool atTypeKeyword() const { return atKeyword("uint8_t", 7) || atKeyword("uint16_t", 8); }
+    /// The type the current keyword names. Only called when atTypeKeyword() is true.
+    CtrlType currentType() const { return atKeyword("uint16_t", 8) ? CtrlType::Uint16 : CtrlType::Uint8; }
 
     // program := { decl } { stmt }.  Declarations (control vars) come first, then one-or-more
     // call statements. (Multi-statement now: a script has decl lines AND a statement line.)
@@ -506,11 +676,7 @@ struct Parser {
         // the inner step then writes the register the outer back edge tests, and the emitted program
         // never terminates — a hang on the render task from a script a user can type. Refused for the
         // same reason a duplicate control name is.
-        for (uint8_t li = 0; li < localCount; li++)
-            if (locals[li].nameLen == varLen &&
-                std::strncmp(locals[li].name, varName, varLen) == 0) {
-                fail("loop variable already in use"); return false;
-            }
+        if (findLocal(varName, varLen) >= 0) { fail("loop variable already in use"); return false; }
         lex.advance();
         if (!expect(Tok::Assign, "expected '=' in the for's first clause")) return false;
         VReg init = parseExpr();
@@ -632,9 +798,195 @@ struct Parser {
     }
 
     /// One statement: a call, or a for.
+    /// `name = expr;` is the statement that makes a member STATE rather than a constant.
+    ///
+    /// What may be assigned to is the rule worth stating. A MEMBER may: it is the script's own
+    /// storage, and its arena byte surviving every call is exactly what a stateful effect (fire,
+    /// trails, decay) needs. A script-LOCAL may: a `for` counter already lives in a frame slot and
+    /// the step clause already writes it, so a body assignment is the same store the loop makes.
+    ///
+    /// A SYSTEM VARIABLE may not: the engine rewrites it before every call, so a store would
+    /// appear to work and then vanish, which is worse than being refused.
+    ///
+    /// A CONTROL is deliberately NOT refused, though the UI does own its value. Whether a member
+    /// becomes a control is decided at RUN time, by `defineControls()` calling `addUint8` on it,
+    /// so the parser cannot know: that is the direct consequence of a control being an ordinary
+    /// call rather than an annotation. Writing one is also legitimate (an effect that ramps its
+    /// own speed and lets the slider re-take it), and the outcome is visible rather than silent:
+    /// the value moves under the slider until the user drags it again. The name is already
+    /// consumed when this runs.
+    bool parseAssignment(const char* name, size_t nameLen) {
+        // An ARRAY element assignment: `heat[i] = expr;`. Resolved before the '=' because the
+        // index sits between the name and the operator.
+        if (lex.kind == Tok::LBracket) {
+            const int ai = findMember(name, nameLen);
+            if (ai < 0) { fail("no member of that name is declared in this class"); return false; }
+            if (members[ai].count == 1) { fail("this member is not an array"); return false; }
+            lex.advance();
+            VReg idx = parseExpr();
+            if (failed) return false;
+            if (!expect(Tok::RBracket, "expected ']' to close an array index")) { freeTemp(idx); return false; }
+            if (!expect(Tok::Assign, "expected '=' in an assignment")) { freeTemp(idx); return false; }
+            VReg v = parseExpr();
+            if (failed) { freeTemp(idx); return false; }
+            emit({IrOp::StoreIdx, 0, idx, v, 0, 0,
+                  idxPack(members[ai].offset, ctrlWidth(members[ai].type),
+                          members[ai].count), nullptr, {}});
+            freeTemp(v); freeTemp(idx);
+            return expect(Tok::Semicolon, "expected ';' after an assignment");
+        }
+        if (!expect(Tok::Assign, "expected '=' in an assignment")) return false;
+
+        // Resolve the DESTINATION before parsing the value, so a refused target reports the name
+        // the script wrote rather than a diagnostic from somewhere inside the expression.
+        const int li = findLocal(name, nameLen);
+        const int mi = li >= 0 ? -1 : findMember(name, nameLen);
+        if (mi >= 0 && members[mi].count > 1) {
+            fail("an array is assigned one element at a time: write name[i] = value");
+            return false;
+        }
+        if (li < 0 && mi < 0) {
+            if (sysvars.find(name, nameLen)) {
+                fail("a system variable is read-only: the engine writes it before every call");
+            } else {
+                fail("no member or loop variable of that name: declare it in the class body");
+            }
+            return false;
+        }
+        VReg v = parseExpr();
+        if (failed) return false;
+        if (li >= 0) emit({IrOp::Spill,     0, v, 0,0,0, locals[li].slot,   nullptr, {}});
+        else         emit({members[mi].type == CtrlType::Uint16 ? IrOp::StoreCtrl16 : IrOp::StoreCtrl,
+                            0, v, 0,0,0, members[mi].offset, nullptr, {}});
+        freeTemp(v);
+        return expect(Tok::Semicolon, "expected ';' after an assignment");
+    }
+
+    /// `if (a OP b) { … }` with an optional `else { … }`.
+    ///
+    /// The six comparisons lower onto the TWO branch ops the loops already use. The emitted branch
+    /// skips the then-block, so each one emits the NEGATION of what the script wrote. `BranchGe` is
+    /// unsigned `a >= b` and `BranchNe` is `a != b`, which is all a byte language needs:
+    ///
+    ///     written    skip when    emitted
+    ///     a <  b     a >= b       BranchGe a, b
+    ///     a >  b     a <= b       BranchGe b, a          (b >= a is exactly a <= b)
+    ///     a >= b     a <  b       emitStrictLess(a, b)   (strict, so not a single BranchGe)
+    ///     a <= b     a >  b       emitStrictLess(b, a)
+    ///     a == b     a != b       BranchNe a, b
+    ///     a != b     a == b       BranchNe over an always-taken skip (there is no BranchEq)
+    ///
+    /// The branch always jumps AROUND the taken block, which is the shape that makes an `if` emit
+    /// only FORWARD branches. That matters beyond tidiness: the spill pass identifies a loop as a
+    /// BranchNe whose label was bound EARLIER, so a forward-only construct cannot be mistaken for
+    /// one, and no change to the allocator is needed to support conditionals.
+    bool parseIf() {
+        lex.advance();   // `if`
+        if (!expect(Tok::LParen, "expected '(' after if")) return false;
+        VReg a = parseExpr();
+        if (failed) return false;
+        const Tok cmp = lex.kind;
+        if (cmp != Tok::Less && cmp != Tok::LessEq && cmp != Tok::Greater &&
+            cmp != Tok::GreaterEq && cmp != Tok::EqEq && cmp != Tok::NotEq) {
+            freeTemp(a);
+            fail("expected a comparison: <, <=, >, >=, == or !=");
+            return false;
+        }
+        lex.advance();
+        VReg b = parseExpr();
+        if (failed) { freeTemp(a); return false; }
+        if (!expect(Tok::RParen, "expected ')' to close the if condition")) { freeTemp(b); freeTemp(a); return false; }
+        if (!expect(Tok::LBrace, "expected '{': an if body is braced")) { freeTemp(b); freeTemp(a); return false; }
+
+        // Two labels at most: one to skip the then-block, one to skip the else-block.
+        if (nextLabel + 2 > kIrLabels) { fail("too many branches in one script"); return false; }
+        const uint8_t lElse = nextLabel++;
+
+        // Emit the branch that SKIPS the then-block, which is the NEGATION of the written test.
+        switch (cmp) {
+            // !(a < b) is a >= b.
+            case Tok::Less:      emit({IrOp::BranchGe, 0, a, b, 0,0, lElse, nullptr, {}}); break;
+            // !(a >= b) is a < b, which is b > a: BranchGe with the operands swapped tests b >= a,
+            // so the strict form needs the pair below. a >= b skips when a < b == b > a.
+            case Tok::GreaterEq: emitStrictLess(a, b, lElse); break;
+            // !(a > b) is a <= b, i.e. b >= a.
+            case Tok::Greater:   emit({IrOp::BranchGe, 0, b, a, 0,0, lElse, nullptr, {}}); break;
+            // !(a <= b) is a > b, i.e. b < a.
+            case Tok::LessEq:    emitStrictLess(b, a, lElse); break;
+            case Tok::EqEq:      emit({IrOp::BranchNe, 0, a, b, 0,0, lElse, nullptr, {}}); break;
+            // !(a != b) is a == b. There is no BranchEq, so this is the one case that needs two:
+            // branch over the skip when they differ, then skip unconditionally.
+            case Tok::NotEq: {
+                if (nextLabel >= kIrLabels) { freeTemp(b); freeTemp(a); fail("too many branches in one script"); return false; }
+                const uint8_t lBody = nextLabel++;
+                emit({IrOp::BranchNe, 0, a, b, 0,0, lBody, nullptr, {}});
+                VReg z = alloc();
+                emit({IrOp::Const,    z, 0,0,0,0, 0,     nullptr, {}});
+                emit({IrOp::BranchGe, 0, z, z, 0,0, lElse, nullptr, {}});   // z >= z: always taken
+                freeTemp(z);
+                emit({IrOp::Label,    0, 0,0,0,0, lBody, nullptr, {}});
+                break;
+            }
+            default: break;
+        }
+        freeTemp(b); freeTemp(a);
+
+        while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End)
+            if (!parseStatement()) return false;
+        if (failed) return false;
+        if (!expect(Tok::RBrace, "expected '}' to close the if body")) return false;
+
+        if (atKeyword("else", 4)) {
+            lex.advance();
+            if (nextLabel >= kIrLabels) { fail("too many branches in one script"); return false; }
+            const uint8_t lEnd = nextLabel++;
+            // The then-block falls through to here, and must jump OVER the else-block. An
+            // unconditional jump is `x >= x`, which the assemblers already encode.
+            VReg z = alloc();
+            emit({IrOp::Const,    z, 0,0,0,0, 0,    nullptr, {}});
+            emit({IrOp::BranchGe, 0, z, z, 0,0, lEnd, nullptr, {}});
+            freeTemp(z);
+            emit({IrOp::Label,    0, 0,0,0,0, lElse, nullptr, {}});
+            if (!expect(Tok::LBrace, "expected '{': an else body is braced")) return false;
+            while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End)
+                if (!parseStatement()) return false;
+            if (failed) return false;
+            if (!expect(Tok::RBrace, "expected '}' to close the else body")) return false;
+            emit({IrOp::Label, 0, 0,0,0,0, lEnd, nullptr, {}});
+        } else {
+            emit({IrOp::Label, 0, 0,0,0,0, lElse, nullptr, {}});
+        }
+        return true;
+    }
+
+    /// Branch to `label` when `a < b`, STRICTLY. BranchGe gives `>=` only, so the strict form is
+    /// "not (a >= b)": branch over an unconditional jump. Two branches for the two comparisons a
+    /// single unsigned `>=` cannot express, rather than a third branch op every backend must grow.
+    void emitStrictLess(VReg a, VReg b, uint8_t label) {
+        if (nextLabel >= kIrLabels) { fail("too many branches in one script"); return; }
+        const uint8_t lSkip = nextLabel++;
+        emit({IrOp::BranchGe, 0, a, b, 0,0, lSkip, nullptr, {}});   // a >= b: do NOT take the skip
+        VReg z = alloc();
+        emit({IrOp::Const,    z, 0,0,0,0, 0,     nullptr, {}});
+        emit({IrOp::BranchGe, 0, z, z, 0,0, label, nullptr, {}});   // always taken
+        freeTemp(z);
+        emit({IrOp::Label,    0, 0,0,0,0, lSkip, nullptr, {}});
+    }
+
     bool parseStatement() {
         if (atKeyword("for", 3)) return parseFor();
-        if (lex.kind != Tok::Ident) { fail("expected a function call"); return false; }
+        if (atKeyword("if", 2))  return parseIf();
+        if (lex.kind != Tok::Ident) { fail("expected a function call or an assignment"); return false; }
+        // One token of lookahead separates `name = …` from `name(…)`. Both start with an
+        // identifier, and only the token AFTER it says which, so the name is saved and the lexer
+        // rewound rather than committing to either shape.
+        const char* name = lex.identBeg;
+        const size_t nameLen = lex.identLen;
+        Lexer save = lex;
+        lex.advance();
+        // `name =` and `name[` both start an assignment; `name(` is a call.
+        if (lex.kind == Tok::Assign || lex.kind == Tok::LBracket) return parseAssignment(name, nameLen);
+        lex = save;
         parseCall(nullptr);
         if (failed) return false;
         return expect(Tok::Semicolon, "expected ';'");
@@ -673,7 +1025,7 @@ struct Parser {
         if (!expect(Tok::LBrace, "expected '{' to open the class body")) return false;
 
         // Declarations first (the controls), then the functions. Both live inside the braces now.
-        while (!failed && atTypeKeyword()) { lex.advance(); parseDecl(); }
+        while (!failed && atTypeKeyword()) { const CtrlType ty = currentType(); lex.advance(); parseDecl(ty); }
         if (failed) return false;
 
         bool any = false;
@@ -721,7 +1073,8 @@ uint32_t countTokens(const char* source) {
 
 CompileResult compileSource(const char* source, const BuiltinTable& table,
                             const SysVarTable& sysvars, uint8_t* out, size_t cap,
-                            const RegBudget* squeeze, LowerFn lower) {
+                            const RegBudget* squeeze, LowerFn lower,
+                            char* strings, uint16_t stringCap) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
     if (!out || cap == 0) { r.error = "no code buffer"; return r; }
@@ -744,6 +1097,8 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     }
     Lexer lex(source);
     Parser parser{lex, table, sysvars, ir, r.className};
+    parser.strings = strings;      // where string literals are interned; see compileSource
+    parser.stringCap = stringCap;
     if (!parser.parseProgram()) { r.error = parser.error; r.errorCol = parser.errorCol; return r; }
     // Hand the backend the frame the script's variables need. The register allocator numbers any
     // further slot from here up, so the two never overlap in the one frame they share.
@@ -757,8 +1112,9 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     r.ok = true;
     r.len = len;
     // Surface the declared controls so the binding can create real MoonModule controls.
-    r.controlCount = parser.controlCount;
-    for (uint8_t i = 0; i < parser.controlCount; i++) r.controls[i] = parser.controls[i];
+    r.stringLen = parser.stringLen;
+    r.memberCount = parser.memberCount;
+    for (uint8_t i = 0; i < parser.memberCount; i++) r.members[i] = parser.members[i];
     // The functions the class defined, each with the byte its code starts at. The parser recorded
     // an IR index and the lowering converted it while emitting, so this is a real symbol table: a
     // binding asks for an entry by name and gets an address inside the one emitted block.

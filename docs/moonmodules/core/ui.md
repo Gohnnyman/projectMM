@@ -140,6 +140,8 @@ how each *renders*.)
 | `toggle` (bool) | switch (pill + thumb; hidden `<input type=checkbox>` is the source of truth) | sends on change | none |
 | `select` | dropdown | sends immediately; server may rebuild controls (dynamic `defineControls`) | none |
 | `text` | text input | sends debounced | 500 ms |
+| `textarea` | resizable multi-line box | sends debounced; the value IS the text, so it rides `/api/control` | 500 ms |
+| `filepath` | file picker + inline editor (new/delete buttons) | picker sends on change; the file's CONTENTS save on blur, Ctrl/Cmd+S or the Save button, and a dot marks unsaved work | none |
 | `password` | password input | masked; hold-to-peek reveals the stored value | 500 ms |
 | `display` (read-only) | static text | WS push updates in place | n/a |
 | `display-int` (read-only int + unit) | formatted text (`-58 dBm`) | unit suffix set device-side at `addReadOnlyInt` time, carried in the descriptor's `aux` slot | n/a |
@@ -147,6 +149,18 @@ how each *renders*.)
 | `progress` | bar + numeric `X / max` | WS push updates | n/a |
 | `ipv4` | text input (dotted-quad) | server validates (`parseDottedQuad`), 400 on malformed; stored as 4 octets device-side | n/a |
 | `button` | clickable button | sends value = 1 on click | none |
+
+- **`filepath` stores a NAME, not a body.** The value is a ~40-byte reference that travels through
+  `/api/control` like any text control; the file's contents move over `GET`/`POST /api/file`,
+  because that is the only route allowed to exceed the request buffer (everything else returns 413).
+  The module declares where its files live and which to offer (`addFilePath(name, buf, size,
+  pick)`, a {directory, extension, template} triple), so the UI lists a directory, filters it, and
+  seeds a new file without knowing what kind of file it holds. Saving is
+  all it takes: a written file asks the module tree to re-derive, so whatever was built from that
+  file rebuilds itself, with no second request from the browser.
+  Editing is the same code the File Manager's modal editor uses, mounted inline instead of in a
+  `<dialog>`, so both share one set of guards (a binary or truncated file loads read-only rather
+  than risking a lossy re-save).
 
 - **Reset-to-default (↺)** appears next to controls whose default is known (captured from a fresh
   probe instance per type, emitted in `/api/types`); dim when value == default, clicking sends the

@@ -26,7 +26,7 @@
 /// Every script this fixture wrote, removed when the test process exits.
 ///
 /// The scripts go in the SAME directory a real install keeps its scripts in — that is what makes the
-/// test meaningful — so leaving them behind drops a hundred `t*.mlv` files among the user's own, and
+/// test meaningful — so leaving them behind drops a hundred `t*.mle` files among the user's own, and
 /// the next run adds another hundred. Deleting each file at the end of its test would be wrong: a
 /// test compiles the script and then re-reads it through the module, so the file has to outlive the
 /// call. Process exit is the first moment they are all certainly finished with.
@@ -45,7 +45,7 @@ inline std::vector<std::string>& mmScriptRegistry() {
 inline const char* mmWriteScript(const char* text) {
     static std::atomic<int> counter{0};
     thread_local char name[32];
-    std::snprintf(name, sizeof(name), "t%d.mlv", ++counter);
+    std::snprintf(name, sizeof(name), "t%d.mle", ++counter);
 
     char path[96];
     std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, name);

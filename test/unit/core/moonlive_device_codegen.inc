@@ -19,6 +19,7 @@
 // included in the enclosing namespace.
 
 #include "light/moonlive/MoonLiveBuiltins_light.h"
+#include "light/moonlive/MoonLiveScriptFile.h"   // the role extensions the sweep filters on
 
 #include <filesystem>
 #include <fstream>
@@ -28,14 +29,23 @@
 #include <cstdint>
 #include <vector>
 
+// Any of the three role extensions: one language, and the sweep compiles every script whatever
+// role its name claims.
+inline bool mmIsScript(const std::filesystem::path& p) {
+    const auto e = p.extension().string();
+    return e == mm::moonlive::kEffectExt || e == mm::moonlive::kLayoutExt ||
+           e == mm::moonlive::kModifierExt;
+}
+
+
 namespace {
 
 // The shipped default layout: a nested loop whose body calls addLight. The script that crashed
 // every S3, so the one worth pinning hardest.
 const char* kGridLayout =
     "class GridLayout {\n"
-    "  uint8_t cols = 16;  // @control 1..64\n"
-    "  uint8_t rows = 16;  // @control 1..64\n"
+    "  uint8_t cols = 16;\n"
+    "  uint8_t rows = 16;\n"
     "  tick() {\n"
     "    for (y = 0; y < rows; y = y + 1) {\n"
     "      for (x = 0; x < cols; x = x + 1) {\n"
@@ -62,8 +72,13 @@ std::vector<uint8_t> emitBytes(const char* src, const mm::moonlive::SysVarTable&
     // Sized the way production sizes it, from the script's own token count — a test that always
     // allocated the sanity bound would pass while a right-sized caller overflowed.
     std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src)));
+    // A string pool, as the engine supplies one: a script with a literal (every `addUint8` name)
+    // interns into it, and the emitted code carries pointers there. Static so those pointers stay
+    // valid for as long as a test might look at the bytes.
+    static char strings[mm::moonlive::CompileResult::kStringPool];
     auto r = mm::moonlive::compileSource(src, mm::moonlive::lightBuiltins(), sysvars,
-                                         out.data(), out.size(), nullptr, MM_ISA_LOWER);
+                                         out.data(), out.size(), nullptr, MM_ISA_LOWER,
+                                         strings, sizeof(strings));
     ok = r.ok;
     out.resize(r.ok ? r.len : 0);
     return out;
@@ -124,7 +139,7 @@ TEST_CASE("fill plus a loop on " MM_ISA_NAME " emits what it currently can") {
 // A scripted MODIFIER is the third binding, and the one handed a per-light coordinate.
 TEST_CASE("a scripted modifier compiles for " MM_ISA_NAME) {
     bool ok = false;
-    CHECK(emitLen(mmScript("setXYZ(0, xPos, yPos, zPos);\n"), mm::moonlive::modifierSysVars(), ok) > 0);
+    CHECK(emitLen(mmScript("setXYZ(xPos, yPos, zPos);\n"), mm::moonlive::modifierSysVars(), ok) > 0);
     CHECK(ok);
 }
 
@@ -201,7 +216,7 @@ TEST_CASE("the " MM_ISA_NAME " assembler stays small enough to build on a render
 // outright ("unaligned entry instruction"), and CALLn encodes its target as a count of 4-byte units,
 // so an unaligned callee is not expressible either. Xtensa instructions are 2 or 3 bytes, so a
 // function following another lands wherever the previous one ended and the alignment is not free.
-// crosshair.mlv is the script that found this: three functions, and the compile was refused with the
+// crosshair.mle is the script that found this: three functions, and the compile was refused with the
 // generic "too large" while the same script built fine on RISC-V, whose instructions are all 4 bytes.
 //
 // Checked on every backend rather than only Xtensa, because the requirement is a property of the
@@ -233,7 +248,7 @@ TEST_CASE("every function in a class starts where a call can reach it, on " MM_I
 }
 
 // Every script we SHIP has to compile on every backend, or a user's board choice silently decides
-// which effects exist. `plasma.mlv` is why this test is here: it ran on an S3 and on desktop and was
+// which effects exist. `plasma.mle` is why this test is here: it ran on an S3 and on desktop and was
 // refused on an S31, because one `kCodeCap` constant was sized to the densest ISA while RISC-V emits
 // up to 1.9x more for identical source. The buffer is now sized per script, and this pins that every
 // shipped script still fits on every backend.
@@ -249,7 +264,7 @@ TEST_CASE("every shipped script compiles for " MM_ISA_NAME) {
             / "moonlive" / sub;
         if (!std::filesystem::exists(dir)) continue;
         for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-            if (!entry.is_regular_file() || entry.path().extension() != ".mlv") continue;
+            if (!entry.is_regular_file() || !mmIsScript(entry.path())) continue;
             std::ifstream f(entry.path());
             std::ostringstream ss;
             ss << f.rdbuf();
@@ -266,8 +281,17 @@ TEST_CASE("every shipped script compiles for " MM_ISA_NAME) {
             INFO("script: ", kind, "/", entry.path().filename().string(), " on " MM_ISA_NAME);
             CHECK(ok);
             CHECK(n > 0);
+            // And it fits its own SIZING ESTIMATE with room to spare. codeCapFor allocates from a
+            // token count before a byte is emitted, so the constant is only right while the widest
+            // real script stays well inside it. This is what fails if a change makes codegen denser
+            // (a wider call sequence, a new per-statement guard) or if the constant is trimmed too
+            // far: 1.5x leaves margin for the next script, which the shipped set cannot predict.
+            const size_t budget = mm::moonlive::codeCapFor(mm::moonlive::countTokens(src.c_str()));
+            INFO("emitted ", n, " of a ", budget, "-byte budget");
+            CHECK(n * 3 <= budget * 2);
             checked++;
         }
     }
     CHECK(checked > 0);   // a silently empty folder would pass without this
 }
+

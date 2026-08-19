@@ -12,8 +12,13 @@ The script places every light itself, with a loop. That is the difference from a
 
 ```c
 class GridLayout {
-  uint8_t cols = 16;  // @control 1..64
-  uint8_t rows = 16;  // @control 1..64
+  uint8_t cols = 16;
+  uint8_t rows = 16;
+
+  defineControls() {
+    addUint8("cols", cols, 1, 64);
+    addUint8("rows", rows, 1, 64);
+  }
 
   placeLights() {
     for (y = 0; y < rows; y = y + 1) {
@@ -44,8 +49,7 @@ for (i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }
 for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }
 
 // a circle: lights and grid cells are not the same number
-uint8_t count = 24;   // @control 3..255
-uint8_t radius = 5;   // @control 1..127
+// (`count` and `radius` are members, surfaced by addUint8 in defineControls)
 for (i = 0; i < count; i = i + 1) {
   addLight(scale(cos(i * turn(count)), radius * 2 + 1),
            scale(sin(i * turn(count)), radius * 2 + 1), 0);
@@ -54,7 +58,7 @@ for (i = 0; i < count; i = i + 1) {
 
 ### What a script can read
 
-A script reads whatever it declares. `uint8_t cols = 16; // @control 1..64` becomes a real slider in the UI, and the loop reads it — which is how a panel gets resized without editing code.
+A script reads whatever it declares. `uint8_t cols = 16;` is a member the script owns; naming it in `defineControls()` with `addUint8("cols", cols, 1, 64)` also makes it a real slider in the UI, and the loop reads it, which is how a panel gets resized without editing code. A member no `addUint8` names stays private to the script.
 
 `t` is the one [system variable](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) a layout is given, and it is always **0** here: the script runs twice per rebuild (once to count, once to place) and must agree with itself, so it is handed a fixed clock rather than a live one — a moving `t` would let the two passes disagree on how many lights there are. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
 
@@ -73,9 +77,29 @@ So it runs twice. On the first pass `addLight` counts; on the second it emits ea
 
 ## Limits
 
-**The grammar is arithmetic, calls and `for`** — `+`, `-`, `*`, parentheses, nested loops. Division, `%` and `if` are not in the language yet, so a serpentine over an arbitrary number of rows (every other row reversed) is not expressible today. A fixed few rows can be written out as one loop per direction — `two-rows.mlv` does exactly that — but each row costs its own loop, so it does not scale to a panel.
+**The grammar is arithmetic, calls, `for` and `if`**: `+`, `-`, `*`, parentheses, nested loops, and the six comparisons (`<`, `<=`, `>`, `>=`, `==`, `!=`). Division and `%` are not in the language, so where a script would divide it calls `mod(a, b)` or `turn(n)` instead.
+
+A serpentine (every other row reversed) is what `if` makes expressible, and it is the common panel wiring:
+
+```c
+uint8_t odd = 0;
+for (y = 0; y < rows; y = y + 1) {
+  for (x = 0; x < cols; x = x + 1) {
+    if (odd == 0) { addLight(x, y, 0); }
+    else { addLight(cols - 1 - x, y, 0); }
+  }
+  if (odd == 0) { odd = 1; } else { odd = 0; }
+}
+```
 
 **A script runs twice per rebuild**, once to count and once to place, so it has to be deterministic. With `random16` in a loop bound or around an `addLight` call, the two passes disagree on the count; with `random16` in a coordinate, the count holds and only the positions move.
+
+## What the card tells you
+
+`status` is the size of the compiled program; the memory figure is what the module costs the device
+(its own `sizeof`, plus the exec block and control arena); `tickTimeUs` is the real per-tick cost.
+Past half full, the status also names the tightest limit the script is approaching. Detail:
+[MoonLive](MoonLiveEffect.md#what-the-card-tells-you-size-memory-and-how-close-to-a-wall).
 
 ## Controls
 
@@ -83,7 +107,7 @@ So it runs twice. On the first pass `addLight` counts; on the second it emits ea
 |---|---|
 | `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
 
-Plus one control per `@control` the script declares.
+Plus one control per `addUint8` in the script's `defineControls()`.
 
 Editing any of them rebuilds the pipeline, because every one can change where the lights are. A script that fails to compile leaves a fixture with no lights, shows the parse error on the module, and the device keeps running.
 

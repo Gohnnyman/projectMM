@@ -493,3 +493,68 @@ TEST_CASE("apply-core: enabled toggle requests a full resync; a plain value chan
     mm::MoonModule::setSchemaChangedHook(nullptr);   // don't leak the spy into other tests
     s.deleteTree(root);
 }
+
+// --- a file write re-derives what was built from the file -------------------------------------
+//
+// Persistent state changes two ways: a control write, and a file write. Core enforced "re-derive
+// what depends on it" for the first only, so saving a file's CONTENTS under an unchanged name
+// changed nothing on the device: a scripted module kept running the program compiled from the
+// PREVIOUS text, and the only way to make it notice was to re-name the file. Editing a script and
+// seeing the fixture change is the loop this closes.
+namespace {
+// A module that counts its own prepare() calls. Observing the COUNT rather than the scheduler's
+// private request flag keeps the test on the behavior (something re-derived) instead of on the
+// mechanism (a bool was set), so a future change of mechanism does not have to rewrite it.
+struct Prepares : public mm::MoonModule {
+    uint8_t prepared = 0;
+    void prepare() override { prepared++; }
+};
+}  // namespace
+
+TEST_CASE("a written file asks the tree to re-derive") {
+    mm::Scheduler s;
+    auto* root = new Prepares();
+    root->setName("Root");
+    s.addModule(root);
+    s.setup();
+
+    mm::HttpServerModule http;
+    http.setScheduler(&s);
+    const uint8_t afterSetup = root->prepared;
+
+    // A tick with nothing pending must not re-derive: the request is what triggers it, not the
+    // passage of time. Without this the next check would pass even if the write did nothing.
+    s.tick();
+    REQUIRE(root->prepared == afterSetup);
+
+    http.applyFileChanged("/moonlive/plasma.mle");
+    s.tick();
+    CHECK(root->prepared == afterSetup + 1);
+}
+
+TEST_CASE("a burst of file writes costs one re-derive, not one per file") {
+    mm::Scheduler s;
+    auto* root = new Prepares();
+    root->setName("Root");
+    s.addModule(root);
+    s.setup();
+
+    mm::HttpServerModule http;
+    http.setScheduler(&s);
+    const uint8_t before = root->prepared;
+
+    // The File Manager's multi-file upload writes several files back to back. Each asks, and the
+    // request coalesces into the single sweep the next tick performs, so a ten-file upload does not
+    // rebuild the tree ten times on the render thread.
+    for (int i = 0; i < 10; i++) http.applyFileChanged("/moonlive/x.mle");
+    s.tick();
+    CHECK(root->prepared == before + 1);
+}
+
+TEST_CASE("a file write with no scheduler is a no-op, not a crash") {
+    // HttpServerModule is constructed before it is wired, and the Improv path builds one without a
+    // tree at all. Degrade visibly, never crash (the robustness rule).
+    mm::HttpServerModule http;
+    http.applyFileChanged("/moonlive/plasma.mle");   // must simply return
+    CHECK(true);
+}

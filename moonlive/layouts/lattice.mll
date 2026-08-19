@@ -4,9 +4,15 @@
 // but not the S3; two loops (grid.mlv) fit everywhere.
 
 class LatticeLayout {
-  uint8_t cols = 4;    // @control 1..32
-  uint8_t rows = 3;    // @control 1..32
-  uint8_t layers = 5;  // @control 1..32
+  uint8_t cols = 4;
+  uint8_t rows = 3;
+  uint8_t layers = 5;
+
+  defineControls() {
+    addUint8("cols", cols, 1, 32);
+    addUint8("rows", rows, 1, 32);
+    addUint8("layers", layers, 1, 32);
+  }
 
   placeLights() {
     for (z = 0; z < layers; z = z + 1) {

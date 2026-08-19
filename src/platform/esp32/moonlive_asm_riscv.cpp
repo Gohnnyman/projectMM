@@ -189,6 +189,26 @@ void RiscvAssembler::store8(Reg base, Reg off, Reg val) {
 void RiscvAssembler::load8(Reg d, Reg base, int32_t imm) {   // lbu rDst, imm(rBase) — control read
     emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);
 }
+void RiscvAssembler::store16(Reg base, Reg off, Reg val) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));   // t6 = base + off
+    // sh val, 0(t6): the S-type store, funct3 = 1 for a halfword where sb uses 0.
+    emit32((uint32_t(xr(val)) << 20) | (uint32_t(kScratchAddr) << 15) | (1u << 12) | 0x23u);
+}
+// lhu rDst, imm(rBase): funct3 = 5 where lbu uses 4. The immediate is in BYTES and unscaled, so
+// unlike arm64 no even-offset rule is forced by the encoding here.
+void RiscvAssembler::load16(Reg d, Reg base, int32_t imm) {
+    emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (5 << 12) | (xr(d) << 7) | 0x03);
+}
+// RISC-V has no register-offset addressing mode, so the address is computed first. Same shape as
+// store8/store16, which is why they share kScratchAddr.
+void RiscvAssembler::load8Idx(Reg d, Reg base, Reg off) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
+    emit32((uint32_t(kScratchAddr) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);     // lbu d, 0(t6)
+}
+void RiscvAssembler::load16Idx(Reg d, Reg base, Reg off) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
+    emit32((uint32_t(kScratchAddr) << 15) | (5 << 12) | (xr(d) << 7) | 0x03);     // lhu d, 0(t6)
+}
 void RiscvAssembler::branchIfZero(Reg a, Label l) {    // a == 0  ⇔  bgeu x0, a (unsigned 0 >= a)
     addFixup(len_, l);
     emit32(encBranch(0, xr(a), 7, 0));                 // bgeu x0, a, l  (patched)
@@ -206,6 +226,19 @@ void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
 // live across the call must be preserved — save the whole pool + ra + the host args around the
 // call (mirrors the host backend). The fn address is built with lui+addi (the hi/lo split, +1
 // to the upper when the low 12 bits' sign bit is set). 64-byte frame, 16-byte aligned.
+// movPtr: a 32-bit address into a register, lui + addi.
+//
+// The same pair call() builds for its target, parameterized on the destination. The +0x800 rounds
+// for addi's SIGN EXTENSION: without it an address whose low half has bit 11 set lands one 4 KB
+// page low, which is the classic RISC-V hi/lo bug and is silent until the pointer is dereferenced.
+void RiscvAssembler::movPtr(Reg d, const void* p) {
+    const uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+    const uint32_t hi = (addr + 0x800) >> 12;
+    const int32_t  lo = static_cast<int32_t>(addr) - static_cast<int32_t>(hi << 12);
+    emit32(encLui(xr(d), hi & 0xfffff));
+    emit32(encAddi(xr(d), xr(d), lo));
+}
+
 void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     // 80-byte frame, 16-byte aligned: 14 saved registers (56 bytes), three argument staging slots
     // (56/60/64), and ra at 76. Every register the map hands out is saved here, or a value live

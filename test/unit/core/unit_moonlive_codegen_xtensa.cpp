@@ -183,3 +183,50 @@ TEST_CASE("the Xtensa vreg map names only registers the windowed ABI leaves free
 // whenever codegen does. A failure here means "read the diff and decide", not "you broke it" —
 // update the number and say why in the commit. It exists because the alternative way to notice an
 // emission change was to flash a board and watch it reset.
+
+// `addi.n aD, aA, #imm` encodes its immediate in a 4-bit field whose value 0 means MINUS ONE: the
+// narrow form covers 1..15 and cannot express "add zero" at all. Every caller passed a literal 1
+// until an array based at arena offset 0 asked for `+0`, which emitted `addi.n aX, aX, -1` and
+// shifted every element access down a byte. It compiled, emitted a plausible length, and passed
+// every host test, because only this backend has the narrow form. The fixture stayed dark.
+//
+// Asserted on the ENCODER rather than on a script's bytes: a difference-based test cannot see it
+// (the wrong bytes still differ from other wrong bytes), which a control run confirmed.
+TEST_CASE("Xtensa addImm never encodes an add of zero as the narrow form") {
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    // add 0 into the SAME register is a no-op and must emit nothing at all.
+    {
+        Asm a(64);
+        a.addImm(R0, R0, 0);
+        CHECK(a.size() == 0);
+    }
+    // Into a DIFFERENT register it is still a move, so it must emit something that is not the
+    // narrow add: the low nibble of a narrow addi.n is 0xb.
+    {
+        Asm a(64);
+        a.addImm(R1, R0, 0);
+        REQUIRE(a.size() > 0);
+        CHECK((a.bytes()[0] & 0x0f) != 0x0b);
+    }
+    // 1..15 keep the narrow form, and the immediate field must hold the value itself.
+    for (int imm = 1; imm <= 15; imm++) {
+        Asm a(64);
+        a.addImm(R0, R0, imm);
+        REQUIRE(a.size() == 2);
+        const uint16_t w = uint16_t(a.bytes()[0]) | uint16_t(uint16_t(a.bytes()[1]) << 8);
+        INFO("imm " << imm);
+        CHECK((w & 0x0f) == 0x0b);              // still addi.n
+        CHECK(((w >> 4) & 0x0f) == imm);        // and it carries the right immediate
+    }
+    // Past 15 the narrow field cannot hold it, so the wide RRI8 form has to take over rather than
+    // silently truncating: `addi.n` with imm 16 would wrap to 0, which is the -1 bug again.
+    {
+        Asm a(64);
+        a.addImm(R0, R0, 40);
+        REQUIRE(a.size() == 3);
+        CHECK((a.bytes()[1] & 0xf0) == 0xc0);   // addi (RRI8)
+        CHECK(a.bytes()[2] == 40);
+    }
+}

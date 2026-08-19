@@ -2,9 +2,13 @@
 // 256: past that it wraps and the light reappears at the left edge.
 
 class ShiftModifier {
-  uint8_t amount = 4; // @control 0..64
+  uint8_t amount = 4;
+
+  defineControls() {
+    addUint8("amount", amount, 0, 64);
+  }
 
   modifyLogical() {
-    setXYZ(0, xPos + amount, yPos, zPos);
+    setXYZ(xPos + amount, yPos, zPos);
   }
 }

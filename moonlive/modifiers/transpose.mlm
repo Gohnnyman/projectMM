@@ -2,6 +2,6 @@
 
 class TransposeModifier {
   modifyLogical() {
-    setXYZ(0, yPos, xPos, zPos);
+    setXYZ(yPos, xPos, zPos);
   }
 }

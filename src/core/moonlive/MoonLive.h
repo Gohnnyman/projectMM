@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>   // snprintf, for describe()
 #include <cstddef>
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveBuiltins.h"
@@ -101,6 +102,47 @@ public:
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }
 
+    /// Append a control the running `defineControls()` declared. The binding installs a sink that
+    /// lands here, so the control list is built by the script CALLING addUint8, exactly as a
+    /// compiled module's list is built by its defineControls() running.
+    ///
+    /// `name` must outlive the engine: it points into the string pool this engine owns, which is
+    /// what the compiler interned it into.
+    void addDeclaredControl(const char* name, uint8_t offset, uint8_t lo, uint8_t hi) {
+        if (controlCount_ >= kMaxCtrls || !name || offset >= kArenaBytes) return;
+        if (lo > hi) return;
+        // Two controls on one member would give the UI two cards writing the same byte, each
+        // overwriting the other, and two labels the same persistence key.
+        for (uint8_t i = 0; i < controlCount_; i++)
+            if (controls_[i].offset == offset) return;
+
+        // The DEFAULT is whatever the member already holds: its initializer seeded the arena
+        // before this ran, so the live byte is the declared value.
+        //
+        // CLAMPED IN THE ARENA, not just in the record. A script edit that narrows a range leaves
+        // a live value outside it, and the native code reads the arena byte every tick, not the
+        // record. Clamping only the record would leave the out-of-range value driving the effect
+        // while the UI showed a slider that could not reach it. This is the one place that knows
+        // both the range and the live byte at the same moment.
+        uint8_t def = ctrlArena_ ? ctrlArena_[offset] : lo;
+        if (def < lo) def = lo;
+        else if (def > hi) def = hi;
+        if (ctrlArena_) ctrlArena_[offset] = def;
+        controls_[controlCount_] = {name, lo, hi, def, 0, CtrlType::Uint8, offset};
+        // nameLen is what the binding reports; measured here rather than passed, so a caller
+        // cannot disagree with the string it handed over.
+        // The BOUND is tested first: `name[n] && n < limit` reads the byte before deciding whether
+        // it may, so a name that fills the buffer without a terminator is read one past the end.
+        uint8_t n = 0;
+        while (n < kMaxControlName - 1 && name[n]) n++;
+        controls_[controlCount_].nameLen = n;
+        controlCount_++;
+    }
+
+    /// Forget the controls a previous defineControls() declared, so re-running it rebuilds rather
+    /// than appends. A compiled module's defineControls() is re-runnable for the same reason.
+    void clearDeclaredControls() { controlCount_ = 0; }
+
     /// Does the script define this entry point? A binding asks before reporting "no tick() to run".
     bool hasEntry(const char* name) const { return entry(name) != nullptr; }
 
@@ -115,19 +157,57 @@ public:
     // every control from its declared default.
     void freeCode();
 
-    // The emitted code length, for the golden-bytes test (0 until compiled).
+    /// How many bytes of machine code the current program IS, as opposed to what its allocation
+    /// cost. `heapBytes` answers "what does this module take from the heap"; this answers "how big
+    /// is my script", which is what a script author asks and what the card reports. 0 until
+    /// compiled. Also the golden-bytes test's subject.
     size_t codeLen() const { return codeLen_; }
     // The allocated exec-block size (word-rounded codeLen) — the actual heap held, for memory
     // accounting. 0 until compiled / after free().
     size_t codeCap() const { return codeCap_; }
 
-    /// Every heap byte this engine holds — the exec block plus the control arena.
+    /// Every HEAP byte this engine holds: the exec block plus the control arena.
     ///
-    /// What a binding reports as its dynamicBytes: the card is supposed to show the memory the
-    /// module actually costs, and codeCap() alone missed the arena. The arena is small but it is a
-    /// real allocation with the module's lifetime, and "roughly right" is how a memory figure stops
-    /// being worth reading.
+    /// What a binding reports as its dynamicBytes. codeCap() alone missed the arena, which is small
+    /// but is a real allocation with the module's lifetime, and "roughly right" is how a memory
+    /// figure stops being worth reading.
+    ///
+    /// The string pool is NOT here, and that is not an omission: it is an inline member, so it is
+    /// already counted in the module's own sizeof rather than its dynamic bytes. Adding it would
+    /// report those bytes twice.
     size_t heapBytes() const { return codeCap_ + (ctrlArena_ ? kArenaBytes : 0); }
+
+    /// Write "1700 B - controls 2/8" into `out`: how big the compiled program is, and the ONE
+    /// budget it is closest to exhausting.
+    ///
+    /// Size first because it is what a script author asks and nothing could answer: the card's
+    /// memory figure is the ALLOCATION, which is word-rounded and says nothing about the program.
+    ///
+    /// One budget, not five. A script can hit ten ceilings, but five are derived (IR ops, vregs,
+    /// labels, fixups, locals all follow from code size or nesting) and reporting a number the
+    /// author cannot act on is noise. Of the five that are actionable, showing the tightest is what
+    /// answers "am I near a wall": the others by definition have more room. It appears only past
+    /// half full, so an ordinary script reads its size and nothing else.
+    void describe(char* out, size_t cap) const {
+        if (!out || !cap) return;
+        if (!codeLen_) { out[0] = '\0'; return; }
+        // Each actionable budget as a percentage, so the tightest is comparable across units.
+        struct Budget { const char* name; uint32_t used, max; };
+        const Budget budgets[] = {
+            {"controls", controlCount_, kMaxCtrls},
+            {"strings",  stringLen_,    CompileResult::kStringPool},
+            {"code",     static_cast<uint32_t>(codeLen_), kCodeCap},
+            {"entries",  entryCount_,   kMaxEntryPoints},
+        };
+        const Budget* worst = &budgets[0];
+        for (const Budget& b : budgets)
+            if (b.used * uint64_t(worst->max) > worst->used * uint64_t(b.max)) worst = &b;
+        if (worst->used * 2 > worst->max)
+            std::snprintf(out, cap, "%u B, %s %u/%u", unsigned(codeLen_),
+                          worst->name, unsigned(worst->used), unsigned(worst->max));
+        else
+            std::snprintf(out, cap, "%u B", unsigned(codeLen_));
+    }
 
     // The controls the last compile() declared (empty if none / not a source compile). The binding
     // reads this to create real MoonModule controls bound to the arena slots.
@@ -136,7 +216,7 @@ public:
     // reference here. nullptr if offset is out of range. The arena is allocated once at full
     // capacity (ensureArena) and never moves, so a bound control pointer stays valid for the
     // engine's lifetime, across every recompile (the stable-slot contract).
-    /// The live byte at an arena offset: a script-declared control (offset < kMaxCtrls) or a host
+    /// The live byte at an arena offset: a script-declared member (offset < kCtrlBytes) or a host
     /// system variable (above it). Bounded by the ARENA, not by controlCount_ — a system variable's
     /// slot exists whether or not the script declared any control, and the binding writes it every
     /// frame. Returns nullptr for an offset the arena does not hold.
@@ -153,6 +233,35 @@ private:
     // recompile; preserves an existing slot's live value when the script is edited but the control
     // persists. Returns false on alloc failure (the caller degrades).
     bool ensureArena(const DeclaredControl* decls, uint8_t count);
+    // WHICH arena bytes hold a seeded member, one bit per offset, and the name each one was
+    // seeded under. Identity is (offset, name), not declaration position: inserting a member at
+    // the top of a class shifts every later declaration down one, and a position-keyed check would
+    // then hand each member the value of the one that used to sit there. kArenaBytes is 17, so a
+    // uint32_t covers the whole arena and the mask costs less than the count it replaces.
+    //
+    // The name is COPIED rather than pointed at. The compiler's record names a span of the source
+    // buffer, which is freed the moment the compile returns, and the comparison happens on the
+    // NEXT compile: a pointer would be dangling by then. Truncated to a prefix, which is enough to
+    // tell two members apart in the only case that matters, and bounded so a long name cannot run
+    // off the end of a record that carries its length instead of a terminator.
+    // Indexed by MEMBER, not by arena byte. A class declares at most kMaxCtrls of them, so a row
+    // per byte was 8x more rows than can ever exist: 768 bytes of a 1440-byte engine, held by value
+    // inside every scripted module and constructed on the main task's stack by ModuleFactory's
+    // probe. The offset is stored alongside, which is what the byte-indexed form was really using.
+    static constexpr uint8_t kSeedNameLen = 12;
+    struct SeededMember { uint8_t offset = 0; char name[kSeedNameLen] = {}; };
+    // A uint64_t, and the table is sized to the SCRIPT's region rather than the whole arena. This
+    // was a uint32_t when kCtrlBytes was 16; the byte budget then grew to 64 and the mask did not,
+    // so `1u << off` for a member at offset 32 or beyond was undefined behaviour and in practice
+    // aliased mod 32: that member was never recorded as seeded (snapping back to its initializer on
+    // every recompile, losing the live value this exists to keep) while corrupting the bit of the
+    // member it aliased. A static_assert now ties the two together so the next widening cannot
+    // repeat it. The rows above kCtrlBytes were dead: a system variable is never seeded from a
+    // declaration.
+    static_assert(kCtrlBytes <= 64, "seeded_ is a 64-bit mask, one bit per script arena byte");
+    uint64_t     seeded_ = 0;
+    SeededMember seededName_[kMaxCtrls] = {};
+    uint8_t      seededCount_ = 0;
 
     void*   code_ = nullptr;     // allocExec block holding the emitted machine code
     size_t  codeCap_ = 0;        // its capacity (for freeExec)
@@ -177,7 +286,14 @@ private:
     // from a file into a transient buffer. Copying the bytes here is what lets the engine outlive
     // the text it was built from; without it a binding reads freed memory when it publishes its
     // controls, which showed up as a control literally named "\x05".
-    char ctrlNames_[kMaxCtrls][kMaxControlName] = {};
+    // Text a script wrote as a literal, copied out of the compile result so a pointer the emitted
+    // code carries stays valid. In the ENGINE rather than the exec block: the block is IRAM on a
+    // device, which takes 32-bit stores only and is instruction memory, so string bytes do not
+    // belong in it. This is a plain member for the same reason ctrlNames_ is, and it lives as long
+    // as the compiled program that points into it.
+    char strings_[CompileResult::kStringPool] = {};
+    // How much of the pool the current program uses, for the card's headroom readout.
+    uint16_t stringLen_ = 0;
 };
 
 }  // namespace mm::moonlive

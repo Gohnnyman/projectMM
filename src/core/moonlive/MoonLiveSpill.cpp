@@ -51,12 +51,31 @@ struct Loop { uint16_t header; uint16_t back; };
 uint8_t sourcesOf(const IrInst& in, VReg* out) {
     switch (in.op) {
         case IrOp::Const:                                   return 0;
+        case IrOp::ConstPtr:                                return 0;   // an address, not a value
         case IrOp::Reload:                                  return 0;
         case IrOp::Label:                                   return 0;
         case IrOp::Mov:
         case IrOp::AddImm:
         case IrOp::Spill:      out[0] = in.a;               return 1;
         case IrOp::LoadCtrl:   out[0] = kArg4;              return 1;   // reads the arena pointer
+        // A member STORE reads the VALUE being written, and nothing else. The arena pointer is
+        // deliberately NOT reported, for the same reason LoadIdx/StoreIdx do not report it: the
+        // rewriter below writes sources back POSITIONALLY, so listing kArg4 first shifts the value
+        // into `b` and leaves `a` holding kArg4's register. Both lowerings read the value from
+        // `op.a`, so every member assignment would store whatever that register held, the moment
+        // the allocator rewrites anything. The pointer is reached through host(kArg4) at lowering
+        // time and needs no live interval here.
+        case IrOp::StoreCtrl:
+        case IrOp::StoreCtrl16: out[0] = in.a; return 1;
+        case IrOp::LoadCtrl16:  out[0] = kArg4;                return 1;   // reads the arena pointer
+        // An indexed access reads its INDEX (and, for a store, the value). The arena pointer is
+        // deliberately NOT reported: the rewriter below writes sources back POSITIONALLY (src[0]
+        // into in.a, src[1] into in.b), so listing kArg4 first would shift every real operand one
+        // place along, leaving the index in the value's field. LoadCtrl gets away with reporting
+        // it because it has no other source and reads the pointer through host(kArg4); these ops
+        // do the same, so kArg4 needs no live interval here either.
+        case IrOp::LoadIdx:     out[0] = in.a;               return 1;
+        case IrOp::StoreIdx:    out[0] = in.a; out[1] = in.b; return 2;
         case IrOp::Add:
         case IrOp::Mul:
         case IrOp::BranchGe:
@@ -86,6 +105,10 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
 bool writesDst(IrOp op) {
     switch (op) {
         case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchNe:
+        // A member store writes MEMORY, not a register: its `a` is the value and `imm` the arena
+        // offset, so reading its dst as a definition would give vreg 0 a spurious live range.
+        case IrOp::StoreCtrl:
+        case IrOp::StoreCtrl16:
         // CallScript writes no dst either: a script function returns nothing today, so the call is
         // a statement rather than an expression. When it gains a return value this moves.
         case IrOp::CallScript:
@@ -331,7 +354,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // two frames. Found by disassembling, because the emitted stream was structurally plausible
     // (two entries, two retws, one call8) and only the POSITION of the boundary was wrong.
     //
-    // REQUIRED, and the disassembly says otherwise. Removing this makes crosshair.mlv emit a
+    // REQUIRED, and the disassembly says otherwise. Removing this makes crosshair.mle emit a
     // TIDIER-looking block (one entry/retw pair per function, at plausible offsets) and every
     // host test still passes, because the host backend cannot reach this path. On an S3 that block
     // boot-loops with StoreProhibited and the buffer pointer holding 0xff: a store through a
