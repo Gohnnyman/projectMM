@@ -115,11 +115,7 @@ public:
     void setScript(const char* name) { script_.setName(name); }
 
 private:
-    // Default script — random pixels: each tick lights one random light in a random RGB color.
-    // A live, always-visible starting example (and a good demo-reel slot). The index random16(256)
-    // covers a typical grid; setRGB bounds-guards it (an index past the light count is skipped, and
-    // 0×0 is safe), so most ticks land on a real light and the demo stays visibly lit.
-    // Publish one system variable into its arena slot, saturating to the uint8 a slot holds — a
+    // Publish one system variable into its arena slot, saturating to the uint8 a slot holds: a
     // layer wider than 255 reports 255 rather than wrapping to a small number and drawing garbage.
     void writeSysVar(uint8_t offset, uint16_t value) {
         if (uint8_t* slot = script_.engine().controlSlot(offset))

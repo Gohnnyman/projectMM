@@ -210,7 +210,8 @@ public:
     /// to the three above. The wire shape the Improv APPLY_OP frame carries.
     OpResult applyOp(const char* opJson);
 
-    /// A file at `path` was written, so ask the tree to re-derive whatever was built from it.
+    /// A file at `path` changed (written or removed), so ask the tree to re-derive whatever was
+    /// built from it.
     ///
     /// The rule core already enforces for the OTHER way persistent state changes: applySetControl
     /// ends in the same request. A file is the second path to it, so it belongs here rather than

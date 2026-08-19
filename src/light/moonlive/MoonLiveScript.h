@@ -36,8 +36,8 @@ public:
     /// its grid, a layout is not), which is why it is a parameter rather than a member.
     bool sync(const SysVarTable& sysvars, MoonModule& owner) {
         // Cheapest question first: does the file still hash to what is loaded? This runs on every
-        // prepare sweep, and a file write now triggers one, so it must not cost a compile. It reads
-        // through a small stack buffer and allocates nothing.
+        // prepare sweep, and a file write now triggers one, so it must not cost a compile. One read
+        // answers it, against a compile's read plus parse, codegen and exec-block allocation.
         uint32_t fileHash = 0;
         const bool readable = scriptFileHash(name_, fileHash);
         if (readable && engine_.ok() && compiledHash_ != 0 && fileHash == compiledHash_) return false;

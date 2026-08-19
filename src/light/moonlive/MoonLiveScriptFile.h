@@ -98,27 +98,19 @@ inline constexpr size_t kMaxScriptName = 40;
 ///
 /// Returns true when the script compiled. On any failure `err` names it, in the words a user needs:
 /// which file, and what was wrong with it.
-/// FNV-1a, in its two halves so a whole-buffer hash and a chunked one cannot drift apart. The
-/// chunked form is what lets scriptFileHash walk a file through a small stack buffer instead of
-/// holding all of it.
-inline constexpr uint32_t kScriptHashSeed = 2166136261u;
-inline uint32_t scriptHashChunk(uint32_t h, const char* s, size_t len) {
+/// FNV-1a over the script text. A caller that must know "did this change" keeps 4 bytes rather than
+/// a second copy of the source, which is the whole reason the text is not resident any more.
+inline uint32_t scriptHash(const char* s, size_t len) {
+    uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; i++) { h ^= static_cast<uint8_t>(s[i]); h *= 16777619u; }
     return h;
 }
 
-/// FNV-1a over the script text. A caller that must know "did this change" keeps 4 bytes rather than
-/// a second copy of the source — which is the whole reason the text is not resident any more.
-inline uint32_t scriptHash(const char* s, size_t len) {
-    return scriptHashChunk(kScriptHashSeed, s, len);
-}
-
-/// The hash of `<kScriptDir>/<name>`'s CURRENT text, without compiling and without allocating.
+/// The hash of `<kScriptDir>/<name>`'s CURRENT text, without compiling it.
 ///
-/// Answers "has the file changed since I compiled it" for the cost of a read. The bindings ask this
-/// on every prepare sweep, which a file write now triggers, so it runs far more often than a
-/// compile does: it reads through a small stack buffer with fsReadAt rather than the whole-file
-/// allocation compileScriptFile makes, because the answer is 4 bytes and the text is not wanted.
+/// Answers "has the file changed since I compiled it" for the cost of ONE read, which is what a
+/// binding asks on every prepare sweep. It costs the same whole-file read compileScriptFile makes
+/// and skips everything after: the parse, the codegen, and the exec-block allocation.
 ///
 /// False when the file is missing, unreadable or outside the accepted bounds, which the caller
 /// treats as "not the thing I compiled" and lets compileScriptFile report properly. Reporting the

@@ -4798,6 +4798,10 @@ function fmMountEditor(host, relPath, opts = {}) {
         status.textContent = "saving…";
         const r = await fmSaveFrom(body, path);
         status.textContent = r.message;
+        // A failed write (no space, a vanished path) must not be silent. The modal shows it on its
+        // status line; a host that supplied its own hidden one gets an alert, because the work is
+        // still unsaved and the dot alone does not say why.
+        if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
         if (r.ok) { setDirty(false); if (onSaved) onSaved(path); }
     };
 

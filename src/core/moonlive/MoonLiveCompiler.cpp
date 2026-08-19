@@ -616,7 +616,10 @@ struct Parser {
         if (align > 1 && (at % align) != 0) at = uint16_t(at + (align - at % align));
         const uint16_t need = uint16_t(ctrlWidth(type));
         if (at + need > kCtrlBytes) { fail("the class declares more member data than the arena holds"); return; }
-        members[memberCount] = {name, 0, 255, static_cast<uint8_t>(def),
+        // def is uint16_t on the record precisely so a wide member's initializer survives; casting
+        // it to a byte here truncated `uint16_t phase = 1000;` to 232. Invisible to a test that
+        // observes through setRGB, because the error is always a multiple of 256.
+        members[memberCount] = {name, 0, 255, static_cast<uint16_t>(def),
                                 static_cast<uint8_t>(nameLen), type,
                                 static_cast<uint8_t>(at), 1};
         memberBytes = static_cast<uint8_t>(at + need);

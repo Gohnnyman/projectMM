@@ -448,7 +448,15 @@ It settles step 5 before step 5 starts. The three bindings already differ only b
 own, so there is no inheritance question left to answer, and `tick` stays available to mean something
 in a layout or a modifier later without a grammar change.
 
-5. ⬜ **Consolidate the three bindings onto a HELD HELPER.** The design question this step existed
+5. ✅ **Consolidate the three bindings onto a HELD HELPER.** Done, in Plan-20260818, because the
+   editing loop needed it: saving a script only recompiles if the bindings agree on what "changed"
+   means, and they did not. `MoonLiveScript` is the held member this step describes, and it removed
+   116 lines. It also settled the recompile rule the three had drifted on: an effect had NO content
+   hash (so editing its text did nothing until the file was renamed), a layout cleared its hash only
+   on a name change, and only a modifier re-read the file. One rule now: if the file changed,
+   recompile.
+
+   The design question this step existed
    to answer is settled: the moment model above means the bindings no longer differ in behaviour,
    only in which base they extend and which moment they own. What is left is measurable duplication,
    and the shape it should take is now concrete rather than anticipated.
@@ -503,8 +511,9 @@ mechanism or a language people build with.
    comes back: three builtins (`red`/`green`/`blue`) or bit operators, which is the same question
    the seven-argument `line()` answered for arguments and would answer once for both.
 
-8. 🟡 **Arrays** (arrays of structs not yet) and **9. 🟡 Wider values than a byte.** Both built;
-   the ceiling NUMBER is the open item, see below.
+8. ✅ **Arrays** (arrays of structs not yet) and **9. ✅ Wider values than a byte.** Both built and
+   on hardware; the ceiling has its number. Arrays OF STRUCTS remain unbuilt, and are their own step
+   whenever a script wants one.
 
    What shipped, in the order it had to be built:
 
@@ -552,10 +561,16 @@ mechanism or a language people build with.
    (control-checked to fail on the bug); the other two are backlogged by name, because three
    attempts at a host test each passed with the defect reintroduced.
 
-   **Open: `kCtrlBytes` is a placeholder 16.** The compile error and its diagnostic are built and
-   tested; the NUMBER is a product-owner decision, since it trades what a script can hold against
-   RAM on the smallest target (25 bytes per engine today, three engines per pipeline). A particle
-   array wants more than 16; a classic ESP32 driving a large fixture is what bounds it.
+   **The ceiling is 64 bytes, sized against a real script rather than guessed.** It was a
+   placeholder 16 until the first realistic effect written against it (`ember.mle`: two byte
+   controls, a `uint16_t` counter and a 16-element heat buffer) was refused at 20 bytes. 64 holds a
+   `uint8_t[64]` or a `uint16_t[32]` alongside scalars. Raise it against a script that needs more,
+   not on speculation: the failure is a compile error naming the arena, so hitting it is visible.
+
+   Widening it also exposed a defect worth recording, found by the pre-merge Reviewer: the seeding
+   mask was a `uint32_t` written when the budget was 16, so a member at offset 32 or beyond shifted
+   past the mask's width. Undefined behaviour that in practice aliased mod 32, silently losing a
+   member's live value on every recompile. A `static_assert` now ties the mask width to the budget.
 
    **8 and 9 were ONE step, done together.** Step 2 was expected to have designed this storage, and
    it did not (see the correction under *Where script-level state lives*): the arena is a fixed row
@@ -609,11 +624,18 @@ same storage-and-ceiling question arrays face in step 8, so the two want one ans
 two. The one concrete use case is a text overlay in a showcase effect, and that can go a long way
 on literals plus the numeric vocabulary already present.
 
-10. ⬜ **The editing loop, which is the thing people will actually see.** Editing a script means the
-   File Manager today: find the file, edit it, save it, then re-name it on the module. The demo is
-   live authoring, and that wants an editor on the module's own card, saving to the same file the
-   engine compiles. Tooling rather than language, and the last step because it is worth building
-   against the finished shape rather than twice.
+10. ✅ **The editing loop, which is the thing people will actually see.** Done, in
+   [Plan-20260818](Plan-20260818%20-%20A%20file%20editor%20control%20and%20a%20filesystem%20change%20seam.md).
+   A card carries a file picker and an editor; typing and clicking away recompiles.
+
+   Built EARLIER than this plan's "last step, against the finished shape" reasoning suggested, and
+   that reasoning turned out to be wrong: the shape a text editor needs (a file, and a compile
+   result) does not change when `get()` or arrays-of-structs arrive, and waiting for a language that
+   is not finished means never building it. It paid for itself immediately, since every one of this
+   plan's own codegen bugs was debugged by editing a file and re-uploading it.
+
+   Two things it needed that were not tooling at all: a CORE seam, because a file write notified
+   nothing (`requestPrepareTree` was reachable only from a control write), and step 5's helper.
 
 ## Files
 
@@ -685,7 +707,7 @@ therefore needs a host test that proves the semantics and a bench run that prove
    source from the constants so raising either limit cannot turn it into a test of the other. The
    ceiling proved itself immediately: the first realistic effect written against it (a 16-element
    fire buffer) was refused at the placeholder 16 bytes, which is how `kCtrlBytes` came to be 64.
-7. 🟡 **The bench, on all four boards**, after each step: S3 and classic (Xtensa), P4 and S31
+7. ✅ **The bench, on all four boards**, after each step: S3 and classic (Xtensa), P4 and S31
    (RISC-V), a scripted layout and a scripted effect. Exec-block sizes compared against the previous
    step, since an unexplained jump is the cheapest signal that codegen went wrong.
 
@@ -719,6 +741,18 @@ therefore needs a host test that proves the semantics and a bench run that prove
    |---|---:|---:|
    | `grid.mlv` | 499 B | 880 B |
    | `plasma.mlv` | 1378 B | 2644 B |
+
+   After the editing loop (Plan-20260818): **all four boards flashed, wiped and re-seeded** with the
+   17 role-named scripts, each compiling its layout and effect with the pickers filtering by role.
+   Save-recompile proven on hardware: writing different text into `lines.mle` took the S3 from
+   1233 B to 107 B with no `/api/control` call.
+
+   The P4 is up and holds its scripts, but it panics with `Cache error` every few minutes while
+   idle. Established as PRE-EXISTING rather than a regression: it runs the default module tree with
+   no MoonLive module at all, and a firmware built from a clean `main` crashes identically. Recorded
+   in [backlog-core](../../backlog/backlog-core.md). A SEPARATE P4 boot loop found in the same
+   session WAS this branch's regression and is fixed: the engine had grown to 1440 bytes held by
+   value in every scripted module, which `registerType`'s stack probe could not absorb.
 
 8. **`collect_kpi.py` after typed members** (now step 3), because members change how EVERY variable
    is accessed. That is the one step where a hot-path regression is plausible, so it is measured

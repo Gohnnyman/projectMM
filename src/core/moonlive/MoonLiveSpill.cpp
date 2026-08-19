@@ -58,9 +58,15 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::AddImm:
         case IrOp::Spill:      out[0] = in.a;               return 1;
         case IrOp::LoadCtrl:   out[0] = kArg4;              return 1;   // reads the arena pointer
-        // A member STORE reads two things: the arena pointer and the value being written.
+        // A member STORE reads the VALUE being written, and nothing else. The arena pointer is
+        // deliberately NOT reported, for the same reason LoadIdx/StoreIdx do not report it: the
+        // rewriter below writes sources back POSITIONALLY, so listing kArg4 first shifts the value
+        // into `b` and leaves `a` holding kArg4's register. Both lowerings read the value from
+        // `op.a`, so every member assignment would store whatever that register held, the moment
+        // the allocator rewrites anything. The pointer is reached through host(kArg4) at lowering
+        // time and needs no live interval here.
         case IrOp::StoreCtrl:
-        case IrOp::StoreCtrl16: out[0] = kArg4; out[1] = in.a; return 2;
+        case IrOp::StoreCtrl16: out[0] = in.a; return 1;
         case IrOp::LoadCtrl16:  out[0] = kArg4;                return 1;   // reads the arena pointer
         // An indexed access reads its INDEX (and, for a store, the value). The arena pointer is
         // deliberately NOT reported: the rewriter below writes sources back POSITIONALLY (src[0]

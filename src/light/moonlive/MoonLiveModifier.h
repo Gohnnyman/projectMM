@@ -111,9 +111,9 @@ public:
         if (uint8_t* sh = self->script_.engine().controlSlot(moonlive::kSysHeight)) *sh = clamp255(box_.y);
         if (uint8_t* sd = self->script_.engine().controlSlot(moonlive::kSysDepth))  *sd = clamp255(box_.z);
 
-        // One light's worth of destination. The script addresses it as index 0 today; the
-        // index argument is real (setXYZ(index, x, y, z), the same shape as setRGB), so a
-        // script written against a future `for` loop uses the identical call.
+        // One light's worth of destination, which is why setXYZ(x, y, z) names no slot: a modifier
+        // is handed a single coordinate per call and can write nothing else. (setRGB keeps its
+        // index because an effect picks a pixel out of a whole buffer.)
         uint8_t out[3] = {*sx, *sy, *sz};   // seeded with the input, so a script that writes
                                             // nothing leaves the coordinate untouched
         // The fold moment: run `modifyLogical` if the script defined one, and leave the coordinate

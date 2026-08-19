@@ -221,13 +221,56 @@ compile or report a diagnostic, and never crash.
 
 ## Steps
 
-Three steps, each stopping at a point the product owner can review and judge. Commit timing is the
-product owner's call and is not part of this plan.
+All three shipped. Each stopped at a point the product owner reviewed.
 
-1. The filesystem seam and the `MoonLiveScript` convergence. Verifiable on its own without any UI
-   change: saving through the File Manager that exists today already recompiles. This is the step
-   with hardware risk, because it changes when `prepare()` runs.
-2. `ControlType::FilePath` and the JS editor extraction, with the File Manager unchanged. The
-   extraction is verifiable by the File Manager still behaving exactly as it did before.
-3. The card control replacing `addText("script", ...)` in the three bindings: the loop the product
-   owner asked for, where typing runs the script.
+1. ✅ The filesystem seam and the `MoonLiveScript` convergence, which removed 116 lines from the
+   three bindings.
+2. ✅ `ControlType::FilePath` and the JS editor extraction, with the File Manager unchanged.
+3. ✅ The card control replacing `addText("script", ...)` in the three bindings.
+
+## What the plan did not predict
+
+Three things were smaller than planned, and two were bigger.
+
+**The seam needed nothing built.** The plan specified a `FileChangedFn` hook, `main.cpp` wiring, a
+`Scheduler` change and a coalescing mechanism. None was needed: `HttpServerModule` already held the
+scheduler and already called `requestPrepareTree` in five places, and that call already coalesces
+through an atomic flag `tick()` consumes. The seam is one call at the write success branch, extracted
+into `applyFileChanged` so it is provable without a socket. It fires on DELETE too, which the plan
+missed and the pre-merge review caught.
+
+**The editor was already written.** `openFileEditor` had the load, save, truncation guard, binary
+guard and prettify hook; the work was extracting it from its `<dialog>`, not writing one.
+
+**Two things the plan got wrong about the language, both corrected by the product owner:**
+
+- A script's ROLE is its file EXTENSION (`.mle` / `.mll` / `.mlm`), not something derived from the
+  entry point it defines. Deriving it would have tied a UI filter to a language feature: the day a
+  modifier wants a per-frame `tick()`, every modifier would appear in effect pickers with nothing
+  changed. One language, three extensions, the way GLSL uses `.vert` / `.frag`.
+- `setXYZ` lost its always-zero index. Implemented as a distinct `StoreFirst` op rather than a flag
+  that hides an argument, because "the one slot I was given" is a different question from "slot
+  number zero". The emitted code got SMALLER (Xtensa 163 to 124 bytes for `mirror.mlm`).
+
+**A new file is a working example**, per role, rather than an empty file that fails to parse the
+moment it is created.
+
+## What the pre-merge review found
+
+Four defects that tests and the bench had both missed, all fixed:
+
+- `StoreCtrl` reported `kArg4` as its first source, and the spill pass writes sources back
+  positionally, so every member assignment stored the wrong register once spilling engaged. The
+  same trap this project had already documented in its backlog, left in a sibling case.
+- The seeding mask was a `uint32_t` after the arena budget grew to 64 bytes: undefined behaviour
+  above offset 31, silently losing a member's live value on every recompile.
+- A `uint16_t` member's initializer was cast to a byte on the way in, so `uint16_t phase = 1000`
+  started at 232. Invisible to every existing test, because they observe through `setRGB`, which
+  truncates to a byte, and the error is always a multiple of 256.
+- `sizeof(MoonLive)` had grown to 1440 bytes, held by value in every scripted module and constructed
+  on the main task's stack by `registerType`'s probe. This was the P4 boot loop. Re-indexing its
+  seeded-member table by member rather than by arena byte took it to 784 bytes.
+
+CI added two more: an ASan global-buffer-overflow from a caller passing a two-element array where
+three were read (now impossible: the parameter is a fixed-size type), and a CodeQL high-severity
+read-before-bound in a name-length loop.

@@ -19,6 +19,43 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
 - **Live RMII Ethernet reconfigure** — runtime PHY/pin config shipped (`ethType` + pin controls in NetworkModule, per-board defaults in `deviceModels.json`, `platform::setEthConfig`/`ethInit` dispatch). W5500 (SPI) on S3 applies **live** — `ethStop()` tears down the SPI bus and `ethInit()` re-runs on the next `loop1s()` with no reboot. RMII (classic/P4 internal EMAC) still saves config and asks for a restart to apply, because the EMAC bring-up is fiddlier to hot-cycle cleanly. Make RMII live too: a hot `esp_eth_stop` + EMAC/netif teardown + re-init on config change, matching the W5500 path, so every interface honours the no-reboot principle.
 - **Installer UX polish** — clear "Pre-release (beta)" warning on RC/latest picks, yank-by-asset-tag instead of yank-by-release-deletion.
 - **Offer projectMM/MoonLight as a library** — a downstream sketch where another firmware/app consumes the light pipeline (or a subset) as an embeddable dependency rather than running the whole binary. `library.json` is already a PlatformIO *library* manifest, so the seed exists. When this is designed, give it a small public **identity surface**: one runtime constant the consumer reads (a `kProjectName`, likely a `ProjectInfo` bundle of name + version + url) that the network wire-strings (ArtNet/E1.31 source-name + CID), the UI banner, and any "About" string all *derive from* — the one place a consumer queries "what am I embedding." This is the genuine home for the name-centralisation that the rename ([rename-to-moonlight.md § Phase 1.3](rename-to-moonlight.md)) deliberately *didn't* do: the rename is a one-time sweep (a constant would just split it), but a library consumer references the identity ongoing and widely, which is the test a constant must pass. Build it *then*, against the real library API, not speculatively now.
+- **ESP32-P4 panics with `Cache error` every few minutes, pre-existing** (2026-08-19): the bench
+  P4 (Waveshare P4-NANO, `esp32p4-eth`) reboots roughly every four minutes while IDLE, with
+  `Guru Meditation Error: Core 0 panic'ed (Cache error)`, sometimes followed by an
+  `Illegal instruction` and a `CHIP_LP_WDT_RESET` on the way down.
+
+  **What the device reports about its own restarts:** `bootReason` alternates between `PANIC` and
+  the watchdog. The serial shows why: the `Cache error` panic sometimes completes its dump and
+  reboots cleanly (`PANIC`), and sometimes the panic HANDLER itself then dies with an
+  `Illegal instruction` before it finishes, leaving the low-power watchdog to reset the chip
+  (`rst:0x10 CHIP_LP_WDT_RESET`, `W boot.esp32p4: CPU has been reset by WDT`). So a WDT boot reason
+  here is a SYMPTOM of the same fault, not a second one: nothing is hanging a task. Worth checking
+  `bootReason` over several restarts rather than one, because either value can appear.
+
+  **Not caused by MoonLive, and not a regression.** Established by two independent checks: the board
+  runs the DEFAULT module tree (GridLayout + NoiseEffect, no MoonLive module at all, so none of that
+  code executes), and a firmware built from a clean `main` crashes identically. The filesystem is
+  healthy throughout: LittleFS mounts, `/.config` lists, and writes succeed.
+
+  What is known about the fault site: `MEPC` resolves to `pxPortGetCoprocArea`
+  (`freertos/.../portable/riscv/port.c`) reached from `rtos_int_enter` (`portasm.S`), which is FreeRTOS's
+  RISC-V coprocessor-context save on INTERRUPT ENTRY. That is a symptom of something faulting inside
+  an ISR context rather than a bug in the kernel itself, and the P4 is the only RISC-V target with a
+  coprocessor, which is why no other board shows it. The prior art at
+  [Plan-20260718](../history/plans/Plan-20260718%20-%20MoonI80%20lapping-v2%20clock-oracle%20ring%20(shipped).md)
+  is a DIFFERENT cause with the same panic name (an ISR reading PSRAM while a flash write disabled
+  the cache, fixed with a `spi_flash_cache_enabled()` defer guard) and is worth re-reading first:
+  the same shape on another ISR would present exactly like this.
+
+  Next step is a decoded backtrace from the full panic dump rather than the register line, then
+  bisecting which ISR is live (audio, the LED driver, ethernet) by disabling each. Two hypotheses
+  were tested and falsified during the session that found it, so start from evidence.
+
+  A SEPARATE P4 boot loop, also found that session, WAS a real regression and is fixed: the MoonLive
+  engine had grown to 1440 bytes held by value in every scripted module, and `registerType`'s `T
+  probe` constructs each module on the main task's stack at boot. Re-indexing its seeded-member table
+  by member rather than by arena byte took it to 784 bytes and the board boots clean.
+
 - **ESP32-P4 DHCP hostname not shown by the router (recheck later)** — the device sets its DHCP hostname (option 12 = `deviceName`, default `MM-XXXX`) in the `ETHERNET_EVENT_CONNECTED` handler, verified working on two boards: the S3 over WiFi (router shows `MM-70BC`) and the Olimex over RMII Ethernet (`MM-BD3C`) — the *same* `ethEventHandler` code path the P4 uses. Yet the bench P4 (Waveshare P4-NANO, RMII) still shows as blank/"Unknown" in the GL.iNet client list, while serial confirms `set_hostname` succeeds with no error. Two unconfirmed suspects, neither our logic: (1) the router holds a **sticky lease** for the P4's MAC and won't relearn the hostname until it fully expires (the per-client "forget" isn't exposed in this GL.iNet UI, and a plain reboot didn't clear it); (2) a P4-specific IDF netif quirk serializing option 12 differently on the newer P4 Ethernet path. Since the shared code path is proven on two other boards, this is not treated as a code bug. Recheck after the P4's lease naturally expires, or on a different router, before spending more on it.
 
 ### DevicesModule — interop plugins + the command half (discovery shipped)

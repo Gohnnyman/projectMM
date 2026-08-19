@@ -154,7 +154,8 @@ how each *renders*.)
   `/api/control` like any text control; the file's contents move over `GET`/`POST /api/file`,
   because that is the only route allowed to exceed the request buffer (everything else returns 413).
   The module declares where its files live and which to offer (`addFilePath(name, buf, size,
-  dirAndExt)`), so the UI lists a directory without knowing what kind of file it holds. Saving is
+  pick)`, a {directory, extension, template} triple), so the UI lists a directory, filters it, and
+  seeds a new file without knowing what kind of file it holds. Saving is
   all it takes: a written file asks the module tree to re-derive, so whatever was built from that
   file rebuilds itself, with no second request from the browser.
   Editing is the same code the File Manager's modal editor uses, mounted inline instead of in a

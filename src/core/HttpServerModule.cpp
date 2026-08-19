@@ -569,8 +569,15 @@ void HttpServerModule::handleRemoveEntry(platform::TcpConnection& conn, const ch
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
-    if (platform::fsRemove(path)) sendResponse(conn, 200, "application/json", "{\"ok\":true}");
-    else sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed (folder not empty?)\"}");
+    if (platform::fsRemove(path)) {
+        // A REMOVED file is a change to persistent state exactly as a written one is: a module that
+        // derived something from it is now running against a file that is gone, and should say so
+        // rather than keep running the vanished program until something else happens to sweep.
+        applyFileChanged(path);
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    } else {
+        sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed (folder not empty?)\"}");
+    }
 }
 
 void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const char* query) {

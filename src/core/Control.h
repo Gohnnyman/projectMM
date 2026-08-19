@@ -92,6 +92,14 @@ inline void sanitizeHostname(char* buf) {
 /// members are noted per value below. There is no RGB color-picker type — effects
 /// use a palette index (a Uint8) instead; `float` and `Coord3D` exist but are used
 /// minimally, prefer Uint8.
+/// What a `filepath` control tells the UI: {directory, extension, template}. Exactly three, because
+/// writeControlMetadata reads all three: a shorter array compiled fine through a bare pointer and
+/// was read past its end (caught by ASan). A module owns the storage and the descriptor borrows it,
+/// the same way addSelect borrows its options array.
+///
+/// `extension` may be null to offer every file; `template` may be null to start a new file empty.
+using FilePathPick = const char* const[3];
+
 enum class ControlType : uint8_t {
     Uint8,      ///< 1 byte, min/max — a 0–255 slider. The preferred default; DMX-mappable.
     Uint16,     ///< 2 bytes — a number input (universe, port). DMX-mappable.
@@ -426,12 +434,28 @@ public:
     // and is what a newly created file is seeded with, so a new file is a working example rather
     // than a blank that fails to parse. Borrowed, not copied, exactly as addSelect borrows its
     // options array, so a control costs no storage beyond the descriptor.
+    //
+    // `pick` is typed as an array of EXACTLY THREE, not a bare `const char* const*`: the reader
+    // (writeControlMetadata) indexes all three slots, and the loose pointer form accepted a shorter
+    // array and read past its end. ASan caught exactly that from a two-element caller. A
+    // fixed-length parameter refuses it at compile time, which is where a fixed-size contract
+    // belongs; a caller with nothing to offer passes nothing (the no-picker overload below).
     void addFilePath(const char* name, char* var, uint16_t bufSize,
-                     const char* const* pick = nullptr,
+                     const FilePathPick& pick,
                      bool (*validate)(const char*) = nullptr) {
         grow();
         controls_[count_++] = {.ptr = var, .name = name,
-                               .aux = reinterpret_cast<uintptr_t>(pick),
+                               .aux = reinterpret_cast<uintptr_t>(&pick[0]),
+                               .type = ControlType::FilePath,
+                               .max = bufSize, .validate = validate};
+    }
+
+    /// A file-path control with no picker: an editor over one fixed path, so there is no directory
+    /// to list and nothing to seed a new file with.
+    void addFilePath(const char* name, char* var, uint16_t bufSize,
+                     bool (*validate)(const char*) = nullptr) {
+        grow();
+        controls_[count_++] = {.ptr = var, .name = name, .aux = 0,
                                .type = ControlType::FilePath,
                                .max = bufSize, .validate = validate};
     }

@@ -143,31 +143,49 @@ bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
     // is offset AND name: a member inserted at the top of the class shifts every later declaration
     // to a new offset, and each of those is a different member now occupying a seeded byte, so it
     // must take its own initializer rather than inherit the previous occupant's value.
-    uint32_t seeding = 0;
+    uint64_t seeding = 0;
+    uint8_t  kept = 0;                 // rows written this pass; the table is per MEMBER
     for (uint8_t i = 0; i < count; i++) {
         const uint8_t off = decls[i].offset;
-        if (off >= kArenaBytes) continue;                       // the parser bounds it; belt and braces
+        // Bounded by the SCRIPT's region, which is what the mask and the name table cover: a member
+        // never sits above it, and the parser already refuses one that would.
+        if (off >= kCtrlBytes) continue;
         // The declared name is a SPAN of the source (nameLen, no terminator), so it is compared
         // and stored length-bounded: strcmp would read past it into the rest of the script.
         const uint8_t n = decls[i].nameLen < kSeedNameLen - 1 ? decls[i].nameLen
                                                              : uint8_t(kSeedNameLen - 1);
-        const bool same = ((seeded_ >> off) & 1u) &&
-                          std::strncmp(seededName_[off], decls[i].name, n) == 0 &&
-                          seededName_[off][n] == '\0';
+        // Same MEMBER means same (offset, name). The offset alone is not identity: inserting a
+        // member at the top of a class shifts every later one down, and each then occupies a byte
+        // that was seeded for something else.
+        const SeededMember* prev = nullptr;
+        if ((seeded_ >> off) & 1ull)
+            for (uint8_t k = 0; k < seededCount_; k++)
+                if (seededName_[k].offset == off) { prev = &seededName_[k]; break; }
+        const bool same = prev && std::strncmp(prev->name, decls[i].name, n) == 0 &&
+                          prev->name[n] == '\0';
         if (!same) {
-            // Seed the member's WHOLE width, little-endian to match every backend's halfword
-            // load: writing only the low byte would leave the high half holding whatever the
-            // previous program left there, so a fresh uint16_t member would start at a value its
-            // script never wrote.
-            ctrlArena_[off] = static_cast<uint8_t>(decls[i].def & 0xff);
-            if (ctrlWidth(decls[i].type) == 2 && off + 1 < kArenaBytes)
-                ctrlArena_[off + 1] = static_cast<uint8_t>(decls[i].def >> 8);
+            // Seed the member's WHOLE extent: every element, at its width, little-endian to match
+            // every backend's halfword load. Writing only the first element left an ARRAY holding
+            // the previous program's bytes from element 1 on, which is what "an array starts at
+            // zero" has to mean; writing only the low byte left a uint16_t's high half stale.
+            const uint8_t w = ctrlWidth(decls[i].type);
+            for (uint16_t e = 0; e < decls[i].count; e++) {
+                const uint16_t at = uint16_t(off + e * w);
+                if (at + w > kCtrlBytes) break;                 // the parser bounds it; belt and braces
+                ctrlArena_[at] = static_cast<uint8_t>(decls[i].def & 0xff);
+                if (w == 2) ctrlArena_[at + 1] = static_cast<uint8_t>(decls[i].def >> 8);
+            }
         }
-        for (uint8_t c = 0; c < n; c++) seededName_[off][c] = decls[i].name[c];
-        seededName_[off][n] = '\0';
-        seeding |= 1u << off;
+        if (kept < kMaxCtrls) {
+            seededName_[kept].offset = off;
+            for (uint8_t c = 0; c < n; c++) seededName_[kept].name[c] = decls[i].name[c];
+            seededName_[kept].name[n] = '\0';
+            kept++;
+        }
+        seeding |= 1ull << off;
     }
     seeded_ = seeding;   // a member the new script dropped is unseeded: its byte reseeds if it returns
+    seededCount_ = kept;
     return true;
 }
 
@@ -190,7 +208,7 @@ void MoonLive::free() {
     // treat every member as one it had already seeded and skip the initializers, so a script would
     // start every value at zero instead of what it declared.
     seeded_ = 0;
-    for (uint8_t i = 0; i < kArenaBytes; i++) seededName_[i][0] = '\0';
+    seededCount_ = 0;
 }
 
 }  // namespace mm::moonlive

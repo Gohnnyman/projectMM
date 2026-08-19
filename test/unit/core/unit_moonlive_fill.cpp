@@ -966,6 +966,23 @@ TEST_CASE("setRGB still names the light it writes") {
     eng.free();
 }
 
+
+// A wide member's INITIALIZER must survive to the arena. It was cast to a byte on the way in, so
+// `uint16_t phase = 1000;` started at 232 (1000 & 0xff). Every existing test observed through
+// setRGB, which truncates to a byte, and the error is always a multiple of 256: invisible.
+// Observed here through a COMPARISON instead, which the byte channel cannot hide.
+TEST_CASE("a uint16_t member starts at the value it was initialized to") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint16_t phase = 1000;\n"
+                        "  tick() { if (phase == 1000) { setRGB(0, 55, 0, 0); } }\n"
+                        "}\n", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0);
+    CHECK(px[0] == 55);
+    eng.free();
+}
+
 #endif  // MM_MOONLIVE_HAS_HOST_JIT — every case above needs compile() to SUCCEED, so
         // they all gate on the JIT: on a target with no backend (x86-64 desktop today)
         // the helpers they call are compiled out with it.

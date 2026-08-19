@@ -93,10 +93,12 @@ public:
         LayoutBase::release();
     }
 
-    /// Replace the script. The next prepare() compiles it — the path a UI edit takes.
-    /// A control write lands DIRECTLY in script_ (addText binds the buffer), so setScript() is not
-    /// called and nothing would clear the compiled-hash — compile() would early-return and keep
-    /// running the previous script under a new name. Clearing it here covers both paths.
+    /// Nothing to do on a control write, and that is the point.
+    ///
+    /// A control write lands DIRECTLY in the name buffer, so this override used to exist to clear a
+    /// cached hash that the write would otherwise leave stale, keeping the previous script running
+    /// under a new name. compile() now re-derives from the FILE every time, comparing its content
+    /// hash, so a changed name and changed contents are both noticed without anything to clear.
     void onControlChanged(const char* name) override {
         // Nothing to invalidate: compile() re-derives from the FILE every time, comparing a content
         // hash, so a control write that lands directly in the name buffer is noticed on its own.

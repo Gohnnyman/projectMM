@@ -1708,16 +1708,20 @@ body.cards-resizing {
 .fm-editor-save.dirty::after {
     content: "";
     display: inline-block; width: 6px; height: 6px; margin-left: 6px;
-    border-radius: 50%; background: currentColor; vertical-align: middle;
+    border-radius: 50%; background: currentcolor; vertical-align: middle;
 }
-/* On the icon button the dot rides the corner instead, since there is no text to sit beside. */
-.fm-tool.fm-editor-save { position: relative; }
-.fm-tool.fm-editor-save.dirty::after {
+/* On an ICON button the dot rides the corner instead, since there is no text to sit beside. Both
+   button shapes are covered: the card mounts a .card-btn, the File Manager modal a .fm-tool. */
+.fm-tool.fm-editor-save,
+.card-btn.fm-editor-save { position: relative; }
+.fm-tool.fm-editor-save.dirty::after,
+.card-btn.fm-editor-save.dirty::after {
     position: absolute; top: 2px; right: 2px;
     margin: 0; width: 7px; height: 7px; background: var(--accent);
 }
 /* Nothing to save reads as nothing to do, rather than a button that silently ignores a click. */
-.fm-tool.fm-editor-save:disabled { opacity: 0.4; }
+.fm-tool.fm-editor-save:disabled,
+.card-btn.fm-editor-save:disabled { opacity: 0.4; }
 
 /* The capture toggles inside a pad popup: what a preset carries. A compact two-column grid so the
    four of them cost one popup row rather than four. */

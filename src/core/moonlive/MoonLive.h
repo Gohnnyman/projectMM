@@ -131,8 +131,10 @@ public:
         controls_[controlCount_] = {name, lo, hi, def, 0, CtrlType::Uint8, offset};
         // nameLen is what the binding reports; measured here rather than passed, so a caller
         // cannot disagree with the string it handed over.
+        // The BOUND is tested first: `name[n] && n < limit` reads the byte before deciding whether
+        // it may, so a name that fills the buffer without a terminator is read one past the end.
         uint8_t n = 0;
-        while (name[n] && n < kMaxControlName - 1) n++;
+        while (n < kMaxControlName - 1 && name[n]) n++;
         controls_[controlCount_].nameLen = n;
         controlCount_++;
     }
@@ -174,9 +176,6 @@ public:
     /// already counted in the module's own sizeof rather than its dynamic bytes. Adding it would
     /// report those bytes twice.
     size_t heapBytes() const { return codeCap_ + (ctrlArena_ ? kArenaBytes : 0); }
-
-    /// How much of the string pool the current program uses. Its ceiling is kStringPool.
-    uint16_t stringBytes() const { return stringLen_; }
 
     /// Write "1700 B - controls 2/8" into `out`: how big the compiled program is, and the ONE
     /// budget it is closest to exhausting.
@@ -245,9 +244,24 @@ private:
     // NEXT compile: a pointer would be dangling by then. Truncated to a prefix, which is enough to
     // tell two members apart in the only case that matters, and bounded so a long name cannot run
     // off the end of a record that carries its length instead of a terminator.
+    // Indexed by MEMBER, not by arena byte. A class declares at most kMaxCtrls of them, so a row
+    // per byte was 8x more rows than can ever exist: 768 bytes of a 1440-byte engine, held by value
+    // inside every scripted module and constructed on the main task's stack by ModuleFactory's
+    // probe. The offset is stored alongside, which is what the byte-indexed form was really using.
     static constexpr uint8_t kSeedNameLen = 12;
-    uint32_t seeded_ = 0;
-    char     seededName_[kArenaBytes][kSeedNameLen] = {};
+    struct SeededMember { uint8_t offset = 0; char name[kSeedNameLen] = {}; };
+    // A uint64_t, and the table is sized to the SCRIPT's region rather than the whole arena. This
+    // was a uint32_t when kCtrlBytes was 16; the byte budget then grew to 64 and the mask did not,
+    // so `1u << off` for a member at offset 32 or beyond was undefined behaviour and in practice
+    // aliased mod 32: that member was never recorded as seeded (snapping back to its initializer on
+    // every recompile, losing the live value this exists to keep) while corrupting the bit of the
+    // member it aliased. A static_assert now ties the two together so the next widening cannot
+    // repeat it. The rows above kCtrlBytes were dead: a system variable is never seeded from a
+    // declaration.
+    static_assert(kCtrlBytes <= 64, "seeded_ is a 64-bit mask, one bit per script arena byte");
+    uint64_t     seeded_ = 0;
+    SeededMember seededName_[kMaxCtrls] = {};
+    uint8_t      seededCount_ = 0;
 
     void*   code_ = nullptr;     // allocExec block holding the emitted machine code
     size_t  codeCap_ = 0;        // its capacity (for freeExec)

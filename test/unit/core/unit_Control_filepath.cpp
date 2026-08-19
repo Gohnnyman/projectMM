@@ -19,7 +19,7 @@
 namespace {
 // What a module declares: where its files live and which of them to offer. Borrowed by the
 // descriptor, so it has to outlive the control, exactly like addSelect's options array.
-const char* const kScriptPick[3] = {"/moonlive", ".mle", nullptr};
+const mm::FilePathPick kScriptPick = {"/moonlive", ".mle", nullptr};
 }  // namespace
 
 TEST_CASE("a file-path control carries the directory and extension the module declared") {
@@ -42,7 +42,7 @@ TEST_CASE("a file-path control carries the directory and extension the module de
 TEST_CASE("a file-path control with no directory offers no picker rather than a broken one") {
     char path[41] = "";
     mm::ControlList controls;
-    controls.addFilePath("file", path, sizeof(path));      // no pair: an editor with a fixed path
+    controls.addFilePath("file", path, sizeof(path));      // no picker: an editor with a fixed path
     mm::JsonSink sink;
     mm::writeControlMetadata(sink, controls[0]);
     const std::string meta = sink.data();
@@ -50,7 +50,7 @@ TEST_CASE("a file-path control with no directory offers no picker rather than a 
 }
 
 TEST_CASE("a file-path control listing every file omits the extension filter") {
-    static const char* const anyFile[2] = {"/presets", nullptr};
+    static const mm::FilePathPick anyFile = {"/presets", nullptr, nullptr};
     char path[41] = "";
     mm::ControlList controls;
     controls.addFilePath("file", path, sizeof(path), anyFile);
