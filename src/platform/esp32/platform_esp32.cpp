@@ -342,16 +342,34 @@ const char* coprocessorWifi() {
     // of 0.0.0 (or an error) means the slave never completed its handshake — the
     // signature of absent / incompatible C6 slave firmware, which is exactly the
     // case we want to surface rather than infer.
+    // Asked a BOUNDED number of times, then never again. esp_hosted_get_coprocessor_fwversion is a
+    // blocking RPC over the host link and SystemModule calls this from tick1s(), which runs INLINE
+    // ON THE RENDER THREAD (the periodic-tick rule: a slow tick1s stutters the LEDs at its cadence).
+    //
+    // Measured on a P4 with WiFi live on the C6: the call TIMES OUT after ~1 s, every second,
+    // forever. SystemModule showed 1,012,344 us per tick, fps 0, and every HTTP request queued a
+    // second or more behind the render loop, which is what "very very slow" over WiFi actually was.
+    // The link works (WiFi associates and serves traffic) while this particular RPC does not answer,
+    // so retrying it buys nothing and costs a second of every tick.
+    //
+    // A few attempts rather than one: the C6 may still be handshaking right after boot, and the
+    // answer is worth having when it comes. After that the display latches on whatever it learned.
+    // The VERSION cannot change while the host runs, since reflashing the C6 takes the host with it.
     static char buf[24] = "querying…";
+    static uint8_t attemptsLeft = 5;
+    if (attemptsLeft == 0) return buf;
     esp_hosted_coprocessor_fwver_t ver = {};
     if (esp_hosted_get_coprocessor_fwversion(&ver) == ESP_OK
         && (ver.major1 || ver.minor1 || ver.patch1)) {
+        attemptsLeft = 0;                       // answered: never ask again
         std::snprintf(buf, sizeof(buf), "C6 fw %u.%u.%u",
                       static_cast<unsigned>(ver.major1),
                       static_cast<unsigned>(ver.minor1),
                       static_cast<unsigned>(ver.patch1));
-    } else {
-        std::snprintf(buf, sizeof(buf), "not detected");
+    } else if (--attemptsLeft == 0) {
+        // Out of attempts. Say WHY the field is empty rather than asserting the C6 is absent: the
+        // query is what failed, and on this bench WiFi runs fine while it does.
+        std::snprintf(buf, sizeof(buf), "no version reply");
     }
     return buf;
 #else
@@ -525,12 +543,17 @@ static void ensureNetifInit() {
 
 #ifndef MM_NO_ETH
 
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING;   // defined below; the link-up log reports it
+
 static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
                             int32_t id, void* data) {
     if (base == ETH_EVENT) {
         if (id == ETHERNET_EVENT_CONNECTED) {
-            ESP_LOGI(NET_TAG, "Ethernet link up");
             ethLinkUp_.store(true, std::memory_order_relaxed);
+            // The NEGOTIATED speed, not just "up". A gigabit PHY that fell back to 100M behaves
+            // differently enough to matter (the S31's RGMII Tx-clock skew is speed-dependent), and
+            // "link up" alone sent one debug session hunting DHCP when the question was the speed.
+            ESP_LOGI(NET_TAG, "Ethernet link up (%u Mbps)", ethLinkSpeedMbps());
             if (ethStatic_.load(std::memory_order_acquire)) {
                 // Static mode: do NOT let the DHCP client restart on this link-up (applyHostname
                 // would) — that is what made a re-plugged cable grab a DHCP lease instead of the

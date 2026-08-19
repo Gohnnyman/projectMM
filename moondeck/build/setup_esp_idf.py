@@ -42,7 +42,7 @@ def _checkout_pinned(idf_path: Path) -> bool:
     co = subprocess.run(["git", "checkout", PINNED_IDF_COMMIT], cwd=str(idf_path))
     if co.returncode != 0:
         print(f"   Checkout failed — the pinned commit may not be fetched yet. "
-              f"In {idf_path}: git fetch origin tag v6.1-beta1, then re-run.")
+              f"In {idf_path}: git fetch origin tag {PINNED_IDF_VERSION}, then re-run.")
         return False
     # The new commit points its submodules at different SHAs; sync them so the
     # build sees the matching component sources.

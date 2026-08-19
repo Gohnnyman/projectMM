@@ -61,19 +61,21 @@ CONFIG_WIFI_RMT_TX_BA_WIN=32
 CONFIG_WIFI_RMT_AMPDU_RX_ENABLED=y
 CONFIG_WIFI_RMT_RX_BA_WIN=16
 
-# --- UNRESOLVED boot crash (IDF 6.1, WiFi build only). KNOWN OPEN IDF BUG: esp-idf
-# #18759 (IDFGH-17859) — on ESP32-P4 + PSRAM, sleep_clock_icg_startup_init (a SECONDARY
-# init fn, priority 106, runs before app_main, NOT gated by CONFIG_PM_ENABLE) allocates
-# REGDMA sleep-retention links needing MALLOC_CAP_RETENTION and aborts with
-# ESP_ERR_NO_MEM (0x101) → reboot loop, once esp_hosted's SDIO stack is pulled in (this
-# WiFi build only; the eth-only P4 boots fine). See docs/backlog § ESP32-P4 round 4 and
-# https://github.com/espressif/esp-idf/issues/18759 for the full trail + upstream status.
+# The P4-WiFi image crash-LOOPED at boot before this: sleep_clock_icg_startup_init (a SECONDARY
+# init fn, priority 106, before app_main, NOT gated by CONFIG_PM_ENABLE) could not allocate its
+# REGDMA sleep-retention links from MALLOC_CAP_RETENTION and cpu_start aborted with ESP_ERR_NO_MEM
+# (0x101) — upstream [esp-idf#18759](https://github.com/espressif/esp-idf/issues/18759), which is
+# still OPEN because the allocation failure itself is unfixed. IDF v6.1-rc1 added this option
+# (4b8e1e87106), and turning it off makes esp_sleep_clock_config log a warning and continue
+# instead of allocating, so nothing asks for that memory. A WORKAROUND, not a fix.
 #
-# Bench-tried 2026-07-03, NONE fixed it (the RETENTION pool is a specific reserved region,
-# not general DRAM, so freeing general DRAM does not help):
-#   - CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y     → those buffers allocate after boot init
-#   - CONFIG_PM_POWER_DOWN_PERIPHERAL_IN_LIGHT_SLEEP=y → drops the ICG file, but the next
-#       retention alloc (PCR / int_wdt) fails, then a sleep_retention.c:914 assert
-#   - CONFIG_SPIRAM_ALLOW_{BSS,NOINIT}_SEG_EXTERNAL_MEMORY=y → retention alloc still fails
-# Held here until esp-idf #18759 lands an "disable ICG / retention" option, or a
-# version-matched C6 slave reflash changes the memory picture (see round 4 note).
+# Why it only ever hit this build: the retention pool is a specific reserved region, not general
+# DRAM, and esp_hosted's SDIO stack is what tips it over — the eth-only P4 boots fine. That is also
+# why freeing general DRAM does not help; see docs/backlog § ESP32-P4 round 4 for the three bench
+# attempts that failed for exactly that reason.
+#
+# What it costs: clock gating for digital peripherals during LIGHT SLEEP. A peripheral that needs
+# its clock kept alive across a sleep no longer gets it ungated. This device never light-sleeps
+# (the render loop runs continuously), so the feature buys us nothing and its allocation is pure
+# cost. Revisit if power management is ever enabled here.
+CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n

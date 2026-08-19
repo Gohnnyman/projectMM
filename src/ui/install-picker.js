@@ -52,12 +52,17 @@ const PREF_RELEASE_KEY  = "projectMM.picker.releaseTag";
 const PREF_FIRMWARE_KEY = "projectMM.picker.firmware";
 const PREF_BOARD_KEY    = "projectMM.picker.board";
 
-// Firmware variants published but known NOT to run — flagged in the dropdown so a
-// user can't select them expecting a working device. esp32p4-eth-wifi is shipped
-// solely as a one-click-flashable repro for esp-idf #18759 (P4 + esp_hosted boot
-// crash); see docs/backlog § ESP32-P4 round 4. Remove a key here once its variant
-// boots (e.g. when the upstream ICG fix lands).
-const EXPERIMENTAL_FIRMWARES = new Set(["esp32p4-eth-wifi"]);
+// Firmware variants published but NEVER RUN ON HARDWARE — flagged in the dropdown so a
+// user knows before flashing. The P4 rev3 images are built for the current v3.x silicon,
+// which no bench board has (both are v1.3 "engineering samples"), so they are published
+// for someone with a v3 board to try: without them a v3 board has no image at all, since
+// the rev1 binary is rejected by its bootloader. Remove a key once its variant is
+// bench-verified.
+//
+// esp32p4rev1-eth-wifi was listed here as an esp-idf #18759 boot-crash repro and is now
+// REMOVED: it boots, associates and serves the UI as of IDF v6.1-rc1 with
+// CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n.
+const EXPERIMENTAL_FIRMWARES = new Set(["esp32p4rev3-eth", "esp32p4rev3-eth-wifi"]);
 
 // One picker instance per init() call. Each tracks its own state so multiple
 // pickers on a page (unused today but possible) don't fight over selections.
@@ -487,12 +492,11 @@ function render(state) {
             const opt = document.createElement("option");
             opt.value = f.firmware;
             // The dropdown shows the bare firmware key, so a variant that flashes but
-            // doesn't run (published only as a bug repro) must carry its own visible
-            // warning here — the firmwares.json `description` isn't loaded by the picker
-            // (it parses names from release asset filenames). esp32p4-eth-wifi is the
-            // esp-idf #18759 boot-crash repro; flag it so a user can't pick it blind.
+            // is unverified must carry its own visible warning here — the firmwares.json
+            // `description` isn't loaded by the picker (it parses names from release asset
+            // filenames), so a user picking blind would see nothing.
             opt.textContent = EXPERIMENTAL_FIRMWARES.has(f.firmware)
-                ? `⚠️ ${f.firmware} (does not boot — repro)`
+                ? `⚠️ ${f.firmware} (untested — no board to verify on)`
                 : f.firmware;
             firmwareEl.appendChild(opt);
         });

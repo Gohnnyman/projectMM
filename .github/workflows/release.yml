@@ -188,7 +188,7 @@ jobs:
           # the ip101 PHY + esp_hosted, both manifest-gated on target == esp32p4),
           # everything
           # else → esp32. (The matrix is the `ships` subset of firmwares.json;
-          # esp32p4-eth-wifi has ships=False in build_esp32.py so it stays out —
+          # esp32p4rev1-eth-wifi has ships=False in build_esp32.py so it stays out —
           # its C6-slave Kconfig defaults don't survive a plain CI build.)
           target: ${{ startsWith(matrix.firmware, 'esp32s31') && 'esp32s31' || startsWith(matrix.firmware, 'esp32s3') && 'esp32s3' || startsWith(matrix.firmware, 'esp32p4') && 'esp32p4' || 'esp32' }}
           path: 'esp32'

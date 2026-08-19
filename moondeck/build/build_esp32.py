@@ -25,15 +25,15 @@ IDF_SEARCH_PATHS = [
 ]
 
 # The ESP-IDF commit every target (classic ESP32, S3, P4, S31) has been
-# validated against — the `v6.1-beta1` tag, on the earliest IDF line that
+# validated against — the `v6.1-rc1` tag, on the earliest IDF line that
 # carries the esp32s31 preview target. Kept here (not in setup_esp_idf.py) so
 # the pre-build drift check below can share the constant — a stale local IDF is
 # the single most common source of an "it built for me last week" ESP32 build
 # failure, so the check runs on every build_esp32 invocation, not just when the
 # user remembers to re-run setup_esp_idf.py. setup_esp_idf.py imports these
 # two constants.
-PINNED_IDF_COMMIT = "b1d13e9fe441c4f75e240c98a26fd631b7b3232f"
-PINNED_IDF_VERSION = "v6.1-beta1"
+PINNED_IDF_COMMIT = "44f0c59f7c81a72a5868a52d5f6dfbbf88829704"
+PINNED_IDF_VERSION = "v6.1-rc1"
 
 
 def installed_idf_commit(idf_path: Path) -> str:
@@ -93,11 +93,11 @@ def check_idf_pin(idf_path: Path) -> None:
 #
 # NOTE on the P4 co-processor components (esp_hosted / esp_wifi_remote / eppp_link):
 # the `rules: target == esp32p4` gate in main/idf_component.yml pulls them for ANY
-# esp32p4 build, including the WiFi-less esp32p4-eth, because manifest rules can't
+# esp32p4 build, including the WiFi-less esp32p4rev1-eth, because manifest rules can't
 # see our eth-only flag. EXCLUDE_COMPONENTS does NOT drop them (the component
 # manager resolves the managed dependency before the exclude applies). It's a
 # *build-time* cost only: the linker dead-strips the unused code, so they add ~0
-# bytes of flash to esp32p4-eth (our coprocessorWifi() is the empty stub there, so
+# bytes of flash to esp32p4rev1-eth (our coprocessorWifi() is the empty stub there, so
 # no esp_hosted symbol is referenced — confirmed: their .text size is 0x0 in the
 # .map). Left as-is rather than fought; see docs/backlog/.
 ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
@@ -208,32 +208,64 @@ FIRMWARES: dict[str, dict] = {
                        "8 MB board, so N8R8 boards (LightCrafter etc.) need this variant.",
         "ships": True,
     },
-    "esp32p4-eth": {
+    "esp32p4rev1-eth": {
         "chip": "esp32p4",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4rev1-eth"],
         "eth_only": True,
-        "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY). The "
-                       "WiFi-less fallback; esp32p4-eth-wifi adds the C6 radio.",
+        "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY), for P4 "
+                       "revisions 0.x/1.x ONLY. The WiFi-less fallback; "
+                       "esp32p4rev1-eth-wifi adds the C6 radio.",
         "ships": True,
         "panel_cards": True,
     },
-    "esp32p4-eth-wifi": {
+    "esp32p4rev1-eth-wifi": {
         "chip": "esp32p4",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth",
-                      "sdkconfig.defaults.esp32p4-eth-wifi"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4rev1-eth",
+                      "sdkconfig.defaults.esp32p4rev1-eth-wifi"],
         "eth_only": False,
-        "description": "⚠️ DOES NOT BOOT — repro build for esp-idf #18759 "
-                       "(github.com/espressif/esp-idf/issues/18759). Waveshare "
-                       "ESP32-P4-NANO, Ethernet + WiFi via the on-board ESP32-C6 over "
-                       "SDIO (esp_hosted). Builds + flashes but crash-loops at boot: "
-                       "sleep_clock_icg_startup_init fails ESP_ERR_NO_MEM on IDF 6.1. "
-                       "Published so the IDF team can one-click-flash the failing "
-                       "binary. Use esp32p4-eth for a working P4.",
-        # ships=True purely to PUBLISH the (crash-looping) binary for the esp-idf
-        # #18759 repro — see backlog § ESP32-P4 round 4. The CI build itself passes
-        # (the $CONFIG{} manifest fix); only the flashed binary crashes at boot, which
-        # CI doesn't boot-test. NOT a usable firmware: the board's deviceModels entry
-        # flags it experimental so the installer warns before flashing.
+        "description": "Waveshare ESP32-P4-NANO — Ethernet + WiFi via the on-board "
+                       "ESP32-C6 over SDIO (esp_hosted), for P4 revisions 0.x/1.x "
+                       "ONLY. Boots and associates as of IDF v6.1-rc1 with "
+                       "CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n, which sidesteps esp-idf "
+                       "#18759 (sleep_clock_icg_startup_init failing ESP_ERR_NO_MEM "
+                       "and aborting cpu_start).",
+        # Was a crash-repro build for esp-idf #18759 and is now a working firmware:
+        # bench-verified on a v1.3 P4 (associates, RSSI -52, serves the UI). #18759 is
+        # NOT fixed upstream — CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n (an option v6.1-rc1
+        # added) skips the allocation that failed, at the cost of peripheral clock
+        # gating during light sleep, which this device never enters.
+        "ships": True,
+        "panel_cards": True,
+    },
+    "esp32p4rev3-eth": {
+        "chip": "esp32p4",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4rev1-eth",
+                      "sdkconfig.defaults.esp32p4rev3"],
+        "eth_only": True,
+        "description": "⚠️ UNTESTED — Waveshare ESP32-P4-NANO, Ethernet only (IP101 "
+                       "PHY), for P4 revisions 3.x (the CURRENT silicon). Identical to "
+                       "esp32p4rev1-eth apart from the chip revision, which the two "
+                       "generations cannot share. Published so someone with a v3 board "
+                       "can test it: both bench boards are v1.3, so this image has "
+                       "never been booted.",
+        # The board fragment is REUSED rather than copied: the two images differ only in
+        # CONFIG_ESP32P4_SELECTS_REV_LESS_V3 / REV_MIN, so duplicating the partition
+        # table, flash size and EMAC config would be the same fact in two places, and
+        # they would drift the first time the board config changed.
+        "ships": True,
+        "panel_cards": True,
+    },
+    "esp32p4rev3-eth-wifi": {
+        "chip": "esp32p4",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4rev1-eth",
+                      "sdkconfig.defaults.esp32p4rev1-eth-wifi",
+                      "sdkconfig.defaults.esp32p4rev3"],
+        "eth_only": False,
+        "description": "⚠️ UNTESTED — Waveshare ESP32-P4-NANO, Ethernet + WiFi via the "
+                       "on-board ESP32-C6 (esp_hosted), for P4 revisions 3.x (the "
+                       "CURRENT silicon). The rev1 build of this image is bench-verified; "
+                       "this one differs only in the chip revision and has never been "
+                       "booted.",
         "ships": True,
         "panel_cards": True,
     },
@@ -683,12 +715,12 @@ def main():
     # set-target is skipped — switching to another firmware uses a different
     # build_dir entirely, so its sdkconfig is untouched.
     #
-    # KNOWN ISSUE (esp32p4-eth-wifi): esp_wifi_remote's slave target
+    # KNOWN ISSUE (esp32p4rev1-eth-wifi): esp_wifi_remote's slave target
     # (SLAVE_IDF_TARGET_ESP32C6) is selected by a Kconfig `default ... if
     # IDF_TARGET_ESP32P4` that fires during `set-target` but is dropped by the
     # reconfigure a plain `build` triggers, falling back to ESP32-H2 (no WiFi) and
     # failing on missing CONFIG_WIFI_RMT_* symbols. A clean manual sequence works:
-    #   rm -rf build/esp32-esp32p4-eth-wifi && idf.py -B <dir> -DSDKCONFIG=<dir>/sdkconfig \
+    #   rm -rf build/esp32-esp32p4rev1-eth-wifi && idf.py -B <dir> -DSDKCONFIG=<dir>/sdkconfig \
     #     -DSDKCONFIG_DEFAULTS="..." set-target esp32p4 && (same) build
     # but this wrapper does not yet reproduce it reliably — tracked in
     # docs/backlog/ (ESP32-P4 round 3). Until fixed, build this variant

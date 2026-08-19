@@ -47,6 +47,14 @@
 //   regression persists in 0.6.0-as-tagged; keep 0.5.7. (0.6.0 also brings no ESP32-S31
 //   support — misdetection is tracked upstream in esptool-js#248 — so the bump has no
 //   upside for us either.) Pinned 2026-06-28, re-verified 2026-07-27.
+//   Re-checked 2026-08-19: **0.6.1 shipped (2026-08-06) and its notes name the fix we
+//   are waiting on** — upstream #245 "Add retries to FLASH_DATA and FLASH_DEFL_DATA",
+//   plus #244 (uncompressed data in writeFlash) and #249 (connection reliability). That
+//   is the deflate write path this pin exists to avoid, so 0.6.1 is the first bump worth
+//   a real P4 bench flash. NOT yet tested here — the pin stays 0.5.7 until a P4
+//   web-flash completes on 0.6.1. Still no ESP32-S31 support in 0.6.1 (that is separate,
+//   see WEB_FLASH_UNSUPPORTED_CHIPS in install.js), so the S31 CLI path is unaffected
+//   either way.
 export const ESPTOOL_JS_VERSION = "0.5.7";
 export const IMPROV_SDK_VERSION = "2.5.0";
 import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.5.7/bundle.js?module";
@@ -462,7 +470,7 @@ export const installer = {
      *   a normal re-flash overwrites in place and users usually want
      *   persistent state to survive a firmware bump.
      * @param {boolean} [opts.ethOnly=false] - the picked firmware has WiFi compiled
-     *   out (firmwares.json `eth_only`: esp32-eth, esp32p4-eth). Such a build connects
+     *   out (firmwares.json `eth_only`: esp32-eth, esp32p4rev1-eth). Such a build connects
      *   over Ethernet only and has no WiFi-provisioning RPC, so when the device isn't
      *   already online from the boot log we SKIP the WiFi-credentials step (which would
      *   otherwise send WIFI_SETTINGS and get UNKNOWN_RPC_COMMAND) and report a clear
@@ -850,7 +858,7 @@ export const installer = {
                 alreadyOnline = true;
                 defaultsApplied = await pushDefaultsOverSerial(port, board, applyDefaults, trackProgress, onLog);
             } else if (ethOnly) {
-                // Ethernet-only firmware (WiFi compiled out: esp32-eth, esp32p4-eth) that
+                // Ethernet-only firmware (WiFi compiled out: esp32-eth, esp32p4rev1-eth) that
                 // did NOT print an IP — i.e. no Ethernet cable was connected at boot. There
                 // is no point attempting WiFi provisioning: the build has no WIFI_SETTINGS
                 // RPC, so sending one returns UNKNOWN_RPC_COMMAND (the error users hit). The
