@@ -351,6 +351,20 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                         a.bind(skip);
                         break;
                     }
+                    // Element 0, with no index to compute and no bounds test to make: the only way
+                    // to be out of range is for the buffer to be empty, which nLights answers.
+                    // Distinct from StoreElem rather than StoreElem with a constant, because it is
+                    // a different question: "the one slot I was given" is not "slot number zero".
+                    case InlineOp::StoreFirst: {
+                        LabelId skip = a.newLabel();
+                        a.branchIfZero(host(kArg1), skip);
+                        a.movImm(sAddr, 0);
+                        a.store8(host(kArg0), sAddr, reg(op.a));
+                        a.addImm(sAddr, sAddr, 1); a.store8(host(kArg0), sAddr, reg(op.b));
+                        a.addImm(sAddr, sAddr, 1); a.store8(host(kArg0), sAddr, reg(op.c));
+                        a.bind(skip);
+                        break;
+                    }
                     case InlineOp::FillElems: {
                         LabelId done = a.newLabel(), top = a.newLabel();
                         a.movImm(sCtr, 0);

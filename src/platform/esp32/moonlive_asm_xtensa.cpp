@@ -353,7 +353,7 @@ void XtensaAssembler::branchIfZero(Reg a, Label l) {
 //     j      l               ; 18-bit displacement — reaches anywhere in a script
 //
 // Xtensa's conditional branches carry a single SIGNED BYTE of displacement (±127), which a loop body
-// outgrows easily once spill traffic is in it — grid.mlv needed 177. Truncating that silently
+// outgrows easily once spill traffic is in it — grid.mll needed 177. Truncating that silently
 // retargets the branch into the middle of the program, so the choice is relax or refuse. This is the
 // textbook relaxation every compiler does (GCC and LLVM emit the short form and rewrite the ones that
 // do not fit); the fixed six-byte form skips the iterate-to-convergence step, which is worth a few

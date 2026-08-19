@@ -28,8 +28,9 @@ namespace mm::moonlive {
 // core treats them as opaque tags; the per-ISA backend and the host both know the element is 3
 // bytes (RGB) for the light host, but that meaning lives outside the core.
 enum class InlineOp : uint8_t {
-    StoreElem,   // operands: bufVReg, indexVReg, v0, v1, v2  → store one element at index
-    FillElems,   // operands: bufVReg, countVReg, strideVReg, v0, v1, v2  → loop store over count
+    StoreElem,   // operands: indexVReg, v0, v1, v2  → store three values at `index`
+    StoreFirst,  // operands: v0, v1, v2             → store three values at element 0
+    FillElems,   // operands: v0, v1, v2             → loop store over every element
 };
 
 enum class BuiltinKind : uint8_t { Call, Inline };
@@ -133,7 +134,7 @@ static constexpr uint8_t kMaxCtrls  = 8;         // records: how many members/co
 // same reason the IR op array is: the backends differ by up to 1.9x on identical source — RISC-V is
 // fixed-4-byte and saves the whole register pool around every call where Xtensa has 3-byte narrow
 // forms — so any single number is either too small for the sparsest backend or wasteful for the
-// densest. A fixed 2 KB let `plasma.mlv` run on an S3 and desktop and REFUSED it on an S31 by 96
+// densest. A fixed 2 KB let `plasma.mle` run on an S3 and desktop and REFUSED it on an S31 by 96
 // bytes, which is the second time one constant made a script's portability depend on its ISA.
 //
 // kCodeCap survives as the SANITY bound only: a runaway script fails with a diagnostic instead of
@@ -146,14 +147,14 @@ static constexpr size_t  kCodeCap = 16384;
 ///
 /// 48 bytes/token, measured across every shipped script on all three backends with `countTokens`
 /// (which skips comments, so a long header does not inflate the count). The densest is
-/// `random-pixel.mlv` at 28.5 on RISC-V: one statement, four nested `random16()` calls, and each
+/// `random-pixel.mle` at 28.5 on RISC-V: one statement, four nested `random16()` calls, and each
 /// call saves and restores the whole register pool. So this is a ~1.7x margin over the worst real
 /// case.
 ///
 /// A SHORT call-dense script sets the bound, not a long one. A call lowers to a save/restore while
 /// declarations and operators lower to a few instructions each, so bytes-per-token FALLS as a
-/// script grows: `gradient.mlv` is 5.9 where `random-pixel.mlv` is 28.5, and the longest shipped
-/// script (`ripples.mlv`, 280 tokens) is only 15.3. The margin is kept wide for that reason rather
+/// script grows: `gradient.mle` is 5.9 where `random-pixel.mle` is 28.5, and the longest shipped
+/// script (`ripples.mle`, 280 tokens) is only 15.3. The margin is kept wide for that reason rather
 /// than trimmed to the observed worst: a new short call-dense script could beat 28.5, while a long
 /// one cannot.
 ///

@@ -52,7 +52,8 @@ const dragTs = {};               // per-control last-touched timestamp (ms) — 
 // (display/display-int/time/progress) and the composite `list` are absent on
 // purpose: they always reflect the latest push.
 const EDITABLE_CONTROL_TYPES = new Set(
-    ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "password", "select", "palette", "ipv4"]);
+    ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "filepath", "password", "select",
+     "palette", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
 
 // localStorage keys per ui.md
@@ -1760,6 +1761,161 @@ function createControl(moduleName, moduleType, ctrl) {
             row.appendChild(input);
             break;
         }
+        case "filepath": {
+            // A file NAME plus an editor for that file's contents. The value travels through
+            // /api/control like any text control; the BODY never does (it cannot: only /api/file
+            // may exceed the request buffer), so the pane below reads and writes it directly.
+            //
+            // `dir` and `ext` come from the module that declared the control, so nothing here knows
+            // what kind of file this is.
+            const dir = ctrl.dir || "";
+            const ext = ctrl.ext || "";
+            const pathOf = (n) => (n ? joinFsPath(dir, n) : "");
+
+            const stack = document.createElement("div");
+            stack.className = "control-fileedit-stack";
+            row.appendChild(stack);
+
+            const bar = document.createElement("div");
+            bar.className = "fileedit-bar";
+
+            // A native <select>: keyboard-accessible, needs no CSS to look right, and matches every
+            // other picker in this UI. Populated from the directory listing, so a file created in
+            // the File Manager shows up on the next render without a reload.
+            const picker = document.createElement("select");
+            picker.className = "control-select fileedit-pick";
+            picker.dataset.mid = moduleName;
+            picker.dataset.key = ctrl.name;
+            const fillPicker = async () => {
+                picker.innerHTML = "";
+                const none = document.createElement("option");
+                none.value = ""; none.textContent = "(none)";
+                picker.appendChild(none);
+                let names = [];
+                if (dir) {
+                    try {
+                        const entries = await fmFetchDir(dir);
+                        names = entries.filter(e => !e.isDir && (!ext || e.name.endsWith(ext)))
+                                       .map(e => e.name);
+                    } catch (_) { /* an unreachable directory leaves just "none" */ }
+                }
+                // The current value may name a file the listing does not have (deleted underneath,
+                // or a directory that could not be read). Keep it selectable so the card still
+                // shows what the module is pointing at, rather than silently appearing unset.
+                const cur = String(ctrl.value ?? "");
+                if (cur && !names.includes(cur)) names.unshift(cur);
+                for (const n of names) {
+                    const o = document.createElement("option");
+                    o.value = n; o.textContent = n;
+                    picker.appendChild(o);
+                }
+                picker.value = cur;
+            };
+
+            // Save sits with the other file actions rather than in a row of its own: the card is
+            // already narrow, and the dot on it is what marks unsaved work.
+            const saveBtn = document.createElement("button");
+            saveBtn.className = "card-btn fm-editor-save fileedit-glyph-lg";
+            // U+2398, the ISO "store" symbol. Not an arrow: ↥ and ↧ already mean upload and
+            // download here, and ⤓ downloads a file in the tree, so an arrow would read as
+            // "fetch this" on a button that writes. Not ✓ either, which is the ARMED DELETE
+            // state one button along.
+            saveBtn.textContent = "⎘";
+            saveBtn.title = "Save (or click away, or Ctrl/Cmd+S)";
+
+            // The same modal the File Manager opens from a file row: one editor, reached two ways,
+            // so a script that needs room gets the full-size box without a second implementation.
+            const popBtn = document.createElement("button");
+            popBtn.className = "card-btn fileedit-glyph-lg";
+            popBtn.textContent = "⤢";                  // expand, the usual glyph for a bigger view
+            popBtn.title = "Open in a larger window";
+
+            // No second status line: the module's own `status` control already reports what the
+            // save produced ("2036 B", or the parse error), and it is the authoritative one because
+            // the DEVICE writes it. A browser-side copy said the same thing in different words and
+            // could only ever disagree. What the browser knows and the device cannot (unsaved work,
+            // a save in flight, a failed write) rides the Save button instead: its dot, its
+            // disabled state, and its tooltip.
+            const statusEl = document.createElement("span");
+            statusEl.hidden = true;
+
+            const newBtn = document.createElement("button");
+            newBtn.className = "card-btn";
+            newBtn.textContent = "+";                  // the same + the module tree adds with
+            newBtn.title = "New script";
+            const delBtn = document.createElement("button");
+            delBtn.className = "card-btn card-btn-del";
+            delBtn.textContent = "×";                  // the card's own delete, red on the symbol
+            delBtn.title = "Delete this script";
+            bar.appendChild(picker);
+            const tools = document.createElement("div");
+            tools.className = "fileedit-tools";
+            tools.appendChild(saveBtn);
+            tools.appendChild(popBtn);
+            if (dir) { tools.appendChild(newBtn); tools.appendChild(delBtn); }
+            bar.appendChild(tools);
+            stack.appendChild(bar);
+
+            const pane = document.createElement("div");
+            pane.className = "control-fileedit";
+            stack.appendChild(pane);
+
+            // Saving re-derives on the device: a written file asks the tree to re-prepare, so the
+            // module recompiles or reloads on its own. The browser sends nothing extra.
+            const editor = fmMountEditor(pane, pathOf(ctrl.value), {
+                sizeKey: key,
+                saveButton: saveBtn,
+                statusEl,
+            });
+
+            // Re-read after the modal closes: it edits the same file through the same endpoints, so
+            // whatever it saved is what this pane should now show.
+            popBtn.addEventListener("click", async () => {
+                if (!picker.value) return;
+                await openFileEditor(pathOf(picker.value));
+                await editor.load(pathOf(picker.value));
+            });
+
+            picker.addEventListener("change", () => {
+                dragTs[key] = Date.now();
+                sendControl(moduleName, ctrl.name, picker.value);
+                editor.load(pathOf(picker.value));
+            });
+
+            newBtn.addEventListener("click", async () => {
+                let name = (prompt("New file name in " + dir + ":") || "").trim();
+                if (!name) return;
+                if (ext && !name.endsWith(ext)) name += ext;    // a name without its extension is a typo
+                const r = await fmCreateFile(dir, name, ctrl.tmpl || "");
+                if (!r.ok) { alert("create file failed: " + r.message); return; }
+                await fillPicker();
+                picker.value = name;
+                dragTs[key] = Date.now();
+                sendControl(moduleName, ctrl.name, name);
+                await editor.load(pathOf(name));
+                editor.textarea.focus();
+            });
+
+            // Two clicks to delete, the same arm-then-confirm the File Manager uses for its own
+            // delete: destructive next to frequent is how people lose work.
+            armPressTwice(delBtn, async () => {
+                const victim = picker.value;
+                if (!victim) return;
+                try {
+                    const res = await fetch("/api/dir?path=" + encodeURIComponent(pathOf(victim)),
+                                            { method: "DELETE" });
+                    if (!res.ok) throw new Error(await errorMessage(res));
+                } catch (err) { alert("delete failed: " + err.message); return; }
+                await fillPicker();
+                picker.value = "";
+                dragTs[key] = Date.now();
+                sendControl(moduleName, ctrl.name, "");
+                await editor.load("");
+            }, { armedText: "✓", armedTitle: "Click again to delete" });
+
+            fillPicker();
+            break;
+        }
         case "password": {
             // ctrl.value arrives XOR-obfuscated + base64-encoded (see
             // HttpServerModule PASSWORD_XOR_KEY). Decode it so the input holds
@@ -3246,6 +3402,15 @@ function updateModuleControls(mod) {
                 if (input && document.activeElement !== input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
+            case "filepath": {
+                const sel = document.querySelector(`select.fileedit-pick[data-mid="${mid}"][data-key="${k}"]`);
+                // Don't clobber the choice while it is focused, and don't reload the pane under
+                // someone who is typing in it: the value is only pushed back when it really moved.
+                if (sel && document.activeElement !== sel && sel.value !== (ctrl.value ?? "")) {
+                    sel.value = ctrl.value ?? "";
+                }
+                break;
+            }
             case "password": {
                 // The peek button flips the input to type="text", so match either.
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
@@ -3391,7 +3556,8 @@ function updateModuleControls(mod) {
 // drift between createControl and updateModuleControls.
 function controlValuesEqual(ctrl, def) {
     if (ctrl.type === "bool") return !!ctrl.value === !!def;
-    if (ctrl.type === "ipv4" || ctrl.type === "text" || ctrl.type === "textarea" || ctrl.type === "password") {
+    if (ctrl.type === "ipv4" || ctrl.type === "text" || ctrl.type === "textarea" ||
+        ctrl.type === "filepath" || ctrl.type === "password") {
         return String(ctrl.value ?? "") === String(def ?? "");
     }
     return Number(ctrl.value) === Number(def);
@@ -4211,16 +4377,8 @@ function renderFileManager(mod, host) {
         const base = createBase();
         const name = (prompt("New file name in " + base + ":") || "").trim();
         if (!name) return;             // blank or whitespace-only → no-op
-        const filePath = joinFsPath(base, name);
-        try {
-            const res = await fetch("/api/file?path=" + encodeURIComponent(filePath), {
-                method: "POST", headers: { "Content-Type": "text/plain" }, body: "",
-            });
-            if (!res.ok) throw new Error(await errorMessage(res));
-        } catch (err) {
-            alert("create file failed: " + err.message);
-            return;
-        }
+        const r = await fmCreateFile(base, name);
+        if (!r.ok) { alert("create file failed: " + r.message); return; }
         st.expanded.add(base);         // reveal the new file
         renderFileManager(mod, host);  // re-list from disk
     });
@@ -4504,30 +4662,16 @@ async function fmDropUpload(destDir, files) {
     return skipped;
 }
 
-// Open a modal text editor for the file at `relPath`. Loads via GET /api/file (streamed whole, any
-// size), saves via POST. A file that isn't valid text (a NUL byte, or UTF-8 decode damage) loads
-// read-only so a lossy re-save can't corrupt it. Uses the native <dialog> — no bespoke overlay code.
-async function openFileEditor(relPath, expectedSize) {
-    const dlg = document.createElement("dialog");
-    dlg.className = "fm-editor";
-    dlg.innerHTML =
-        '<form method="dialog" class="fm-editor-head">' +
-        '  <span class="fm-editor-path"></span>' +
-        '  <button value="close" class="fm-editor-x" title="close">✕</button>' +
-        '</form>' +
-        '<textarea class="fm-editor-body" spellcheck="false"></textarea>' +
-        '<div class="fm-editor-foot">' +
-        '  <span class="fm-editor-status"></span>' +
-        '  <button class="action-btn fm-editor-save">Save</button>' +
-        '</div>';
-    dlg.querySelector(".fm-editor-path").textContent = relPath;
-    const body = dlg.querySelector(".fm-editor-body");
-    const status = dlg.querySelector(".fm-editor-status");
-    const saveBtn = dlg.querySelector(".fm-editor-save");
-    document.body.appendChild(dlg);
-    dlg.addEventListener("close", () => dlg.remove());
-    dlg.showModal();
+// --- the file editor, shared by the File Manager modal and the filepath control ---------------
+//
+// One implementation, two hosts. The File Manager opens it in a <dialog> from a tree row; a
+// `filepath` control mounts the same pane inline on a module's card. The guards below are the
+// reason this is worth sharing rather than re-typing: each one exists because a re-save could
+// otherwise destroy a file the editor could not faithfully represent.
 
+// Load `relPath` into `textarea`. Returns {readOnly, message}: read-only when the file cannot be
+// safely round-tripped through a <textarea>, so a save can never write a lossy copy back over it.
+async function fmLoadInto(textarea, relPath, expectedSize) {
     try {
         const res = await fetch("/api/file?path=" + encodeURIComponent(relPath));
         // Surface the server's own message (e.g. "not found") rather than a bare status code.
@@ -4539,42 +4683,168 @@ async function openFileEditor(relPath, expectedSize) {
         // read-only. TextEncoder gives the byte length (text.length is chars, not bytes).
         if (typeof expectedSize === "number" &&
             new TextEncoder().encode(text).length < expectedSize) {
-            body.value = text;
-            body.readOnly = true;
-            saveBtn.disabled = true;
-            status.textContent = "truncated read — read-only (save would corrupt the file)";
+            textarea.value = text;
+            return { readOnly: true, message: "truncated read — read-only (save would corrupt the file)" };
+        }
         // The editor is text/config only: a <textarea> can't faithfully round-trip non-text bytes,
-        // so a re-save would corrupt the file. Treat it as binary — read-only, save disabled — if it
-        // has a NUL OR if res.text()'s UTF-8 decode left a replacement char (U+FFFD), which means the
-        // bytes weren't valid UTF-8 and are already lossy in the textarea. Use the per-row ⤓ to
-        // download such files intact.
-        } else if (text.indexOf("\0") !== -1 || text.indexOf("�") !== -1) {
-            body.value = text;
-            body.readOnly = true;
-            saveBtn.disabled = true;
-            status.textContent = "binary / non-text file — read-only";
-        } else {
-            body.value = fmPrettify(text, relPath);
+        // so a re-save would corrupt the file. Treat it as binary — read-only — if it has a NUL OR
+        // if res.text()'s UTF-8 decode left a replacement char (U+FFFD), which means the bytes
+        // weren't valid UTF-8 and are already lossy in the textarea. Use the per-row ⤓ to download
+        // such files intact.
+        if (text.indexOf("\0") !== -1 || text.indexOf("\uFFFD") !== -1) {
+            textarea.value = text;
+            return { readOnly: true, message: "binary / non-text file — read-only" };
         }
+        textarea.value = fmPrettify(text, relPath);
+        return { readOnly: false, message: "" };
     } catch (err) {
-        body.value = "";
-        status.textContent = "load failed: " + err.message;
-        saveBtn.disabled = true;   // never let a Save post an empty body over a file that failed to load
+        textarea.value = "";
+        // Read-only on a failed load so a Save can never post an empty body over a file that is
+        // merely unreachable.
+        return { readOnly: true, message: "load failed: " + err.message };
     }
+}
 
-    saveBtn.addEventListener("click", async () => {
-        status.textContent = "saving…";
-        try {
-            const res = await fetch("/api/file?path=" + encodeURIComponent(relPath), {
-                method: "POST",
-                headers: { "Content-Type": "text/plain" },
-                body: body.value,
-            });
-            if (!res.ok) throw new Error(await errorMessage(res));
-            status.textContent = "saved";
-        } catch (err) {
-            status.textContent = "save failed: " + err.message;
+// Write `textarea`'s contents to `relPath`. Returns {ok, message}.
+async function fmSaveFrom(textarea, relPath) {
+    try {
+        const res = await fetch("/api/file?path=" + encodeURIComponent(relPath), {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: textarea.value,
+        });
+        if (!res.ok) throw new Error(await errorMessage(res));
+        return { ok: true, message: "saved" };
+    } catch (err) {
+        return { ok: false, message: "save failed: " + err.message };
+    }
+}
+
+// Create a file at `dir`/`name`, holding `content` (empty by default). The same POST the editor
+// saves through. A control whose module declares a template passes it here, so a new file is a
+// working example rather than a blank one: for anything the device parses, empty is invalid, and
+// the first thing a new file would say is an error message.
+async function fmCreateFile(dir, name, content = "") {
+    const filePath = joinFsPath(dir, name);
+    try {
+        const res = await fetch("/api/file?path=" + encodeURIComponent(filePath), {
+            method: "POST", headers: { "Content-Type": "text/plain" }, body: content,
+        });
+        if (!res.ok) throw new Error(await errorMessage(res));
+        return { ok: true, path: filePath, message: "" };
+    } catch (err) {
+        return { ok: false, path: filePath, message: err.message };
+    }
+}
+
+// Build the editing pane (textarea + status + Save) into `host` and wire its save triggers.
+//
+// Saves on BLUR, on Ctrl/Cmd+S and on the Save button, not on every keystroke. A save writes to
+// flash and re-derives whatever depends on the file, so autosaving would do both against text that
+// is mid-edit and usually invalid. Blur plus an explicit key is what every editor a user already
+// knows does, and the dot marks unsaved work the way a modified tab does.
+//
+// `onSaved(relPath)` fires after each successful save. Returns a handle so a caller can point the
+// same pane at a different file without rebuilding it.
+function fmMountEditor(host, relPath, opts = {}) {
+    const { expectedSize, onSaved, sizeKey, saveButton, statusEl } = opts;
+    const wrap = document.createElement("div");
+    wrap.className = "fm-editor-pane";
+    // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
+    // a toolbar of file actions, so they belong there, and an empty strip under the box is a gap
+    // rather than a layout.
+    const ownFooter = !saveButton || !statusEl;
+    wrap.innerHTML =
+        '<textarea class="fm-editor-body" spellcheck="false" wrap="off"></textarea>' +
+        (ownFooter
+            ? '<div class="fm-editor-foot">' +
+              (statusEl   ? '' : '  <span class="fm-editor-status"></span>') +
+              (saveButton ? '' : '  <button class="action-btn fm-editor-save">Save</button>') +
+              '</div>'
+            : '');
+    const body = wrap.querySelector(".fm-editor-body");
+    const status = statusEl || wrap.querySelector(".fm-editor-status");
+    const saveBtn = saveButton || wrap.querySelector(".fm-editor-save");
+    host.appendChild(wrap);
+
+    let path = relPath;
+    let dirty = false;
+    const setDirty = (d) => {
+        dirty = d;
+        saveBtn.classList.toggle("dirty", d);
+        if (d) status.textContent = "unsaved changes";
+        // The button says it too, for a host that shows no status line: the dot marks unsaved work
+        // and the tooltip spells it out, which is where a user looks when a control has a dot on it.
+        if (saveBtn.title !== undefined) {
+            saveBtn.title = d ? "Save (unsaved changes)" : "Save (or click away, or Ctrl/Cmd+S)";
         }
+    };
+
+    // Restore a previously dragged height, the same view-state the plain textarea control keeps, so
+    // an editor a user sized once stays that size. Keyed per control, or per path in the modal.
+    const key = sizeKey || ("fm:" + path);
+    const savedH = textareaSizes[key];
+    if (typeof savedH === "number" && savedH > 0) body.style.height = savedH + "px";
+    let taRaf = 0, taPrevH = Math.round(savedH > 0 ? savedH : 0);
+    const taObserver = new ResizeObserver((entries) => {
+        const h = Math.round(entries[0].contentRect.height);
+        if (taRaf || h <= 0 || h === taPrevH) return;
+        taRaf = requestAnimationFrame(() => { taRaf = 0; taPrevH = h; saveTextareaSize(key, h); });
+    });
+    taObserver.observe(body);
+
+    const save = async () => {
+        if (body.readOnly || !dirty || !path) return;
+        status.textContent = "saving…";
+        const r = await fmSaveFrom(body, path);
+        status.textContent = r.message;
+        if (r.ok) { setDirty(false); if (onSaved) onSaved(path); }
+    };
+
+    body.addEventListener("input", () => { if (!body.readOnly) setDirty(true); });
+    body.addEventListener("blur", save);
+    body.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); save(); }
+    });
+    saveBtn.addEventListener("click", save);
+
+    const load = async (p, size) => {
+        path = p;
+        setDirty(false);
+        if (!path) { body.value = ""; body.readOnly = true; saveBtn.disabled = true; status.textContent = ""; return; }
+        const r = await fmLoadInto(body, path, size);
+        body.readOnly = r.readOnly;
+        saveBtn.disabled = r.readOnly;
+        status.textContent = r.message;
+    };
+    load(path, expectedSize);
+
+    return {
+        textarea: body,
+        load,
+        isDirty: () => dirty,
+        dispose: () => { taObserver.disconnect(); wrap.remove(); },
+    };
+}
+
+// Open the shared editor in a modal, for the File Manager's tree rows. Uses the native <dialog>,
+// no bespoke overlay code, and mounts exactly the pane a card mounts inline.
+async function openFileEditor(relPath, expectedSize) {
+    const dlg = document.createElement("dialog");
+    dlg.className = "fm-editor";
+    dlg.innerHTML =
+        '<form method="dialog" class="fm-editor-head">' +
+        '  <span class="fm-editor-path"></span>' +
+        '  <button value="close" class="fm-editor-x" title="close">✕</button>' +
+        '</form>';
+    dlg.querySelector(".fm-editor-path").textContent = relPath;
+    document.body.appendChild(dlg);
+    const ed = fmMountEditor(dlg, relPath, { expectedSize });
+    dlg.showModal();
+    // Resolves when the dialog CLOSES, not when it opens: a caller that re-reads the file
+    // afterwards (the card's pane shows the same file) would otherwise read it before any edit.
+    await new Promise((resolve) => {
+        dlg.addEventListener("close", () => { ed.dispose(); dlg.remove(); resolve(); }, { once: true });
     });
 }
 

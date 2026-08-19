@@ -395,7 +395,7 @@ TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
     CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));
 #endif
     // Sequential loops REUSE a name legitimately: the first has left scope by the time the second
-    // binds, so this must still compile (two-rows.mlv is exactly this shape).
+    // binds, so this must still compile (two-rows.mll is exactly this shape).
     auto seq = moonlive::compileSource(
         mmScript("for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } for (i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); }"),
         kTable, kSys, out, sizeof(out));

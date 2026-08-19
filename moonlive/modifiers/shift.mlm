@@ -9,6 +9,6 @@ class ShiftModifier {
   }
 
   modifyLogical() {
-    setXYZ(0, xPos + amount, yPos, zPos);
+    setXYZ(xPos + amount, yPos, zPos);
   }
 }

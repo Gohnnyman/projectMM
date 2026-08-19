@@ -436,7 +436,7 @@ TEST_CASE("one class can serve several moments, and each is called on its own") 
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class Both {\n"
                         "  tick()          { setRGB(0, 7, 0, 0); }\n"
-                        "  modifyLogical() { setXYZ(0, 3, 4, 5); }\n"
+                        "  modifyLogical() { setXYZ(3, 4, 5); }\n"
                         "}\n", kCtrlTable, kSys));
     CHECK(eng.hasEntry("tick"));
     CHECK(eng.hasEntry("modifyLogical"));
@@ -927,6 +927,42 @@ TEST_CASE("an array larger than the arena is refused at compile time") {
                   moonlive::kCtrlBytes + 1);
     moonlive::MoonLive eng;
     CHECK_FALSE(eng.compile(src, kCtrlTable, kSys));
+    eng.free();
+}
+
+
+// setXYZ takes THREE arguments, not four. The op it lowers to writes three bytes at
+// `index * stride` and still takes that index, exactly as setRGB does: what changed is only the
+// syntax. A modifier is handed ONE coordinate per call and can write nothing but slot 0, so an
+// explicit index was a constant every author typed and none could explain. setRGB keeps its index
+// because an effect picks a pixel out of a whole buffer, where the index is the whole point.
+TEST_CASE("a modifier writes its coordinate without naming a destination slot") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class M { modifyLogical() { setXYZ(3, 4, 5); } }\n", kCtrlTable, kSys));
+    uint8_t xyz[3] = {0, 0, 0};
+    eng.run(xyz, 1, 3, 0, moonlive::kEntryModify);
+    CHECK(xyz[0] == 3);
+    CHECK(xyz[1] == 4);
+    CHECK(xyz[2] == 5);
+    eng.free();
+}
+
+// The old four-argument form is REFUSED rather than quietly reinterpreted: taking it would read the
+// coordinate's x as the slot index and silently write the wrong thing.
+TEST_CASE("the old four-argument setXYZ is refused, not reinterpreted") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class M { modifyLogical() { setXYZ(0, 3, 4, 5); } }\n", kCtrlTable, kSys));
+    eng.free();
+}
+
+// setRGB is untouched: its index is meaningful, so it still takes four.
+TEST_CASE("setRGB still names the light it writes") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() { setRGB(1, 9, 8, 7); } }\n", kCtrlTable, kSys));
+    uint8_t px[6] = {};
+    eng.run(px, 2, 3, 0);
+    CHECK(px[3] == 9);        // light 1, not light 0
+    CHECK(px[0] == 0);
     eng.free();
 }
 

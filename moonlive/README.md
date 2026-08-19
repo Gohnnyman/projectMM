@@ -24,7 +24,7 @@ class CrosshairEffect {
 
 These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what
 lets one helper call another and lets a function recurse. A function takes no arguments and returns
-nothing yet, so a helper does a whole job rather than computing a value. `effects/crosshair.mlv` is
+nothing yet, so a helper does a whole job rather than computing a value. `effects/crosshair.mle` is
 the worked example.
 
 **A declaration is a MEMBER; `defineControls()` decides what the UI shows.** `uint8_t bpm = 30;` is
@@ -69,10 +69,10 @@ repeated last light instead of crashing.
 All of a class's members share a small fixed budget (`kCtrlBytes`), so a class that declares more
 than fits is a compile error naming the arena, not a failed allocation while a fixture runs.
 
-`effects/ember.mlv` is the worked example: a heat array that decays and re-ignites, so what it
+`effects/ember.mle` is the worked example: a heat array that decays and re-ignites, so what it
 draws this frame depends on the last one. That is the line between an effect that evaluates a
-formula and one that runs a simulation, and it is the reason arrays exist. `plasma.mlv` would look
-identical if every frame started from scratch; `ember.mlv` would go dark.
+formula and one that runs a simulation, and it is the reason arrays exist. `plasma.mle` would look
+identical if every frame started from scratch; `ember.mle` would go dark.
 
 **Declare a helper above the function that calls it.** Only functions already parsed are visible, so
 a call to one declared further down reports `unknown function`. A function can always call itself.
@@ -82,11 +82,22 @@ task has a fixed stack, so the alternative to a limit is a device that resets mi
 see if you hit it is the picture being wrong where the recursion stopped, on a device that keeps
 running. Nothing is reported; the exact depth is `kMaxCallDepth`.
 
+**A script's ROLE is its file extension**: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. One
+language, three names, the way GLSL uses `.vert`/`.frag` for one shading language. It is what a card
+filters its picker on, so an effect card offers effects.
+
+Stated in the name rather than worked out from the file's contents, and deliberately: the entry
+point a class defines (`tick`, `placeLights`, `modifyLogical`) already tells the ENGINE which moment
+to call, but reusing that as the role would tie a UI filter to a language feature. The day a modifier
+wants a per-frame `tick()`, every modifier would start appearing in effect pickers with nothing
+changed. The engine stays role-blind either way: it runs whichever moment the binding asks for, so a
+class defining several is still legal.
+
 | folder | run by | a script writes |
 |---|---|---|
 | `layouts/` | [MoonLiveLayout](../docs/moonmodules/light/MoonLiveLayout.md) | where the lights physically are — `addLight(x, y, z)` |
 | `effects/` | [MoonLiveEffect](../docs/moonmodules/light/MoonLiveEffect.md) | a colour per light: `setRGB(index, r, g, b)`, or a whole shape at once with `line(x1, y1, x2, y2, r, g, b)` |
-| `modifiers/` | [MoonLiveModifier](../docs/moonmodules/light/MoonLiveModifier.md) | where one light lands: `setXYZ(0, xPos, yPos, zPos)` |
+| `modifiers/` | [MoonLiveModifier](../docs/moonmodules/light/MoonLiveModifier.md) | where one light lands: `setXYZ(xPos, yPos, zPos)` |
 
 Each module ships one of these as its default, so the folder doubles as the reference for what a
 working script looks like.

@@ -210,6 +210,23 @@ public:
     /// to the three above. The wire shape the Improv APPLY_OP frame carries.
     OpResult applyOp(const char* opJson);
 
+    /// A file at `path` was written, so ask the tree to re-derive whatever was built from it.
+    ///
+    /// The rule core already enforces for the OTHER way persistent state changes: applySetControl
+    /// ends in the same request. A file is the second path to it, so it belongs here rather than
+    /// in whichever client remembers to send a follow-up nudge (curl and MoonDeck would not).
+    /// Transport-free like the apply-core above, and for the same reason: it is provable without a
+    /// socket, and any future write path (a serial upload) reaches one implementation.
+    ///
+    /// Whole-tree rather than a path-to-module registry, which would need an association nothing
+    /// else in the system keeps. A module decides for ITSELF whether what it holds actually
+    /// changed: prepare() is the cold path that exists to be re-entered, and a scripted module
+    /// compares a 4-byte content hash rather than re-reading its source.
+    ///
+    /// `path` is accepted for the diagnostics and for a future narrower dispatch; today every
+    /// successful write asks the same question, so it is deliberately unused.
+    void applyFileChanged(const char* path);
+
     /// Decode a `path=<rel>` query value into `out` (%XX + '+' decoding), rooted at the mount.
     /// Returns false on a missing/empty path, a `..` traversal, or an overlong (buffer-filling)
     /// value. The single filesystem-path guard shared by every fs HTTP entry (read/write/dir/

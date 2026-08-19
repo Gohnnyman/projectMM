@@ -29,6 +29,7 @@ const char* controlTypeName(ControlType t) {
         case ControlType::Bool:        return "bool";
         case ControlType::Text:        return "text";
         case ControlType::TextArea:    return "textarea";
+        case ControlType::FilePath:    return "filepath";
         case ControlType::Password:    return "password";
         case ControlType::ReadOnly:    return "display";
         case ControlType::ReadOnlyInt: return "display-int";
@@ -99,6 +100,7 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             return;
         case ControlType::Text:
         case ControlType::TextArea:
+        case ControlType::FilePath:
         case ControlType::Password:
         case ControlType::ReadOnly:
             // All char-buffer-backed. Password is rendered as a
@@ -228,6 +230,19 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
         case ControlType::IPv4:
         case ControlType::Button:
             return;
+        // Where the module keeps its files, and which of them to offer. Both borrowed from the
+        // module (addFilePath), so the UI can list a directory without knowing what lives there.
+        case ControlType::FilePath: {
+            auto* pick = reinterpret_cast<const char* const*>(c.aux);
+            if (!pick || !pick[0]) return;          // no picker: an editor with a fixed path
+            sink.append(",\"dir\":");
+            sink.writeJsonString(pick[0]);
+            if (pick[1]) { sink.append(",\"ext\":"); sink.writeJsonString(pick[1]); }
+            // What a NEW file starts as. Sent with the metadata rather than fetched: it is a
+            // property of the control, and it is the module that knows what a usable file holds.
+            if (pick[2]) { sink.append(",\"tmpl\":"); sink.writeJsonString(pick[2]); }
+            return;
+        }
     }
 }
 
@@ -294,8 +309,9 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             return ApplyResult::Ok;
         case ControlType::Text:
         case ControlType::TextArea:
+        case ControlType::FilePath:
         case ControlType::Password: {
-            // TextArea and Password parse identically to Text — only the UI render
+            // TextArea, FilePath and Password parse identically to Text: only the UI render
             // (TextArea) or serialization (Password) differs.
             // c.max is the buffer size; parseString writes up to maxLen-1 then
             // NUL-terminates, so passing c.max gives "fill the buffer". uint16_t (not uint8_t) so

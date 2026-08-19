@@ -17,6 +17,7 @@
 #include "platform/platform.h"
 #include "core/moonlive/moonlive_emit.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
+#include "light/moonlive/MoonLiveScriptFile.h"   // the role extensions the sweep filters on
 
 #include <filesystem>
 #include <fstream>
@@ -24,6 +25,15 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// Any of the three role extensions: one language, and the sweep compiles every script whatever
+// role its name claims.
+inline bool mmIsScript(const std::filesystem::path& p) {
+    const auto e = p.extension().string();
+    return e == mm::moonlive::kEffectExt || e == mm::moonlive::kLayoutExt ||
+           e == mm::moonlive::kModifierExt;
+}
+
 
 using namespace mm;
 
@@ -40,7 +50,7 @@ std::vector<std::filesystem::path> scriptsIn(const char* sub) {
     const std::filesystem::path dir = scriptRoot() / sub;
     if (!std::filesystem::exists(dir)) return out;
     for (const auto& e : std::filesystem::directory_iterator(dir))
-        if (e.is_regular_file() && e.path().extension() == ".mlv") out.push_back(e.path());
+        if (e.is_regular_file() && mmIsScript(e.path())) out.push_back(e.path());
     return out;
 }
 
@@ -102,7 +112,7 @@ TEST_CASE("every script in moonlive/ compiles") {
 // compile error, which is the same outcome as reading a value that is always zero. What they did
 // create was a trap, because they were different vocabularies rather than nested ones, so a name
 // was legal in one role and RESERVED in another. `disasm.py` compiled against the widest table and
-// therefore refused `grid.mlv`, the shipped default layout, as "name is a system variable".
+// therefore refused `grid.mll`, the shipped default layout, as "name is a system variable".
 TEST_CASE("every script reads the same system-variable vocabulary") {
     struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
@@ -112,7 +122,7 @@ TEST_CASE("every script reads the same system-variable vocabulary") {
         {mmScript("for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }"),
          true,  "a layout may read width: same name, same meaning, whoever asks"},
         {mmScript("setRGB(width, 0, 0, 0);"),           true,  "an effect reads the layer's width"},
-        {mmScript("setXYZ(0, width - 1 - xPos, yPos, zPos);"),
+        {mmScript("setXYZ(width - 1 - xPos, yPos, zPos);"),
          true,  "a modifier reads its coordinate AND the box it lives in"},
         {mmScript("setRGB(xPos, 0, 0, 0);"),
          true,  "reading a coordinate outside a modifier is legal and reads 0: no binding writes "

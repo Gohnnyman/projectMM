@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/moonlive/MoonLive.h"
-#include "light/moonlive/MoonLiveScriptFile.h"
+#include "light/moonlive/MoonLiveScript.h"
 #include "light/layouts/LayoutBase.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstdio>
@@ -42,7 +42,8 @@ public:
     void defineControls() override {
         // The script NAME, not the script — the text lives in a file the UI loads and saves
         // through /api/file. A module costs ~32 bytes here instead of a resident kilobyte.
-        controls_.addText("script", script_, sizeof(script_));
+        controls_.addFilePath("script", script_.buffer(), script_.bufferSize(),
+                              moonlive::kLayoutPick);
         // Every control the SCRIPT declared — including any extents it loops over. A layout does not
         // RECEIVE a width: the pipeline derives its bounding box from the coordinates the layouts
         // actually place (Layouts::prepare, "max coordinate + 1 per axis"), so a width handed in
@@ -51,9 +52,9 @@ public:
         // slider. Not `width`: that is a system variable the engine writes, so a script cannot
         // declare it and the compiler refuses the name.
         uint8_t n = 0;
-        const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
+        const moonlive::DeclaredControl* decls = script_.engine().declaredControls(n);
         for (uint8_t i = 0; i < n; i++) {
-            uint8_t* slot = engine_.controlSlot(decls[i].offset);
+            uint8_t* slot = script_.engine().controlSlot(decls[i].offset);
             if (!slot) continue;
             controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
         }
@@ -72,7 +73,7 @@ public:
     /// alternative is caching coordinates, and that is the allocation this design exists to avoid.
     nrOfLightsType lightCount() const override {
         compile();
-        if (!engine_.ok()) return 0;
+        if (!script_.ok()) return 0;
         Counter c{0};
         runScript(&addToCounter, &c);
         return c.n;
@@ -81,13 +82,14 @@ public:
     /// Run the script again, emitting each light into the consumer's sink.
     void placeLights(const CoordSink& sink) const override {
         compile();
-        if (!engine_.ok()) return;
+        if (!script_.ok()) return;
         Emitter e{&sink, 0};
         runScript(&addToSink, &e);
     }
 
     void release() override {
-        engine_.free();
+        script_.engine().free();
+        script_.invalidate();     // forget what was compiled, so re-enabling rebuilds it
         LayoutBase::release();
     }
 
@@ -96,16 +98,13 @@ public:
     /// called and nothing would clear the compiled-hash — compile() would early-return and keep
     /// running the previous script under a new name. Clearing it here covers both paths.
     void onControlChanged(const char* name) override {
-        if (name && std::strcmp(name, "script") == 0) { compiledHash_ = 0; compileFailed_ = false; }
+        // Nothing to invalidate: compile() re-derives from the FILE every time, comparing a content
+        // hash, so a control write that lands directly in the name buffer is noticed on its own.
+        (void)name;
     }
 
     /// Point the layout at a script in the shared script directory; the next prepare() compiles it.
-    void setScript(const char* name) {
-        if (!name) return;
-        std::snprintf(script_, sizeof(script_), "%s", name);
-        compiledHash_ = 0;          // a different file: whatever was compiled is not it
-        compileFailed_ = false;     // and it has not been tried yet
-    }
+    void setScript(const char* name) { script_.setName(name); }
 
 private:
     /// Compile if the source has changed since the program that is loaded.
@@ -125,40 +124,12 @@ private:
     /// Moving layout work to a worker would change that — the engine would then need a published
     /// immutable program rather than one mutated in place.
     void compile() const {
-        if (engine_.ok() && compiledHash_ != 0) return;   // already current for this script
-        // Give up only on the name that ACTUALLY failed. As a bare flag this latched on the empty
-        // script every device boots with, and then skipped the compile forever — the card sat at
-        // "no script" however many times a real one was named, because the render loop asks for the
-        // light count long before any control write clears a flag.
-        if (compileFailed_ && std::strcmp(failedScript_, script_) == 0) return;
+        // sync() answers "is what is compiled still what the file says" from a content hash, so a
+        // call that changes nothing costs a read rather than a re-JIT. That matters here more than
+        // anywhere: this runs from lightCount() and placeLights() as well as prepare(), which the
+        // Layer calls while it builds its mapping.
         auto* self = const_cast<MoonLiveLayout*>(this);
-        moonlive::resetPrintBudget();
-        // A layout is the one script with no layer to ask, so it gets the clock and nothing else:
-        // it names its own size controls, and `x`/`y` stay free as ordinary loop counters.
-        const char* err = nullptr;
-        uint32_t hash = 0;
-        if (moonlive::compileScriptFile(self->engine_, script_, moonlive::lightBuiltins(),
-                                        moonlive::layoutSysVars(), err, &hash)) {
-            // Declare the controls the script asks for, the way a compiled module does: by
-            // RUNNING defineControls(). Before rebuildControls(), which turns the declared
-            // list into UI cards.
-            moonlive::runDefineControls(self->engine_);
-            // A compiled script is not an error, but it has something to say: how big it is,
-            // and the one budget it is closest to using up. The card's memory figure is the
-            // ALLOCATION, word-rounded, which says nothing about the program itself.
-            self->engine_.describe(self->statusBuf_, sizeof(statusBuf_));
-            self->setStatus(self->statusBuf_, Severity::Status);
-            self->compileFailed_ = false;
-        } else {
-            self->setStatus(err, Severity::Error);
-            // Remember WHICH name failed, so a different one is still tried.
-            self->compileFailed_ = true;
-            std::snprintf(self->failedScript_, sizeof(failedScript_), "%s", script_);
-        }
-        // The CONTENT hash, not a copy of the text: 4 bytes to answer "is what I compiled still what
-        // the file says", which is all the rebuild check ever needed. 0 means "nothing compiled".
-        self->compiledHash_ = hash;
-        self->setDynamicBytes(engine_.heapBytes());
+        self->script_.sync(moonlive::layoutSysVars(), *self);
     }
 
     struct Counter { nrOfLightsType n; };
@@ -184,35 +155,14 @@ private:
         moonlive::setAddLightSink(fn, ctx);
         // The placement moment: run `placeLights` if the script defined one. A script without it
         // places no lights, which the module reports as an empty fixture rather than a failure.
-        if (!engine_.hasEntry(moonlive::kEntryPlaceLights)) return;
-        const_cast<moonlive::MoonLive&>(engine_).run(scratch, 1, 3, 0, moonlive::kEntryPlaceLights);
+        if (!script_.engine().hasEntry(moonlive::kEntryPlaceLights)) return;
+        script_.engine().run(scratch, 1, 3, 0, moonlive::kEntryPlaceLights);
         moonlive::setAddLightSink(nullptr, nullptr);
     }
 
-    mutable moonlive::MoonLive engine_;
-    // Backing store for the status line: MoonModule::setStatus keeps a POINTER, so the text has to
-    // outlive the call. The same module-owned pattern NetworkModule uses.
-    char statusBuf_[48] = {};
-
-    // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
-    // "no script" and places no lights until one is named, rather than every new layout compiling
-    // the same default grid.
-    char script_[moonlive::kMaxScriptName + 1] = "";
-
-    // FNV-1a of the text the loaded program was built from — 4 bytes in place of a second copy of
-    // the source. Non-zero means "this engine holds a compiled program for that content"; 0 means
-    // nothing is compiled, which is what setScript() restores when the file changes.
-    mutable uint32_t compiledHash_ = 0;
-
-    // Has this script name already been tried and failed? A FAILED compile leaves compiledHash_ at 0
-    // and the engine not ok(), which is indistinguishable from "not compiled yet" — so without this
-    // flag every lightCount()/placeLights() re-reads and re-compiles the file. Each attempt is two
-    // LittleFS operations (~5 ms on an S3), the pipeline asks repeatedly while sizing and walking the
-    // fixture, and the retries starve the task until the 12 s watchdog resets the device. One attempt
-    // per script name is all that can ever help: nothing about the file changes between two calls in
-    // the same rebuild. Cleared wherever compiledHash_ is, because both mean "this is a new script".
-    mutable bool compileFailed_ = false;
-    mutable char failedScript_[moonlive::kMaxScriptName + 1] = "";   // the name compileFailed_ refers to
+    // The script this layout places from. Empty on a fresh card: it reports "no script" and places
+    // no lights until one is named, rather than every new layout compiling the same default grid.
+    mutable moonlive::MoonLiveScript script_;
 
 };
 

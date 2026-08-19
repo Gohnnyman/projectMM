@@ -12,7 +12,7 @@ The script transforms **one coordinate**. It needs no loop over the lights, beca
 
 ```c
 class MirrorModifier {
-  modifyLogical() { setXYZ(0, width - 1 - xPos, yPos, zPos); }   // mirror along x
+  modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }   // mirror along x
 }
 ```
 
@@ -21,12 +21,12 @@ The function is named `modifyLogical` because that is the moment a modifier is a
 The body is one expression per axis. Other shapes, in the same place:
 
 ```c
-setXYZ(0, yPos, xPos, zPos);               // swap the axes
-setXYZ(0, xPos + 4, yPos, zPos);           // shift by four
-setXYZ(0, (width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
+setXYZ(yPos, xPos, zPos);               // swap the axes
+setXYZ(xPos + 4, yPos, zPos);           // shift by four
+setXYZ((width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 ```
 
-`setXYZ(index, x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`. The index is the destination slot: today the script is handed a single coordinate, so it is always `0`.
+`setXYZ(x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`. The index is the destination slot: today the script is handed a single coordinate, so it is always `0`.
 
 ### What a script can read
 
@@ -36,7 +36,7 @@ setXYZ(0, (width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 
 ### Seeing inside a script
 
-`print(v)` logs a value and returns it, so it wraps any part of an expression: `setXYZ(0, print(width - 1 - xPos), yPos, zPos)`.
+`print(v)` logs a value and returns it, so it wraps any part of an expression: `setXYZ(print(width - 1 - xPos), yPos, zPos)`.
 It is for debugging and comes back out again — [what print costs](../../../moonlive/README.md#debugging-print).
 
 ## Limits

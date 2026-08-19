@@ -54,15 +54,15 @@ using namespace mm;
 int main(int argc, char** argv) {
     const char* src = argc > 1 ? argv[1] : "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }";
     // Sized the way the ENGINE sizes it, from the script's own token count. A fixed 4 KB refused
-    // ripples.mlv and rose.mlv on RISC-V, which emits ~1.3x Xtensa: the tool reported "codegen
+    // ripples.mle and rose.mll on RISC-V, which emits ~1.3x Xtensa: the tool reported "codegen
     // failed (too large)" for scripts a device compiles without trouble, so the one place that
     // measures emitted size was lying about the two largest scripts.
     static uint8_t buf[moonlive::kCodeCap];
     // Which BINDING to compile as, because the system-variable tables are different vocabularies and
     // not nested supersets: a modifier is handed `x`/`y`/`z`, and a LAYOUT deliberately is not, so it
-    // may use those names as ordinary loop counters — which the shipped grid.mlv does. Compiling
+    // may use those names as ordinary loop counters — which the shipped grid.mll does. Compiling
     // every script against the widest table therefore refuses exactly the scripts most worth
-    // inspecting ("name is a system variable"), which is how this tool came to never see grid.mlv.
+    // inspecting ("name is a system variable"), which is how this tool came to never see grid.mll.
     const char* binding = argc > 2 ? argv[2] : "layout";
     const auto sysvars = std::strcmp(binding, "modifier") == 0 ? moonlive::modifierSysVars()
                        : std::strcmp(binding, "effect")   == 0 ? moonlive::effectSysVars()

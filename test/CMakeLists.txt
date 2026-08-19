@@ -19,6 +19,7 @@ add_executable(mm_tests
     unit/core/unit_MqttModule.cpp
     unit/core/unit_FileManagerModule.cpp
     unit/core/unit_Control_apply_absent_key.cpp
+    unit/core/unit_Control_filepath.cpp
     unit/core/unit_Control_list.cpp
     unit/core/unit_DeviceIdentify.cpp
     unit/core/unit_DevicesModule_ageout.cpp

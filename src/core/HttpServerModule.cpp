@@ -709,10 +709,22 @@ void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char
     UploadSource src{&conn, initialBody, initial, contentLen,
                      platform::millis() + kUploadHardMs};
     if (platform::fsWriteStream(path, &uploadPull, &src)) {
+        applyFileChanged(path);   // the write succeeded, so what was built from it may be stale
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     } else {
         sendResponse(conn, 500, "application/json", "{\"error\":\"write failed\"}");
     }
+}
+
+// See the header for WHY this exists and why it is whole-tree. Here is only the how.
+void HttpServerModule::applyFileChanged(const char* /*path*/) {
+    if (!scheduler_) return;
+    // requestPrepareTree, never prepareTree: the immediate walk runs a scripted layout's JIT'd code
+    // on the CALLING task's stack (Scheduler.h:74-77), and a write arrives on the small web-server
+    // task rather than the render task the pipeline is budgeted against. The request is a flag
+    // tick() consumes with exchange(false), so a multi-file upload costs ONE sweep, not one per
+    // file: the coalescing is already there and needs nothing added.
+    scheduler_->requestPrepareTree();
 }
 
 // OTA from an uploaded .bin body: stream the request body straight into the OTA partition

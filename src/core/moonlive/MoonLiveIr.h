@@ -205,7 +205,7 @@ static constexpr uint8_t kIrLabels = 16;
 /// labels the IR never names: one per named function (a call may precede its definition, so these
 /// cannot be lazy), plus one per StoreElem for its bounds guard and two per FillElems. A class of
 /// three functions each holding a loop and a store needs more than the sixteen that sized these
-/// when a script was a single routine: crosshair.mlv is exactly that script, and it failed to
+/// when a script was a single routine: crosshair.mle is exactly that script, and it failed to
 /// compile with the generic "too large" rather than naming the table it exhausted.
 ///
 /// Held in core so the three backends cannot drift: they carried an identical private copy each,

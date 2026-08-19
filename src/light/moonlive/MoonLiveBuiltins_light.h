@@ -424,7 +424,7 @@ inline constexpr const char* kEntryModify       = "modifyLogical"; // a modifier
 /// `width` got a compile error, which is the same outcome as reading a variable that is always
 /// zero) and it created a trap: the tables were different vocabularies rather than nested ones, so
 /// a name meant one thing in one role and was RESERVED in another. `disasm.py` compiled against the
-/// widest table and therefore refused `grid.mlv`, the shipped default layout, with "name is a
+/// widest table and therefore refused `grid.mll`, the shipped default layout, with "name is a
 /// system variable" -- the tool was blind to the one script most worth inspecting.
 ///
 /// `width`/`height`/`depth` mean the same thing everywhere: the dimensions of the grid. A layout
@@ -432,7 +432,7 @@ inline constexpr const char* kEntryModify       = "modifyLogical"; // a modifier
 /// still decides is which slots it WRITES each frame; reading is uniform.
 ///
 /// The per-light coordinate is `xPos`/`yPos`/`zPos`, not `x`/`y`/`z`. Those are the names an author
-/// reaches for as loop counters (`grid.mlv` uses both), so reserving them globally would break the
+/// reaches for as loop counters (`grid.mll` uses both), so reserving them globally would break the
 /// most ordinary code there is. Only a modifier is handed a coordinate; elsewhere the slots read 0.
 inline SysVarTable lightSysVars() {
     SysVarTable t;
@@ -460,11 +460,16 @@ inline BuiltinTable lightBuiltins() {
     BuiltinTable t;
     // setRGB(index, r, g, b)  → write one pixel (bounds-guarded). Inline op StoreElem.
     t.add({"setRGB", 4, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreElem});
-    // setXYZ(index, x, y, z)  → write one POSITION (bounds-guarded). The same StoreElem as
-    // setRGB: three values at index * stride. What differs is the destination the binding hands
-    // run() — a colour buffer for an effect, a coordinate for a modifier — so one op serves both
-    // and the engine stays free of any notion of what the three bytes mean.
-    t.add({"setXYZ", 4, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreElem});
+    // setXYZ(x, y, z)         → write one POSITION (bounds-guarded). The same StoreElem as setRGB:
+    // three values at index * stride, and what differs is the destination the binding hands run()
+    // (a colour buffer for an effect, a coordinate for a modifier), so one op serves both and the
+    // engine stays free of any notion of what the three bytes mean.
+    //
+    // A different OP from setRGB, not the same one with an argument hidden: StoreFirst writes
+    // element 0, which is the whole of what a modifier can do. The two are asked different
+    // questions. An effect picks a pixel out of a whole buffer, so its index is the point; a
+    // modifier is handed ONE coordinate per call, so there is no index to give.
+    t.add({"setXYZ", 3, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreFirst});
     // fill(r, g, b)           → write every light. Inline op FillElems.
     t.add({"fill", 3, false, BuiltinKind::Inline, nullptr, InlineOp::FillElems});
     // mod(value, limit)      → value % limit. The wrap every cyclic animation needs; see above.

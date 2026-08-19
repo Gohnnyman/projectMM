@@ -348,7 +348,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // two frames. Found by disassembling, because the emitted stream was structurally plausible
     // (two entries, two retws, one call8) and only the POSITION of the boundary was wrong.
     //
-    // REQUIRED, and the disassembly says otherwise. Removing this makes crosshair.mlv emit a
+    // REQUIRED, and the disassembly says otherwise. Removing this makes crosshair.mle emit a
     // TIDIER-looking block (one entry/retw pair per function, at plausible offsets) and every
     // host test still passes, because the host backend cannot reach this path. On an S3 that block
     // boot-loops with StoreProhibited and the buffer pointer holding 0xff: a store through a

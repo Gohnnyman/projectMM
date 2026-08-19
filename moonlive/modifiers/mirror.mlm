@@ -2,6 +2,6 @@
 
 class MirrorModifier {
   modifyLogical() {
-    setXYZ(0, width - 1 - xPos, yPos, zPos);
+    setXYZ(width - 1 - xPos, yPos, zPos);
   }
 }

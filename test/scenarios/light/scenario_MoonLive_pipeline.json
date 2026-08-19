@@ -157,7 +157,7 @@
       "op": "set_control",
       "id": "MOD",
       "key": "source",
-      "value": "setXYZ(0, width - 1 - x, y, z);"
+      "value": "setXYZ(width - 1 - x, y, z);"
     },
     {
       "name": "measure-all-three-scripted",
@@ -188,7 +188,7 @@
       "op": "set_control",
       "id": "MOD",
       "key": "source",
-      "value": "setXYZ(0, y, x, z);"
+      "value": "setXYZ(y, x, z);"
     },
     {
       "name": "measure-modifier-edited",

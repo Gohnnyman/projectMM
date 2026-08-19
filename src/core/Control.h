@@ -105,6 +105,15 @@ enum class ControlType : uint8_t {
     Text,       ///< char[N] — a text input.
     TextArea,   ///< multi-line text — same storage/persist path as Text, a resizable
                 ///< `<textarea>` in the UI (script source and other multi-line fields).
+    FilePath,   ///< the NAME of a file, with an editor for its CONTENTS in the UI. Same
+                ///< char-buffer storage as Text: the value is a ~40-byte reference, and the
+                ///< body moves over /api/file, which is the only route that may exceed the
+                ///< request buffer. A separate type rather than a flag on TextArea because the
+                ///< two store opposite things (TextArea's value IS the body), and every other
+                ///< flag leaves a value's meaning untouched. `aux` points at a
+                ///< `const char* const[3]` of {directory, extension, template}: the module says
+                ///< where its files live, what to list, and what a NEW file starts out containing.
+                ///< All three come from the module, so the UI needs no knowledge of any domain.
     Password,   ///< secret text — /api/state serializes it XOR-obfuscated + base64, not
                 ///< plaintext. Obfuscation only (XOR key shared with app.js), trivially
                 ///< reversible by design — a first line of defence, not encryption.
@@ -408,6 +417,22 @@ public:
                      bool (*validate)(const char*) = nullptr) {
         grow();
         controls_[count_++] = {.ptr = var, .name = name, .type = ControlType::TextArea,
+                               .max = bufSize, .validate = validate};
+    }
+
+    // Like addText, but the value NAMES A FILE and the UI edits that file's contents in place.
+    // `pick` is a {directory, extension, template} triple the module owns (or nullptr for "no
+    // picker"). Extension may be null to list every file; template may be null for "start empty",
+    // and is what a newly created file is seeded with, so a new file is a working example rather
+    // than a blank that fails to parse. Borrowed, not copied, exactly as addSelect borrows its
+    // options array, so a control costs no storage beyond the descriptor.
+    void addFilePath(const char* name, char* var, uint16_t bufSize,
+                     const char* const* pick = nullptr,
+                     bool (*validate)(const char*) = nullptr) {
+        grow();
+        controls_[count_++] = {.ptr = var, .name = name,
+                               .aux = reinterpret_cast<uintptr_t>(pick),
+                               .type = ControlType::FilePath,
                                .max = bufSize, .validate = validate};
     }
 

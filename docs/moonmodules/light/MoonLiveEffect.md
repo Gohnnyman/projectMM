@@ -19,13 +19,19 @@ class RandomPixelEffect {
 
 Inside a function the grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call. The class declaration is required: one top-level form rather than two means one set of rules to learn and one parse path to maintain.
 
-The **class name is not the file name**. `plasma.mlv` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
+**A script's role is its extension**: `.mle` an effect, `.mll` a [layout](MoonLiveLayout.md), `.mlm` a [modifier](MoonLiveModifier.md). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
+
+The **class name is not the file name**. `plasma.mle` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
 
 The functions are **not built into the compiler** — `setRGB`, `fill`, `random16` are registered by the *host* (the light domain) in a builtin table; the core compiler owns only the grammar and a generic call/inline mechanism (the ESPLiveScript / ARTI bound-function model). The compiler emits machine code for whichever ISA the device runs (Xtensa on the classic/S3) or the host ISA on desktop, places it in executable memory, and the engine calls it each render tick.
 
 ## Controls
 
-- `script` — the file name under `/moonlive/`, e.g. `lines.mlv`. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default. Naming one (or re-naming it after an edit) recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot). The directory is created on demand.
+- `script`: the script this module runs, picked from `/moonlive/` and **edited on the card itself**. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default.
+
+    Type in the box and the script compiles when you click away, press Ctrl/Cmd+S, or press Save; a dot on the Save button marks unsaved work. A valid script swaps in on the next tick. A failed compile frees the old code, shows the diagnostic in the module status, and renders dark until it is fixed, so a typo costs a message rather than a reboot. Fixing it in place is enough: nothing has to be renamed.
+
+    The card also creates and deletes scripts (delete asks twice), and the same editor is what the File Manager opens from a file row. The control is [`filepath`](../core/ui.md#control-types), which is generic: the module says only where its files are and which extension they carry.
 - **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` inside a `defineControls()`, the same call a compiled module makes. Each becomes a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
@@ -64,7 +70,7 @@ Some names are **reserved**: the engine defines them, the script only reads them
 
 Every one but `t` is a byte, because it lives in the controls arena. A grid extent past 255 reports 255 rather than wrapping to a small number, and a modifier handed a coordinate outside `0..255` passes it through untransformed instead of folding a wrong position — so a script never silently sees a value that means something else.
 
-The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and `y` stay free as loop counters in every script**, which is what an author reaches for and what the shipped `grid.mlv` uses. Reserving them globally would break the most ordinary code there is; a per-role reservation was the alternative and was worse, because a name then meant one thing in one role and was refused in another — which is how `disasm.py`, compiling against the widest vocabulary, came to refuse the shipped default layout.
+The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and `y` stay free as loop counters in every script**, which is what an author reaches for and what the shipped `grid.mll` uses. Reserving them globally would break the most ordinary code there is; a per-role reservation was the alternative and was worse, because a name then meant one thing in one role and was refused in another — which is how `disasm.py`, compiling against the widest vocabulary, came to refuse the shipped default layout.
 
 `width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it names its own controls instead (`cols`, `rows`) and reads the grid only if it has a use for it.
 
@@ -77,7 +83,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | call | does |
 |---|---|
 | `setRGB(index, r, g, b)` | write one light |
-| `setXYZ(index, x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
+| `setXYZ(x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
 | `fill(r, g, b)` | write every light |
 | `addLight(x, y, z)` | place the next light (a [layout](MoonLiveLayout.md)) |
 | `line(x1, y1, x2, y2, r, g, b)` | a straight segment on the grid, via the shared `draw::line` |
@@ -96,7 +102,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 
 ### The script's own functions
 
-A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mlv` is the worked example: a `column()` and a `row()`, both called from `tick()`.
+A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mle` is the worked example: a `column()` and a `row()`, both called from `tick()`.
 
 These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments and returns nothing yet, so a helper does a whole job rather than computing a value.
 
