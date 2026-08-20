@@ -25,6 +25,33 @@ namespace mm::moonlive {
 // random16(n) → a pseudo-random value in [0, n). A simple LCG, deterministic enough that the
 // runtime Bounds guard always sees an in-range index; the same implementation on every target
 // so a script behaves identically. The one host helper exposed as a Call so far.
+// The palette, as THREE builtins — `paletteR(i, bri)`, `paletteG(i, bri)`, `paletteB(i, bri)`.
+// `bri` is the brightness colorFromPalette already takes, and it is what gives a shape a
+// radial falloff instead of a flat fill. A builtin returns
+// one uint32_t, so a packed 0xRRGGBB would need the script to unpack it, and the language has no
+// division or shift to do that with. Three calls is the shape that works today, and
+// `setRGB(idx, paletteR(i), paletteG(i), paletteB(i))` reads clearly.
+//
+// The ACTIVE palette, so a script follows the device's palette control exactly as a compiled
+// effect does — which is the whole point: before this, a script could only hard-code colour.
+//
+// Deliberately NO hsv() alongside it. A hue wheel is how an effect picks colour while IGNORING
+// the user's palette, which is the habit the compiled effects were moved off (47 of 52 read the
+// palette; the exceptions are effects where colour carries meaning, like the axis-identifying
+// red/green/blue in LinesEffect). Giving scripts hsv() would reintroduce it as the easy default.
+extern "C" inline uint32_t mm_light_paletteR(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
+                            static_cast<uint8_t>(args[1])).r;
+}
+extern "C" inline uint32_t mm_light_paletteG(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
+                            static_cast<uint8_t>(args[1])).g;
+}
+extern "C" inline uint32_t mm_light_paletteB(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
+                            static_cast<uint8_t>(args[1])).b;
+}
+
 extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t n = uint32_t(args[0]);
     // ATOMIC, because two threads run scripts at once: the render task walks a layout for the frame
@@ -92,6 +119,32 @@ extern "C" inline uint32_t mm_light_beatsin(const uintptr_t* args, uint32_t, con
 // math16's sin16/cos16 return SIGNED -32768..32767; a script's values are unsigned, so the result
 // is biased into 0..65535 with the zero line at 32768. A script that wants a coordinate scales the
 // result: `scale(sin(a), width)` sweeps the whole axis, which is the same `scale` a beat uses.
+// polarA(dx, dy) / polarR(dx, dy) — the POLAR pair (Angle, Radius), for an effect written around distance and
+// bearing from a centre rather than around x/y. Both take offsets that a script computes as
+// `x - cx`, which is unsigned and therefore wraps for a point left of centre: the builtins
+// re-centre it themselves (see below), so a script does not have to reason about the wrap.
+//
+// polarA() returns an angle16 (65536 = one turn), so it feeds straight into sin()/cos(). polarR()
+// returns the true distance, not the octagonal approximation, because a visibly non-circular
+// "circle" is exactly what an effect using this would be trying to draw.
+extern "C" inline uint32_t mm_light_polarA(const uintptr_t* args, uint32_t, const uint8_t*) {
+    // A script's arithmetic is unsigned, so `x - cx` for x < cx arrives as a huge value rather
+    // than a negative one. Anything above half the range is that wrap, and subtracting the range
+    // recovers the signed offset the maths needs.
+    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
+    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
+    if (dx > 32767) dx -= 65536;
+    if (dy > 32767) dy -= 65536;
+    return static_cast<uint32_t>(atan16(dy, dx));
+}
+extern "C" inline uint32_t mm_light_polarR(const uintptr_t* args, uint32_t, const uint8_t*) {
+    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
+    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
+    if (dx > 32767) dx -= 65536;
+    if (dy > 32767) dy -= 65536;
+    return dist16(dx, dy);
+}
+
 extern "C" inline uint32_t mm_light_sin(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t angle = uint32_t(args[0]);
     return static_cast<uint32_t>(sin16(static_cast<angle16>(angle)) + 32768);
@@ -365,6 +418,30 @@ inline void setDrawCanvas(const draw::Canvas& cv) MM_NONBLOCKING {
     if (s) s->canvas = cv;
 }
 
+/// setPaletteColor(x, y, index, brightness) → one pixel, coloured from the ACTIVE palette.
+///
+/// One call where a script used to write three: `paletteR/G/B` each returned a single channel, so
+/// a palette pixel cost three host calls AND three evaluations of whatever expression produced the
+/// brightness — the compiler evaluates each argument independently. Measured on an S3, that was
+/// 1451 us flat vs 1940 us with a per-pixel falloff; folding it into one call removes two of the
+/// three calls and two of the three brightness computations.
+///
+/// Takes x/y rather than a flat index so the buffer layout stops leaking into every script: a
+/// script was writing `mod(bx + dx, width) + mod(by + dy, height) * width` at every call site.
+/// Out-of-range coordinates are dropped, not wrapped — a "negative" coordinate arrives as a huge
+/// unsigned value, and wrapping it would paint the wrong edge rather than nothing.
+extern "C" inline uint32_t mm_light_setPaletteColor(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;                       // no canvas installed (a layout, a modifier)
+    const uint32_t x = uint32_t(args[0]), y = uint32_t(args[1]);
+    if (x >= uint32_t(cv.dims.x) || y >= uint32_t(cv.dims.y)) return 0;
+    draw::pixel(cv, Coord3D{lengthType(x), lengthType(y), 0},
+                colorFromPalette(*Palettes::active(),
+                                 static_cast<uint8_t>(args[2]),
+                                 static_cast<uint8_t>(args[3])));
+    return 0;
+}
+
 /// line(x1, y1, x2, y2, r, g, b) → a straight segment on the effect's canvas, z = 0.
 ///
 /// The first seven-argument builtin, riding the args-array call ABI (every Call builtin receives
@@ -502,6 +579,12 @@ inline BuiltinTable lightBuiltins() {
     // sin(angle) / cos(angle) → the circle. One turn is 0..65535, so a loop over N points steps
     // by 65536/N; the result is biased unsigned (see above).
     t.add({"sin", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_sin, {}});
+    // polarA(dx, dy) / polarR(dx, dy) → polar from a centre. atan16 and dist16 already exist in
+    // math16.h. NOT named `angle`/`radius`: a script wants those for its own controls
+    // (ring.mll and balls.mle both declare `radius`), and a builtin would shadow them.
+    // math16.h; this exposes them, so a radial effect stops needing a precomputed lookup table.
+    t.add({"polarA", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarA, {}});
+    t.add({"polarR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarR, {}});
     t.add({"cos", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_cos, {}});
     t.add({"random16", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_random16, {}});
     // print(v)                → log v and return it. The script-level debugger.
@@ -521,6 +604,17 @@ inline BuiltinTable lightBuiltins() {
     // two byte controls. Same by-ref/by-str marking: only the declared width differs.
     t.add({"addUint16", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint16, {},
            /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint16});
+    // setPaletteColor(x, y, i, bri) → one palette-coloured pixel. The form a script should reach
+    // for: one call, one brightness evaluation, and no buffer-layout arithmetic at the call site.
+    t.add({"setPaletteColor", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColor, {}});
+    // paletteR/G/B(i, bri)    → one channel each, for a script that needs the components. Kept
+    // because setPaletteColor writes a pixel and cannot serve a script that wants the value.
+    t.add({"paletteR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteR, {}});
+    t.add({"paletteG", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteG, {}});
+    t.add({"paletteB", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteB, {}});
+    // The table is built once at startup; a dropped registration would surface much later as
+    // "unknown function" in a script, so it is caught HERE.
+    MM_ASSERT_NO_BUILTIN_OVERFLOW(t);
     return t;
 }
 

@@ -280,7 +280,10 @@ async function init() {
                 const savedSel = lsRead(LS_SELECTED, null);
                 if (state.modules.length > 0) {
                     const exists = savedSel && state.modules.some(m => m.name === savedSel);
-                    selectedModule = exists ? savedSel : state.modules[0].name;
+                    // Default to the first root AS LISTED, not as scheduled — otherwise a
+                    // device with no saved selection opens on a card that is not the one the
+                    // nav highlights at the top.
+                    selectedModule = exists ? savedSel : navRoots(state.modules)[0].name;
                 }
                 renderNav();
                 renderCards();
@@ -504,6 +507,44 @@ async function rebootDevice() {
 // 4. Render pipeline
 // ---------------------------------------------------------------------------
 
+// The order roots are LISTED in, which is deliberately not the order they RUN in.
+//
+// main.cpp orders by dependency — Filesystem before anything that writes a file, System before the
+// modules that read its identity — and that order is load-bearing, so it cannot be reshuffled to
+// suit a menu. But it reads as an implementation detail to someone using the device: the first
+// thing they see is System, and the lights are at the bottom.
+//
+// So the nav states its own order, grouped by what a user is looking for: the thing they reach for
+// most (Control), then the light pipeline in pipeline order (where the lights are → what colour →
+// how it gets out), then the device itself. A root NOT named here still appears, after these, in
+// scheduler order — so adding a module never makes it invisible, it just lands at the end until
+// someone decides where it belongs.
+// GROUPS, not one flat list: the nav draws a rule between them, so the grouping has to be the
+// data rather than an index the renderer counts to.
+const NAV_GROUPS = [
+    ["Control"],
+    ["Layouts", "Effects", "Drivers"],                          // the light pipeline, in pipeline order
+    ["System", "File Manager", "Network", "Services", "Firmware"],
+];
+const NAV_ORDER = NAV_GROUPS.flat();
+
+/// Roots in nav order, grouped: each entry is an array of the modules present from one NAV_GROUP,
+/// with anything NAV_GROUPS does not name appended as a final group in scheduler order. Empty
+/// groups are dropped, so a build without (say) Services never draws a rule around nothing.
+function navGroups(modules) {
+    const byName = new Map(modules.map(m => [m.name, m]));
+    const groups = NAV_GROUPS.map(g => g.map(n => byName.get(n)).filter(Boolean));
+    const unlisted = modules.filter(m => !NAV_ORDER.includes(m.name));
+    if (unlisted.length) groups.push(unlisted);
+    return groups.filter(g => g.length);
+}
+
+/// Flat nav order — the same modules navGroups returns, ungrouped. Used where only the ORDER
+/// matters (picking the default selection), so the two can never disagree about what comes first.
+function navRoots(modules) {
+    return navGroups(modules).flat();
+}
+
 function renderNav() {
     const nav = document.getElementById("nav");
     if (!nav || !state) return;
@@ -513,16 +554,26 @@ function renderNav() {
     // root's card subtree is rendered (one root visible at a time).
     const list = document.createElement("div");
     list.className = "nav-list";
-    for (const mod of state.modules) {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "nav-item";
-        item.textContent = mod.name;
-        item.dataset.module = mod.name;
-        if (mod.name === selectedModule) item.classList.add("active");
-        item.addEventListener("click", () => selectModule(mod.name));
-        list.appendChild(item);
-    }
+    navGroups(state.modules).forEach((group, gi) => {
+        // A rule BETWEEN groups, never before the first or after the last. `<hr>` rather than a
+        // styled div: it is the element that means "thematic break", so a screen reader announces
+        // the grouping instead of reading one long undifferentiated list.
+        if (gi > 0) {
+            const rule = document.createElement("hr");
+            rule.className = "nav-sep";
+            list.appendChild(rule);
+        }
+        for (const mod of group) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "nav-item";
+            item.textContent = mod.name;
+            item.dataset.module = mod.name;
+            if (mod.name === selectedModule) item.classList.add("active");
+            item.addEventListener("click", () => selectModule(mod.name));
+            list.appendChild(item);
+        }
+    });
     nav.appendChild(list);
     nav.appendChild(buildNavFooter());
 }
@@ -659,7 +710,7 @@ function renderCards() {
     // Falls back to the first root if the selection is missing or stale.
     let root = selectedModule ? findModule(selectedModule) : null;
     if (!root && state.modules.length > 0) {
-        root = state.modules[0];
+        root = navRoots(state.modules)[0];   // the first NAV entry, matching what is highlighted
         selectedModule = root.name;
     }
     if (root) renderModuleTree(root, main, 0);

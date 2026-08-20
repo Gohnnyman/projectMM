@@ -19,17 +19,60 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
 - **Live RMII Ethernet reconfigure** — runtime PHY/pin config shipped (`ethType` + pin controls in NetworkModule, per-board defaults in `deviceModels.json`, `platform::setEthConfig`/`ethInit` dispatch). W5500 (SPI) on S3 applies **live** — `ethStop()` tears down the SPI bus and `ethInit()` re-runs on the next `loop1s()` with no reboot. RMII (classic/P4 internal EMAC) still saves config and asks for a restart to apply, because the EMAC bring-up is fiddlier to hot-cycle cleanly. Make RMII live too: a hot `esp_eth_stop` + EMAC/netif teardown + re-init on config change, matching the W5500 path, so every interface honours the no-reboot principle.
 - **Installer UX polish** — clear "Pre-release (beta)" warning on RC/latest picks, yank-by-asset-tag instead of yank-by-release-deletion.
 - **Offer projectMM/MoonLight as a library** — a downstream sketch where another firmware/app consumes the light pipeline (or a subset) as an embeddable dependency rather than running the whole binary. `library.json` is already a PlatformIO *library* manifest, so the seed exists. When this is designed, give it a small public **identity surface**: one runtime constant the consumer reads (a `kProjectName`, likely a `ProjectInfo` bundle of name + version + url) that the network wire-strings (ArtNet/E1.31 source-name + CID), the UI banner, and any "About" string all *derive from* — the one place a consumer queries "what am I embedding." This is the genuine home for the name-centralisation that the rename ([rename-to-moonlight.md § Phase 1.3](rename-to-moonlight.md)) deliberately *didn't* do: the rename is a one-time sweep (a constant would just split it), but a library consumer references the identity ongoing and widely, which is the test a constant must pass. Build it *then*, against the real library API, not speculatively now.
-- **A uint16 script member reads back 0 on the DESKTOP backend (2026-08-20).** `addUint16` works
-  end-to-end on hardware — S3 (Xtensa) and S31 (RISC-V) both publish ember's `cycle` control and
-  drive it to 2000 and back, and the arena holds the right bytes on desktop too (`232,3` = 1000).
-  But re-running a compiled script after writing the slot renders 0 rather than the new value on
-  the host JIT, so the emitted `LoadCtrl16` either is not implemented on the arm64 backend or the
-  read is folded to the initializer. Found while adding the runtime assertion CodeRabbit asked for;
-  no existing test covered a wide member's runtime READ (the one that mentions `uint16_t x = 300`
-  only compiles it). Not user-visible today — the feature ships on the device backends where it is
-  verified — but it means the desktop suite cannot pin wide-member reads, so the next wide-member
-  codegen bug would only show on hardware. Reproduce with a two-line script and a slot write; the
-  assertion is written out in `unit_moonlive_fill.cpp` under "a uint16_t member is published".
+- **HTTP: a request whose headers or body arrive a few ms late is dropped, intermittently
+  (2026-08-20).** `handleConnection` runs SYNCHRONOUSLY inside `tick20ms`, so its waits are kept
+  short to protect the render loop: a freshly accepted connection gets **~5 ms** for its request
+  headers (`HttpServerModule.cpp`, the `empties > 5` bail) and **~50 ms** for a body
+  (`empties > 50`). A client that misses either budget gets no response at all (the header case
+  closes the socket: *"Remote end closed connection without response"*, seen client-side at 28 ms)
+  or a `400 {"error":"incomplete request body"}`.
+
+  **Observed:** the MoonLive live scenarios fail roughly **1 run in 3** on the S3, always as a
+  failed `POST /api/file` that cascades (`module not found` for every step depending on that
+  script). A 40-write burst failed 4/40. Not reproduced on the classic (3/3 clean), so it may be
+  S3-specific or simply load/timing-dependent.
+
+  **NOT render load — that theory is disproved.** Disabling the heavy driver took the tick from
+  2889 us to 472 us (fps 346 → 2118) and made it WORSE: 14/40 failures instead of 4/40. So a
+  faster tick means more accept batches per second and more chances to hit the window, which
+  points at the budget itself rather than at contention.
+
+  **Why it matters:** any client on a busy or distant network can lose a write with no useful
+  error, and the UI's own file saves ride the same route. The fix is not simply a longer wait —
+  that would stall the render loop, which is what the budgets exist to prevent. It wants the
+  connection handling moved off the render tick, or a state machine that parks a partial request
+  and resumes it next tick instead of dropping it.
+
+- **Desktop backend: a control-arena write is not seen by a second `run()` of an already-compiled
+  program (2026-08-20).** The live-edit path is "move a slider, the next frame reads the new arena
+  byte, no recompile". On the host JIT the first render is correct, the write lands (the arena
+  reads back `232,3` = 1000 at the control's own `offset`), and a second `run()` of the same
+  compiled program still renders the OLD value.
+
+  **Ruled out — do not re-investigate these:**
+  - Not `LoadCtrl16` missing: it is implemented, lowers to `a.load16`, and `load16` exists in all
+    three assemblers including `platform/desktop/moonlive_asm_host.cpp` (`ldrh`, immediate scaled).
+  - Not uint16-specific: a `uint8_t` member behaves identically.
+  - Not `defineControls()` or the control sink: a class with an unrelated second function fails the
+    same way, and one with no members at all (a literal in `tick`) does too.
+  - Not the arena address or offset: `controlSlot(dc[0].offset)` is the byte the write reaches.
+
+  **A large part of the original symptom was a TEST BUG, not an engine bug.** `run()` without an
+  entry name starts at the BLOCK START — the first function compiled — which in a class with
+  `defineControls()` is `defineControls`, not `tick`. So the script rendered nothing and looked
+  like a broken control read. Naming `kEntryTick` makes the initial render correct in every
+  variant tried (with/without `defineControls`, with an unrelated second function, `tick` first or
+  second, uint8 and uint16). Only the re-read after a slot write is still wrong.
+
+  **Reproduce** (in `unit_moonlive_fill.cpp`, which has `kCtrlTable`/`kSys` to hand): compile
+  `class T { uint16_t big = 5; defineControls() { addUint16("big", big, 0, 1000); } tick() {
+  setRGB(0, big, 0, 0); } }`, `run(..., kEntryTick)` → 5, write the slot to 7, run again → still 5.
+
+  **Impact: desktop only, nothing ships broken.** `addUint16` is hardware-verified on both ISAs
+  (S3 Xtensa and S31 RISC-V drive ember's `cycle` to 2000 and back). What is missing is DESKTOP
+  coverage of the live-edit loop — the path users touch most — so no host test can pin it and the
+  next regression there would surface only on a board. Add the runtime assertion together with the
+  fix, not before: asserting the current behavior would encode the bug.
 
 - **ESP32-P4 panics with `Cache error` every few minutes, pre-existing** (2026-08-19): the bench
   P4 (Waveshare P4-NANO, `esp32p4rev1-eth`) reboots roughly every four minutes while IDLE, with
@@ -410,6 +453,16 @@ Once both land, add a `ReleaseCheckModule` (or a small extension inside NetworkM
 ### Additional test coverage (pending)
 
 - **Memory degradation cascade** — the output-buffer *allocation* decision (no buffer for a lone identity layer; a buffer for ≥2 layers or any LUT layer) is unit-pinned (`unit_Layers_container` "Drivers allocates the output buffer only when…"), and LUT-vs-identity is pinned by `unit_Layer_sparse_mapping`. What's **not** pinned is the *low-heap* half of [architecture.md § Degradation cascade](../architecture.md#degradation-cascade): under heap pressure the LUT + driver buffer are skipped *together* (`lutSkipped()` true, forced 1:1), and below that the layer buffer *reduces dimensions* (halving to a 8×8 floor) rather than failing. The hook exists — `unit_BlendMap` already uses `platform::setTestMaxAllocBlock` to force allocation failure for the paging test — so a test could cap the block size and assert: (1) LUT+output buffer both skip and `lutSkipped()` flips, (2) the layer buffer shrinks to fit and never goes null. Pre-existing gap (predates multi-layer); the *happy-path* allocation contract is covered, only the OOM-degrade branch isn't.
+- **Per-step assertions in scenarios (a framework gap, not a scenario gap).** A scenario step can
+  assert TIMING and HEAP (`bounds`, `contract`) and the run asserts the final buffer, but it cannot
+  say "after this step the fixture has 24 lights", "this module's status reports a compile error",
+  or "the rendered output changed". So a migrated script step proves the pipeline still ticks, not
+  that the edit did what it claims — the MoonLive scenarios walk break-and-recover cycles whose
+  most interesting states go unasserted. Wants a small vocabulary (`expect_lights`,
+  `expect_status`, maybe `expect_pixel`) added to **both** runners together: the desktop/live split
+  is exactly what let `write_file` exist on one and silently no-op on the other. Raised by
+  CodeRabbit against scenario_MoonLive_pipeline and scenario_MoonLiveEffect_controls; the sites are
+  listed there, but the vocabulary has to exist first.
 - **UI page load time** — scenario step measuring HTTP response time for `/`, `/api/state`, `/api/system` via the live runner. Verifies acceptable load time on ESP32.
 - **Module teardown memory** — scenario that tears down all modules and verifies heap returns to pre-setup baseline. Confirms no lifecycle leaks.
 - **JavaScript test harness** — `vitest` + `jsdom` for the browser UI: pure helpers in `install-picker.js` (`isCompatible`, `parseFirmwaresFromAssets`, `relativeTime`) **and `app.js`'s conditional-control DOM logic** (`syncVisibleControls` — reconciles which control rows are rendered when a `hidden` flag flips). The C++/backend half of conditional controls IS unit-tested (`conditional_controls.h` + per-module tests pin the binding + `hidden` flag), but the **UI re-render half is not** — `syncVisibleControls` was the source of a real re-render-loop freeze (Network static-IP toggle) caught only on hardware. A `jsdom` test that builds a card, flips a control's `hidden`, runs the reconcile, and asserts the right rows appear/disappear (and that it converges — the unchanged→no-op fast path) would have caught it. **Attempted and reverted (2026-06-17):** stood up vitest + 13 passing tests for the install-picker pure helpers, but the high-value half (`syncVisibleControls`) needs either an `app.js` module seam or extracting its reconcile logic into a separate served `.js` (6 embed/route wiring edits for a firmware-served file). Judged not worth adding a whole Node/npm toolchain to a C++/Python repo to test ~3 small pure functions; the toolchain earns its place only once the `syncVisibleControls` DOM test (and a real body of JS logic) lands with it. **Do it as its own focused branch**, deciding the app.js seam first (it's already `type="module"`, so extracting `reconcileControlRows` into a served file — wired through `embed_ui.cmake` + the two HttpServerModule routes like the other UI .js — is the clean shape). Pure-helper `_test` exports + the reconcile extraction are the two pieces; both were prototyped in that reverted attempt.
@@ -630,7 +683,7 @@ Rounds 1 (board + Ethernet-only) and 2 (Parlio LED driver) have landed. Remainin
   1. **Runtime SDIO re-init of the C6 fails — CONFIRMED a C6 slave-firmware problem (not a guess).** SystemModule now exposes a `wifiCoproc` read-only control (via `platform::coprocessorWifi()` → `esp_hosted_get_coprocessor_fwversion()`), and on the bench it read **`not detected`** at the time (the control now reports **`no version reply`**, and only after a bounded number of attempts): the C6 returns no valid firmware version. **What that means was overstated here.** It was read as the signature of absent / incompatible slave firmware, but the same board later associated and served traffic over that very link while this RPC still went unanswered — so an unanswered version query says the QUERY failed, not that the C6 is absent. The round-3 conclusion below rests on the `sdmmc_card_init failed` re-init evidence, not on this control. Likely a version mismatch on top of that: The host pulled esp_hosted **2.12.9**; Espressif's P4-Function-EV-Board ships its C6 pre-flashed with esp_hosted slave **v0.0.6**, and the **Waveshare NANO is a different board that may carry a different / absent C6 slave image**. The symptom fits: boot inits the host SDIO master fine, but resetting the C6 (GPIO 54) and re-enumerating it as a slave fails (`sdmmc_card_init failed`) because the C6 has no compatible slave firmware responding. **Primary next step: build + flash the version-matched esp_hosted slave firmware onto the NANO's C6.** The slave project is already vendored at `esp32/managed_components/espressif__esp_hosted/slave/` (`sdkconfig.defaults.esp32c6`, `partitions.esp32c6.csv`); `idf.py create-project-from-example "espressif/esp_hosted:slave"` → `set-target esp32c6` → flash. **Caveat / needs PO + bench hardware:** flashing the C6 on the EV board uses an **ESP-Prog wired to the `PROG_C6` header** with the P4 held in bootloader mode (esp_hosted `docs/esp32_p4_function_ev_board.md` §5.2) — the NANO's C6-flash path must be confirmed (separate USB? equivalent header? ESP-Prog?), and an ESP-Prog may be needed. An OTA slave-update path exists but needs a *working* link first (chicken-and-egg here). This is a hardware-provisioning task, not application code. Secondary fallbacks if firmware-match doesn't fix it: an esp_hosted option to skip the reconfigure/slave-reset when the transport is already up at boot; a slower SDIO freq or 1-bit mode; verify GPIO 54 reset polarity/timing for the NANO. **(Note: EIM — the building.md v6.0-adoption item — does NOT help here; it's a host-machine installer, unrelated to device-side C6 firmware.)**
 
   **User lead (2026-07-09) — avoid the WiFi teardown/re-init on hosted targets entirely; it may sidestep the slave-reset failure.** A user hit the mirror symptom on a *different* codebase (ESP32-Sveltekit / WLED-MM, not projectMM — its `lib/framework/WiFiSettingsService.cpp` doesn't exist here): after a clean C6-flash the P4-NANO WiFi worked, but their app's boot-time `WiFi.disconnect(true)` fully tore down the WiFi stack, and the later AP bring-up then failed with `esp_hosted_transport_config: Transport already initialized` / `esp_hosted_init failed!` / `AP enable failed!`. Their working fix: on `CONFIG_ESP_WIFI_REMOTE_ENABLED` (= hosted) targets, **don't do a full stack reset** — keep STA enabled, reconnect *without* a full teardown/re-init, and never call `WiFi.disconnect(true)` in the disconnect callback. **Why this is relevant to us even though the file differs:** our own comment at `platform_esp32.cpp:796` already documents that the esp_hosted transport is set up **once at boot** and is fragile to re-init (`connect_to_slave` = a transport reconfigure that resets the slave + re-inits SDIO and fails on a live link). Our disconnect *callback* is already safe (`wifiEventHandler` on `STA_DISCONNECTED` only sets a flag — no teardown), BUT our **failover path is not**: `wifiStaStop()` (`platform_esp32.cpp:915`) calls `esp_wifi_deinit()`, and the STA-retry / AP-fallback then re-runs `ensureWifiInit()` → `esp_wifi_init()` — the exact deinit→reinit cycle that on a hosted target triggers the GPIO-54 slave reset (round-3 open-issue #2's `sdmmc_card_init failed`). So the round-3 failure ("runtime SDIO re-init of the C6 fails") and this user's report may be **the same root cause**: the re-init shouldn't happen at all on a hosted target. **Concrete next step to try on the bench:** guard the teardown/re-init on `platform::hasWifiCoprocessor` (already defined = `isEsp32P4 && hasWiFi`) — on hosted targets, do NOT `esp_wifi_deinit()` in `wifiStaStop()` and do NOT re-`esp_wifi_init()` in `ensureWifiInit()` once the boot-time init is up; instead just `esp_wifi_disconnect()` + `esp_wifi_set_config()` + `esp_wifi_connect()` (STA retry) or `esp_wifi_set_mode(APSTA)` for the fallback, reusing the live transport. This is cheaper than the C6 reflash and independent of #18759, so it's worth trying first once the board boots. If it works, it also removes the slave-reset from the normal failover, not just the AP case. Blocked behind the #18759 boot crash like everything else P4-WiFi, but this is the first thing to try when the board boots again.
-  2. **Co-processor components no longer compile into `esp32p4rev1-eth` — FIXED.** The gate is now `rules: if CONFIG_MM_P4_WIFI == True` (a Kconfig option declared in `esp32/main/Kconfig.projbuild`, set only by `sdkconfig.defaults.esp32p4rev1-eth-wifi`), so `esp_hosted` / `esp_wifi_remote` are pulled **only** by the WiFi build, never by eth-only. The old `target == esp32p4` gate pulled them into `esp32p4rev1-eth` too; that wasn't merely build-time waste — esp_hosted self-inits its SDIO master at boot, which on the eth-only build interfered with the EMAC bring-up (a red herring chased during the P4 no-DHCP hunt). The eth-only image dropped 1.36→1.12 MB once gated out. The `wifiCoproc` read-out stays compile-gated on `platform::hasWifiCoprocessor` (`isEsp32P4 && hasWiFi`).
+  2. **Co-processor components no longer compile into `esp32p4rev1-eth` — FIXED.** The gate is now `rules: if "$CONFIG{MM_P4_WIFI} == True"` (the `$CONFIG{NAME}` form, no `CONFIG_` prefix inside the braces — the bare form silently skipped the dependency, see round 4 below) (a Kconfig option declared in `esp32/main/Kconfig.projbuild`, set only by `sdkconfig.defaults.esp32p4rev1-eth-wifi`), so `esp_hosted` / `esp_wifi_remote` are pulled **only** by the WiFi build, never by eth-only. The old `target == esp32p4` gate pulled them into `esp32p4rev1-eth` too; that wasn't merely build-time waste — esp_hosted self-inits its SDIO master at boot, which on the eth-only build interfered with the EMAC bring-up (a red herring chased during the P4 no-DHCP hunt). The eth-only image dropped 1.36→1.12 MB once gated out. The `wifiCoproc` read-out stays compile-gated on `platform::hasWifiCoprocessor` (`isEsp32P4 && hasWiFi`).
   3. **Build reproducibility.** `build_esp32.py` does not yet build this variant reliably: the C6 slave-target Kconfig `default ... if IDF_TARGET_ESP32P4` only fires on `set-target`, and the reconfigure a plain `build` triggers drops it back to ESP32-H2 (no WiFi) → fails on missing `CONFIG_WIFI_RMT_*`. A clean manual sequence works (`rm -rf <build dir>` → `set-target esp32p4` → `build`, all with the same `-DSDKCONFIG`/`-DSDKCONFIG_DEFAULTS`); the wrapper needs a fix so the auto-default sticks across reconfigures (see the KNOWN ISSUE comment in `build_esp32.py`).
 
   **Round 4 — the IDF-update regression (2026-07-03).** After the IDF bump to `v6.1-dev-5215-g0d928780081`, the variant stopped building entirely, then stopped booting. Two distinct causes, both IDF/component-manager side (all our config was correct):

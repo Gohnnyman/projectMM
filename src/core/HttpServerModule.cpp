@@ -1980,14 +1980,21 @@ void HttpServerModule::serveModule(platform::TcpConnection& conn, const char* na
             };
             const int hi = hex(p[1]), lo = hex(p[2]);
             if (hi >= 0 && lo >= 0) { c = static_cast<char>((hi << 4) | lo); p += 2; }
-        } else if (c == '+') {
-            c = ' ';
         }
+        // NO '+' → space here, unlike parseFilePath. That rule belongs to form/query encoding;
+        // this is a PATH segment, and the UI builds it with encodeURIComponent, which emits a
+        // space as %20 and leaves '+' literal. Translating it would make a module named "A+B"
+        // unreachable while fixing nothing.
         decoded[i++] = c;
     }
     decoded[i] = 0;
 
+    // appearsInUi() is checked for the same reason /api/state checks it: this endpoint is the
+    // `{ }` link on a CARD, and a module that is not a card has no card to link from. Serving
+    // HttpServerModule (the server itself) or FilesystemModule here would answer for something
+    // the UI deliberately does not show.
     MoonModule* mod = i ? findModuleByName(decoded) : nullptr;
+    if (mod && !mod->appearsInUi()) mod = nullptr;
     if (!mod) {
         sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
         return;

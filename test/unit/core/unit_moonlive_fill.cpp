@@ -877,12 +877,16 @@ TEST_CASE("a uint16_t member is published as a control spanning its full range")
     CHECK((slot[0] | (slot[1] << 8)) == 1000);
     eng.free();
 
-    // NOT ASSERTED HERE: that the emitted code READS both bytes back at run time. Writing the
-    // slot and re-running this script renders 0 rather than the new value on the desktop
-    // backend, so either LoadCtrl16 is unimplemented there or the read is folded away — an
-    // open question, tracked in docs/backlog/backlog-core.md. Verified on HARDWARE instead
-    // (S3 and S31 both drove ember's `cycle` control to 2000 and back), so the feature works
-    // where it ships; what is missing is desktop coverage of the runtime read.
+    // NOT ASSERTED HERE: that a LIVE EDIT is picked up — writing the slot and running again.
+    // On the desktop backend a second run() of an already-compiled program still renders the old
+    // value even though the arena holds the new one; that is an open bug (docs/backlog § Desktop
+    // backend: a control-arena write is not seen by a second run()), NOT a property to pin. The
+    // assertion belongs with the fix, or it would encode the bug.
+    //
+    // The initial READ is fine, here and everywhere: what looked like a broken read was run()
+    // being called without an entry name, which starts at the block start — `defineControls`,
+    // not `tick`. addUint16 itself is hardware-verified on both ISAs (S3 and S31 drive ember's
+    // `cycle` to 2000 and back).
 }
 
 // A range a uint16_t cannot hold is refused rather than truncated. A LITERAL past the width is
@@ -1127,6 +1131,58 @@ TEST_CASE("a uint16_t member starts at the value it was initialized to") {
     eng.free();
 }
 
+
+// The palette is what makes a scripted effect follow the device's palette control instead of
+// hard-coding colour, which is the split the compiled effects settled long ago.
+TEST_CASE("a script paints from the active palette") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() { setPaletteColor(0, 0, 128, 255); } }",
+                        kCtrlTable, kSys));
+    // A canvas has to be installed or the draw builtins no-op — the same seam line() uses.
+    uint8_t px[3] = {9, 9, 9};
+    moonlive::setDrawCanvas(draw::Canvas{px, sizeof(px), {1, 1, 1}, 3});
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    moonlive::setDrawCanvas(draw::Canvas{});
+    // Whatever the active palette holds at index 128, it is not the sentinel.
+    const bool untouched = (px[0] == 9) && (px[1] == 9) && (px[2] == 9);
+    CHECK_FALSE(untouched);
+    eng.free();
+}
+
+// polarA/polarR turn a pixel's offset from a centre into an angle and a distance, which is what
+// lets a radial effect run without the fixture-sized lookup table the original form needs.
+TEST_CASE("polar builtins answer angle and distance from a centre") {
+    moonlive::MoonLive eng;
+    // Directly right of centre is angle 0 and distance 4; the script writes both as channels.
+    REQUIRE(eng.compile("class T { tick() { setRGB(0, scale(polarA(4, 0), 256), polarR(4, 0), 0); } }",
+                        kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    CHECK(px[0] == 0);       // angle 0: straight along +x
+    CHECK(px[1] == 4);       // distance 4
+    eng.free();
+
+    // A point LEFT of centre arrives as an unsigned wrap (x - cx underflows); the builtin
+    // re-centres it, so the distance is still 4 rather than a huge number.
+    moonlive::MoonLive eng2;
+    REQUIRE(eng2.compile("class T { tick() { setRGB(0, polarR(0 - 4, 0), 0, 0); } }",
+                         kCtrlTable, kSys));
+    uint8_t px2[3] = {};
+    eng2.run(px2, 1, 3, 0, moonlive::kEntryTick);
+    CHECK(px2[0] == 4);
+    eng2.free();
+}
+
 #endif  // MM_MOONLIVE_HAS_HOST_JIT — every case above needs compile() to SUCCEED, so
         // they all gate on the JIT: on a target with no backend (x86-64 desktop today)
         // the helpers they call are compiled out with it.
+
+// The table was FULL at 16 entries and add() failed silently, so the next builtin registered
+// would have vanished and surfaced as "unknown function" in a script.
+TEST_CASE("the builtin table has room and reports an overflow") {
+    moonlive::BuiltinTable t = moonlive::lightBuiltins();
+    CHECK_FALSE(t.full());                                   // nothing was dropped
+    CHECK(t.count < moonlive::BuiltinTable::kMax);           // and there is room to grow
+    while (t.add({"filler", 0, false, moonlive::BuiltinKind::Call, nullptr, {}})) {}
+    CHECK(t.full());                                         // overflow is now VISIBLE
+}

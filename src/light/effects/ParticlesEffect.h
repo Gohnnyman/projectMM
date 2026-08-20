@@ -118,7 +118,11 @@ public:
         // Draw into the persistent trail: one whole pixel per particle, matching the original.
         draw::Canvas trailCv{trail_.data(), trail_.bytes(), {w, h, 1}, cpl};
         for (uint16_t i = 0; i < live; i++) {
-            const RGB c = hsvToRgb(static_cast<uint8_t>(pool_.hue[i] + hue_shift), 255, 255);
+            // The ACTIVE PALETTE, like every other particle effect (BallpitEffect does the
+            // same lookup). A raw hsvToRgb ignored the user's palette choice, so this effect
+            // alone stayed rainbow when the device was set to anything else.
+            const RGB c = colorFromPalette(*Palettes::active(),
+                                           static_cast<uint8_t>(pool_.hue[i] + hue_shift), 255);
             draw::pixel(trailCv, {static_cast<lengthType>(draw::toPixel(pool_.x[i])),
                                   static_cast<lengthType>(draw::toPixel(pool_.y[i])), 0}, c);
         }

@@ -143,11 +143,15 @@ ever knowing it.
 
 ## 4. Everything applies live
 
-There is **no save button**, and nothing needs a reboot.
+**Settings need no save button, and nothing needs a reboot.**
 
 Move a slider and the next frame uses it. Change the WiFi credentials, add an
-effect, resize a grid, edit a script — all of it takes effect immediately, on a
-running device.
+effect, resize a grid — all of it takes effect immediately, on a running device.
+
+**Files are the one exception, and only because typing is different.** A script
+you are editing is saved when you click away, press Ctrl/Cmd+S, or press Save —
+a half-typed line should not be compiled onto your fixture mid-word. The moment
+it is saved it recompiles and swaps in live, same as everything else.
 
 This is a deliberate design rule, not a convenience, and you can trust it: if
 something needs a reboot before it works, that is a bug worth

@@ -561,8 +561,11 @@ async function runScript(script, btn) {
     if (script.tab === "live" && script.needs_device) {
         const active = getActiveNetwork();
         const picked = ((active && active.devices) || []).filter(d => d.selected);
-        const devices = picked.filter(d => d.online);
-        const skipped = picked.filter(d => !d.online);
+        // `online !== false`, the same predicate the device list and the status dot use: a device
+        // discovered but never probed has NO `online` field, and treating that as offline would
+        // refuse to run on a board that is very likely up.
+        const devices = picked.filter(d => d.online !== false);
+        const skipped = picked.filter(d => d.online === false);
         if (devices.length === 0) {
             switchPane("log");
             appendLog(picked.length

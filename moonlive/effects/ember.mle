@@ -1,52 +1,35 @@
-// Ember: a fire that SIMULATES rather than draws. Each cell holds a heat value that decays a
-// little every frame and is re-lit at random, so what you see this frame depends on the last one.
-//
-// The first shipped script that carries state: `heat` is an array, and an array is what separates
-// an effect that evaluates a formula from one that runs a simulation. Plasma computes each cell
-// from the clock alone and would look identical if the previous frame were discarded; this one
-// would go dark.
-//
-// Uses every construct the language grew for that: an array read and written by index, a member
-// assigned (`heat[i] = ...`), `if`/`else` choosing a colour ramp, and a `uint16_t` counter that
-// keeps counting past the 255 a byte stops at — surfaced as a control with `addUint16`, because
-// its range is exactly what a byte cannot express.
+// Ember: a fire that simulates rather than draws. Each cell holds a heat value that decays and
+// re-ignites at random, so this frame depends on the last one — `heat` is the state that makes
+// it a simulation rather than a formula.
 
 class EmberEffect {
-  uint8_t  cool = 30;    // how fast a lit cell fades back to black
-  uint8_t  spark = 60;   // chance out of 256 that a cell re-ignites this frame
-  uint16_t phase = 0;    // a free-running counter, wider than a byte on purpose
-  uint16_t cycle = 1000; // where that counter wraps: a value no byte slider could reach
-  uint8_t  heat[16];     // the simulation itself: one heat value per cell, kept between frames
+  uint8_t  cool = 30;
+  uint8_t  spark = 60;
+  uint16_t phase = 0;
+  uint16_t cycle = 1000;   // wraps past 255, which is why it is uint16_t
+  uint8_t  heat[16];
 
   defineControls() {
     addUint8("cool", cool, 1, 120);
     addUint8("spark", spark, 0, 200);
-    // addUint16, not addUint8: the wrap point runs to 2000, and a byte control would drive
-    // only the low half of the member — the compiler refuses that pairing outright.
     addUint16("cycle", cycle, 100, 2000);
   }
 
   tick() {
-    // Wider than a byte, so it counts past 255. `cycle` sets where it wraps, live.
     phase = phase + 7;
     if (phase >= cycle) { phase = 0; }
 
-    // Cool: every cell loses `cool`, clamped at zero rather than wrapping to white.
     for (i = 0; i < 16; i = i + 1) {
-      if (heat[i] > cool) { heat[i] = heat[i] - cool; }
-      else { heat[i] = 0; }
+      if (heat[i] > cool) { heat[i] = heat[i] - cool; } else { heat[i] = 0; }
     }
 
-    // Spark: re-light a few cells. This is the only randomness, and it is what keeps the
-    // simulation from settling into a still image.
     for (j = 0; j < 16; j = j + 1) {
       if (random16(256) < spark) { heat[j] = 255; }
     }
 
-    // Paint: hot cells run red into yellow, cool ones stay in the dim reds.
     for (k = 0; k < 16; k = k + 1) {
-      if (heat[k] > 128) { setRGB(k, 255, heat[k] - 128, 0); }
-      else { setRGB(k, heat[k] * 2, 0, 0); }
+      setRGB(k, paletteR(heat[k], heat[k]), paletteG(heat[k], heat[k]),
+                paletteB(heat[k], heat[k]));
     }
   }
 }

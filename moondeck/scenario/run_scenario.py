@@ -93,9 +93,12 @@ def _stale_runner_reason() -> str:
     newest, newest_path = 0.0, None
     candidates = []
     for d in _RUNNER_SOURCE_DIRS:
+        # Skip-parts are matched against the path RELATIVE to ROOT: `f.parts` is absolute, so a
+        # checkout living under a directory called "build" (or ".git") would match every file and
+        # skip the whole scan — the guard would then pass on any binary, silently.
         candidates.extend(f for f in (ROOT / d).rglob("*")
                           if f.is_file() and f.suffix in _RUNNER_SOURCE_SUFFIXES
-                          and not (_RUNNER_SKIP_PARTS & set(f.parts))
+                          and not (_RUNNER_SKIP_PARTS & set(f.relative_to(ROOT).parts))
                           and f.relative_to(ROOT).as_posix() not in _RUNNER_GENERATED)
     candidates.extend(ROOT / f for f in _RUNNER_SOURCE_FILES if (ROOT / f).is_file())
     for f in candidates:

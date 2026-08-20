@@ -1,0 +1,51 @@
+// Bouncing balls: each ball's position and direction survive between frames, so a bounce is the
+// position reaching a wall and the direction flipping. Ported from MoonLight's E_balls.sc.
+//
+// Reduced: 4 balls not 25 (8 members, 64-byte arena) and whole-pixel motion (no fractional type).
+// docs/backlog/moonlive-language-roadmap.md tracks what would lift each of those.
+
+class BallsEffect {
+  uint8_t count = 4;
+  uint8_t radius = 4;
+  uint8_t bpm = 20;
+
+  uint8_t bx[4];      // top-left corner, not centre: every coordinate is then an addition,
+  uint8_t by[4];      // so unsigned arithmetic never underflows.
+  uint8_t dir[4];     // bits 0-1 direction, bits 2-7 the beat this ball last stepped on.
+  uint8_t b = 0;      // the ball drawBall() is drawing — a helper takes no arguments.
+
+  defineControls() {
+    addUint8("count", count, 1, 4);
+    addUint8("radius", radius, 2, 10);
+    addUint8("bpm", bpm, 1, 120);
+  }
+
+  drawBall() {
+    for (dy = 0; dy < 21; dy = dy + 1) {
+      for (dx = 0; dx < 21; dx = dx + 1) {
+        if ((dx - radius) * (dx - radius) + (dy - radius) * (dy - radius) <= radius * radius) {
+          setPaletteColor(bx[b] + dx, by[b] + dy, b * 64,
+                          scale((radius * radius
+                                 - (dx - radius) * (dx - radius)
+                                 - (dy - radius) * (dy - radius)) * 640, 256));
+        }
+      }
+    }
+  }
+
+  tick() {
+    fill(0, 0, 0);
+
+    for (i = 0; i < 4; i = i + 1) {
+      b = i;
+      if (b < count) {
+        if (scale(beat(bpm + b * 3, t), 32) * 4 != dir[b] - mod(dir[b], 4)) {
+          dir[b] = scale(beat(bpm + b * 3, t), 32) * 4 + mod(dir[b], 4);
+          if (mod(dir[b], 2) == 1) { bx[b] = bx[b] + 1; } else { bx[b] = bx[b] - 1; }
+          if (mod(dir[b], 4) >= 2) { by[b] = by[b] + 1; } else { by[b] = by[b] - 1; }
+        }
+        drawBall();
+      }
+    }
+  }
+}

@@ -27,7 +27,7 @@ supposed to work like this?".
 
 ### 1. Describe the problem
 
-```
+```text
 Steps to reproduce:
 1. ...
 2. ...
@@ -64,7 +64,7 @@ timing — exactly as it was when things went wrong.
 
 Wrap each one in a fenced code block so the issue stays readable:
 
-````
+````markdown
 API output:
 
 - System

@@ -182,6 +182,17 @@ body {
     flex: 1;
 }
 
+/* Group separator in the side nav. A real <hr>, restyled: default borders render as an inset
+   3D groove, so they are replaced with a single hairline in the same --border the cards use.
+   The margin is what makes it read as a break — at the list's 2px gap a bare rule looks like a
+   squashed item. */
+.nav-sep {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 8px 10px;
+    width: auto;
+}
+
 .nav-item {
     background: transparent;
     border: none;

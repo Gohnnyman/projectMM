@@ -11,7 +11,7 @@ namespace mm {
 // wave phase; one pixel per column is lit at the height
 //   y = floor(h/2 * (1 + sin(dist / interval + time)))
 // so the lit surface ripples like water filling the 3D volume. The hue cycles
-// over time and position (a palette substitute). Genuinely 3D: it writes a
+// over time and position, read through the active palette. Genuinely 3D: it writes a
 // height across the y-axis, so it needs real depth — on a 2D grid (depth 1) it
 // degenerates to a single y-row, which is honest for a flat layout.
 //
@@ -71,7 +71,9 @@ public:
 
                 const uint8_t hue = static_cast<uint8_t>(
                     elapsed() / 50u + static_cast<uint32_t>(x) * 3u + static_cast<uint32_t>(z) * 7u);
-                const RGB c = hsvToRgb(hue, 255, 255);
+                // `hue` is already a 0-255 wheel index, so it reads straight as a palette
+                // index — the ramp above was a stand-in for the palette, not a different idea.
+                const RGB c = colorFromPalette(*Palettes::active(), hue, 255);
 
                 // Buffer layout is (z * h * w + y * w + x) — see NoiseEffect.
                 const nrOfLightsType idx = static_cast<nrOfLightsType>(z) * wh
