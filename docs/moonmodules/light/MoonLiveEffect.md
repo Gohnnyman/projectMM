@@ -32,17 +32,19 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
     Type in the box and the script compiles when you click away, press Ctrl/Cmd+S, or press Save; a dot on the Save button marks unsaved work. A valid script swaps in on the next tick. A failed compile frees the old code, shows the diagnostic in the module status, and renders dark until it is fixed, so a typo costs a message rather than a reboot. Fixing it in place is enough: nothing has to be renamed.
 
     The card also creates and deletes scripts (delete asks twice), and the same editor is what the File Manager opens from a file row. The control is [`filepath`](../core/ui.md#control-types), which is generic: the module says only where its files are and which extension they carry.
-- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` inside a `defineControls()`, the same call a compiled module makes. Each becomes a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
+- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` (or `addUint16`) inside a `defineControls()`, the same call a compiled module makes. Each becomes a real MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
   class SpeedyEffect {
-    uint8_t speed = 50;
-    uint8_t hue   = 128;
-    uint8_t phase = 0;          // a member, not a control: the UI never shows it
+    uint8_t  speed = 50;
+    uint8_t  hue   = 128;
+    uint16_t dwell = 900;       // a value a byte cannot hold
+    uint8_t  phase = 0;         // a member, not a control: the UI never shows it
 
     defineControls() {
       addUint8("speed", speed, 0, 99);
       addUint8("hue", hue, 0, 255);
+      addUint16("dwell", dwell, 0, 1000);
     }
 
     tick() { setRGB(speed, hue, phase, 255); }
@@ -56,7 +58,9 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
   The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`. The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
 
-  `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
+  `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops.
+
+  **The call has to match the member's width**: `addUint8` binds a `uint8_t` and `addUint16` a `uint16_t`. A mismatch is a compile error naming the call to use instead, because the alternative is silent: `addUint8` on a wide member would drive only its low byte, leaving the high half holding whatever it had, so the number the script reads is one nobody chose. A control binds a single member, never an array.
 
 ### System variables — what the engine hands a script
 

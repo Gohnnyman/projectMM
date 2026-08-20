@@ -188,10 +188,15 @@ using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 /// and a third would mean a genuinely new concurrency story rather than a bigger table.
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 
-/// Where a running `defineControls()` sends each `addUint8`. Same shape and same reason as the
-/// addLight sink: a builtin has no receiver, so the binding installs one for the duration of the
-/// run and the call reaches the engine through it.
-using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset, uint8_t lo, uint8_t hi);
+/// Where a running `defineControls()` sends each `addUint8` / `addUint16`. Same shape and same
+/// reason as the addLight sink: a builtin has no receiver, so the binding installs one for the
+/// duration of the run and the call reaches the engine through it.
+///
+/// `type` is the width the SCRIPT declared, which is what decides the UI control and how many
+/// arena bytes a write touches. It is checked against the member's own type by the compiler, so
+/// by the time a call arrives here the two already agree.
+using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset,
+                              uint16_t lo, uint16_t hi, CtrlType type);
 struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
 
 namespace detail {
@@ -301,20 +306,31 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
 // this runs. What is left is the call itself, which exists so that a script declares a control the
 // way a compiled module does: `defineControls()` is an ordinary function the binding calls after a
 // successful compile, and this is an ordinary builtin it calls.
-extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, const uint8_t*) {
+// Shared by addUint8 and addUint16: identical but for the width they declare, so the bound check
+// and the sink call live once rather than in two copies that could drift.
+inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     // args: (name, memberOffset, min, max). The name is a pointer into the compiled program's
     // string pool, which outlives the run; the offset is the member's arena byte, which the
     // compiler passed by reference.
     const char* name = reinterpret_cast<const char*>(args[0]);
     const AddControlSink s = addControlSink();
     if (!name || !s.fn || !s.ctx) return 0;      // no binding listening: the call is a no-op
-    // A bound is a byte, and the range is an ARBITRARY EXPRESSION, so `addUint8("n", n, 0, x * 64)`
-    // can compute past 255. Truncating would publish a slider whose top silently wraps to a small
-    // number; refusing the declaration leaves the control absent, which the user can see.
-    if (args[2] > 255 || args[3] > 255) return 0;
+    // The range is an ARBITRARY EXPRESSION, so `addUint8("n", n, 0, x * 64)` can compute past what
+    // the declared width holds. Truncating would publish a slider whose top silently wraps to a
+    // small number; refusing the declaration leaves the control absent, which the user can see.
+    const uintptr_t limit = (type == CtrlType::Uint16) ? 65535u : 255u;
+    if (args[2] > limit || args[3] > limit) return 0;
     s.fn(s.ctx, name, static_cast<uint8_t>(args[1]),
-         static_cast<uint8_t>(args[2]), static_cast<uint8_t>(args[3]));
+         static_cast<uint16_t>(args[2]), static_cast<uint16_t>(args[3]), type);
     return 0;
+}
+
+extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return addControlDecl(args, CtrlType::Uint8);
+}
+
+extern "C" inline uint32_t mm_light_addUint16(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return addControlDecl(args, CtrlType::Uint16);
 }
 
 extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -499,7 +515,12 @@ inline BuiltinTable lightBuiltins() {
     // argument as the MEMBER, so the compiler passes its arena offset rather than its value, which
     // is what makes the script read as the reference a compiled module passes.
     t.add({"addUint8", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint8, {},
-           /*byRef*/ 0x2, /*byStr*/ 0x1});
+           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint8});
+    // addUint16(name, member, min, max) → the same call against a uint16_t member, so a script can
+    // expose a value a byte cannot hold (a dwell time, a 0..1000 scale) instead of packing it into
+    // two byte controls. Same by-ref/by-str marking: only the declared width differs.
+    t.add({"addUint16", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint16, {},
+           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint16});
     return t;
 }
 
@@ -521,8 +542,9 @@ inline void runDefineControls(MoonLive& engine) {
     // clear-then-run would drop every control and rebuild none of them: the script would appear to
     // declare nothing. Keeping the previous set is the honest degrade, and the run is skipped
     // rather than executed into a dead sink.
-    if (!setAddControlSink([](void* ctx, const char* n, uint8_t off, uint8_t lo, uint8_t hi) {
-            static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi);
+    if (!setAddControlSink([](void* ctx, const char* n, uint8_t off,
+                              uint16_t lo, uint16_t hi, CtrlType type) {
+            static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi, type);
         }, &engine)) return;
     engine.clearDeclaredControls();      // re-runnable: rebuild rather than append
     // A one-light scratch buffer: this entry point writes no pixels, but `run` refuses a null or

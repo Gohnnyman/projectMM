@@ -104,7 +104,26 @@ struct JsonParser {
         p++; // skip opening "
         JsonVal v; v.type = JsonVal::String;
         while (*p && *p != '"') {
-            if (*p == '\\') { p++; v.str += *p++; }
+            // Decode the escape rather than dropping the backslash. Appending the next
+            // character raw turned "\n" into a literal 'n', so a multi-line string arrived as
+            // one line — invisible until write_file staged a script and the compiler reported
+            // "expected '(' after the function name" on a file that looked correct in the JSON.
+            if (*p == '\\') {
+                p++;
+                switch (*p) {
+                    case 'n':  v.str += '\n'; p++; break;
+                    case 't':  v.str += '\t'; p++; break;
+                    case 'r':  v.str += '\r'; p++; break;
+                    case 'b':  v.str += '\b'; p++; break;
+                    case 'f':  v.str += '\f'; p++; break;
+                    case '"':  v.str += '"';  p++; break;
+                    case '\\': v.str += '\\'; p++; break;
+                    case '/':  v.str += '/';  p++; break;
+                    // \uXXXX is not decoded: no scenario needs one, and a half-done UTF-16
+                    // surrogate decoder would be worse than an honest passthrough.
+                    default:   if (*p) v.str += *p++; break;
+                }
+            }
             else v.str += *p++;
         }
         if (*p == '"') p++;
@@ -586,6 +605,36 @@ static int runScenario(const char* path) {
                 std::printf("  SET   %s — control %s.%s not applied\n", name, targetId, key);
             } else {
                 std::printf("  SET   %s (%s.%s)\n", name, targetId, key);
+            }
+        } else if (std::strcmp(op, "write_file") == 0) {
+            // Stage a file the way the UI's editor does, so a scenario can drive the script
+            // loop end-to-end: write a script, point a module's `script` control at it, and
+            // measure. Same primitive the HTTP save path uses (fsWriteAtomic), so a scenario
+            // exercises the file the device would actually read.
+            //
+            // This op exists because the interesting cases have no shipped file to select:
+            // a DELIBERATELY BROKEN script (proving the device degrades rather than dies —
+            // one could not live in moonlive/, where unit_MoonLiveScripts compiles all of
+            // them), and an edit that CHANGES A SCRIPT'S CONTROL SET (proving controls
+            // re-derive and keep their values). Selecting a shipped script covers neither.
+            if (!step.has("path") || !step.has("value")) {
+                std::printf("  WRITE %s — missing path/value, skipped\n", name);
+                continue;
+            }
+            const char* filePath = step["path"].c_str();
+            const std::string body = step["value"].str;
+            // mkdir -p the parent: a scenario names /moonlive/x.mle without staging the
+            // directory, and on a fresh build tree that directory may not exist yet.
+            if (const char* slash = std::strrchr(filePath, '/')) {
+                if (slash != filePath) {
+                    std::string dir(filePath, static_cast<size_t>(slash - filePath));
+                    mm::platform::fsMkdir(dir.c_str());
+                }
+            }
+            if (mm::platform::fsWriteAtomic(filePath, body.c_str(), body.size())) {
+                std::printf("  WRITE %s (%s, %zu bytes)\n", name, filePath, body.size());
+            } else {
+                std::printf("  WRITE %s — write to %s FAILED\n", name, filePath);
             }
         } else if (std::strcmp(op, "remove_module") == 0 || std::strcmp(op, "delete_module") == 0) {
             // `remove_module` and `delete_module` are aliases — accept both so a

@@ -58,7 +58,7 @@ for (i = 0; i < count; i = i + 1) {
 
 ### What a script can read
 
-A script reads whatever it declares. `uint8_t cols = 16;` is a member the script owns; naming it in `defineControls()` with `addUint8("cols", cols, 1, 64)` also makes it a real slider in the UI, and the loop reads it, which is how a panel gets resized without editing code. A member no `addUint8` names stays private to the script.
+A script reads whatever it declares. `uint8_t cols = 16;` is a member the script owns; naming it in `defineControls()` with `addUint8("cols", cols, 1, 64)` also makes it a real slider in the UI, and the loop reads it, which is how a panel gets resized without editing code. A `uint16_t` member is surfaced the same way with `addUint16`, which the call must match. A member no such call names stays private to the script.
 
 `t` is the one [system variable](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) a layout is given, and it is always **0** here: the script runs twice per rebuild (once to count, once to place) and must agree with itself, so it is handed a fixed clock rather than a live one — a moving `t` would let the two passes disagree on how many lights there are. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
 
@@ -107,7 +107,7 @@ Past half full, the status also names the tightest limit the script is approachi
 |---|---|
 | `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
 
-Plus one control per `addUint8` in the script's `defineControls()`.
+Plus one control per `addUint8` / `addUint16` in the script's `defineControls()`.
 
 Editing any of them rebuilds the pipeline, because every one can change where the lights are. A script that fails to compile leaves a fixture with no lights, shows the parse error on the module, and the device keeps running.
 

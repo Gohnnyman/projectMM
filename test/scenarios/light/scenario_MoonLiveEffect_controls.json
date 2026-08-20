@@ -52,6 +52,13 @@
   ],
   "steps": [
     {
+      "name": "stage-initial-script",
+      "description": "Stage a script before the card points at it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-ctrl.mle",
+      "value": "class E { tick() { setRGB(0, 200, 60, 255); } }\n"
+    },
+    {
       "name": "add-control-script",
       "description": "Add a MoonLiveEffect whose source declares a `speed` control and uses it. The control appears bound to the arena slot (seeded to its default 7); the wired effect renders one pixel.",
       "op": "add_module",
@@ -117,12 +124,27 @@
       }
     },
     {
-      "name": "set-source-with-control",
-      "description": "Edit the source to the control script. A source edit recompiles (affectsPrepare gates on `source`); the engine derives the `speed` control and the binding surfaces it.",
+      "name": "select-initial-script",
+      "description": "Point the card at its script file, so the controls it declares appear.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "class SpeedEffect {\n  uint8_t speed = 7;\n  defineControls() { addUint8(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n",
+      "key": "script",
+      "value": "sc-ctrl.mle"
+    },
+    {
+      "name": "set-source-with-control-save",
+      "description": "Save the script file: editing a script in place is what re-derives its controls.",
+      "op": "write_file",
+      "path": "/moonlive/sc-ctrl.mle",
+      "value": "class SpeedEffect {\n  uint8_t speed = 7;\n  defineControls() { addUint8(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n"
+    },
+    {
+      "name": "set-source-with-control",
+      "description": "Edit the source to the control script. A source edit recompiles (affectsPrepare gates on `script`); the engine derives the `speed` control and the binding surfaces it.",
+      "op": "set_control",
+      "id": "ML",
+      "key": "script",
+      "value": "sc-ctrl.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -247,12 +269,19 @@
       }
     },
     {
+      "name": "edit-source-two-controls-save",
+      "description": "Save the script file: editing a script in place is what re-derives its controls.",
+      "op": "write_file",
+      "path": "/moonlive/sc-ctrl.mle",
+      "value": "class SpeedEffect {\n  uint8_t speed = 7;\n  uint8_t hue = 128;\n  defineControls() { addUint8(\"speed\", speed, 0, 15); addUint8(\"hue\", hue, 0, 255); }\n  tick() { setRGB(speed, hue, 0, 255); }\n}\n"
+    },
+    {
       "name": "edit-source-two-controls",
       "description": "Edit the source to add a second control. The recompile re-derives the control set; the stable-address grow-only arena keeps `speed`'s live value while seeding the new slot.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "class SpeedEffect {\n  uint8_t speed = 7;\n  uint8_t hue = 128;\n  defineControls() { addUint8(\"speed\", speed, 0, 15); addUint8(\"hue\", hue, 0, 255); }\n  tick() { setRGB(speed, hue, 0, 255); }\n}\n",
+      "key": "script",
+      "value": "sc-ctrl.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -312,12 +341,19 @@
       }
     },
     {
+      "name": "edit-source-shrink-to-one-control-save",
+      "description": "Save the script file: editing a script in place is what re-derives its controls.",
+      "op": "write_file",
+      "path": "/moonlive/sc-ctrl.mle",
+      "value": "class SpeedEffect {\n  uint8_t speed = 7;\n  defineControls() { addUint8(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n"
+    },
+    {
       "name": "edit-source-shrink-to-one-control",
       "description": "Edit the source back to a single control. The control set shrinks 2 -> 1: `speed` stays bound (its live value kept), the removed `hue`'s value is dropped, and the value change path is exercised without an unexpected recompile crash.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "class SpeedEffect {\n  uint8_t speed = 7;\n  defineControls() { addUint8(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n",
+      "key": "script",
+      "value": "sc-ctrl.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -377,12 +413,19 @@
       }
     },
     {
+      "name": "edit-source-broken-save",
+      "description": "Save the script file: editing a script in place is what re-derives its controls.",
+      "op": "write_file",
+      "path": "/moonlive/sc-ctrl.mle",
+      "value": "class Broken {\n  uint8_t speed = ;\n  tick() { setRGB(0,0,0,0); }\n}\n"
+    },
+    {
       "name": "edit-source-broken",
       "description": "Push a broken script. Compile fails, the previous code is freed, the effect renders dark and the parse error surfaces in status — no crash.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "class Broken {\n  uint8_t speed = ;\n  tick() { setRGB(0,0,0,0); }\n}\n",
+      "key": "script",
+      "value": "sc-ctrl.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -442,12 +485,19 @@
       }
     },
     {
+      "name": "edit-source-recover-save",
+      "description": "Save the script file: editing a script in place is what re-derives its controls.",
+      "op": "write_file",
+      "path": "/moonlive/sc-ctrl.mle",
+      "value": "class BrightEffect {\n  uint8_t bright = 200;\n  defineControls() { addUint8(\"bright\", bright, 0, 255); }\n  tick() { fill(0, 0, bright); }\n}\n"
+    },
+    {
       "name": "edit-source-recover",
       "description": "Recover with a valid control script — the effect compiles and renders again.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "class BrightEffect {\n  uint8_t bright = 200;\n  defineControls() { addUint8(\"bright\", bright, 0, 255); }\n  tick() { fill(0, 0, bright); }\n}\n",
+      "key": "script",
+      "value": "sc-ctrl.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -573,6 +623,35 @@
           "at": [
             "2026-07-24",
             "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "re-select-script",
+      "description": "Point the re-added card at the same script file, then TICK. Without a render after the select the buffer still holds what the removed card left, so this is what proves the re-added one draws.",
+      "op": "set_control",
+      "id": "ML2",
+      "key": "script",
+      "value": "sc-ctrl.mle",
+      "measure": true,
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            0,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-19",
+            "2026-08-19"
           ]
         }
       }

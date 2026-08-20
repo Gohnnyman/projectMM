@@ -51,6 +51,64 @@ def _resolve_runner() -> Path:
 
 RUNNER = _resolve_runner()
 
+
+# What feeds mm_scenarios. Same question check_esp32_built.py asks of a firmware image, for
+# the same reason: a binary older than its sources reports on code that is no longer there.
+_RUNNER_SOURCE_DIRS = ("src", "test")
+_RUNNER_SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp"}
+_RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
+
+
+def _stale_runner_reason() -> str:
+    """The newest source file NEWER than the runner binary, or "" when it is fresh.
+
+    This exists because a stale runner is INVISIBLE: it runs, it prints PASSED, and every
+    assertion is against code that has since changed. It cost ten days of three MoonLive
+    scenarios silently asserting nothing — `set_control` steps naming a control the modules no
+    longer had, reported as applied by a binary built before the rename.
+
+    Freshness is measured against the SOURCES, never the clock: a wall-clock rule passes a
+    binary that predates an edit made minutes ago, which is the exact trap this catches.
+
+    The trap is easy to fall into because two build directories exist: `cmake --build build`
+    (what a developer types) writes build/, while this script runs build/<host>/ — the tree
+    build_desktop.py produces. Rebuilding the wrong one leaves the runner untouched and no
+    error anywhere.
+    """
+    if not RUNNER.exists():
+        return "missing"
+    binary_mtime = RUNNER.stat().st_mtime
+    newest, newest_path = 0.0, None
+    for d in _RUNNER_SOURCE_DIRS:
+        for f in (ROOT / d).rglob("*"):
+            if not f.is_file() or f.suffix not in _RUNNER_SOURCE_SUFFIXES:
+                continue
+            if _RUNNER_SKIP_PARTS & set(f.parts):
+                continue
+            m = f.stat().st_mtime
+            if m > newest:
+                newest, newest_path = m, f
+    if newest > binary_mtime and newest_path is not None:
+        mins = (newest - binary_mtime) / 60.0
+        return (f"{newest_path.relative_to(ROOT)} is {mins:.0f} min newer than the runner")
+    return ""
+
+
+def _require_fresh_runner() -> None:
+    """Refuse to run against a missing or stale binary, naming the rebuild command."""
+    reason = _stale_runner_reason()
+    if not reason:
+        return
+    rel = RUNNER.relative_to(ROOT) if RUNNER.is_relative_to(ROOT) else RUNNER
+    if reason == "missing":
+        print(f"Scenario runner not built: {rel}")
+    else:
+        print(f"Scenario runner is STALE: {rel}")
+        print(f"  {reason}")
+        print("  It would report on code that is no longer there.")
+    print("  rebuild: uv run moondeck/build/build_desktop.py --tests")
+    sys.exit(1)
+
 # Format emitted by scenario_runner.cpp's measure block:
 #   MEASURE <step-name>: tick=Nus FPS=N lights=N heap=N (step: ±N) block=N
 # `<step-name>` may contain hyphens and underscores. heap is the absolute free
@@ -210,10 +268,8 @@ def main():
         parser.error("--update-contract requires --reason "
                      "(e.g. --reason 'tightened after Layer optimisation')")
 
-    if not RUNNER.exists():
-        print(f"Scenario runner not found: {RUNNER}")
-        print("Compile it first: uv run moondeck/build/build_desktop.py --tests (MoonDeck → desktop → Compile Tests).")
-        sys.exit(1)
+    # Missing OR stale: both mean the results would not describe the code on disk.
+    _require_fresh_runner()
 
     module_filter = args.module if (args.module and args.module.lower() != "all") else None
 

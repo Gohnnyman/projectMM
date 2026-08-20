@@ -8,23 +8,28 @@
 //
 // Uses every construct the language grew for that: an array read and written by index, a member
 // assigned (`heat[i] = ...`), `if`/`else` choosing a colour ramp, and a `uint16_t` counter that
-// keeps counting past the 255 a byte stops at.
+// keeps counting past the 255 a byte stops at — surfaced as a control with `addUint16`, because
+// its range is exactly what a byte cannot express.
 
 class EmberEffect {
   uint8_t  cool = 30;    // how fast a lit cell fades back to black
   uint8_t  spark = 60;   // chance out of 256 that a cell re-ignites this frame
   uint16_t phase = 0;    // a free-running counter, wider than a byte on purpose
+  uint16_t cycle = 1000; // where that counter wraps: a value no byte slider could reach
   uint8_t  heat[16];     // the simulation itself: one heat value per cell, kept between frames
 
   defineControls() {
     addUint8("cool", cool, 1, 120);
     addUint8("spark", spark, 0, 200);
+    // addUint16, not addUint8: the wrap point runs to 2000, and a byte control would drive
+    // only the low half of the member — the compiler refuses that pairing outright.
+    addUint16("cycle", cycle, 100, 2000);
   }
 
   tick() {
-    // Wider than a byte, so it counts to 1000 rather than wrapping at 255.
+    // Wider than a byte, so it counts past 255. `cycle` sets where it wraps, live.
     phase = phase + 7;
-    if (phase >= 1000) { phase = 0; }
+    if (phase >= cycle) { phase = 0; }
 
     // Cool: every cell loses `cool`, clamped at zero rather than wrapping to white.
     for (i = 0; i < 16; i = i + 1) {

@@ -1770,7 +1770,9 @@ function createControl(moduleName, moduleType, ctrl) {
             // what kind of file this is.
             const dir = ctrl.dir || "";
             const ext = ctrl.ext || "";
-            const pathOf = (n) => (n ? joinFsPath(dir, n) : "");
+            // No `dir` means the name IS the path: joinFsPath("", n) would return "/n" and point
+            // at the filesystem root instead of the file the module named.
+            const pathOf = (n) => (n ? (dir ? joinFsPath(dir, n) : n) : "");
 
             const stack = document.createElement("div");
             stack.className = "control-fileedit-stack";
@@ -1872,11 +1874,16 @@ function createControl(moduleName, moduleType, ctrl) {
             // whatever it saved is what this pane should now show.
             popBtn.addEventListener("click", async () => {
                 if (!picker.value) return;
+                // Flush unsaved edits first: the modal loads the file from the device, so opening
+                // it on a dirty pane would show stale bytes and then save them back over the edit.
+                await editor.save();
                 await openFileEditor(pathOf(picker.value));
                 await editor.load(pathOf(picker.value));
             });
 
-            picker.addEventListener("change", () => {
+            picker.addEventListener("change", async () => {
+                // Same reason as the modal above: switching files discards the edit otherwise.
+                await editor.save();
                 dragTs[key] = Date.now();
                 sendControl(moduleName, ctrl.name, picker.value);
                 editor.load(pathOf(picker.value));
@@ -4671,9 +4678,9 @@ async function fmDropUpload(destDir, files) {
 
 // Load `relPath` into `textarea`. Returns {readOnly, message}: read-only when the file cannot be
 // safely round-tripped through a <textarea>, so a save can never write a lossy copy back over it.
-async function fmLoadInto(textarea, relPath, expectedSize) {
+async function fmLoadInto(textarea, relPath, expectedSize, signal) {
     try {
-        const res = await fetch("/api/file?path=" + encodeURIComponent(relPath));
+        const res = await fetch("/api/file?path=" + encodeURIComponent(relPath), { signal });
         // Surface the server's own message (e.g. "not found") rather than a bare status code.
         if (!res.ok) throw new Error(await errorMessage(res));
         const text = await res.text();
@@ -4698,6 +4705,9 @@ async function fmLoadInto(textarea, relPath, expectedSize) {
         textarea.value = fmPrettify(text, relPath);
         return { readOnly: false, message: "" };
     } catch (err) {
+        // A superseded load was cancelled on purpose (the caller has already moved to another
+        // file): leave the pane alone and say so, so the newer load owns what is on screen.
+        if (err && err.name === "AbortError") return { aborted: true, readOnly: false, message: "" };
         textarea.value = "";
         // Read-only on a failed load so a Save can never post an empty body over a file that is
         // merely unreachable.
@@ -4793,16 +4803,29 @@ function fmMountEditor(host, relPath, opts = {}) {
     });
     taObserver.observe(body);
 
-    const save = async () => {
-        if (body.readOnly || !dirty || !path) return;
-        status.textContent = "saving…";
-        const r = await fmSaveFrom(body, path);
-        status.textContent = r.message;
-        // A failed write (no space, a vanished path) must not be silent. The modal shows it on its
-        // status line; a host that supplied its own hidden one gets an alert, because the work is
-        // still unsaved and the dot alone does not say why.
-        if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
-        if (r.ok) { setDirty(false); if (onSaved) onSaved(path); }
+    // Blur, Cmd+S and the Save button all call save(), and a blur fires when the button takes
+    // focus — so without this guard one edit issues overlapping POSTs of the same file. `dirty`
+    // cannot serve as the guard: it is only cleared after the await, so a second trigger passes
+    // the check while the first request is still in flight. Saves are serialized rather than
+    // dropped, because the second trigger may carry newer keystrokes than the first.
+    let saving = null;
+    const save = () => {
+        if (body.readOnly || !dirty || !path) return Promise.resolve();
+        saving = (saving || Promise.resolve()).then(async () => {
+            if (body.readOnly || !dirty || !path) return;   // re-check: a queued save may be moot
+            const saved = body.value;                       // what THIS request writes
+            status.textContent = "saving…";
+            const r = await fmSaveFrom(body, path);
+            status.textContent = r.message;
+            // A failed write (no space, a vanished path) must not be silent. The modal shows it on
+            // its status line; a host that supplied its own hidden one gets an alert, because the
+            // work is still unsaved and the dot alone does not say why.
+            if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
+            // Only clear dirty if the body still holds what we just wrote — typing during the
+            // request means there are newer bytes on screen that nobody has saved yet.
+            if (r.ok && body.value === saved) { setDirty(false); if (onSaved) onSaved(path); }
+        });
+        return saving;
     };
 
     body.addEventListener("input", () => { if (!body.readOnly) setDirty(true); });
@@ -4812,11 +4835,20 @@ function fmMountEditor(host, relPath, opts = {}) {
     });
     saveBtn.addEventListener("click", save);
 
+    // Picking a second file before the first finishes loading must not paint the first file's
+    // contents over it. The in-flight request is ABORTED rather than merely ignored, because
+    // fmLoadInto writes the textarea itself — a late response would overwrite the newer file's
+    // contents before any check here could run.
+    let loadAbort = null;
     const load = async (p, size) => {
+        if (loadAbort) loadAbort.abort();
+        const ac = new AbortController();
+        loadAbort = ac;
         path = p;
         setDirty(false);
         if (!path) { body.value = ""; body.readOnly = true; saveBtn.disabled = true; status.textContent = ""; return; }
-        const r = await fmLoadInto(body, path, size);
+        const r = await fmLoadInto(body, path, size, ac.signal);
+        if (r.aborted || ac !== loadAbort) return;   // a newer load started: that one owns the pane
         body.readOnly = r.readOnly;
         saveBtn.disabled = r.readOnly;
         status.textContent = r.message;
@@ -4826,6 +4858,9 @@ function fmMountEditor(host, relPath, opts = {}) {
     return {
         textarea: body,
         load,
+        // Flush pending edits before the pane is navigated away from or replaced by the modal.
+        // Resolves once any in-flight save has completed, so the caller can safely re-read.
+        save,
         isDirty: () => dirty,
         dispose: () => { taObserver.disconnect(); wrap.remove(); },
     };

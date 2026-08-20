@@ -18,6 +18,13 @@
       "type": "Layouts"
     },
     {
+      "name": "fix-write-default-layout",
+      "description": "Stage the layout script the fixture starts on, as the editor would have saved it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-grid.mll",
+      "value": "class G { placeLights() { for (i = 0; i < 16; i = i + 1) { addLight(i, 0, 0); } } }\n"
+    },
+    {
       "name": "fix-scripted-layout",
       "op": "add_module",
       "id": "MLL",
@@ -53,12 +60,20 @@
   ],
   "steps": [
     {
+      "name": "select-default-layout",
+      "description": "Point the scripted layout at its file — the fixture a user starts from.",
+      "op": "set_control",
+      "id": "MLL",
+      "key": "script",
+      "value": "sc-grid.mll"
+    },
+    {
       "name": "baseline-default-script",
       "op": "measure",
       "observed": {
         "desktop-macos": {
           "tick_us": [
-            4,
+            0,
             33
           ],
           "free_heap": [
@@ -71,7 +86,7 @@
           ],
           "at": [
             "2026-08-09",
-            "2026-08-14"
+            "2026-08-19"
           ]
         }
       }
@@ -84,11 +99,18 @@
       "parent_id": "Layer"
     },
     {
+      "name": "effect-gradient-write",
+      "description": "Write the script file the card points at, the way the editor saves it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-fx.mle",
+      "value": "class FX { tick() { setRGB(random16(256), 255, 200, 60); } }\n"
+    },
+    {
       "name": "effect-gradient",
       "op": "set_control",
       "id": "FX",
-      "key": "source",
-      "value": "setRGB(random16(256), 255, 200, 60);"
+      "key": "script",
+      "value": "sc-fx.mle"
     },
     {
       "name": "measure-scripted-effect",
@@ -96,7 +118,7 @@
       "observed": {
         "desktop-macos": {
           "tick_us": [
-            4,
+            0,
             21
           ],
           "free_heap": [
@@ -109,17 +131,24 @@
           ],
           "at": [
             "2026-08-09",
-            "2026-08-16"
+            "2026-08-19"
           ]
         }
       }
     },
     {
+      "name": "layout-a-row-write",
+      "description": "Write the script file the card points at, the way the editor saves it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-row.mll",
+      "value": "class L { placeLights() { for (i = 0; i < 24; i = i + 1) { addLight(i, 0, 0); } } }\n"
+    },
+    {
       "name": "layout-a-row",
       "op": "set_control",
       "id": "MLL",
-      "key": "source",
-      "value": "for (i = 0; i < 24; i = i + 1) { addLight(i, 0, 0); }"
+      "key": "script",
+      "value": "sc-row.mll"
     },
     {
       "name": "measure-scripted-row",
@@ -153,11 +182,18 @@
       "parent_id": "Layer"
     },
     {
+      "name": "modifier-mirror-write",
+      "description": "Write the script file the card points at, the way the editor saves it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-mod.mlm",
+      "value": "class M { modifyLogical() { setXYZ(width - 1 - x, y, z); } }\n"
+    },
+    {
       "name": "modifier-mirror",
       "op": "set_control",
       "id": "MOD",
-      "key": "source",
-      "value": "setXYZ(width - 1 - x, y, z);"
+      "key": "script",
+      "value": "sc-mod.mlm"
     },
     {
       "name": "measure-all-three-scripted",
@@ -166,7 +202,7 @@
         "desktop-macos": {
           "tick_us": [
             5,
-            30
+            34
           ],
           "free_heap": [
             0,
@@ -178,17 +214,25 @@
           ],
           "at": [
             "2026-08-09",
-            "2026-08-18"
+            "2026-08-19"
           ]
         }
       }
     },
     {
-      "name": "modifier-transpose",
+      "name": "modifier-transpose-write",
+      "description": "Write the script file the card points at, the way the editor saves it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-mod.mlm",
+      "value": "class M { modifyLogical() { setXYZ(y, x, z); } }\n"
+    },
+    {
+      "name": "modifier-transpose-resync",
       "op": "set_control",
       "id": "MOD",
-      "key": "source",
-      "value": "setXYZ(y, x, z);"
+      "key": "script",
+      "value": "sc-mod.mlm",
+      "description": "Re-assert the same filename: editing a file in place must recompile it."
     },
     {
       "name": "measure-modifier-edited",
@@ -197,7 +241,7 @@
         "desktop-macos": {
           "tick_us": [
             5,
-            23
+            29
           ],
           "free_heap": [
             0,
@@ -209,17 +253,25 @@
           ],
           "at": [
             "2026-08-09",
-            "2026-08-16"
+            "2026-08-19"
           ]
         }
       }
     },
     {
-      "name": "break-the-layout",
+      "name": "break-the-layout-write",
+      "description": "Write the script file the card points at, the way the editor saves it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-row.mll",
+      "value": "class L { placeLights() { for (i = 0; i < 4; i = i + 1) { addLight(i, i\n"
+    },
+    {
+      "name": "break-the-layout-resync",
       "op": "set_control",
       "id": "MLL",
-      "key": "source",
-      "value": "for (i = 0; i < 4; i = i + 1) { addLight(i, i"
+      "key": "script",
+      "value": "sc-row.mll",
+      "description": "Re-assert the same filename: editing a file in place must recompile it."
     },
     {
       "name": "measure-broken-layout",
@@ -228,7 +280,7 @@
         "desktop-macos": {
           "tick_us": [
             0,
-            0
+            1
           ],
           "free_heap": [
             0,
@@ -240,17 +292,25 @@
           ],
           "at": [
             "2026-08-09",
-            "2026-08-09"
+            "2026-08-19"
           ]
         }
       }
     },
     {
-      "name": "recover-the-layout",
+      "name": "recover-the-layout-write",
+      "description": "Write the script file the card points at, the way the editor saves it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-row.mll",
+      "value": "class L { placeLights() { for (i = 0; i < 12; i = i + 1) { addLight(i, 0, 0); } } }\n"
+    },
+    {
+      "name": "recover-the-layout-resync",
       "op": "set_control",
       "id": "MLL",
-      "key": "source",
-      "value": "for (i = 0; i < 12; i = i + 1) { addLight(i, 0, 0); }"
+      "key": "script",
+      "value": "sc-row.mll",
+      "description": "Re-assert the same filename: editing a file in place must recompile it."
     },
     {
       "name": "measure-recovered",
@@ -259,7 +319,7 @@
         "desktop-macos": {
           "tick_us": [
             4,
-            22
+            40
           ],
           "free_heap": [
             0,
@@ -271,7 +331,7 @@
           ],
           "at": [
             "2026-08-09",
-            "2026-08-14"
+            "2026-08-19"
           ]
         }
       }
@@ -289,7 +349,7 @@
         "desktop-macos": {
           "tick_us": [
             4,
-            35
+            41
           ],
           "free_heap": [
             0,
@@ -301,7 +361,7 @@
           ],
           "at": [
             "2026-08-09",
-            "2026-08-13"
+            "2026-08-19"
           ]
         }
       }

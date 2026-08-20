@@ -32,7 +32,7 @@ namespace mm {
 /// **`wifiCoproc`:** shown only on boards whose radio is a separate chip (the ESP32-P4
 /// with its on-board ESP32-C6 over esp_hosted); absent on native-radio targets (the
 /// platform returns an empty string and the control is not added). Reports the detected
-/// slave firmware version (`C6 fw 2.12.9`) when the link is up, or `not detected` when
+/// slave firmware version (`C6 fw 2.12.9`) when the query answers, or `no version reply` when
 /// the C6 never completes its handshake / reports 0.0.0 — the signature of absent or
 /// incompatible C6 slave firmware. `tick1s()` re-queries it, so the state stays current
 /// if the link comes up after boot or the C6 is reflashed without a host reboot.

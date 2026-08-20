@@ -470,6 +470,17 @@ struct Parser {
                     if (lex.kind != Tok::Ident) { fail("expected the member this control is bound to"); return; }
                     const int mi = findMember(lex.identBeg, lex.identLen);
                     if (mi < 0) { fail("no member of that name is declared in this class"); return; }
+                    // The BUILTIN'S width must match the MEMBER'S. addUint8 on a uint16_t member
+                    // would drive only its low byte and addUint16 on a uint8_t member would write
+                    // past it, both silently — so the mismatch is a diagnostic naming the call to
+                    // use instead. A control also drives one value, never an array: binding one
+                    // would move element 0 and leave the rest, with nothing on screen saying so.
+                    if (members[mi].type != fn->refType)
+                        { fail(fn->refType == CtrlType::Uint16
+                                   ? "addUint16 binds a uint16_t member (use addUint8)"
+                                   : "addUint8 binds a uint8_t member (use addUint16)"); return; }
+                    if (members[mi].count > 1)
+                        { fail("a control binds a single member, not an array"); return; }
                     v = alloc();
                     emit({IrOp::Const, v, 0,0,0,0, members[mi].offset, nullptr, {}});
                     lex.advance();

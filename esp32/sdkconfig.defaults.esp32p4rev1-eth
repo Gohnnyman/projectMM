@@ -32,8 +32,9 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # Kconfig enforces it structurally: REV_MIN_0/1/100 require SELECTS_REV_LESS_V3=y and
 # REV_MIN_300/301 require it =n, with the max clamped to 199 or 399. So this image
 # supports revisions 0.0 through 1.99 and will refuse to boot on a v3.x chip, which is
-# the bench/field silicon today. A v3.x board needs its own firmware variant (backlog:
-# esp32p4-eth-v3), not a flag flipped here.
+# the bench/field silicon today. A v3.x board needs its own firmware variant — those now
+# exist as esp32p4rev3-eth and esp32p4rev3-eth-wifi (sdkconfig.defaults.esp32p4rev3 layers
+# the revision over this file) — not a flag flipped here.
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_0=y
 

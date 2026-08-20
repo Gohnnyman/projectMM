@@ -161,8 +161,12 @@ bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
         if ((seeded_ >> off) & 1ull)
             for (uint8_t k = 0; k < seededCount_; k++)
                 if (seededName_[k].offset == off) { prev = &seededName_[k]; break; }
+        // Same NAME, same SHAPE. A widened scalar or a grown array keeps its name and offset, and
+        // reusing its bytes on that basis would leave the new extent holding the old program's
+        // values (see SeededMember).
         const bool same = prev && std::strncmp(prev->name, decls[i].name, n) == 0 &&
-                          prev->name[n] == '\0';
+                          prev->name[n] == '\0' &&
+                          prev->type == decls[i].type && prev->count == decls[i].count;
         if (!same) {
             // Seed the member's WHOLE extent: every element, at its width, little-endian to match
             // every backend's halfword load. Writing only the first element left an ARRAY holding
@@ -178,6 +182,8 @@ bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
         }
         if (kept < kMaxCtrls) {
             seededName_[kept].offset = off;
+            seededName_[kept].type   = decls[i].type;
+            seededName_[kept].count  = static_cast<uint8_t>(decls[i].count);
             for (uint8_t c = 0; c < n; c++) seededName_[kept].name[c] = decls[i].name[c];
             seededName_[kept].name[n] = '\0';
             kept++;

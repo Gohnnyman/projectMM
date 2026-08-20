@@ -470,7 +470,7 @@ export const installer = {
      *   a normal re-flash overwrites in place and users usually want
      *   persistent state to survive a firmware bump.
      * @param {boolean} [opts.ethOnly=false] - the picked firmware has WiFi compiled
-     *   out (firmwares.json `eth_only`: esp32-eth, esp32p4rev1-eth). Such a build connects
+     *   out (firmwares.json `eth_only`: esp32-eth, esp32p4rev1-eth, esp32p4rev3-eth). Such a build connects
      *   over Ethernet only and has no WiFi-provisioning RPC, so when the device isn't
      *   already online from the boot log we SKIP the WiFi-credentials step (which would
      *   otherwise send WIFI_SETTINGS and get UNKNOWN_RPC_COMMAND) and report a clear

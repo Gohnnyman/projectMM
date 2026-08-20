@@ -56,7 +56,20 @@ public:
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = script_.engine().controlSlot(decls[i].offset);
             if (!slot) continue;
-            controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
+            // Published at the width the script declared. A uint16_t member reaches the UI as a
+            // 16-bit control writing both its arena bytes; publishing it as a uint8 would drive
+            // only the low one and leave the high half holding whatever it had.
+            if (decls[i].type == moonlive::CtrlType::Uint16) {
+                // Safe to view as a uint16_t: the compiler aligns every wide member to an even
+                // arena offset (two backends cannot encode an odd halfword offset at all), and the
+                // arena base comes from platform::alloc, which is aligned for any fundamental type.
+                controls_.addUint16(decls[i].name, *reinterpret_cast<uint16_t*>(slot),
+                                    decls[i].min, decls[i].max);
+            } else {
+                controls_.addUint8(decls[i].name, *slot,
+                                   static_cast<uint8_t>(decls[i].min),
+                                   static_cast<uint8_t>(decls[i].max));
+            }
         }
     }
 
@@ -154,10 +167,14 @@ private:
     /// there harmlessly.
     void runScript(moonlive::AddLightFn fn, void* ctx) const {
         uint8_t scratch[3] = {0, 0, 0};
-        moonlive::setAddLightSink(fn, ctx);
-        // The placement moment: run `placeLights` if the script defined one. A script without it
-        // places no lights, which the module reports as an empty fixture rather than a failure.
+        // Checked BEFORE the sink is installed. `ctx` is the caller's stack-local Counter or
+        // Emitter, so returning between install and clear would leave the global sink pointing at
+        // a dead frame until the next runScript happened to overwrite it.
+        //
+        // A script without placeLights places no lights, which the module reports as an empty
+        // fixture rather than a failure.
         if (!script_.engine().hasEntry(moonlive::kEntryPlaceLights)) return;
+        moonlive::setAddLightSink(fn, ctx);
         script_.engine().run(scratch, 1, 3, 0, moonlive::kEntryPlaceLights);
         moonlive::setAddLightSink(nullptr, nullptr);
     }

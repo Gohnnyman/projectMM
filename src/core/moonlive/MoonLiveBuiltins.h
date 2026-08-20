@@ -22,6 +22,13 @@
 
 namespace mm::moonlive {
 
+// The width of a script member, and how many arena bytes one element of it occupies. Here rather
+// than with the IR because a builtin descriptor names the width its by-reference argument takes.
+enum class CtrlType : uint8_t { Uint8, Uint16 };
+
+constexpr uint8_t ctrlWidth(CtrlType t) { return t == CtrlType::Uint16 ? 2 : 1; }
+
+
 // Neutral inline opcodes — "store shapes a backend can emit", not "LED operations". A host maps
 // its function names onto these; a backend implements them. StoreElem = store N bytes (one
 // element) at a computed index; FillElems = a counted loop writing one element per slot. The
@@ -78,6 +85,11 @@ struct Builtin {
     // host a pointer built from a color byte. Stated per builtin for the same reason byRef is,
     // rather than special-cased by name in the parser.
     uint8_t      byStr = 0;
+    // The member WIDTH a by-reference argument must have, for the control-declaring builtins:
+    // addUint8 takes a uint8_t member, addUint16 a uint16_t one. Stated here for the same reason
+    // byRef and byStr are, rather than the parser matching on the builtin's name — a name test
+    // would silently mis-classify the next by-reference builtin somebody adds.
+    CtrlType     refType = CtrlType::Uint8;
 };
 
 // A fixed-capacity table the host fills and the compiler reads. No heap; a host registers a

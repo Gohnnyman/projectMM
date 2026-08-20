@@ -71,6 +71,13 @@
   ],
   "steps": [
     {
+      "name": "stage-initial-script",
+      "description": "Stage the script the effect starts on, before it is added.",
+      "op": "write_file",
+      "path": "/moonlive/sc-live.mle",
+      "value": "class E { tick() { setRGB(random16(256), 200, 60, 255); } }\n"
+    },
+    {
       "name": "add-moonlive",
       "description": "Add a MoonLiveEffect to the Layer. Its default source (random pixels) compiles on-device to native code; measure that the wired effect renders.",
       "op": "add_module",
@@ -154,12 +161,27 @@
       }
     },
     {
-      "name": "edit-source-red",
-      "description": "Live-edit the script source to a new color. A source edit triggers a recompile (affectsPrepare gates on `source`); the new native code swaps in and keeps rendering.",
+      "name": "select-initial-script",
+      "description": "Point the card at its script file.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "fill(255, 0, 0);",
+      "key": "script",
+      "value": "sc-live.mle"
+    },
+    {
+      "name": "edit-source-red-save",
+      "description": "Save the script file, the way the card editor writes it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-live.mle",
+      "value": "class E { tick() { fill(255, 0, 0); } }\n"
+    },
+    {
+      "name": "edit-source-red",
+      "description": "Live-edit the script source to a new color. A script edit triggers a recompile (affectsPrepare gates on `script`); the new native code swaps in and keeps rendering.",
+      "op": "set_control",
+      "id": "ML",
+      "key": "script",
+      "value": "sc-live.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -237,12 +259,19 @@
       }
     },
     {
+      "name": "edit-source-broken-save",
+      "description": "Save the script file, the way the card editor writes it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-live.mle",
+      "value": "class E { tick() { fill(nope); } }\n"
+    },
+    {
       "name": "edit-source-broken",
       "description": "Push a script that fails to parse. The compile fails, the engine reports the diagnostic in the module status and renders dark, but the device keeps running (robust, no reboot) — the script-editor failure path. The measure passes because the pipeline still ticks.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "fill(nope);",
+      "key": "script",
+      "value": "sc-live.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -320,12 +349,19 @@
       }
     },
     {
+      "name": "edit-source-recover-save",
+      "description": "Save the script file, the way the card editor writes it.",
+      "op": "write_file",
+      "path": "/moonlive/sc-live.mle",
+      "value": "class E { tick() { fill(0, 255, 0); } }\n"
+    },
+    {
       "name": "edit-source-recover",
       "description": "Push a valid script again. The engine recompiles cleanly and rendering resumes — a broken edit is fully recoverable.",
       "op": "set_control",
       "id": "ML",
-      "key": "source",
-      "value": "fill(0, 255, 0);",
+      "key": "script",
+      "value": "sc-live.mle",
       "measure": true,
       "observed": {
         "desktop-macos": {
@@ -728,6 +764,35 @@
           "at": [
             "2026-07-24",
             "2026-07-24"
+          ]
+        }
+      }
+    },
+    {
+      "name": "re-select-script",
+      "description": "Point the re-added card at the same script file, then TICK. Without a render after the select the buffer still holds what the removed card left, so this is what proves the re-added one draws.",
+      "op": "set_control",
+      "id": "ML2",
+      "key": "script",
+      "value": "sc-live.mle",
+      "measure": true,
+      "observed": {
+        "desktop-macos": {
+          "tick_us": [
+            5,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-08-19",
+            "2026-08-20"
           ]
         }
       }

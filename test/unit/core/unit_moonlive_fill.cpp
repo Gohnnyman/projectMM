@@ -295,6 +295,47 @@ TEST_CASE("MoonLive controls: arena address is STABLE across a recompile and the
     CHECK(*eng.controlSlot(1) == 200);                   // hue seeded from its default
 }
 
+// A member keeps its live value across a recompile because its name and offset still match. But
+// EDITING ITS TYPE OR LENGTH makes it a different member at the same address, and its new bytes
+// have never held anything: a widened uint8->uint16 would keep the old program's byte as the new
+// value's high half, and a grown array would keep stale elements past the old end. Both read back
+// as numbers the script never wrote.
+TEST_CASE("MoonLive controls: widening or growing a member reseeds its whole extent") {
+    moonlive::MoonLive eng;
+
+    // Spelled out rather than via mmScript: that helper only hoists `uint8_t` declarations to class
+    // scope, so a uint16_t member written through it would become a local instead.
+    REQUIRE(eng.compile("class T {\n  uint8_t level = 3;\n  tick() { setRGB(0, level, 0, 0); }\n}\n",
+                        kCtrlTable, kSys));
+    *eng.controlSlot(0) = 0xEE;                          // a "slider move" the widened member must not inherit
+    REQUIRE(eng.compile("class T {\n  uint16_t level = 900;\n  tick() { setRGB(0, level - 900, 0, 0); }\n}\n",
+                        kCtrlTable, kSys));
+    const uint8_t* wide = eng.controlSlot(0);
+    REQUIRE(wide != nullptr);
+    // 900 = 0x0384, little-endian across both bytes. The high byte proves the extent was reseeded:
+    // it would be 0 if only the low byte were written, and the low byte would be 0xEE if the
+    // member had been treated as unchanged.
+    CHECK(wide[0] == 0x84);
+    CHECK(wide[1] == 0x03);
+
+    // The same rule for an array that grows: the new elements carry the declared default, not
+    // whatever the previous program left at those addresses.
+    moonlive::MoonLive eng2;
+    REQUIRE(eng2.compile("class T {\n  uint8_t bank[2];\n  tick() { setRGB(0, bank[0], 0, 0); }\n}\n",
+                         kCtrlTable, kSys));
+    uint8_t* slot = eng2.controlSlot(0);
+    REQUIRE(slot != nullptr);
+    slot[2] = 0x77;                                      // beyond the old end: stale bytes to inherit
+    slot[3] = 0x77;
+    REQUIRE(eng2.compile("class T {\n  uint8_t bank[4];\n  tick() { setRGB(0, bank[3], 0, 0); }\n}\n",
+                         kCtrlTable, kSys));
+    const uint8_t* grown = eng2.controlSlot(0);
+    // An array with no initializer starts at zero, so the grown elements must read 0 rather than
+    // the 0x77 the previous program left at those addresses.
+    CHECK(grown[2] == 0);
+    CHECK(grown[3] == 0);
+}
+
 TEST_CASE("MoonLive controls: free() releases the arena (no stale slot after release)") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile(mmScript("uint8_t a = 5;\nfill(0, 0, a);"), kCtrlTable, kSys));
@@ -752,20 +793,111 @@ TEST_CASE("a uint16_t member is aligned to an even arena offset") {
     REQUIRE(eng.compile("class T {\n"
                         "  uint8_t  small = 1;\n"     // takes byte 0, leaving the cursor odd
                         "  uint16_t wide = 900;\n"    // must skip byte 1 and land on byte 2
+                        "  uint8_t  after = 2;\n"     // lands after the wide member
                         "  defineControls() {\n"
                         "    addUint8(\"small\", small, 0, 9);\n"
-                        "    addUint8(\"wide\", wide, 0, 9);\n"
+                        "    addUint8(\"after\", after, 0, 9);\n"
                         "  }\n"
-                        "  tick() { setRGB(0, small, 0, 0); }\n"
+                        "  tick() { setRGB(0, small + wide, 0, 0); }\n"
                         "}\n", kCtrlTable, kSys));
     moonlive::runDefineControls(eng);
     uint8_t n = 0;
     const moonlive::DeclaredControl* dc = eng.declaredControls(n);
     REQUIRE(n == 2);
     CHECK(dc[0].offset == 0);
-    CHECK(dc[1].offset == 2);          // byte 1 is padding, not a member
-    CHECK(dc[1].offset % 2 == 0);
+    // `after` sits at byte 4: `small` took 0, byte 1 is padding, and the uint16 occupies 2-3. Its
+    // offset is what proves the wide member was placed on the even byte and given both of them.
+    // (The controls bind the two BYTE members: a control drives a single arena byte, so binding
+    // the uint16 itself is refused by the compiler.)
+    CHECK(dc[1].offset == 4);
     eng.free();
+}
+
+// A control declares a WIDTH, and it has to be the member's own. addUint8 on a uint16_t member
+// would drive only its low half (leaving the high byte holding whatever it had, so the number the
+// script reads is one nobody chose) and addUint16 on a uint8_t member would write past it. Each
+// mismatch names the call to use instead, rather than compiling into a silently wrong value.
+TEST_CASE("a control must be declared at its member's own width") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T {\n"
+                            "  uint16_t wide = 5;\n"
+                            "  defineControls() { addUint8(\"wide\", wide, 0, 9); }\n"
+                            "  tick() { setRGB(0, wide, 0, 0); }\n"
+                            "}\n", kCtrlTable, kSys));
+    eng.free();
+
+    moonlive::MoonLive engNarrow;
+    CHECK_FALSE(engNarrow.compile("class T {\n"
+                                  "  uint8_t small = 5;\n"
+                                  "  defineControls() { addUint16(\"small\", small, 0, 900); }\n"
+                                  "  tick() { setRGB(0, small, 0, 0); }\n"
+                                  "}\n", kCtrlTable, kSys));
+    engNarrow.free();
+
+    // An array is not a control at either width: binding one would move element 0 and leave the
+    // rest, with nothing on screen saying so.
+    moonlive::MoonLive eng2;
+    CHECK_FALSE(eng2.compile("class T {\n"
+                             "  uint8_t bank[4];\n"
+                             "  defineControls() { addUint8(\"bank\", bank, 0, 9); }\n"
+                             "  tick() { setRGB(0, bank[0], 0, 0); }\n"
+                             "}\n", kCtrlTable, kSys));
+    eng2.free();
+}
+
+// The point of addUint16: a script exposes a value a byte cannot hold — a dwell time, a 0..1000
+// scale — as ONE control, instead of packing it into two byte sliders. The declaration reaches the
+// binding with its full range intact, and the live value spans both arena bytes.
+TEST_CASE("a uint16_t member is published as a control spanning its full range") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint16_t dwell = 900;\n"
+                        "  defineControls() { addUint16(\"dwell\", dwell, 0, 1000); }\n"
+                        "  tick() { setRGB(0, dwell - 900, 0, 0); }\n"
+                        "}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng);
+
+    uint8_t n = 0;
+    const moonlive::DeclaredControl* dc = eng.declaredControls(n);
+    REQUIRE(n == 1);
+    CHECK(dc[0].type == moonlive::CtrlType::Uint16);
+    CHECK(dc[0].max == 1000);              // a range past 255 survives: the record is 16-bit wide
+    CHECK(dc[0].def == 900);               // seeded from the member's own initializer, not its low byte
+
+    // The live value occupies BOTH bytes, little-endian, which is what the UI writes through and
+    // the emitted code reads back.
+    const uint8_t* slot = eng.controlSlot(dc[0].offset);
+    REQUIRE(slot != nullptr);
+    CHECK(slot[0] == (900 & 0xff));
+    CHECK(slot[1] == (900 >> 8));
+    eng.free();
+}
+
+// A range a uint16_t cannot hold is refused rather than truncated. A LITERAL past the width is
+// caught by the compiler (every number is bounded at 0..65535), so the script never runs; a range
+// COMPUTED at run time is caught by the declaration, which then publishes no control. Both are
+// visible failures rather than a slider whose top silently wrapped to a small number.
+TEST_CASE("a control range past its width is refused, not truncated") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T {\n"
+                            "  uint16_t wide = 5;\n"
+                            "  defineControls() { addUint16(\"wide\", wide, 0, 70000); }\n"
+                            "  tick() { setRGB(0, wide, 0, 0); }\n"
+                            "}\n", kCtrlTable, kSys));
+    eng.free();
+
+    // Computed past the width: 1000 * 100 is in range as a literal pair but not as a bound.
+    moonlive::MoonLive eng2;
+    REQUIRE(eng2.compile("class T {\n"
+                         "  uint16_t wide = 5;\n"
+                         "  defineControls() { addUint16(\"wide\", wide, 0, 1000 * 100); }\n"
+                         "  tick() { setRGB(0, wide, 0, 0); }\n"
+                         "}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng2);
+    uint8_t n = 0;
+    eng2.declaredControls(n);
+    CHECK(n == 0);                         // the declaration was refused; no control appears
+    eng2.free();
 }
 
 // The initializer is checked against the DECLARED type, so a value a uint8_t cannot hold is a
