@@ -11,6 +11,7 @@
 
 #include "core/math8.h"    // beatsin16 — the shared time vocabulary
 #include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
+#include "core/noise.h"    // inoise8 — the shared value-noise field
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
 
 // MoonLive — the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
@@ -25,6 +26,33 @@ namespace mm::moonlive {
 // random16(n) → a pseudo-random value in [0, n). A simple LCG, deterministic enough that the
 // runtime Bounds guard always sees an in-range index; the same implementation on every target
 // so a script behaves identically. The one host helper exposed as a Call so far.
+// The palette, as THREE builtins — `paletteR(i, bri)`, `paletteG(i, bri)`, `paletteB(i, bri)`.
+// `bri` is the brightness colorFromPalette already takes, and it is what gives a shape a
+// radial falloff instead of a flat fill. A builtin returns
+// one uint32_t, so a packed 0xRRGGBB would need the script to unpack it, and the language has no
+// division or shift to do that with. Three calls is the shape that works today, and
+// `setRGB(idx, paletteR(i), paletteG(i), paletteB(i))` reads clearly.
+//
+// The ACTIVE palette, so a script follows the device's palette control exactly as a compiled
+// effect does — which is the whole point: before this, a script could only hard-code colour.
+//
+// Deliberately NO hsv() alongside it. A hue wheel is how an effect picks colour while IGNORING
+// the user's palette, which is the habit the compiled effects were moved off (47 of 52 read the
+// palette; the exceptions are effects where colour carries meaning, like the axis-identifying
+// red/green/blue in LinesEffect). Giving scripts hsv() would reintroduce it as the easy default.
+extern "C" inline uint32_t mm_light_paletteR(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
+                            static_cast<uint8_t>(args[1])).r;
+}
+extern "C" inline uint32_t mm_light_paletteG(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
+                            static_cast<uint8_t>(args[1])).g;
+}
+extern "C" inline uint32_t mm_light_paletteB(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
+                            static_cast<uint8_t>(args[1])).b;
+}
+
 extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t n = uint32_t(args[0]);
     // ATOMIC, because two threads run scripts at once: the render task walks a layout for the frame
@@ -82,6 +110,15 @@ extern "C" inline uint32_t mm_light_beatsin(const uintptr_t* args, uint32_t, con
     return beatsin16(static_cast<uint8_t>(bpm), ms, 0, static_cast<uint16_t>(high));
 }
 
+// noise(x, y, z) → the 0..255 value-noise field at that point, the primitive behind fire, clouds,
+// plasma and lava. Coordinates are 16.0 fixed point: the HIGH byte picks the noise cell and the low
+// byte interpolates within it, so `x * 256 / scale` zooms and feeding `t` into an axis makes the
+// field flow. Three arguments is exactly a Call's budget, and 2D is the same call with z held at a
+// constant — one builtin rather than an arity family.
+extern "C" inline uint32_t mm_light_noise(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return inoise8(uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]));
+}
+
 // scale(value, n) → map a 0..65535 value onto 0..n-1. The other half of `beat`: a beat is full-scale
 // by design so it is fixture-independent, and this is what lands it on an actual axis. `beat(30, t)`
 // then `scale(…, width)` is the sweep position, which is exactly what LinesEffect computes
@@ -92,6 +129,32 @@ extern "C" inline uint32_t mm_light_beatsin(const uintptr_t* args, uint32_t, con
 // math16's sin16/cos16 return SIGNED -32768..32767; a script's values are unsigned, so the result
 // is biased into 0..65535 with the zero line at 32768. A script that wants a coordinate scales the
 // result: `scale(sin(a), width)` sweeps the whole axis, which is the same `scale` a beat uses.
+// polarA(dx, dy) / polarR(dx, dy) — the POLAR pair (Angle, Radius), for an effect written around distance and
+// bearing from a centre rather than around x/y. Both take offsets that a script computes as
+// `x - cx`, which is unsigned and therefore wraps for a point left of centre: the builtins
+// re-centre it themselves (see below), so a script does not have to reason about the wrap.
+//
+// polarA() returns an angle16 (65536 = one turn), so it feeds straight into sin()/cos(). polarR()
+// returns the true distance, not the octagonal approximation, because a visibly non-circular
+// "circle" is exactly what an effect using this would be trying to draw.
+extern "C" inline uint32_t mm_light_polarA(const uintptr_t* args, uint32_t, const uint8_t*) {
+    // A script's arithmetic is unsigned, so `x - cx` for x < cx arrives as a huge value rather
+    // than a negative one. Anything above half the range is that wrap, and subtracting the range
+    // recovers the signed offset the maths needs.
+    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
+    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
+    if (dx > 32767) dx -= 65536;
+    if (dy > 32767) dy -= 65536;
+    return static_cast<uint32_t>(atan16(dy, dx));
+}
+extern "C" inline uint32_t mm_light_polarR(const uintptr_t* args, uint32_t, const uint8_t*) {
+    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
+    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
+    if (dx > 32767) dx -= 65536;
+    if (dy > 32767) dy -= 65536;
+    return dist16(dx, dy);
+}
+
 extern "C" inline uint32_t mm_light_sin(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t angle = uint32_t(args[0]);
     return static_cast<uint32_t>(sin16(static_cast<angle16>(angle)) + 32768);
@@ -188,10 +251,15 @@ using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 /// and a third would mean a genuinely new concurrency story rather than a bigger table.
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 
-/// Where a running `defineControls()` sends each `addUint8`. Same shape and same reason as the
-/// addLight sink: a builtin has no receiver, so the binding installs one for the duration of the
-/// run and the call reaches the engine through it.
-using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset, uint8_t lo, uint8_t hi);
+/// Where a running `defineControls()` sends each `addUint8` / `addUint16`. Same shape and same
+/// reason as the addLight sink: a builtin has no receiver, so the binding installs one for the
+/// duration of the run and the call reaches the engine through it.
+///
+/// `type` is the width the SCRIPT declared, which is what decides the UI control and how many
+/// arena bytes a write touches. It is checked against the member's own type by the compiler, so
+/// by the time a call arrives here the two already agree.
+using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset,
+                              uint16_t lo, uint16_t hi, CtrlType type);
 struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
 
 namespace detail {
@@ -301,20 +369,35 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
 // this runs. What is left is the call itself, which exists so that a script declares a control the
 // way a compiled module does: `defineControls()` is an ordinary function the binding calls after a
 // successful compile, and this is an ordinary builtin it calls.
-extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, const uint8_t*) {
+// Shared by addUint8 and addUint16: identical but for the width they declare, so the bound check
+// and the sink call live once rather than in two copies that could drift.
+inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     // args: (name, memberOffset, min, max). The name is a pointer into the compiled program's
     // string pool, which outlives the run; the offset is the member's arena byte, which the
     // compiler passed by reference.
     const char* name = reinterpret_cast<const char*>(args[0]);
     const AddControlSink s = addControlSink();
     if (!name || !s.fn || !s.ctx) return 0;      // no binding listening: the call is a no-op
-    // A bound is a byte, and the range is an ARBITRARY EXPRESSION, so `addUint8("n", n, 0, x * 64)`
-    // can compute past 255. Truncating would publish a slider whose top silently wraps to a small
-    // number; refusing the declaration leaves the control absent, which the user can see.
-    if (args[2] > 255 || args[3] > 255) return 0;
+    // The range is an ARBITRARY EXPRESSION, so `addUint8("n", n, 0, x * 64)` can compute past what
+    // the declared width holds. Truncating would publish a slider whose top silently wraps to a
+    // small number; refusing the declaration leaves the control absent, which the user can see.
+    const uintptr_t limit = (type == CtrlType::Uint16) ? 65535u : 255u;
+    if (args[2] > limit || args[3] > limit) return 0;
+    // Same stance for an INVERTED range: with min > max the write path's `v < min || v > max` is
+    // true for every value, so the slider would appear and then refuse everything the user does to
+    // it. Refusing the declaration leaves it absent, which is visible.
+    if (args[2] > args[3]) return 0;
     s.fn(s.ctx, name, static_cast<uint8_t>(args[1]),
-         static_cast<uint8_t>(args[2]), static_cast<uint8_t>(args[3]));
+         static_cast<uint16_t>(args[2]), static_cast<uint16_t>(args[3]), type);
     return 0;
+}
+
+extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return addControlDecl(args, CtrlType::Uint8);
+}
+
+extern "C" inline uint32_t mm_light_addUint16(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return addControlDecl(args, CtrlType::Uint16);
 }
 
 extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -347,6 +430,30 @@ inline void setDrawCanvas(const draw::Canvas& cv) MM_NONBLOCKING {
     }
     detail::SinkSlot* s = detail::ownedSlot(true);
     if (s) s->canvas = cv;
+}
+
+/// setPaletteColor(x, y, index, brightness) → one pixel, coloured from the ACTIVE palette.
+///
+/// One call where a script used to write three: `paletteR/G/B` each returned a single channel, so
+/// a palette pixel cost three host calls AND three evaluations of whatever expression produced the
+/// brightness — the compiler evaluates each argument independently. Measured on an S3, that was
+/// 1451 us flat vs 1940 us with a per-pixel falloff; folding it into one call removes two of the
+/// three calls and two of the three brightness computations.
+///
+/// Takes x/y rather than a flat index so the buffer layout stops leaking into every script: a
+/// script was writing `mod(bx + dx, width) + mod(by + dy, height) * width` at every call site.
+/// Out-of-range coordinates are dropped, not wrapped — a "negative" coordinate arrives as a huge
+/// unsigned value, and wrapping it would paint the wrong edge rather than nothing.
+extern "C" inline uint32_t mm_light_setPaletteColor(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;                       // no canvas installed (a layout, a modifier)
+    const uint32_t x = uint32_t(args[0]), y = uint32_t(args[1]);
+    if (x >= uint32_t(cv.dims.x) || y >= uint32_t(cv.dims.y)) return 0;
+    draw::pixel(cv, Coord3D{lengthType(x), lengthType(y), 0},
+                colorFromPalette(*Palettes::active(),
+                                 static_cast<uint8_t>(args[2]),
+                                 static_cast<uint8_t>(args[3])));
+    return 0;
 }
 
 /// line(x1, y1, x2, y2, r, g, b) → a straight segment on the effect's canvas, z = 0.
@@ -478,6 +585,8 @@ inline BuiltinTable lightBuiltins() {
     t.add({"beat", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_beat, {}});
     // beatsin(bpm, t, high)  → a sine 0..high at bpm. The same shape an effect reaches for.
     t.add({"beatsin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_beatsin, {}});
+    // noise(x, y, z)         → 0..255 value noise. The one primitive fire/clouds/plasma all start from.
+    t.add({"noise", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_noise, {}});
     // scale(value, n)        → a 0..65535 value onto 0..n-1. Lands a beat on an axis.
     t.add({"scale", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_scale, {}});
     // turn(n)                → one revolution split n ways, for stepping a circle.
@@ -486,6 +595,12 @@ inline BuiltinTable lightBuiltins() {
     // sin(angle) / cos(angle) → the circle. One turn is 0..65535, so a loop over N points steps
     // by 65536/N; the result is biased unsigned (see above).
     t.add({"sin", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_sin, {}});
+    // polarA(dx, dy) / polarR(dx, dy) → polar from a centre. atan16 and dist16 already exist in
+    // math16.h. NOT named `angle`/`radius`: a script wants those for its own controls
+    // (ring.mll and balls.mle both declare `radius`), and a builtin would shadow them. Exposing
+    // them here is what lets a radial effect drop its precomputed lookup table.
+    t.add({"polarA", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarA, {}});
+    t.add({"polarR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarR, {}});
     t.add({"cos", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_cos, {}});
     t.add({"random16", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_random16, {}});
     // print(v)                → log v and return it. The script-level debugger.
@@ -499,7 +614,23 @@ inline BuiltinTable lightBuiltins() {
     // argument as the MEMBER, so the compiler passes its arena offset rather than its value, which
     // is what makes the script read as the reference a compiled module passes.
     t.add({"addUint8", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint8, {},
-           /*byRef*/ 0x2, /*byStr*/ 0x1});
+           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint8});
+    // addUint16(name, member, min, max) → the same call against a uint16_t member, so a script can
+    // expose a value a byte cannot hold (a dwell time, a 0..1000 scale) instead of packing it into
+    // two byte controls. Same by-ref/by-str marking: only the declared width differs.
+    t.add({"addUint16", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint16, {},
+           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint16});
+    // setPaletteColor(x, y, i, bri) → one palette-coloured pixel. The form a script should reach
+    // for: one call, one brightness evaluation, and no buffer-layout arithmetic at the call site.
+    t.add({"setPaletteColor", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColor, {}});
+    // paletteR/G/B(i, bri)    → one channel each, for a script that needs the components. Kept
+    // because setPaletteColor writes a pixel and cannot serve a script that wants the value.
+    t.add({"paletteR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteR, {}});
+    t.add({"paletteG", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteG, {}});
+    t.add({"paletteB", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteB, {}});
+    // The table is built once at startup; a dropped registration would surface much later as
+    // "unknown function" in a script, so it is caught HERE.
+    MM_ASSERT_NO_BUILTIN_OVERFLOW(t);
     return t;
 }
 
@@ -521,8 +652,9 @@ inline void runDefineControls(MoonLive& engine) {
     // clear-then-run would drop every control and rebuild none of them: the script would appear to
     // declare nothing. Keeping the previous set is the honest degrade, and the run is skipped
     // rather than executed into a dead sink.
-    if (!setAddControlSink([](void* ctx, const char* n, uint8_t off, uint8_t lo, uint8_t hi) {
-            static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi);
+    if (!setAddControlSink([](void* ctx, const char* n, uint8_t off,
+                              uint16_t lo, uint16_t hi, CtrlType type) {
+            static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi, type);
         }, &engine)) return;
     engine.clearDeclaredControls();      // re-runnable: rebuild rather than append
     // A one-light scratch buffer: this entry point writes no pixels, but `run` refuses a null or

@@ -625,7 +625,7 @@ two. The one concrete use case is a text overlay in a showcase effect, and that 
 on literals plus the numeric vocabulary already present.
 
 10. ✅ **The editing loop, which is the thing people will actually see.** Done, in
-   [Plan-20260818](Plan-20260818%20-%20A%20file%20editor%20control%20and%20a%20filesystem%20change%20seam.md).
+   [Plan-20260818](Plan-20260818%20-%20A%20file%20editor%20control%20and%20a%20filesystem%20change%20seam%20(shipped).md).
    A card carries a file picker and an editor; typing and clicking away recompiles.
 
    Built EARLIER than this plan's "last step, against the finished shape" reasoning suggested, and

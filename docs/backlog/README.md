@@ -50,6 +50,7 @@ One-off research documents that informed a future direction, kept for the reason
 
 - [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md) — live scripting (run user-authored effects/layouts/modifiers/drivers/sensor logic on-device without a reflash), Stage-1 survey. Deep-reads the ESPLiveScript fork (hpwit's native-Xtensa JIT), surveys the field (ARTI-FX interpreter by ewowi, embedded VMs, WASM/WAMR), and records the product-owner direction.
 - [livescripts-analysis-top-down.md](livescripts-analysis-top-down.md) — the Stage-2 redesign: a native-codegen engine, Xtensa-first behind an IR seam (WASM/WAMR the per-target fallback), a C-subset language that ports an effect near-verbatim, the MoonModule binding, and a staged spike plan along the MoonLight effects-tutorial ladder.
+- [moonlive-language-roadmap.md](moonlive-language-roadmap.md) — the ordered plan for closing the gap between the MoonLive engine and the power-functions library it was meant to expose. Records five measured ceilings (a FULL 16-entry builtin table, 64-byte arena, 8 members, 16 branch labels, no fractional or signed types), what a simulation effect gives up under them, and why the order runs the builtin table and the call ABI first — the library is largely built and almost none of it is reachable from a script.
 
 ## Project transition
 

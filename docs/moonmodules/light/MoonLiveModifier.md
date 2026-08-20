@@ -30,14 +30,14 @@ setXYZ((width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 
 ### What a script can read
 
-`x`, `y`, `z` (the light being folded) and `width`, `height`, `depth` (the box it lives in) are [system variables](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) — the engine writes them per call, and a script cannot declare a name that shadows one.
+`x`, `y`, `z` (the light being folded) and `width`, `height`, `depth` (the box it lives in) are [system variables](MoonLiveEffect.md#system-variables-what-the-engine-hands-a-script) — the engine writes them per call, and a script cannot declare a name that shadows one.
 
 `width` matters more than it looks. A mirror written against a fixed `255` sends every light of a 16-wide grid far outside the grid, the Layer discards each one as out of bounds, and the fixture goes black — with no error anywhere, because the script itself ran perfectly.
 
 ### Seeing inside a script
 
 `print(v)` logs a value and returns it, so it wraps any part of an expression: `setXYZ(print(width - 1 - xPos), yPos, zPos)`.
-It is for debugging and comes back out again — [what print costs](../../../moonlive/README.md#debugging-print).
+It is for debugging and comes back out again — [what print costs](writing-scripts.md#debugging-print).
 
 ## Limits
 
@@ -60,7 +60,7 @@ Past half full, the status also names the tightest limit the script is approachi
 |---|---|
 | `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-maps live |
 
-Plus one control per `addUint8` in the script's `defineControls()`: `addUint8("amount", amount, 0, 64)`
+Plus one control per `addUint8` / `addUint16` in the script's `defineControls()`: `addUint8("amount", amount, 0, 64)`
 becomes a slider, and moving it rebuilds the mapping just as editing the script does.
 
 Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through — the transform disappears until the script parses again, and the device keeps rendering throughout.

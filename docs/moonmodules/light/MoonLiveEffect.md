@@ -21,6 +21,8 @@ Inside a function the grammar is a sequence of **statements** — a function cal
 
 **A script's role is its extension**: `.mle` an effect, `.mll` a [layout](MoonLiveLayout.md), `.mlm` a [modifier](MoonLiveModifier.md). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
 
+**The shipped scripts are the reference**: [`moonlive/`](https://github.com/MoonModules/projectMM/tree/main/moonlive) in the repository holds every script a device ships with, one file per effect, layout and modifier. Read them to see what the language looks like in practice: they are the same text the card edits, and a device keeps its own copies under `/moonlive/`.
+
 The **class name is not the file name**. `plasma.mle` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
 
 The functions are **not built into the compiler** — `setRGB`, `fill`, `random16` are registered by the *host* (the light domain) in a builtin table; the core compiler owns only the grammar and a generic call/inline mechanism (the ESPLiveScript / ARTI bound-function model). The compiler emits machine code for whichever ISA the device runs (Xtensa on the classic/S3) or the host ISA on desktop, places it in executable memory, and the engine calls it each render tick.
@@ -32,17 +34,19 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
     Type in the box and the script compiles when you click away, press Ctrl/Cmd+S, or press Save; a dot on the Save button marks unsaved work. A valid script swaps in on the next tick. A failed compile frees the old code, shows the diagnostic in the module status, and renders dark until it is fixed, so a typo costs a message rather than a reboot. Fixing it in place is enough: nothing has to be renamed.
 
     The card also creates and deletes scripts (delete asks twice), and the same editor is what the File Manager opens from a file row. The control is [`filepath`](../core/ui.md#control-types), which is generic: the module says only where its files are and which extension they carry.
-- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` inside a `defineControls()`, the same call a compiled module makes. Each becomes a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
+- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` (or `addUint16`) inside a `defineControls()`, the same call a compiled module makes. Each becomes a real MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
   class SpeedyEffect {
-    uint8_t speed = 50;
-    uint8_t hue   = 128;
-    uint8_t phase = 0;          // a member, not a control: the UI never shows it
+    uint8_t  speed = 50;
+    uint8_t  hue   = 128;
+    uint16_t dwell = 900;       // a value a byte cannot hold
+    uint8_t  phase = 0;         // a member, not a control: the UI never shows it
 
     defineControls() {
       addUint8("speed", speed, 0, 99);
       addUint8("hue", hue, 0, 255);
+      addUint16("dwell", dwell, 0, 1000);
     }
 
     tick() { setRGB(speed, hue, phase, 255); }
@@ -54,9 +58,13 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
   UI shows one is the separate question `defineControls()` answers. A member no control names is
   simply the script's own state.
 
-  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`. The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
+  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`
+  (and `controls_.addUint16("dwell", dwell, 0, 1000)` for a wide member, which reaches the UI as a
+  16-bit control carrying its full range and value, not a byte). The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
 
-  `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
+  `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops.
+
+  **The call has to match the member's width**: `addUint8` binds a `uint8_t` and `addUint16` a `uint16_t`. A mismatch is a compile error naming the call to use instead, because the alternative is silent: `addUint8` on a wide member would drive only its low byte, leaving the high half holding whatever it had, so the number the script reads is one nobody chose. A control binds a single member, never an array.
 
 ### System variables — what the engine hands a script
 
@@ -91,12 +99,15 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
 | `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
 | `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
+| `noise(x, y, z)` | `0..255` value noise at that point — the field behind fire, clouds and plasma |
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
-| `print(v)` | log a value and return it ([what it costs](../../../moonlive/README.md#debugging-print)) |
+| `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
 
 `sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
+
+`noise(x, y, z)` takes **16.8 fixed-point** coordinates: the high byte selects the noise cell and the low byte interpolates within it. So `x * zoom` sets how much of the field the fixture spans, and the time axis must be **monotonic** — feeding it a `beat()` sawtooth walks one cell and then snaps back to its start, which reads as a hiccup once per beat. Scaling `t` keeps walking into new cells. 2D is the same call with `z` held constant.
 
 `turn(n)` exists because a full revolution is 65536 — one past the largest number a script can write — and the grammar has no division. Without it, placing `n` points evenly on a circle is not expressible.
 

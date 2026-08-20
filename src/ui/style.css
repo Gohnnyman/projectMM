@@ -182,6 +182,17 @@ body {
     flex: 1;
 }
 
+/* Group separator in the side nav. A real <hr>, restyled: default borders render as an inset
+   3D groove, so they are replaced with a single hairline in the same --border the cards use.
+   The margin is what makes it read as a break — at the list's 2px gap a bare rule looks like a
+   squashed item. */
+.nav-sep {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 8px 10px;
+    width: auto;
+}
+
 .nav-item {
     background: transparent;
     border: none;
@@ -612,7 +623,9 @@ body.cards-resizing {
 }
 /* Per-module help link → spec page on GitHub. Styled as a .card-btn so the
    right-hand cluster (✎ × ☰ ?) is visually uniform — same 26×26 square frame. */
-.card-help {
+/* `{ }` shares the help link's frame exactly — same 26px square, so the two read as one cluster
+   at the end of the title row rather than as a button and a label. */
+.card-help, .card-api {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--fg-muted);
@@ -627,9 +640,15 @@ body.cards-resizing {
     align-items: center;
     justify-content: center;
 }
-.card-help:hover {
+.card-help:hover, .card-api:hover {
     color: var(--fg);
     border-color: var(--accent);
+}
+
+.card-api {
+    /* Slightly tighter than the 12px `?`: the braces sit visually larger at the same size. */
+    font-size: 11px;
+    letter-spacing: -0.05em;
 }
 
 .card-stats {

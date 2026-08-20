@@ -197,6 +197,10 @@ function connectWs() {
             if (!Array.isArray(data.modules)) return;
             state = data;
             renderCards();     // a full state may add/remove/reshape cards (structural resync) — full render
+            // The nav is built from the same tree, so a structural change (a module added or removed)
+            // must rebuild it too, or the sidebar keeps entries the state no longer has. AFTER
+            // renderCards, because its fallback may reassign selectedModule and the nav highlights it.
+            renderNav();
             updateValues();
         } catch {
             // ignore malformed messages
@@ -280,7 +284,10 @@ async function init() {
                 const savedSel = lsRead(LS_SELECTED, null);
                 if (state.modules.length > 0) {
                     const exists = savedSel && state.modules.some(m => m.name === savedSel);
-                    selectedModule = exists ? savedSel : state.modules[0].name;
+                    // Default to the first root AS LISTED, not as scheduled — otherwise a
+                    // device with no saved selection opens on a card that is not the one the
+                    // nav highlights at the top.
+                    selectedModule = exists ? savedSel : navRoots(state.modules)[0].name;
                 }
                 renderNav();
                 renderCards();
@@ -504,6 +511,44 @@ async function rebootDevice() {
 // 4. Render pipeline
 // ---------------------------------------------------------------------------
 
+// The order roots are LISTED in, which is deliberately not the order they RUN in.
+//
+// main.cpp orders by dependency — Filesystem before anything that writes a file, System before the
+// modules that read its identity — and that order is load-bearing, so it cannot be reshuffled to
+// suit a menu. But it reads as an implementation detail to someone using the device: the first
+// thing they see is System, and the lights are at the bottom.
+//
+// So the nav states its own order, grouped by what a user is looking for: the thing they reach for
+// most (Control), then the light pipeline in pipeline order (where the lights are → what colour →
+// how it gets out), then the device itself. A root NOT named here still appears, after these, in
+// scheduler order — so adding a module never makes it invisible, it just lands at the end until
+// someone decides where it belongs.
+// GROUPS, not one flat list: the nav draws a rule between them, so the grouping has to be the
+// data rather than an index the renderer counts to.
+const NAV_GROUPS = [
+    ["Control"],
+    ["Layouts", "Effects", "Drivers"],                          // the light pipeline, in pipeline order
+    ["System", "File Manager", "Network", "Services", "Firmware"],
+];
+const NAV_ORDER = NAV_GROUPS.flat();
+
+/// Roots in nav order, grouped: each entry is an array of the modules present from one NAV_GROUP,
+/// with anything NAV_GROUPS does not name appended as a final group in scheduler order. Empty
+/// groups are dropped, so a build without (say) Services never draws a rule around nothing.
+function navGroups(modules) {
+    const byName = new Map(modules.map(m => [m.name, m]));
+    const groups = NAV_GROUPS.map(g => g.map(n => byName.get(n)).filter(Boolean));
+    const unlisted = modules.filter(m => !NAV_ORDER.includes(m.name));
+    if (unlisted.length) groups.push(unlisted);
+    return groups.filter(g => g.length);
+}
+
+/// Flat nav order — the same modules navGroups returns, ungrouped. Used where only the ORDER
+/// matters (picking the default selection), so the two can never disagree about what comes first.
+function navRoots(modules) {
+    return navGroups(modules).flat();
+}
+
 function renderNav() {
     const nav = document.getElementById("nav");
     if (!nav || !state) return;
@@ -513,16 +558,26 @@ function renderNav() {
     // root's card subtree is rendered (one root visible at a time).
     const list = document.createElement("div");
     list.className = "nav-list";
-    for (const mod of state.modules) {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "nav-item";
-        item.textContent = mod.name;
-        item.dataset.module = mod.name;
-        if (mod.name === selectedModule) item.classList.add("active");
-        item.addEventListener("click", () => selectModule(mod.name));
-        list.appendChild(item);
-    }
+    navGroups(state.modules).forEach((group, gi) => {
+        // A rule BETWEEN groups, never before the first or after the last. `<hr>` rather than a
+        // styled div: it is the element that means "thematic break", so a screen reader announces
+        // the grouping instead of reading one long undifferentiated list.
+        if (gi > 0) {
+            const rule = document.createElement("hr");
+            rule.className = "nav-sep";
+            list.appendChild(rule);
+        }
+        for (const mod of group) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "nav-item";
+            item.textContent = mod.name;
+            item.dataset.module = mod.name;
+            if (mod.name === selectedModule) item.classList.add("active");
+            item.addEventListener("click", () => selectModule(mod.name));
+            list.appendChild(item);
+        }
+    });
     nav.appendChild(list);
     nav.appendChild(buildNavFooter());
 }
@@ -659,7 +714,7 @@ function renderCards() {
     // Falls back to the first root if the selection is missing or stale.
     let root = selectedModule ? findModule(selectedModule) : null;
     if (!root && state.modules.length > 0) {
-        root = state.modules[0];
+        root = navRoots(state.modules)[0];   // the first NAV entry, matching what is highlighted
         selectedModule = root.name;
     }
     if (root) renderModuleTree(root, main, 0);
@@ -1023,6 +1078,24 @@ function createCard(mod, depth) {
         help.href = "https://moonmodules.org/projectMM/moonmodules/" + htmlPath;
         title.appendChild(help);
     }
+
+    // `api` → this ONE module's JSON in a new tab, for issue reports: a user pastes the state of
+    // the card that misbehaves instead of the whole /api/state tree, and the report carries the
+    // control values, the type and the live telemetry without anyone having to ask for them.
+    // On EVERY card, unlike ✎/× (user-editable children only) and ? (types with a doc page):
+    // the card most worth reporting is as likely to be a fixed top-level module as a child.
+    const api = document.createElement("a");
+    api.className = "card-api";
+    // A glyph, not the word "api": this is a diagnostic aid, and the card's own content should
+    // carry the visual weight. Braces read as JSON at a glance and match the ?/× glyph style.
+    api.textContent = "{ }";
+    api.title = "Open this module's JSON (for issue reports)";
+    api.target = "_blank";
+    api.rel = "noopener";
+    // Relative, so it follows whatever host the UI is served from (device IP, mDNS name or a
+    // desktop build on localhost) instead of hard-coding one.
+    api.href = "/api/modules/" + encodeURIComponent(mod.name);
+    title.appendChild(api);
 
     card.appendChild(title);
 
@@ -1770,7 +1843,9 @@ function createControl(moduleName, moduleType, ctrl) {
             // what kind of file this is.
             const dir = ctrl.dir || "";
             const ext = ctrl.ext || "";
-            const pathOf = (n) => (n ? joinFsPath(dir, n) : "");
+            // No `dir` means the name IS the path: joinFsPath("", n) would return "/n" and point
+            // at the filesystem root instead of the file the module named.
+            const pathOf = (n) => (n ? (dir ? joinFsPath(dir, n) : n) : "");
 
             const stack = document.createElement("div");
             stack.className = "control-fileedit-stack";
@@ -1872,11 +1947,16 @@ function createControl(moduleName, moduleType, ctrl) {
             // whatever it saved is what this pane should now show.
             popBtn.addEventListener("click", async () => {
                 if (!picker.value) return;
+                // Flush unsaved edits first: the modal loads the file from the device, so opening
+                // it on a dirty pane would show stale bytes and then save them back over the edit.
+                await editor.save();
                 await openFileEditor(pathOf(picker.value));
                 await editor.load(pathOf(picker.value));
             });
 
-            picker.addEventListener("change", () => {
+            picker.addEventListener("change", async () => {
+                // Same reason as the modal above: switching files discards the edit otherwise.
+                await editor.save();
                 dragTs[key] = Date.now();
                 sendControl(moduleName, ctrl.name, picker.value);
                 editor.load(pathOf(picker.value));
@@ -4671,9 +4751,9 @@ async function fmDropUpload(destDir, files) {
 
 // Load `relPath` into `textarea`. Returns {readOnly, message}: read-only when the file cannot be
 // safely round-tripped through a <textarea>, so a save can never write a lossy copy back over it.
-async function fmLoadInto(textarea, relPath, expectedSize) {
+async function fmLoadInto(textarea, relPath, expectedSize, signal) {
     try {
-        const res = await fetch("/api/file?path=" + encodeURIComponent(relPath));
+        const res = await fetch("/api/file?path=" + encodeURIComponent(relPath), { signal });
         // Surface the server's own message (e.g. "not found") rather than a bare status code.
         if (!res.ok) throw new Error(await errorMessage(res));
         const text = await res.text();
@@ -4698,6 +4778,9 @@ async function fmLoadInto(textarea, relPath, expectedSize) {
         textarea.value = fmPrettify(text, relPath);
         return { readOnly: false, message: "" };
     } catch (err) {
+        // A superseded load was cancelled on purpose (the caller has already moved to another
+        // file): leave the pane alone and say so, so the newer load owns what is on screen.
+        if (err && err.name === "AbortError") return { aborted: true, readOnly: false, message: "" };
         textarea.value = "";
         // Read-only on a failed load so a Save can never post an empty body over a file that is
         // merely unreachable.
@@ -4793,16 +4876,29 @@ function fmMountEditor(host, relPath, opts = {}) {
     });
     taObserver.observe(body);
 
-    const save = async () => {
-        if (body.readOnly || !dirty || !path) return;
-        status.textContent = "saving…";
-        const r = await fmSaveFrom(body, path);
-        status.textContent = r.message;
-        // A failed write (no space, a vanished path) must not be silent. The modal shows it on its
-        // status line; a host that supplied its own hidden one gets an alert, because the work is
-        // still unsaved and the dot alone does not say why.
-        if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
-        if (r.ok) { setDirty(false); if (onSaved) onSaved(path); }
+    // Blur, Cmd+S and the Save button all call save(), and a blur fires when the button takes
+    // focus — so without this guard one edit issues overlapping POSTs of the same file. `dirty`
+    // cannot serve as the guard: it is only cleared after the await, so a second trigger passes
+    // the check while the first request is still in flight. Saves are serialized rather than
+    // dropped, because the second trigger may carry newer keystrokes than the first.
+    let saving = null;
+    const save = () => {
+        if (body.readOnly || !dirty || !path) return Promise.resolve();
+        saving = (saving || Promise.resolve()).then(async () => {
+            if (body.readOnly || !dirty || !path) return;   // re-check: a queued save may be moot
+            const saved = body.value;                       // what THIS request writes
+            status.textContent = "saving…";
+            const r = await fmSaveFrom(body, path);
+            status.textContent = r.message;
+            // A failed write (no space, a vanished path) must not be silent. The modal shows it on
+            // its status line; a host that supplied its own hidden one gets an alert, because the
+            // work is still unsaved and the dot alone does not say why.
+            if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
+            // Only clear dirty if the body still holds what we just wrote — typing during the
+            // request means there are newer bytes on screen that nobody has saved yet.
+            if (r.ok && body.value === saved) { setDirty(false); if (onSaved) onSaved(path); }
+        });
+        return saving;
     };
 
     body.addEventListener("input", () => { if (!body.readOnly) setDirty(true); });
@@ -4812,11 +4908,20 @@ function fmMountEditor(host, relPath, opts = {}) {
     });
     saveBtn.addEventListener("click", save);
 
+    // Picking a second file before the first finishes loading must not paint the first file's
+    // contents over it. The in-flight request is ABORTED rather than merely ignored, because
+    // fmLoadInto writes the textarea itself — a late response would overwrite the newer file's
+    // contents before any check here could run.
+    let loadAbort = null;
     const load = async (p, size) => {
+        if (loadAbort) loadAbort.abort();
+        const ac = new AbortController();
+        loadAbort = ac;
         path = p;
         setDirty(false);
         if (!path) { body.value = ""; body.readOnly = true; saveBtn.disabled = true; status.textContent = ""; return; }
-        const r = await fmLoadInto(body, path, size);
+        const r = await fmLoadInto(body, path, size, ac.signal);
+        if (r.aborted || ac !== loadAbort) return;   // a newer load started: that one owns the pane
         body.readOnly = r.readOnly;
         saveBtn.disabled = r.readOnly;
         status.textContent = r.message;
@@ -4826,6 +4931,9 @@ function fmMountEditor(host, relPath, opts = {}) {
     return {
         textarea: body,
         load,
+        // Flush pending edits before the pane is navigated away from or replaced by the modal.
+        // Resolves once any in-flight save has completed, so the caller can safely re-read.
+        save,
         isDirty: () => dirty,
         dispose: () => { taObserver.disconnect(); wrap.remove(); },
     };
@@ -4848,7 +4956,13 @@ async function openFileEditor(relPath, expectedSize) {
     // Resolves when the dialog CLOSES, not when it opens: a caller that re-reads the file
     // afterwards (the card's pane shows the same file) would otherwise read it before any edit.
     await new Promise((resolve) => {
-        dlg.addEventListener("close", () => { ed.dispose(); dlg.remove(); resolve(); }, { once: true });
+        // AWAIT the save before disposing. Closing blurs the textarea, which starts a save; the
+        // promise above exists so the caller can re-read the file afterwards, and resolving while
+        // that write is still in flight is exactly the stale read it is meant to prevent.
+        // ed.save() is a no-op when nothing is dirty, and its own queue makes a double-call safe.
+        dlg.addEventListener("close", async () => {
+            try { await ed.save(); } finally { ed.dispose(); dlg.remove(); resolve(); }
+        }, { once: true });
     });
 }
 

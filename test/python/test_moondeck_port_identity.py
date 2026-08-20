@@ -42,7 +42,7 @@ def test_resolve_native_usb_p4_not_mislabeled_as_s3():
     # A P4 on native USB shares PID 0x1001 with the S3 — the descriptor must NOT guess "esp32-s3".
     # With a registry match (MAC), the P4's real chip (from firmware) wins over the generic guess.
     devs = [{"deviceName": "MM-P4", "mac": "80:F1:B2:D0:AC:F7", "ip": "192.168.1.133",
-             "firmware": "esp32p4-eth"}]
+             "firmware": "esp32p4rev1-eth"}]
     usb = {"vid": 0x303A, "pid": 0x1001, "product": "USB JTAG/serial debug unit",
            "serial": "80:F1:B2:D0:AC:F7"}
     got = _resolve_port("/dev/cu.usbmodem5ABA0767221", usb, devs)
@@ -60,7 +60,7 @@ def test_chip_from_usb_external_adapter_reveals_nothing():
 # --- level 2 fallback: chip from the registry firmware id ---------------------
 
 def test_firmware_to_chip():
-    assert _firmware_to_chip("esp32p4-eth") == "esp32-p4"
+    assert _firmware_to_chip("esp32p4rev1-eth") == "esp32-p4"
     assert _firmware_to_chip("esp32s3-n8r8") == "esp32-s3"
     assert _firmware_to_chip("esp32s31") == "esp32-s3"        # S31 is an S3 variant
     assert _firmware_to_chip("esp32") == "esp32 (classic)"
@@ -83,7 +83,7 @@ _DEVS = [
     {"deviceName": "projectMM-testbench-S3", "mac": "CC:BA:97:0A:F3:F8",
      "ip": "192.168.1.159", "firmware": "esp32s3-n16r8"},   # native USB, no usbSerial
     {"deviceName": "MM-P4", "mac": "80:F1:B2:D0:AC:F7", "ip": "192.168.1.133",
-     "firmware": "esp32p4-eth", "usbSerial": "5ABA0767221"},
+     "firmware": "esp32p4rev1-eth", "usbSerial": "5ABA0767221"},
 ]
 
 
@@ -196,7 +196,7 @@ def test_parse_esptool_probe():
 
 
 def test_apply_probe_caches_serial_and_chip():
-    devs = [{"deviceName": "MM-P4", "mac": "80:F1:B2:D0:AC:F7", "firmware": "esp32p4-eth"}]
+    devs = [{"deviceName": "MM-P4", "mac": "80:F1:B2:D0:AC:F7", "firmware": "esp32p4rev1-eth"}]
     _apply_probe_results(devs, {"/dev/cu.usbmodem5ABA0767221":
                                 {"chip": "esp32-p4", "mac": "80:f1:b2:d0:ac:f7"}})
     assert devs[0]["usbSerial"] == "5ABA0767221"

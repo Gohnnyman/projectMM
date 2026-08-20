@@ -39,16 +39,7 @@ public:
                               moonlive::kEffectPick);
         // Every control the script declared. System variables (`width`, `height`, `depth`, `t`)
         // are not controls and never appear here, so there is nothing to filter out.
-        uint8_t n = 0;
-        const moonlive::DeclaredControl* decls = script_.engine().declaredControls(n);
-        for (uint8_t i = 0; i < n; i++) {
-            uint8_t* slot = script_.engine().controlSlot(decls[i].offset);
-            if (!slot) continue;   // engine not compiled yet (first sweep) — controls appear after prepare
-            // The engine owns its declared names (MoonLive::compile copies them out of the
-            // source before the text is freed), so the descriptor can borrow that pointer
-            // directly — a second per-binding pool would be the same fact in two places.
-            controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
-        }
+        script_.publishDeclaredControls(controls_);
     }
 
     // Naming a different script must recompile: route it through the prepare rebuild sweep so the

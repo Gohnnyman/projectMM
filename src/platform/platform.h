@@ -275,11 +275,15 @@ const char* psramType();
 
 // WiFi co-processor status, for boards whose radio lives on a separate chip (the
 // ESP32-P4 + on-board ESP32-C6 over esp_hosted). Returns a short status string:
-// the detected co-processor firmware version when the link is up (e.g.
-// "C6 fw 2.12.9"), "not detected" when the slave never completed its handshake or
-// reports 0.0.0 (the tell for absent / incompatible C6 slave firmware), or "" on
-// targets with a native radio (no co-processor). Lets SystemModule prove the C6
-// firmware state instead of guessing. Empty string => render nothing.
+// the detected co-processor firmware version when the query answers (e.g.
+// "C6 fw 2.12.9"), "querying…" while attempts remain, "no version reply" once a
+// bounded number of attempts have gone unanswered, or "" on targets with a native
+// radio (no co-processor). Empty string => render nothing.
+//
+// "no version reply" rather than "not detected": on the bench the C6 associates and
+// serves traffic while this particular RPC times out, so declaring the slave absent
+// would be a false statement about working hardware. The field says what is known —
+// the query did not answer — and leaves the conclusion to whoever reads it.
 const char* coprocessorWifi();
 
 // This host's LAN IPv4 address as a dotted string, or "" if unavailable.

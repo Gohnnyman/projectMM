@@ -40,9 +40,9 @@ public:
         // answers it, against a compile's read plus parse, codegen and exec-block allocation.
         uint32_t fileHash = 0;
         const bool readable = scriptFileHash(name_, fileHash);
-        if (readable && engine_.ok() && compiledHash_ != 0 && fileHash == compiledHash_) return false;
+        if (readable && engine_.ok() && haveCompiled_ && fileHash == compiledHash_) return false;
 
-        // A failed compile leaves compiledHash_ at 0 and the engine not ok(), which is
+        // A failed compile leaves haveCompiled_ false and the engine not ok(), which is
         // indistinguishable from "not compiled yet", so without this latch a layout re-reads and
         // re-compiles the file on every lightCount()/placeLights(). Each attempt is two LittleFS
         // operations (~5 ms on an S3), the pipeline asks repeatedly while sizing and walking the
@@ -83,8 +83,11 @@ public:
             std::snprintf(failedScript_, sizeof(failedScript_), "%s", name_);
         }
         // The CONTENT hash, not a copy of the text: 4 bytes to answer "is what I compiled still what
-        // the file says". 0 means nothing is compiled.
+        // the file says". Whether anything IS compiled is a separate flag rather than hash != 0,
+        // because 0 is a legitimate hash: a script that happened to hash to it would recompile on
+        // every prepare sweep, which is the cost this comparison exists to avoid.
         compiledHash_ = hash;
+        haveCompiled_ = engine_.ok();   // a FAILED compile has no program, whatever the file hashed to
         owner.setDynamicBytes(engine_.heapBytes());
         return true;
     }
@@ -107,10 +110,38 @@ public:
     /// disabled, where the engine was released but the name was kept.
     void invalidate() {
         compiledHash_ = 0;
+        haveCompiled_ = false;
         compileFailed_ = false;
         failedHash_ = 0;
         failedReadable_ = false;
         failedScript_[0] = '\0';
+    }
+
+    /// Publish every control the compiled script declared into `controls`, bound by reference to
+    /// the engine's live arena slot so a slider write lands where the running native code reads it.
+    /// The ONE home for this: all three bindings (effect, layout, modifier) publish identically,
+    /// and the width dispatch below is the kind of reasoning that should be stated once.
+    void publishDeclaredControls(ControlList& controls) {
+        uint8_t n = 0;
+        const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
+        for (uint8_t i = 0; i < n; i++) {
+            uint8_t* slot = engine_.controlSlot(decls[i].offset);
+            if (!slot) continue;   // engine not compiled yet — controls appear after prepare
+            // Published at the width the script declared. A uint16_t member reaches the UI as a
+            // 16-bit control writing both its arena bytes; publishing it as a uint8 would drive
+            // only the low one and leave the high half holding whatever it had.
+            if (decls[i].type == moonlive::CtrlType::Uint16) {
+                // Safe to view as a uint16_t: the compiler aligns every wide member to an even
+                // arena offset (two backends cannot encode an odd halfword offset at all), and the
+                // arena base comes from platform::alloc, which is aligned for any fundamental type.
+                controls.addUint16(decls[i].name, *reinterpret_cast<uint16_t*>(slot),
+                                   decls[i].min, decls[i].max);
+            } else {
+                controls.addUint8(decls[i].name, *slot,
+                                  static_cast<uint8_t>(decls[i].min),
+                                  static_cast<uint8_t>(decls[i].max));
+            }
+        }
     }
 
     MoonLive&       engine()       { return engine_; }
@@ -126,6 +157,7 @@ private:
     // "no script" until one is named, rather than every new module compiling the same default.
     char     name_[kMaxScriptName + 1] = "";
     uint32_t compiledHash_ = 0;
+    bool     haveCompiled_ = false;   // 0 is a valid hash, so "is anything compiled" is its own flag
     // The name AND content that failed, so a retry is skipped only while both still match. Content
     // too, because the whole point of this step is that a file's text changes under a fixed name:
     // latching on the name alone would refuse to re-try a script the user just fixed.

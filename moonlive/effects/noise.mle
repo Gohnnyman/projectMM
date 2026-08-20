@@ -1,0 +1,22 @@
+// Perlin-style value noise coloured by the palette.
+// Ported from MoonLight's E_noise.sc.
+
+class NoiseEffect {
+  uint8_t speed = 20;
+  uint8_t zoom = 8;
+
+  defineControls() {
+    addUint8("speed", speed, 1, 120);
+    addUint8("zoom", zoom, 1, 32);
+  }
+
+  tick() {
+    for (y = 0; y < height; y = y + 1) {
+      for (x = 0; x < width; x = x + 1) {
+        // The time axis must keep growing: a beat() sawtooth would walk one noise
+        // cell and snap back to its start, a visible hiccup once per beat.
+        setPaletteColor(x, y, noise(x * zoom, y * zoom, scale(t, speed * 280)), 255);
+      }
+    }
+  }
+}

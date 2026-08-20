@@ -51,13 +51,7 @@ public:
         // declares it under its OWN name (`addUint8("cols", cols, 1, 64)`) and it becomes a real
         // slider. Not `width`: that is a system variable the engine writes, so a script cannot
         // declare it and the compiler refuses the name.
-        uint8_t n = 0;
-        const moonlive::DeclaredControl* decls = script_.engine().declaredControls(n);
-        for (uint8_t i = 0; i < n; i++) {
-            uint8_t* slot = script_.engine().controlSlot(decls[i].offset);
-            if (!slot) continue;
-            controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
-        }
+        script_.publishDeclaredControls(controls_);
     }
 
     /// Compile the script. The lights themselves are placed by whoever asks — see lightCount().
@@ -154,10 +148,14 @@ private:
     /// there harmlessly.
     void runScript(moonlive::AddLightFn fn, void* ctx) const {
         uint8_t scratch[3] = {0, 0, 0};
-        moonlive::setAddLightSink(fn, ctx);
-        // The placement moment: run `placeLights` if the script defined one. A script without it
-        // places no lights, which the module reports as an empty fixture rather than a failure.
+        // Checked BEFORE the sink is installed. `ctx` is the caller's stack-local Counter or
+        // Emitter, so returning between install and clear would leave the global sink pointing at
+        // a dead frame until the next runScript happened to overwrite it.
+        //
+        // A script without placeLights places no lights, which the module reports as an empty
+        // fixture rather than a failure.
         if (!script_.engine().hasEntry(moonlive::kEntryPlaceLights)) return;
+        moonlive::setAddLightSink(fn, ctx);
         script_.engine().run(scratch, 1, 3, 0, moonlive::kEntryPlaceLights);
         moonlive::setAddLightSink(nullptr, nullptr);
     }

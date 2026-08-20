@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstdio>   // the builtin-table overflow diagnostic
 
 // MoonLive built-in table — the neutral seam by which a HOST registers the functions a script
 // may call (the ESPLiveScript `arti_external_function` / ARTI / doc §3.4 model). The core
@@ -21,6 +22,13 @@
 // "setRGB" and its RGB meaning live only in the host's registration; the core sees a tag.
 
 namespace mm::moonlive {
+
+// The width of a script member, and how many arena bytes one element of it occupies. Here rather
+// than with the IR because a builtin descriptor names the width its by-reference argument takes.
+enum class CtrlType : uint8_t { Uint8, Uint16 };
+
+constexpr uint8_t ctrlWidth(CtrlType t) { return t == CtrlType::Uint16 ? 2 : 1; }
+
 
 // Neutral inline opcodes — "store shapes a backend can emit", not "LED operations". A host maps
 // its function names onto these; a backend implements them. StoreElem = store N bytes (one
@@ -78,20 +86,54 @@ struct Builtin {
     // host a pointer built from a color byte. Stated per builtin for the same reason byRef is,
     // rather than special-cased by name in the parser.
     uint8_t      byStr = 0;
+    // The member WIDTH a by-reference argument must have, for the control-declaring builtins:
+    // addUint8 takes a uint8_t member, addUint16 a uint16_t one. Stated here for the same reason
+    // byRef and byStr are, rather than the parser matching on the builtin's name — a name test
+    // would silently mis-classify the next by-reference builtin somebody adds.
+    CtrlType     refType = CtrlType::Uint8;
 };
+
+/// Assert a host's builtin table did not silently drop a registration.
+///
+/// `BuiltinTable::add()` returns false when the table is full, and a host registers dozens of
+/// names in a row without checking each one — so an overflow used to surface as a script failing
+/// with "unknown function" for a builtin that plainly exists in the source. This turns it into a
+/// failure at the point of registration. A host calls it once, after building its table.
+#define MM_ASSERT_NO_BUILTIN_OVERFLOW(t)                                              \
+    do {                                                                              \
+        if ((t).full()) {                                                             \
+            std::printf("MoonLive: builtin table FULL at %u entries — a registration " \
+                        "was dropped. Raise BuiltinTable::kMax.\n",                    \
+                        static_cast<unsigned>((t).registered()));                     \
+        }                                                                             \
+    } while (0)
 
 // A fixed-capacity table the host fills and the compiler reads. No heap; a host registers a
 // handful of functions. Lookup is by name (linear — the table is tiny).
 struct BuiltinTable {
-    static constexpr uint8_t kMax = 16;
+    // 64, not 16. The light domain filled all 16, and a table at capacity fails SILENTLY: add()
+    // returned false, no caller checked it, and the script found out as "unknown function" at
+    // compile time with nothing pointing at the real cause. 64 is what the power-functions spec
+    // asks for; the cost is `sizeof(Builtin) * 48` more in a table the host builds once.
+    static constexpr uint8_t kMax = 64;
     Builtin items[kMax];
     uint8_t count = 0;
+    bool overflowed = false;    // set when an add() was DROPPED — see full()
 
     bool add(const Builtin& b) {
-        if (count >= kMax || b.name == nullptr) return false;   // a null name would null-deref in find()
+        if (b.name == nullptr) return false;   // a null name would null-deref in find()
+        if (count >= kMax) { overflowed = true; return false; }
         items[count++] = b;
         return true;
     }
+
+    /// True when a registration was dropped for lack of room. A host builds its table once at
+    /// startup, so this is asserted there rather than checked per call — the point is that
+    /// running out of table is LOUD, which is exactly what the 16-entry version was not.
+    bool full() const { return overflowed; }
+
+    /// Every registered name, for the overflow diagnostic. Not used on any hot path.
+    uint8_t registered() const { return count; }
     const Builtin* find(const char* name, size_t len) const {
         for (uint8_t i = 0; i < count; i++) {
             const char* n = items[i].name;

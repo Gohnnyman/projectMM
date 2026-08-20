@@ -50,13 +50,7 @@ public:
                               moonlive::kModifierPick);
         // Every control the script declared. System variables (`x`/`y`/`z`, `width`/`height`/
         // `depth`, `t`) are not controls and never appear here, so there is nothing to filter out.
-        uint8_t n = 0;
-        const moonlive::DeclaredControl* decls = script_.engine().declaredControls(n);
-        for (uint8_t i = 0; i < n; i++) {
-            uint8_t* slot = script_.engine().controlSlot(decls[i].offset);
-            if (!slot) continue;
-            controls_.addUint8(decls[i].name, *slot, decls[i].min, decls[i].max);
-        }
+        script_.publishDeclaredControls(controls_);
     }
 
     /// Compile the script as written.

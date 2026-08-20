@@ -551,14 +551,34 @@ async function runScript(script, btn) {
         return;
     }
 
-    // Live tab scripts: run against each selected device in the active network
+    // Live tab scripts: run against each selected device in the active network.
+    //
+    // ONLINE ones only. A checkbox survives a device going offline (the flag is user state,
+    // deliberately kept across scans), so a stale tick would otherwise send the run at a board
+    // that is not there — and each one costs a ~16 s connect timeout before failing, which buries
+    // the results of the boards that did run. Offline picks are reported rather than dropped
+    // silently, so a device that was expected to run and did not is visible.
     if (script.tab === "live" && script.needs_device) {
         const active = getActiveNetwork();
-        const devices = ((active && active.devices) || []).filter(d => d.selected);
+        const picked = ((active && active.devices) || []).filter(d => d.selected);
+        // `online !== false`, the same predicate the device list and the status dot use: a device
+        // discovered but never probed has NO `online` field, and treating that as offline would
+        // refuse to run on a board that is very likely up.
+        const devices = picked.filter(d => d.online !== false);
+        const skipped = picked.filter(d => d.online === false);
         if (devices.length === 0) {
             switchPane("log");
-            appendLog("\n--- No devices selected. Use Discover and check devices first. ---\n");
+            appendLog(picked.length
+                ? `\n--- No ONLINE devices selected. ${skipped.length} selected `
+                  + `device(s) are offline: ${skipped.map(d => d.deviceName || d.ip).join(", ")}. `
+                  + `Scan to refresh. ---\n`
+                : "\n--- No devices selected. Use Discover and check devices first. ---\n");
             return;
+        }
+        if (skipped.length) {
+            switchPane("log");
+            appendLog(`\n--- Skipping ${skipped.length} offline device(s): `
+                      + `${skipped.map(d => d.deviceName || d.ip).join(", ")} ---\n`);
         }
         let allPassed = true;
         for (const device of devices) {

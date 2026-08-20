@@ -72,8 +72,11 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     # ensure_ascii=False keeps the em-dashes in descriptions literal (readable
     # diffs), matching the hand-authored deviceModels.json sibling.
-    args.out.write_text(json.dumps(build_doc(), indent=2, ensure_ascii=False) + "\n")
-    print(f"generate_firmwares: wrote {args.out} ({len(FIRMWARES)} variants)")
+    doc = build_doc()
+    args.out.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    # Count what was WRITTEN, not len(FIRMWARES): build_doc drops non-installable
+    # variants, so the raw dict size contradicts check_firmwares.py's count.
+    print(f"generate_firmwares: wrote {args.out} ({len(doc['firmwares'])} variants)")
     return 0
 
 

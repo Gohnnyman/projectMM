@@ -92,7 +92,7 @@ def test_ci_target_inference_resolves_esp32s31_before_esp32s3():
     assert infer_target("esp32s31") == "esp32s31", "S31 must NOT be misread as esp32s3"
     assert infer_target("esp32s3-n16r8") == "esp32s3"
     assert infer_target("esp32s3-n8r8") == "esp32s3"
-    assert infer_target("esp32p4-eth") == "esp32p4"
+    assert infer_target("esp32p4rev1-eth") == "esp32p4"
     assert infer_target("esp32") == "esp32"
     assert infer_target("esp32-16mb") == "esp32"
 

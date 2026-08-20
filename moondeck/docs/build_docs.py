@@ -69,7 +69,11 @@ def _kill_stray_serve() -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build the projectMM docs site.")
     ap.add_argument("--strict", action="store_true",
-                    help="Treat warnings (broken nav/links) as errors — used in CI.")
+                    help=("Promote EVERY mkdocs warning to fatal — a local anchor audit, NOT the "
+                          "CI gate. The plain build is what CI runs; it already fails on a missing "
+                          "page or broken nav. This additionally fails on the out-of-tree source "
+                          "links and stale cross-doc anchors that mkdocs.yml deliberately sets to "
+                          "`warn`, so it aborts and writes NO site until those are swept."))
     ap.add_argument("--serve", action="store_true",
                     help="Live-preview the site locally instead of building.")
     ap.add_argument("--port", type=int, default=SERVE_PORT,

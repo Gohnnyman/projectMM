@@ -72,7 +72,15 @@ A left column listing the root modules, one entry per top-level MoonModule.
 - **Hamburger toggle.** ☰ toggles `body.nav-open`. On wide screens (≥ 820 px) the nav is a static
   column the hamburger collapses/expands; on narrow screens (< 820 px) it's a slide-in drawer over a
   dimming overlay (click the overlay or press Esc to close).
-- **No root reorder.** Root order is fixed in `main.cpp`; the nav does not drag-reorder.
+- **The nav states its own order** (`NAV_ORDER` in app.js), which is deliberately NOT the order the
+  roots run in. `main.cpp` orders by dependency — Filesystem before anything that writes a file,
+  System before the modules that read its identity — and that is load-bearing, so it cannot be
+  reshuffled to suit a menu. It also reads as an implementation detail to a user: it puts System
+  first and the lights last. The nav instead groups by what someone is looking for: **Control**,
+  then the light pipeline in pipeline order (**Layouts → Effects → Drivers**), then the device
+  (**System, File Manager, Network, Services, Firmware**). A root the list does not name still
+  appears, after them, in scheduler order — adding a module never makes it invisible.
+- **No root reorder.** The order is fixed in that list; the nav does not drag-reorder.
 - **Footer** pinned to the bottom of the nav: social links (GitHub, Discord, Reddit, YouTube — inline
   SVG) and a `© <year> MoonLight` line.
 
@@ -89,7 +97,7 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
 
 ```text
 ┌─ card ──────────────────────────────────┐
-│ [name] [emoji]  [timing · 🧠 mem]  [enabled toggle]  [✎ × ☰]  [? help] │
+│ [name] [emoji]  [timing · 🧠 mem]  [enabled toggle]  [✎ × ☰]  [? help] [{ } api] │
 │ [control rows — one per control]        │
 │ ┌─ child card ────────────────────────┐ │
 │ │ …                                   │ │
@@ -101,6 +109,9 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
 - The parent's own controls render **above** its children; `+ add child` renders **below** them.
   Child cards live in a `.card-children` wrapper appended into the parent card's DOM node (not flat
   siblings); `renderModuleTree` recurses into the parent card, not into `main`.
+- **`{ }`** opens `GET /api/modules/{name}` in a new tab — that one module's live JSON, for issue
+  reports (see [Log an issue](../../logging-an-issue.md)). On EVERY card, unlike `✎`/`×` (user-editable
+  children only) and `?` (types that have a doc page).
 - **Enabled toggle** in the right-hand action cluster mirrors `MoonModule::enabled()` — a styled
   `<button>` (transparent + muted border, 26×26); state shown by the glyph alone (accent **✓** on,
   muted **○** off; `data-checked` + `aria-pressed`). Toggling fires `onEnabled()`; the Scheduler skips

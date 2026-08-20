@@ -89,7 +89,7 @@ def _load_firmwares():
     generated projection of build_esp32's FIRMWARES dict (the single source of
     truth, shared with the CI release matrix). Returns [] on missing/malformed
     file, so the MoonDeck UI just shows no firmware entries. Filtering on
-    `ships` keeps held-out variants (e.g. esp32p4-eth-wifi) out of the picker.
+    `ships` keeps held-out variants out of the picker.
     """
     try:
         doc = json.loads(FIRMWARES_FILE.read_text(encoding="utf-8"))
@@ -1010,7 +1010,7 @@ def _chip_from_usb(vid: int, pid: int) -> str:
 
 def _firmware_to_chip(firmware: str) -> str:
     """Best-effort ESP32 family from a registry firmware id (e.g.
-    'esp32s3-n8r8' → 'esp32-s3', 'esp32p4-eth' → 'esp32-p4', 'esp32' →
+    'esp32s3-n8r8' → 'esp32-s3', 'esp32p4rev1-eth' → 'esp32-p4', 'esp32' →
     'esp32 (classic)'). The fallback for boards behind a UART bridge. Pure."""
     f = (firmware or "").lower()
     for key, chip in (("p4", "esp32-p4"), ("s3", "esp32-s3"),

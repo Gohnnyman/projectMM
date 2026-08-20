@@ -122,6 +122,46 @@ TEST_CASE("NetworkReceiveEffect holds the last frame across ticks without new pa
     CHECK(buf[2] == 30);
 }
 
+// A tick with no new packet must not re-copy staging over the layer buffer: the Layer does not clear
+// between frames, so the copy would be identical bytes at real cost (3.5 ms per tick at 12288 lights
+// on an S3). Another effect writing the shared buffer after us proves the copy was skipped.
+TEST_CASE("NetworkReceiveEffect does not touch the layer buffer on a tick with no packet") {
+    Rig r;
+    uint8_t u0[3] = {10, 20, 30};
+    r.fx.applyDmx(0, u0, sizeof(u0));
+    r.layer.tick();                         // the packet lands in the layer buffer
+
+    uint8_t* buf = r.layer.buffer().data();
+    buf[0] = 99;                            // stand in for a later writer of the shared buffer
+    r.layer.tick();                         // no packet: must leave the buffer alone
+    CHECK(buf[0] == 99);
+
+    r.fx.applyDmx(0, u0, sizeof(u0));       // a new packet repaints
+    r.layer.tick();
+    CHECK(buf[0] == 10);
+}
+
+// Hold-last-frame must survive a sibling effect fading the shared layer buffer. The Layer runs the
+// collected fade BEFORE the effect pass, so a fading sibling darkens the held frame every tick; if
+// the receiver only re-copies when a packet arrived, an idle stream fades to black instead of
+// holding. This is the contract the module documents, and it is what a real installation looks
+// like: a receiver on the same layer as any of the 30 effects that call fadeToBlackBy.
+TEST_CASE("a held frame survives a sibling effect fading the layer") {
+    Rig r;
+    uint8_t u0[3] = {200, 200, 200};
+    r.fx.applyDmx(0, u0, sizeof(u0));
+    r.layer.tick();                       // the frame lands
+    const uint8_t* buf = r.layer.buffer().data();
+    REQUIRE(buf[0] == 200);
+
+    // A sibling asks for a fade, the way a trail effect does. No new packet arrives.
+    for (int i = 0; i < 20; i++) {
+        r.layer.fadeToBlackBy(64);
+        r.layer.tick();
+    }
+    CHECK(buf[0] == 200);                 // still held, not faded away
+}
+
 // Universes below universe_start are ignored; universes relative to a non-zero start land at offset 0.
 TEST_CASE("NetworkReceiveEffect respects universe_start") {
     Rig r;

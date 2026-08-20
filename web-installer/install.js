@@ -577,10 +577,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // ESP32 and try to flash it with the wrong stub + flash params — corruption,
     // not a lucky success. esptool-js needs the S31 secondary-detection logic
     // before browser flashing is safe; a version bump alone is not enough.
+    //
+    // Re-verified 2026-08-19 against esptool-js main and the 0.6.1 release (2026-08-06):
+    // still NO S31. src/targets/ has no esp32s31.ts (esp32{,c2,c3,c5,c6,c61,h2,p4,s2,s3}.ts
+    // + esp8266/rom only), esploader.ts's magic2Chip has no ESP32S31ROM entry, and a repo
+    // code search for "S31" returns nothing. Support exists only as OPEN PR
+    // esptool-js#250, which adds ESP32S31ROM and — confirming the collision analysis above
+    // — identifies the chip via GET_SECURITY_INFO rather than the magic table; it is
+    // blocked on overlapping unreviewed work in #197. esp-web-tools depends on
+    // esptool-js ^0.6.0, so it inherits the same gap. Watch #250 landing in a 0.6.2/0.7.0.
     const WEB_FLASH_UNSUPPORTED_CHIPS = new Set(["ESP32-S31"]);
 
     // Map a firmware key to its chip family ("esp32s31" → "ESP32-S31", "esp32s3-n16r8"
-    // → "ESP32-S3", "esp32p4-eth" → "ESP32-P4", "esp32*" → "ESP32") — the same prefix
+    // → "ESP32-S3", "esp32p4rev1-eth" → "ESP32-P4", "esp32*" → "ESP32") — the same prefix
     // vocabulary build_esp32's TARGET_TO_FAMILY uses. Used as the chip fallback when no
     // board is picked (OTA / generic flash). "" for an unrecognised key.
     function firmwareToChip(firmware) {

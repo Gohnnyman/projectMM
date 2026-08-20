@@ -343,7 +343,7 @@ Each step is independently verifiable, and the branch stays green throughout:
 
 Steps 10 to 13, which replaced step 7, moved to their own plan once they grew into a language
 change rather than a refactor: [Plan-20260817 — MoonLive scripts are
-classes](Plan-20260817%20-%20MoonLive%20scripts%20are%20classes.md).
+classes](Plan-20260817%20-%20MoonLive%20scripts%20are%20classes%20(shipped).md).
 
 8. ✅ **Bench: S3 and P4**, a scripted layout and a scripted effect, both with nested loops. Done on
    FOUR boards (S3, classic ESP32, P4, S31), scripted layout + effect, plasma and the heavier
@@ -447,7 +447,7 @@ lowering serves every backend, one system-variable vocabulary serves every role,
 frame contract that blocked the whole thing is fixed and pinned.
 
 What a script LOOKS LIKE is the next question, and it continues in
-[Plan-20260817 — MoonLive scripts are classes](Plan-20260817%20-%20MoonLive%20scripts%20are%20classes.md).
+[Plan-20260817 — MoonLive scripts are classes](Plan-20260817%20-%20MoonLive%20scripts%20are%20classes%20(shipped).md).
 
 ## Then, separately
 

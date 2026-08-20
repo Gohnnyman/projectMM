@@ -342,16 +342,36 @@ const char* coprocessorWifi() {
     // of 0.0.0 (or an error) means the slave never completed its handshake — the
     // signature of absent / incompatible C6 slave firmware, which is exactly the
     // case we want to surface rather than infer.
+    // Asked a BOUNDED number of times, then never again. esp_hosted_get_coprocessor_fwversion is a
+    // blocking RPC over the host link and SystemModule calls this from tick1s(), which runs INLINE
+    // ON THE RENDER THREAD (the periodic-tick rule: a slow tick1s stutters the LEDs at its cadence).
+    //
+    // Measured on a P4 with WiFi live on the C6: the call TIMES OUT after ~1 s, every second,
+    // forever. SystemModule showed 1,012,344 us per tick, fps 0, and every HTTP request queued a
+    // second or more behind the render loop, which is what "very very slow" over WiFi actually was.
+    // The link works (WiFi associates and serves traffic) while this particular RPC does not answer,
+    // so retrying it buys nothing and costs a second of every tick.
+    //
+    // TWO attempts, not five: each unanswered one is a ~1 s stall on the render thread, so five is
+    // five seconds of stutter at boot to fill in a diagnostic string. One retry still catches a C6
+    // that was mid-handshake on the first ask, which is the only case a retry was for. After that
+    // the display latches on whatever it learned; the VERSION cannot change while the host runs,
+    // since reflashing the C6 takes the host with it.
     static char buf[24] = "querying…";
+    static uint8_t attemptsLeft = 2;
+    if (attemptsLeft == 0) return buf;
     esp_hosted_coprocessor_fwver_t ver = {};
     if (esp_hosted_get_coprocessor_fwversion(&ver) == ESP_OK
         && (ver.major1 || ver.minor1 || ver.patch1)) {
+        attemptsLeft = 0;                       // answered: never ask again
         std::snprintf(buf, sizeof(buf), "C6 fw %u.%u.%u",
                       static_cast<unsigned>(ver.major1),
                       static_cast<unsigned>(ver.minor1),
                       static_cast<unsigned>(ver.patch1));
-    } else {
-        std::snprintf(buf, sizeof(buf), "not detected");
+    } else if (--attemptsLeft == 0) {
+        // Out of attempts. Say WHY the field is empty rather than asserting the C6 is absent: the
+        // query is what failed, and on this bench WiFi runs fine while it does.
+        std::snprintf(buf, sizeof(buf), "no version reply");
     }
     return buf;
 #else
@@ -525,12 +545,17 @@ static void ensureNetifInit() {
 
 #ifndef MM_NO_ETH
 
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING;   // defined below; the link-up log reports it
+
 static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
                             int32_t id, void* data) {
     if (base == ETH_EVENT) {
         if (id == ETHERNET_EVENT_CONNECTED) {
-            ESP_LOGI(NET_TAG, "Ethernet link up");
             ethLinkUp_.store(true, std::memory_order_relaxed);
+            // The NEGOTIATED speed, not just "up". A gigabit PHY that fell back to 100M behaves
+            // differently enough to matter (the S31's RGMII Tx-clock skew is speed-dependent), and
+            // "link up" alone sent one debug session hunting DHCP when the question was the speed.
+            ESP_LOGI(NET_TAG, "Ethernet link up (%u Mbps)", ethLinkSpeedMbps());
             if (ethStatic_.load(std::memory_order_acquire)) {
                 // Static mode: do NOT let the DHCP client restart on this link-up (applyHostname
                 // would) — that is what made a re-plugged cable grab a DHCP lease instead of the
@@ -1182,8 +1207,22 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                 // it does not gate the retry.)
                 static uint32_t attempts = 0;
                 if (attempts < UINT32_MAX) attempts++;
-                ESP_LOGI(NET_TAG, "WiFi STA disconnected — reconnecting (attempt %u)",
-                         (unsigned)attempts);
+                // LOG THE REASON. Without it the line says only "disconnected", which sends a
+                // user hunting coverage and DHCP for a cause the radio already named: an S31 on
+                // a 5 GHz-only SSID reports NO_AP_FOUND (201) on every attempt, and the log read
+                // identically to a weak-signal drop (issue #70). The IDF supplies the code in the
+                // event; `esp_err_to_name` does not cover the wifi_err_reason_t range, so the
+                // number is logged and the common ones are named.
+                const auto* ev = static_cast<wifi_event_sta_disconnected_t*>(data);
+                const uint8_t why = ev ? ev->reason : 0;
+                const char* whyText =
+                    why == WIFI_REASON_NO_AP_FOUND        ? " (no AP with that SSID — wrong name, or a 5 GHz-only network: ESP32 is 2.4 GHz)"
+                  : why == WIFI_REASON_AUTH_FAIL          ? " (auth failed — wrong password)"
+                  : why == WIFI_REASON_HANDSHAKE_TIMEOUT  ? " (handshake timeout — usually a wrong password)"
+                  : why == WIFI_REASON_BEACON_TIMEOUT     ? " (beacon timeout — out of range or the AP went away)"
+                  : "";
+                ESP_LOGI(NET_TAG, "WiFi STA disconnected, reason %u%s — reconnecting (attempt %u)",
+                         (unsigned)why, whyText, (unsigned)attempts);
                 esp_wifi_connect();
             } else {
                 ESP_LOGI(NET_TAG, "WiFi STA disconnected");

@@ -1,0 +1,34 @@
+// Octopus: a rotating spiral drawn from each pixel's POLAR position rather than its x/y. The arms
+// come from feeding angle and radius into a sine; rotation is the clock shifting both.
+// Ported from MoonLight's E_octo.sc.
+//
+// The original precomputes angle and radius into two arrays sized to the fixture. Here polarA()
+// and polarR() compute them per pixel: the arena is 64 bytes, so a 64x64 map would be 128x over
+// budget — and a lookup table is a cache, not state, so recomputing costs correctness nothing.
+
+class OctopusEffect {
+  uint8_t speed = 20;
+  uint8_t branches = 4;
+  uint8_t cx = 0;
+  uint8_t cy = 0;
+
+  defineControls() {
+    addUint8("speed", speed, 1, 120);
+    addUint8("branches", branches, 1, 8);
+  }
+
+  tick() {
+    cx = scale(32768, width);
+    cy = scale(32768, height);
+
+    for (y = 0; y < height; y = y + 1) {
+      for (x = 0; x < width; x = x + 1) {
+        setPaletteColor(x, y,
+                        polarR(x - cx, y - cy) * 8 + scale(beat(speed, t), 256),
+                        scale(sin(polarA(x - cx, y - cy) * branches
+                                  + polarR(x - cx, y - cy) * 1024
+                                  + beat(speed, t)), 256));
+      }
+    }
+  }
+}

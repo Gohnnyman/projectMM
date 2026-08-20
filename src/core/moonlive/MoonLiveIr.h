@@ -156,17 +156,16 @@ struct IrInst {
 // the arena slot. `type` is a neutral kind — Uint8 only in Stage 1 — NOT a projectMM ControlType.
 /// A member's element type. The WIDTH is derived from it rather than stored beside it, so the two
 /// can never disagree: a record carrying both would let a `Uint16` claim one byte.
-enum class CtrlType : uint8_t { Uint8, Uint16 };
-
-/// Bytes one element of `t` occupies in the arena.
-constexpr uint8_t ctrlWidth(CtrlType t) { return t == CtrlType::Uint16 ? 2 : 1; }
+// CtrlType / ctrlWidth live in MoonLiveBuiltins.h: a builtin descriptor names the member
+// width its by-reference argument takes, and that header cannot include this one.
 
 struct DeclaredControl {
     const char* name = nullptr;        // script-declared name (points into the source buffer)
-    uint8_t     min = 0, max = 255;    // the UI range; a control is a uint8 slider either way
-    // The initializer, wide enough for the widest member type. A control's range stays 0..255
-    // because that is what addUint8 declares and what a slider spans; the DEFAULT is separate,
-    // since a uint16_t member holds a value no slider needs to reach.
+    // The UI range, as wide as the widest member a control can bind: addUint8 declares 0..255 and
+    // addUint16 the full 16-bit span, so the field has to hold the wider one.
+    uint16_t    min = 0, max = 255;
+    // The initializer, wide enough for the widest member type. Separate from the range because a
+    // member may be seeded to a value outside what its slider spans.
     uint16_t    def = 0;
     uint8_t     nameLen = 0;           // length (the source is not NUL-terminated per token)
     CtrlType    type = CtrlType::Uint8;

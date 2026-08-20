@@ -32,10 +32,11 @@ namespace mm {
 /// **`wifiCoproc`:** shown only on boards whose radio is a separate chip (the ESP32-P4
 /// with its on-board ESP32-C6 over esp_hosted); absent on native-radio targets (the
 /// platform returns an empty string and the control is not added). Reports the detected
-/// slave firmware version (`C6 fw 2.12.9`) when the link is up, or `not detected` when
-/// the C6 never completes its handshake / reports 0.0.0 — the signature of absent or
-/// incompatible C6 slave firmware. `tick1s()` re-queries it, so the state stays current
-/// if the link comes up after boot or the C6 is reflashed without a host reboot.
+/// slave firmware version (`C6 fw 2.12.9`) when the query answers, or `no version reply` when it
+/// does not. A missing reply says only that the QUERY failed: the same board associates and serves
+/// traffic over that very link while this RPC times out, so it is not evidence of absent or
+/// incompatible slave firmware. Asked a bounded number of times and then latched — the call blocks
+/// for ~1 s on the render thread, and the version cannot change while the host runs.
 ///
 /// **Device name:** `deviceName` is the single network identity across the system —
 /// NetworkModule uses it as the mDNS hostname (`<name>.local`), the SoftAP SSID, and the
@@ -214,8 +215,10 @@ public:
         // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
         // cost — vanishes on native-radio builds (classic/S3/desktop) and the
-        // eth-only P4. Its value proves the C6 slave-firmware state ("C6 fw 2.12.9"
-        // vs "not detected"). tick1s() refreshes it.
+        // eth-only P4. Its value reports the C6 slave-firmware state ("C6 fw 2.12.9"
+        // vs "no version reply" — the query went unanswered, which is NOT the same as
+        // the C6 being absent: on the bench it serves traffic while this RPC times out).
+        // tick1s() refreshes it until the bounded attempts are used up.
         if constexpr (platform::hasWifiCoprocessor) {
             controls_.addReadOnly("wifiCoproc", const_cast<char*>(platform::coprocessorWifi()));
         }

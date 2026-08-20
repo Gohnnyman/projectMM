@@ -108,9 +108,14 @@ public:
     ///
     /// `name` must outlive the engine: it points into the string pool this engine owns, which is
     /// what the compiler interned it into.
-    void addDeclaredControl(const char* name, uint8_t offset, uint8_t lo, uint8_t hi) {
+    void addDeclaredControl(const char* name, uint8_t offset, uint16_t lo, uint16_t hi,
+                            CtrlType type = CtrlType::Uint8) {
         if (controlCount_ >= kMaxCtrls || !name || offset >= kArenaBytes) return;
         if (lo > hi) return;
+        // A wide control owns TWO arena bytes, so the second one has to exist. The compiler already
+        // aligned and bounded the member; this is the engine refusing to publish a control whose
+        // high byte would sit outside the arena.
+        if (ctrlWidth(type) == 2 && offset + 1 >= kArenaBytes) return;
         // Two controls on one member would give the UI two cards writing the same byte, each
         // overwriting the other, and two labels the same persistence key.
         for (uint8_t i = 0; i < controlCount_; i++)
@@ -124,11 +129,20 @@ public:
         // record. Clamping only the record would leave the out-of-range value driving the effect
         // while the UI showed a slider that could not reach it. This is the one place that knows
         // both the range and the live byte at the same moment.
-        uint8_t def = ctrlArena_ ? ctrlArena_[offset] : lo;
+        // Read at the DECLARED width, little-endian to match every backend's halfword load, so a
+        // wide control's default is the member's whole value rather than its low byte.
+        uint16_t def = lo;
+        if (ctrlArena_) {
+            def = ctrlArena_[offset];
+            if (ctrlWidth(type) == 2) def |= static_cast<uint16_t>(ctrlArena_[offset + 1]) << 8;
+        }
         if (def < lo) def = lo;
         else if (def > hi) def = hi;
-        if (ctrlArena_) ctrlArena_[offset] = def;
-        controls_[controlCount_] = {name, lo, hi, def, 0, CtrlType::Uint8, offset};
+        if (ctrlArena_) {
+            ctrlArena_[offset] = static_cast<uint8_t>(def & 0xff);
+            if (ctrlWidth(type) == 2) ctrlArena_[offset + 1] = static_cast<uint8_t>(def >> 8);
+        }
+        controls_[controlCount_] = {name, lo, hi, def, 0, type, offset};
         // nameLen is what the binding reports; measured here rather than passed, so a caller
         // cannot disagree with the string it handed over.
         // The BOUND is tested first: `name[n] && n < limit` reads the byte before deciding whether
@@ -249,7 +263,17 @@ private:
     // inside every scripted module and constructed on the main task's stack by ModuleFactory's
     // probe. The offset is stored alongside, which is what the byte-indexed form was really using.
     static constexpr uint8_t kSeedNameLen = 12;
-    struct SeededMember { uint8_t offset = 0; char name[kSeedNameLen] = {}; };
+    // Type and count ride along because a member's IDENTITY is its whole shape, not just where it
+    // sits and what it is called. `uint8 x` edited to `uint16 x`, or `uint8 a[4]` to `a[8]`, keeps
+    // both offset and name — so without these the member reads as unchanged and its NEW bytes (a
+    // uint16's high half, elements 4..7) keep the previous program's values instead of the
+    // declared default. 2 bytes per row, 16 across the table.
+    struct SeededMember {
+        uint8_t  offset = 0;
+        CtrlType type   = CtrlType::Uint8;
+        uint8_t  count  = 1;
+        char     name[kSeedNameLen] = {};
+    };
     // A uint64_t, and the table is sized to the SCRIPT's region rather than the whole arena. This
     // was a uint32_t when kCtrlBytes was 16; the byte budget then grew to 64 and the mask did not,
     // so `1u << off` for a member at offset 32 or beyond was undefined behaviour and in practice

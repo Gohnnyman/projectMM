@@ -1,0 +1,28 @@
+# ESP32-P4 revision v3.x — the CURRENT silicon.
+#
+# Layered on top of sdkconfig.defaults.esp32p4rev1-eth, which carries the board config
+# (partition table, flash size, EMAC/RMII). This fragment overrides ONLY the chip
+# revision, because that is the entire difference between the two images: everything
+# about the board is the same.
+#
+# Why a second image at all: rev <3.0 and rev >=3.0 are not binary compatible. IDF says
+# so at the top of esp_hw_support/port/esp32p4/Kconfig.hw_support ("Support of ESP32-P4
+# rev. <3.0 and >=3.0 is mutually exclusive ... huge hardware difference ... not
+# compatible") and enforces it in the Kconfig: REV_MIN_0/1/100 require
+# SELECTS_REV_LESS_V3=y, REV_MIN_300/301 require it =n. So one binary cannot serve both,
+# and this is not a flag we can relax.
+#
+# TWO images cover every P4 that exists, not one per revision: REV_MIN_300 supports
+# v3.0 through v3.99 (REV_MAX_FULL=399), so v3.0 and v3.1 share this one. The rev1 image
+# covers v0.0 through v1.99 the same way.
+#
+# NOT VERIFIED ON HARDWARE. Both bench boards are v1.3, so this image has never been
+# booted. It is published so someone with current silicon can test it: a v3 board
+# otherwise has no image at all, since the rev1 binary is rejected by the bootloader.
+# Espressif calls v1.x "engineering samples" and does not recommend v0.x/v1.x for new
+# designs, so a board bought today is v3.x and this is the image it needs.
+
+# Undo the rev1 fragment's sub-v3 selection, then take the v3 minimum. REV_MIN_300 rather
+# than 301: it covers both v3.0 and v3.1, where 301 would refuse a v3.0 chip.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y

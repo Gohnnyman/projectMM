@@ -1,0 +1,54 @@
+// Bouncing balls: four balls on their own paths, each reversing at every wall.
+// Ported from MoonLight's E_balls.sc.
+
+class BallsEffect {
+  uint8_t count = 4;
+  uint8_t size = 5;
+  uint8_t bpm = 20;
+
+  uint8_t b = 0;
+  uint8_t radius = 4;
+  uint8_t px = 0;
+  uint8_t py = 0;
+
+  defineControls() {
+    addUint8("count", count, 1, 4);
+    addUint8("size", size, 1, 10);
+    addUint8("bpm", bpm, 1, 120);
+  }
+
+  drawBall() {
+    for (dy = 0; dy < 21; dy = dy + 1) {
+      for (dx = 0; dx < 21; dx = dx + 1) {
+        if ((dx - radius) * (dx - radius) + (dy - radius) * (dy - radius) <= radius * radius) {
+          setPaletteColor(px + dx, py + dy, b * 64,
+                          255 - scale(((dx - radius) * (dx - radius)
+                                       + (dy - radius) * (dy - radius)) * 640, 256));
+        }
+      }
+    }
+  }
+
+  tick() {
+    fill(0, 0, 0);
+
+    // Sized off the smaller axis, capped at the 21x21 drawing window; 0 on an axis too
+    // small to hold a ball, which draws a single pixel rather than underflowing the bound.
+    radius = scale(height, size * 819) + 1;
+    if (width < height) { radius = scale(width, size * 819) + 1; }
+    if (radius > 10) { radius = 10; }
+    if (width < radius * 2 + 2) { radius = 0; }
+    if (height < radius * 2 + 2) { radius = 0; }
+
+    for (i = 0; i < 4; i = i + 1) {
+      b = i;
+      if (b < count) {
+        // A beatsin between 0 and the wall IS a bounce. Different rates per ball and per
+        // axis, so each traces its own path instead of all four moving together.
+        px = beatsin(bpm + b * 7, t, width - radius * 2 - 1);
+        py = beatsin(bpm + b * 5 + 3, t, height - radius * 2 - 1);
+        drawBall();
+      }
+    }
+  }
+}

@@ -26,7 +26,7 @@ The container of layers — composites them (blend mode + opacity per layer) int
 
 Detail: [technical](moxygen/Effects.md)
 
-[Tests](../../tests/unit-tests.md#layers)
+[Tests](../../tests/unit-tests.md#effects)
 
 <a id="layouts"></a>
 

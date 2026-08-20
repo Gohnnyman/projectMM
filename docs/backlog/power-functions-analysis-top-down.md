@@ -126,6 +126,8 @@ What the builtin surface needs from the engine, recorded for the livescripts wor
 
 Until the ABI lands, stages 1–2 proceed compiled-side; nothing here blocks on the engine.
 
+<a id="migration-plan"></a>
+
 ## 5. Migration plan and example effects ✅ *(11 of 12 showcases built; VectorBalls landed 2026-08-07)*
 
 Order by leverage, cheapest risk first; every batch lands with its tests and the branch stays under ~100 files. **These five phases are the project's one numbering for this work** — the bottom-up document's nine *families* group functions by algorithm, while the phases below group them by what lands in the repo together, so each phase names the families it carries.

@@ -31,6 +31,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+
+# The firmware registry, so carry-forward can drop rows for variants that no longer exist
+# (see merge_carry_forward). Same single source of truth check_firmwares.py reads.
+sys.path.insert(0, str(ROOT / "moondeck" / "build"))
+from build_esp32 import FIRMWARES  # noqa: E402
 HEALTH_FILE = ROOT / "docs" / "metrics" / "repo-health.json"
 # The same snapshot as a table a human reads: units applied, ratios as percentages, areas
 # grouped. The JSON stays the source the delta is computed from; this is the view. Both
@@ -275,9 +280,23 @@ def merge_carry_forward(new, old):
     A commit that did not build the P4 firmware, or ran without a bench board, should not
     silently drop those numbers — the alternative is a file whose contents depend on which
     targets happened to be built, which makes every diff unreadable.
+
+    Carrying forward is bounded by the firmware REGISTRY, not by history: a renamed or
+    deleted variant would otherwise linger forever, since nothing ever measures it again to
+    overwrite the stale row. `esp32p4-eth` and `esp32p4-eth-wifi` outlived their rename to
+    `esp32p4rev1-*` exactly this way. Only `flash` is keyed by firmware; `perf` and
+    `complexity` are keyed by platform/metric and are carried forward as they were.
     """
+    # Drop rows for ESP32 variants that no longer exist, but keep everything else: `flash`
+    # also holds non-firmware targets (`desktop`), which are not in FIRMWARES and must not be
+    # filtered out. So the rule is "an esp32* key that is not a known firmware is a ghost",
+    # which is exactly what a rename leaves behind and nothing else.
+    known = set(FIRMWARES)
     for key in ("flash", "perf", "complexity"):
         merged = dict(old.get(key, {}))
+        if key == "flash":
+            merged = {k: v for k, v in merged.items()
+                      if not k.startswith("esp32") or k in known}
         merged.update(new.get(key, {}))
         new[key] = merged
     return new
