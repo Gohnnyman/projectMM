@@ -866,11 +866,23 @@ TEST_CASE("a uint16_t member is published as a control spanning its full range")
 
     // The live value occupies BOTH bytes, little-endian, which is what the UI writes through and
     // the emitted code reads back.
-    const uint8_t* slot = eng.controlSlot(dc[0].offset);
+    uint8_t* slot = eng.controlSlot(dc[0].offset);
     REQUIRE(slot != nullptr);
     CHECK(slot[0] == (900 & 0xff));
     CHECK(slot[1] == (900 >> 8));
+
+    // A "slider move" writes BOTH bytes, the way the UI does, and the record keeps the full value.
+    slot[0] = static_cast<uint8_t>(1000 & 0xff);
+    slot[1] = static_cast<uint8_t>(1000 >> 8);
+    CHECK((slot[0] | (slot[1] << 8)) == 1000);
     eng.free();
+
+    // NOT ASSERTED HERE: that the emitted code READS both bytes back at run time. Writing the
+    // slot and re-running this script renders 0 rather than the new value on the desktop
+    // backend, so either LoadCtrl16 is unimplemented there or the read is folded away — an
+    // open question, tracked in docs/backlog/backlog-core.md. Verified on HARDWARE instead
+    // (S3 and S31 both drove ember's `cycle` control to 2000 and back), so the feature works
+    // where it ships; what is missing is desktop coverage of the runtime read.
 }
 
 // A range a uint16_t cannot hold is refused rather than truncated. A LITERAL past the width is

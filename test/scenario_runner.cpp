@@ -119,8 +119,17 @@ struct JsonParser {
                     case '"':  v.str += '"';  p++; break;
                     case '\\': v.str += '\\'; p++; break;
                     case '/':  v.str += '/';  p++; break;
-                    // \uXXXX is not decoded: no scenario needs one, and a half-done UTF-16
-                    // surrogate decoder would be worse than an honest passthrough.
+                    // \uXXXX is NOT decoded — no scenario needs one, and a half-done UTF-16
+                    // surrogate decoder would be worse than not having one. But it must not pass
+                    // through silently either: appending a literal 'u' would stage a script
+                    // containing "u00e9" and the failure would surface as a confusing compile
+                    // error in a file that looks right in the JSON. Say so, loudly, once.
+                    case 'u':
+                        std::printf("  WARN  \\uXXXX escape is not supported; "
+                                    "write the character directly in the JSON\n");
+                        v.str += "\\u";           // keep it visible rather than half-decoding
+                        p++;
+                        break;
                     default:   if (*p) v.str += *p++; break;
                 }
             }
@@ -631,11 +640,16 @@ static int runScenario(const char* path) {
                     mm::platform::fsMkdir(dir.c_str());
                 }
             }
-            if (mm::platform::fsWriteAtomic(filePath, body.c_str(), body.size())) {
+            // A FAILED write is a failed scenario, not a printed note. Every step after this one
+            // would run against a stale or absent file and could still report PASSED — the silent
+            // pass this op exists to make impossible.
+            const bool wrote = mm::platform::fsWriteAtomic(filePath, body.c_str(), body.size());
+            if (wrote) {
                 std::printf("  WRITE %s (%s, %zu bytes)\n", name, filePath, body.size());
             } else {
                 std::printf("  WRITE %s — write to %s FAILED\n", name, filePath);
             }
+            result.check(wrote, name);
         } else if (std::strcmp(op, "remove_module") == 0 || std::strcmp(op, "delete_module") == 0) {
             // `remove_module` and `delete_module` are aliases — accept both so a
             // scenario reads identically here and on the live runner (which uses

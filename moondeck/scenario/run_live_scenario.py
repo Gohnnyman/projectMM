@@ -71,6 +71,13 @@ class Client:
             f"{self.base}{path}", data=body,
             headers={"Content-Type": "application/json"}))
 
+    def post_text(self, path: str, text: str):
+        """POST a raw text body. /api/file takes the file's CONTENTS, not JSON — the body IS
+        the payload, which is why it cannot go through post() like every control write."""
+        return self._send(urllib.request.Request(
+            f"{self.base}{path}", data=text.encode("utf-8"),
+            headers={"Content-Type": "text/plain"}))
+
     def delete(self, path: str):
         return self._send(urllib.request.Request(f"{self.base}{path}", method="DELETE"))
 
@@ -333,6 +340,12 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         # Walk the steps in order, growing the reachable set as add_module steps
         # create ids. The containers (Layouts/Effects/Drivers) are always present.
         reachable = _collect_module_names(live_state)
+        # The FIXTURE runs before the steps and creates the wired pipeline, so the ids it adds
+        # are reachable by the time any step runs. Walking only `steps` reported a fixture-added
+        # module as missing the moment a scenario's first step targeted one.
+        for step in scenario.get("fixture", []):
+            if step.get("op") == "add_module" and step.get("id"):
+                reachable.add(step["id"])
         missing = []
         for step in scenario.get("steps", []):
             sid = step.get("id")
@@ -460,6 +473,25 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         print(f"  +     {step.get('id','?')} ({step['type']}) — skipped (optional, type unavailable on {target})")
                     else:
                         raise
+
+            elif op == "write_file":
+                # Stage a script file, the same op the desktop runner has. Without it a migrated
+                # scenario ran its set_control against a file that was never written, and every
+                # script step failed on hardware while passing on the desktop.
+                path_ = step.get("path")
+                body = step.get("value", "")
+                if not path_:
+                    print(f"  WRITE {step_name} — missing path, skipped")
+                    step_result["status"] = "skipped"
+                else:
+                    try:
+                        resp = client.post_text(f"/api/file?path={urllib.parse.quote(path_)}", body)
+                        ok = bool(resp.get("ok")) if isinstance(resp, dict) else True
+                        step_result["status"] = "ok" if ok else "error"
+                        print(f"  WRITE {path_} ({len(body)} bytes)")
+                    except Exception as we:
+                        step_result["status"] = "error"
+                        print(f"  WRITE {path_} — FAILED: {we}")
 
             elif op == "set_control":
                 data = {"module": step["id"], "control": step["key"],

@@ -34,7 +34,7 @@ That is the default: a plain grid, one light per cell. The function is named `pl
 
 The `cols` and `rows` lines are the script's own controls, not something the module hands it. A layout is never told how big it is: the pipeline works out the bounding box from the coordinates the layouts actually place, so a size passed in from outside would be a second answer that could disagree with the first.
 
-They are named `cols`/`rows` because `width`, `height` and `depth` are [system variables](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) — the logical grid the Layer hands an effect or a modifier. A layout is upstream of that grid, so it names its own controls.
+They are named `cols`/`rows` because `width`, `height` and `depth` are [system variables](MoonLiveEffect.md#system-variables-what-the-engine-hands-a-script) — the logical grid the Layer hands an effect or a modifier. A layout is upstream of that grid, so it names its own controls.
 
 A few shapes that are one line here and a new class otherwise:
 
@@ -60,12 +60,12 @@ for (i = 0; i < count; i = i + 1) {
 
 A script reads whatever it declares. `uint8_t cols = 16;` is a member the script owns; naming it in `defineControls()` with `addUint8("cols", cols, 1, 64)` also makes it a real slider in the UI, and the loop reads it, which is how a panel gets resized without editing code. A `uint16_t` member is surfaced the same way with `addUint16`, which the call must match. A member no such call names stays private to the script.
 
-`t` is the one [system variable](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) a layout is given, and it is always **0** here: the script runs twice per rebuild (once to count, once to place) and must agree with itself, so it is handed a fixed clock rather than a live one — a moving `t` would let the two passes disagree on how many lights there are. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
+`t` is the one [system variable](MoonLiveEffect.md#system-variables-what-the-engine-hands-a-script) a layout is given, and it is always **0** here: the script runs twice per rebuild (once to count, once to place) and must agree with itself, so it is handed a fixed clock rather than a live one — a moving `t` would let the two passes disagree on how many lights there are. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
 
 ### Seeing inside a script
 
 `print(v)` logs a value and returns it, so it wraps any part of an expression: `addLight(print(x), y, 0)`.
-It is for debugging and comes back out again — [what print costs](../../../moonlive/README.md#debugging-print).
+It is for debugging and comes back out again — [what print costs](writing-scripts.md#debugging-print).
 
 ## How the count is known
 

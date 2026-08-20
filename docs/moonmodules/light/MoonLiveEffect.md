@@ -56,7 +56,9 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
   UI shows one is the separate question `defineControls()` answers. A member no control names is
   simply the script's own state.
 
-  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`. The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
+  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`
+  (and `controls_.addUint16("dwell", dwell, 0, 1000)` for a wide member, which reaches the UI as a
+  16-bit control carrying its full range and value, not a byte). The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
 
   `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops.
 
@@ -98,7 +100,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
-| `print(v)` | log a value and return it ([what it costs](../../../moonlive/README.md#debugging-print)) |
+| `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
 
 `sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
 

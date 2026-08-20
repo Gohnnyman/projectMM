@@ -89,7 +89,7 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
 
 ```text
 ┌─ card ──────────────────────────────────┐
-│ [name] [emoji]  [timing · 🧠 mem]  [enabled toggle]  [✎ × ☰]  [? help] │
+│ [name] [emoji]  [timing · 🧠 mem]  [enabled toggle]  [✎ × ☰]  [? help] [{ } api] │
 │ [control rows — one per control]        │
 │ ┌─ child card ────────────────────────┐ │
 │ │ …                                   │ │
@@ -101,6 +101,9 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
 - The parent's own controls render **above** its children; `+ add child` renders **below** them.
   Child cards live in a `.card-children` wrapper appended into the parent card's DOM node (not flat
   siblings); `renderModuleTree` recurses into the parent card, not into `main`.
+- **`{ }`** opens `GET /api/modules/{name}` in a new tab — that one module's live JSON, for issue
+  reports (see [Log an issue](../../logging-an-issue.md)). On EVERY card, unlike `✎`/`×` (user-editable
+  children only) and `?` (types that have a doc page).
 - **Enabled toggle** in the right-hand action cluster mirrors `MoonModule::enabled()` — a styled
   `<button>` (transparent + muted border, 26×26); state shown by the glyph alone (accent **✓** on,
   muted **○** off; `data-checked` + `aria-pressed`). Toggling fires `onEnabled()`; the Scheduler skips

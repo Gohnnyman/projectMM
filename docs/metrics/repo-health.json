@@ -1,23 +1,23 @@
 {
-  "commit": "67fbe644",
+  "commit": "575b4472",
   "flash": {
-    "esp32": 1749712,
-    "esp32p4rev1-eth": 1639056,
+    "esp32": 1752608,
+    "esp32p4rev1-eth": 1640176,
     "esp32p4rev1-eth-wifi": 1928640,
-    "esp32s3-n16r8": 1788704,
+    "esp32s3-n16r8": 1791680,
     "esp32s3-n8r8": 1753232,
-    "esp32s31": 2069184,
+    "esp32s31": 2070528,
     "esp32-16mb": 1714608,
     "esp32-eth": 1324816,
     "esp32-wrover": 1765504,
     "qemu": 1318160,
     "esp32p4rev3-eth": 1643760,
-    "desktop": 1192328
+    "desktop": 1192520
   },
   "perf": {
     "desktop": {
-      "tick_us": 181,
-      "fps": 5524
+      "tick_us": 157,
+      "fps": 6369
     },
     "esp32": {
       "tick_us": 2151,
@@ -25,16 +25,16 @@
     }
   },
   "loc": {
-    "core": 19310,
+    "core": 19369,
     "light": 24985,
-    "platform": 13489,
-    "ui": 6781,
-    "test": 43705,
-    "moondeck": 21057
+    "platform": 13493,
+    "ui": 6805,
+    "test": 43746,
+    "moondeck": 21138
   },
   "comments": {
     "core": {
-      "lines": 7574,
+      "lines": 7589,
       "ratio": 0.425
     },
     "light": {
@@ -42,20 +42,20 @@
       "ratio": 0.432
     },
     "platform": {
-      "lines": 4794,
+      "lines": 4798,
       "ratio": 0.392
     },
     "ui": {
-      "lines": 1763,
-      "ratio": 0.276
+      "lines": 1776,
+      "ratio": 0.277
     },
     "test": {
-      "lines": 7831,
+      "lines": 7846,
       "ratio": 0.206
     },
     "moondeck": {
-      "lines": 3390,
-      "ratio": 0.184
+      "lines": 3421,
+      "ratio": 0.185
     }
   },
   "tests": {
@@ -63,16 +63,16 @@
     "scenarios": 23
   },
   "docs": {
-    "md_files": 180,
-    "md_lines": 25889,
+    "md_files": 182,
+    "md_lines": 26186,
     "plans_files": 93,
-    "backlog_lines": 3803,
+    "backlog_lines": 3817,
     "lessons_lines": 549,
     "claude_md_lines": 135
   },
   "complexity": {
-    "functions": 2587,
-    "over_threshold": 162,
+    "functions": 2588,
+    "over_threshold": 163,
     "worst_ccn": 108
   }
 }

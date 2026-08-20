@@ -247,6 +247,10 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
         else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
         else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
+        // GET /api/modules/<name> → that ONE module's JSON, the same object /api/state
+        // carries for it. Exists for issue reports: a user opens the card's `api` link and
+        // pastes what they see, instead of hunting one card out of the whole-tree dump.
+        else if (std::strncmp(path, "/api/modules/", 13) == 0) serveModule(conn, path + 13);
         // File Manager: GET /api/dir?path=<rel>[&hidden=1] → one directory's children as JSON
         // [{name,isDir,size}] (the lazy tree loads a node's children on expand).
         else if (std::strcmp(path, "/api/dir") == 0) serveDirListing(conn, queryStart ? queryStart + 1 : "");
@@ -1956,6 +1960,51 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     FilesystemModule::noteDirty();
 
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+}
+
+void HttpServerModule::serveModule(platform::TcpConnection& conn, const char* name) {
+    // Percent-decode into a bounded buffer: a module name may contain a space ("File Manager"),
+    // which a browser sends as %20. Same decoding parseFilePath does, over a name-sized buffer —
+    // MoonModule::name_ is 16 bytes, so anything longer cannot match a module anyway.
+    char decoded[24] = {};
+    size_t i = 0;
+    for (const char* p = name; *p && i + 1 < sizeof(decoded); p++) {
+        char c = *p;
+        if (c == '/' || c == '?') break;      // a sub-route ("/move") or query: the name ends here
+        if (c == '%' && p[1] && p[2]) {
+            auto hex = [](char h) -> int {
+                if (h >= '0' && h <= '9') return h - '0';
+                if (h >= 'a' && h <= 'f') return h - 'a' + 10;
+                if (h >= 'A' && h <= 'F') return h - 'A' + 10;
+                return -1;
+            };
+            const int hi = hex(p[1]), lo = hex(p[2]);
+            if (hi >= 0 && lo >= 0) { c = static_cast<char>((hi << 4) | lo); p += 2; }
+        } else if (c == '+') {
+            c = ' ';
+        }
+        decoded[i++] = c;
+    }
+    decoded[i] = 0;
+
+    MoonModule* mod = i ? findModuleByName(decoded) : nullptr;
+    if (!mod) {
+        sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+        return;
+    }
+
+    const char* header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    // The SAME writer /api/state uses, so the two can never disagree about a module's shape.
+    JsonSink sink(conn);
+    writeModuleJson(sink, mod);
+    sink.flush();
 }
 
 void HttpServerModule::serveTypes(platform::TcpConnection& conn) {

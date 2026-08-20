@@ -214,8 +214,10 @@ public:
         // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
         // cost — vanishes on native-radio builds (classic/S3/desktop) and the
-        // eth-only P4. Its value proves the C6 slave-firmware state ("C6 fw 2.12.9"
-        // vs "not detected"). tick1s() refreshes it.
+        // eth-only P4. Its value reports the C6 slave-firmware state ("C6 fw 2.12.9"
+        // vs "no version reply" — the query went unanswered, which is NOT the same as
+        // the C6 being absent: on the bench it serves traffic while this RPC times out).
+        // tick1s() refreshes it until the bounded attempts are used up.
         if constexpr (platform::hasWifiCoprocessor) {
             controls_.addReadOnly("wifiCoproc", const_cast<char*>(platform::coprocessorWifi()));
         }

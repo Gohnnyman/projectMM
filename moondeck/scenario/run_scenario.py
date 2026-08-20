@@ -54,9 +54,21 @@ RUNNER = _resolve_runner()
 
 # What feeds mm_scenarios. Same question check_esp32_built.py asks of a firmware image, for
 # the same reason: a binary older than its sources reports on code that is no longer there.
-_RUNNER_SOURCE_DIRS = ("src", "test")
+#
+# `src/` plus test/scenario_runner.cpp ONLY — that is the whole of what the target compiles
+# (`add_executable(mm_scenarios scenario_runner.cpp)` + mm_core/mm_platform). Watching all of
+# test/ made every unit-test edit report the runner stale, and rebuilding did not clear it
+# because CMake correctly relinks nothing: a false alarm that trains people to ignore the guard.
+_RUNNER_SOURCE_DIRS = ("src",)
+_RUNNER_SOURCE_FILES = ("test/scenario_runner.cpp",)
 _RUNNER_SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp"}
 _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
+# GENERATED sources are re-emitted (identical content, fresh mtime) by every ESP32 build, so a
+# timestamp comparison calls the runner stale whenever a firmware was built more recently —
+# rebuilding clears it only until the next firmware build. They are excluded because their mtime
+# carries no information about whether the runner is out of date; a real edit reaches them through
+# their INPUT (src/ui/app.js), which is watched.
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h"}
 
 
 def _stale_runner_reason() -> str:
@@ -79,15 +91,17 @@ def _stale_runner_reason() -> str:
         return "missing"
     binary_mtime = RUNNER.stat().st_mtime
     newest, newest_path = 0.0, None
+    candidates = []
     for d in _RUNNER_SOURCE_DIRS:
-        for f in (ROOT / d).rglob("*"):
-            if not f.is_file() or f.suffix not in _RUNNER_SOURCE_SUFFIXES:
-                continue
-            if _RUNNER_SKIP_PARTS & set(f.parts):
-                continue
-            m = f.stat().st_mtime
-            if m > newest:
-                newest, newest_path = m, f
+        candidates.extend(f for f in (ROOT / d).rglob("*")
+                          if f.is_file() and f.suffix in _RUNNER_SOURCE_SUFFIXES
+                          and not (_RUNNER_SKIP_PARTS & set(f.parts))
+                          and f.relative_to(ROOT).as_posix() not in _RUNNER_GENERATED)
+    candidates.extend(ROOT / f for f in _RUNNER_SOURCE_FILES if (ROOT / f).is_file())
+    for f in candidates:
+        m = f.stat().st_mtime
+        if m > newest:
+            newest, newest_path = m, f
     if newest > binary_mtime and newest_path is not None:
         mins = (newest - binary_mtime) / 60.0
         return (f"{newest_path.relative_to(ROOT)} is {mins:.0f} min newer than the runner")

@@ -51,12 +51,27 @@ def test_a_snapshot_with_no_sections_is_still_valid():
 
 def test_carry_forward_keeps_previous_values_for_unmeasured_sections():
     """The reason the shapes matter: a run that measured nothing must not drop the old numbers."""
-    old = {"flash": {"esp32": 100, "esp32s3": 200}, "perf": {"tick": 5}, "complexity": {}}
+    # Real firmware keys: carry-forward now drops `esp32*` rows that are NOT in FIRMWARES, so a
+    # made-up name would be filtered as a ghost and this would assert the wrong thing.
+    old = {"flash": {"esp32": 100, "esp32s3-n16r8": 200, "desktop": 300},
+           "perf": {"tick": 5}, "complexity": {}}
     new = {"flash": {"esp32": 150}}
     merged = repo_health.merge_carry_forward(new, old)
-    assert merged["flash"]["esp32"] == 150      # this run measured it
-    assert merged["flash"]["esp32s3"] == 200    # this run did not, so the old value survives
+    assert merged["flash"]["esp32"] == 150             # this run measured it
+    assert merged["flash"]["esp32s3-n16r8"] == 200     # this run did not, so the old value survives
+    assert merged["flash"]["desktop"] == 300           # not an esp32* key: never filtered
     assert merged["perf"]["tick"] == 5
+
+
+def test_carry_forward_drops_a_renamed_firmware():
+    """A variant that no longer exists must not linger forever. Nothing measures it again, so
+    without this it would be carried forward on every run — which is how `esp32p4-eth` outlived
+    its rename to `esp32p4rev1-eth` and kept reporting a stale size."""
+    old = {"flash": {"esp32p4-eth": 1600, "esp32p4rev1-eth": 1650, "desktop": 300}}
+    merged = repo_health.merge_carry_forward({"flash": {}}, old)
+    assert "esp32p4-eth" not in merged["flash"]        # gone: not a known firmware
+    assert merged["flash"]["esp32p4rev1-eth"] == 1650  # kept: it is one
+    assert merged["flash"]["desktop"] == 300           # kept: not an esp32* key at all
 
 
 def test_carry_forward_survives_a_rejected_baseline():

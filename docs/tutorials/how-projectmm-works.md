@@ -1,0 +1,169 @@
+# How projectMM works
+
+You have lights running. This page explains what you were actually looking at.
+
+There is really only **one idea** in projectMM, and everything else follows from
+it. Ten minutes here and the rest of the interface stops being a wall of settings
+and becomes a place you know your way around.
+
+> New here? Start with **[Install & first light](../gettingstarted.md)** and come
+> back once something is lit.
+
+![The projectMM interface: navigation on the left, live preview in the middle, module cards on the right](../assets/gettingstarted/02-01-UI-large.png)
+
+---
+
+## 1. Everything is a card
+
+Every single thing in projectMM — the WiFi settings, an effect, an LED driver,
+the file manager — is a **MoonModule**. And every MoonModule is a **card**.
+
+There is no second kind of thing. Learn to read one card and you can read them
+all.
+
+![A Layouts card with a Grid card nested inside it](../assets/gettingstarted/02-08-UI-Layouts.png)
+
+Look at that picture again, because every card has the same parts:
+
+| What you see | What it means |
+|---|---|
+| **Layouts** ⚙️ | The name, and an emoji hinting at what it does |
+| 🕐 **250K fps** | How fast this module runs, live |
+| 🧠 **112B** | How much memory it uses, live |
+| **⏻** | Turn it off without deleting it |
+| **?** | Open this module's documentation |
+| **`{ }`** | Open its live state, for [issue reports](../logging-an-issue.md) |
+| `status`, `width`, `height` … | The settings, one per row |
+| The **Grid** box inside | A child card — cards nest |
+| **+ add module** | Add a child here |
+
+Two of those are unusual and worth pausing on.
+
+**The timing and memory are per module, and they are live.** Most software hides
+this. projectMM shows you exactly what each part costs, so when something feels
+slow you can see which card is responsible instead of guessing.
+
+**The nesting is the structure.** A child card is drawn *inside* its parent's
+border. When you see `Grid` inside `Layouts`, that is not decoration — the Grid
+really does belong to Layouts. The box is the truth.
+
+---
+
+## 2. Two families of card
+
+Cards come in two kinds, and knowing which is which tells you where to look for
+anything.
+
+### Core — the device itself
+
+Identity, network, files, firmware. This half knows *nothing* about lights: it
+would be identical on a machine driving motors or synthesising audio. These cards
+are fixed — you configure them, you don't add or remove them.
+
+![The System card, showing device name, chip, memory and uptime](../assets/gettingstarted/02-05-UI-System.png)
+
+| Card | What it's for |
+|---|---|
+| **System** | Device name, chip, memory, uptime, why it last rebooted |
+| **Network** | WiFi and Ethernet, plus MQTT and finding other devices |
+| **File Manager** | Browse, edit and upload files on the device |
+| **Firmware** | Your version, and updates over the air |
+| **Services** | Hardware that isn't lighting — a microphone, a sensor |
+| **Control** | Drive controls from MIDI, a remote, or another device |
+
+### Light — what you build with
+
+Lights, colours, and getting the bytes out. These cards are yours: add them,
+remove them, rearrange them freely.
+
+| Card | What it's for |
+|---|---|
+| **Layouts** | Where the lights physically ARE |
+| **Effects** | What colour they are, over time |
+| **Drivers** | How the colours actually reach the lights |
+
+That split is why the menu is ordered the way it is: the device first, then the
+three light cards.
+
+---
+
+## 3. The light pipeline
+
+Those three light cards are not a random list. They are a **pipeline**, and they
+run in order, every frame:
+
+```text
+   Layouts    ──→    Effects    ──→    Drivers
+    where            what colour        how it gets out
+```
+
+<!-- IMAGE PLACEHOLDER: a friendly left-to-right diagram of the three stages.
+     Stage 1 shows a grid of grey dots (positions only); stage 2 the same grid
+     with colour flowing across it; stage 3 an arrow leaving toward a real LED
+     strip and a network cable. This is the single most valuable new image on
+     the page — the pipeline is the concept everything else hangs off. -->
+
+**1. A Layout decides where the lights are.**
+A 16×16 grid, a ring of 60, two rows of 24, a shape you draw yourself. It answers
+one question: *how many lights, and where is each one?*
+
+![Layouts](../assets/light/Layouts.png)
+
+**2. An Effect paints them.**
+It asks the layout for the coordinates and writes colours — every frame, forever.
+Effects live inside a **Layer**, and a Layer can hold several, stacked and blended
+like layers in an image editor.
+
+![A plasma effect running](../assets/light/effects/PlasmaEffect.gif)
+
+**3. A Driver sends the result somewhere.**
+Out a GPIO pin to a strip, across the network as ArtNet or DDP, or to the preview
+in your browser.
+
+![Drivers](../assets/light/Drivers.png)
+
+### Why this order matters
+
+Because the stages are separate, **changing one doesn't break the others**.
+
+Resize your panel from 16×16 to 32×32 and every effect keeps running — it simply
+asks the layout a new question and gets new coordinates back. That is why the
+same effect works on a grid, a ring, or a wall of 12,288 lights without being
+rewritten.
+
+**Modifiers** sit between layout and effect and bend the mapping — mirror it,
+fold it, tile it. An effect written for one strip can drive a whole wall without
+ever knowing it.
+
+<!-- IMAGE PLACEHOLDER: before/after of one effect with a mirror modifier
+     applied — the same frame, un-mirrored and mirrored, side by side. Makes
+     "a modifier folds the mapping" obvious in one glance. -->
+
+---
+
+## 4. Everything applies live
+
+There is **no save button**, and nothing needs a reboot.
+
+Move a slider and the next frame uses it. Change the WiFi credentials, add an
+effect, resize a grid, edit a script — all of it takes effect immediately, on a
+running device.
+
+This is a deliberate design rule, not a convenience, and you can trust it: if
+something needs a reboot before it works, that is a bug worth
+[reporting](../logging-an-issue.md).
+
+Your settings save themselves and survive a power cycle.
+
+---
+
+## Where to go next
+
+Now that you know what the cards are, go build something:
+
+- **[Effects](../moonmodules/light/effects.md)** — the catalog, with pictures
+- **[Layouts](../moonmodules/light/layouts.md)** — grids, rings and custom shapes
+- **[Modifiers](../moonmodules/light/modifiers.md)** — mirroring, folding, tiling
+- **[Drivers](../moonmodules/light/drivers.md)** — LED strips, ArtNet, DMX
+- **[Live scripting](../moonmodules/light/MoonLiveEffect.md)** — write your own
+  effect in the browser; it compiles on the device and runs as native code

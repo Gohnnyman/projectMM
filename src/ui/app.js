@@ -1024,6 +1024,24 @@ function createCard(mod, depth) {
         title.appendChild(help);
     }
 
+    // `api` → this ONE module's JSON in a new tab, for issue reports: a user pastes the state of
+    // the card that misbehaves instead of the whole /api/state tree, and the report carries the
+    // control values, the type and the live telemetry without anyone having to ask for them.
+    // On EVERY card, unlike ✎/× (user-editable children only) and ? (types with a doc page):
+    // the card most worth reporting is as likely to be a fixed top-level module as a child.
+    const api = document.createElement("a");
+    api.className = "card-api";
+    // A glyph, not the word "api": this is a diagnostic aid, and the card's own content should
+    // carry the visual weight. Braces read as JSON at a glance and match the ?/× glyph style.
+    api.textContent = "{ }";
+    api.title = "Open this module's JSON (for issue reports)";
+    api.target = "_blank";
+    api.rel = "noopener";
+    // Relative, so it follows whatever host the UI is served from (device IP, mDNS name or a
+    // desktop build on localhost) instead of hard-coding one.
+    api.href = "/api/modules/" + encodeURIComponent(mod.name);
+    title.appendChild(api);
+
     card.appendChild(title);
 
     // -- Controls --
@@ -4883,7 +4901,13 @@ async function openFileEditor(relPath, expectedSize) {
     // Resolves when the dialog CLOSES, not when it opens: a caller that re-reads the file
     // afterwards (the card's pane shows the same file) would otherwise read it before any edit.
     await new Promise((resolve) => {
-        dlg.addEventListener("close", () => { ed.dispose(); dlg.remove(); resolve(); }, { once: true });
+        // AWAIT the save before disposing. Closing blurs the textarea, which starts a save; the
+        // promise above exists so the caller can re-read the file afterwards, and resolving while
+        // that write is still in flight is exactly the stale read it is meant to prevent.
+        // ed.save() is a no-op when nothing is dirty, and its own queue makes a double-call safe.
+        dlg.addEventListener("close", async () => {
+            try { await ed.save(); } finally { ed.dispose(); dlg.remove(); resolve(); }
+        }, { once: true });
     });
 }
 

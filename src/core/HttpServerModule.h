@@ -454,6 +454,14 @@ private:
     void handleDeleteModule(platform::TcpConnection& conn, const char* moduleName);
     void handleReplaceModule(platform::TcpConnection& conn, const char* moduleName, const char* body);
     void serveTypes(platform::TcpConnection& conn);
+
+    /// GET /api/modules/<name> — one module's JSON, byte-identical to its entry in /api/state
+    /// (children included). `name` is the raw path segment and may be percent-encoded, since a
+    /// module name can carry a space ("File Manager").
+    ///
+    /// For issue reports: the UI puts an `api` link on every card, so a user can copy the state
+    /// of the one module that misbehaves rather than the whole tree.
+    void serveModule(platform::TcpConnection& conn, const char* name);
     void writeTypeDefaults(JsonSink& sink, const char* typeName);
     void handleMoveModule(platform::TcpConnection& conn, const char* moduleName, const char* body);
     // Editable list (the CRUD primitive): `<tail>` is the path after "/api/list/", i.e.

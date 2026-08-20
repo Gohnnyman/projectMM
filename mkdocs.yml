@@ -122,7 +122,12 @@ nav:
       # site-relative /projectMM/install/) so MkDocs treats it as the external
       # resource it is, rather than warning about an unresolvable absolute path.
       - Web installer: https://moonmodules.org/projectMM/install/
-  - Use cases:
+      - Log an issue: logging-an-issue.md
+  # Tutorials: the guided path AFTER "Install & first light". Ordered as a reader
+  # would walk them — concepts first, then the longer-form use cases (which predate
+  # this section and are being folded in gradually).
+  - Tutorials:
+      - How projectMM works: tutorials/how-projectmm-works.md
       - Build your own MoonModules: usecases/build-your-own-moonmodules.md
       - Home automation: usecases/home-automation.md
       - LED signal integrity: usecases/led-signal-integrity.md
@@ -132,6 +137,10 @@ nav:
       - Modifiers: moonmodules/light/modifiers.md
       - Drivers: moonmodules/light/drivers.md
       - Live scripting: moonmodules/light/MoonLiveEffect.md
+      # The script LANGUAGE reference. Authored at moonlive/README.md (beside the scripts
+      # it documents) and staged into the tree by mkdocs_hooks.on_files — it is not a file
+      # under docs/, so it appears here by its staged URI.
+      - Writing scripts: moonmodules/light/writing-scripts.md
       - Power functions: moonmodules/light/power-functions.md
       - Supporting: moonmodules/light/supporting.md
   - Core:

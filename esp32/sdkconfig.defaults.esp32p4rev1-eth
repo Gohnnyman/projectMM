@@ -31,8 +31,10 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # >=3.0 is mutually exclusive ... huge hardware difference ... not compatible". The
 # Kconfig enforces it structurally: REV_MIN_0/1/100 require SELECTS_REV_LESS_V3=y and
 # REV_MIN_300/301 require it =n, with the max clamped to 199 or 399. So this image
-# supports revisions 0.0 through 1.99 and will refuse to boot on a v3.x chip, which is
-# the bench/field silicon today. A v3.x board needs its own firmware variant — those now
+# supports revisions 0.0 through 1.99 and will refuse to boot on a v3.x chip. v3.x is what a
+# board bought today carries (Espressif calls v1.x "engineering samples" and does not recommend
+# it for new designs); this image exists for the v1.x boards already in the field and on our
+# bench, which is the only silicon we can test on. A v3.x board needs its own variant — those now
 # exist as esp32p4rev3-eth and esp32p4rev3-eth-wifi (sdkconfig.defaults.esp32p4rev3 layers
 # the revision over this file) — not a flag flipped here.
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y

@@ -30,14 +30,14 @@ setXYZ((width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 
 ### What a script can read
 
-`x`, `y`, `z` (the light being folded) and `width`, `height`, `depth` (the box it lives in) are [system variables](MoonLiveEffect.md#system-variables--what-the-engine-hands-a-script) — the engine writes them per call, and a script cannot declare a name that shadows one.
+`x`, `y`, `z` (the light being folded) and `width`, `height`, `depth` (the box it lives in) are [system variables](MoonLiveEffect.md#system-variables-what-the-engine-hands-a-script) — the engine writes them per call, and a script cannot declare a name that shadows one.
 
 `width` matters more than it looks. A mirror written against a fixed `255` sends every light of a 16-wide grid far outside the grid, the Layer discards each one as out of bounds, and the fixture goes black — with no error anywhere, because the script itself ran perfectly.
 
 ### Seeing inside a script
 
 `print(v)` logs a value and returns it, so it wraps any part of an expression: `setXYZ(print(width - 1 - xPos), yPos, zPos)`.
-It is for debugging and comes back out again — [what print costs](../../../moonlive/README.md#debugging-print).
+It is for debugging and comes back out again — [what print costs](writing-scripts.md#debugging-print).
 
 ## Limits
 
