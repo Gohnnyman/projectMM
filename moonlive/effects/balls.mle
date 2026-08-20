@@ -1,22 +1,28 @@
-// Bouncing balls: each ball's position and direction survive between frames, so a bounce is the
-// position reaching a wall and the direction flipping. Ported from MoonLight's E_balls.sc.
+// Bouncing balls: each ball traces its own path and reverses at every wall.
+// Ported from MoonLight's E_balls.sc.
 //
-// Reduced: 4 balls not 25 (8 members, 64-byte arena) and whole-pixel motion (no fractional type).
+// The original integrates a velocity and tests four walls per ball. Here each axis is a beatsin()
+// instead: a sine between 0 and the wall IS a bounce, so the reversal costs no branch and no
+// stored velocity — which is what makes four independent balls fit the 16-label budget. Each ball
+// gets its own x and y rate, and the two differ, so a ball traces a Lissajous rather than a
+// diagonal and the four never travel together.
+//
+// Reduced: 4 balls not 25 (the 64-byte arena) and whole-pixel motion (no fractional type).
 // docs/backlog/moonlive-language-roadmap.md tracks what would lift each of those.
 
 class BallsEffect {
   uint8_t count = 4;
-  uint8_t radius = 4;
+  uint8_t size = 5;   // ball size as a FRACTION of the layout, not a pixel count
   uint8_t bpm = 20;
 
-  uint8_t bx[4];      // top-left corner, not centre: every coordinate is then an addition,
-  uint8_t by[4];      // so unsigned arithmetic never underflows.
-  uint8_t dir[4];     // bits 0-1 direction, bits 2-7 the beat this ball last stepped on.
   uint8_t b = 0;      // the ball drawBall() is drawing — a helper takes no arguments.
+  uint8_t radius = 4; // derived from `size` and the layout each frame, not a control
+  uint8_t px = 0;     // its top-left corner, so drawBall's coordinates are all additions
+  uint8_t py = 0;     // and unsigned arithmetic never underflows.
 
   defineControls() {
     addUint8("count", count, 1, 4);
-    addUint8("radius", radius, 2, 10);
+    addUint8("size", size, 1, 10);
     addUint8("bpm", bpm, 1, 120);
   }
 
@@ -24,10 +30,13 @@ class BallsEffect {
     for (dy = 0; dy < 21; dy = dy + 1) {
       for (dx = 0; dx < 21; dx = dx + 1) {
         if ((dx - radius) * (dx - radius) + (dy - radius) * (dy - radius) <= radius * radius) {
-          setPaletteColor(bx[b] + dx, by[b] + dy, b * 64,
-                          scale((radius * radius
-                                 - (dx - radius) * (dx - radius)
-                                 - (dy - radius) * (dy - radius)) * 640, 256));
+          // Brightness falls off from the centre against a FIXED reference, not against r*r:
+          // normalising by the actual radius needs a divide the language does not have, and the
+          // previous fixed multiplier made a small ball dim (radius 4 peaked at 40 of 255, all but
+          // invisible). Every ball now peaks at full brightness; a bigger one just falls off further.
+          setPaletteColor(px + dx, py + dy, b * 64,
+                          255 - scale(((dx - radius) * (dx - radius)
+                                       + (dy - radius) * (dy - radius)) * 640, 256));
         }
       }
     }
@@ -36,14 +45,18 @@ class BallsEffect {
   tick() {
     fill(0, 0, 0);
 
+    // A ball is a fraction of the fixture, so it looks the same on a 16x16 panel and a 192x64
+    // wall. An absolute pixel radius does not travel: radius 4 on a 16-wide grid is 56% of it,
+    // leaving 7 pixels of movement and four balls overlapping into one blob.
+    radius = scale(height, size * 819) + 1;
+
     for (i = 0; i < 4; i = i + 1) {
       b = i;
       if (b < count) {
-        if (scale(beat(bpm + b * 3, t), 32) * 4 != dir[b] - mod(dir[b], 4)) {
-          dir[b] = scale(beat(bpm + b * 3, t), 32) * 4 + mod(dir[b], 4);
-          if (mod(dir[b], 2) == 1) { bx[b] = bx[b] + 1; } else { bx[b] = bx[b] - 1; }
-          if (mod(dir[b], 4) >= 2) { by[b] = by[b] + 1; } else { by[b] = by[b] - 1; }
-        }
+        // Different rates per ball AND per axis: co-prime-ish steps (7 and 5) keep the four from
+        // falling into step with each other or from tracing a straight diagonal.
+        px = beatsin(bpm + b * 7, t, width - radius * 2 - 1);
+        py = beatsin(bpm + b * 5 + 3, t, height - radius * 2 - 1);
         drawBall();
       }
     }

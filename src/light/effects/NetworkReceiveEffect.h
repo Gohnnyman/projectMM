@@ -83,6 +83,7 @@ public:
         // Size the staging buffer to the layer (one byte per channel byte). resize() reallocs
         // (zero-filled) only when the byte count changes, frees on 0, and keeps dynamicBytes current.
         staging_.resize(static_cast<size_t>(nrOfLights()) * channelsPerLight());
+        dirty_ = true;   // a resize (or a re-enable) must repaint the layer from staging once
     }
 
     void tick() MM_NONBLOCKING override {
@@ -120,7 +121,13 @@ public:
                 noteReceiving("DDP", srcIp);
             }
         }
-        // Staging → layer buffer (the layer cleared it at tick start).
+        // Staging → layer buffer, but ONLY when a packet actually landed. The Layer does not clear
+        // the buffer (Layer::tick — it persists frame-to-frame), so last frame's pixels are already
+        // there and re-copying identical bytes every tick is pure cost: at 12288 lights that memcpy
+        // measured 3.5 ms per tick on an S3 with NO traffic at all. Hold-last-frame is unchanged —
+        // the buffer already holds it.
+        if (!dirty_) return;
+        dirty_ = false;
         uint8_t* buf = buffer();
         if (!buf) return;
         const size_t bufBytes = static_cast<size_t>(nrOfLights()) * channelsPerLight();
@@ -148,6 +155,7 @@ public:
         size_t n = len;
         if (offset + n > staging_.bytes()) n = staging_.bytes() - offset;
         std::memcpy(staging_.data() + offset, data, n);
+        dirty_ = true;   // the one write into staging — tick() copies to the layer only after this
     }
 
     // Test-only accessors — let the unit tests pin the staging lifecycle
@@ -175,6 +183,10 @@ private:
     // Layer-buffer-sized staging (hold-last-frame). Self-sizing, self-freeing, self-reporting;
     // freed on disable via MoonModule::release() (the release() override chains to it).
     ScratchBuffer<uint8_t> staging_{*this};
+    // Set by applyBytes, consumed by tick(): staging changed since the last copy to the layer.
+    // Starts true so a fresh (zeroed) staging paints once, rather than leaving whatever the
+    // previous effect left in the shared layer buffer.
+    bool dirty_ = true;
 
     // Update the "receiving <protocol> from <ip>" diagnostic, but never clobber a bind error (its status is
     // the kBindFailMsg literal, so status() != recvStatus_). The common case is the same sender + protocol

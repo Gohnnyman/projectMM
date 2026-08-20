@@ -11,6 +11,7 @@
 
 #include "core/math8.h"    // beatsin16 — the shared time vocabulary
 #include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
+#include "core/noise.h"    // inoise8 — the shared value-noise field
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
 
 // MoonLive — the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
@@ -107,6 +108,15 @@ extern "C" inline uint32_t mm_light_beatsin(const uintptr_t* args, uint32_t, con
     // low is 0 and high is the caller's: a Call carries three arguments and bpm + ms take two, so
     // the common "oscillate from 0 up to N" form is the one exposed rather than a packed pair.
     return beatsin16(static_cast<uint8_t>(bpm), ms, 0, static_cast<uint16_t>(high));
+}
+
+// noise(x, y, z) → the 0..255 value-noise field at that point, the primitive behind fire, clouds,
+// plasma and lava. Coordinates are 16.0 fixed point: the HIGH byte picks the noise cell and the low
+// byte interpolates within it, so `x * 256 / scale` zooms and feeding `t` into an axis makes the
+// field flow. Three arguments is exactly a Call's budget, and 2D is the same call with z held at a
+// constant — one builtin rather than an arity family.
+extern "C" inline uint32_t mm_light_noise(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return inoise8(uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]));
 }
 
 // scale(value, n) → map a 0..65535 value onto 0..n-1. The other half of `beat`: a beat is full-scale
@@ -571,6 +581,8 @@ inline BuiltinTable lightBuiltins() {
     t.add({"beat", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_beat, {}});
     // beatsin(bpm, t, high)  → a sine 0..high at bpm. The same shape an effect reaches for.
     t.add({"beatsin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_beatsin, {}});
+    // noise(x, y, z)         → 0..255 value noise. The one primitive fire/clouds/plasma all start from.
+    t.add({"noise", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_noise, {}});
     // scale(value, n)        → a 0..65535 value onto 0..n-1. Lands a beat on an axis.
     t.add({"scale", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_scale, {}});
     // turn(n)                → one revolution split n ways, for stepping a circle.

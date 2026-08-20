@@ -122,6 +122,25 @@ TEST_CASE("NetworkReceiveEffect holds the last frame across ticks without new pa
     CHECK(buf[2] == 30);
 }
 
+// A tick with no new packet must not re-copy staging over the layer buffer: the Layer does not clear
+// between frames, so the copy would be identical bytes at real cost (3.5 ms per tick at 12288 lights
+// on an S3). Another effect writing the shared buffer after us proves the copy was skipped.
+TEST_CASE("NetworkReceiveEffect does not touch the layer buffer on a tick with no packet") {
+    Rig r;
+    uint8_t u0[3] = {10, 20, 30};
+    r.fx.applyDmx(0, u0, sizeof(u0));
+    r.layer.tick();                         // the packet lands in the layer buffer
+
+    uint8_t* buf = r.layer.buffer().data();
+    buf[0] = 99;                            // stand in for a later writer of the shared buffer
+    r.layer.tick();                         // no packet: must leave the buffer alone
+    CHECK(buf[0] == 99);
+
+    r.fx.applyDmx(0, u0, sizeof(u0));       // a new packet repaints
+    r.layer.tick();
+    CHECK(buf[0] == 10);
+}
+
 // Universes below universe_start are ignored; universes relative to a non-zero start land at offset 0.
 TEST_CASE("NetworkReceiveEffect respects universe_start") {
     Rig r;

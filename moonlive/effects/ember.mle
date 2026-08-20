@@ -5,7 +5,6 @@
 class EmberEffect {
   uint8_t  cool = 30;
   uint8_t  spark = 60;
-  uint16_t phase = 0;
   uint16_t cycle = 1000;   // wraps past 255, which is why it is uint16_t
   uint8_t  heat[16];
 
@@ -16,15 +15,15 @@ class EmberEffect {
   }
 
   tick() {
-    phase = phase + 7;
-    if (phase >= cycle) { phase = 0; }
-
     for (i = 0; i < 16; i = i + 1) {
       if (heat[i] > cool) { heat[i] = heat[i] - cool; } else { heat[i] = 0; }
     }
 
+    // Ignition breathes: strongest at the start of each cycle, fading to nothing by its end, so
+    // `cycle` sets how long a flare-up lasts. beat() is already the 0..65535 sawtooth, so the
+    // effect reads the clock rather than keeping a phase counter of its own.
     for (j = 0; j < 16; j = j + 1) {
-      if (random16(256) < spark) { heat[j] = 255; }
+      if (random16(256) < scale(spark, 65535 - beat(cycle, t))) { heat[j] = 255; }
     }
 
     for (k = 0; k < 16; k = k + 1) {

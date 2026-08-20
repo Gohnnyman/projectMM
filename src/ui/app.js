@@ -197,6 +197,10 @@ function connectWs() {
             if (!Array.isArray(data.modules)) return;
             state = data;
             renderCards();     // a full state may add/remove/reshape cards (structural resync) — full render
+            // The nav is built from the same tree, so a structural change (a module added or removed)
+            // must rebuild it too, or the sidebar keeps entries the state no longer has. AFTER
+            // renderCards, because its fallback may reassign selectedModule and the nav highlights it.
+            renderNav();
             updateValues();
         } catch {
             // ignore malformed messages

@@ -1205,8 +1205,22 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                 // it does not gate the retry.)
                 static uint32_t attempts = 0;
                 if (attempts < UINT32_MAX) attempts++;
-                ESP_LOGI(NET_TAG, "WiFi STA disconnected — reconnecting (attempt %u)",
-                         (unsigned)attempts);
+                // LOG THE REASON. Without it the line says only "disconnected", which sends a
+                // user hunting coverage and DHCP for a cause the radio already named: an S31 on
+                // a 5 GHz-only SSID reports NO_AP_FOUND (201) on every attempt, and the log read
+                // identically to a weak-signal drop (issue #70). The IDF supplies the code in the
+                // event; `esp_err_to_name` does not cover the wifi_err_reason_t range, so the
+                // number is logged and the common ones are named.
+                const auto* ev = static_cast<wifi_event_sta_disconnected_t*>(data);
+                const uint8_t why = ev ? ev->reason : 0;
+                const char* whyText =
+                    why == WIFI_REASON_NO_AP_FOUND        ? " (no AP with that SSID — wrong name, or a 5 GHz-only network: ESP32 is 2.4 GHz)"
+                  : why == WIFI_REASON_AUTH_FAIL          ? " (auth failed — wrong password)"
+                  : why == WIFI_REASON_HANDSHAKE_TIMEOUT  ? " (handshake timeout — usually a wrong password)"
+                  : why == WIFI_REASON_BEACON_TIMEOUT     ? " (beacon timeout — out of range or the AP went away)"
+                  : "";
+                ESP_LOGI(NET_TAG, "WiFi STA disconnected, reason %u%s — reconnecting (attempt %u)",
+                         (unsigned)why, whyText, (unsigned)attempts);
                 esp_wifi_connect();
             } else {
                 ESP_LOGI(NET_TAG, "WiFi STA disconnected");

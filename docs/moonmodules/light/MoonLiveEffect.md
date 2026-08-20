@@ -21,6 +21,8 @@ Inside a function the grammar is a sequence of **statements** — a function cal
 
 **A script's role is its extension**: `.mle` an effect, `.mll` a [layout](MoonLiveLayout.md), `.mlm` a [modifier](MoonLiveModifier.md). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
 
+**The shipped scripts are the reference**: [`moonlive/`](https://github.com/MoonModules/projectMM/tree/main/moonlive) in the repository holds every script a device ships with, one file per effect, layout and modifier. Read them to see what the language looks like in practice: they are the same text the card edits, and a device keeps its own copies under `/moonlive/`.
+
 The **class name is not the file name**. `plasma.mle` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
 
 The functions are **not built into the compiler** — `setRGB`, `fill`, `random16` are registered by the *host* (the light domain) in a builtin table; the core compiler owns only the grammar and a generic call/inline mechanism (the ESPLiveScript / ARTI bound-function model). The compiler emits machine code for whichever ISA the device runs (Xtensa on the classic/S3) or the host ISA on desktop, places it in executable memory, and the engine calls it each render tick.
@@ -97,12 +99,15 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
 | `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
 | `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
+| `noise(x, y, z)` | `0..255` value noise at that point — the field behind fire, clouds and plasma |
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
 | `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
 
 `sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
+
+`noise(x, y, z)` takes **16.8 fixed-point** coordinates: the high byte selects the noise cell and the low byte interpolates within it. So `x * zoom` sets how much of the field the fixture spans, and the time axis must be **monotonic** — feeding it a `beat()` sawtooth walks one cell and then snaps back to its start, which reads as a hiccup once per beat. Scaling `t` keeps walking into new cells. 2D is the same call with `z` held constant.
 
 `turn(n)` exists because a full revolution is 65536 — one past the largest number a script can write — and the grammar has no division. Without it, placing `n` points evenly on a circle is not expressible.
 

@@ -19,6 +19,7 @@
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include "light/moonlive/MoonLiveScriptFile.h"   // the role extensions the sweep filters on
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -233,6 +234,49 @@ TEST_CASE("a script reads elapsed time, so it can animate") {
         CHECK(buf[tv * 3] == 200);                  // the light AT t is lit
         if (tv != 0) CHECK(buf[0] == 0);            // and light 0 is not, so it really moved
     }
+    platform::freeExec(blk, r.len);
+}
+#endif
+
+// Value noise is the primitive every organic effect (fire, clouds, plasma, lava) starts from, so a
+// script needs it as a builtin: it cannot be written from the grammar's arithmetic. The two
+// properties that make it noise rather than a random number are pinned here — it is SMOOTH in space
+// (adjacent points inside one cell differ a little, not wildly) and it actually VARIES across the
+// field (a constant would be smooth too, and useless).
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("noise is smooth across neighbouring points, and varies across the field") {
+    uint8_t code[4096];
+    // One light per sample: light i gets the noise at x = i * 64, so the 32 lights walk 8 whole
+    // cells (256 units each) and the buffer IS a real slice of the field, not a corner of one cell.
+    auto r = moonlive::compileSource(
+        mmScript("for (i = 0; i < 32; i = i + 1) { setRGB(i, noise(i * 64, 0, 0), 0, 0); }"),
+        moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
+    REQUIRE(r.ok);
+    void* blk = platform::allocExec(r.len);
+    REQUIRE(blk);
+    platform::writeExec(blk, code, r.len);
+    auto fn = reinterpret_cast<moonlive::CtrlFn>(blk);
+    uint8_t arena[moonlive::kArenaBytes] = {};
+    uint8_t buf[32 * 3] = {};
+    fn(buf, 32, 3, 0, arena);
+
+    // Smooth: 64 units per step is a quarter cell, so neighbours move but cannot leap the range.
+    int biggestJump = 0;
+    for (int i = 1; i < 32; i++) {
+        const int d = std::abs(int(buf[i * 3]) - int(buf[(i - 1) * 3]));
+        if (d > biggestJump) biggestJump = d;
+    }
+    INFO("biggest neighbour-to-neighbour jump: " << biggestJump);
+    CHECK(biggestJump < 64);
+
+    // Varies: a field that returned one value everywhere would pass the smoothness check.
+    uint8_t lo = 255, hi = 0;
+    for (int i = 0; i < 32; i++) {
+        if (buf[i * 3] < lo) lo = buf[i * 3];
+        if (buf[i * 3] > hi) hi = buf[i * 3];
+    }
+    INFO("field spanned " << int(lo) << ".." << int(hi));
+    CHECK(hi - lo > 32);   // a real field, not a near-constant one a weak test would accept
     platform::freeExec(blk, r.len);
 }
 #endif

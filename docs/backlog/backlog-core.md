@@ -691,7 +691,7 @@ Rounds 1 (board + Ethernet-only) and 2 (Parlio LED driver) have landed. Remainin
   - ❌ **Boot: `sleep_clock_icg_startup_init` aborts with `ESP_ERR_NO_MEM` (0x101) → reboot loop.** A KNOWN, OPEN ESP-IDF bug: **[esp-idf #18759 (IDFGH-17859)](https://github.com/espressif/esp-idf/issues/18759)** — on ESP32-P4 + PSRAM, this sleep-clock retention init runs unconditionally at a SECONDARY boot phase (before `app_main`, NOT gated by `CONFIG_PM_ENABLE`) and fails to allocate its REGDMA retention links when early internal DRAM is tight, which it is once esp_hosted's SDIO stack is pulled in (WiFi build only; the eth-only P4 has DRAM to spare). Espressif's guidance on the issue: reduce early internal-DRAM static usage. Bench findings (2026-07-03): `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP` does NOT help (those buffers allocate after the boot init); `CONFIG_PM_POWER_DOWN_PERIPHERAL_IN_LIGHT_SLEEP=y` drops the ICG file but only moves the failure to the next retention alloc (PCR / int_wdt) then a `sleep_retention.c:914` assert; `.bss`/`.noinit` → PSRAM (`CONFIG_SPIRAM_ALLOW_{BSS,NOINIT}_SEG_EXTERNAL_MEMORY`) still fails — because `MALLOC_CAP_RETENTION` is a *specific reserved memory region*, not general DRAM, so freeing general DRAM doesn't reach it. MoonLight ran the same board on IDF 5.5 without it, so it's a 6.1-era regression. **RESOLVED for us 2026-08-19 by resolution path 1 below** (`CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n` on IDF v6.1-rc1) — a workaround, since the allocation failure is untouched and #18759 remains open upstream.
 
     **Resolution paths (each independent):**
-    1. **Upstream fix — SHIPPED on master, needs a v6.1 back-port or a cherry-pick (rechecked 2026-07-27).** #18759 is now **CLOSED (Resolution: Done)**. The fix is exactly the knob we wanted: commit `7d31b82d27d` ("change(esp_pm): add kconfig option for REGDMA sleep clock ICG", 2026-07-06) adds **`CONFIG_PM_SLEEP_CLK_ICG_ENABLE`** (`bool`, default `y`) — set it **`n`** and the crashing `sleep_clock_icg_startup_init` is not built/run. Since a 236-FPS LED controller never light-sleeps, ICG retention is dead weight for us, so `=n` costs nothing. **But it is on `origin/master` only — NOT back-ported to `release/v6.1`** (our pinned IDF `14f663f`/dev-5880 and the current `origin/release/v6.1` are the same commit; neither has it). So bumping the pinned v6.1 IDF does *not* get it yet. **Decision (2026-07-27): wait for the next v6.1 beta** that carries the back-port, rather than cherry-pick `7d31b82d27d` onto the pinned IDF — a manual local IDF patch is bespoke, drifts, and complicates the single-pinned-IDF story for a fix that is a clean one-line sdkconfig change once it's in the branch. **DONE 2026-08-19 — that plan executed exactly as written.** v6.1-rc1 published carrying the option as `4b8e1e87106` (verified present in `components/esp_pm/Kconfig` at the pinned commit `44f0c59f7c8`); the IDF pin was bumped, `CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n` added to `sdkconfig.defaults.esp32p4rev1-eth-wifi`, and the P4-WiFi boot bench-tested: it boots, associates (RSSI -52) and serves the UI. The variant is out of the installer's experimental set and ships as a normal firmware. Reported back on the upstream issue ([comment](https://github.com/espressif/esp-idf/issues/18759#issuecomment-5345660136)), which also told the original reporter the option had landed — nobody had announced it in the thread. **#18759 stays OPEN upstream** and we did not ask for it to be closed: the retention allocation still fails under early-DRAM pressure, the option merely means nothing requests that memory. Round 3 is now unblocked, and its remaining defect is throughput, not boot (see open issue 0 above).
+    1. **Upstream fix — SHIPPED on master, needs a v6.1 back-port or a cherry-pick (rechecked 2026-07-27).** #18759 was marked **Done** on 2026-07-27 and has since been **reopened — it is OPEN upstream** (rechecked 2026-08-20; see the status note at the end of this item). The fix is exactly the knob we wanted: commit `7d31b82d27d` ("change(esp_pm): add kconfig option for REGDMA sleep clock ICG", 2026-07-06) adds **`CONFIG_PM_SLEEP_CLK_ICG_ENABLE`** (`bool`, default `y`) — set it **`n`** and the crashing `sleep_clock_icg_startup_init` is not built/run. Since a 236-FPS LED controller never light-sleeps, ICG retention is dead weight for us, so `=n` costs nothing. **But it is on `origin/master` only — NOT back-ported to `release/v6.1`** (our pinned IDF `14f663f`/dev-5880 and the current `origin/release/v6.1` are the same commit; neither has it). So bumping the pinned v6.1 IDF does *not* get it yet. **Decision (2026-07-27): wait for the next v6.1 beta** that carries the back-port, rather than cherry-pick `7d31b82d27d` onto the pinned IDF — a manual local IDF patch is bespoke, drifts, and complicates the single-pinned-IDF story for a fix that is a clean one-line sdkconfig change once it's in the branch. **DONE 2026-08-19 — that plan executed exactly as written.** v6.1-rc1 published carrying the option as `4b8e1e87106` (verified present in `components/esp_pm/Kconfig` at the pinned commit `44f0c59f7c8`); the IDF pin was bumped, `CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n` added to `sdkconfig.defaults.esp32p4rev1-eth-wifi`, and the P4-WiFi boot bench-tested: it boots, associates (RSSI -52) and serves the UI. The variant is out of the installer's experimental set and ships as a normal firmware. Reported back on the upstream issue ([comment](https://github.com/espressif/esp-idf/issues/18759#issuecomment-5345660136)), which also told the original reporter the option had landed — nobody had announced it in the thread. **#18759 stays OPEN upstream** and we did not ask for it to be closed: the retention allocation still fails under early-DRAM pressure, the option merely means nothing requests that memory. Round 3 is now unblocked, and its remaining defect is throughput, not boot (see open issue 0 above).
     2. **IDF 5.5 fallback — investigated 2026-07-03, NOT a cheap escape.** MoonLight ran this exact board on IDF **5.5** without the crash, so a 5.5 build of just this variant (everything else on 6.1) looked like a timeline-independent path. A bench attempt against IDF 5.5.4 found `src/platform/esp32/` has drifted to genuinely require IDF **6.x**: four distinct 5.5↔6.1 API breaks in `platform_esp32.cpp` / `platform_config.h` — (a) `RMT_LL_TX_CANDIDATES_PER_INST` renamed (5.5: `SOC_RMT_TX_CANDIDATES_PER_GROUP`); (b) `esp_eth_phy_ip101.h` moved (5.5: ctor lives in core `esp_eth_phy.h`, no standalone header); (c) `CHIP_ESP32S31` enum is 6.1-only; (d) `ETH_ESP32_EMAC_DEFAULT_CONFIG()` in 5.5 has out-of-declaration-order designated initializers — a C++ **hard error no compiler flag suppresses** (`-fpermissive` doesn't touch it). So a working 5.5 binary needs permanent `#if`-IDF-version compat branches in the platform layer (an EMAC-init back-port + a second IDF 5.5.4 in the CI matrix) — a real feature, not a throwaway. Only worth it if #18759 stalls long enough that a shippable P4-WiFi is needed sooner.
     3. **Version-matched C6 slave reflash** (see round-3 item 1) — may change the boot memory picture, but is blocked behind the boot crash (host must boot to test the C6 handshake), so it only matters once 1 or 2 gets us to `app_main` stably.
 - **Round 4 — Parlio loopback self-test FIXED (2026-07-09), real long strip still to prove.** The Parlio loopback self-test now passes on P4 hardware at any grid size (verified on MM-P4, jumper GPIO 32↔33, at both 8×8 and 128×128). A real *long* WS2812 strip (not just the bench panel) is the remaining hardware proof.
@@ -881,3 +881,69 @@ Two cases in `test/unit/core/unit_AudioService_sync.cpp` fail intermittently, bo
 Production is not near the ceiling today (~90 types), so this is not urgent. It became visible because a test binary that registers repeatedly can reach it, which is what made the grid sweep construct effects directly instead of registering them.
 
 **Options, cheapest first:** (a) make `registerType` idempotent — ignore a duplicate name and return true, which fixes the multiplier and is arguably the correct semantic anyway; (b) widen `count_`/`capacity_` to `uint16_t` (a handful of bytes, removes the ceiling as a practical concern); (c) make a failed registration loud in a debug build (assert or a boot-time log) so it can never be silent again. (a) plus (c) is probably the right pair.
+
+## Network-receive throughput starves HTTP (issue #69)
+
+**Found:** 2026-08-20, reproducing issue #69 on MM-testbench-S3 (ESP32-S3, 240 MHz, v6.1-rc1).
+
+Reported as "DDP gets very stuttery once the led count gets over a few thousand, even with no led drivers, and the same stream to WLED plays smoothly". Reproduced, and the threshold matches: HTTP availability while a DDP source runs, sampled 6 requests per point.
+
+| lights | pkt/s | KB/s | HTTP |
+|---:|---:|---:|---:|
+| 480 | 30 | 44 | 6/6 |
+| 1440 | 90 | 131 | 6/6 |
+| 2880 | 180 | 262 | 6/6 |
+| 4800 | 300 | 437 | 3/6 |
+| 8160 | 510 | 743 | 0/6 |
+| 12288 | 780 | 1136 | 0/6 |
+
+Fully reversible: 8/8 before, 1/8 during, 8/8 after. Art-Net degrades the same way and, per light, sooner — it carries 170 lights/packet against DDP's 480.
+
+**The limit is throughput, not packet rate.** Art-Net survived 510 pkt/s where DDP failed at 300, but both broke at ~440-480 KB/s. A matched-throughput control (~740 KB/s) gave 3/6 for DDP at 510 pkt/s and 2/6 for Art-Net at 1350 pkt/s — 2.6x the packet rate, same result. So a deeper `LWIP_UDP_RECVMBOX_SIZE` (6 today) is not the lever it looks like; the bytes have to be moved regardless of how they are grouped.
+
+**Not the render loop either.** MM-S31 at 4096 lights held 6/6 all the way to 1966 KB/s while ticking at 12 fps (82 ms), against the S3's 8.3 ms tick. If the once-per-tick drain in `NetworkReceiveEffect::tick()` were the constraint, the board with the 10x slower tick would fail first. It is the fastest board that fails, which points at contention between the receive path and the HTTP task rather than at drain cadence.
+
+**Partly fixed 2026-08-20** (`NetworkReceiveEffect`, this branch). The staging→layer `memcpy` ran every tick whether or not a packet had arrived; the Layer does not clear the buffer between frames, so that copy was writing identical bytes. Guarding it on a `dirty_` flag cut the effect's idle tick from **3522 us to ~240 us** at 12288 lights (93%), measured on MM-testbench-S3. HTTP availability under load, same board, before → after:
+
+| lights | pkt/s | DDP before | DDP after |
+|---:|---:|---:|---:|
+| 4800 | 300 | 3/6 | 6/6 |
+| 8160 | 510 | 0/6 | 5/6 |
+| 12288 | 780 | 0/6 | 2/6 |
+
+Art-Net gains the same way (4800 lights 3/6 → 6/6; 1350 pkt/s 2/6 → 4/6) — the fix is on the shared staging path, not per protocol. The reported threshold ("a few thousand") is now clean; 12288 lights at 780 pkt/s still degrades.
+
+**Remaining work — measurement, not a fix:** find where the rest of the bytes cost. Candidates are the `recvfrom` copy out of lwIP plus the staging→layer `memcpy` (both O(bytes/s), both on the render thread), and core-0 contention between the lwIP task and HTTP — the LC16 Ethernet starvation entry is the same shape. `handleConnection` running synchronously in `tick20ms` with ~5 ms/~50 ms budgets is the likely victim.
+
+Related: WLED is smooth on the same stream because it receives via `AsyncUDP` — packets are consumed in a callback from the lwIP task the instant they arrive, rather than polled once per render tick. Moving to that model is the structural fix, and it needs `staging_` synchronized against the render thread.
+
+## POST /api/file reports success while writing an empty file (no Content-Length)
+
+**Found:** 2026-08-20, on MM-testbench-S3, while uploading an edited MoonLive script. The upload
+answered `{"ok":true}` twice while the board kept the previous file, and a compile result was read
+from the stale script before the mismatch was noticed.
+
+`contentLen` defaults to **0** when the request carries no `Content-Length`
+(`HttpServerModule.cpp:152`, "declared body length (0 if no Content-Length)"). `handleWriteFile`
+then clamps the already-buffered body against it:
+
+```cpp
+const size_t initial = initialLen < contentLen ? initialLen : contentLen;   // → 0
+```
+
+so `fsWriteStream` streams nothing, succeeds, and the handler answers 200. The body on the socket is
+discarded. Reproduced deliberately: an 11-byte file written with `Content-Length: 11` lands as 11
+bytes; the identical request sent `Transfer-Encoding: chunked` answers `{"ok":true}` and leaves a
+**0-byte** file, destroying what was there. Any HTTP client that streams without declaring a length
+hits this — `curl --data-binary` on a pipe, and chunked uploads generally.
+
+This is data loss reported as success, which is the part that matters: a caller has no way to know
+the write did not happen, and the previous contents are already gone.
+
+**Options:** (a) reject a body-bearing POST with no `Content-Length` (411 Length Required) — smallest,
+honest, and standard; (b) support `Transfer-Encoding: chunked` in the upload source, which is more
+work and only worth it if a real client needs it; (c) at minimum, never report 200 for a write whose
+byte count does not match what was declared. (a) plus (c) is the pair worth doing. The UI's own
+File Manager always sends a length, so this does not affect it — an API caller or a script does.
+
+Pin with a test that a length-less upload does not report success and does not truncate the target.

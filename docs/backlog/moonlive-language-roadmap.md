@@ -68,19 +68,36 @@ Its top-down spec already records what it needs from the engine, in
 library could finish compiled-side first. That list is the real roadmap, and it is more specific
 than "add a language feature":
 
-1. **A builtin table of ≥ 64 entries.** Today `BuiltinTable::kMax` is **16 — and the light domain
-   registers exactly 16.** The table is FULL. `add()` returns false past the limit and nothing
-   checks the result, so the seventeenth builtin is dropped silently and the script fails later
-   with "unknown function". This is the first thing to fix, and it is a one-line constant plus a
-   guard that makes overflow loud.
-2. **Typed multi-argument host calls** (≤ 6 args, optional return). Today a builtin takes one
+1. **A builtin table of ≥ 64 entries.** ✅ *shipped*. `BuiltinTable::kMax` was **16, and the light
+   domain registered exactly 16** — the table was FULL, `add()` returned false past the limit, and
+   nothing checked the result, so the seventeenth builtin was dropped silently and the script
+   failed later with "unknown function". `kMax` is now 64, and an overflow is loud rather than
+   silent (`MM_ASSERT_NO_BUILTIN_OVERFLOW`).
+2. **A larger branch budget (`kIrLabels`, today 16).** Every `if` costs up to two labels and every
+   `for` costs two, counted across the WHOLE script including its helper functions, and labels are
+   never reused once a scope closes. A script hits "too many branches in one script" well before it
+   feels complex. **Concrete case (2026-08-20):** giving `balls.mle` the wall bounces its own name
+   promises — four `if`s, one per wall — exceeded the budget and would not compile, even reduced to
+   one branch per wall by writing the direction bit arithmetically instead of toggling it. The
+   effect is 4 balls on a 64-byte arena. It ships bouncing only because the motion was rewritten as
+   a `beatsin()` per axis, where the reversal is inherent in the sine and costs no branch at all.
+   That worked out better here, but it was a workaround found under the ceiling rather than the
+   obvious way to write the effect, and the next script will not always have one.
+   **The cost is stack**, already measured and documented at `kIrAsmLabels`: ~4 bytes per label in
+   `lowerWith` (a local in the assembler), plus `Loop loops[kIrLabels]` and `int32_t
+   labelAt[kIrLabels]` in the spill pass. Raising 16 → 32 is a one-constant change; the number to
+   watch is `lowerWith`'s frame on the classic ESP32, which the existing note records going 480 →
+   1120 bytes when the assembler tables were last raised. Reusing a label once its scope closes
+   would lift the ceiling without the stack, but that is a real allocator change rather than a
+   constant.
+3. **Typed multi-argument host calls** (≤ 6 args, optional return). Today a builtin takes one
    `uint32_t` and returns one, which is why `line()` had to be given a bespoke seven-argument
    staging path and why most of the library is inexpressible.
-3. **Script symbols** `x/y/z/w/h/d/time` — already threaded to the runtime entry point, needing
+4. **Script symbols** `x/y/z/w/h/d/time` — already threaded to the runtime entry point, needing
    only grammar exposure.
-4. **Two entry shapes:** `frame()` for composing kernels (the scalable path) and `pixel(x,y,z)`
+5. **Two entry shapes:** `frame()` for composing kernels (the scalable path) and `pixel(x,y,z)`
    for per-pixel ergonomics (honest ceiling around 32×32).
-5. **Stateful handles** — a `Pool`, a `BeatPhase` — script-declared, arena-allocated at compile
+6. **Stateful handles** — a `Pool`, a `BeatPhase` — script-declared, arena-allocated at compile
    time, passed as an opaque first argument. No script-side memory management.
 
 Item 5 is worth noting against the arena work below: a particle pool as a HANDLE means the script
@@ -134,7 +151,7 @@ Not purely a constants bump, and the blockers are known:
 
 A script now writes one call where it used to write three:
 
-```
+```c
 setPaletteColor(x, y, index, brightness);
 ```
 
@@ -208,7 +225,7 @@ and the builtins can take and return.
 
 The payoff is that #4 becomes the natural signature rather than a special case:
 
-```
+```c
 setColorFromPalette(pos, index, brightness);     // pos is a Coord3D
 ```
 
