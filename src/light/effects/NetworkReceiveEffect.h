@@ -5,6 +5,7 @@
 #include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
 #include "light/DdpPacket.h"      // shared DDP wire format
 #include "light/E131Packet.h"     // shared E1.31/sACN wire format
+#include "light/layers/Layer.h"    // Layer::bufferGen — is the held frame still ours? (see tick)
 #include "platform/platform.h"    // platform::UdpSocket (the receive sockets — not a scratch buffer)
 
 namespace mm {
@@ -121,17 +122,25 @@ public:
                 noteReceiving("DDP", srcIp);
             }
         }
-        // Staging → layer buffer, but ONLY when a packet actually landed. The Layer does not clear
-        // the buffer (Layer::tick — it persists frame-to-frame), so last frame's pixels are already
-        // there and re-copying identical bytes every tick is pure cost: at 12288 lights that memcpy
-        // measured 3.5 ms per tick on an S3 with NO traffic at all. Hold-last-frame is unchanged —
-        // the buffer already holds it.
-        if (!dirty_) return;
-        dirty_ = false;
+        // Staging → layer buffer. The Layer does not clear between frames, so when no packet
+        // arrived AND nothing else touched the buffer, it still holds our last frame and the copy
+        // would write identical bytes: 3.5 ms per tick at 12288 lights on an S3, for nothing.
+        // Both halves are required. A sibling effect's tick, the collected fade (which the Layer
+        // runs BEFORE the effect pass) or the live-modifier pass all leave the held frame altered,
+        // and hold-last-frame is this module's contract — so the layer's write generation, not just
+        // our own packet flag, decides. One uint32 compare, no scan.
         uint8_t* buf = buffer();
         if (!buf) return;
+        const auto* layer = static_cast<const Layer*>(parent());
+        const uint32_t gen = layer ? layer->bufferGen() : 0;
+        if (!dirty_ && layer && gen == lastGen_) return;
+        dirty_ = false;
         const size_t bufBytes = static_cast<size_t>(nrOfLights()) * channelsPerLight();
         std::memcpy(buf, staging_.data(), staging_.bytes() < bufBytes ? staging_.bytes() : bufBytes);
+        // Record the generation our write produces: the Layer bumps it right after this tick
+        // returns (the effect loop counts every effect), so the next tick compares against the
+        // value that includes our own copy.
+        lastGen_ = gen + 1;
     }
 
     // Place one universe's payload: byte offset (universe − universeStart) ×
@@ -187,6 +196,9 @@ private:
     // Starts true so a fresh (zeroed) staging paints once, rather than leaving whatever the
     // previous effect left in the shared layer buffer.
     bool dirty_ = true;
+    // The layer's write generation as of our last copy. Anything else writing the shared buffer
+    // moves it, which is what makes skipping the copy safe (see tick).
+    uint32_t lastGen_ = 0;
 
     // Update the "receiving <protocol> from <ip>" diagnostic, but never clobber a bind error (its status is
     // the kBindFailMsg literal, so status() != recvStatus_). The common case is the same sender + protocol

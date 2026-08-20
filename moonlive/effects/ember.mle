@@ -5,13 +5,13 @@
 class EmberEffect {
   uint8_t  cool = 30;
   uint8_t  spark = 60;
-  uint16_t cycle = 1000;   // wraps past 255, which is why it is uint16_t
+  uint8_t  cycle = 20;
   uint8_t  heat[16];
 
   defineControls() {
     addUint8("cool", cool, 1, 120);
     addUint8("spark", spark, 0, 200);
-    addUint16("cycle", cycle, 100, 2000);
+    addUint8("cycle", cycle, 1, 120);
   }
 
   tick() {
@@ -19,9 +19,9 @@ class EmberEffect {
       if (heat[i] > cool) { heat[i] = heat[i] - cool; } else { heat[i] = 0; }
     }
 
-    // Ignition breathes: strongest at the start of each cycle, fading to nothing by its end, so
-    // `cycle` sets how long a flare-up lasts. beat() is already the 0..65535 sawtooth, so the
-    // effect reads the clock rather than keeping a phase counter of its own.
+    // Ignition breathes: strongest at the start of each cycle, fading to nothing by its end.
+    // `cycle` is a BPM because beat() takes one; a wider slider would truncate to a byte and
+    // read back as a different, non-monotonic speed.
     for (j = 0; j < 16; j = j + 1) {
       if (random16(256) < scale(spark, 65535 - beat(cycle, t))) { heat[j] = 255; }
     }

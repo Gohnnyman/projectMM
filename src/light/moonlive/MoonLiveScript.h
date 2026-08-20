@@ -117,6 +117,33 @@ public:
         failedScript_[0] = '\0';
     }
 
+    /// Publish every control the compiled script declared into `controls`, bound by reference to
+    /// the engine's live arena slot so a slider write lands where the running native code reads it.
+    /// The ONE home for this: all three bindings (effect, layout, modifier) publish identically,
+    /// and the width dispatch below is the kind of reasoning that should be stated once.
+    void publishDeclaredControls(ControlList& controls) {
+        uint8_t n = 0;
+        const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
+        for (uint8_t i = 0; i < n; i++) {
+            uint8_t* slot = engine_.controlSlot(decls[i].offset);
+            if (!slot) continue;   // engine not compiled yet — controls appear after prepare
+            // Published at the width the script declared. A uint16_t member reaches the UI as a
+            // 16-bit control writing both its arena bytes; publishing it as a uint8 would drive
+            // only the low one and leave the high half holding whatever it had.
+            if (decls[i].type == moonlive::CtrlType::Uint16) {
+                // Safe to view as a uint16_t: the compiler aligns every wide member to an even
+                // arena offset (two backends cannot encode an odd halfword offset at all), and the
+                // arena base comes from platform::alloc, which is aligned for any fundamental type.
+                controls.addUint16(decls[i].name, *reinterpret_cast<uint16_t*>(slot),
+                                   decls[i].min, decls[i].max);
+            } else {
+                controls.addUint8(decls[i].name, *slot,
+                                  static_cast<uint8_t>(decls[i].min),
+                                  static_cast<uint8_t>(decls[i].max));
+            }
+        }
+    }
+
     MoonLive&       engine()       { return engine_; }
     const MoonLive& engine() const { return engine_; }
     bool ok() const { return engine_.ok(); }

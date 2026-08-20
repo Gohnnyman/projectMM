@@ -3,11 +3,11 @@
 // `cos`/`sin` run 0..65535 centred at 32768, so scaling by the DIAMETER lands the whole circle.
 
 class RingLayout {
-  uint8_t count = 24;
+  uint16_t count = 24;
   uint8_t radius = 5;
 
   defineControls() {
-    addUint8("count", count, 3, 255);
+    addUint16("count", count, 3, 1000);
     addUint8("radius", radius, 1, 127);
   }
 

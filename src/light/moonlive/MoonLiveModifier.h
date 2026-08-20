@@ -50,26 +50,7 @@ public:
                               moonlive::kModifierPick);
         // Every control the script declared. System variables (`x`/`y`/`z`, `width`/`height`/
         // `depth`, `t`) are not controls and never appear here, so there is nothing to filter out.
-        uint8_t n = 0;
-        const moonlive::DeclaredControl* decls = script_.engine().declaredControls(n);
-        for (uint8_t i = 0; i < n; i++) {
-            uint8_t* slot = script_.engine().controlSlot(decls[i].offset);
-            if (!slot) continue;
-            // Published at the width the script declared. A uint16_t member reaches the UI as a
-            // 16-bit control writing both its arena bytes; publishing it as a uint8 would drive
-            // only the low one and leave the high half holding whatever it had.
-            if (decls[i].type == moonlive::CtrlType::Uint16) {
-                // Safe to view as a uint16_t: the compiler aligns every wide member to an even
-                // arena offset (two backends cannot encode an odd halfword offset at all), and the
-                // arena base comes from platform::alloc, which is aligned for any fundamental type.
-                controls_.addUint16(decls[i].name, *reinterpret_cast<uint16_t*>(slot),
-                                    decls[i].min, decls[i].max);
-            } else {
-                controls_.addUint8(decls[i].name, *slot,
-                                   static_cast<uint8_t>(decls[i].min),
-                                   static_cast<uint8_t>(decls[i].max));
-            }
-        }
+        script_.publishDeclaredControls(controls_);
     }
 
     /// Compile the script as written.

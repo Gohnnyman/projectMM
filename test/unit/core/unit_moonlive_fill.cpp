@@ -275,6 +275,29 @@ TEST_CASE("MoonLive controls: declaredControls + controlSlot seeded from the def
     CHECK(eng.controlSlot(moonlive::kArenaBytes) == nullptr);   // out of range → nullptr (robust)
 }
 
+// A declared range is an arbitrary expression, so a script can write min > max. The write path
+// tests `v < min || v > max`, which is true of EVERY value when the range is inverted: the slider
+// would appear and then silently refuse everything the user does to it. Refusing the declaration
+// instead leaves the control absent, which is visible — the same stance a range past the declared
+// width already takes.
+TEST_CASE("a control declared with min above max is refused, not published as unsettable") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T {\n"
+                        "  uint8_t ok = 5;\n"
+                        "  uint8_t bad = 7;\n"
+                        "  defineControls() {\n"
+                        "    addUint8(\"ok\", ok, 0, 99);\n"
+                        "    addUint8(\"bad\", bad, 90, 10);\n"
+                        "  }\n"
+                        "  tick() { setRGB(ok, 0, 0, 255); }\n"
+                        "}\n", kCtrlTable, kSys));
+    moonlive::runDefineControls(eng);
+    uint8_t n = 0;
+    const moonlive::DeclaredControl* dc = eng.declaredControls(n);
+    REQUIRE(n == 1);                       // only the sane one reached the sink
+    CHECK(std::strcmp(dc[0].name, "ok") == 0);
+}
+
 TEST_CASE("MoonLive controls: arena address is STABLE across a recompile and the slot value survives") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile(mmScript("uint8_t speed = 7;\nsetRGB(speed, 0, 0, 255);"), kCtrlTable, kSys));

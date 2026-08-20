@@ -59,9 +59,8 @@ const PREF_BOARD_KEY    = "projectMM.picker.board";
 // the rev1 binary is rejected by its bootloader. Remove a key once its variant is
 // bench-verified.
 //
-// esp32p4rev1-eth-wifi was listed here as an esp-idf #18759 boot-crash repro and is now
-// REMOVED: it boots, associates and serves the UI as of IDF v6.1-rc1 with
-// CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n.
+// esp32p4rev1-eth-wifi is NOT experimental: on IDF v6.1-rc1 with
+// CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n it boots, associates and serves the UI.
 const EXPERIMENTAL_FIRMWARES = new Set(["esp32p4rev3-eth", "esp32p4rev3-eth-wifi"]);
 
 // One picker instance per init() call. Each tracks its own state so multiple

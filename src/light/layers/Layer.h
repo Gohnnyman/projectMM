@@ -166,7 +166,7 @@ public:
         // (VirtualLayer): effects call layer()->fadeToBlackBy(amt) which MINs into fadeBy_, so N
         // fading effects on one layer cost ONE buffer pass (the gentlest amount wins, preserving the
         // most light / longest trail) instead of each effect fading the whole shared buffer itself.
-        if (fadeBy_ > 0) { draw::fade(buffer_, fadeBy_); fadeBy_ = 0; }
+        if (fadeBy_ > 0) { draw::fade(buffer_, fadeBy_); fadeBy_ = 0; bufferGen_++; }
         // A degenerate grid has nothing to draw. This is orchestration — the Layer owns the
         // decision to run the effect pass at all, the same way it owns the enabled/role gates
         // below — so it is checked ONCE here rather than repeated as a guard clause in every
@@ -187,6 +187,7 @@ public:
             // only writes its own slice (D1 → column x=0,z=0; D2 → slice z=0); the
             // framework duplicates that across the rest of the buffer.
             extrude(eff->dimensions());
+            bufferGen_++;   // this effect wrote the shared buffer; see bufferGen()
             eff->addAccumUs(platform::micros() - start);
         }
         // Tick EVERY enabled modifier AFTER the effect pass (the frame's buffer is
@@ -210,7 +211,7 @@ public:
         // the buffer goes straight to the driver scatter (the pay-for-what-you-use rule).
         // hasGrid too: applyLivePass walks the mapping into the buffer, and an empty layout has
         // neither. The effect pass above is already gated the same way.
-        if (hasGrid && hasLive_) applyLivePass();
+        if (hasGrid && hasLive_) { applyLivePass(); bufferGen_++; }
     }
 
     // COLD path (called from prepare after rebuildLUT): (re)size the live-pass
@@ -324,6 +325,14 @@ public:
     // the start of the next frame, then resets. MoonLight's VirtualLayer::fadeToBlackBy model — N
     // fading effects on one layer cost one pass, not N, and never fade each other's fresh pixels.
     void fadeToBlackBy(uint8_t amt) { fadeBy_ = fadeBy_ ? (amt < fadeBy_ ? amt : fadeBy_) : amt; }
+
+    /// How many times anything has written this layer's shared buffer. The buffer PERSISTS between
+    /// frames (see tick), so an effect that holds a previous frame — a network receiver, a still —
+    /// can re-lay it only when something actually disturbed it, instead of re-copying every tick.
+    /// Bumped by the collected fade, by every effect's tick, and by the live-modifier pass, so
+    /// "unchanged" means the bytes are exactly as that effect left them. A new writer of `buffer_`
+    /// must bump it too, the same discipline the fade follows.
+    uint32_t bufferGen() const { return bufferGen_; }
 
     nrOfLightsType physicalLightCount() const {
         return layouts_ ? layouts_->totalLightCount() : 0;
@@ -589,6 +598,7 @@ private:
     lengthType depth_ = 0;
     uint32_t elapsed_ = 0;
     uint8_t  fadeBy_ = 0;   // per-frame fade collected from effects (MIN), consumed once at frame start
+    uint32_t bufferGen_ = 0;   // bumped by every write to buffer_; see bufferGen()
     char statusBuf_[20] = {};  // "999×999×999" fits; owned (setStatus borrows the pointer)
     bool     hasLive_ = false;          // any enabled modifier animates per frame (gates the live pass)
     uint8_t* liveScratch_ = nullptr;    // snapshot for the live pass; allocated only when hasLive_

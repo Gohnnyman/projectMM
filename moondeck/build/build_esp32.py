@@ -715,14 +715,9 @@ def main():
     # set-target is skipped — switching to another firmware uses a different
     # build_dir entirely, so its sdkconfig is untouched.
     #
-    # esp32p4rev1-eth-wifi used to need a manual set-target sequence here:
-    # esp_wifi_remote's slave target (SLAVE_IDF_TARGET_ESP32C6) is selected by a
-    # Kconfig `default ... if IDF_TARGET_ESP32P4` that fired during `set-target` but
-    # was dropped by the reconfigure a plain `build` triggered, falling back to
-    # ESP32-H2 (no WiFi) and failing on missing CONFIG_WIFI_RMT_* symbols. Re-tested
-    # on IDF v6.1-rc1 (2026-08-19): a clean build and an incremental rebuild through
-    # this wrapper both keep CONFIG_SLAVE_IDF_TARGET_ESP32C6=y, so the variant builds
-    # like any other and ships in the release matrix.
+    # esp32p4rev1-eth-wifi needs no special handling: on IDF v6.1-rc1 a clean build and an
+    # incremental rebuild through this wrapper both keep CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+    # (esp_wifi_remote's slave target), so it builds like any other variant.
     extra = firmware_cmake_args(firmware, args.release, args.version,
                                 task_cpu_stats=args.task_cpu_stats)
 

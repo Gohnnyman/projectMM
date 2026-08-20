@@ -383,6 +383,10 @@ inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     // small number; refusing the declaration leaves the control absent, which the user can see.
     const uintptr_t limit = (type == CtrlType::Uint16) ? 65535u : 255u;
     if (args[2] > limit || args[3] > limit) return 0;
+    // Same stance for an INVERTED range: with min > max the write path's `v < min || v > max` is
+    // true for every value, so the slider would appear and then refuse everything the user does to
+    // it. Refusing the declaration leaves it absent, which is visible.
+    if (args[2] > args[3]) return 0;
     s.fn(s.ctx, name, static_cast<uint8_t>(args[1]),
          static_cast<uint16_t>(args[2]), static_cast<uint16_t>(args[3]), type);
     return 0;
@@ -593,8 +597,8 @@ inline BuiltinTable lightBuiltins() {
     t.add({"sin", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_sin, {}});
     // polarA(dx, dy) / polarR(dx, dy) → polar from a centre. atan16 and dist16 already exist in
     // math16.h. NOT named `angle`/`radius`: a script wants those for its own controls
-    // (ring.mll and balls.mle both declare `radius`), and a builtin would shadow them.
-    // math16.h; this exposes them, so a radial effect stops needing a precomputed lookup table.
+    // (ring.mll and balls.mle both declare `radius`), and a builtin would shadow them. Exposing
+    // them here is what lets a radial effect drop its precomputed lookup table.
     t.add({"polarA", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarA, {}});
     t.add({"polarR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarR, {}});
     t.add({"cos", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_cos, {}});

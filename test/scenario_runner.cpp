@@ -626,8 +626,13 @@ static int runScenario(const char* path) {
             // one could not live in moonlive/, where unit_MoonLiveScripts compiles all of
             // them), and an edit that CHANGES A SCRIPT'S CONTROL SET (proving controls
             // re-derive and keep their values). Selecting a shipped script covers neither.
+            // A MALFORMED step is a failed scenario, for the same reason a failed write is (see
+            // below): every later step runs against a file that was never staged, and the run
+            // could still report PASSED. Skipping it silently is what makes a typo'd key pass here
+            // and fail on hardware, where run_live_scenario.py already treats this as an error.
             if (!step.has("path") || !step.has("value")) {
-                std::printf("  WRITE %s — missing path/value, skipped\n", name);
+                std::printf("  WRITE %s — missing path/value\n", name);
+                result.check(false, name);
                 continue;
             }
             const char* filePath = step["path"].c_str();

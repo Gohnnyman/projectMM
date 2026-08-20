@@ -780,7 +780,7 @@
         "desktop-macos": {
           "tick_us": [
             5,
-            15
+            22
           ],
           "free_heap": [
             0,

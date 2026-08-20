@@ -352,11 +352,13 @@ const char* coprocessorWifi() {
     // The link works (WiFi associates and serves traffic) while this particular RPC does not answer,
     // so retrying it buys nothing and costs a second of every tick.
     //
-    // A few attempts rather than one: the C6 may still be handshaking right after boot, and the
-    // answer is worth having when it comes. After that the display latches on whatever it learned.
-    // The VERSION cannot change while the host runs, since reflashing the C6 takes the host with it.
+    // TWO attempts, not five: each unanswered one is a ~1 s stall on the render thread, so five is
+    // five seconds of stutter at boot to fill in a diagnostic string. One retry still catches a C6
+    // that was mid-handshake on the first ask, which is the only case a retry was for. After that
+    // the display latches on whatever it learned; the VERSION cannot change while the host runs,
+    // since reflashing the C6 takes the host with it.
     static char buf[24] = "querying…";
-    static uint8_t attemptsLeft = 5;
+    static uint8_t attemptsLeft = 2;
     if (attemptsLeft == 0) return buf;
     esp_hosted_coprocessor_fwver_t ver = {};
     if (esp_hosted_get_coprocessor_fwversion(&ver) == ESP_OK
