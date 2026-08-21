@@ -685,23 +685,21 @@ static bool ethInitEmac() {
     // a non-IO_MUX pin fails "invalid ... GPIO number"). They also match the CoreBoard
     // schematic wiring (docs/reference/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
     // here would make IDF pick these same defaults; we list them explicitly for clarity.
-    // Indices into platform::ethRgmiiPins, which is the ONE list of these pads: NetworkModule
-    // publishes the same entries as read-only controls so the pin map can see what the MAC holds.
-    // Named here rather than repeated as literals, so the two can never drift apart.
     // A pad's GPIO by signal name. constexpr-evaluable, so a name that is not in the list fails the
     // build rather than silently wiring pad 0.
     constexpr auto rgmiiPad = [](const char* want) -> int {
-        for (uint8_t i = 0; i < ethRgmiiPadCount; i++) {
-            const char* n = ethRgmiiPads[i].name;
+        for (uint8_t i = 0; i < ethFixedPadCount; i++) {
+            const char* n = ethFixedPads[i].name;
             const char* w = want;
             while (*n && *n == *w) { ++n; ++w; }
-            if (*n == 0 && *w == 0) return ethRgmiiPads[i].gpio;
+            if (*n == 0 && *w == 0) return ethFixedPads[i].gpio;
         }
         return -1;   // not found: IDF rejects it loudly at eth init
     };
-    // Looked up BY NAME out of platform::ethRgmiiPads, the one list NetworkModule also publishes as
-    // read-only controls. By name rather than by index so reordering that list cannot silently
-    // rewire the MAC, and a typo is a compile error rather than a scrambled bus.
+    // Looked up BY NAME out of platform::ethFixedPads, the ONE list of these pads: NetworkModule
+    // reports the same entries through fixedPins() so the pin map can show what the MAC holds. By
+    // name rather than by index so reordering that list cannot silently rewire the MAC, and a typo
+    // is a compile error rather than a scrambled bus.
     emac_config.clock_config.rgmii.clock_tx_gpio = rgmiiPad("ethTxClk");
     emac_config.clock_config.rgmii.clock_rx_gpio = rgmiiPad("ethRxClk");
     emac_config.emac_dataif_gpio.rgmii = eth_mac_rgmii_gpio_config_t{

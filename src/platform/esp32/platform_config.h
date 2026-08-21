@@ -72,25 +72,37 @@ constexpr bool isEsp32S31 = false;
 // NetworkModule's read-only pin controls: the controls are the pin registry the pin map reads, and a
 // pad nobody declares is a pad the map shows free while the MAC drives it (an LED lane parked on
 // GPIO 10 corrupted every frame the MAC sent, with the link still reporting 1000 Mbit and no drops).
-/// One pad: the signal it carries and the GPIO the silicon fixed it to. Pairing them here is what
-/// keeps the EMAC's wiring and the published control name from drifting apart: both read this, so a
-/// reorder cannot scramble one without the other.
-struct EthRgmiiPad { const char* name; uint8_t gpio; };
+/// One pad the EMAC's data interface owns: the signal it carries and the GPIO the silicon fixed it
+/// to. RGMII on the S31, RMII on the P4, and neither is configurable, which is why they are reported
+/// through MoonModule::fixedPins() rather than published as controls. Pairing name with GPIO here is
+/// what keeps the MAC's wiring and the pin map's label from drifting apart: both read this list.
+struct EthFixedPad { const char* name; uint8_t gpio; };
 #ifdef CONFIG_IDF_TARGET_ESP32S31
-constexpr EthRgmiiPad ethRgmiiPads[] = {
+constexpr EthFixedPad ethFixedPads[] = {
     {"ethTxd0",  8}, {"ethTxd1",  9}, {"ethTxd2", 10}, {"ethTxd3", 11},
     {"ethTxCtl", 12}, {"ethTxClk", 13}, {"ethRxClk", 14}, {"ethRxCtl", 15},
     {"ethRxd3", 16}, {"ethRxd2", 17}, {"ethRxd1", 18}, {"ethRxd0", 19},
 };
-constexpr uint8_t ethRgmiiPadCount = 12;
-static_assert(ethRgmiiPadCount == sizeof(ethRgmiiPads) / sizeof(ethRgmiiPads[0]),
+constexpr uint8_t ethFixedPadCount = 12;
+#elif defined(CONFIG_IDF_TARGET_ESP32P4)
+// P4 RMII: the data lines the EMAC drives, from ETH_ESP32_EMAC_DEFAULT_CONFIG() (which ethInitEmac
+// leaves untouched) and matching the NANO wiring in docs/reference/gpio-usage.md. Not the management
+// pair, which NetworkModule owns as real controls a carrier can reroute.
+constexpr EthFixedPad ethFixedPads[] = {
+    {"ethTxEn", 49}, {"ethTxd0", 34}, {"ethTxd1", 35},
+    {"ethCrsDv", 28}, {"ethRxd0", 29}, {"ethRxd1", 30},
+};
+constexpr uint8_t ethFixedPadCount = 6;
+#endif
+#if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4)
+static_assert(ethFixedPadCount == sizeof(ethFixedPads) / sizeof(ethFixedPads[0]),
               "the count gates every loop over this list: a mismatch reads past the end");
 #else
 // RMII targets name their data pins through NetworkModule's own controls, so there is no fixed pad
 // to publish. A one-element dummy rather than a zero-size array: `T x[] = {}` is a GCC/Clang
 // extension that MSVC refuses, and the desktop build is compiled by MSVC on the Windows CI job.
-constexpr EthRgmiiPad ethRgmiiPads[] = {{"", 0}};
-constexpr uint8_t ethRgmiiPadCount = 0;
+constexpr EthFixedPad ethFixedPads[] = {{"", 0}};
+constexpr uint8_t ethFixedPadCount = 0;
 #endif
 
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 / P4 / S31,

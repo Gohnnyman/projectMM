@@ -353,4 +353,3 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
 
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)
-

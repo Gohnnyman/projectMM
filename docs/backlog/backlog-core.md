@@ -629,7 +629,18 @@ Rounds 1 (board + Ethernet-only) and 2 (Parlio LED driver) have landed. Remainin
 
   **Open issues before this is done:**
 
-  0. **The esp_hosted build is ~17x slower on HTTP, with a ~1 s stutter — BISECTED to the hosted link, not to us (2026-08-19).** Same board, same commit, same application code, measured over **Ethernet on both builds** so the radio is not in the path:
+  0. **The esp_hosted build is slower on HTTP — BISECTED to the hosted link, not to us (2026-08-19), and much improved but NOT gone (re-measured 2026-08-21).**
+
+     **Re-measurement on IDF v6.1-rc1**, same board, same commit, same Ethernet interface, same method:
+
+     | build | per-request (`/api/system`) | throughput (76 KB `app.js`) |
+     |---|---|---|
+     | `esp32p4rev1-eth` | 10 ms flat | 1,973 KB/s |
+     | `esp32p4rev1-eth-wifi` | 40 ms typical, one 280 ms outlier in 12 | ~980 KB/s |
+
+     So the penalty is now **4x per-request and 2x throughput**, against 33-60x and 17x when this was written, and **the alternating 0.4/0.8 s pattern is gone** (one outlier in twelve, not every other request). Render is healthy in both (359 fps on the WiFi build). Something between the two IDF versions fixed most of it; what remains is the same shape (per-request, not per-byte) and still worth closing. The original measurement follows.
+
+     **Original (2026-08-19):** Same board, same commit, same application code, measured over **Ethernet on both builds** so the radio is not in the path:
 
      | build | per-request (`/api/system`) | throughput (73 KB `app.js`) |
      |---|---|---|
@@ -925,8 +936,9 @@ Three separate defects made this invisible, and each is worth fixing on its own:
 
 - ✅ **Bus-padded lanes** (fixed): a one-strand board had seven i80 lanes parked on `clockPin`, driven at bus-clock rate and listed nowhere. `spareLanesNeedPad()` stops the padding on a backend that routes its own GPIOs, so the pin is no longer driven and the map is truthful again.
 - ✅ **RGMII data pads** (fixed): all twelve are now published by NetworkModule as read-only pin controls from one `platform::ethRgmiiPads` list that `ethInitEmac` also reads. Verified on MM-S31: `gpio 10` reports as `ethTxd2`.
-- ❌ **RMII data pins** (open): `ethInitEmac` leaves TX_EN/TXD0/TXD1/CRS_DV/RXD0/RXD1 at `ETH_ESP32_EMAC_DEFAULT_CONFIG()`, so nothing names them. Confirmed on MM-P4, whose map lists MDC 31, MDIO 52, clock 50 and reset 51 (all controls) while the MAC also drives 49/34/35/28/29/30.
-- ❌ **MDC/MDIO on the classic ESP32** (open): the chip default is `mdc -1, mdio -1` and neither Olimex model sets them, so `ethInitEmac` skips the assignment and IDF applies its own defaults (23/18). The controls show -1, the MAC drives 23 and 18, and the map claims neither. Verified on MM-Olimex: Network owns only `ethRstGpio 5` and `ethClockGpio 17`. Giving the classic the real numbers in `ethConfigDefault` (or in the two models' JSON) closes it, since the controls are already visible for RMII.
+- ✅ **P4 RMII data pins** (fixed): the six lines the EMAC drives are in `platform::ethFixedPads` and reported through `fixedPins()`, same as the S31's RGMII pads. Verified on MM-P4: Network owns all ten of its Ethernet GPIOs (28/29/30/34/35/49 plus MDC 31, MDIO 52, clock 50, reset 51), against four before.
+- ❌ **Classic ESP32 RMII data pins** (open): TX_EN/TXD0/TXD1/CRS_DV/RXD0/RXD1 are fixed in silicon there, and unlike the P4 the IDF macro carries no field for them, so there is no in-tree source to copy. They need the datasheet numbers, entered as a third `ethFixedPads` branch; the mechanism is already built and the S31/P4 branches are the pattern.
+- ✅ **MDC/MDIO on the classic ESP32** (fixed): the chip default was `mdc -1, mdio -1`, so `ethInitEmac` skipped the assignment, IDF applied its own 23/18, and the map claimed neither. `ethConfigDefault` now states 23/18, sourced from IDF's own classic default and our QuinLED Dig-Octa entry. Verified on MM-Olimex: `Eth: 192.168.1.210 (100 Mbit)` with `gpio 23 MDC` and `gpio 18 MDIO` in the map. NOTE: a board with -1 already persisted keeps it until those controls are set once or NVS is erased.
 
 **The fix is the RGMII one, extended.** Being fixed in silicon does not make `gpioCapability`'s reserved list the right home: reserved means "routing I/O here corrupts the device" (flash, PSRAM, USB), which is unconditional, while an EMAC pad is only held while that interface runs. With `ethType = None` the init returns false and every one of those GPIOs is free for LEDs, so a static reserved list would permanently forbid pins a WiFi-only board can use. What makes a control the right shape is not that the pin is configurable (it is not) but that the claim is CONDITIONAL: published when the interface is selected, released when it is not, which is exactly what the pin map reads.
 

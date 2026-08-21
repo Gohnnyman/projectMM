@@ -259,8 +259,8 @@ public:
     uint8_t fixedPins(FixedPin* out, uint8_t max) const override {
         if (!out || ethType_ == static_cast<uint8_t>(platform::ethNone)) return 0;
         uint8_t n = 0;
-        for (uint8_t i = 0; i < platform::ethRgmiiPadCount && n < max; i++)
-            out[n++] = FixedPin{platform::ethRgmiiPads[i].gpio, platform::ethRgmiiPads[i].name};
+        for (uint8_t i = 0; i < platform::ethFixedPadCount && n < max; i++)
+            out[n++] = FixedPin{platform::ethFixedPads[i].gpio, platform::ethFixedPads[i].name};
         return n;
     }
 

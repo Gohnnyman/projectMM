@@ -330,6 +330,19 @@ reports ~3 500 B of flash and no static RAM.
 No scenario contract yet: the driver needs a receiver card on the wire, so the numbers above are a
 bench record rather than an asserted ceiling.
 
+## HTTP cost of the P4's WiFi co-processor (`esp32p4rev1-eth-wifi`)
+
+The P4 has no native radio: WiFi comes from an on-board ESP32-C6 over SDIO. Compiling that path in costs HTTP throughput **on an interface it does not carry**, which is why it is measured over Ethernet on both images: same board, same commit, same cable, so the only variable is whether esp_hosted is in the binary.
+
+| build | per-request (`/api/system`) | throughput (76 KB `app.js`) |
+|---|---:|---:|
+| `esp32p4rev1-eth` | 10 ms flat | 1,973 KB/s |
+| `esp32p4rev1-eth-wifi` | 40 ms typical, one 280 ms outlier in 12 | ~980 KB/s |
+
+So roughly **4x per request and 2x on throughput** for having the co-processor compiled in. Render is unaffected (359 fps on the WiFi build), so this is not frame-loop contention: the cost is per-REQUEST rather than per-byte, which points at a periodic blocker a request waits out rather than a slow pipe.
+
+Measured on IDF v6.1-rc1. The penalty was far worse on v6.1-beta1 (33-60x per request, 17x throughput, with requests alternating 0.4/0.8 s); most of that is gone and what remains is tracked in [backlog-core](backlog/backlog-core.md).
+
 ## Multicore: the whole output stage on core 1 (`multicore`, Step 2)
 
 The `multicore` control on the Drivers container runs **every driver's per-frame work** — the LED encode, the ArtNet packet build, the preview frame build — on a **core-1 task**, while the render loop draws the next frame on core 0. A frame costs `max(render, output)` instead of `render + output`. It stacks with the driver's `doubleBuffer` (which hides the WS2812 *wire* behind DMA on one core); this hides the *encode* behind the *render* on the other.
