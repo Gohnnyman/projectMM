@@ -24,6 +24,17 @@ constexpr bool isEsp32P4 = false;
 // of the two real constraints.
 constexpr uint8_t rmtTxChannels = 4;
 
+// A host has no EMAC and no fixed pads: its Ethernet is a named interface, not wired signals. The
+// count is 0 so the same NetworkModule code publishes nothing here; the array still holds one dummy
+// element because a zero-size array is a GCC/Clang extension MSVC refuses, and this header is
+// compiled by MSVC on the Windows CI job. See the ESP32 config for what this is for.
+struct EthRgmiiPad { const char* name; uint8_t gpio; };
+// A host has no EMAC and no fixed pads. Count 0 so the publishing loop yields nothing; the array
+// still holds one dummy element because a zero-size array is a GCC/Clang extension MSVC refuses, and
+// this header is compiled by MSVC on the Windows CI job.
+constexpr EthRgmiiPad ethRgmiiPads[] = {{"", 0}};
+constexpr uint8_t ethRgmiiPadCount = 0;
+
 // Lane counts the parallel backends report on desktop. NOT zero, deliberately: everything in the
 // repo runs on the desktop build — the platform layer just has no hardware behind the call. A
 // zero here makes every backend's lanesAvailable() report "not my silicon", so ParallelLedDriver

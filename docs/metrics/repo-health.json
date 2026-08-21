@@ -1,23 +1,23 @@
 {
-  "commit": "854acf2d",
+  "commit": "d65bae25",
   "flash": {
-    "esp32": 1754896,
-    "esp32p4rev1-eth": 1643616,
+    "esp32": 1756176,
+    "esp32p4rev1-eth": 1643712,
     "esp32p4rev1-eth-wifi": 1928640,
-    "esp32s3-n16r8": 1794496,
+    "esp32s3-n16r8": 1794192,
     "esp32s3-n8r8": 1753232,
-    "esp32s31": 2074256,
+    "esp32s31": 2075392,
     "esp32-16mb": 1714608,
     "esp32-eth": 1324816,
     "esp32-wrover": 1765504,
     "qemu": 1318160,
     "esp32p4rev3-eth": 1643760,
-    "desktop": 1193320
+    "desktop": 1193640
   },
   "perf": {
     "desktop": {
-      "tick_us": 179,
-      "fps": 5586
+      "tick_us": 241,
+      "fps": 4149
     },
     "esp32": {
       "tick_us": 2151,
@@ -25,32 +25,32 @@
     }
   },
   "loc": {
-    "core": 19407,
-    "light": 25102,
-    "platform": 13509,
+    "core": 19456,
+    "light": 25126,
+    "platform": 13572,
     "ui": 6859,
-    "test": 44249,
-    "moondeck": 21154
+    "test": 44289,
+    "moondeck": 21155
   },
   "comments": {
     "core": {
-      "lines": 7612,
-      "ratio": 0.425
+      "lines": 7639,
+      "ratio": 0.426
     },
     "light": {
-      "lines": 9849,
-      "ratio": 0.433
+      "lines": 9864,
+      "ratio": 0.434
     },
     "platform": {
-      "lines": 4806,
-      "ratio": 0.392
+      "lines": 4837,
+      "ratio": 0.393
     },
     "ui": {
       "lines": 1803,
       "ratio": 0.279
     },
     "test": {
-      "lines": 7980,
+      "lines": 7985,
       "ratio": 0.207
     },
     "moondeck": {
@@ -59,19 +59,19 @@
     }
   },
   "tests": {
-    "cases": 1429,
+    "cases": 1430,
     "scenarios": 23
   },
   "docs": {
-    "md_files": 183,
-    "md_lines": 26626,
+    "md_files": 185,
+    "md_lines": 26697,
     "plans_files": 93,
-    "backlog_lines": 4239,
+    "backlog_lines": 4268,
     "lessons_lines": 549,
-    "claude_md_lines": 135
+    "claude_md_lines": 136
   },
   "complexity": {
-    "functions": 2600,
+    "functions": 2604,
     "over_threshold": 163,
     "worst_ccn": 108
   }

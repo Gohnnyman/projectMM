@@ -198,6 +198,17 @@ public:
     /// member variable.
     virtual void defineControls() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->defineControls(); }
 
+    /// GPIOs this module holds that are NOT controls: pads the silicon fixed, which nobody can set
+    /// and so must never be a setting. Write them to `out` (capacity `max`) with the signal name each
+    /// carries, and return how many. Reported only while the module is actually using them, which is
+    /// what lets a board with no Ethernet spend those pins on LEDs.
+    ///
+    /// Exists because the pin map reads the control list as the pin registry, and a pad no control
+    /// names is a pad the map shows free while a peripheral drives it. That gap let an LED driver
+    /// take an Ethernet transmit line: every frame went out corrupt while the link reported healthy.
+    struct FixedPin { uint8_t gpio; const char* role; };
+    virtual uint8_t fixedPins(FixedPin* /*out*/, uint8_t /*max*/) const { return 0; }
+
     /// Non-virtual helper: clear-and-rebuild for this module AND its descendants. The default
     /// defineControls cascades into children, so we must also clear their control lists first;
     /// otherwise the recursive append would duplicate every child's controls. Used after Select

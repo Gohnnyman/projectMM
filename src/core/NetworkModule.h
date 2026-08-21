@@ -253,6 +253,17 @@ public:
         MoonModule::setup();
     }
 
+    /// The EMAC's data pads while Ethernet is the running interface. Not controls: the chip fixed
+    /// them, so there is nothing to set, and a board that is not using Ethernet leaves them free for
+    /// anything else (three of four classic boards in the catalog have no PHY at all).
+    uint8_t fixedPins(FixedPin* out, uint8_t max) const override {
+        if (!out || ethType_ == static_cast<uint8_t>(platform::ethNone)) return 0;
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < platform::ethRgmiiPadCount && n < max; i++)
+            out[n++] = FixedPin{platform::ethRgmiiPads[i].gpio, platform::ethRgmiiPads[i].name};
+        return n;
+    }
+
     void defineControls() override {
         // Chain to base FIRST so children (Improv on ESP32) register their
         // controls before NetworkModule appends its own — per the override-
@@ -340,10 +351,10 @@ public:
             const bool isRmii  = (ethType_ == 1 || ethType_ == 2);
             const bool isSpi   = (ethType_ == 3);
             const bool isRgmii = (ethType_ == 4);
-            // RGMII (S31): the data/clock pins are the chip's fixed IO_MUX pads, set in
-            // ethInitEmac() (not user config); MDC/MDIO come from the per-chip ethConfigDefault
-            // (5/6) via the shared smi_gpio path. Neither needs a UI row, so RGMII shows only
-            // phyAddr + reset (the rest of the RMII rows stay hidden — isRmii-gated below).
+            // RGMII (S31): the data/clock pins are the chip's fixed IO_MUX pads, set in ethInitEmac()
+            // and reported through fixedPins() rather than as controls, since nobody can choose them.
+            // MDC/MDIO are NOT fixed: they ride the shared smi_gpio path on every interface and a
+            // carrier can wire them anywhere, so they stay ordinary controls here.
             const bool isEth   = isRmii || isSpi || isRgmii;
             // GPIO controls use addPin → a plain number input (ControlType::Pin),
             // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
@@ -358,10 +369,15 @@ public:
             controls_.setHidden(controls_.count() - 1, !isEth);
             controls_.addPin("ethRstGpio", ethRstGpio_);
             controls_.setHidden(controls_.count() - 1, !isEth);
+            // MDC/MDIO are the PHY management pair, and every wired PHY needs them: ethInitEmac sets
+            // smi_gpio outside the RMII/RGMII branch, so an RGMII board drives them too. Shown for
+            // both (they are real board wiring a carrier can route differently), which is also what
+            // gets them counted by the pin map: it skips a hidden pin control on the rule that hidden
+            // means unused, so hiding a pin the MAC drives is how a pad goes missing from the map.
             controls_.addPin("ethMdcGpio", ethMdcGpio_);
-            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.setHidden(controls_.count() - 1, !isRmii && !isRgmii);
             controls_.addPin("ethMdioGpio", ethMdioGpio_);
-            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.setHidden(controls_.count() - 1, !isRmii && !isRgmii);
             controls_.addPin("ethClockGpio", ethClockGpio_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
             // Clock direction is a boolean (true = clock IN / board feeds it,
@@ -765,6 +781,9 @@ private:
     int8_t  ethMdcGpio_    = static_cast<int8_t>(platform::ethConfigDefault.mdcGpio);
     int8_t  ethMdioGpio_   = static_cast<int8_t>(platform::ethConfigDefault.mdioGpio);
     int8_t  ethRstGpio_    = static_cast<int8_t>(platform::ethConfigDefault.rstGpio);
+    // The RGMII data pads, mirrored from the platform's one list so they can be PUBLISHED as controls
+    // (read-only): the controls are the registry the pin map reads, so a pad that is not a control is
+    // a pad the map cannot see. Seeded once; nothing writes them.
     int8_t  ethClockGpio_  = static_cast<int8_t>(platform::ethConfigDefault.rmiiClockGpio);
     bool    ethClockExtIn_ = platform::ethConfigDefault.rmiiClockExtIn;
     int8_t  ethSpiMiso_    = static_cast<int8_t>(platform::ethConfigDefault.spiMiso);
@@ -1049,8 +1068,18 @@ private:
         if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) return;   // not connected — keep prior status
         char ipStr[16];
         formatDottedQuad(ipStr, ip);
-        const char* label = (state_ == State::ConnectedEth) ? "Eth" : "WiFi";
-        std::snprintf(statusBuf_, sizeof(statusBuf_), "%s: %s", label, ipStr);
+        if (state_ == State::ConnectedEth) {
+            // Carry the NEGOTIATED speed, not just the address. A gigabit PHY that fell back to
+            // 100M still gets a lease and looks identical here, while the panel-card driver needs
+            // the higher rate to hold its frame timing, so the one line answers both "am I on the
+            // network" and "at what rate".
+            const uint16_t mbps = platform::ethLinkSpeedMbps();
+            if (mbps > 0) std::snprintf(statusBuf_, sizeof(statusBuf_), "Eth: %s (%u Mbit)",
+                                        ipStr, static_cast<unsigned>(mbps));
+            else          std::snprintf(statusBuf_, sizeof(statusBuf_), "Eth: %s", ipStr);
+        } else {
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi: %s", ipStr);
+        }
         setStatus(statusBuf_, Severity::Status);
     }
 

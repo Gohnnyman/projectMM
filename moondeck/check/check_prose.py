@@ -26,6 +26,7 @@ SUFFIXES = (".h", ".hpp", ".c", ".cpp", ".inc", ".md", ".py", ".js", ".css", ".h
 
 # Paths exempt, with the reason each earns it.
 EXEMPT = (
+    "docs/friend-repos/", # monthly digests OF OTHER PROJECTS, quoted from their sources
     "docs/history/",      # the record of what was written then; rewriting it falsifies it
     "docs/backlog/",      # same: prior-project digests quoted from their sources
     "docs/metrics/",      # generated

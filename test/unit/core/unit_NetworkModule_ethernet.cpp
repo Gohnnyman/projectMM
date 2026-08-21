@@ -182,3 +182,4 @@ TEST_CASE("Static mode pins the static IP during STA bring-up (WaitingSta)") {
     }
     mm::platform::setTestWifiStaAvailable(false);   // reset — cases stay independent
 }
+
