@@ -11,6 +11,7 @@
 
 #include "core/math8.h"    // beatsin16 — the shared time vocabulary
 #include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
+#include "light/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
 #include "core/noise.h"    // inoise8 — the shared value-noise field
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
 
@@ -69,6 +70,19 @@ extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, co
     return n ? (next >> 16) % n : 0u;
 }
 
+// A script's arithmetic is UNSIGNED, so `x - cx` for x < cx arrives as a huge value rather than a
+// negative one. Anything above half the range is that wrap, and subtracting the range recovers the
+// signed offset the maths needs.
+//
+// One home rather than a copy per builtin: this is a language-wide ABI fact, not a detail of any
+// one function, and a new signed-taking builtin that forgets it renders INVERTED rather than
+// failing (the outside of a shape reads as fully inside), which looks like a working effect until
+// the shape moves. Every builtin below that takes a signed argument calls this.
+inline int32_t signedArg(uintptr_t a) {
+    const int32_t v = static_cast<int32_t>(uint32_t(a));
+    return v > 32767 ? v - 65536 : v;
+}
+
 // mod(a, b) → a % b, the wrap a cyclic animation needs. `t` grows without bound, so every effect
 // that repeats has to fold it back into a range: `mod(t * speed, width)` is a sweep that returns to
 // the start instead of running off the end once and never coming back.
@@ -80,6 +94,83 @@ extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, co
 extern "C" inline uint32_t mm_light_mod(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t a = uint32_t(args[0]), b = uint32_t(args[1]);
     return b ? a % b : 0u;
+}
+
+// div(a, b) → a / b, and what the '/' OPERATOR lowers to. Registered under a name for the same
+// reason mod is: the parser resolves both operators through the builtin table, so core stays
+// domain-neutral and a divide is one host call rather than an instruction no ISA here has.
+// b == 0 returns 0, matching mod, a script degrades, never faults.
+extern "C" inline uint32_t mm_light_div(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t a = uint32_t(args[0]), b = uint32_t(args[1]);
+    return b ? a / b : 0u;
+}
+
+// smoothstep(edge0, edge1, v) → a soft 0..65535 ramp between the edges, GLSL's own and the
+// anti-aliasing workhorse: wherever a script would draw a hard jaggy edge with an `if`, running
+// the distance through this softens it over a width the script picks. `smoothstep(0, w, w - d)`
+// turns a distance into a falloff, which is the difference between a stamp and a light source.
+//
+// A builtin rather than script arithmetic even though '/' now exists: the cubic is two divides
+// and three multiplies, so this folds about five host calls into one on a path that runs per
+// pixel. That is the bar a builtin has to clear now that the operator covers the general case.
+//
+// ALL THREE arguments are signed and re-centered here, exactly as polarA/polarR do: a script's
+// arithmetic is unsigned, so the natural `w - d` arrives as a huge value once d passes w. Without
+// this the outside of a shape reads as fully-inside and the effect renders inverted, a bug that
+// looks like a working effect until the shape moves.
+extern "C" inline uint32_t mm_light_smoothstep(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return shader::smoothstep(signedArg(args[0]), signedArg(args[1]), signedArg(args[2]));
+}
+
+// uvX(px, w, h) / uvY(py, w, h) → SHADER SPACE: the pixel's position centered on the grid and
+// scaled so the SHORT side spans one unit either way, biased at 32768 like sin/cos so 32768 is
+// the origin. This is the mapping every shader starts from, and skipping it is why a design
+// STRETCHES on a non-square panel: on a 48x256 wall `x - width / 2` draws a 5:1 ellipse where the
+// author wrote a circle.
+//
+// TWO builtins because a Call returns one value, the shape paletteR/G/B already established.
+//
+// Scaled so one unit is 8192, not 32768, and biased at 32768. The bias matches sin/cos so
+// `uvX(...) - 32768` feeds polarR/polarA with no adapter, and the coarser unit is what leaves the
+// LONG axis room: normalization is on the SHORT side, so on a 48x256 wall the long axis reaches
+// ±5.3 units and a window that put one unit at 32768 would clip everything past the middle
+// sixth: flattening exactly the panel shape uv exists to preserve. At 8192 the range covers a
+// 16:1 fixture, and beyond that the value saturates rather than wrapping to the opposite edge.
+//
+// ONE axis per call, rather than shader::uv's pair with the other half discarded: that computed two
+// divides per call and a script asking for both paid four per pixel, on the path the builtin exists
+// to make cheap. The 8192 factor is applied before the divide instead of as a shift after it, so
+// there is one rounding step rather than two. Everything stays int32_t: the arguments arrive as
+// full 32-bit script values, and narrowing them to lengthType (int16_t) first would wrap a large
+// width past the guard that is meant to catch it.
+extern "C" inline uint32_t mm_light_uvAxis(const uintptr_t* args, bool wantY) {
+    const int32_t px = static_cast<int32_t>(uint32_t(args[0]));
+    const int32_t w  = static_cast<int32_t>(uint32_t(args[1]));
+    const int32_t h  = static_cast<int32_t>(uint32_t(args[2]));
+    const int32_t sw = w < 1 ? 1 : w, sh = h < 1 ? 1 : h;
+    const int32_t s  = sw < sh ? sw : sh;          // normalize on the SHORT side: that is what
+                                                   // keeps a circle circular on a wide panel
+    const int32_t extent = wantY ? sh : sw;
+    const int32_t v = ((px * 2 - extent + 1) * 8192) / s;
+    return static_cast<uint32_t>(shader::clamp(v, -32768, 32767) + 32768);
+}
+extern "C" inline uint32_t mm_light_uvX(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return mm_light_uvAxis(args, false);
+}
+extern "C" inline uint32_t mm_light_uvY(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return mm_light_uvAxis(args, true);
+}
+
+// smin(a, b, k) → the smooth minimum of two distances: two shapes FLOW into one another instead of
+// merely overlapping (Quilez). `k` is the blend radius, 0 a plain min. Wraps draw::smin, so a
+// script and a compiled effect melt shapes identically.
+//
+// The distances are signed and re-centered here. draw::smin already widens its intermediates to 64
+// bits, and that is load-bearing: a wrapped smin returns a value larger than BOTH inputs, which
+// inverts the blend rather than degrading it.
+extern "C" inline uint32_t mm_light_smin(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return static_cast<uint32_t>(draw::smin(signedArg(args[0]), signedArg(args[1]),
+                                            static_cast<int32_t>(uint32_t(args[2]))));
 }
 
 // beat(bpm) / beatsin(bpm, low, high) → the TIME vocabulary an animation is actually written in.
@@ -138,21 +229,10 @@ extern "C" inline uint32_t mm_light_noise(const uintptr_t* args, uint32_t, const
 // returns the true distance, not the octagonal approximation, because a visibly non-circular
 // "circle" is exactly what an effect using this would be trying to draw.
 extern "C" inline uint32_t mm_light_polarA(const uintptr_t* args, uint32_t, const uint8_t*) {
-    // A script's arithmetic is unsigned, so `x - cx` for x < cx arrives as a huge value rather
-    // than a negative one. Anything above half the range is that wrap, and subtracting the range
-    // recovers the signed offset the maths needs.
-    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
-    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
-    if (dx > 32767) dx -= 65536;
-    if (dy > 32767) dy -= 65536;
-    return static_cast<uint32_t>(atan16(dy, dx));
+    return static_cast<uint32_t>(atan16(signedArg(args[1]), signedArg(args[0])));
 }
 extern "C" inline uint32_t mm_light_polarR(const uintptr_t* args, uint32_t, const uint8_t*) {
-    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
-    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
-    if (dx > 32767) dx -= 65536;
-    if (dy > 32767) dy -= 65536;
-    return dist16(dx, dy);
+    return dist16(signedArg(args[0]), signedArg(args[1]));
 }
 
 extern "C" inline uint32_t mm_light_sin(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -262,6 +342,14 @@ using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset,
                               uint16_t lo, uint16_t hi, CtrlType type);
 struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
 
+/// Where fade(amt) sends its request. The binding forwards it to the LAYER rather than to the
+/// buffer, because Layer::tick collects every request into one amount and applies it ONCE per
+/// frame before the effects run: N fading effects on a shared layer cost one buffer pass, and the
+/// gentlest amount wins so the longest trail survives. A builtin that faded the buffer itself
+/// would be N passes AND would fight the other effects sharing that layer.
+using FadeFn = void (*)(void* ctx, uint8_t amt);
+struct FadeSink { FadeFn fn = nullptr; void* ctx = nullptr; };
+
 namespace detail {
 // `owner` is ATOMIC and claimed with compare_exchange: the claim used to be a load then a store,
 // so two threads could both see the same slot free and both take it — leaving them sharing one
@@ -271,7 +359,7 @@ namespace detail {
 // addLight sink (a layout run installs it) and the draw canvas (an effect run installs it). A
 // second table would repeat the claim/release machinery for the same lifetime.
 struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas;
-                  AddControlSink controls; };
+                  AddControlSink controls; FadeSink fade; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -303,11 +391,11 @@ inline SinkSlot* ownedSlot(bool claim) MM_NONBLOCKING {
     }
     return nullptr;
 }
-/// Release only a fully empty slot: the three halves (addLight sink, draw canvas, control sink)
-/// detach independently, and a release while any of them is live would hand this thread's context
-/// to the next claimer, whose script would then reach a dead engine through it.
+/// Release only a fully empty slot: the four halves (addLight sink, draw canvas, control sink,
+/// fade sink) detach independently, and a release while any of them is live would hand this
+/// thread's context to the next claimer, whose script would then reach a dead engine through it.
 inline void releaseIfEmpty(SinkSlot* s) MM_NONBLOCKING {
-    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn)
+    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn && !s->fade.fn)
         s->owner.store(0, std::memory_order_release);
 }
 }  // namespace detail
@@ -329,6 +417,24 @@ inline const AddControlSink& addControlSink() {
     detail::SinkSlot* s = detail::ownedSlot(false);
     static constinit AddControlSink none{};
     return s ? s->controls : none;
+}
+
+/// The fade sink for this thread, or an empty one. Reading does not claim a slot, for the same
+/// reason addLightSink() does not.
+inline const FadeSink& fadeSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit FadeSink none{};
+    return s ? s->fade : none;
+}
+
+/// Point fade() at the layer for the duration of one run; nullptr to detach. Installed by the
+/// binding in the same bracket as the draw canvas, so a script calling fade from a layout or a
+/// modifier reaches no sink and does nothing, exactly as line and setPaletteColor already behave.
+inline void setFadeSink(FadeFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->fade = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
 }
 
 /// Point addUint8 at a consumer for the duration of one defineControls() run; nullptr to detach.
@@ -456,6 +562,24 @@ extern "C" inline uint32_t mm_light_setPaletteColor(const uintptr_t* args, uint3
     return 0;
 }
 
+/// fade(amt) → dim every light toward black by amt/255, FastLED's fadeToBlackBy under its own
+/// name. The trail primitive: an effect that fades instead of clearing leaves a decaying tail
+/// behind whatever it draws, which is what a spark, a comet or a scanner looks like.
+///
+/// Goes to the LAYER, not to the buffer. Layer::tick collects the requests and applies the
+/// gentlest one ONCE per frame before the effects run, so two fading effects on one layer cost one
+/// pass rather than two, and the longer trail survives. See Layer::fadeToBlackBy.
+///
+/// Reaches nothing from a layout or a modifier, where no sink is installed, so the call is a
+/// no-op there rather than fading a layer the script is not ticking in.
+extern "C" inline uint32_t mm_light_fade(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const FadeSink& f = fadeSink();
+    if (!f.fn) return 0;
+    const uint32_t amt = uint32_t(args[0]);
+    f.fn(f.ctx, static_cast<uint8_t>(amt > 255 ? 255 : amt));
+    return 0;
+}
+
 /// line(x1, y1, x2, y2, r, g, b) → a straight segment on the effect's canvas, z = 0.
 ///
 /// The first seven-argument builtin, riding the args-array call ABI (every Call builtin receives
@@ -579,8 +703,25 @@ inline BuiltinTable lightBuiltins() {
     t.add({"setXYZ", 3, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreFirst});
     // fill(r, g, b)           → write every light. Inline op FillElems.
     t.add({"fill", 3, false, BuiltinKind::Inline, nullptr, InlineOp::FillElems});
+    // fade(amt)              → dim every light toward black, FastLED's fadeToBlackBy. The trail
+    // primitive, collected by the layer so N fading effects cost one pass. See mm_light_fade.
+    t.add({"fade", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_fade, {}});
     // mod(value, limit)      → value % limit. The wrap every cyclic animation needs; see above.
+    // Also what the '%' OPERATOR resolves to, which is why the name stays even though `%` reads
+    // better: the parser looks it up here rather than core knowing any function by name.
     t.add({"mod", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_mod, {}});
+    // div(a, b)              → a / b, and what the '/' operator resolves to. See mm_light_div.
+    t.add({"div", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_div, {}});
+    // smoothstep(e0, e1, v)  → a soft 0..65535 ramp between two edges. Turns a distance into a
+    // glow; signed arguments, re-centered like polarA. See mm_light_smoothstep.
+    t.add({"smoothstep", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smoothstep, {}});
+    // uvX(x, w, h) / uvY(y, w, h) → shader space, centered and short-side normalized so a circle
+    // stays a circle on a wide panel. Biased at 32768. See mm_light_uvAxis.
+    t.add({"uvX", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvX, {}});
+    t.add({"uvY", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvY, {}});
+    // smin(a, b, k)          → the smooth minimum: two shapes melt into one surface. k = 0 is a
+    // plain union. See mm_light_smin.
+    t.add({"smin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smin, {}});
     // beat(bpm, t)           → 0..65535 sawtooth at bpm. The clock an animation is written against.
     t.add({"beat", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_beat, {}});
     // beatsin(bpm, t, high)  → a sine 0..high at bpm. The same shape an effect reaches for.

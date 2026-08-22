@@ -55,22 +55,9 @@ public:
 
         const draw::Canvas cv = canvas();
 
-        // Motion trail: dim the whole buffer each frame (MoonLight: fadeToBlackBy(100)).
-        // The trail fades per unit TIME, not per frame: fading once per frame makes the tail length a
-        // property of the framerate (erased before the eye sees it on a fast device, smeared on a
-        // slow one). See architecture.md, the tick-rate rule.
-        {
-            // Carry the fraction rather than rounding it up to 1: `fadeToBlackBy` runs once per
-            // RENDER, so a floor of 1 at high fps applies many times the intended decay and the
-            // trail is visibly shorter on a fast device than on a slow one.
-            fadeCarry_ += 100u * trailTime_.advance(elapsed());
-            uint32_t amt = fadeCarry_ / particles::FrameTime::kOne;
-            if (amt > 0) {
-                fadeCarry_ -= amt * particles::FrameTime::kOne;
-                if (amt > 255) amt = 255;
-                layer()->fadeToBlackBy(static_cast<uint8_t>(amt));
-            }
-        }
+        // Motion trail: fadeToBlackBy takes a RATE per reference frame (MoonLight: 100), and the
+        // Layer scales it by the elapsed frame, so the tail is the same length on any device.
+        layer()->fadeToBlackBy(100);
 
         constexpr float gravity = -9.81f;
         const uint32_t time = elapsed();
@@ -150,8 +137,6 @@ private:
     ScratchBuffer<Ball> balls_{*this};
     Random8 rng_;               // relaunch-kick randomness (FastLED random8(5,11) → below(5,11))
 
-    particles::FrameTime trailTime_{60};
-    uint32_t fadeCarry_ = 0;   // sub-frame trail fade not yet applied   // trail decay is per second, not per frame
 };
 
 } // namespace mm

@@ -1,0 +1,41 @@
+// Metal: blobs of liquid mercury that MELT into each other instead of overlapping.
+// A shader: every light is a function of where it is and what time it is, nothing is stored.
+//
+// smin() is the trick: a plain minimum of two distances draws two circles with a seam between
+// them, smin() draws one surface that flows. Turn blend down to 0 to see the difference.
+
+class MetalEffect {
+  uint8_t bpm = 14;
+  uint8_t blend = 40;
+  uint8_t glow = 30;
+
+  uint16_t ux = 0;
+  uint16_t uy = 0;
+  uint16_t d = 0;
+
+  defineControls() {
+    addUint8("bpm", bpm, 1, 60);
+    addUint8("blend", blend, 0, 120);
+    addUint8("glow", glow, 4, 120);
+  }
+
+  tick() {
+    for (y = 0; y < height; y = y + 1) {
+      for (x = 0; x < width; x = x + 1) {
+        // Shader space: normalized on the short side, so a blob is round on any panel.
+        ux = uvX(x, width, height) - 32768;
+        uy = uvY(y, width, height) - 32768;
+
+        // Each blob is a distance: how far this light is from a center that drifts on the clock.
+        d = polarR(ux - beatsin(bpm, t, 30000) + 15000,
+                   uy - beatsin(bpm + 5, t, 30000) + 15000) - 4200;
+        d = smin(d, polarR(ux - beatsin(bpm + 3, t, 30000) + 15000, uy) - 3600, blend * 32);
+        d = smin(d, polarR(ux, uy - beatsin(bpm + 7, t, 30000) + 15000) - 3600, blend * 32);
+
+        // One distance, one surface: brightest at the surface, the palette running through it.
+        setPaletteColor(x, y, scale(d * 8, 256),
+                        scale(smoothstep(0, glow * 100, glow * 100 - d), 256));
+      }
+    }
+  }
+}

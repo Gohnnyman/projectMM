@@ -6,7 +6,7 @@ This is a **fork of this project** building a commercial product on it: **HELIO*
 
 **Branch note: the work is not on the default branch.** `main` tracks our upstream and has not moved since 2026-07-09; every change lives in named branches, so each month below carries a **Branches** line for what moved on them. The repository has no issues and publishes no releases.
 
-## August 2026
+## August 2026 (to the 21st)
 
 - **HELIO product layer, stabilised.** One large commit ("Stabilize HELIO scenes, previews, output, and onboarding", 147 files vs our `main`) covering scene playback, the browser preview, LED output and first-run onboarding for the sphere product.
 - A browser-side optical simulation of the lamp (`helio-preview.js`, `heliotrace.js`, ~2,000 lines) renders internal reflections and an optional wall bounce, so the dashboard preview resembles the physical object rather than a flat grid.
@@ -14,13 +14,13 @@ This is a **fork of this project** building a commercial product on it: **HELIO*
 - An **ambient-light service** (BH1750 over I2C) publishes a brightness target that drivers consume, for automatic brightness.
 - A **curated WLED preset player** keeps source effect IDs, names, speed/intensity values and playlist order as data, rendered through this project's own palette and light-buffer primitives.
 
-- **Branches:** only `codex/helio-private-wip` moved (2026-08-20). The six other feature branches have been dormant since July.
+- **Branches:** only `codex/helio-private-wip` moved (2026-08-20). The other seven have been dormant since July.
 
-_Checked: commits on `main` for author-date 2026-08-01..2026-09-01 (0); commits on all 9 branches vs `MoonModules/projectMM@main` for the same window (2 commits, both on `codex/helio-private-wip`); releases published (none); issue search `repo:Funkelfetisch/projectMM is:issue created:2026-08-01..2026-08-31` and the same with `closed:` (0 results each, the repository has no issue tracker activity)._
+_Checked: commits on `main` for author-date 2026-08-01..2026-08-21 (0); commits on all 9 branches vs `MoonModules/projectMM@main` for the same window (2 commits, both on `codex/helio-private-wip`); releases published (none); issue search `repo:Funkelfetisch/projectMM is:issue created:2026-08-01..2026-08-21` and the same with `closed:` (0 results each, the repository has no issue tracker activity)._
 
 ## July 2026
 
-Seven feature branches opened, none merged to the fork's `main`. Each is a self-contained proposal against this project rather than product work:
+Six feature branches opened, none merged to the fork's `main`, alongside a carry-forward of our own `next-iteration`. Each is a self-contained proposal against this project rather than product work:
 
 - **Automatic firmware updates**, the device polls a JSON manifest, checks the advertised version, chip family and flash offset against its own build info, and starts an OTA with SHA-256 and expected-size verification. Manifests over plain HTTP or without a declared size are refused.
 - **BLE WiFi provisioning**, credentials over Bluetooth using Espressif's `wifi_provisioning` component, gated to run only while the device is in access-point fallback, in its own firmware variant (it costs roughly 320 KB of flash).
@@ -29,7 +29,7 @@ Seven feature branches opened, none merged to the fork's `main`. Each is a self-
 - **RGBW colour correction**, a wider set of channel-order presets, and an explicit white channel taken from the source when the layer carries one.
 - **Frame pacing**, a target-frame-rate cap on the scheduler, work-time metrics, and a periodic-tick sweep spread across ticks rather than run in one burst.
 
-- **Branches:** `codex/upstream-auto-update-manifest` (07-11), `codex/upstream-network-sta-reconnect` (07-10), `codex/upstream-rmt-rgbw-performance` (07-10), `codex/performance-frame-pacing` (07-11), `codex/universal-ble-provisioning` (07-13), `codex/helio-private-wip` (07-10, initial WIP). `main` last moved 2026-07-09.
+- **Branches:** `codex/upstream-auto-update-manifest` (07-11), `codex/upstream-network-sta-reconnect` (07-10), `codex/upstream-rmt-rgbw-performance` (07-10), `codex/performance-frame-pacing` (07-11), `codex/universal-ble-provisioning` (07-13), `codex/helio-private-wip` (07-10, initial WIP), `next-iteration` (07-10, a carry-forward of our upstream branch). `main` last moved 2026-07-09.
 
 _Checked: commits on `main` for author-date 2026-07-01..2026-08-01 (2, both upstream carry-forward); commits on all branches vs `MoonModules/projectMM@main` for the same window (11); releases published (none); issue search `repo:Funkelfetisch/projectMM is:issue created:2026-07-01..2026-07-31` and the same with `closed:` (0 results each)._
 

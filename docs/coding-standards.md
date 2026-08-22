@@ -48,6 +48,37 @@ Counter-example to avoid: storing `char rssiStr_[12]` and re-`snprintf`'ing `"-5
 
 **When one control type does two jobs with different UX, that's the smell for a new type, not a range hack.** An `int16` control the UI renders as a slider can't also mean "GPIO pin number"; a dedicated `Pin` type (smallest storage that fits the domain, `int8_t` for a GPIO) is the fix, not overloading the range.
 
+## Animate on elapsed time, never on the frame count
+
+**A faster device renders the same motion more smoothly, not more motion.** Anything on a tick path
+whose output changes between two calls with identical inputs is animating, and it takes its step
+from wallclock, not from having been called. This holds for effects, for modifiers that scroll or
+rotate, and for anything else the render loop reaches. A pure fold of coordinates from controls is
+not animating and owes nothing. Rationale and the two-rate check:
+[architecture.md](architecture.md#live-reconfiguration-every-change-applies-without-a-reboot).
+
+The shape, whichever quantity it is:
+
+```cpp
+carry_ += rate * time_.advance(elapsed());     // particles::FrameTime, 256 = one 1/60 s frame
+uint32_t due = carry_ / particles::FrameTime::kOne;
+carry_ -= due * particles::FrameTime::kOne;    // CARRY the remainder, never floor it to 1
+```
+
+**Carry the fraction.** At a high render rate the per-frame amount is legitimately below one unit,
+and flooring it to 1 applies many times the intended amount: that is what made trails visibly
+shorter on a fast device than on a slow one. Cap `due` so a long stall tops the effect up rather
+than bursting a frame's worth of work at once.
+
+**Ask whether something upstream already scales it.** Do not scale a quantity twice. A fade
+requested through `Layer::fadeToBlackBy` is already scaled by the Layer, so an effect passes a rate
+and does nothing else; a fade requested only on frames that pass a wallclock gate gets throttled by
+the gate AND by the scale. When in doubt, write the two-rate test first.
+
+**A compounding spatial operation is not a rate.** `draw::blur` applied twice at half strength is
+not one blur at full strength, so the carry pattern above does not transfer to it. Gate it in time
+and leave it at full strength.
+
 ## Per-type behaviour lives with the type
 
 When a struct or enum is the semantic owner of some data — a control descriptor, a packet, a module role — the functions that interpret, serialise, validate, or otherwise operate on it should live next to the type, not at the call sites that use it. Free functions in the same `.cpp` count; member methods on the owning class are stronger; virtual methods on a base class are strongest. The wrong shape is the same `switch (type)` repeated in every consumer — adding a variant means hunting across N files for switches to extend, and the compiler can't tell you when one gets missed.

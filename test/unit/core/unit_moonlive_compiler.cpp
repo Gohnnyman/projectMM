@@ -538,3 +538,30 @@ TEST_CASE("a function the host has no name for is still reported") {
     REQUIRE(r.entryCount == 1);
     CHECK(std::string(r.entries[0].name, r.entries[0].nameLen) == "paint");
 }
+
+#if MM_MOONLIVE_HAS_HOST_JIT
+// The '/' and '%' operators. Both lower to a host call (no ISA here has a divide), so what needs
+// pinning is not the arithmetic but the GRAMMAR: a hand-written precedence-climbing parser gets
+// binding wrong silently, and a wrong answer here is indistinguishable from a working effect.
+// The rule the parser must not get backwards: `/` and `%` bind tighter than `+`, and equally with
+// `*`, so a chain runs left to right. `12 / 2 * 3` is 18; grouping it as 12 / (2 * 3) gives 2.
+TEST_CASE("division binds tighter than addition and left to right with multiplication") {
+    CHECK(render(mmScript("setRGB(0, 12 / 2 * 3, 2 + 12 / 4, 2 + 20 % 7);"), 1)[0] == 18);
+    CHECK(render(mmScript("setRGB(0, 12 / 2 * 3, 2 + 12 / 4, 2 + 20 % 7);"), 1)[1] == 5);
+    CHECK(render(mmScript("setRGB(0, 12 / 2 * 3, 2 + 12 / 4, 2 + 20 % 7);"), 1)[2] == 8);
+}
+
+// Parentheses override the precedence, which is what makes the operators usable at all.
+TEST_CASE("parentheses group an expression ahead of division") {
+    CHECK(render(mmScript("setRGB(0, (2 + 12) / 7, (3 + 1) * 5, 3 + 1 * 5);"), 1)[0] == 2);
+    CHECK(render(mmScript("setRGB(0, (2 + 12) / 7, (3 + 1) * 5, 3 + 1 * 5);"), 1)[1] == 20);
+    CHECK(render(mmScript("setRGB(0, (2 + 12) / 7, (3 + 1) * 5, 3 + 1 * 5);"), 1)[2] == 8);
+}
+
+// A script must degrade, never fault. Dividing by zero is the one input the hardware would trap
+// on, and it reaches the host helper as an ordinary value.
+TEST_CASE("dividing by zero yields zero rather than faulting") {
+    CHECK(render(mmScript("setRGB(0, 100 / 0, 100 % 0, 0);"), 1)[0] == 0);
+    CHECK(render(mmScript("setRGB(0, 100 / 0, 100 % 0, 0);"), 1)[1] == 0);
+}
+#endif

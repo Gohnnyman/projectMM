@@ -804,6 +804,9 @@ public:
         prepared = true;
         rebuildControls();
     }
+    /// Derived from the late control, read on demand: the shape MoonLiveLayout has, where
+    /// lightCount() runs the script each call rather than caching anything at prepare time.
+    uint16_t derived() const { return static_cast<uint16_t>(late) * 2; }
 };
 }  // namespace
 
@@ -832,6 +835,9 @@ TEST_CASE("FilesystemModule restores a control that only exists after prepare()"
 
     CHECK(late->always == 7);    // an ordinary control: the first load pass carried it
     CHECK(late->late == 42);     // and one that did not exist until prepare() ran
+    // And the state DERIVED from it, not just the backing member: a value restored after phase 4
+    // is still the one the pipeline reads, because derived state here is computed on demand.
+    CHECK(late->derived() == 84);
     mm::platform::fsSetRoot(".");
     std::filesystem::remove_all(tmpRoot);
 }

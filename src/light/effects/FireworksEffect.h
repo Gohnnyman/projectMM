@@ -90,12 +90,9 @@ public:
         if (scale > 0) {
             frame_++;
             simulate(gy, wSub, hSub, scale);
-            // The trail decays per unit TIME too, scaled the same way, or its length would be a
-            // property of the framerate: erased before the eye sees it on a fast device, smeared on
-            // a slow one.
-            uint32_t f = (static_cast<uint32_t>(fade) * scale) / particles::FrameTime::kOne;
-            if (f == 0) f = 1;
-            layer()->fadeToBlackBy(static_cast<uint8_t>(f > 255 ? 255 : f));
+            // The trail decays per unit TIME, which the Layer now does for every fading effect:
+            // fadeToBlackBy takes a RATE and the Layer scales it by the elapsed frame.
+            layer()->fadeToBlackBy(fade);
         }
 
         pool_.render(cv, sparkLife);

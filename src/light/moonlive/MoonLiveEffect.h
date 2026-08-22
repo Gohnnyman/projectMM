@@ -85,11 +85,17 @@ public:
         // installed for exactly one run and detached after, so a script can only ever draw into
         // the layer it is ticking in.
         moonlive::setDrawCanvas(canvas());
+        // fade(amt) asks the LAYER, which collects the request and applies it once per frame.
+        // Installed in the same bracket as the canvas so it detaches on the same path.
+        moonlive::setFadeSink([](void* ctx, uint8_t amt) {
+            if (Layer* l = static_cast<MoonLiveEffect*>(ctx)->layer()) l->fadeToBlackBy(amt);
+        }, this);
         // The frame moment: run `tick` if the script defined one. A script that defines only
         // `modifyLogical` renders nothing here and folds coordinates instead, which is the author's
         // choice rather than an error.
         if (script_.engine().hasEntry(moonlive::kEntryTick))
             script_.engine().run(buffer(), nrOfLights(), cpl, elapsed(), moonlive::kEntryTick);
+        moonlive::setFadeSink(nullptr, nullptr);
         moonlive::setDrawCanvas({});
     }
 

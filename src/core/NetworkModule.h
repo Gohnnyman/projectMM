@@ -257,7 +257,8 @@ public:
     /// them, so there is nothing to set, and a board that is not using Ethernet leaves them free for
     /// anything else (three of four classic boards in the catalog have no PHY at all).
     uint8_t fixedPins(FixedPin* out, uint8_t max) const override {
-        if (!out || ethType_ == static_cast<uint8_t>(platform::ethNone)) return 0;
+        // The APPLIED type, not the pending control: see appliedEthType_.
+        if (!out || appliedEthType_ == static_cast<uint8_t>(platform::ethNone)) return 0;
         uint8_t n = 0;
         for (uint8_t i = 0; i < platform::ethFixedPadCount && n < max; i++)
             out[n++] = FixedPin{platform::ethFixedPads[i].gpio, platform::ethFixedPads[i].name};
@@ -797,6 +798,12 @@ private:
     // valid hash output. setup()'s syncEthConfig() sets it before any compare.
     uint32_t appliedEthSig_ = 0;
     bool ethSigApplied_ = false;
+    // The ethType the DRIVER is running, which is not always the one the control holds: on an
+    // RMII/RGMII board a type change is saved and applied on the next boot (see syncEthLive), so the
+    // EMAC keeps driving its pads meanwhile. fixedPins() reports what the hardware holds, so it must
+    // read this rather than the pending control, or setting the type to None would free a pin the
+    // MAC is still driving and the map would show it available to an LED lane.
+    uint8_t appliedEthType_ = static_cast<uint8_t>(platform::ethNone);
     // Last-applied addressing signature (mode + static octets), same guard shape as ethSig — so
     // syncAddressingLive re-applies only on a real DHCP↔Static / static-field change.
     uint32_t appliedAddressingSig_ = 0;
@@ -841,6 +848,7 @@ private:
             cfg.spiIrq         = ethSpiIrq_;
             platform::setEthConfig(cfg);
             appliedEthSig_ = ethSig();   // mark this config as applied
+            appliedEthType_ = ethType_;  // and WHICH interface the driver now holds pads for
             ethSigApplied_ = true;
         }
     }

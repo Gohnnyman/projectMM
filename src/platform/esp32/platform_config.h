@@ -93,8 +93,18 @@ constexpr EthFixedPad ethFixedPads[] = {
     {"ethCrsDv", 28}, {"ethRxd0", 29}, {"ethRxd1", 30},
 };
 constexpr uint8_t ethFixedPadCount = 6;
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+// Classic ESP32 RMII: one IO_MUX choice per signal, so these are the pins, not a default. From the
+// IDF's own RMII Data Plane GPIO table (docs/en/api-reference/network/esp_eth.rst), which is why
+// ethInitEmac does not set them: there is nothing to choose. The management pair (MDC/MDIO) IS
+// routable through the GPIO matrix and stays a NetworkModule control.
+constexpr EthFixedPad ethFixedPads[] = {
+    {"ethTxEn", 21}, {"ethTxd0", 19}, {"ethTxd1", 22},
+    {"ethCrsDv", 27}, {"ethRxd0", 25}, {"ethRxd1", 26},
+};
+constexpr uint8_t ethFixedPadCount = 6;
 #endif
-#if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4) || defined(CONFIG_IDF_TARGET_ESP32)
 static_assert(ethFixedPadCount == sizeof(ethFixedPads) / sizeof(ethFixedPads[0]),
               "the count gates every loop over this list: a mismatch reads past the end");
 #else

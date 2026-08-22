@@ -35,7 +35,7 @@ Five hard limits, all found by hitting them:
 | script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:132` |
 | distinct members | **8** | `kMaxCtrls`, same file |
 | branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:201` |
-| numeric types | `uint8_t`, `uint16_t` | no float, no signed, no division operator |
+| numeric types | `uint8_t`, `uint16_t` | no float, no signed |
 | ~~builtin table~~ | ~~16, and 16 used~~ → **64** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
 
 The branch budget was binary-searched with generated scripts: **6 `if`/`else` + 2 `for` compiles,
@@ -52,7 +52,6 @@ Each row is a compromise the balls effect makes, and the language feature that w
 | whole-pixel motion | no fractional type | fixed-point or float |
 | a direction bit per axis | unsigned only | signed values |
 | one flat colour | no `hsv()` builtin | `hsv()` |
-| a disc, no radial falloff | no `/` operator | division |
 | one array per field | no structs | structs |
 | the helper reads a member for its index | functions take no arguments | arguments |
 | guards folded into `mod()` | 16 branch labels | a bigger label budget |
@@ -181,6 +180,26 @@ first, and the difference is the useful part.
 | balls | four small discs, ~500 lit pixels | **1278 us** |
 | octopus | every pixel, every frame | **21762 us** |
 
+A third port (`metal.mle`, an SDF shader) put a number on the most expensive builtin, measured on
+shiffy's 80x48:
+
+| variant | tick | vs plasma |
+|---|---|---|
+| plasma (9 calls/px, no sqrt) | **16031 us** | baseline |
+| metal, 2 `polarR`, no `uv` | **32843 us** | 2.0x |
+| metal, 2 blobs + `uv` | **46221 us** | 2.9x |
+| metal, 3 blobs + `uv` | **59600 us** | 3.7x |
+
+**`polarR` costs ~13400 us per call site per frame at 3840 pixels: about 3.5 us per pixel, one
+builtin.** It wraps `dist16`, a real square root, and `draw.h` already measures a sqrt-based SDF at
+~108 cycles/px against ~14 for the squared form. A squared-distance builtin (`polarRSq`, or letting
+a script compare against `r * r` as `ripples.mle` does) is the cheap fix, and it is the same trick
+the compiled effects already use.
+
+Also measured and **disproved**: hoisting the four loop-invariant `beatsin` calls out of the inner
+loop into members moved 59600 to 58459 us. Call overhead per se is NOT the cost here: the square
+roots are. Worth recording because it contradicts the natural first guess.
+
 That is ~5.3 us per pixel, and it is not the arithmetic — it is **~32,000 host calls per frame**.
 Each `polarA`/`polarR`/`sin`/`scale`/`beat` is a real call through the builtin ABI, and a
 whole-canvas effect makes eight or so per pixel.
@@ -273,11 +292,48 @@ type is signed, which argues for doing them together.
 compile-time table space and nothing at run time. Measure what a realistic effect needs before
 picking a number — the balls port wanted ~12 and had to be folded down.
 
-### 9. Division — *narrow, but some maths needs it*
+### 9. Division: ✅ *shipped*
 
-`mod` and `scale` cover the cyclic cases, so this is mainly for ratios and falloff. Note that no
-ISA here has a cheap integer divide, so it lowers to a host call the way `mod` already does: fine
-on a cold path, questionable per-pixel. Worth documenting that cost at the call site.
+`/` and `%` are operators, at multiplication's precedence. Both lower to a host call the way `mod`
+already did, so the operator costs nothing the capability did not already cost: the divide itself
+is the expense, and it is a host call wherever it appears: fine on a cold path, deliberate
+per-pixel. The parser resolves both through the builtin table (`div`, `mod`) rather than knowing
+either by name, so core stays domain-neutral and a domain that registers neither simply has no
+operator. `mod(a, b)` stays registered: it is the name the cyclic case reads best under.
+
+### 9b. A ScratchBuffer handle: `pool()` and friends, *the particle blocker*
+
+**Particles cannot be a script feature without this, and it is the reason the shader step shipped
+first.** A `particles::Pool` is eight parallel arrays plus a count (`particles.h:132`). At the
+64-byte arena and 8 members a script could hold **five** particles across all its state, against
+the 100 to 1000 a particle look needs. Even a bigger arena is the wrong answer: `sizeof(MoonLive)`
+is held BY VALUE in every scripted module and probed on the main task's stack by `registerType`,
+which is what boot-looped the P4 at 1440 bytes (see #3). Particle state must live OUTSIDE the
+arena.
+
+`ScratchBuffer<T>` (`src/core/ScratchBuffer.h`) is already exactly the primitive: one
+`platform::alloc`, PSRAM-backed where the target has it, tied to its owning module so it is freed
+on disable and counted into that module's `dynamicBytes`. `ParticlesEffect` composes six of them
+into a Pool in `prepare()` (`ParticlesEffect.h:46-49, :137`), which is the shape a script wants
+too.
+
+What is missing is the HANDLE: a script has no type but `uint8_t`/`uint16_t`, so it cannot name a
+buffer. The shape that fits the existing vocabulary is an arena-resident handle the binding owns,
+with the script addressing slots by index:
+
+    pool(200)                 // in prepare/defineControls: size the pool, once
+    emit(x, y, vx, vy, ttl)   // returns a slot, or the count when full
+    step(); gravity(g); bounce()   // the frame order particles.h documents
+
+Every one of those is a Call the binding services against a `ScratchBuffer` it holds, so the arena
+carries a handle rather than the data, and the 64-byte ceiling stops being the limit on particle
+count. Note this is the same "handle route" #3 already argues for, stated concretely: **widen the
+arena for scripts that genuinely hold their own state, not as a substitute for this.**
+
+Two things to settle when it is built: who owns the frame order (the script calling
+step/bounce/age in sequence is honest but is five more calls per frame, and `particles.h` warns
+the order is the caller's to get right), and what a second script asking for a pool gets, since
+`setDrawCanvas` already had to become a per-thread table for exactly this reason.
 
 ### 10. Structs — *readability, once the arena is bigger*
 
